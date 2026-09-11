@@ -17,12 +17,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   clearAssetDrag,
   clearElementDrag,
-  draggedAssetId,
-  draggedLibraryId,
   draggingAssetId,
   draggingAssetIds,
   draggingElement,
-  draggingLibrary,
   draggingLibraryMany,
   draggingTemplate,
   hasAssetDrag,
@@ -30,7 +27,7 @@ import {
   hasLibraryDrag,
   hasTemplateDrag,
 } from "@/cut/lib/assetDrag";
-import { registerFileLanding } from "@/cut/lib/timelineDrop";
+import { registerFileLanding, registerTransitionLanding } from "@/cut/lib/timelineDrop";
 import { audioClipRefs, clipRefs, draggingRef, hasRefDrag, refFromAsset, type AssetRef } from "@/cut/lib/assetRef";
 import { sendFrameToChat, type FrameGrabOrigin } from "@/cut/lib/chatIntake";
 import { copyRefImage } from "@/cut/lib/refMedia";
@@ -49,7 +46,7 @@ import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { keyboardToEditor, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { additiveClick } from "@/cut/lib/hostKeys";
-import { CLIP_GAP, laneDragFor, laneDragParts, resolveRow, startLaneMove, startLaneTrim, type LaneDrag, type RowBox } from "@/cut/lib/laneTracks";
+import { CLIP_GAP, landOnRow, laneDragFor, laneDragParts, resolveRow, startLaneMove, startLaneTrim, type LaneDrag, type RowBox } from "@/cut/lib/laneTracks";
 import { reportSwallowed } from "@/cut/lib/report";
 import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockAudio, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
@@ -411,31 +408,126 @@ const draggedSticker = (): MediaAsset | null => {
   return stickerOf(id ? useEditor.getState().assets.find((a) => a.id === id) : null);
 };
 
-/** The image ref being dragged (a stock tile), null for any other drag —
- * asset and library drags carry the ref MIME too but with video/audio kinds.
- * On the timeline it lands on video track 0 as a still image. */
-function draggingStill(e: React.DragEvent): AssetRef | null {
-  if (!hasRefDrag(e)) return null;
-  const ref = draggingRef();
-  return ref?.kind === "image" ? ref : null;
+/** One item a media drag carries, whatever tile it came from: a project
+ * asset, a library card, a stock video, sound or image. Every item lands the
+ * same way once it is in the project; only how it gets there differs, and
+ * `land` is that difference. */
+interface CarriedMedia {
+  kind: "video" | "audio" | "image";
+  name: string;
+  /** How much timeline the item takes when it lands. */
+  duration: number;
+  /** The project asset for this item — already there, or imported now. */
+  land: (projectId: string) => Promise<MediaAsset>;
+  /** What a video landing segment paints while it is carried; sound and
+   * stickers paint none. */
+  ghost?: DropGhost;
 }
 
-/** The stock-clip ref being dragged (a stock video tile), null for any other
- * drag — project and library videos carry their own MIMEs and are handled
- * first. On the timeline it imports into the project and lands as footage. */
-function draggingStockVideo(e: React.DragEvent): AssetRef | null {
-  if (!hasRefDrag(e)) return null;
+/** Everything a drag carries, the grabbed item first. A single card is a run
+ * of one, so every media drop takes the same path; a font, which has no
+ * place on the timeline, is left out. */
+function carriedMedia(e: React.DragEvent): CarriedMedia[] {
+  if (hasLibraryDrag(e)) {
+    return draggingLibraryMany().flatMap((lib) =>
+      lib.type === "font"
+        ? []
+        : [
+            {
+              kind: lib.type,
+              name: lib.title || lib.name,
+              duration: lib.type === "image" ? STILL_SECONDS : lib.duration,
+              land: (projectId: string) => importLibraryAsset(projectId, lib),
+              ...(isClipMedia(lib.type)
+                ? {
+                    ghost: {
+                      url: libraryMediaUrl(lib.fileName, lib.residency),
+                      kind: lib.type,
+                      name: lib.title || lib.name,
+                      duration: lib.duration,
+                      width: lib.width,
+                      height: lib.height,
+                      // The card's cover is already painted and cached, so
+                      // the segment has a frame of the video in it from the
+                      // first move — true frames replace it tile by tile as
+                      // the reads land.
+                      poster: libraryPosterUrl(lib),
+                    },
+                  }
+                : {}),
+            },
+          ]
+    );
+  }
+  if (hasAssetDrag(e)) {
+    const assets = useEditor.getState().assets;
+    return draggingAssetIds().flatMap((id) => {
+      const asset = assets.find((a) => a.id === id);
+      if (!asset || asset.type === "font") return [];
+      return [
+        {
+          kind: asset.type,
+          name: asset.name,
+          duration: asset.type === "image" ? STILL_SECONDS : asset.duration,
+          land: async () => asset,
+          ...(isClipMedia(asset.type) && !stickerOf(asset) ? { ghost: { asset } } : {}),
+        },
+      ];
+    });
+  }
+  // A stock tile carries only the unified ref: a sound, a clip, or a still.
+  if (!hasRefDrag(e)) return [];
   const ref = draggingRef();
-  return ref?.scope === "stock" && ref.kind === "video" ? ref : null;
-}
-
-/** The stock audio ref being dragged — a music sample or a sound effect card —
- * null otherwise. On the soundtrack it imports into the project and lands as
- * an audio clip. */
-function draggingStockAudio(e: React.DragEvent): AssetRef | null {
-  if (!hasRefDrag(e)) return null;
-  const ref = draggingRef();
-  return ref?.scope === "stock" && ref.kind === "audio" ? ref : null;
+  if (!ref) return [];
+  if (ref.scope === "stock" && ref.kind === "audio") {
+    return [
+      {
+        kind: "audio",
+        name: ref.name,
+        duration: ref.duration ?? 0,
+        land: (projectId) =>
+          importStockAudio(projectId, { url: ref.url, name: ref.name, duration: ref.duration }),
+      },
+    ];
+  }
+  if (ref.scope === "stock" && ref.kind === "video") {
+    return [
+      {
+        kind: "video",
+        name: ref.name,
+        duration: ref.duration ?? 0,
+        land: (projectId) =>
+          importStockVideo(projectId, {
+            url: ref.url,
+            name: ref.name,
+            duration: ref.duration,
+            width: ref.width,
+            height: ref.height,
+          }),
+        ghost: {
+          url: ref.url,
+          kind: "video",
+          name: ref.name,
+          duration: ref.duration ?? 0,
+          width: ref.width,
+          height: ref.height,
+          poster: ref.thumb,
+        },
+      },
+    ];
+  }
+  if (ref.kind === "image") {
+    return [
+      {
+        kind: "image",
+        name: ref.name,
+        duration: STILL_SECONDS,
+        land: (projectId) => importImage(projectId, ref),
+        ghost: { url: ref.url, kind: "image", name: ref.name, duration: STILL_SECONDS },
+      },
+    ];
+  }
+  return [];
 }
 
 export function Timeline() {
@@ -1054,16 +1146,15 @@ export function Timeline() {
     return map;
   }, [clips, assets]);
 
-  // The audio row under a screen y, one past the last row = a new track.
-  // Before any audio exists there are no rows, so everything resolves to 0.
+  // The audio row under a screen y, by the resolver a lane drag aims with:
+  // past either edge of the band, beyond the same reach, is a new lane there
+  // (-1 above, one past the last below), and the row already aimed at holds
+  // while the band shifts under the pointer. Before any audio exists there
+  // are no rows, so everything resolves to 0.
   const audioRowAt = useCallback(
-    (clientY: number): number => {
-      const el = audioRef.current;
-      if (!el) return 0;
-      const top = el.getBoundingClientRect().top;
-      return Math.min(audioLanes.count, Math.max(0, Math.floor((clientY - top) / AUDIO_H)));
-    },
-    [audioLanes.count]
+    (clientY: number): number =>
+      resolveRow(audioRowBoxes(), clientY, audioDrop?.row ?? null, { top: true, bottom: true }),
+    [audioRowBoxes, audioDrop]
   );
 
   // The element row under the pointer, or undefined for a point outside the
@@ -1213,6 +1304,15 @@ export function Timeline() {
     st.endHistoryBatch();
     st.select({ kind: "transition", id });
   };
+  // A pasted transition lands through the same closure a dropped one does.
+  const dropTransitionRef = useRef(dropTransitionAt);
+  useEffect(() => {
+    dropTransitionRef.current = dropTransitionAt;
+  });
+  useEffect(
+    () => registerTransitionLanding((time, style) => dropTransitionRef.current(time, style)),
+    []
+  );
 
   // Drag a bar anywhere along the row. An anchor within reach pulls the drop
   // onto itself and lights the room it takes; released anywhere else the bar
@@ -1363,7 +1463,7 @@ export function Timeline() {
   // drop through `registerFileLanding`. Stashed by this surface's own drop,
   // which runs first; a release the surface never saw resolves from the
   // geometry at the moment of asking.
-  const fileLanding = useRef<{ at: number; place: TrackTarget } | null>(null);
+  const fileLanding = useRef<{ at: number; place: TrackTarget; audioRow: number } | null>(null);
   const footerRef = useRef<HTMLElement>(null);
   useEffect(
     () =>
@@ -1377,17 +1477,18 @@ export function Timeline() {
         if (!surface) return null;
         const r = surface.getBoundingClientRect();
         if (y < r.top || y > r.bottom || x < r.left || x > r.right) return null;
-        return { at: dropTimeAt(x), place: resolveDropTrack(y) };
+        return { at: dropTimeAt(x), place: resolveDropTrack(y), audioRow: audioRowAt(y) };
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [resolveDropTrack]
+    [resolveDropTrack, audioRowAt]
   );
   // A transition bar mid-drag, drawn where the pointer has it.
   const [transitionDrag, setTransitionDrag] = useState<XBar | null>(null);
   // A drag past the top edge opens a row there, pushing the stack down by one
   // for as long as it is aimed that way.
   const topRowShift = laneDrag?.kind === "overlay" && laneDrag.targetRow < 0 ? TEXT_H : 0;
-  const audioTopShift = laneDrag?.kind === "audio" && laneDrag.targetRow < 0 ? AUDIO_H : 0;
+  const audioTopShift =
+    (laneDrag?.kind === "audio" && laneDrag.targetRow < 0) || audioDrop?.row === -1 ? AUDIO_H : 0;
 
   // Where a dropped asset should land. An empty timeline has no arrangement to
   // read a position against, so the drop starts the film at 0 no matter where
@@ -1621,10 +1722,9 @@ export function Timeline() {
       // drop into a leading gap or between clips lands there.
       s.addVideoFromAsset(assetId, place, t);
     } else {
-      const used = [...new Set(s.audioClips.map((a) => a.lane ?? 0))].sort((a, b) => a - b);
-      const lane =
-        audioRow < used.length ? used[audioRow] : (used[used.length - 1] ?? -1) + 1;
-      s.addAudioFromAsset(assetId, t, { lane });
+      landOnRow("audio", audioRow, (lane) =>
+        useEditor.getState().addAudioFromAsset(assetId, t, { lane })
+      );
     }
   };
 
@@ -1646,11 +1746,14 @@ export function Timeline() {
     };
   };
 
-  /** Lay a whole dragged group down in order, each one after the last. A
-   * single card is a group of one, so every drop takes this path. `only`
-   * narrows the group to what the row under the pointer accepts. */
-  const placeAssetsAt = (
-    ids: string[],
+  /** Lay a carried run down in order, each item after the last — a single
+   * card is a run of one, so every media drop takes this path. Each item is
+   * landed in the project first (a copy, a download, or nothing at all), and
+   * an item that fails leaves the rest of the run alone. `only` narrows the
+   * run to what the row under the pointer accepts. */
+  const placeCarriedAt = async (
+    projectId: string,
+    items: CarriedMedia[],
     t: number,
     atElement: number,
     audioRow = 0,
@@ -1659,38 +1762,18 @@ export function Timeline() {
     only?: (asset: MediaAsset) => boolean
   ) => {
     const next = runCursor(t, atElement);
-    for (const id of ids) {
-      const asset = useEditor.getState().assets.find((a) => a.id === id);
-      if (!asset || asset.type === "font") continue;
-      if (only && !only(asset)) continue;
-      const sticker = !!stickerOf(asset);
-      placeAssetAt(id, asset.type, next(asset, sticker), audioRow, place, elementLane);
-    }
-  };
-
-  /** Copy a dragged group of library assets into the project, in order, then
-   * lay them down. Each import waits for the last so the run keeps the order
-   * they were selected in. */
-  const placeLibraryAt = async (
-    projectId: string,
-    items: LibraryAsset[],
-    t: number,
-    atElement: number,
-    audioRow = 0,
-    place: TrackTarget = TRACK_ZERO,
-    only?: (asset: MediaAsset) => boolean
-  ) => {
-    const next = runCursor(t, atElement);
     for (const item of items) {
       try {
-        const asset = await importLibraryAsset(projectId, item);
+        const asset = await item.land(projectId);
+        // The landing outlived a project switch: the asset belongs to the
+        // project it was landed in.
+        if (useEditor.getState().projectId !== projectId) return;
         if (asset.type === "font") continue;
         if (only && !only(asset)) continue;
         const sticker = !!stickerOf(asset);
-        placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place);
+        placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place, elementLane);
       } catch (err) {
-        // A copy that fails leaves the rest of the run alone.
-        reportSwallowed(`[cut] library drop failed for ${item.fileName}`, err);
+        reportSwallowed(`[cut] drop failed for ${item.name}`, err);
       }
     }
   };
@@ -1699,59 +1782,12 @@ export function Timeline() {
    * mixed selection may also be carrying. */
   const clipsOnly = (asset: MediaAsset) => isClipMedia(asset.type) && !stickerOf(asset);
 
-  // The video being dragged — project media, a library clip, or an image ref
-  // (which lands as a still) — with the ghost its landing segment paints.
+  // The video the drag carries — project media, a library clip, a stock clip
+  // or an image (which lands as a still) — with the ghost its landing
+  // segment paints. A sound or a sticker is no video.
   const draggedVideo = (e: React.DragEvent): { duration: number; ghost: DropGhost } | null => {
-    if (hasLibraryDrag(e)) {
-      const lib = draggingLibrary();
-      if (!lib || !isClipMedia(lib.type)) return null;
-      return {
-        duration: lib.type === "image" ? STILL_SECONDS : lib.duration,
-        ghost: {
-          url: libraryMediaUrl(lib.fileName, lib.residency),
-          kind: lib.type,
-          name: lib.title || lib.name,
-          duration: lib.duration,
-          width: lib.width,
-          height: lib.height,
-          // The card's cover is already painted and cached, so the segment
-          // has a frame of the video in it from the first move — true frames
-          // replace it tile by tile as the reads land.
-          poster: libraryPosterUrl(lib),
-        },
-      };
-    }
-    const id = draggingAssetId();
-    if (id) {
-      const asset = useEditor.getState().assets.find((a) => a.id === id);
-      if (!asset || stickerOf(asset) || !isClipMedia(asset.type)) return null;
-      return {
-        duration: asset.type === "image" ? STILL_SECONDS : asset.duration,
-        ghost: { asset },
-      };
-    }
-    const stockVideo = draggingStockVideo(e);
-    if (stockVideo) {
-      return {
-        duration: stockVideo.duration ?? 0,
-        ghost: {
-          url: stockVideo.url,
-          kind: "video",
-          name: stockVideo.name,
-          duration: stockVideo.duration ?? 0,
-          width: stockVideo.width,
-          height: stockVideo.height,
-          poster: stockVideo.thumb,
-        },
-      };
-    }
-    const still = draggingStill(e);
-    return still
-      ? {
-          duration: STILL_SECONDS,
-          ghost: { url: still.url, kind: "image", name: still.name, duration: STILL_SECONDS },
-        }
-      : null;
+    const first = carriedMedia(e)[0];
+    return first?.ghost ? { duration: first.duration, ghost: first.ghost } : null;
   };
 
   // Drop targets for the upper tracks and between-track seams: dragging a
@@ -1792,42 +1828,13 @@ export function Timeline() {
       const t = Math.max(0, timeAt(e.clientX));
       endCrossDrag();
       setDropType(null);
-      const lib = draggingLibrary();
-      const libId = draggedLibraryId(e);
-      // The whole dragged group, read before the drag is cleared.
-      const libGroup = draggingLibraryMany();
-      const assetGroup = draggingAssetIds();
-      const still = draggingStill(e);
-      const stockVideo = draggingStockVideo(e);
+      // The whole carried run, read before the drag is cleared; the row
+      // takes the clips in it and leaves the rest.
+      const carried = carriedMedia(e).filter((item) => isClipMedia(item.kind));
       const projectId = useEditor.getState().projectId;
       clearAssetDrag();
-      if (libId && lib && isClipMedia(lib.type) && projectId) {
-        void placeLibraryAt(projectId, libGroup, t, t, 0, place, clipsOnly);
-        return;
-      }
-      const id = draggedAssetId(e);
-      const asset = id ? useEditor.getState().assets.find((a) => a.id === id) : null;
-      if (id && !stickerOf(asset) && isClipMedia(asset?.type)) {
-        placeAssetsAt(assetGroup, t, t, 0, place, undefined, clipsOnly);
-        return;
-      }
-      if (stockVideo && projectId) {
-        void importStockVideo(projectId, {
-          url: stockVideo.url,
-          name: stockVideo.name,
-          duration: stockVideo.duration,
-          width: stockVideo.width,
-          height: stockVideo.height,
-        })
-          .then((vid) => useEditor.getState().addVideoFromAsset(vid.id, place, t))
-          .catch((err: unknown) => reportSwallowed("[cut] stock video drop failed", err));
-        return;
-      }
-      if (still && projectId) {
-        void importImage(projectId, still)
-          .then((img) => useEditor.getState().addVideoFromAsset(img.id, place, t))
-          .catch((err: unknown) => reportSwallowed("[cut] image drop failed", err));
-      }
+      if (carried.length > 0 && projectId)
+        void placeCarriedAt(projectId, carried, t, t, 0, place, undefined, clipsOnly);
     },
   };
 
@@ -1974,13 +1981,9 @@ export function Timeline() {
           });
           return;
         }
-        const isLib = hasLibraryDrag(e);
-        const still = draggingStill(e);
-        const stockVideo = draggingStockVideo(e);
-        const stockAudio = draggingStockAudio(e);
+        const carried = carriedMedia(e);
         const element = hasElementDrag(e) ? draggingElement() : null;
-        if (!hasAssetDrag(e) && !isLib && !still && !stockVideo && !stockAudio && !element)
-          return;
+        if (carried.length === 0 && !element) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
         // What the event carries is read now — the drag data is only readable
@@ -2028,29 +2031,11 @@ export function Timeline() {
           });
           return;
         }
-        // Preview where a video would land; audio drops free-form. Library and
-        // stock drags carry their own shape since they aren't in the project yet.
-        let type: "video" | "audio" | "image" | undefined;
-        let duration = 0;
-        if (isLib) {
-          const lib = draggingLibrary();
-          type = lib && lib.type !== "font" ? lib.type : undefined;
-          duration = lib?.duration ?? 0;
-        } else if (stockAudio) {
-          type = "audio";
-          duration = stockAudio.duration ?? 0;
-        } else if (stockVideo) {
-          type = "video";
-          duration = stockVideo.duration ?? 0;
-        } else if (still) {
-          type = "video";
-          duration = STILL_SECONDS;
-        } else {
-          const id = draggingAssetId();
-          const asset = id ? useEditor.getState().assets.find((a) => a.id === id) : null;
-          type = asset && asset.type !== "font" ? asset.type : undefined;
-          duration = asset?.type === "image" ? STILL_SECONDS : asset?.duration ?? 0;
-        }
+        // Preview where the grabbed item would land: a video on its row, a
+        // sound free-form on its lane. Every tile carries the same shape,
+        // whether or not the item is in the project yet.
+        const type = carried[0]?.kind;
+        const duration = carried[0]?.duration ?? 0;
         // What the ghost paints: the source's frames, from wherever it lives.
         const ghost = draggedVideo(e)?.ghost;
         schedulePreview(() => {
@@ -2108,6 +2093,7 @@ export function Timeline() {
           fileLanding.current = {
             at: dropTimeAt(e.clientX),
             place: resolveDropTrack(e.clientY),
+            audioRow: audioRowAt(e.clientY),
           };
         }
         // Resolve the hovered rows before the previews (and their rows) clear.
@@ -2123,16 +2109,9 @@ export function Timeline() {
         setDropType(null);
         const t = dropTimeAt(e.clientX);
 
-        // A library asset must be copied into the project before it can land.
-        const lib = draggingLibrary();
-        const libId = draggedLibraryId(e);
         // Everything the drag is carrying — one card, or the whole marquee
         // selection it was grabbed from — read before the drag is cleared.
-        const libGroup = draggingLibraryMany();
-        const assetGroup = draggingAssetIds();
-        const still = draggingStill(e);
-        const stockVideo = draggingStockVideo(e);
-        const stockAudio = draggingStockAudio(e);
+        const carried = carriedMedia(e);
         const tpl = draggingTemplate();
         const element = hasElementDrag(e) ? draggingElement() : null;
         const projectId = useEditor.getState().projectId;
@@ -2162,53 +2141,9 @@ export function Timeline() {
             );
           return;
         }
-        if (libId && lib && projectId) {
+        if (carried.length > 0 && projectId) {
           e.preventDefault();
-          void placeLibraryAt(projectId, libGroup, t, atElement, audioRow, videoPlace);
-          return;
-        }
-
-        const id = draggedAssetId(e);
-        if (id) {
-          e.preventDefault();
-          placeAssetsAt(assetGroup, t, atElement, audioRow, videoPlace, elementLane);
-          return;
-        }
-
-        // A stock music sample or sound effect imports as an audio asset and
-        // lands on the hovered soundtrack lane.
-        if (stockAudio && projectId) {
-          e.preventDefault();
-          void importStockAudio(projectId, {
-            url: stockAudio.url,
-            name: stockAudio.name,
-            duration: stockAudio.duration,
-          })
-            .then((asset) => placeAssetAt(asset.id, "audio", t, audioRow))
-            .catch((err: unknown) => reportSwallowed("[cut] stock audio drop failed", err));
-          return;
-        }
-
-        // A stock clip imports as footage, an image ref as a still, then each
-        // lands in the resolved video slot.
-        if (stockVideo && projectId) {
-          e.preventDefault();
-          void importStockVideo(projectId, {
-            url: stockVideo.url,
-            name: stockVideo.name,
-            duration: stockVideo.duration,
-            width: stockVideo.width,
-            height: stockVideo.height,
-          })
-            .then((asset) => placeAssetAt(asset.id, "video", t, 0, videoPlace))
-            .catch((err: unknown) => reportSwallowed("[cut] stock video drop failed", err));
-          return;
-        }
-        if (still && projectId) {
-          e.preventDefault();
-          void importImage(projectId, still)
-            .then((asset) => placeAssetAt(asset.id, "image", t, 0, videoPlace))
-            .catch((err: unknown) => reportSwallowed("[cut] image drop failed", err));
+          void placeCarriedAt(projectId, carried, t, atElement, audioRow, videoPlace, elementLane);
         }
       }}
     >
@@ -2829,7 +2764,7 @@ export function Timeline() {
                   className="tl-audio-drop-slot pointer-events-none absolute rounded-[2.5px] border-[1.5px] border-dashed border-emerald-500/80 bg-emerald-500/10 transition-[left] duration-150 ease-out"
                   style={{
                     left: audioDrop.t * pps,
-                    top: audioDrop.row * AUDIO_H + 2,
+                    top: audioDrop.row * AUDIO_H + 2 + audioTopShift,
                     width: Math.max(10, audioDrop.len * pps - CLIP_GAP),
                     height: AUDIO_H - 4,
                   }}

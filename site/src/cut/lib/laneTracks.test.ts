@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { commitRow, NEW_ROW_PX, partAround, resolveRow } from "./laneTracks";
+import { commitRow, landOnRow, NEW_ROW_PX, partAround, resolveRow } from "./laneTracks";
 import { clipLen, useEditor } from "./store";
 import { emptySubtitles } from "./types";
 import type { AudioClip, VideoClip } from "./types";
@@ -153,6 +153,52 @@ describe("commitRow on the video stack", () => {
     commitRow("video", mover.id, 0);
     expect(clipById(mover.id).track).toBe(0);
     expect(clipById(resident.id).track).toBe(0);
+  });
+});
+
+describe("landOnRow on the audio lanes", () => {
+  // What the store's add does with the lane it is handed: 0 is stored as none.
+  const land = (_row: number, lane: number) => {
+    const c = aclip({ start: 5, ...(lane > 0 ? { lane } : {}) });
+    useEditor.setState({ audioClips: [...s().audioClips, c] });
+    return c.id;
+  };
+
+  test("a row in use lands on that lane", () => {
+    const bed = aclip({});
+    const fx = aclip({ lane: 1 });
+    useEditor.setState({ audioClips: [bed, fx] });
+    let id = "";
+    landOnRow("audio", 1, (lane) => (id = land(1, lane)));
+    expect(audioById(id).lane).toBe(1);
+    expect(audioById(bed.id).lane).toBeUndefined();
+  });
+
+  test("the row past the top opens a new first lane, the way a drag does", () => {
+    const bed = aclip({});
+    const fx = aclip({ lane: 1 });
+    useEditor.setState({ audioClips: [bed, fx] });
+    let id = "";
+    landOnRow("audio", -1, (lane) => (id = land(-1, lane)));
+    expect(audioById(id).lane).toBeUndefined();
+    expect(audioById(bed.id).lane).toBe(1);
+    expect(audioById(fx.id).lane).toBe(2);
+  });
+
+  test("the row past the bottom opens a new last lane", () => {
+    const bed = aclip({});
+    useEditor.setState({ audioClips: [bed] });
+    let id = "";
+    landOnRow("audio", 1, (lane) => (id = land(1, lane)));
+    expect(audioById(id).lane).toBe(1);
+    expect(audioById(bed.id).lane).toBeUndefined();
+  });
+
+  test("an empty band lands on lane 0", () => {
+    useEditor.setState({ audioClips: [] });
+    let id = "";
+    landOnRow("audio", 0, (lane) => (id = land(0, lane)));
+    expect(audioById(id).lane).toBeUndefined();
   });
 });
 

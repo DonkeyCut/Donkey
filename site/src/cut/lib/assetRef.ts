@@ -25,8 +25,7 @@ import {
   TRANSITION_STYLE_IDS,
   TRANSITION_STYLE_LABELS,
   type ShapeKind,
-  type TransitionStyle,
-} from "./types";
+  type TransitionStyle, type LibraryTemplate } from "./types";
 import type {
   AudioClip,
   MediaAsset,
@@ -889,32 +888,42 @@ export function useRefCandidates(enabled = true): AssetRef[] {
 
   return useMemo(() => {
     if (!assets || !clips || !audioClips || !overlays || !transitions || !subtitles || !projectTemplates) return [];
-    const project = projectRefs(assets);
-    const seen = new Set<string>();
-    const out: AssetRef[] = [];
-    for (const ref of [
-      ...clipRefs(clips, assets),
-      ...audioClipRefs(audioClips, assets),
-      ...entityRefs({ clips, assets, overlays, transitions, subtitles }),
-      ...project,
-      ...projectTemplates.map(refFromTemplate),
-      // A font is used from the font menu, so there is nothing to point a tool
-      // at; library fonts stay out of the candidates the way project fonts do.
-      ...lib.assets.filter((a) => a.type !== "font").map(refFromLibrary),
-      ...lib.templates.map(refFromTemplate),
-      ...STOCK_IMAGES.map(refFromStock),
-      ...STOCK_VIDEOS.map(refFromStockVideo),
-      ...STOCK_MUSIC.map(refFromStockMusic),
-      ...STOCK_SFX.map(refFromStockSfx),
-      ...catalogRefs(),
-    ]) {
-      const key = ref.name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(ref);
-    }
-    return out;
+    return refCandidatesOf({ assets, clips, audioClips, overlays, transitions, subtitles, templates: projectTemplates }, lib);
   }, [assets, clips, audioClips, overlays, transitions, subtitles, projectTemplates, lib]);
+}
+
+/** The candidates for one state and one shelf listing — what the hook memoizes,
+ * for a reader that wants them once, at an event, without subscribing. */
+export function refCandidatesOf(
+  s: EntitySources & { audioClips: AudioClip[]; templates: LibraryTemplate[] },
+  lib: LibraryData
+): AssetRef[] {
+  const { assets, clips, audioClips, overlays, transitions, subtitles, templates } = s;
+  const project = projectRefs(assets);
+  const seen = new Set<string>();
+  const out: AssetRef[] = [];
+  for (const ref of [
+    ...clipRefs(clips, assets),
+    ...audioClipRefs(audioClips, assets),
+    ...entityRefs({ clips, assets, overlays, transitions, subtitles }),
+    ...project,
+    ...templates.map(refFromTemplate),
+    // A font is used from the font menu, so there is nothing to point a tool
+    // at; library fonts stay out of the candidates the way project fonts do.
+    ...lib.assets.filter((a) => a.type !== "font").map(refFromLibrary),
+    ...lib.templates.map(refFromTemplate),
+    ...STOCK_IMAGES.map(refFromStock),
+    ...STOCK_VIDEOS.map(refFromStockVideo),
+    ...STOCK_MUSIC.map(refFromStockMusic),
+    ...STOCK_SFX.map(refFromStockSfx),
+    ...catalogRefs(),
+  ]) {
+    const key = ref.name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
+  }
+  return out;
 }
 
 /** The prompt token for an asset name: `@name`, quoted when it has spaces. */

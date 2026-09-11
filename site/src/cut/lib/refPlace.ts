@@ -3,8 +3,9 @@
 /**
  * ⌘V of anything a panel offers: the tile's + button, for a ref that arrived
  * as a mention token on the system clipboard. A copied media tile, library
- * card, stock sound, sticker, effect, shape, transition or template lands
- * under the indicator the way its tile's + button lands it.
+ * card, stock sound, sticker, effect, shape or template lands under the
+ * indicator the way its tile's + button lands it; a transition lands the way
+ * a dropped one does, through the timeline's own landing.
  */
 
 import { CATALOG_PREFIX, type AssetRef } from "./assetRef";
@@ -16,14 +17,9 @@ import {
 } from "./library";
 import { isLottieAsset } from "./lottieAssets";
 import { importImage, importStockAudio, importStockVideo } from "./media";
-import { clipLen, useEditor } from "./store";
-import {
-  transitionDefaultSeconds,
-  XBAR_MAGNET_PX,
-  type MediaAsset,
-  type ShapeKind,
-  type TransitionStyle,
-} from "./types";
+import { useEditor } from "./store";
+import { landTransitionAt } from "./timelineDrop";
+import type { MediaAsset, ShapeKind, TransitionStyle } from "./types";
 import type { EffectId } from "@donkeycut/effects-kit";
 
 /** A project asset lands as the tile's + button lands it: a sticker as a
@@ -37,26 +33,6 @@ function placeAsset(asset: MediaAsset, at: number): void {
     return;
   }
   s.addAssetAtPlayhead(asset.id, at);
-}
-
-/** A transition takes the clip tail within the same reach a dragged bar
- * snaps by, replacing whatever plays there; with no edge in reach it parks
- * at the indicator, the way a bar dropped in open row does. */
-function placeTransition(style: TransitionStyle, at: number): void {
-  const s = useEditor.getState();
-  const reach = XBAR_MAGNET_PX / s.pxPerSec;
-  let best: { id: string; gap: number } | null = null;
-  for (const c of s.clips) {
-    const gap = Math.abs(c.start + clipLen(c) - at);
-    if (gap <= reach && (!best || gap < best.gap)) best = { id: c.id, gap };
-  }
-  const seconds = transitionDefaultSeconds(style);
-  if (best) {
-    s.setClipTransition(best.id, seconds, style);
-    return;
-  }
-  const id = s.addTransition({ start: at, seconds, style });
-  s.select({ kind: "transition", id });
 }
 
 /**
@@ -121,8 +97,7 @@ export async function placeRefAtPlayhead(
           s.addShape(pick as ShapeKind, { at });
           return true;
         case "transition":
-          placeTransition(pick as TransitionStyle, at);
-          return true;
+          return landTransitionAt(at, pick as TransitionStyle);
         case "template": {
           const own = s.templates.find((t) => t.id === pick);
           if (own) {

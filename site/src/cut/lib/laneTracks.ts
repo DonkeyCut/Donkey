@@ -1117,6 +1117,45 @@ export function commitRow(kind: LaneKind, id: string, targetRow: number) {
   ad.apply(raws.map((r, i) => ad.lanePatch!(r, remap.get(moved[i]) ?? 0)));
 }
 
+/**
+ * Land a new item on a display row of a multi-lane band — the row under a
+ * drop, or one past either edge — by the lane arithmetic a lane drag commits
+ * with, so a drop and a drag open rows the same way. `add` places the item
+ * on the lane the row names. A row opened past the top first moves the whole
+ * band down one, and the band is renumbered from 0 once the item has landed,
+ * the way a committed drag leaves it. One undo step.
+ */
+export function landOnRow(kind: LaneKind, row: number, add: (lane: number) => void): void {
+  const s = useEditor.getState();
+  const ad = ADAPTERS[kind];
+  if (!ad.multiLane || !ad.lanePatch) {
+    add(0);
+    return;
+  }
+  const raws = ad.raws(s);
+  const views = raws.map((r) => ad.view(r));
+  const used = laneOrder(kind, s, views.map((v) => v.lane));
+  let lane = laneAtRow(kind, used, row);
+  s.beginHistoryBatch();
+  try {
+    if (lane < 0) {
+      const lift = -lane;
+      ad.apply(raws.map((r, i) => ad.lanePatch!(r, views[i].lane + lift)));
+      lane = 0;
+    }
+    add(lane);
+    const after = ad.raws(useEditor.getState());
+    const lanes = after.map((r) => ad.view(r).lane);
+    const usedNext = [...new Set(lanes)].sort((a, b) => a - b);
+    if (usedNext.some((l, i) => l !== i)) {
+      const remap = new Map(usedNext.map((l, i) => [l, i]));
+      ad.apply(after.map((r, i) => ad.lanePatch!(r, remap.get(lanes[i]) ?? 0)));
+    }
+  } finally {
+    s.endHistoryBatch();
+  }
+}
+
 export interface LaneTrimUI {
   pps: number;
   /** Paint (or clear) the snap guide at this stage-x pixel. */

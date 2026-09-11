@@ -21,7 +21,7 @@ import {
   renderPreviewProxy,
   type ExportDoc,
 } from "@/cut/lib/exportClient";
-import { EMPTY_LIBRARY, fileZoneAt, hasRefDrag, parseMentions, selectionRefTokens, useRefCandidates } from "@/cut/lib/assetRef";
+import { EMPTY_LIBRARY, fileZoneAt, hasRefDrag, parseMentions, refCandidatesOf, selectionRefTokens } from "@/cut/lib/assetRef";
 import { placeRefAtPlayhead } from "@/cut/lib/refPlace";
 import { useLibrary } from "@/cut/lib/queries";
 import { copyableRefs } from "@/cut/lib/refCopy";
@@ -65,6 +65,7 @@ import {
 } from "@/cut/lib/shortcutGate";
 import { docAudioClips, docClips, docOverlays, projectDuration, serializeDoc, storedAssets, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
 import { fileLandingAt } from "@/cut/lib/timelineDrop";
+import { landOnRow } from "@/cut/lib/laneTracks";
 import { playheadAt, previewAt, skimAt } from "@/cut/lib/playhead";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
@@ -761,6 +762,10 @@ export function Editor({
          * `at`, rippling the row's later clips right, each file after the
          * last; without it the file takes track 0's next free slot. */
         place?: VideoTrackPlacement;
+        /** The audio display row a timeline drop resolved to, one past
+         * either edge for a new lane. Sound lands there at `at`, each file
+         * after the last; without it the file takes lane 0. */
+        audioRow?: number;
         /** Media folder the import files into — the one open in the Media
          * panel when the upload started. */
         folderId?: string;
@@ -771,6 +776,7 @@ export function Editor({
       // opened by the first and the rest join it.
       let at = opts?.at;
       let place = opts?.place;
+      let audioRow = opts?.audioRow;
       // The keyboard comes back to the editor. An import is started from a
       // panel control — an Upload button, a library tile, a file input the OS
       // dialog hands focus back to — and whichever one it was keeps focus
@@ -823,9 +829,23 @@ export function Editor({
                 // footage.
                 s.addClipFromAsset(asset.id, at);
               }
+            } else if (audioRow !== undefined && at !== undefined) {
+              // A timeline drop lands on the row it was released over, the
+              // way every sound drag lands, each file after the last.
+              const from = at;
+              landOnRow("audio", audioRow, (lane) =>
+                useEditor.getState().addAudioFromAsset(asset.id, from, { lane })
+              );
+              const next = useEditor.getState();
+              const placed = next.audioClips.find((c) => c.assetId === asset.id && c.start >= from - 1e-6);
+              if (placed) {
+                at = placed.start + clipLen(placed);
+                const used = [...new Set(next.audioClips.map((c) => c.lane ?? 0))].sort((a, b) => a - b);
+                audioRow = used.indexOf(placed.lane ?? 0);
+              }
             } else {
-              // A timeline drop lands at the pointer; an upload drops at the
-              // playhead (the store slides it right only if that spot is taken).
+              // An upload drops at the playhead (the store slides it right
+              // only if that spot is taken).
               s.addAudioFromAsset(asset.id, at);
             }
           }
@@ -923,7 +943,11 @@ export function Editor({
         // clip floating at the pointer time reads as broken.
         const s = useEditor.getState();
         const empty = s.clips.length === 0 && s.audioClips.length === 0;
-        void importFiles(e.dataTransfer.files, { at: empty ? 0 : landing.at, place: landing.place });
+        void importFiles(e.dataTransfer.files, {
+          at: empty ? 0 : landing.at,
+          place: landing.place,
+          audioRow: landing.audioRow,
+        });
         return;
       }
       void importFiles(e.dataTransfer.files, { mediaOnly: !overCanvas(e) });
@@ -967,36 +991,19 @@ export function Editor({
   // frame copied off the preview, or a timeline selection. A file that Cut
   // imports lands under the indicator, on the first row with room for it. A
   // composer marks its own paste handled, so this only ever sees the pastes
-  // nobody else wanted. The keystroke arms a fallback for a browser that
-  // fires no paste event at all; the event, when it comes, disarms it.
-  // What a mention token on the clipboard can name — the same candidates the
-  // chat composer resolves against — read at the paste, so a tile copied a
-  // moment ago resolves against the live project and shelf.
-  const candidates = useRefCandidates(!viewer);
+  // nobody else wanted. The keystroke keeps its default so the event fires.
+  // The shelf listing a pasted mention token can name, read at the paste. The
+  // rest of the candidates come off the store at that moment too: nothing
+  // here subscribes to the timeline, so a drag on a clip never re-renders
+  // the editor for a paste that may never come.
   const library = useLibrary({ enabled: !viewer }).data ?? EMPTY_LIBRARY;
-  const mentionable = useRef({ candidates, library });
+  const libraryRef = useRef(library);
   useEffect(() => {
-    mentionable.current = { candidates, library };
-  }, [candidates, library]);
-  const pasteFallback = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const disarmPasteFallback = useCallback(() => {
-    if (pasteFallback.current === null) return;
-    clearTimeout(pasteFallback.current);
-    pasteFallback.current = null;
-  }, []);
-  const armPasteFallback = useCallback(() => {
-    disarmPasteFallback();
-    const at = Math.max(0, previewAt());
-    pasteFallback.current = setTimeout(() => {
-      pasteFallback.current = null;
-      pasteOwn(at);
-    }, 0);
-  }, [disarmPasteFallback, pasteOwn]);
-  useEffect(() => disarmPasteFallback, [disarmPasteFallback]);
+    libraryRef.current = library;
+  }, [library]);
   useEffect(() => {
     if (viewer) return;
     const onPaste = (e: ClipboardEvent) => {
-      disarmPasteFallback();
       const s = useEditor.getState();
       if (e.defaultPrevented || s.readOnly) return;
       // A dialog on top owns the paste, the same way it owns the shortcuts.
@@ -1026,7 +1033,8 @@ export function Editor({
         // sticker, an effect, a shape, a transition, a template — put its
         // mention token here; each one lands the way the tile's + button
         // lands it. Imports run behind the editor; a run lands in copy order.
-        const { candidates, library } = mentionable.current;
+        const library = libraryRef.current;
+        const candidates = refCandidatesOf(s, library);
         const refs = parseMentions(e.clipboardData?.getData("text/plain") ?? "", candidates).refs;
         const projectId = s.projectId;
         if (refs.length === 0 || !projectId) return;
@@ -1062,7 +1070,7 @@ export function Editor({
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [disarmPasteFallback, importFiles, pasteOwn, viewer]);
+  }, [importFiles, pasteOwn, viewer]);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -1146,10 +1154,6 @@ export function Editor({
             e.preventDefault();
           }
         }
-      } else if (mod && e.key.toLowerCase() === "v") {
-        // The keystroke keeps its default: the paste event it raises is where
-        // the editor decides what lands (see the paste listener above).
-        armPasteFallback();
       } else if (mod && e.key.toLowerCase() === "g") {
         // ⌘G groups the multi-selected elements, ⇧⌘G dissolves the primary's
         // group — the panel's Group button is out of reach while a
@@ -1191,7 +1195,7 @@ export function Editor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [armPasteFallback, importFiles]);
+  }, [importFiles]);
 
   // The project is here, on this Mac — it just can't be opened without the app
   // that holds it. The gate's banner sits above this with the recovery steps,
