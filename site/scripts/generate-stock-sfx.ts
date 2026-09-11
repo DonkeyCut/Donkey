@@ -109,7 +109,7 @@ const CATALOG: CatalogItem[] = [
   // One focus sound: the lock itself, the way a DSLR confirms it.
   ...sfx("Camera", [
     ["focus-lock", 0.6, "A single DSLR autofocus lock: one soft, precise lens click with a faint motor tick, dry, close-miked, no beep.", ["camera", "focus", "lock", "lens", "dslr"]],
-  ]),
+  ], core),
   ...sfx("Flash", [
     ["pop", 0.8, "A camera flash firing: a quick rising electric charge whine then a bright pop.", ["flash", "camera", "pop", "charge", "quick cut"]],
     ["cut", 0.7, "A bright quick flash transition, a short shimmering white burst that cuts to silence.", ["flash", "transition", "bright", "burst", "quick cut"]],
@@ -260,16 +260,25 @@ const CATALOG: CatalogItem[] = [
   ]),
   ...sfx("Crowd", [
     ["applause", 3, "A medium crowd applauding warmly for three seconds.", ["crowd", "applause", "clap", "audience", "praise"]],
-    ["cheer", 3, "A big crowd cheering and whooping loudly, excited.", ["crowd", "cheer", "whoop", "excited", "win"]],
     ["laugh", 2.5, "A studio audience laughing, a warm laugh track.", ["crowd", "laugh", "audience", "laugh track", "funny"]],
     ["gasp", 1.2, "A crowd gasping in surprise all at once.", ["crowd", "gasp", "surprise", "shock", "audience"]],
     ["boo", 2.5, "A crowd booing with disapproval.", ["crowd", "boo", "disapprove", "audience", "bad"]],
     ["small-laugh", 1.5, "A few people chuckling quietly.", ["crowd", "chuckle", "small", "laugh", "quiet"]],
     ["ooh", 1.5, "A crowd going ooh in awe together.", ["crowd", "ooh", "awe", "impressed", "audience"]],
-    ["stadium", 3, "A stadium crowd roaring after a goal, huge and distant.", ["crowd", "stadium", "roar", "goal", "sports"]],
-    ["kids-cheer", 2, "A group of children cheering happily.", ["crowd", "kids", "cheer", "children", "happy"]],
     ["awww", 1.5, "An audience going aww together, tender.", ["crowd", "aww", "cute", "tender", "audience"]],
   ]),
+  // Cheering gets takes: a win, a reveal and a landing each want their own.
+  ...sfx("Crowd", [
+    ["cheer", 3, "A big crowd cheering and whooping loudly, excited.", ["crowd", "cheer", "whoop", "excited", "win"]],
+    ["cheer-small", 2, "A small group of friends cheering and clapping, close and excited.", ["crowd", "cheer", "friends", "small", "clap"]],
+    ["cheer-party", 2.5, "A lively party crowd cheering with whistles and whoops.", ["crowd", "cheer", "party", "whistle", "celebrate"]],
+    ["cheer-team", 2, "A sports team cheering together in a huddle, one big group shout.", ["crowd", "cheer", "team", "huddle", "shout"]],
+    ["cheer-office", 2, "An office full of coworkers cheering and applauding, indoors.", ["crowd", "cheer", "office", "coworkers", "applause"]],
+    ["cheer-distant", 3, "A distant crowd cheering from far away, outdoors.", ["crowd", "cheer", "distant", "far", "outdoors"]],
+    ["kids-cheer", 2, "A group of children cheering happily.", ["crowd", "kids", "cheer", "children", "happy"]],
+    ["kids-yay", 1.5, "A classroom of children shouting yay together, happy.", ["crowd", "kids", "yay", "children", "classroom"]],
+    ["stadium", 3, "A stadium crowd roaring after a goal, huge and distant.", ["crowd", "stadium", "roar", "goal", "sports"]],
+  ], core),
   ...sfx("Cartoon", [
     ["boing", 0.8, "A cartoon boing, a springy bounce sound.", ["cartoon", "boing", "spring", "bounce", "funny"]],
     ["slide-up", 1, "A slide whistle sliding up in pitch, cartoonish.", ["cartoon", "slide whistle", "up", "rise", "funny"]],
