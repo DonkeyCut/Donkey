@@ -128,14 +128,16 @@ function KindsSection({ kinds }: { kinds: OutboxOverview["kinds"] }) {
                     <span className="inline-flex items-center gap-2">
                       {action.isError && action.variables?.action === "drain" && action.variables.kind === k.kind ? (
                         <span className="text-xs text-destructive">Failed.</span>
+                      ) : k.drainer?.state === "held" ? (
+                        <span className="text-xs text-muted-foreground">held · resumes {formatWhen(k.drainer.resumesAt)}</span>
                       ) : null}
                       <Button
-                        disabled={k.queued === 0 || k.draining || action.isPending}
+                        disabled={k.queued === 0 || k.drainer !== null || action.isPending}
                         onClick={() => action.mutate({ action: "drain", kind: k.kind })}
                         size="sm"
                         variant="outline"
                       >
-                        {k.draining ? "Draining…" : "Drain"}
+                        {k.drainer?.state === "running" ? "Draining…" : "Drain"}
                       </Button>
                     </span>
                   </td>

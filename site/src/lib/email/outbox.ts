@@ -279,9 +279,9 @@ export type OutboxKindRow = {
   queued: number;
   sentToday: number;
   failed: number;
-  // A drainer covering this kind is running or due now; one held back by a
-  // quota wait is not.
-  draining: boolean;
+  // The drainer covering this kind: running or due now, or held back by a
+  // quota wait until `resumesAt`; null when none is coming.
+  drainer: { state: "running" } | { state: "held"; resumesAt: string } | null;
 };
 
 export type OutboxItem = {
@@ -353,16 +353,24 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
       where: { state: { in: ["sent", "skipped"] } },
     }),
     prisma.asyncJob.findMany({
-      select: { payload: true },
-      where: {
-        kind: "email-drain",
-        OR: [{ state: "running" }, { notBefore: null, state: "queued" }, { notBefore: { lte: now }, state: "queued" }],
-      },
+      select: { notBefore: true, payload: true },
+      where: { kind: "email-drain", state: { in: ["queued", "running"] } },
     }),
   ]);
-  // A drainer without a kind covers every kind.
-  const drainingKinds = drains.map((d) => (d.payload as { kind?: EmailKindId } | null)?.kind ?? null);
-  const draining = (kind: EmailKindId) => drainingKinds.some((k) => k === null || k === kind);
+  // A drainer without a kind covers every kind. One running or due now is
+  // draining; one held back for later is waiting on the quota, and the kind
+  // reports the earliest of those.
+  const drainers = drains.map((d) => ({
+    kind: (d.payload as { kind?: EmailKindId } | null)?.kind ?? null,
+    held: d.notBefore !== null && d.notBefore > now ? d.notBefore : null,
+  }));
+  const drainer = (kind: EmailKindId): OutboxKindRow["drainer"] => {
+    const covering = drainers.filter((d) => d.kind === null || d.kind === kind);
+    if (covering.some((d) => d.held === null)) return { state: "running" };
+    const held = covering.map((d) => d.held).filter((t): t is Date => t !== null);
+    if (held.length === 0) return null;
+    return { state: "held", resumesAt: new Date(Math.min(...held.map((t) => t.getTime()))).toISOString() };
+  };
   const countOf = (groups: { kind: string; _count: number }[], kind: string) =>
     groups.find((g) => g.kind === kind)?._count ?? 0;
   const kinds = EMAIL_KIND_IDS.map((kind) => ({
@@ -372,7 +380,7 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
     queued: countOf(queued, kind),
     sentToday: countOf(sentToday, kind),
     failed: countOf(failed, kind),
-    draining: draining(kind),
+    drainer: drainer(kind),
   }));
   const campaignIds = [...new Set(byCampaign.map((g) => g.promotionId).filter((id): id is string => id !== null))];
   const names = await prisma.promotion.findMany({ select: { id: true, name: true }, where: { id: { in: campaignIds } } });
