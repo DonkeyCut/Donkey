@@ -141,7 +141,7 @@ function KindsSection({ kinds }: { kinds: OutboxOverview["kinds"] }) {
                         <span className="text-xs text-muted-foreground">held · resumes {formatWhen(k.drainer.resumesAt)}</span>
                       ) : null}
                       <Button
-                        disabled={k.queued === 0 || k.drainer !== null || action.isPending}
+                        disabled={k.queued === 0 || k.drainer?.state === "running" || action.isPending}
                         onClick={() => action.mutate({ action: "drain", kind: k.kind })}
                         size="sm"
                         variant="outline"
