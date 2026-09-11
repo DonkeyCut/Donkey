@@ -6,7 +6,7 @@ import { PeakStrip } from "@/cut/components/AudioPanel";
 import { clearRefDrag, refFromStockMusic, setRefDragData } from "@/cut/lib/assetRef";
 import { useRefCopy } from "@/cut/lib/refCopy";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
-import { importStockMusic } from "@/cut/lib/media";
+import { importStockAudio } from "@/cut/lib/media";
 import { useMusicGen } from "@/cut/lib/musicGen";
 import { usePreviewAudio } from "@/cut/lib/previewAudio";
 import { STOCK_MUSIC_CATEGORIES, stockTitle, type StockMusic, type StockMusicCategory } from "@/cut/lib/stock";
@@ -81,7 +81,7 @@ export function SampleLibrary({ projectId }: { projectId: string }) {
                   playing={playingUrl === s.file}
                   onTogglePlay={() => togglePlay(s.file)}
                   onAdd={() =>
-                    void importStockMusic(projectId, {
+                    void importStockAudio(projectId, {
                       url: s.file,
                       name: sampleName(s.id),
                       duration: s.duration,

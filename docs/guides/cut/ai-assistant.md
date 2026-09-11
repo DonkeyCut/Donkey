@@ -74,7 +74,7 @@ Deciding what the user wants is prompt text, executed by the model. The prompt o
 
 1. **Deliverable first.** "Write me a caption / a script / a prompt" asks for words — the answer goes in chat and the project stays untouched until the user says "do it". A request to change the project gets acted on directly with tools.
 2. **Doing beats asking.** Edits are free to reverse (unlimited undo), so the model acts on reasonable interpretations. Generation is the exception: undo removes the clip but credits stay spent, so it generates only when the user asked for the media itself.
-3. **Free before paid.** Bundled stock is checked before spending generation credits when existing media could serve.
+3. **Free before paid.** Bundled stock is checked before spending generation credits when existing media could serve. The stock sound effects are part of that catalog: a whoosh on a scene change or a click when something pops up is a `stock_search` for a sound and a `stock_add` onto the soundtrack, never a generation.
 
 "This" resolves to the current selection, ids come verbatim from the state, and unfamiliar areas trigger a skill read first.
 

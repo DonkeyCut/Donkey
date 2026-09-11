@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { libraryRouteUrl, type LibraryAsset, type LibraryData } from "./library";
 import { useLibrary } from "./queries";
-import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockVideo } from "./stock";
+import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockSfx, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_MUSIC } from "./stockMusicManifest";
+import { STOCK_SFX } from "./stockSfxManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
 import {
   ALL_EFFECT_IDS,
@@ -172,6 +173,15 @@ export const refFromStockMusic = (m: StockMusic): AssetRef => ({
   kind: "audio",
   url: m.file,
   duration: m.duration,
+});
+
+export const refFromStockSfx = (s: StockSfx): AssetRef => ({
+  scope: "stock",
+  id: s.id,
+  name: stockTitle(s.id),
+  kind: "audio",
+  url: s.file,
+  duration: s.duration,
 });
 
 /** A ref for a text file dropped from the desktop: the contents ride inline
@@ -895,6 +905,7 @@ export function useRefCandidates(enabled = true): AssetRef[] {
       ...STOCK_IMAGES.map(refFromStock),
       ...STOCK_VIDEOS.map(refFromStockVideo),
       ...STOCK_MUSIC.map(refFromStockMusic),
+      ...STOCK_SFX.map(refFromStockSfx),
       ...catalogRefs(),
     ]) {
       const key = ref.name.toLowerCase();

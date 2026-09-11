@@ -134,6 +134,7 @@ import { StockImagesPanel } from "./StockImagesPanel";
 import { SampleLibrary } from "./StockMusicPanel";
 import { StockVideosPanel } from "./StockVideosPanel";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
+import { STOCK_SFX } from "@/cut/lib/stockSfxManifest";
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
 import { LibraryCard, ShelfBadge } from "./LibraryView";
 import { MediaCardShell } from "./MediaCardShell";
@@ -266,6 +267,16 @@ export function SidePanel({
   useRevealEffect((ref) => {
     if (ref.scope === "project" || ref.scope === "library") {
       setTab("media");
+      return;
+    }
+    if (STOCK_SFX.some((s) => s.id === ref.id)) {
+      setTab("effects");
+      return;
+    }
+    if (STOCK_MUSIC.some((m) => m.id === ref.id)) {
+      setTab("audio");
+      setAudioSub("music");
+      musicFold.setOpen(true);
       return;
     }
     // The revealed tile lives in a library column; unfold it if hidden.

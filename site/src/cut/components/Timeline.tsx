@@ -51,7 +51,7 @@ import { keyboardToEditor, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { CLIP_GAP, laneDragFor, laneDragParts, resolveRow, startLaneMove, startLaneTrim, type LaneDrag, type RowBox } from "@/cut/lib/laneTracks";
 import { reportSwallowed } from "@/cut/lib/report";
-import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockMusic, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
+import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockAudio, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
 import { waveGain } from "@/cut/lib/waveform";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, maxClipFade, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
@@ -433,9 +433,10 @@ function draggingStockVideo(e: React.DragEvent): AssetRef | null {
   return ref?.scope === "stock" && ref.kind === "video" ? ref : null;
 }
 
-/** The stock-music ref being dragged (a sample-library card), null otherwise. On
- * the soundtrack it imports into the project and lands as an audio clip. */
-function draggingStockMusic(e: React.DragEvent): AssetRef | null {
+/** The stock audio ref being dragged — a music sample or a sound effect card —
+ * null otherwise. On the soundtrack it imports into the project and lands as
+ * an audio clip. */
+function draggingStockAudio(e: React.DragEvent): AssetRef | null {
   if (!hasRefDrag(e)) return null;
   const ref = draggingRef();
   return ref?.scope === "stock" && ref.kind === "audio" ? ref : null;
@@ -1980,9 +1981,9 @@ export function Timeline() {
         const isLib = hasLibraryDrag(e);
         const still = draggingStill(e);
         const stockVideo = draggingStockVideo(e);
-        const stockMusic = draggingStockMusic(e);
+        const stockAudio = draggingStockAudio(e);
         const element = hasElementDrag(e) ? draggingElement() : null;
-        if (!hasAssetDrag(e) && !isLib && !still && !stockVideo && !stockMusic && !element)
+        if (!hasAssetDrag(e) && !isLib && !still && !stockVideo && !stockAudio && !element)
           return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "copy";
@@ -2039,9 +2040,9 @@ export function Timeline() {
           const lib = draggingLibrary();
           type = lib && lib.type !== "font" ? lib.type : undefined;
           duration = lib?.duration ?? 0;
-        } else if (stockMusic) {
+        } else if (stockAudio) {
           type = "audio";
-          duration = stockMusic.duration ?? 0;
+          duration = stockAudio.duration ?? 0;
         } else if (stockVideo) {
           type = "video";
           duration = stockVideo.duration ?? 0;
@@ -2135,7 +2136,7 @@ export function Timeline() {
         const assetGroup = draggingAssetIds();
         const still = draggingStill(e);
         const stockVideo = draggingStockVideo(e);
-        const stockMusic = draggingStockMusic(e);
+        const stockAudio = draggingStockAudio(e);
         const tpl = draggingTemplate();
         const element = hasElementDrag(e) ? draggingElement() : null;
         const projectId = useEditor.getState().projectId;
@@ -2178,17 +2179,17 @@ export function Timeline() {
           return;
         }
 
-        // A stock-music sample imports as an audio asset and lands on the
-        // hovered soundtrack lane.
-        if (stockMusic && projectId) {
+        // A stock music sample or sound effect imports as an audio asset and
+        // lands on the hovered soundtrack lane.
+        if (stockAudio && projectId) {
           e.preventDefault();
-          void importStockMusic(projectId, {
-            url: stockMusic.url,
-            name: stockMusic.name,
-            duration: stockMusic.duration,
+          void importStockAudio(projectId, {
+            url: stockAudio.url,
+            name: stockAudio.name,
+            duration: stockAudio.duration,
           })
             .then((asset) => placeAssetAt(asset.id, "audio", t, audioRow))
-            .catch((err: unknown) => reportSwallowed("[cut] stock music drop failed", err));
+            .catch((err: unknown) => reportSwallowed("[cut] stock audio drop failed", err));
           return;
         }
 

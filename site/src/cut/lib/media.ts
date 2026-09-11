@@ -977,10 +977,11 @@ export async function importStockVideo(
   });
 }
 
-/** Store a bundled stock-music bed in the project's media as a regular audio
- * asset and register it, without placing it on the timeline — callers choose
- * where it lands (the soundtrack). Tagged "stock" so it stays out of Media. */
-export async function importStockMusic(
+/** Store a bundled stock audio file — a music bed or a one-shot sound effect —
+ * in the project's media as a regular audio asset and register it, without
+ * placing it on the timeline; callers choose where it lands (the soundtrack).
+ * Tagged "stock" so it stays out of Media. */
+export async function importStockAudio(
   projectId: string,
   music: { url: string; name: string; duration?: number }
 ): Promise<MediaAsset> {

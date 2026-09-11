@@ -100,6 +100,7 @@ import {
   enrichAsset,
   ensurePeaks,
   importImage,
+  importStockAudio,
   importStockVideo,
   importUrlMedia,
   composeSheets,
@@ -122,6 +123,7 @@ import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } fro
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
+import { STOCK_SFX } from "./stockSfxManifest";
 import { storedMediaUrl } from "./mediaSync";
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
 import { isStylePresetTemplate } from "./stylePresets";
@@ -2769,14 +2771,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   stock_search: (s, input) => {
       const q = String(input.query ?? "").trim().toLowerCase();
       const kindIn =
-        input.kind === "video" || input.kind === "image" || input.kind === "character"
+        input.kind === "video" ||
+        input.kind === "image" ||
+        input.kind === "character" ||
+        input.kind === "sound"
           ? input.kind
           : undefined;
       interface Hit {
         id: string;
-        kind: "video" | "image" | "character";
+        kind: "video" | "image" | "character" | "sound";
         category: string;
-        aspect: string;
+        aspect?: string;
         duration?: number;
         persona?: string;
         prompt: string;
@@ -2809,6 +2814,18 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           });
         }
       }
+      if (!kindIn || kindIn === "sound") {
+        for (const x of STOCK_SFX) {
+          hits.push({
+            id: x.id,
+            kind: "sound",
+            category: x.category,
+            duration: round2(x.duration),
+            prompt: x.prompt,
+            tags: x.tags,
+          });
+        }
+      }
       const words = q.split(/\s+/).filter(Boolean);
       const matches = hits.filter((h) => {
         const hay = [h.id, h.category, h.prompt, h.persona ?? "", ...h.tags]
@@ -2835,7 +2852,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const id = String(input.id ?? "");
       const vid = STOCK_VIDEOS.find((v) => v.id === id);
       const img = vid ? undefined : STOCK_IMAGES.find((i) => i.id === id);
-      if (!vid && !img)
+      const sfx = vid || img ? undefined : STOCK_SFX.find((x) => x.id === id);
+      if (!vid && !img && !sfx)
         throw new ToolError(`No stock item with id ${id}. Call stock_search for ids.`);
       // Captured before the import: the media files under the chat that
       // asked, even if the user switches threads while it downloads.
@@ -2847,22 +2865,30 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             duration: vid.duration,
             ...stockAspectDims(vid.aspect),
           })
-        : await importImage(projectId, { url: img!.file, name: stockTitle(img!.id) });
+        : sfx
+          ? await importStockAudio(projectId, {
+              url: sfx.file,
+              name: stockTitle(sfx.id),
+              duration: sfx.duration,
+            })
+          : await importImage(projectId, { url: img!.file, name: stockTitle(img!.id) });
       tagChatAsset(asset.id, chatId);
       const addToTimeline = wantsTimeline(input, "start");
+      const start = isNum(input.start) ? Math.max(0, input.start) : undefined;
       let clipId: string | null = null;
       if (addToTimeline) {
-        useEditor
-          .getState()
-          .addClipFromAsset(asset.id, isNum(input.start) ? Math.max(0, input.start) : undefined);
+        // A sound lands on the soundtrack at the playhead (or `start`), on the
+        // first lane with room; footage and stills go to the video track.
+        if (sfx) useEditor.getState().addAssetAtPlayhead(asset.id, start);
+        else useEditor.getState().addClipFromAsset(asset.id, start);
         const sel = useEditor.getState().selection;
-        clipId = sel?.kind === "clip" ? sel.id : null;
+        clipId = sel?.kind === "clip" || sel?.kind === "audio" ? sel.id : null;
       }
       return {
         assetId: asset.id,
         name: asset.name,
-        kind: vid ? "video" : "image",
-        duration: round2(vid ? asset.duration : IMAGE_CLIP_SECONDS),
+        kind: vid ? "video" : sfx ? "sound" : "image",
+        duration: round2(vid || sfx ? asset.duration : IMAGE_CLIP_SECONDS),
         addedToTimeline: addToTimeline,
         clipId,
       };

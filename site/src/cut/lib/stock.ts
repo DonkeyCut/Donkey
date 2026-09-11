@@ -47,8 +47,8 @@ export interface StockVideo {
 }
 
 /** Pregenerated background-music beds (Gemini/Lyria), bundled under
- * public/cut-stock-music with the manifest in stockMusicManifest.ts. Regenerate
- * or extend the set with `bun scripts/generate-stock-music.ts`. */
+ * stock/music/ in the media bucket with the manifest in stockMusicManifest.ts.
+ * Regenerate or extend the set with `bun scripts/generate-stock-music.ts`. */
 export interface StockMusic {
   id: string;
   category: StockMusicCategory;
@@ -56,13 +56,81 @@ export interface StockMusic {
   prompt: string;
   /** Mood/genre/instrument keywords the search box matches beyond the prompt. */
   tags: string[];
-  /** Site-relative mp3 URL (under /cut-stock-music/) — preview and timeline. */
+  /** Absolute mp3 URL on the media host — preview and timeline. */
   file: string;
   /** Rendered length in seconds. */
   duration: number;
   /** Normalized 0..1 waveform peaks for the card, precomputed at generation. */
   peaks: number[];
 }
+
+/** Pregenerated one-shot sound effects, stored under stock/sfx/ in the media
+ * bucket with the manifest in stockSfxManifest.ts. Regenerate or extend the set with
+ * `bun scripts/generate-stock-sfx.ts`. */
+export interface StockSfx {
+  id: string;
+  category: StockSfxCategory;
+  /** The generation prompt, saved verbatim. */
+  prompt: string;
+  /** Keywords the search box matches beyond the prompt. */
+  tags: string[];
+  /** Absolute mp3 URL on the media host — preview and timeline. */
+  file: string;
+  /** Trimmed length in seconds. */
+  duration: number;
+  /** Normalized 0..1 waveform peaks for the card, precomputed at generation. */
+  peaks: number[];
+  /** A bed rendered to repeat seamlessly (ambience, room tone). */
+  loop?: boolean;
+}
+
+export const STOCK_SFX_CATEGORIES = [
+  "Clicks",
+  "Camera",
+  "Flash",
+  "UI",
+  "Whoosh",
+  "Glitch",
+  "Riser",
+  "Hits",
+  "Keyboard",
+  "Pops",
+  "Stops",
+  "Dings",
+  "Buzzers",
+  "Notifications",
+  "Money",
+  "Crowd",
+  "Cartoon",
+  "Magic",
+  "Stingers",
+  "Drums",
+  "Time",
+  "Tension",
+  "Paper",
+  "Doors",
+  "Footsteps",
+  "Water",
+  "Weather",
+  "Fire",
+  "Horns",
+  "Vehicles",
+  "Kitchen",
+  "Body",
+  "Cloth",
+  "Tech",
+  "Sci-Fi",
+  "Games",
+  "Toys",
+  "Sports",
+  "Animals",
+  "Ambience",
+  "Musical",
+  "Transitions",
+  "Retro",
+] as const;
+
+export type StockSfxCategory = (typeof STOCK_SFX_CATEGORIES)[number];
 
 /** Nominal pixel size for a stock clip's aspect. The catalog stores only the
  * ratio; these stand in until the file's real dimensions are probed, and all

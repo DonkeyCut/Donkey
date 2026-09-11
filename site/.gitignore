@@ -20,6 +20,9 @@ node_modules/
 # production
 /build
 
+# local build caches (stock sounds and music live in R2)
+/.cache/
+
 # misc
 .DS_Store
 *.pem
