@@ -16,6 +16,7 @@ const READ_ONLY = new Set([
   "detect_silence",
   "detect_beats",
   "listen_audio",
+  "measure_level",
   "read_color_stats",
   "library_list",
   "library_list_folder",

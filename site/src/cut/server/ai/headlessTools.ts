@@ -22,6 +22,7 @@ import { uniqueName } from "../util";
 const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "watch_video",
   "listen_audio",
+  "measure_level",
   "detect_silence",
   "detect_beats",
   "refine_speech_cuts",

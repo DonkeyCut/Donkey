@@ -66,6 +66,18 @@ export const AI_PANEL_TOOLS = [
     }),
   },
   {
+    name: "measure_level",
+    description:
+      "Measure how loud clips actually play — the level of each clip's audible sound over its trimmed range, in dBFS, with its current volume applied — so volumes are set from numbers, never by ear. Returns per clip: sourceDb (the media), volume, levelDb (what plays), peakDb, and for every clip except the target, volumeToMatch: the volume that lands it at the target's level. \"Make the voiceover as loud as the clip\", \"match the levels\", \"balance the music under the speech\": call this with every clip involved and target_id = the one to match, then set_clip_volume / update_audio with volumeToMatch (for a bed under speech, a fraction of it). A shortfallDb means the volume ceiling (3) cannot reach the target; lower the target instead. A clip marked muted plays nothing until set_clip_muted / update_audio unmutes it; its level is what it would play unmuted.",
+    inputSchema: obj(
+      {
+        ids: { type: "array", items: { type: "string" }, description: "Clip ids to measure — video clips (their own sound) and soundtrack clips alike" },
+        target_id: str("The clip whose level the others should match (default: the first id)"),
+      },
+      ["ids"]
+    ),
+  },
+  {
     name: "detect_beats",
     description:
       "Read a source's musical beat grid — the tempo and where each beat lands — for cutting to the music. Returns bpm and beats in SOURCE seconds; with clip_id it also returns timelineBeats, the beats inside the clip's trimmed range mapped to timeline seconds, ready for split_at. The grid persists on the asset: its clips draw the beats as yellow dots and every drag or trim snaps to them, so one detection serves the whole edit. A stored grid comes back as-is — the user can hand-edit the dots, and their edits hold, and a grid they have edited reports bpm 0 because the tempo is theirs now — so pass regenerate only to re-scan and replace it. Detection always reads the whole source; from/to just window the reply.",

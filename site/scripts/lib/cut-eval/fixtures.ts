@@ -24,6 +24,7 @@ export const SAFE_TOOLS = new Set([
   "detect_silence",
   "detect_beats",
   "listen_audio",
+  "measure_level",
   // The model's own memory of a source and the user's synced notes: reading
   // notes and writing down a look are bookkeeping, never a project edit.
   "note_source",
@@ -630,6 +631,7 @@ export function serveSafeTool(name: string, state: unknown): unknown {
   if (name === "library_list") return { folders: [], assets: [], templates: [] };
   if (name === "notes_list") return { notes: [], folders: [], labels: [] };
   if (name === "detect_silence") return { silences: [] };
+  if (name === "measure_level") return { targetId: "", clips: [] };
   if (name === "detect_beats") return { bpm: 0, beats: [] };
   return { ok: true };
 }

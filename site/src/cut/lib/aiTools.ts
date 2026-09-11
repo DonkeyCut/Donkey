@@ -97,6 +97,7 @@ import {
   beatlessFor,
   detectAssetBeats,
   detectSilenceClientSide,
+  measureSourceLevel,
   enrichAsset,
   ensurePeaks,
   importImage,
@@ -1106,6 +1107,54 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
                 ? " This is the stored grid, the user's hand edits included; pass regenerate to re-scan."
                 : ""),
       };
+  },
+
+  measure_level: async (s, input) => {
+      const ids = Array.isArray(input.ids) ? input.ids.map(String) : [];
+      if (ids.length === 0) throw new ToolError("ids is required: the clip ids to measure.");
+      const targetId = input.target_id === undefined || input.target_id === null ? ids[0] : String(input.target_id);
+      if (!ids.includes(targetId)) ids.push(targetId);
+      const rows = new Map<
+        string,
+        { id: string; name: string; kind: "video" | "soundtrack"; sourceDb: number; peakDb: number; audibleSeconds: number; volume: number; levelDb: number; muted?: boolean }
+      >();
+      await eachScanned(ids, async (id) => {
+        const { asset, clip, from, to } = resolveWatchRange(s, { clip_id: id });
+        if (asset.type === "image") throw new ToolError(`"${asset.name}" is an image — it has no sound.`);
+        const level = await measureSourceLevel(asset.url, { from, ...(to !== undefined ? { to } : {}) }).catch((e) => {
+          throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
+        });
+        const soundtrack = s.audioClips.some((a) => a.id === clip!.id);
+        const { volume = 1, muted = false } = clip as { volume?: number; muted?: boolean };
+        rows.set(id, {
+          id,
+          name: asset.name,
+          kind: soundtrack ? "soundtrack" : "video",
+          sourceDb: level.rmsDb,
+          peakDb: level.peakDb,
+          audibleSeconds: level.audibleSeconds,
+          volume: round2(volume),
+          // A muted clip plays nothing; its level is what it would play unmuted.
+          levelDb: round2(level.rmsDb + gainDb(volume)),
+          ...(muted ? { muted: true } : {}),
+        });
+      });
+      const target = rows.get(targetId)!;
+      // The volume that would land each clip at the target's level, from the
+      // clip's own level under its current volume. The volume range is 0..3, so
+      // a clip too quiet to reach the target says how far it gets.
+      const clips = ids.map((id) => {
+        const row = rows.get(id)!;
+        if (id === targetId) return row;
+        const wanted = row.volume * 10 ** ((target.levelDb - row.levelDb) / 20);
+        const volumeToMatch = round2(clamp(wanted, 0, 3));
+        return {
+          ...row,
+          volumeToMatch,
+          ...(wanted > 3 ? { shortfallDb: round2(20 * Math.log10(wanted / 3)) } : {}),
+        };
+      });
+      return { targetId, clips };
   },
 
   listen_audio: async (s, input) => {
@@ -3921,6 +3970,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "convert_media",
   "watch_video",
   "listen_audio",
+  "measure_level",
   "detect_silence",
   "detect_beats",
   "refine_speech_cuts",
@@ -4167,6 +4217,9 @@ function notesIn(
     .filter((n) => n.to > from && n.from < to)
     .map((n) => ({ from: round2(n.from), to: round2(n.to), text: n.text }));
 }
+
+/** A clip volume as decibels of gain; silence reads as the quiet floor. */
+const gainDb = (volume: number) => (volume > 0 ? 20 * Math.log10(volume) : -100);
 
 function resolveWatchTarget(
   s: ReturnType<typeof useEditor.getState>,

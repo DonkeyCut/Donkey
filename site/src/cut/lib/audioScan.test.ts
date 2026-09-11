@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { scanBeats, scanSilence, scanSpeech, type PcmChunk } from "./audioScan";
+import { scanBeats, scanLevel, scanSilence, scanSpeech, type PcmChunk } from "./audioScan";
 
 const RATE = 8000;
 
@@ -156,6 +156,30 @@ function expectWords(
     expect(segments[i].end).toBeLessThanOrEqual(w.end + slack.late);
   });
 }
+
+describe("scanLevel", () => {
+  test("reads the level of what plays, leaving the pauses out", async () => {
+    // Half-scale tone with a second of silence in the middle: the mean is
+    // the tone's own level, and the silence does not drag it down.
+    const half = 20 * Math.log10(0.5);
+    const level = await scanLevel(chunks([0.5, 0, 0.5]), { from: 0 });
+    expect(level.rmsDb).toBeCloseTo(half, 1);
+    expect(level.peakDb).toBeCloseTo(half, 1);
+    expect(level.audibleSeconds).toBeCloseTo(2, 1);
+  });
+
+  test("a quieter take reads quieter by its gain", async () => {
+    const loud = await scanLevel(chunks([1]), { from: 0 });
+    const soft = await scanLevel(chunks([0.25]), { from: 0 });
+    expect(loud.rmsDb - soft.rmsDb).toBeCloseTo(20 * Math.log10(4), 1);
+  });
+
+  test("nothing audible reads at the floor of what was heard", async () => {
+    const level = await scanLevel(chunks([0, 0]), { from: 0 });
+    expect(level.audibleSeconds).toBe(0);
+    expect(level.rmsDb).toBeLessThan(-90);
+  });
+});
 
 describe("scanSpeech", () => {
   test("finds the words in a quiet room", async () => {

@@ -150,6 +150,57 @@ export function silencesFrom(
   return silences;
 }
 
+/** Frames under this are the room, or nothing at all: they carry no program
+ * and would drag a level reading down with the pauses between words. */
+const LEVEL_FLOOR_DB = -45;
+
+/** How loud a span plays: its program level and its peak, in dBFS. */
+export interface LevelScan {
+  /** Power-mean level of the audible frames — what the ear averages. */
+  rmsDb: number;
+  /** The loudest 20ms frame. */
+  peakDb: number;
+  /** Seconds of the span that read as audible. */
+  audibleSeconds: number;
+}
+
+/**
+ * The level of an envelope. Pauses and room tone are left out of the mean so
+ * a recording with long gaps reads at the level of what it says, the way two
+ * clips are compared by ear; a span with nothing audible reads at its floor.
+ */
+export function levelFrom(env: Envelope): LevelScan {
+  let power = 0;
+  let audible = 0;
+  let peak = QUIET;
+  let heard = 0;
+  let allPower = 0;
+  for (const level of env.db) {
+    if (!Number.isFinite(level)) continue;
+    heard++;
+    const p = 10 ** (level / 10);
+    allPower += p;
+    if (level > peak) peak = level;
+    if (level < LEVEL_FLOOR_DB) continue;
+    power += p;
+    audible++;
+  }
+  const mean = audible > 0 ? power / audible : heard > 0 ? allPower / heard : 0;
+  return {
+    rmsDb: round2(Math.max(QUIET, 10 * Math.log10(mean || 1e-10))),
+    peakDb: round2(peak),
+    audibleSeconds: round2(audible * env.hop),
+  };
+}
+
+/** The level of `chunks`, by RMS over 20ms windows. */
+export async function scanLevel(
+  chunks: AsyncIterable<PcmChunk>,
+  opts: { from: number; to?: number }
+): Promise<LevelScan> {
+  return levelFrom(await scanEnvelope(chunks, opts));
+}
+
 /** Silent spans in `chunks`, by RMS over 20ms windows. */
 export async function scanSilence(
   chunks: AsyncIterable<PcmChunk>,

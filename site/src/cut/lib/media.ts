@@ -1,6 +1,6 @@
 "use client";
 
-import { scanBeats, scanSilence, scanSpeech, type BeatScan, type PcmChunk, type SpeechScan } from "./audioScan";
+import { scanBeats, scanLevel, scanSilence, scanSpeech, type BeatScan, type LevelScan, type PcmChunk, type SpeechScan } from "./audioScan";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { registerBlobFile } from "./backend/browser/registry";
 import { cloudBackend } from "./backend/cloud";
@@ -1259,6 +1259,17 @@ export async function scanSourceSpeech(
 ): Promise<SpeechScan> {
   const from = Math.max(0, opts.from);
   return scanSpeech(sourcePcm(sourceUrl, from, opts.to), { ...opts, from });
+}
+
+/** How loud a span of a source plays. Same residency story as the speech
+ * scan: the page decodes its own media, the headless runner installs the
+ * same decoders. */
+export async function measureSourceLevel(
+  sourceUrl: string,
+  opts: { from: number; to?: number }
+): Promise<LevelScan> {
+  const from = Math.max(0, opts.from);
+  return scanLevel(sourcePcm(sourceUrl, from, opts.to), { ...opts, from });
 }
 
 /** The source's musical beat grid, end to end. The grid is a property of the
