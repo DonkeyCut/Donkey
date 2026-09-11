@@ -112,6 +112,14 @@ export async function scheduleDrain(delaySeconds: number): Promise<void> {
   await ensureJob("email-drain", {}, "system", { delaySeconds });
 }
 
+/** Starts a drainer for one kind now, on an operator's say-so. Its own job,
+ * so a drainer held back by another kind's quota wait does not stand in
+ * for it. */
+export async function drainKindNow(kind: EmailKindId, createdBy: string): Promise<void> {
+  const { enqueueJob } = await import("@/lib/jobs/queue");
+  await enqueueJob("email-drain", { kind }, createdBy);
+}
+
 type DrainableRow = Awaited<ReturnType<typeof prisma.emailSend.findMany>>[number];
 
 async function sendRow(row: DrainableRow, now: Date): Promise<Outcome> {
@@ -184,8 +192,9 @@ export type DrainResult = {
 
 /** Sends what the outbox holds, highest priority first, until the budget or
  * the quota runs out. A refused quota class is left alone for the rest of
- * the run; the classes above it keep going. */
-export async function drainOutbox(budgetMs: number): Promise<DrainResult> {
+ * the run; the classes above it keep going. Given a kind, only that kind's
+ * rows go. */
+export async function drainOutbox(budgetMs: number, kind?: EmailKindId): Promise<DrainResult> {
   const startedAt = Date.now();
   const result: DrainResult = { sent: 0, failed: 0, skipped: 0, retried: 0, retryAfterSeconds: null, more: false };
   const refused = new Map<EmailSendKind, number>();
@@ -196,13 +205,14 @@ export async function drainOutbox(budgetMs: number): Promise<DrainResult> {
 
   drain: for (;;) {
     const now = new Date();
+    if (kind && refused.has(EMAIL_KINDS[kind].quota)) break;
     const rows = await prisma.emailSend.findMany({
       orderBy: [{ priority: "desc" }, { rank: "asc" }, { createdAt: "asc" }],
       take: PAGE,
       where: {
         AND: [
           claimable(now),
-          { kind: { notIn: refusedKinds() }, notBefore: { lte: now } },
+          { kind: kind ?? { notIn: refusedKinds() }, notBefore: { lte: now } },
           // A paused promotion's rows wait where they are.
           { OR: [{ promotionId: null }, { promotion: { status: "sending" } }] },
         ],
@@ -229,18 +239,19 @@ export async function drainOutbox(budgetMs: number): Promise<DrainResult> {
 
   await finishPromotions(touchedPromotions);
   const waits = [...refused.values()];
-  const backedOff = await nextBackedOffRow(new Date());
+  const backedOff = await nextBackedOffRow(new Date(), kind);
   if (backedOff) waits.push(Math.max(1, Math.ceil((backedOff.getTime() - Date.now()) / 1000)));
   if (waits.length > 0) result.retryAfterSeconds = Math.min(...waits);
   return result;
 }
 
 // When the soonest row held back by a failed attempt comes due.
-async function nextBackedOffRow(now: Date): Promise<Date | null> {
+async function nextBackedOffRow(now: Date, kind?: EmailKindId): Promise<Date | null> {
   const row = await prisma.emailSend.findFirst({
     orderBy: { notBefore: "asc" },
     select: { notBefore: true },
     where: {
+      kind,
       notBefore: { gt: now },
       state: "queued",
       OR: [{ promotionId: null }, { promotion: { status: "sending" } }],
@@ -268,6 +279,9 @@ export type OutboxKindRow = {
   queued: number;
   sentToday: number;
   failed: number;
+  // A drainer covering this kind is running or due now; one held back by a
+  // quota wait is not.
+  draining: boolean;
 };
 
 export type OutboxItem = {
@@ -305,8 +319,6 @@ export type OutboxOverview = {
   campaigns: OutboxCampaign[];
   // What is waiting, then what failed, then what went most recently.
   items: OutboxItem[];
-  // A drainer is running or due now; one held back by a quota wait is not.
-  drainPending: boolean;
 };
 
 const ITEMS = 60;
@@ -315,7 +327,7 @@ const ITEMS = 60;
  * rows worth a look. */
 export async function outboxOverview(now = new Date()): Promise<OutboxOverview> {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const [quota, priorities, queued, sentToday, failed, byCampaign, waiting, broken, recent, drain] = await Promise.all([
+  const [quota, priorities, queued, sentToday, failed, byCampaign, waiting, broken, recent, drains] = await Promise.all([
     dailyEmailQuotaStatus(now),
     getGlobalSetting("emailPriorities"),
     prisma.emailSend.groupBy({ _count: true, by: ["kind"], where: { state: { in: ["queued", "sending"] } } }),
@@ -340,14 +352,17 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
       take: ITEMS,
       where: { state: { in: ["sent", "skipped"] } },
     }),
-    prisma.asyncJob.findFirst({
-      select: { id: true },
+    prisma.asyncJob.findMany({
+      select: { payload: true },
       where: {
         kind: "email-drain",
         OR: [{ state: "running" }, { notBefore: null, state: "queued" }, { notBefore: { lte: now }, state: "queued" }],
       },
     }),
   ]);
+  // A drainer without a kind covers every kind.
+  const drainingKinds = drains.map((d) => (d.payload as { kind?: EmailKindId } | null)?.kind ?? null);
+  const draining = (kind: EmailKindId) => drainingKinds.some((k) => k === null || k === kind);
   const countOf = (groups: { kind: string; _count: number }[], kind: string) =>
     groups.find((g) => g.kind === kind)?._count ?? 0;
   const kinds = EMAIL_KIND_IDS.map((kind) => ({
@@ -357,6 +372,7 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
     queued: countOf(queued, kind),
     sentToday: countOf(sentToday, kind),
     failed: countOf(failed, kind),
+    draining: draining(kind),
   }));
   const campaignIds = [...new Set(byCampaign.map((g) => g.promotionId).filter((id): id is string => id !== null))];
   const names = await prisma.promotion.findMany({ select: { id: true, name: true }, where: { id: { in: campaignIds } } });
@@ -388,7 +404,7 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
     sentAt: row.sentAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
   }));
-  return { quota, kinds, campaigns, items, drainPending: drain !== null };
+  return { quota, kinds, campaigns, items };
 }
 
 /** Puts a failed row back in the queue with a clean slate and sends for a

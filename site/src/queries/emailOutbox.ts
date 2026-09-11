@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { EmailKindId } from "@/lib/email/kindIds";
 import type { OutboxOverview } from "@/lib/email/outbox";
 import { apiFetch } from "@/queries/apiClient";
 
@@ -19,12 +20,12 @@ export function useEmailOutbox() {
   });
 }
 
-// Drain now, or put one failed row back in the queue; the response is the
-// refreshed overview.
+// Drain one kind now, or put one failed row back in the queue; the response
+// is the refreshed overview.
 export function useOutboxAction() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: { action: "drain" } | { action: "retry"; id: string }) =>
+    mutationFn: (body: { action: "drain"; kind: EmailKindId } | { action: "retry"; id: string }) =>
       apiFetch<OutboxOverview>("/api/su/email", { body: JSON.stringify(body), method: "POST" }),
     onSuccess: (data) => queryClient.setQueryData(emailOutboxQueryKey, data),
   });

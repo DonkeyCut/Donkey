@@ -95,6 +95,7 @@ function QuotaSection({ quota }: { quota: OutboxOverview["quota"] }) {
 }
 
 function KindsSection({ kinds }: { kinds: OutboxOverview["kinds"] }) {
+  const action = useOutboxAction();
   const cell = "py-1.5 pr-3";
   return (
     <section className="space-y-2">
@@ -108,7 +109,8 @@ function KindsSection({ kinds }: { kinds: OutboxOverview["kinds"] }) {
               <th className="py-1 pr-3 font-normal">Quota</th>
               <th className="py-1 pr-3 text-right font-normal">Queued</th>
               <th className="py-1 pr-3 text-right font-normal">Sent today</th>
-              <th className="py-1 text-right font-normal">Failed</th>
+              <th className="py-1 pr-3 text-right font-normal">Failed</th>
+              <th className="py-1" />
             </tr>
           </thead>
           <tbody>
@@ -121,7 +123,22 @@ function KindsSection({ kinds }: { kinds: OutboxOverview["kinds"] }) {
                   <td className={cn(cell, "text-muted-foreground")}>{k.quota}</td>
                   <td className={cn(cell, "text-right tabular-nums")}>{k.queued}</td>
                   <td className={cn(cell, "text-right tabular-nums")}>{k.sentToday}</td>
-                  <td className={cn("py-1.5 text-right tabular-nums", k.failed > 0 && "text-destructive")}>{k.failed}</td>
+                  <td className={cn(cell, "text-right tabular-nums", k.failed > 0 && "text-destructive")}>{k.failed}</td>
+                  <td className="py-1 text-right">
+                    <span className="inline-flex items-center gap-2">
+                      {action.isError && action.variables?.action === "drain" && action.variables.kind === k.kind ? (
+                        <span className="text-xs text-destructive">Failed.</span>
+                      ) : null}
+                      <Button
+                        disabled={k.queued === 0 || k.draining || action.isPending}
+                        onClick={() => action.mutate({ action: "drain", kind: k.kind })}
+                        size="sm"
+                        variant="outline"
+                      >
+                        {k.draining ? "Draining…" : "Drain"}
+                      </Button>
+                    </span>
+                  </td>
                 </tr>
               ))}
           </tbody>
