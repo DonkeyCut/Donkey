@@ -48,6 +48,8 @@ const EDGE_TTL_SECONDS = 7 * 24 * 60 * 60;
  * as later rungs finish — long enough to absorb a crowd opening one link, short
  * enough that the finished ladder reaches them. */
 const PLAYLIST_TTL_SECONDS = 60;
+/** The one key shape served without a token: a blog image, content-addressed. */
+const PUBLIC_BLOG_IMAGE = /^blog\/[a-z0-9]+\/[a-f0-9]{64}\.avif$/;
 
 const encoder = new TextEncoder();
 
@@ -213,6 +215,11 @@ async function authorize(url: URL, env: MediaEnv): Promise<Granted | Response> {
   }
 
   const key = decodePath(segments);
+  // Blog images are public: content-addressed AVIFs under blog/<post>/, named
+  // by their bytes, so the key alone says what is served and nothing under
+  // the prefix but that shape — never the article source or a raw upload — is
+  // reachable without a token (src/lib/blog/keys.ts holds the same pattern).
+  if (key && PUBLIC_BLOG_IMAGE.test(key)) return { key, downloadName: "", version: "" };
   const expires = Number(url.searchParams.get("e"));
   const sig = url.searchParams.get("s") ?? "";
   // Both are signed, so neither can be edited in after the fact. The name is
