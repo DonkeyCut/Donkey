@@ -35,6 +35,9 @@ fetches uncached has to sit behind its own `<Suspense>` boundary and streams in
 after the shell. Data that rarely changes goes behind `use cache`, as close to
 the read as you can put it.
 
+The blog is the worked example of a public page built this way: cached, tagged
+reads that the CMS expires on save (see [The Blog](blog.md)).
+
 The old route segment configs are gone with it. `dynamic`, `revalidate`,
 `fetchCache`, and `runtime` fail the build; a handler that must run per request
 awaits `connection()` from `next/server`, and a cache duration is `cacheLife`
