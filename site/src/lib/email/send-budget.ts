@@ -20,9 +20,11 @@ import { prisma } from "@/lib/prisma";
 // process that dies mid-send costs the cycle one slot.
 export type EmailSendKind = "manual" | "transactional" | "bulk";
 
-// How long a refused send waits before asking again while the reserves
-// still hold slots back; they release as work days and cycle days pass.
-const RESERVE_RETRY_SECONDS = 60 * 60;
+// How long a refused send waits before asking again. The reserves release
+// as work days and cycle days pass, the plan renews, and an operator can
+// raise the allowance at any time, so a held drainer looks again every hour
+// and never sleeps to a date computed under conditions that may change.
+const RETRY_SECONDS = 60 * 60;
 
 export class EmailBudgetError extends Error {
   public constructor(
@@ -96,12 +98,7 @@ async function reserveSlot(day: string, kind: EmailSendKind, now: Date): Promise
   });
   if (taken.count > 0) return;
 
-  // The lowest the ceiling can settle at before the renewal: the allowance
-  // less the headroom the forecast keeps to the end. Under it, the reserves
-  // are what holds the send back and they release with time; at it, the
-  // plan is spent until it renews.
-  const floor = kind === "bulk" ? status.allowance - status.forecast.headroom : status.allowance;
-  const retryAfterSeconds = status.sent < floor ? RESERVE_RETRY_SECONDS : status.renewsInSeconds;
+  const retryAfterSeconds = Math.min(RETRY_SECONDS, status.renewsInSeconds);
   throw new EmailBudgetError(kind, limit, Math.max(0, limit - status.sent), retryAfterSeconds);
 }
 
