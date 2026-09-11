@@ -299,27 +299,38 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
       </TabsContent>
 
       <TabsContent value="details" className="space-y-8">
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold">Header image</h2>
-          <ImageUpload postId={post.id} kind="header" url={post.headerUrl} label="Header, 1080×240 on the page" className="h-60 w-full">
+        <section className="space-y-4">
+          <h2 className="text-sm font-semibold">Images</h2>
+          <div className="space-y-2">
+            <h3 className="text-xs font-medium text-muted-foreground">Header, 1080×240 on the page</h3>
+            <ImageUpload postId={post.id} kind="header" url={post.headerUrl} label="Header image" className="h-60 w-full">
+              {post.headerUrl ? (
+                <HeaderFocusPicker
+                  src={post.headerUrl}
+                  alt={draft.headerAlt}
+                  focus={draft.headerFocus}
+                  onChange={(focus) => patch({ headerFocus: focus })}
+                />
+              ) : null}
+            </ImageUpload>
             {post.headerUrl ? (
-              <HeaderFocusPicker
-                src={post.headerUrl}
-                alt={draft.headerAlt}
-                focus={draft.headerFocus}
-                onChange={(focus) => patch({ headerFocus: focus })}
-              />
-            ) : null}
-          </ImageUpload>
-          {post.headerUrl ? (
-            <>
               <p className="text-xs text-muted-foreground">Click or drag on the image to set what stays in frame.</p>
-              <Field label="Alt text" htmlFor="headerAlt">
+            ) : null}
+            {error("header")}
+          </div>
+          <div className="grid gap-6 md:grid-cols-2">
+            <div className="space-y-2">
+              <h3 className="text-xs font-medium text-muted-foreground">Thumbnail, 800×500 on the index</h3>
+              <ImageUpload postId={post.id} kind="thumbnail" url={post.thumbnailUrl} label="Thumbnail" className="aspect-[8/5] w-full" />
+              {error("thumbnail")}
+            </div>
+            {post.headerUrl ? (
+              <Field label="Header alt text" htmlFor="headerAlt">
                 <Input id="headerAlt" value={draft.headerAlt} onChange={(e) => patch({ headerAlt: e.target.value })} />
                 {error("headerAlt")}
               </Field>
-            </>
-          ) : null}
+            ) : null}
+          </div>
         </section>
 
         <div className="grid gap-8 md:grid-cols-2">
@@ -371,16 +382,6 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
               <DateTimeField id="revisedAt" value={draft.revisedAt} onChange={(revisedAt) => patch({ revisedAt })} />
               {error("revisedAt")}
             </Field>
-            <div className="space-y-2">
-              <h3 className="text-xs font-medium text-muted-foreground">Thumbnail</h3>
-              <ImageUpload
-                postId={post.id}
-                kind="thumbnail"
-                url={post.thumbnailUrl}
-                label="Thumbnail, 800×500 on the index"
-                className="aspect-[8/5] w-full max-w-sm"
-              />
-            </div>
           </section>
 
           <section className="space-y-4">
