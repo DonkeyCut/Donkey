@@ -19,6 +19,9 @@ export type AsyncJobListItem = {
   result?: Record<string, unknown>;
   error?: string;
   createdAt: string;
+  // When a held-back job is due: one deferred by its own run (a drainer
+  // waiting on the email quota) or queued for later.
+  notBefore?: string;
 };
 
 export const recentJobsQueryKey = ["jobs", "recent"] as const;

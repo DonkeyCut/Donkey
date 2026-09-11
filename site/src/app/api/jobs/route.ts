@@ -29,6 +29,7 @@ export const GET = withSuperUser(async () => {
       result: job.result ?? undefined,
       error: job.error ?? undefined,
       createdAt: job.createdAt.toISOString(),
+      notBefore: job.notBefore?.toISOString(),
     })),
   });
 });

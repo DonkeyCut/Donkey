@@ -37,6 +37,20 @@ function formatWhen(iso: string): string {
   return then.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+function formatIn(iso: string): string {
+  const mins = Math.ceil((new Date(iso).getTime() - Date.now()) / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `in ${mins}m`;
+  return `in ${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+// A queued job held back until later: deferred by its own run, or queued
+// for a later time.
+function heldUntil(item: AsyncJobListItem): string | null {
+  if (item.state !== "queued" || !item.notBefore) return null;
+  return new Date(item.notBefore).getTime() > Date.now() ? item.notBefore : null;
+}
+
 const stateDot: Record<AsyncJobListItem["state"], string> = {
   queued: "bg-muted-foreground/40",
   running: "bg-blue-500 animate-pulse",
@@ -77,6 +91,11 @@ export default function SuJobsPage() {
               <span className="text-muted-foreground">
                 {formatWhen(item.createdAt)}
               </span>
+              {heldUntil(item) ? (
+                <span className="text-muted-foreground">
+                  held · resumes {formatIn(heldUntil(item)!)}
+                </span>
+              ) : null}
             </div>
             {doneSummary(item) ? (
               <p className="text-muted-foreground">{doneSummary(item)}</p>
