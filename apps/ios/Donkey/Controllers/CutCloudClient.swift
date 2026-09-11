@@ -366,13 +366,13 @@ extension CutCloudClient: CloudSyncServicing {
         )
     }
 
-    func importInspirationLink(_ url: URL) async throws -> String {
+    func importInspirationLink(_ url: URL, key: String) async throws -> String {
         struct QueuedJob: Decodable { var jobId: String }
         let data = try await send(
             try request(
                 "POST",
                 "/api/cut-cloud/library/import-url",
-                body: ["url": url.absoluteString, "origin": "inspiration"]
+                body: ["url": url.absoluteString, "origin": "inspiration", "key": key]
             )
         )
         return try decode(QueuedJob.self, from: data).jobId

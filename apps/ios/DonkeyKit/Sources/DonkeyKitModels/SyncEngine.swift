@@ -700,7 +700,7 @@ public final class SyncEngine {
             guard online else { continue }
             if ((try? journal.isInspirationLinkSynced(item.id)) ?? true) == false {
                 do {
-                    let jobId = try await service.importInspirationLink(url)
+                    let jobId = try await service.importInspirationLink(url, key: item.id.uuidString)
                     try? journal.markInspirationLinkSynced(item.id, jobId: jobId)
                     landed = true
                 } catch CloudSyncError.unauthorized {

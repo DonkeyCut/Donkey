@@ -215,6 +215,7 @@ import Testing
         var deletedLibraryIds: Set<String> = []
         var deletedNotes: [UUID] = []
         var links: [URL] = []
+        var linkKeys: [String] = []
         var polled: [String] = []
         var downloads: [String] = []
         var folders: [UUID: RemoteNoteFolder] = [:]
@@ -270,9 +271,10 @@ import Testing
         /// does.
         var importFailure: CloudSyncError?
 
-        func importInspirationLink(_ url: URL) async throws -> String {
+        func importInspirationLink(_ url: URL, key: String) async throws -> String {
             if let importFailure { throw importFailure }
             links.append(url)
+            linkKeys.append(key)
             return "job-\(links.count)"
         }
 
@@ -614,6 +616,9 @@ import Testing
         await rig.engine.run()
         await rig.engine.run()
         #expect(rig.cloud.links.count == 2)
+        // Both posts name the same item, so the cloud can tell a repeat from
+        // a new link.
+        #expect(rig.cloud.linkKeys == [item.id.uuidString, item.id.uuidString])
         #expect(try #require(rig.ideas.inspiration.first).cloud?.fileName == "reel.mp4")
     }
 

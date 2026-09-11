@@ -304,7 +304,10 @@ public protocol CloudSyncServicing: AnyObject {
     /// Queue a cloud-side import of an inspiration link (the render worker
     /// fetches the media into the Inspiration folder). Returns the job id the
     /// phone follows to bring the media down.
-    func importInspirationLink(_ url: URL) async throws -> String
+    /// Hand a link to the cloud worker. `key` is the item's own id: a link
+    /// posted again — the first answer never arrived — gets the job it already
+    /// has, so the media lands once.
+    func importInspirationLink(_ url: URL, key: String) async throws -> String
     /// Where an import job stands.
     func importedLink(jobId: String) async throws -> LinkImport
     /// Download one library media file to a local URL. Posters only: a link's
