@@ -106,7 +106,7 @@ const CATALOG: CatalogItem[] = [
     ["zoom-in-whoosh", 0.7, "A fast punch-in zoom whoosh, a quick rising air swipe that stops sharp.", ["camera", "zoom in", "punch in", "whoosh", "fast"]],
     ["zoom-out-whoosh", 0.7, "A fast zoom-out whoosh, a quick falling air swipe that stops sharp.", ["camera", "zoom out", "whoosh", "fast", "pull back"]],
   ], core),
-  // One focus sound, one take: the lock itself, the way a DSLR confirms it.
+  // One focus sound: the lock itself, the way a DSLR confirms it.
   ...sfx("Camera", [
     ["focus-lock", 0.6, "A single DSLR autofocus lock: one soft, precise lens click with a faint motor tick, dry, close-miked, no beep.", ["camera", "focus", "lock", "lens", "dslr"]],
   ]),
