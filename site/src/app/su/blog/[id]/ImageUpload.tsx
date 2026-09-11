@@ -22,6 +22,7 @@ export function ImageUpload({
   label,
   className,
   children,
+  onChanged,
 }: {
   postId: string;
   kind: Exclude<BlogImageKind, "inline">;
@@ -29,6 +30,8 @@ export function ImageUpload({
   label: string;
   className?: string;
   children?: ReactNode;
+  // Fires once a new picture is on the row, or the old one is gone.
+  onChanged?: () => void;
 }) {
   const upload = useUploadBlogImage(postId);
   const remove = useRemoveBlogImage(postId);
@@ -37,7 +40,7 @@ export function ImageUpload({
   const busy = upload.isPending || remove.isPending;
 
   const take = (file: File | undefined) => {
-    if (file && file.type.startsWith("image/")) upload.mutate({ file, kind });
+    if (file && file.type.startsWith("image/")) upload.mutate({ file, kind }, { onSuccess: () => onChanged?.() });
   };
 
   return (
@@ -73,7 +76,7 @@ export function ImageUpload({
                 <Upload />
                 Replace
               </Button>
-              <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => remove.mutate(kind)}>
+              <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => remove.mutate(kind, { onSuccess: () => onChanged?.() })}>
                 <Trash2 />
                 Remove
               </Button>

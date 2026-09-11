@@ -29,10 +29,9 @@ function FeaturedCard({ post }: { post: BlogPostCard }) {
           <img
             src={post.thumbnailUrl}
             alt={post.title}
-            width={800}
-            height={500}
             fetchPriority="high"
             className="absolute inset-0 h-full w-full object-cover"
+            style={{ objectPosition: post.thumbnailFocus ?? "50% 50%" }}
           />
         ) : null}
       </div>
@@ -62,10 +61,9 @@ function PostCard({ post }: { post: BlogPostCard }) {
           <img
             src={post.thumbnailUrl}
             alt={post.title}
-            width={800}
-            height={500}
             loading="lazy"
             className="absolute inset-0 h-full w-full object-cover brightness-90 contrast-125 grayscale transition-all duration-500 group-hover:brightness-100 group-hover:contrast-100 group-hover:grayscale-0"
+            style={{ objectPosition: post.thumbnailFocus ?? "50% 50%" }}
           />
         ) : null}
       </div>

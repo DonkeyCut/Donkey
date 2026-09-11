@@ -30,6 +30,7 @@ export type BlogPostCard = {
   headerAlt: string | null;
   headerFocus: string | null;
   thumbnailUrl: string | null;
+  thumbnailFocus: string | null;
 };
 
 export type BlogPostPage = BlogPostCard & {
@@ -58,6 +59,7 @@ export function cardOf(row: BlogPost): BlogPostCard {
     headerAlt: row.headerAlt,
     headerFocus: row.headerFocus,
     thumbnailUrl: row.thumbnailKey ? blogImageUrl(row.thumbnailKey) : null,
+    thumbnailFocus: row.thumbnailFocus,
   };
 }
 

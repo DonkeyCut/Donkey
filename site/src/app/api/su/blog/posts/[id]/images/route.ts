@@ -46,7 +46,11 @@ export const POST = withSuperUser(async (request, { params }: Params) => {
 
   const row = await prisma.blogPost.update({
     where: { id: existing.id },
-    data: kind === "header" ? { headerKey: image.key } : { thumbnailKey: image.key },
+    // A new picture starts centred; the old focus named a point in the old one.
+    data:
+      kind === "header"
+        ? { headerKey: image.key, headerFocus: null }
+        : { thumbnailKey: image.key, thumbnailFocus: null },
   });
   revalidateBlogLater([row.slug]);
   return NextResponse.json({ image, post: adminPost(row) });

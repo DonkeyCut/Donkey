@@ -85,7 +85,7 @@ export const POST = withSuperUser(async (request, { params }: Params) => {
   ]);
   const row = await prisma.blogPost.update({
     where: { id: existing.id },
-    data: { headerKey: header.key, thumbnailKey: thumbnail.key },
+    data: { headerKey: header.key, headerFocus: null, thumbnailKey: thumbnail.key, thumbnailFocus: null },
   });
   revalidateBlogLater([row.slug]);
 

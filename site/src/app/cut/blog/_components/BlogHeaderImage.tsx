@@ -7,8 +7,6 @@ export function BlogHeaderImage({ src, alt, focus }: { src: string; alt: string;
       <img
         src={src}
         alt={alt}
-        width={1600}
-        height={900}
         fetchPriority="high"
         className="absolute inset-0 h-full w-full object-cover select-none"
         style={{ objectPosition: focus ?? "50% 50%" }}

@@ -46,6 +46,7 @@ export const blogPostInputSchema = z
     revisedAt: isoDate,
     headerAlt: z.string().trim().max(400),
     headerFocus: blogFocusSchema.nullable(),
+    thumbnailFocus: blogFocusSchema.nullable(),
     seoTitle: z.string().trim().max(200),
     canonicalUrl: z.union([z.literal(""), z.string().trim().url()]),
     noIndex: z.boolean(),

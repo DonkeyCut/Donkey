@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BlogEditor } from "@/app/su/blog/[id]/BlogEditor";
 import { DateTimeField } from "@/app/su/blog/[id]/DateTimeField";
-import { HeaderFocusPicker } from "@/app/su/blog/[id]/HeaderFocusPicker";
+import { FocusPicker } from "@/app/su/blog/[id]/FocusPicker";
 import { ImageUpload } from "@/app/su/blog/[id]/ImageUpload";
 import { TagInput } from "@/app/su/blog/[id]/TagInput";
 import { Field } from "@/app/su/Field";
@@ -80,6 +80,7 @@ const inputOf = (post: BlogPostAdminWithBody): BlogPostInput => ({
   revisedAt: post.revisedAt,
   headerAlt: post.headerAlt,
   headerFocus: post.headerFocus,
+  thumbnailFocus: post.thumbnailFocus,
   seoTitle: post.seoTitle,
   canonicalUrl: post.canonicalUrl,
   noIndex: post.noIndex,
@@ -340,25 +341,49 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
           <h2 className="text-sm font-semibold">Images</h2>
           <div className="space-y-2">
             <h3 className="text-xs font-medium text-muted-foreground">Header, 1080×240 on the page</h3>
-            <ImageUpload postId={post.id} kind="header" url={post.headerUrl} label="Header image" className="h-60 w-full">
+            <ImageUpload
+              postId={post.id}
+              kind="header"
+              url={post.headerUrl}
+              label="Header image"
+              className="aspect-[9/2] w-full"
+              onChanged={() => patch({ headerFocus: null })}
+            >
               {post.headerUrl ? (
-                <HeaderFocusPicker
+                <FocusPicker
                   src={post.headerUrl}
                   alt={draft.headerAlt}
                   focus={draft.headerFocus}
+                  className="aspect-[9/2]"
                   onChange={(focus) => patch({ headerFocus: focus })}
                 />
               ) : null}
             </ImageUpload>
-            {post.headerUrl ? (
-              <p className="text-xs text-muted-foreground">Click or drag on the image to set what stays in frame.</p>
-            ) : null}
+            {post.headerUrl ? <p className="text-xs text-muted-foreground">Drag the picture to place it.</p> : null}
             {error("header")}
           </div>
           <div className="grid gap-6 md:grid-cols-2">
             <div className="space-y-2">
               <h3 className="text-xs font-medium text-muted-foreground">Thumbnail, 800×500 on the index</h3>
-              <ImageUpload postId={post.id} kind="thumbnail" url={post.thumbnailUrl} label="Thumbnail" className="aspect-[8/5] w-full" />
+              <ImageUpload
+                postId={post.id}
+                kind="thumbnail"
+                url={post.thumbnailUrl}
+                label="Thumbnail"
+                className="aspect-[8/5] w-full"
+                onChanged={() => patch({ thumbnailFocus: null })}
+              >
+                {post.thumbnailUrl ? (
+                  <FocusPicker
+                    src={post.thumbnailUrl}
+                    alt=""
+                    focus={draft.thumbnailFocus}
+                    className="aspect-[8/5]"
+                    onChange={(focus) => patch({ thumbnailFocus: focus })}
+                  />
+                ) : null}
+              </ImageUpload>
+              {post.thumbnailUrl ? <p className="text-xs text-muted-foreground">Drag the picture to place it.</p> : null}
               {error("thumbnail")}
             </div>
             {post.headerUrl ? (

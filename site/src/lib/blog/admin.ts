@@ -23,6 +23,7 @@ export type BlogPostAdmin = {
   headerFocus: string | null;
   thumbnailKey: string | null;
   thumbnailUrl: string | null;
+  thumbnailFocus: string | null;
   seoTitle: string;
   canonicalUrl: string;
   noIndex: boolean;
@@ -52,6 +53,7 @@ export function adminPost(row: BlogPost): BlogPostAdmin {
     headerFocus: row.headerFocus,
     thumbnailKey: row.thumbnailKey,
     thumbnailUrl: row.thumbnailKey ? blogImageUrl(row.thumbnailKey) : null,
+    thumbnailFocus: row.thumbnailFocus,
     seoTitle: row.seoTitle ?? "",
     canonicalUrl: row.canonicalUrl ?? "",
     noIndex: row.noIndex,

@@ -22,7 +22,7 @@ export const POST = withSuperUser(async (request, { params }: Params) => {
   if (!existing) return notFoundResponse();
   const row = await prisma.blogPost.update({
     where: { id: existing.id },
-    data: parsed.data.kind === "header" ? { headerKey: null, headerAlt: null, headerFocus: null } : { thumbnailKey: null },
+    data: parsed.data.kind === "header" ? { headerKey: null, headerAlt: null, headerFocus: null } : { thumbnailKey: null, thumbnailFocus: null },
   });
   revalidateBlogLater([row.slug]);
   return NextResponse.json({ post: adminPost(row) });

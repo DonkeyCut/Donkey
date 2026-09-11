@@ -28,6 +28,8 @@ model BlogPost {
   // CSS object-position for the header crop, "x% y%".
   headerFocus  String?
   thumbnailKey String?
+  // CSS object-position for the thumbnail crop, "x% y%".
+  thumbnailFocus String?
   // Overrides the <title>; the post title when empty.
   seoTitle     String?
   // Overrides the canonical URL when the piece was first published elsewhere.

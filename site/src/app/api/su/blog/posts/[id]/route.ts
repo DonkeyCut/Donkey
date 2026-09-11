@@ -54,6 +54,7 @@ export const PUT = withSuperUser(async (request, { params }: Params) => {
         revisedAt: input.revisedAt ? new Date(input.revisedAt) : null,
         headerAlt: input.headerAlt || null,
         headerFocus: input.headerFocus,
+        thumbnailFocus: input.thumbnailFocus,
         seoTitle: input.seoTitle || null,
         canonicalUrl: input.canonicalUrl || null,
         noIndex: input.noIndex,
