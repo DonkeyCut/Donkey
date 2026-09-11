@@ -28,7 +28,7 @@ AI is hosted whatever the home: image, video, and voiceover generation and the a
 
 The preview scrubs and plays from per-clip decoders held in memory. It shows a frame the moment it arrives and refines behind it, so the timeline always answers and a jump lands on a picture. Every cache is bounded by one memory budget sized to the machine. The performance guide holds the frame budget and how a change is measured.
 
-Guides draw over the preview from the button beside the timeline zoom: thirds, center, safe margins, the short-form keep-out zone where TikTok, Reels and Shorts draw their own UI, and custom lines dragged into place on the preview. They save with the project, snap a dragged element to their edges, never export, and the assistant reads the safe area they leave when it places graphics.
+Guides draw over the preview from the button beside the timeline zoom: thirds, center, safe margins, the short-form keep-out zone where TikTok, Reels and Shorts draw their own UI or crop the sides of a 9:16 frame, and custom lines dragged into place on the preview. They save with the project, snap a dragged element to their edges, never export, and the assistant reads the safe area they leave when it places graphics.
 
 ## The export
 

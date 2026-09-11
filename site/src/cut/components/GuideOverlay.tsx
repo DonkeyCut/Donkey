@@ -134,7 +134,9 @@ export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
         const bh = b.h * h;
         // A full-width band names itself at its inner edge; a side rail at
         // its top, so the label sits where the keep-out meets the picture.
+        // A strip too narrow for its label runs the label down its length.
         const labelY = b.w >= 0.99 && b.y <= 0.01 ? y + bh - 5 : y + label + 4;
+        const narrow = bw <= 40 && bh > 120;
         return (
           <g key={`box-${i}`}>
             <rect x={x} y={y} width={bw} height={bh} fill="rgba(239,68,68,0.12)" />
@@ -149,10 +151,11 @@ export function GuideOverlay({ stage }: { stage: { w: number; h: number } }) {
               strokeWidth="1"
               strokeDasharray="4 3"
             />
-            {bw > 40 && bh > label * 2 && (
+            {(narrow || (bw > 40 && bh > label * 2)) && (
               <text
-                x={x + 6}
-                y={labelY}
+                x={narrow ? x + bw / 2 + label / 2 - 1 : x + 6}
+                y={narrow ? y + 8 : labelY}
+                transform={narrow ? `rotate(90 ${x + bw / 2 + label / 2 - 1} ${y + 8})` : undefined}
                 fontSize={label}
                 fontWeight={600}
                 fill="rgba(255,255,255,0.95)"

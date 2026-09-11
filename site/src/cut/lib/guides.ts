@@ -3,8 +3,8 @@
  * stickers and captions land where a phone will show them. Geometry is in
  * frame fractions (0..1 of width and height), so one preset serves every
  * frame size. Guides draw in the editor only; exports and captured frames
- * never carry them. The short-form preset is measured on a 1080×1920 phone
- * screen and dated, so a change in an app's UI is one edit here.
+ * never carry them. The short-form preset is measured on a phone and dated,
+ * so a change in an app's UI is one edit here.
  */
 
 import { aspectOrientation, type Aspect } from "./types";
@@ -80,7 +80,11 @@ export const GUIDE_PRESETS: readonly GuidePreset[] = [
   },
   // The phone UI of TikTok, Instagram Reels and YouTube Shorts, merged into
   // one keep-out: each region is the widest of the three. Measured September
-  // 2026 on a 1080×1920 screen.
+  // 2026 on a 1170×2532 phone, mapped onto the 1080×1920 frame. Reels and
+  // Shorts scale a 9:16 frame to fill the player and crop 4.4% off each
+  // side; TikTok crops 1.4%. The top band covers the status bar and the
+  // search row under it, the rail the actions from the avatar down, the
+  // bottom band the username, caption and music line.
   {
     id: "shortform",
     name: "Short form",
@@ -90,8 +94,10 @@ export const GUIDE_PRESETS: readonly GuidePreset[] = [
       v: [],
       h: [],
       boxes: [
-        { x: 0, y: 0, w: 1, h: phone(150, 1920), label: "Top bar" },
-        { x: phone(930, 1080), y: phone(800, 1920), w: phone(150, 1080), h: phone(740, 1920), label: "Actions" },
+        { x: 0, y: 0, w: 1, h: phone(215, 1920), label: "Top bar" },
+        { x: 0, y: 0, w: phone(50, 1080), h: 1, label: "Cropped" },
+        { x: 1 - phone(50, 1080), y: 0, w: phone(50, 1080), h: 1, label: "Cropped" },
+        { x: phone(895, 1080), y: phone(730, 1920), w: phone(185, 1080), h: phone(730, 1920), label: "Actions" },
         { x: 0, y: phone(1460, 1920), w: 1, h: phone(460, 1920), label: "Caption · music · nav" },
       ],
     },

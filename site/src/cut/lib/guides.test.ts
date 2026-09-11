@@ -8,16 +8,16 @@ describe("guides", () => {
   });
 
   test("platform zones apply to portrait frames only", () => {
-    expect(guideGeometry(["shortform"], "9:16").boxes.length).toBe(3);
+    expect(guideGeometry(["shortform"], "9:16").boxes.length).toBe(5);
     expect(guideGeometry(["shortform"], "16:9").boxes.length).toBe(0);
     expect(guideGeometry(["thirds"], "16:9").v).toEqual([1 / 3, 2 / 3]);
   });
 
   test("the safe area is the frame minus every keep-out band and rail", () => {
     const safe = safeAreaOf(["shortform"], "9:16")!;
-    expect(safe.x).toBe(0);
-    expect(safe.y).toBeGreaterThan(0.07);
-    expect(safe.x + safe.w).toBeLessThan(0.88);
+    expect(safe.x).toBeGreaterThan(0.04);
+    expect(safe.y).toBeGreaterThan(0.1);
+    expect(safe.x + safe.w).toBeLessThan(0.84);
     expect(safe.y + safe.h).toBeLessThan(0.77);
     expect(safeAreaOf(["thirds", "center"], "9:16")).toBeNull();
     expect(safeAreaOf(["margins"], "16:9")).toEqual({ x: 0.05, y: 0.05, w: 0.9, h: 0.9 });
@@ -36,6 +36,6 @@ describe("guides", () => {
     expect(lines.v.includes(0.5)).toBe(true);
     expect(lines.h.includes(0.5)).toBe(true);
     expect(lines.h.length).toBe(3);
-    expect(lines.v.length).toBe(2);
+    expect(lines.v.length).toBe(4);
   });
 });
