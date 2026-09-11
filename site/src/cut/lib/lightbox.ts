@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import type { AssetRef } from "./assetRef";
 import { libraryMediaUrl, libraryPosterUrl, type LibraryAsset } from "./library";
+import type { MediaAsset } from "./types";
 
 // The asset lightbox: a full-screen viewer opened from stock tiles, generated
 // media, chat asset cards, and library cards. Held in its own store so any
@@ -48,6 +49,20 @@ export const lightboxItemFromRef = (ref: AssetRef): LightboxItem => ({
   ...(ref.thumb ? { poster: ref.thumb } : {}),
   assetId: ref.scope === "project" ? ref.id : null,
   ...(ref.scope === "library" ? { libraryId: ref.id } : {}),
+});
+
+/** The lightbox view of a project asset — what a Project Files card opens on
+ * a double-click. It carries the asset's id, so "Use" adds it straight to the
+ * timeline. */
+export const lightboxItemFromAsset = (a: MediaAsset): LightboxItem => ({
+  kind: a.type,
+  src: a.url,
+  name: a.name,
+  prompt: "",
+  assetId: a.id,
+  ...(a.width && a.height ? { ratio: a.width / a.height } : {}),
+  ...(a.duration ? { duration: a.duration } : {}),
+  ...(a.thumbs?.[0] ? { poster: a.thumbs[0] } : {}),
 });
 
 /** The lightbox view of a library asset — what a library card opens on a

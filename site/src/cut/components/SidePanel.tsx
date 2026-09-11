@@ -43,7 +43,6 @@ import {
   useAssetDrop,
   type AssetRef,
 } from "@/cut/lib/assetRef";
-import { useRefCopy } from "@/cut/lib/refCopy";
 import { RefDropZone } from "./RefDropZone";
 import { deleteExport, downloadProjectExport, exportFileUrl, revealExport } from "@/cut/lib/exportClient";
 import {
@@ -119,7 +118,7 @@ import { useLocalPref } from "@/cut/lib/uiState";
 import type { MediaAsset, SidePanelTab } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { containerOfName } from "@/cut/lib/exportDelivery";
-import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
+import { useRevealEffect } from "@/cut/lib/refReveal";
 import { usePanelRequestEffect } from "@/cut/lib/panelRequest";
 import { CopyNameLabel } from "./AssetRefs";
 import { AudioCardFace, AudioPanel } from "./AudioPanel";
@@ -137,6 +136,8 @@ import { StockVideosPanel } from "./StockVideosPanel";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
 import { LibraryCard, ShelfBadge } from "./LibraryView";
+import { MediaCardShell } from "./MediaCardShell";
+import { lightboxItemFromAsset } from "@/cut/lib/lightbox";
 import { SubTabs } from "./SubTabs";
 
 // Drag a library clip onto a folder tile to file it (side panel, single card).
@@ -1364,18 +1365,16 @@ function AssetCard({
   const [saved, setSaved] = useState(false);
   // Number of timeline items that would be cascade-deleted; null = no prompt.
   const [confirmUses, setConfirmUses] = useState<number | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const { flash, attachReveal } = useRevealFlash("project", asset.id);
   // ⌘C over the card copies its mention token (`@v2`). A card inside the
   // current pick carries the whole set, the same rule its drag follows.
-  const copyRef = useRefCopy(() => {
+  const refs = () => {
     const all = useEditor.getState().assets;
     const ids = selected && dragGroup?.length ? dragGroup : [asset.id];
     return ids
       .map((id) => all.find((x) => x.id === id))
       .filter((x): x is MediaAsset => !!x)
       .map(refFromAsset);
-  });
+  };
   // A media-heavy project would open every one of these connections at once;
   // the source waits until the tile has been scrolled near.
   const [tileRef, seen] = useInView<HTMLDivElement>();
@@ -1410,15 +1409,15 @@ function AssetCard({
 
   return (
     <>
-    <div
-      ref={(el) => {
-        attachReveal(el);
-        copyRef(el);
-      }}
-      data-sel-id={asset.id}
+    <MediaCardShell
+      scope="project"
+      id={asset.id}
+      refs={refs}
+      // A file still on its way up has nothing to show yet.
+      view={asset.upload ? undefined : () => lightboxItemFromAsset(asset)}
+      restTime={0.1}
       className="asset-card group flex flex-col gap-1.5 text-left"
       title="Drag onto the timeline, or click + to add"
-      draggable
       onClick={onSelect}
       onDragStart={(e) => {
         setAssetDragData(e, asset.id, dragGroup);
@@ -1432,138 +1431,131 @@ function AssetCard({
         e.dataTransfer.setData(MEDIA_MOVE_MIME, JSON.stringify(ids));
         setObjectDragImage(e, ids.length, ids, onDragLanded);
       }}
-      onDragEnd={clearAssetDrag}
-      onMouseEnter={() => {
-        setHovered(true);
-        void videoRef.current?.play().catch(() => {});
-      }}
-      onMouseLeave={() => {
-        const v = videoRef.current;
-        if (v) {
-          v.pause();
-          v.currentTime = 0.1;
-        }
-      }}
+      onHover={() => setHovered(true)}
     >
-      <div
-        ref={tileRef}
-        data-drag-object
-        className={cn(
-          "relative aspect-square overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover:border-input",
-          (flash || selected) && "ring-2 ring-[#0a84ff] ring-offset-1"
-        )}
-      >
-        {asset.type === "video" ? (
-          // Native first frame as the poster — full-resolution, no blurry thumb.
-          seen && (
-            <video crossOrigin={MEDIA_CORS}
-              ref={videoRef}
-              src={`${asset.url}#t=0.1`}
-              poster={asset.thumbs?.[0]}
-              preload="metadata"
-              muted
-              loop
-              playsInline
-              className="size-full object-cover"
-            />
-          )
-        ) : asset.type === "image" ? (
-          // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
-          <img crossOrigin={MEDIA_CORS} src={asset.url} alt={asset.name} loading="lazy" className="size-full object-cover" />
-        ) : (
-          <AudioCardFace
-            url={asset.url}
-            duration={asset.duration}
-            peaks={asset.peaks}
-            // On hover the + button takes the pill's corner, as on Library cards.
-            durationClassName="transition-opacity group-hover:opacity-0"
-          />
-        )}
-        {asset.type === "video" && (
-          <span
-            data-drag-omit
-            className="absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9.5px] text-white tabular-nums"
-          >
-            {formatTime(asset.duration)}
-          </span>
-        )}
-        {sizeBytes != null && (
-          <span
+      {({ flash, videoRef }) => (
+        <>
+          <div
+            ref={tileRef}
+            data-drag-object
             className={cn(
-              "absolute font-mono tabular-nums opacity-0 transition-opacity group-hover:opacity-100",
-              asset.type === "audio"
-                ? // Clear of the play circle, matching the face's duration pill.
-                  "bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 text-[10px] text-[#d6eddf]"
-                : "bottom-1 left-1 rounded-[5px] bg-black/65 px-1 py-px text-[9.5px] text-white"
+              "relative aspect-square overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover:border-input",
+              (flash || selected) && "ring-2 ring-[#0a84ff] ring-offset-1"
             )}
           >
-            {formatBytes(sizeBytes)}
-          </span>
-        )}
-        <span
-          className={cn(
-            "absolute flex gap-1 opacity-0 transition-opacity group-hover:opacity-100",
-            // Audio keeps play bottom-left; + swaps in where the duration pill hides.
-            asset.type === "audio" ? "right-1.5 bottom-2.5" : "top-1 left-1"
-          )}
-        >
-          <span
-            role="button"
-            title="Add to timeline"
-            className="grid size-5 scale-75 cursor-pointer place-items-center rounded-full bg-primary text-primary-foreground transition-transform group-hover:scale-100 hover:brightness-110"
-            onClick={(e) => {
-              e.stopPropagation();
-              add();
-            }}
-          >
-            <Plus className="size-3" />
-          </span>
-        </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            aria-label="More actions"
-            title="More actions"
-            className="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65 data-[state=open]:opacity-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {saved ? <Check className="size-3" /> : <Ellipsis className="size-3" />}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
-            <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
-              <FolderPlus /> Save to library
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => downloadMedia(projectId, asset)}
-              disabled={!!asset.upload}
-            >
-              <Download /> Download
-            </DropdownMenuItem>
-            {caps.revealInFinder && (
-              <DropdownMenuItem
-                onClick={() => void revealMedia(projectId, asset.fileName).catch(() => {})}
+            {asset.type === "video" ? (
+              // Native first frame as the poster — full-resolution, no blurry thumb.
+              seen && (
+                <video crossOrigin={MEDIA_CORS}
+                  ref={videoRef}
+                  src={`${asset.url}#t=0.1`}
+                  poster={asset.thumbs?.[0]}
+                  preload="metadata"
+                  muted
+                  loop
+                  playsInline
+                  className="size-full object-cover"
+                />
+              )
+            ) : asset.type === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
+              <img crossOrigin={MEDIA_CORS} src={asset.url} alt={asset.name} loading="lazy" className="size-full object-cover" />
+            ) : (
+              <AudioCardFace
+                url={asset.url}
+                duration={asset.duration}
+                peaks={asset.peaks}
+                // On hover the + button takes the pill's corner, as on Library cards.
+                durationClassName="transition-opacity group-hover:opacity-0"
+              />
+            )}
+            {asset.type === "video" && (
+              <span
+                data-drag-omit
+                className="absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[9.5px] text-white tabular-nums"
               >
-                <FolderOpen /> Show in Finder
-              </DropdownMenuItem>
+                {formatTime(asset.duration)}
+              </span>
             )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" onClick={remove}>
-              <Trash2 /> Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        {asset.type === "audio" && (
-          <CopyNameLabel
-            name={asset.name}
-            dark
-            className="absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-4.75rem)]"
-          />
-        )}
-        {asset.upload && <UploadState asset={asset} />}
-      </div>
-      {asset.type !== "audio" && (
-        <CopyNameLabel name={asset.name} className="text-[11px] text-muted-foreground" />
+            {sizeBytes != null && (
+              <span
+                className={cn(
+                  "absolute font-mono tabular-nums opacity-0 transition-opacity group-hover:opacity-100",
+                  asset.type === "audio"
+                    ? // Clear of the play circle, matching the face's duration pill.
+                      "bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 text-[10px] text-[#d6eddf]"
+                    : "bottom-1 left-1 rounded-[5px] bg-black/65 px-1 py-px text-[9.5px] text-white"
+                )}
+              >
+                {formatBytes(sizeBytes)}
+              </span>
+            )}
+            <span
+              className={cn(
+                "absolute flex gap-1 opacity-0 transition-opacity group-hover:opacity-100",
+                // Audio keeps play bottom-left; + swaps in where the duration pill hides.
+                asset.type === "audio" ? "right-1.5 bottom-2.5" : "top-1 left-1"
+              )}
+            >
+              <span
+                role="button"
+                title="Add to timeline"
+                className="grid size-5 scale-75 cursor-pointer place-items-center rounded-full bg-primary text-primary-foreground transition-transform group-hover:scale-100 hover:brightness-110"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  add();
+                }}
+              >
+                <Plus className="size-3" />
+              </span>
+            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="More actions"
+                title="More actions"
+                className="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65 data-[state=open]:opacity-100"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {saved ? <Check className="size-3" /> : <Ellipsis className="size-3" />}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
+                  <FolderPlus /> Save to library
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => downloadMedia(projectId, asset)}
+                  disabled={!!asset.upload}
+                >
+                  <Download /> Download
+                </DropdownMenuItem>
+                {caps.revealInFinder && (
+                  <DropdownMenuItem
+                    onClick={() => void revealMedia(projectId, asset.fileName).catch(() => {})}
+                  >
+                    <FolderOpen /> Show in Finder
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={remove}>
+                  <Trash2 /> Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {asset.type === "audio" && (
+              <CopyNameLabel
+                name={asset.name}
+                dark
+                className="absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-4.75rem)]"
+              />
+            )}
+            {asset.upload && <UploadState asset={asset} />}
+          </div>
+          {asset.type !== "audio" && (
+            <CopyNameLabel name={asset.name} className="text-[11px] text-muted-foreground" />
+          )}
+        </>
       )}
-    </div>
+    </MediaCardShell>
     <AlertDialog open={confirmUses !== null} onOpenChange={(o) => !o && setConfirmUses(null)}>
       <AlertDialogContent aria-describedby={undefined}>
         <AlertDialogHeader>
