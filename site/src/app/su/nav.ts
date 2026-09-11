@@ -61,6 +61,12 @@ export const SU_NAV = [
     description: "One email to a segment of accounts.",
   },
   {
+    href: "/blog",
+    label: "Blog",
+    title: "Blog",
+    description: "The posts on donkeycut.com/blog.",
+  },
+  {
     href: "/experiments",
     label: "Experiments",
     title: "Experiments",

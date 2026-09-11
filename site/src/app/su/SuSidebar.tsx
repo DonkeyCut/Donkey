@@ -11,6 +11,7 @@ import {
   ListChecks,
   Mail,
   Megaphone,
+  Newspaper,
   Package,
   UserRound,
 } from "lucide-react";
@@ -42,6 +43,7 @@ import { SU_APP_ORIGIN } from "@/cut/lib/hosts";
 // of React so the proxy can read it, so the icons live here.
 const SURFACE_ICONS: Record<SuSurface["href"], typeof UserRound> = {
   "/analytics": ChartColumn,
+  "/blog": Newspaper,
   "/credits": CreditCard,
   "/experiments": FlaskConical,
   "/jobs": ListChecks,

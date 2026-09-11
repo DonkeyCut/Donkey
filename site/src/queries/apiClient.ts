@@ -1,19 +1,25 @@
 // Thin fetch wrapper shared by every query/mutation hook in this folder. All
 // settings UI data access goes through here so it can be audited in one place.
 
+export type ApiIssue = { path: string; message: string };
+
 export class ApiError extends Error {
   public readonly status: number;
   public readonly code: string | null;
+  // Field-level findings from a validating route, so a form can show each
+  // under its own control.
+  public readonly issues: ApiIssue[];
 
-  public constructor(message: string, status: number, code: string | null) {
+  public constructor(message: string, status: number, code: string | null, issues: ApiIssue[] = []) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    this.issues = issues;
   }
 }
 
-type ApiErrorBody = { error?: string; message?: string };
+type ApiErrorBody = { error?: string; message?: string; issues?: ApiIssue[] };
 
 export async function apiFetch<T>(
   path: string,
@@ -36,9 +42,10 @@ export async function apiFetch<T>(
       // Non-JSON error body; fall back to status text.
     }
     throw new ApiError(
-      body.message ?? response.statusText,
+      body.message ?? body.error ?? response.statusText,
       response.status,
       body.error ?? null,
+      Array.isArray(body.issues) ? body.issues : [],
     );
   }
 

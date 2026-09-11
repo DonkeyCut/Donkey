@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import type { ComponentType } from "react";
 
 import { RunAnalyticsButton } from "@/app/su/analytics/RunAnalyticsButton";
+import { NewPostButton } from "@/app/su/blog/NewPostButton";
 import { DrainNowButton } from "@/app/su/jobs/email/DrainNowButton";
 import { suSurfaceAt, type SuPage } from "@/app/su/nav";
 import { ScanOutreachButton } from "@/app/su/outreach/ScanOutreachButton";
@@ -14,6 +15,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 // components live here.
 const PAGE_ACTIONS: Partial<Record<SuPage["href"], ComponentType>> = {
   "/analytics/product": RunAnalyticsButton,
+  "/blog": NewPostButton,
   "/jobs/email": DrainNowButton,
   "/outreach": ScanOutreachButton,
 };
