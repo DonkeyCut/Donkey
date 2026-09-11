@@ -86,7 +86,8 @@ import {
   type LibraryTemplateItem,
   type LibraryData,
 } from "@/cut/lib/library";
-import { normalizeLink } from "@/cut/lib/link";
+import { linkFromText, normalizeLink } from "@/cut/lib/link";
+import { isPasteTarget } from "@/cut/lib/shortcutGate";
 import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
@@ -516,8 +517,8 @@ export function LibraryView() {
   // The link's tile goes up at once — shaped by what that kind of link usually
   // holds — and the dialog closes, so the wait happens in the library rather
   // than in front of it.
-  const importUrl = async () => {
-    const value = normalizeLink(url);
+  const importLink = async (raw: string) => {
+    const value = normalizeLink(raw);
     if (!value) return;
     const { residency, folderId } = landing(openFolder);
     if (!live(residency)) return;
@@ -563,6 +564,31 @@ export function LibraryView() {
     });
     await run();
   };
+
+  // ⌘V takes what a drop takes: files copied from the desktop upload into the
+  // open folder, and a copied link imports the way the link field imports it.
+  // A field with the caret in it keeps its own paste.
+  const intake = useRef({ upload, importLink });
+  useEffect(() => {
+    intake.current = { upload, importLink };
+  });
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (e.defaultPrevented || isPasteTarget(e.target)) return;
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (files.length > 0) {
+        e.preventDefault();
+        void intake.current.upload(files);
+        return;
+      }
+      const link = linkFromText(e.clipboardData?.getData("text/plain") ?? "");
+      if (!link) return;
+      e.preventDefault();
+      void intake.current.importLink(link);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, []);
 
   const remove = async () => {
     if (!deleting) return;
@@ -1048,13 +1074,13 @@ export function LibraryView() {
                       className="pl-8"
                       onChange={(e) => setUrl(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter") void importUrl();
+                        if (e.key === "Enter") void importLink(url);
                       }}
                     />
                   </div>
                   <Button
                     disabled={!url.trim()}
-                    onClick={() => void importUrl()}
+                    onClick={() => void importLink(url)}
                   >
                     <LinkIcon /> Import
                   </Button>

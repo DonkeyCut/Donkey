@@ -10,3 +10,19 @@ export function normalizeLink(value: string): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(v)) return v;
   return `https://${v}`;
 }
+
+/** The one link a pasted text holds, normalized, or null when the text is
+ * anything else: several lines, words with spaces, a bare name with no host.
+ * A format check only; what the link points at is the importer's to judge. */
+export function linkFromText(text: string): string | null {
+  const v = text.trim();
+  if (!v || /\s/.test(v)) return null;
+  const href = normalizeLink(v);
+  try {
+    const u = new URL(href);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.hostname.includes(".") ? href : null;
+  } catch {
+    return null;
+  }
+}
