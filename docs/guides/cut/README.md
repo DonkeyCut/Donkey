@@ -32,7 +32,7 @@ Guides draw over the preview from the button beside the timeline zoom: thirds, c
 
 ## The export
 
-An export is the preview drawn again frame by frame into an MP4 by the same compositor and mixer, so the file matches what the person saw. The finished file goes to the project's home: the app's project folder for a Mac project, storage for a cloud one, the page's store for a browser one. A browser that cannot carry the render hands it to the machine behind the project, and the ffmpeg pipeline stays for ProRes, headless renders, share cards, and streaming ladders. The local-compute guide covers where each kind of work runs.
+An export is the preview drawn again frame by frame into an MP4 by the same compositor and mixer, so the file matches what the person saw. One thing the export draws better: a clip with smooth slow motion on has the frames between its source frames estimated from the motion between them, by a frame interpolation network in the tab and by ffmpeg's own interpolation on the ffmpeg pipeline, wherever its rate runs under 1×; the preview blends the two frames instead, and so does an export from a browser without WebGPU, the one surface that cannot run the network. The finished file goes to the project's home: the app's project folder for a Mac project, storage for a cloud one, the page's store for a browser one. A browser that cannot carry the render hands it to the machine behind the project, and the ffmpeg pipeline stays for ProRes, headless renders, share cards, and streaming ladders. The local-compute guide covers where each kind of work runs.
 
 ## Sharing
 
