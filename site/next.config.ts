@@ -14,6 +14,11 @@ const nextConfig: NextConfig = {
   // the store holds this route's own project, and usePlayback disposes decoders
   // and the audio mixer from an effect cleanup.
   cacheComponents: true,
+  // One App Shell per route is prefetched and shared by every link to it,
+  // and a route visited at an address the build did not list (a blog post
+  // published after the deploy) is rendered in the background on that first
+  // visit and served fully static from then on.
+  partialPrefetching: true,
   // Cut (the video editor) uploads large media. Two independent limits apply:
   // its media route reads req.formData() (a route handler), so it isn't covered
   // by serverActions.bodySizeLimit; and src/proxy.ts runs on /api/cut/* on every
