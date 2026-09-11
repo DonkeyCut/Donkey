@@ -1,6 +1,6 @@
 "use client";
 
-import { Ellipsis, ExternalLink, Eye, EyeOff, Save, Send } from "lucide-react";
+import { Ellipsis, ExternalLink, Eye, EyeOff, Save, Send, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -41,6 +41,7 @@ import {
   uploadBlogImage,
   useBlogPost,
   useBlogPosts,
+  useGenerateBlogDetails,
   usePublishBlogPost,
   useSaveBlogPost,
   useUnpublishBlogPost,
@@ -119,6 +120,7 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
   const save = useSaveBlogPost(post.id);
   const publish = usePublishBlogPost(post.id);
   const unpublish = useUnpublishBlogPost(post.id);
+  const generate = useGenerateBlogDetails(post.id);
 
   const [draft, setDraft] = useState<BlogPostInput>(() => inputOf(post));
   const [saved, setSaved] = useState<BlogPostInput>(() => inputOf(post));
@@ -139,7 +141,7 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
   useSuCrumb(draft.title.trim() || "Untitled post");
 
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(saved), [draft, saved]);
-  const busy = save.isPending || publish.isPending || unpublish.isPending;
+  const busy = save.isPending || publish.isPending || unpublish.isPending || generate.isPending;
   const published = post.status === "PUBLISHED";
 
   const patch = (next: Partial<BlogPostInput>) => setDraft((current) => ({ ...current, ...next }));
@@ -206,6 +208,16 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
   const doUnpublish = () => {
     setNotice(null);
     unpublish.mutate(undefined, { onError: (error) => setNotice(error.message) });
+  };
+
+  // The copy lands in the form for a look before it is saved; the pictures
+  // are on the row already and show through the query.
+  const doGenerate = () => {
+    setNotice(null);
+    generate.mutate(
+      { title: draft.title, body: draft.body },
+      { onSuccess: ({ details }) => patch(details), onError: (error) => setNotice(error.message) },
+    );
   };
 
   const openPreview = async () => {
@@ -467,6 +479,16 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
               </div>
             ) : null}
           </section>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-6">
+          <p className="text-xs text-muted-foreground">
+            {draft.body.trim() ? "Writes every detail and both pictures from the article. Change anything after." : "Write the article first."}
+          </p>
+          <Button variant="outline" disabled={busy || !draft.body.trim()} onClick={doGenerate}>
+            <Sparkles />
+            {generate.isPending ? "Generating…" : "Generate details"}
+          </Button>
         </div>
       </TabsContent>
     </Tabs>

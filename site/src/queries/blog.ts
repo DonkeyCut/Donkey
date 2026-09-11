@@ -76,6 +76,25 @@ export function useUnpublishBlogPost(id: string) {
   });
 }
 
+export type BlogGeneratedDetails = Pick<
+  BlogPostInput,
+  "seoTitle" | "excerpt" | "summary" | "tags" | "keywords" | "headerAlt"
+>;
+
+// Details written off the article. The pictures land on the row at once; the
+// copy is the caller's to put in the form.
+export function useGenerateBlogDetails(id: string) {
+  const takePost = useTakePost();
+  return useMutation({
+    mutationFn: (input: { title: string; body: string }) =>
+      apiFetch<{ post: BlogPostAdmin; details: BlogGeneratedDetails }>(postUrl(id, "/generate"), {
+        body: JSON.stringify(input),
+        method: "POST",
+      }),
+    onSuccess: ({ post }) => takePost(post),
+  });
+}
+
 export function useDeleteBlogPost() {
   const queryClient = useQueryClient();
   return useMutation({
