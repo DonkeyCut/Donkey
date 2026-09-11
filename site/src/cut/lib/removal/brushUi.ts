@@ -21,7 +21,8 @@ interface BrushUi {
   clipId: string | null;
   tool: BrushTool;
   size: number;
-  open: (clipId: string) => void;
+  /** Opens a session on the clip with the tool its panel remembers. */
+  open: (clipId: string, tool?: BrushTool) => void;
   close: () => void;
   setTool: (tool: BrushTool) => void;
   setSize: (size: number) => void;
@@ -31,7 +32,7 @@ export const useBrushUi = create<BrushUi>((set) => ({
   clipId: null,
   tool: "brush",
   size: BRUSH_SIZE_DEFAULT,
-  open: (clipId) => set({ clipId, tool: "brush" }),
+  open: (clipId, tool = "brush") => set({ clipId, tool }),
   close: () => set({ clipId: null }),
   setTool: (tool) => set({ tool }),
   setSize: (size) => set({ size: Math.min(BRUSH_SIZE_MAX, Math.max(BRUSH_SIZE_MIN, size)) }),

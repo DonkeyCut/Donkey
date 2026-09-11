@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { BRUSH_SIZE_MAX, BRUSH_SIZE_MIN, useBrushUi } from "@/cut/lib/removal/brushUi";
+import { panelState, useRememberedScroll } from "@/cut/lib/panelState";
 import {
   cancelMatteBake,
   confirmMatteBake,
@@ -87,6 +88,7 @@ function useRemovalWriter(clip: VideoClip) {
 }
 
 export function RemovalPanel({ clip }: { clip: VideoClip }) {
+  const scroll = useRememberedScroll(clip.id, "cutout");
   const removal = clip.removal;
   const { commit } = useRemovalWriter(clip);
   const peeking = useEditor((s) => s.removalPeek === clip.id);
@@ -110,7 +112,8 @@ export function RemovalPanel({ clip }: { clip: VideoClip }) {
   // The brush session follows custom mode while its panel is open.
   useEffect(() => {
     const brush = useBrushUi.getState();
-    if (removal?.mode === "custom" && !removal.off) brush.open(clip.id);
+    if (removal?.mode === "custom" && !removal.off)
+      brush.open(clip.id, panelState.get(clip.id, "brushTool", "brush"));
     else if (brush.clipId === clip.id) brush.close();
     return () => {
       const b = useBrushUi.getState();
@@ -128,6 +131,7 @@ export function RemovalPanel({ clip }: { clip: VideoClip }) {
       <ScrollArea
         className="min-h-0 flex-1"
         viewportClassName="overscroll-contain"
+        {...scroll}
         contentClassName="flex flex-col gap-1 px-3.5 pt-1 pb-4"
       >
         <RemovalView clip={clip} />
@@ -387,7 +391,11 @@ function CustomControls({ clip }: { clip: VideoClip }) {
                   : "text-muted-foreground hover:text-foreground"
               )}
               aria-pressed={erasing === erase}
-              onClick={() => useBrushUi.getState().setTool(erase ? "erase" : "brush")}
+              onClick={() => {
+                const tool = erase ? "erase" : "brush";
+                panelState.set(clip.id, "brushTool", tool);
+                useBrushUi.getState().setTool(tool);
+              }}
             >
               {erase ? "Erase" : "Brush"}
             </button>

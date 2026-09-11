@@ -25,7 +25,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { getPreviewCanvas, sampleClipFrameData } from "@/cut/lib/previewCanvas";
 import { useEditor } from "@/cut/lib/store";
-import { usePanelView } from "@/cut/lib/panelViews";
+import { usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import type { VideoClip } from "@/cut/lib/types";
 import { ResetButton, Row, useSliderCheckpoint } from "@/cut/components/panelBits";
 import { ColorWheel } from "@/cut/components/ColorWheel";
@@ -51,10 +51,7 @@ import { Switch } from "@/components/ui/switch";
 export function ColorPanel({ clip }: { clip: VideoClip }) {
   // The open level holds for the session per clip, so deselecting and coming
   // back lands on the same view.
-  const [view, setView] = usePanelView<"presets" | "adjust">(
-    `color-level:${clip.id}`,
-    "presets"
-  );
+  const [view, setView] = usePanelState<"presets" | "adjust">(clip.id, "colorView", "presets");
   if (view === "adjust") {
     return <AdjustView clip={clip} onBack={() => setView("presets")} />;
   }
@@ -95,7 +92,12 @@ function useGradeWriter(clip: VideoClip) {
 /* ------------------------------------------------------------------ */
 
 function PresetView({ clip, onAdjust }: { clip: VideoClip; onAdjust: () => void }) {
-  const [category, setCategory] = useState<GradePresetCategory | "all">("all");
+  const [category, setCategory] = usePanelState<GradePresetCategory | "all">(
+    clip.id,
+    "colorPresetCategory",
+    "all"
+  );
+  const gridScroll = useRememberedScroll(clip.id, `color-presets:${category}`);
   // The clip's own frame, ungraded: a swatch shows what its preset does to the
   // footage, never what the clip's current grade already did.
   const frame = useClipSourceFrame(clip.id);
@@ -162,6 +164,7 @@ function PresetView({ clip, onAdjust }: { clip: VideoClip; onAdjust: () => void 
         className="min-h-0 flex-1"
         viewportClassName="overscroll-contain"
         contentClassName="grid grid-cols-2 gap-2 px-3.5 pt-1 pb-2"
+        {...gridScroll}
       >
         {presets.map((p) => (
           // Keyed by the clip too: a tile holds its last thumb across a
@@ -358,7 +361,8 @@ function StandInScene({ filter, tint }: { filter: string; tint: string | null })
 
 function AdjustView({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
   // The picked tool holds for the session, the same way the open level does.
-  const [tool, setTool] = usePanelView<Tool>(`color-tool:${clip.id}`, "basic");
+  const [tool, setTool] = usePanelState<Tool>(clip.id, "colorTool", "basic");
+  const toolScroll = useRememberedScroll(clip.id, `color-adjust:${tool}`);
   const { draft, commit } = useGradeWriter(clip);
   const grade = clip.grade;
   // Manual adjustments only — reset-all keeps the preset layer.
@@ -435,6 +439,7 @@ function AdjustView({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
         className="min-h-0 flex-1"
         viewportClassName="overscroll-contain"
         contentClassName="flex flex-col gap-1 px-3.5 pt-1 pb-4"
+        {...toolScroll}
       >
         <Histogram />
         {tool === "basic" && <BasicTool grade={grade} draft={draft} commit={commit} />}
@@ -446,7 +451,7 @@ function AdjustView({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
           />
         )}
         {tool === "wheels" && <WheelsTool grade={grade} draft={draft} commit={commit} />}
-        {tool === "hsl" && <HslTool grade={grade} draft={draft} commit={commit} />}
+        {tool === "hsl" && <HslTool clipId={clip.id} grade={grade} draft={draft} commit={commit} />}
       </ScrollArea>
     </div>
   );
@@ -584,8 +589,8 @@ const HSL_AXES = [
   { index: 2, label: "Luminance" },
 ] as const;
 
-function HslTool({ grade, draft, commit }: GradeWrite) {
-  const [band, setBand] = useState<HslBand>("orange");
+function HslTool({ clipId, grade, draft, commit }: GradeWrite & { clipId: string }) {
+  const [band, setBand] = usePanelState<HslBand>(clipId, "hslBand", "orange");
   const active = HSL_BANDS.find((b) => b.id === band)!;
   const tuple: HslTuple = grade?.hsl?.[band] ?? [0, 0, 0];
   const write = (to: (g: ColorGrade) => void, next: HslTuple) =>

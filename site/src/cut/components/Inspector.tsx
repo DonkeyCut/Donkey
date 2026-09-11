@@ -4,7 +4,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PenTool, Scissors, Smile, Sparkles, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useSpeedCurveUi } from "@/cut/lib/speedCurveUi";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
 import {
@@ -79,7 +78,7 @@ import {
   restingMaskFrame,
 } from "@donkeycut/effects-kit";
 import { clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
-import { usePanelView } from "@/cut/lib/panelViews";
+import { PANEL_GLOBAL, usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
 import { AnimationCard, AnimationTiles } from "@/cut/components/AnimationTiles";
@@ -227,7 +226,11 @@ function InspectorColumn({
 }) {
   const open = useEditor((s) => s.inspectorOpen);
   const setOpen = useEditor((s) => s.setInspectorOpen);
-  const [view, setView] = useState("main");
+  // The open tab and the Home scroller's place hold per item for the
+  // session, so coming back to an item lands on its panel as it was left.
+  const itemId = clip?.id ?? audio?.id ?? overlay?.id ?? PANEL_GLOBAL;
+  const [view, setView] = usePanelState<string>(itemId, "tab", "main");
+  const homeScroll = useRememberedScroll(itemId, "main");
   // Coming home from the animation view marks the return, so the overlay
   // panel can scroll its Animation row back into sight; the mark clears on
   // the next pick.
@@ -238,7 +241,7 @@ function InspectorColumn({
       setView(id);
       setOpen(true);
     },
-    [view, setOpen]
+    [view, setView, setOpen]
   );
   const nav = useMemo<AnimNav>(
     () => ({
@@ -271,7 +274,7 @@ function InspectorColumn({
             </AnimNavContext.Provider>
           ) : (
             <AnimNavContext.Provider value={nav}>
-              <ScrollArea className="min-h-0 flex-1">
+              <ScrollArea className="min-h-0 flex-1" {...homeScroll}>
                 {audio ? (
                   <AudioPanel clip={audio} />
                 ) : overlay ? (
@@ -532,10 +535,12 @@ function LayoutButtons({
  * out their own bands around their own scroller; the others ride this one.
  */
 function ClipColumn({ clip, tab }: { clip: VideoClip; tab: string }) {
+  // Keyed on the tab: each view keeps its own scroller and its own place.
+  const scroll = useRememberedScroll(clip.id, tab);
   if (tab === "color") return <ColorPanel clip={clip} />;
   if (tab === "cutout") return <RemovalPanel clip={clip} />;
   return (
-    <ScrollArea className="min-h-0 flex-1">
+    <ScrollArea key={tab} className="min-h-0 flex-1" {...scroll}>
       {tab === "frame" ? (
         <ClipFramePanel clip={clip} />
       ) : tab === "audio" ? (
@@ -600,9 +605,11 @@ function ClipAudioPanel({ clip }: { clip: VideoClip }) {
     useEditor.getState().updateClipTransient(clip.id, { sound });
     if (phase === "commit") ck.end();
   };
-  const [view, setView] = usePanelView<"main" | "sound">(`clip-audio:${clip.id}`, "main");
+  const [view, setView] = usePanelState<"main" | "sound">(clip.id, "audioView", "main");
   if (view === "sound") {
-    return <SoundQualityPanel sound={clip.sound} write={writeSound} onBack={() => setView("main")} />;
+    return (
+      <SoundQualityPanel itemId={clip.id} sound={clip.sound} write={writeSound} onBack={() => setView("main")} />
+    );
   }
   return (
     <>
@@ -674,9 +681,11 @@ const sameSound = (a: ClipSound | undefined, b: ClipSound | undefined) =>
  * as absence.
  */
 function SoundQualitySections({
+  itemId,
   sound,
   write,
 }: {
+  itemId: string;
   sound: ClipSound | undefined;
   write: (sound: ClipSound | undefined, phase: "draft" | "commit") => void;
 }) {
@@ -731,7 +740,7 @@ function SoundQualitySections({
   );
   return (
     <>
-      <SoundPresetsRow sound={sound} onApply={(s) => set(s, "commit")} />
+      <SoundPresetsRow itemId={itemId} sound={sound} onApply={(s) => set(s, "commit")} />
       <Section
         title="Equalizer"
         aside={
@@ -876,10 +885,12 @@ function SoundQualityRow({ sound, onOpen }: { sound: ClipSound | undefined; onOp
 
 /** The Sound quality view, pushed over an audio panel. */
 function SoundQualityPanel({
+  itemId,
   sound,
   write,
   onBack,
 }: {
+  itemId: string;
   sound: ClipSound | undefined;
   write: (sound: ClipSound | undefined, phase: "draft" | "commit") => void;
   onBack: () => void;
@@ -888,7 +899,7 @@ function SoundQualityPanel({
     <>
       <SubviewHead title="Sound quality" onBack={onBack} />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
-        <SoundQualitySections sound={sound} write={write} />
+        <SoundQualitySections itemId={itemId} sound={sound} write={write} />
       </div>
     </>
   );
@@ -899,9 +910,11 @@ function SoundQualityPanel({
  * none of them — plus saving the current treatment under a name and
  * deleting the saved one that is selected. */
 function SoundPresetsRow({
+  itemId,
   sound,
   onApply,
 }: {
+  itemId: string;
   sound: ClipSound | undefined;
   onApply: (sound: ClipSound | undefined) => void;
 }) {
@@ -963,7 +976,7 @@ function SoundPresetsRow({
   // Two presets can hold the same settings — one saved while another was
   // applied — so the one the user picked stays selected for as long as the
   // clip still matches it; the first match stands in otherwise.
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = usePanelState<string | null>(itemId, "soundPreset", null);
   const current =
     options.find((o) => o.key === picked && sameSound(o.sound, sound)) ??
     options.find((o) => sameSound(o.sound, sound));
@@ -1078,7 +1091,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
   const speed = speedDraft ?? (curved ? retimeOf(clip).rate : (clip.speed ?? 1));
   const speedLen =
     curved && speedDraft === null ? retimeOf(clip).len : (clip.out - clip.in) / (speed > 0 ? speed : 1);
-  const curveOpen = useSpeedCurveUi((s) => s.open.has(clip.id));
+  const [curveOpen, setCurveOpen] = usePanelState(clip.id, "speedCurve", false);
   // Typing can trim out to the source's end but no further; an image has no
   // intrinsic duration, so its clip can be any length.
   const maxOut = asset && asset.type !== "image" ? asset.duration : Infinity;
@@ -1196,15 +1209,14 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             className="h-6 px-2 text-[11px]"
             title="Shape the speed across the footage with nodes"
             onClick={() => {
-              const ui = useSpeedCurveUi.getState();
               if (curveOpen) {
-                ui.close(clip.id);
+                setCurveOpen(false);
                 return;
               }
               if (!curved) {
                 useEditor.getState().setClipSpeedCurve(clip.id, flatSpeedCurve(clip));
               }
-              ui.openFor(clip.id);
+              setCurveOpen(true);
             }}
           >
             {curveOpen ? "Editing" : curved ? "Edit" : "Add"}
@@ -1551,10 +1563,11 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
     setAudio(patch);
     ck.end();
   };
-  const [view, setView] = usePanelView<"main" | "sound">(`audio-sound:${clip.id}`, "main");
+  const [view, setView] = usePanelState<"main" | "sound">(clip.id, "soundView", "main");
   if (view === "sound") {
     return (
       <SoundQualityPanel
+        itemId={clip.id}
         sound={clip.sound}
         write={(sound, phase) => (phase === "commit" ? commitAudio({ sound }) : setAudio({ sound }))}
         onBack={() => setView("main")}
@@ -2551,13 +2564,14 @@ type AnimSlot = "in" | "out" | "loop" | "move" | "words";
 function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
   const anim = o.anim ?? {};
   // The active slot holds for the session, like every settings view's tab.
-  const [picked, setSlot] = usePanelView<AnimSlot>(`anim-slot:${o.id}`, "in");
+  const [picked, setSlot] = usePanelState<AnimSlot>(o.id, "animSlot", "in");
   // Word emphasis is a title's slot; a shape or a sticker has no words, so
   // selecting one hands the picker back to the entrance.
   const tabs: AnimSlot[] = isTextOverlay(o)
     ? ["in", "out", "loop", "move", "words"]
     : ["in", "out", "loop", "move"];
   const slot = tabs.includes(picked) ? picked : "in";
+  const tilesScroll = useRememberedScroll(o.id, `anim:${slot}`);
   const active = slot === "move" || slot === "words" ? undefined : anim[slot];
   const seconds = slot === "in" || slot === "out" ? anim[slot]?.seconds : undefined;
   const activeMove = anim.move;
@@ -2657,9 +2671,10 @@ function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
       {/* pt-1 clears the selected tile's ring, which draws outside its box.
           The bounce stops here rather than travelling to the panel behind. */}
       <ScrollArea
-        // Keyed on the tab: a new list of tiles starts at its own top.
+        // Keyed on the tab: each list of tiles keeps its own place.
         key={slot}
         className="min-h-0 flex-1"
+        {...tilesScroll}
         viewportClassName="overscroll-contain"
         contentClassName="flex flex-col gap-1 px-3.5 pt-1 pb-2"
       >
@@ -3136,6 +3151,8 @@ function MaskShapeIcon({ kind }: { kind: MaskKind }) {
 /** How a panel's mask section reads and writes its owner's mask — the same
  * section serves overlay elements and video clips through this. */
 interface MaskTarget {
+  /** The masked clip or overlay, for the panel's memory of the section. */
+  id: string;
   /** Timeline window for the keyframe row and playhead-local time. */
   element: { start: number; end: number };
   mask?: Mask;
@@ -3280,6 +3297,7 @@ function OverlayMaskSection({ overlay: o }: { overlay: Overlay }) {
   return (
     <MaskSection
       target={{
+        id: o.id,
         element: o,
         mask: o.mask,
         subjectStartsBehind: true,
@@ -3499,6 +3517,7 @@ function ClipMaskSection({ clip }: { clip: VideoClip }) {
   return (
     <MaskSection
       target={{
+        id: clip.id,
         element: { start: win.start, end: win.start + win.len },
         mask: clip.mask,
         set: (mask) => st().updateClip(clip.id, { mask }),
@@ -3525,7 +3544,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
   const radiusCk = useSliderCheckpoint();
   // Size link: scrubbing one axis carries the other so the shape keeps its
   // pixel proportions. On for a circle, which starts round.
-  const [linked, setLinked] = useState<boolean | null>(null);
+  const [linked, setLinked] = usePanelState<boolean | null>(target.id, "maskLinked", null);
   const m = target.mask;
   const tLocal = localTimeOf(target.element, now);
   const geom = m ? maskFrameAt(m, tLocal) : null;

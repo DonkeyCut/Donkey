@@ -29,7 +29,7 @@ import {
   skimAt,
   subscribePlayhead,
 } from "@/cut/lib/playhead";
-import { useSpeedCurveUi } from "@/cut/lib/speedCurveUi";
+import { panelState, usePanelStore } from "@/cut/lib/panelState";
 import { useEditor } from "@/cut/lib/store";
 import type { VideoClip } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
@@ -81,19 +81,12 @@ export function SpeedCurveStrip() {
   const selectedId = useEditor((s) =>
     s.selection?.kind === "clip" ? s.selection.id : null,
   );
-  const clipId = useSpeedCurveUi((s) =>
-    selectedId && s.open.has(selectedId) ? selectedId : null,
+  const clipId = usePanelStore((s) =>
+    selectedId && s.items[selectedId]?.speedCurve ? selectedId : null,
   );
   const clip = useEditor((s) =>
     clipId ? s.clips.find((c) => c.id === clipId) : undefined,
   );
-  // Clips that are gone drop their entry.
-  const clipIds = useEditor((s) => s.clips);
-  useEffect(() => {
-    const ui = useSpeedCurveUi.getState();
-    for (const id of ui.open)
-      if (!clipIds.some((c) => c.id === id)) ui.close(id);
-  }, [clipIds]);
   if (!clip) return null;
   return <Strip key={clip.id} clip={clip} />;
 }
@@ -422,7 +415,7 @@ function Strip({ clip }: { clip: VideoClip }) {
         removePicked();
         break;
       case "Escape":
-        useSpeedCurveUi.getState().close(clip.id);
+        panelState.set(clip.id, "speedCurve", false);
         break;
       default:
         return;
@@ -568,7 +561,7 @@ function Strip({ clip }: { clip: VideoClip }) {
         </IconButton>
         <IconButton
           title="Close (Esc)"
-          onClick={() => useSpeedCurveUi.getState().close(clip.id)}
+          onClick={() => panelState.set(clip.id, "speedCurve", false)}
         >
           <X className="size-3.5" />
         </IconButton>
