@@ -447,7 +447,7 @@ export function useAssetDrop(
 // ---------------------------------------------------------------------------
 // Candidates and @name mentions
 
-const EMPTY_LIBRARY: LibraryData = { assets: [], folders: [], templates: [] };
+export const EMPTY_LIBRARY: LibraryData = { assets: [], folders: [], templates: [] };
 
 /** The open project's media as refs with their session handles, assigned in
  * media order — `v1` videos, `i1` generated stills, `a1` audio — so a prompt

@@ -28,6 +28,7 @@ import {
   refToken,
   type AssetRef,
 } from "./assetRef";
+import { clearCopiedFrame } from "./stageFrame";
 import { useEditor } from "./store";
 
 type RefsFn = () => AssetRef[];
@@ -160,6 +161,10 @@ export const refClipboardText = (refs: AssetRef[]) => refs.map(refToken).join(" 
 export function copyRefs(refs: AssetRef[]): boolean {
   if (refs.length === 0) return false;
   void navigator.clipboard?.writeText(refClipboardText(refs.map(withHandle))).catch(() => {});
+  // The newer copy owns the clipboard: the timeline's own copy and a copied
+  // preview frame step aside, so ⌘V on the timeline lands what was copied.
+  useEditor.getState().clearClipboard();
+  clearCopiedFrame();
   return true;
 }
 

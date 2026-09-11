@@ -21,10 +21,13 @@ import {
   renderPreviewProxy,
   type ExportDoc,
 } from "@/cut/lib/exportClient";
-import { fileZoneAt, hasRefDrag, selectionRefTokens } from "@/cut/lib/assetRef";
+import { EMPTY_LIBRARY, fileZoneAt, hasRefDrag, parseMentions, selectionRefTokens, useRefCandidates } from "@/cut/lib/assetRef";
+import { placeRefAtPlayhead } from "@/cut/lib/refPlace";
+import { useLibrary } from "@/cut/lib/queries";
 import { copyableRefs } from "@/cut/lib/refCopy";
 import { startUpload } from "@/cut/lib/importQueue";
-import { enrichAsset, importFileToProject, prepareImport } from "@/cut/lib/media";
+import { enrichAsset, importFileToProject, isFontFile, isMediaFile, prepareImport } from "@/cut/lib/media";
+import { uploadLibraryFont } from "@/cut/lib/linkedLibrary";
 import { clearCopiedFrame, copiedFrameFile, hasCopiedFrame } from "@/cut/lib/stageFrame";
 // Side-effect import: registers the brief-to-video resume subscription, so a
 // persisted run resumes on project load even when the AI panel never mounts.
@@ -937,32 +940,129 @@ export function Editor({
     };
   }, [importFiles, viewer]);
 
-  // An image on the system clipboard joins the cut: a frame copied from
-  // another tab's preview, a screenshot, a picture from anywhere else. The
-  // editor's own ⌘V claims the timeline clipboard and the copied frame before
-  // this — both stop the keystroke, so no paste event follows them — and a
+  // The editor's own copies: the timeline clipboard first, then a frame
+  // copied off the preview canvas, which lands as a still under the
+  // indicator. Where it lands is read at the keystroke, so a still that waits
+  // on its draw or its upload still arrives where the paste was aimed. True
+  // when something of ours was pasted.
+  const pasteOwn = useCallback(
+    (at: number): boolean => {
+      if (useEditor.getState().paste()) return true;
+      if (!hasCopiedFrame()) return false;
+      void copiedFrameFile()
+        .then((grab) => {
+          if (grab) {
+            return importFiles([grab.file], { at, atFirstFit: true, origin: "freeze", name: grab.name });
+          }
+        })
+        .catch((err) => reportSwallowed("[cut] paste frame failed", err));
+      return true;
+    },
+    [importFiles]
+  );
+
+  // ⌘V is decided at the paste event, the one place the system clipboard can
+  // be read, so the newest copy wins whichever app made it: a recording
+  // copied out of Voice Memos, a screenshot, a video file from the Finder, a
+  // frame copied off the preview, or a timeline selection. A file that Cut
+  // imports lands under the indicator, on the first row with room for it. A
   // composer marks its own paste handled, so this only ever sees the pastes
-  // nobody else wanted. The picture lands under the indicator, on the first
-  // row with room for it.
+  // nobody else wanted. The keystroke arms a fallback for a browser that
+  // fires no paste event at all; the event, when it comes, disarms it.
+  // What a mention token on the clipboard can name — the same candidates the
+  // chat composer resolves against — read at the paste, so a tile copied a
+  // moment ago resolves against the live project and shelf.
+  const candidates = useRefCandidates(!viewer);
+  const library = useLibrary({ enabled: !viewer }).data ?? EMPTY_LIBRARY;
+  const mentionable = useRef({ candidates, library });
+  useEffect(() => {
+    mentionable.current = { candidates, library };
+  }, [candidates, library]);
+  const pasteFallback = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disarmPasteFallback = useCallback(() => {
+    if (pasteFallback.current === null) return;
+    clearTimeout(pasteFallback.current);
+    pasteFallback.current = null;
+  }, []);
+  const armPasteFallback = useCallback(() => {
+    disarmPasteFallback();
+    const at = Math.max(0, previewAt());
+    pasteFallback.current = setTimeout(() => {
+      pasteFallback.current = null;
+      pasteOwn(at);
+    }, 0);
+  }, [disarmPasteFallback, pasteOwn]);
+  useEffect(() => disarmPasteFallback, [disarmPasteFallback]);
   useEffect(() => {
     if (viewer) return;
     const onPaste = (e: ClipboardEvent) => {
+      disarmPasteFallback();
       const s = useEditor.getState();
       if (e.defaultPrevented || s.readOnly) return;
       // A dialog on top owns the paste, the same way it owns the shortcuts.
       if (s.exportOpen || dialogOnTop()) return;
       if (isPasteTarget(e.target)) return;
-      const files = Array.from(e.clipboardData?.items ?? [])
-        .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
-        .map((i) => i.getAsFile())
-        .filter((f): f is File => f !== null);
-      if (files.length === 0) return;
+      const at = Math.max(0, previewAt());
+      const pasted = Array.from(e.clipboardData?.files ?? []);
+      // A font is not media for the timeline: it goes on the shelf and lights
+      // up in the font menu, the way the Library panel takes a dropped one.
+      const fonts = pasted.filter(isFontFile);
+      if (fonts.length > 0) {
+        e.preventDefault();
+        for (const font of fonts) {
+          void uploadLibraryFont(font).catch((err) =>
+            reportSwallowed(`[cut] paste failed for ${font.name}`, err)
+          );
+        }
+      }
+      const files = pasted.filter((f) => isMediaFile(f) && !isFontFile(f));
+      if (files.length === 0) {
+        if (fonts.length > 0) return;
+        if (pasteOwn(at)) {
+          e.preventDefault();
+          return;
+        }
+        // A ⌘C on a tile — a media card, a library card, a stock sound, a
+        // sticker, an effect, a shape, a transition, a template — put its
+        // mention token here; each one lands the way the tile's + button
+        // lands it. Imports run behind the editor; a run lands in copy order.
+        const { candidates, library } = mentionable.current;
+        const refs = parseMentions(e.clipboardData?.getData("text/plain") ?? "", candidates).refs;
+        const projectId = s.projectId;
+        if (refs.length === 0 || !projectId) return;
+        e.preventDefault();
+        void (async () => {
+          for (const ref of refs) {
+            try {
+              await placeRefAtPlayhead(ref, { projectId, library, at });
+            } catch (err) {
+              reportSwallowed(`[cut] paste failed for ${ref.name}`, err);
+            }
+          }
+        })();
+        return;
+      }
       e.preventDefault();
-      void importFiles(files, { at: Math.max(0, previewAt()), atFirstFit: true });
+      // The frame the preview copied went out to the system clipboard as a
+      // PNG, so it comes back here as a file like any other. It is told apart
+      // by its bytes and keeps its freeze origin and its name; any other file
+      // is a newer copy from elsewhere.
+      void copiedFrameFile()
+        .then((grab) => {
+          const own =
+            grab !== null &&
+            files.length === 1 &&
+            files[0].type === grab.file.type &&
+            files[0].size === grab.file.size;
+          return own
+            ? importFiles([grab.file], { at, atFirstFit: true, origin: "freeze", name: grab.name })
+            : importFiles(files, { at, atFirstFit: true });
+        })
+        .catch((err) => reportSwallowed("[cut] paste failed", err));
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [importFiles, viewer]);
+  }, [disarmPasteFallback, importFiles, pasteOwn, viewer]);
 
   // Keyboard shortcuts.
   useEffect(() => {
@@ -1035,35 +1135,21 @@ export function Editor({
           // copy, so ⌘V still pastes what was copied for the timeline.
           if (copyableRefs().length > 0) return;
           const token = selectionRefTokens(s);
-          if (token) void navigator.clipboard.writeText(token).catch(() => {});
           // The newer copy owns the clipboard: a copied preview frame steps
-          // aside for this one.
+          // aside for this one, and so does a file copied from another app —
+          // the system clipboard takes the token, or nothing at all, so a
+          // paste finds the timeline copy first.
           const copied = s.copySelection();
           if (copied) clearCopiedFrame();
-          if (copied || token) e.preventDefault();
+          if (copied || token) {
+            void navigator.clipboard.writeText(token ?? "").catch(() => {});
+            e.preventDefault();
+          }
         }
       } else if (mod && e.key.toLowerCase() === "v") {
-        // The timeline clipboard first; a frame copied off the preview canvas
-        // lands as a still under the indicator. Where it lands is read at the
-        // keystroke, so a still that waits on its draw or its upload still
-        // arrives where the paste was aimed.
-        if (s.paste()) e.preventDefault();
-        else if (hasCopiedFrame()) {
-          e.preventDefault();
-          const at = Math.max(0, previewAt());
-          void copiedFrameFile()
-            .then((grab) => {
-              if (grab) {
-                return importFiles([grab.file], {
-                  at,
-                  atFirstFit: true,
-                  origin: "freeze",
-                  name: grab.name,
-                });
-              }
-            })
-            .catch((err) => reportSwallowed("[cut] paste frame failed", err));
-        }
+        // The keystroke keeps its default: the paste event it raises is where
+        // the editor decides what lands (see the paste listener above).
+        armPasteFallback();
       } else if (mod && e.key.toLowerCase() === "g") {
         // ⌘G groups the multi-selected elements, ⇧⌘G dissolves the primary's
         // group — the panel's Group button is out of reach while a
@@ -1105,7 +1191,7 @@ export function Editor({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [importFiles]);
+  }, [armPasteFallback, importFiles]);
 
   // The project is here, on this Mac — it just can't be opened without the app
   // that holds it. The gate's banner sits above this with the recovery steps,

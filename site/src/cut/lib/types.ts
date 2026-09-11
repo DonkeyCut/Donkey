@@ -647,6 +647,11 @@ export const TRANSITION_DEFAULT_SECONDS = 0.5;
 export const CROSS_DISSOLVE_DEFAULT_SECONDS = 0.3;
 
 /** How long a bar of this style runs when it lands on a bare cut. */
+/** How far a cut or clip edge reaches while a transition bar is in flight,
+ * px. Inside it the bar aligns to the edge; outside it the bar lands exactly
+ * where it is. */
+export const XBAR_MAGNET_PX = 16;
+
 export const transitionDefaultSeconds = (style: TransitionStyle): number =>
   isAudioTransition(style) ? CROSS_DISSOLVE_DEFAULT_SECONDS : TRANSITION_DEFAULT_SECONDS;
 

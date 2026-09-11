@@ -50,6 +50,7 @@ import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
 import { buildAiContext } from "@/cut/lib/aiContext";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
+import { useRefCopy } from "@/cut/lib/refCopy";
 import { registerChatIntake } from "@/cut/lib/chatIntake";
 import { videoModel } from "@/cut/lib/videoModels";
 import {
@@ -1712,8 +1713,11 @@ function MessageAssetCard({ asset }: { asset: AssetRef }) {
   // jump the side panel to the asset.
   const clickTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(clickTimer.current), []);
+  // ⌘C over the card copies what it stands for, the way its drag carries it.
+  const copyRef = useRefCopy(() => [asset]);
   return (
     <div
+      ref={copyRef}
       className={cn(
         "ai-msg-asset group/chip relative",
         // Audio gets the wide timeline-pill treatment; the row still wraps

@@ -62,7 +62,7 @@ import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
-import { assetIsSilent, emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, type ShapeKind } from "@/cut/lib/types";
+import { assetIsSilent, emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox } from "@donkeycut/effects-kit";
@@ -272,10 +272,6 @@ type XBar = {
   role: { kind: Anchor["kind"]; clipId: string } | null;
   label: string;
 };
-
-/** How far an anchor reaches while a bar is in flight, px. Inside it the drop
- * aligns to the anchor; outside it the bar lands exactly where it is. */
-const XBAR_MAGNET_PX = 16;
 
 
 const overlayFamily = (o: Overlay): OverlayFamily =>

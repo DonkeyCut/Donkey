@@ -2,7 +2,7 @@
 
 import {
   type DragEventHandler,
-  type HTMLAttributes,
+  type ComponentProps,
   type ReactNode,
   useEffect,
   useRef,
@@ -41,7 +41,8 @@ import {
 import { LiveElapsed } from "@/cut/components/Elapsed";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { MUSIC_VARIANTS, synthesizeMusic, type MusicVariant } from "@/cut/lib/audioGen";
-import { draggingRef, hasRefDrag } from "@/cut/lib/assetRef";
+import { draggingRef, hasRefDrag, refFromAsset, type AssetRef } from "@/cut/lib/assetRef";
+import { useRefCopy } from "@/cut/lib/refCopy";
 import { useMusicGen } from "@/cut/lib/musicGen";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { stockAssetInDoc } from "@/cut/lib/genvideo/docWriter";
@@ -563,7 +564,7 @@ export function AudioPillSurface({
   className,
   children,
   ...rest
-}: { peaks?: number[] } & HTMLAttributes<HTMLDivElement>) {
+}: { peaks?: number[] } & ComponentProps<"div">) {
   return (
     <div
       className={cn(
@@ -706,6 +707,8 @@ function buildAudioDragGhost(name: string, width: number, peaks?: number[]): HTM
  * the chat's audio cards), styled like its timeline clip: emerald gradient,
  * white waveform, name overlaid, plus a play button, duration badge, and a
  * hover-revealed menu + add button. */
+const NO_REFS = (): AssetRef[] => [];
+
 export function AudioRow({
   name,
   duration,
@@ -717,6 +720,7 @@ export function AudioRow({
   menu,
   onDragStart,
   pulse,
+  refs,
 }: {
   name: string;
   duration: number;
@@ -731,9 +735,14 @@ export function AudioRow({
   onDragStart?: DragEventHandler<HTMLDivElement>;
   /** A freshly-generated clip the user hasn't seen — pulses blue for a beat. */
   pulse?: boolean;
+  /** What a ⌘C over the row copies: the asset's ref, so the row pastes onto
+   * the timeline and into a prompt the way it drags. */
+  refs?: () => AssetRef[];
 }) {
+  const copyRef = useRefCopy(refs ?? NO_REFS);
   return (
     <AudioPillSurface
+      ref={copyRef}
       peaks={peaks}
       className="audio-row group/row h-10 shrink-0 cursor-grab"
       draggable={!!onDragStart}
@@ -835,6 +844,7 @@ function ProjectAudio({
             pulse={pulsing.includes(a.id)}
             onTogglePlay={onTogglePlay}
             onAdd={() => useEditor.getState().addAssetAtPlayhead(a.id)}
+            refs={() => [refFromAsset(a)]}
             menu={
               <GeneratedAssetMenu
                 asset={a}
@@ -897,6 +907,7 @@ function ProjectMusic({
             pulse={pulsing.includes(a.id)}
             onTogglePlay={onTogglePlay}
             onAdd={() => useEditor.getState().addAssetAtPlayhead(a.id)}
+            refs={() => [refFromAsset(a)]}
             menu={
               <GeneratedAssetMenu
                 asset={a}
