@@ -187,6 +187,13 @@ const CATALOG: CatalogItem[] = [
     ["typing-long", 3, "Steady typing on a mechanical keyboard for three seconds, dry, close-miked.", ["keyboard", "typing", "long", "mechanical", "work"]],
     ["backspace", 0.8, "Three quick backspace key taps on a keyboard, dry.", ["keyboard", "backspace", "delete", "taps", "correct"]],
     ["phone-typing", 1.5, "Fast typing on a smartphone touchscreen, soft rapid taps with tiny clicks.", ["keyboard", "phone", "touchscreen", "taps", "texting"]],
+    ["laptop-key", 0.5, "A single laptop keyboard key press, one soft shallow click, dry, close-miked.", ["keyboard", "laptop", "key", "single", "click"]],
+    ["typewriter-key", 0.6, "A single key strike on an old manual typewriter, one sharp metallic clack, no bell, dry.", ["keyboard", "typewriter", "key", "single", "clack"]],
+    ["typewriter-typing", 1.8, "A run of keystrokes on an old manual typewriter, sharp metallic clacks, no bell, dry.", ["keyboard", "typewriter", "typing", "vintage", "clacks"]],
+    ["mechanical-key", 0.5, "A single clicky mechanical keyboard switch press, one sharp click with a light spring, dry, close-miked.", ["keyboard", "mechanical", "key", "single", "clicky"]],
+    ["mechanical-thock", 0.5, "A single deep mechanical keyboard key press, a low dampened thock, dry, close-miked.", ["keyboard", "mechanical", "key", "single", "thock"]],
+    ["mechanical-typing", 1.5, "Fast typing on a clicky mechanical keyboard with sharp switch clicks, a run of keystrokes, dry, close-miked.", ["keyboard", "mechanical", "typing", "clicky", "keys"]],
+    ["mechanical-thock-typing", 1.5, "Fast typing on a deep mechanical keyboard, a run of low dampened thocks, dry, close-miked.", ["keyboard", "mechanical", "typing", "thock", "keys"]],
   ], core),
   ...sfx("Pops", [
     ["bubble", 0.5, "A single soft bubble pop, wet and round, dry.", ["pop", "bubble", "soft", "wet", "small"]],
