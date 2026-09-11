@@ -739,10 +739,12 @@ export function AudioRow({
    * the timeline and into a prompt the way it drags. */
   refs?: () => AssetRef[];
 }) {
+  // A row inside a registered card (the chat's audio cards) registers
+  // nothing of its own, so the card's copy still answers over it.
   const copyRef = useRefCopy(refs ?? NO_REFS);
   return (
     <AudioPillSurface
-      ref={copyRef}
+      ref={refs ? copyRef : undefined}
       peaks={peaks}
       className="audio-row group/row h-10 shrink-0 cursor-grab"
       draggable={!!onDragStart}

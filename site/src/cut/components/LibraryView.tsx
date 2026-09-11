@@ -87,7 +87,7 @@ import {
   type LibraryData,
 } from "@/cut/lib/library";
 import { linkFromText, normalizeLink } from "@/cut/lib/link";
-import { isPasteTarget } from "@/cut/lib/shortcutGate";
+import { dialogOnTop, isPasteTarget } from "@/cut/lib/shortcutGate";
 import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
@@ -574,7 +574,7 @@ export function LibraryView() {
   });
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      if (e.defaultPrevented || isPasteTarget(e.target)) return;
+      if (e.defaultPrevented || isPasteTarget(e.target) || dialogOnTop()) return;
       const files = Array.from(e.clipboardData?.files ?? []);
       if (files.length > 0) {
         e.preventDefault();
