@@ -1338,8 +1338,10 @@ export function Timeline() {
   useEffect(() => cancelPreview, [cancelPreview]);
   // Every drag ends here, wherever it was released: the landing previews and
   // the placement hold clear on the browser's own `dragend`, which fires for
-  // a drop the timeline took, a release elsewhere, and an escape alike. No
-  // preview can outlive its drag and sit on the rows into the next one.
+  // a drop the timeline took, a release elsewhere, and an escape alike. An
+  // OS file drag has no source in the page, so no `dragend` follows it; its
+  // release is the window's `drop`, which ends it the same way. No preview
+  // can outlive its drag and sit on the rows into the next one.
   useEffect(() => {
     const end = () => {
       cancelPreview();
@@ -1352,7 +1354,13 @@ export function Timeline() {
       setXTileDrag(null);
     };
     window.addEventListener("dragend", end, true);
-    return () => window.removeEventListener("dragend", end, true);
+    // Bubble phase: the timeline's own drop runs first and stashes the file
+    // landing off the rows before they clear.
+    window.addEventListener("drop", end);
+    return () => {
+      window.removeEventListener("dragend", end, true);
+      window.removeEventListener("drop", end);
+    };
   }, [cancelPreview, setAssetDrop, endCrossDrag, setAudioDrop, setElementDrop, setJointDrop]);
   // The landing an OS file release resolved to, handed to the editor's file
   // drop through `registerFileLanding`. Stashed by this surface's own drop,
@@ -1775,9 +1783,11 @@ export function Timeline() {
       endCrossDrag();
     },
     onDrop: (e: React.DragEvent) => {
-      // A sticker crossing a video row is still headed for the element rows;
-      // leave it to the timeline's own drop rather than swallowing it here.
-      if (draggedSticker()) return;
+      // A sticker crossing a video row is still headed for the element rows,
+      // and OS files belong to the timeline's own drop, which stashes their
+      // landing for the editor's import and clears every preview; both pass
+      // through here untouched.
+      if (draggedSticker() || draggedFiles(e)) return;
       e.preventDefault();
       e.stopPropagation();
       cancelPreview();
@@ -1959,16 +1969,11 @@ export function Timeline() {
             }
             setDropType("video");
             setAudioDrop(null);
-            const place = resolveDropTrack(y);
-            if (place.kind === "insert") {
-              setAssetDrop(null);
-              setOverlayDrop({ target: place, t: dropTimeAt(x), len });
-              return;
-            }
-            setOverlayDrop(null);
-            const cur = useEditor.getState();
-            const { start, shifts } = rippleInsert(track0Clips(cur.clips), dropTimeAt(x), len);
-            setAssetDrop({ t: start, len, shifts });
+            setAssetDrop(null);
+            // The slot paints on the row the drop resolves to — the one under
+            // the pointer, or the new track past the stack — the same way an
+            // asset drag previews across the rows.
+            previewCross(resolveDropTrack(y), dropTimeAt(x), len);
           });
           return;
         }
