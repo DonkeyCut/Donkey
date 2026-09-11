@@ -14,17 +14,27 @@ import {
   streakGradient,
   type EffectId,
 } from "@donkeycut/effects-kit";
-import { Pause, Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pause, Play, Plus, Search, Star } from "lucide-react";
 import { PHASE_STEP } from "@/cut/components/AnimationTiles";
+import { PeakStrip } from "@/cut/components/AudioPanel";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
 import { useFxAudition } from "@/cut/lib/audioFxAudition";
 import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
+import { clearRefDrag, refFromStockSfx, setRefDragData } from "@/cut/lib/assetRef";
+import { importStockAudio } from "@/cut/lib/media";
+import { usePreviewAudio } from "@/cut/lib/previewAudio";
+import { useRefCopy } from "@/cut/lib/refCopy";
+import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
+import { useSoundFavorites } from "@/cut/lib/soundFavorites";
 import { SubTabs } from "@/cut/components/SubTabs";
 import { usePlayheadFrame } from "@/cut/components/usePlayheadFrame";
+import { STOCK_SFX_CATEGORIES, stockTitle, type StockSfx, type StockSfxCategory } from "@/cut/lib/stock";
+import { STOCK_SFX } from "@/cut/lib/stockSfxManifest";
 import { useEditor } from "@/cut/lib/store";
 import { isEffectOverlay, TRANSITION_STYLE_LABELS, type EffectOverlay } from "@/cut/lib/types";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import "./grain.css";
 
@@ -37,6 +47,9 @@ import "./grain.css";
  * treatments over the window (echo, reverb, muffle, telephone…) and the
  * handover that dissolves the sound across a cut. Drag one onto the timeline
  * to place it; a click only picks the tile, the same as every other panel.
+ * Under the treatments sits the sound-effect shelf: the bundled one-shots
+ * (whooshes, clicks, risers, hits…) that drop onto the soundtrack as audio
+ * clips.
  *
  * The picture effects treat the footage and everything laid over it; the audio
  * ones treat everything audible under them — clip sound, upper tracks and the
@@ -80,45 +93,76 @@ export function EffectsPanel() {
   const [group, setGroup] = useLocalPref<EffectGroup>("cut-effects-group", "moving", (v) =>
     GROUPS.some((g) => g.id === v)
   );
+  // The Sound family drills down: the root lists the sound groups, and an
+  // open group replaces the segmented control with a back header. Kept across
+  // reloads like the group itself.
+  const [soundGroup, setSoundGroup] = useLocalPref<SoundGroup | null>(
+    "cut-effects-sound-group",
+    null,
+    (v) =>
+      v === null ||
+      v === FAVORITES ||
+      v === TREATMENTS ||
+      (STOCK_SFX_CATEGORIES as readonly string[]).includes(String(v))
+  );
   // The tab follows the selection into its family so the marked tile shows.
   const liveEffect = live?.effect;
   useEffect(() => {
-    if (liveEffect) setGroup(groupOf(liveEffect));
-  }, [liveEffect, setGroup]);
+    if (!liveEffect) return;
+    setGroup(groupOf(liveEffect));
+    if (isAudioEffect(liveEffect)) setSoundGroup(TREATMENTS);
+  }, [liveEffect, setGroup, setSoundGroup]);
+  // A sound-effect reference clicked in the chat lands on its card: the family
+  // opens here, its group opens below, and the card scrolls into view.
+  useRevealEffect((ref) => {
+    const hit = ref.scope === "stock" ? STOCK_SFX.find((x) => x.id === ref.id) : undefined;
+    if (!hit) return;
+    setGroup("audio");
+    setSoundGroup(hit.category);
+  });
   const frame = usePlayheadFrame();
   // An audition belongs to the panel that started it; leaving the tab, or the
   // panel, silences it.
-  useEffect(() => () => useFxAudition.getState().stop(), [group]);
+  useEffect(() => () => silence(), [group]);
   return (
     <>
       {/* PanelHead's height, so the side panel's floating close button lands
           on the toggle's centerline; the right padding keeps clear of it. */}
       <div className="flex h-12 shrink-0 items-center pr-12 pl-3.5">
-        <SubTabs tabs={GROUPS} value={group} onChange={setGroup} />
+        {group === "audio" && soundGroup ? (
+          <div className="flex min-w-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                silence();
+                setSoundGroup(null);
+              }}
+              className="flex h-8 items-center gap-0.5 rounded-full pr-2.5 pl-1.5 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <ChevronLeft className="size-4" />
+              Sounds
+            </button>
+            <span className="truncate text-[13px] font-semibold tracking-tight">{soundGroup}</span>
+          </div>
+        ) : (
+          <SubTabs tabs={GROUPS} value={group} onChange={setGroup} />
+        )}
       </div>
 
       {/* The top pad is the selected tile's ring and its offset: the grid
           starts at the scroll edge, and a ring drawn outside the tile would be
           cut off there. */}
-      <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-1 pb-4">
-        <div className="grid grid-cols-2 gap-2" onKeyDown={pickGridNav}>
-          {group === "audio" ? (
-            <>
-              {AUDIO_EFFECT_IDS.map((id, i) => (
-                <SoundTile key={id} id={id} live={live} index={i} />
-              ))}
-              {/* The handover on the sound sits with the treatments on the
-                  sound. It is a transition — it drags to a cut, where the
-                  picture keeps cutting and the sound crosses over. */}
-              <CrossDissolveTile index={AUDIO_EFFECT_IDS.length} />
-            </>
-          ) : (
-            ALL_EFFECT_IDS.filter((id) => groupOf(id) === group).map((id) => (
+      {group === "audio" ? (
+        <SoundShelf live={live} open={soundGroup} onOpen={setSoundGroup} />
+      ) : (
+        <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-1 pb-4">
+          <div className="grid grid-cols-2 gap-2" onKeyDown={pickGridNav}>
+            {ALL_EFFECT_IDS.filter((id) => groupOf(id) === group).map((id) => (
               <EffectTile key={id} id={id} live={live} frame={frame} />
-            ))
-          )}
-        </div>
-      </ScrollArea>
+            ))}
+          </div>
+        </ScrollArea>
+      )}
     </>
   );
 }
@@ -192,8 +236,8 @@ function EffectTile({
 
 /**
  * One treatment on the sound, as the card the stock audio shelves use: the
- * figure across the middle, the play control on it, the name on its own strip
- * underneath. A sound tile is picked by ear, so it carries the same play
+ * figure across the middle, the play control on it, the name laid over the
+ * bottom edge. A sound tile is picked by ear, so it carries the same play
  * affordance a music sample does; the card itself picks and drags like every
  * other tile.
  */
@@ -208,7 +252,7 @@ function SoundTile({
 }) {
   const { picked, pick } = useAssetPick(`effect:${id}`);
   const t = useSoundClock(index);
-  const ref = useRef<HTMLDivElement>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
   const isLive = live?.effect === id;
   const marked = live ? isLive : picked;
   useEffect(() => {
@@ -218,9 +262,12 @@ function SoundTile({
     if (!live) return pick();
     if (!isLive) useEditor.getState().updateOverlay(live.id, { effect: id });
   };
+  const playing = useFxAudition((s) => s.effect === id);
   return (
     <SoundCard
-      cardRef={ref}
+      cardRef={(el) => {
+        ref.current = el;
+      }}
       pickId={`effect:${id}`}
       label={EFFECT_LABELS[id]}
       marked={marked}
@@ -229,8 +276,10 @@ function SoundTile({
         setElementDragData(e, { kind: "effect", effect: id });
         setObjectDragImage(e);
       }}
+      onDragEnd={clearElementDrag}
       figure={<BarStrip bars={audioFxBars(id, t, STRIP_BARS, 0.9)} />}
-      audition={id}
+      playing={playing}
+      onTogglePlay={() => useFxAudition.getState().toggle(id)}
     />
   );
 }
@@ -245,6 +294,7 @@ function SoundTile({
 function CrossDissolveTile({ index }: { index: number }) {
   const { picked, pick } = useAssetPick(`transition:${CROSS_DISSOLVE}`);
   const t = useSoundClock(index);
+  const playing = useFxAudition((s) => s.effect === CROSS_DISSOLVE);
   return (
     <SoundCard
       pickId={`transition:${CROSS_DISSOLVE}`}
@@ -255,38 +305,61 @@ function CrossDissolveTile({ index }: { index: number }) {
         setElementDragData(e, { kind: "transition", style: CROSS_DISSOLVE });
         setObjectDragImage(e);
       }}
+      onDragEnd={clearElementDrag}
       figure={<CrossStrip t={t} />}
-      audition={CROSS_DISSOLVE}
+      playing={playing}
+      onTogglePlay={() => useFxAudition.getState().toggle(CROSS_DISSOLVE)}
     />
   );
 }
 
-/** The card the sound shelf is built from: figure, play control, name. */
+/** Quiets every sound the panel can be playing: a treatment audition and a
+ * catalog preview. Leaving a view takes its sound with it. */
+function silence() {
+  useFxAudition.getState().stop();
+  usePreviewAudio.getState().stop();
+}
+
+/** The card the sound shelf is built from: figure, play control, name, and
+ * whatever a shelf lays in the corners (a duration, an add button). */
 function SoundCard({
   cardRef,
   pickId,
   label,
   marked,
+  flash,
   onChoose,
   onDragStart,
+  onDragEnd,
   figure,
-  audition,
+  playing,
+  onTogglePlay,
+  corner,
+  trailing,
 }: {
-  cardRef?: React.RefObject<HTMLDivElement | null>;
+  cardRef?: (el: HTMLDivElement | null) => void;
   pickId: string;
   label: string;
   marked: boolean;
+  /** The reveal highlight — a reference to this card was clicked in chat. */
+  flash?: boolean;
   onChoose: () => void;
   onDragStart: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
   figure: React.ReactNode;
-  audition: string;
+  playing: boolean;
+  onTogglePlay: () => void;
+  /** Extra controls laid over the card beside the play button. */
+  corner?: React.ReactNode;
+  /** A small note at the end of the name row (a length); the name truncates
+   * before it. */
+  trailing?: React.ReactNode;
 }) {
-  const playing = useFxAudition((s) => s.effect === audition);
   return (
     // The play control sits over the card as a sibling rather than inside it:
     // the card is what a drag carries, and the ghost of it is the boxed
-    // waveform with its name — pressing play is not part of what is dragged.
-    <span className="relative block">
+    // waveform — pressing play is not part of what is dragged.
+    <span className="group relative block">
       <div
         ref={cardRef}
         data-pick-id={pickId}
@@ -296,7 +369,7 @@ function SoundCard({
         aria-pressed={marked}
         draggable
         onDragStart={onDragStart}
-        onDragEnd={clearElementDrag}
+        onDragEnd={onDragEnd}
         onClick={onChoose}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -305,16 +378,20 @@ function SoundCard({
           }
         }}
         className={cn(
-          "group flex scroll-m-2 cursor-grab flex-col overflow-hidden rounded-xl border border-border bg-muted/40 outline-none",
-          marked && PICKED_RING
+          "flex scroll-m-2 cursor-grab flex-col overflow-hidden rounded-xl border border-border bg-muted/40 outline-none",
+          (marked || flash) && PICKED_RING
         )}
       >
-        <div className="relative h-14">
-          <span className="absolute inset-x-2.5 top-1/2 block -translate-y-1/2">{figure}</span>
-        </div>
-        <div data-drag-omit className="border-t border-border px-2.5 py-1.5">
-          <span className="block truncate text-[11.5px] font-medium" title={label}>
-            {label}
+        <div className="relative h-16">
+          <span className="absolute inset-x-2.5 top-2.5 block">{figure}</span>
+          <span
+            data-drag-omit
+            className="absolute inset-x-2.5 bottom-1.5 flex items-baseline gap-1.5 text-[11.5px] leading-tight font-medium"
+          >
+            <span className="min-w-0 flex-1 truncate" title={label}>
+              {label}
+            </span>
+            {trailing}
           </span>
         </div>
       </div>
@@ -322,12 +399,268 @@ function SoundCard({
         type="button"
         title={playing ? "Stop" : "Play"}
         aria-label={`${playing ? "Stop" : "Play"} ${label}`}
-        onClick={() => useFxAudition.getState().toggle(audition)}
+        onClick={onTogglePlay}
         className="absolute top-1.5 left-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-transform hover:scale-105"
       >
         {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
       </button>
+      {corner}
     </span>
+  );
+}
+
+/** The card's name drops the family the header already gives: "whoosh-quick"
+ * under Whoosh reads "Quick". */
+const sfxName = (s: StockSfx) => {
+  const family = s.category.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return stockTitle(s.id.startsWith(`${family}-`) ? s.id.slice(family.length + 1) : s.id);
+};
+
+/** How many matches a search shows at once. */
+const SFX_SEARCH_LIMIT = 60;
+
+/** The two groups of the shelf's own: the starred sounds, and the treatments,
+ * listed with the sound families. */
+const FAVORITES = "Favorites";
+const TREATMENTS = "Treatments";
+type SoundGroup = typeof FAVORITES | typeof TREATMENTS | StockSfxCategory;
+
+/**
+ * The Sound family's shelf. The root is a search box over a list of groups —
+ * the starred sounds, the treatments, then every sound family with its count
+ * — and opening
+ * a group pushes its grid, with the panel header turning into "‹ Sounds" so
+ * the way back is one tap. A search shows whatever matches, treatments
+ * included, grouped under their family names.
+ */
+function SoundShelf({
+  live,
+  open,
+  onOpen,
+}: {
+  live: EffectOverlay | null;
+  open: SoundGroup | null;
+  onOpen: (g: SoundGroup | null) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const favoriteIds = useSoundFavorites((s) => s.ids);
+  const families = STOCK_SFX_CATEGORIES.filter((c) => STOCK_SFX.some((x) => x.category === c));
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const matchesWords = (hay: string) => words.every((w) => hay.includes(w));
+
+  const treatmentGrid = (ids: readonly EffectId[], dissolve: boolean) => (
+    <div className="grid grid-cols-2 gap-2 pt-1" onKeyDown={pickGridNav}>
+      {ids.map((id, i) => (
+        <SoundTile key={id} id={id} live={live} index={i} />
+      ))}
+      {/* The handover on the sound sits with the treatments on the sound. It
+          is a transition — it drags to a cut, where the picture keeps cutting
+          and the sound crosses over. */}
+      {dissolve && <CrossDissolveTile index={AUDIO_EFFECT_IDS.length} />}
+    </div>
+  );
+  const soundGrid = (items: StockSfx[], fullNames = false) => (
+    <div className="grid grid-cols-2 gap-2 pt-1" onKeyDown={pickGridNav}>
+      {items.map((x) => (
+        <SfxCard key={x.id} sound={x} fullName={fullNames} />
+      ))}
+    </div>
+  );
+
+  // An open group: just its cards.
+  if (open === FAVORITES) {
+    const items = favoriteIds
+      .map((id) => STOCK_SFX.find((x) => x.id === id))
+      .filter((x): x is StockSfx => x !== undefined);
+    return (
+      <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-1 pb-4">
+        {/* Favorites come from every family, so each card carries its own. */}
+        {items.length > 0 ? (
+          soundGrid(items, true)
+        ) : (
+          <div className="py-2 text-[12px] text-muted-foreground">
+            Star a sound to keep it here.
+          </div>
+        )}
+      </ScrollArea>
+    );
+  }
+  if (open === TREATMENTS) {
+    return (
+      <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-1 pb-4">
+        {treatmentGrid(AUDIO_EFFECT_IDS, true)}
+      </ScrollArea>
+    );
+  }
+  if (open) {
+    return (
+      <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-1 pb-4">
+        {soundGrid(STOCK_SFX.filter((x) => x.category === open))}
+      </ScrollArea>
+    );
+  }
+
+  let body: React.ReactNode;
+  if (words.length > 0) {
+    const ids = AUDIO_EFFECT_IDS.filter((id) => matchesWords(EFFECT_LABELS[id].toLowerCase()));
+    const dissolve = matchesWords(TRANSITION_STYLE_LABELS[CROSS_DISSOLVE].toLowerCase());
+    const hits = STOCK_SFX.filter((x) =>
+      matchesWords([x.id, x.category, x.prompt, ...x.tags].join(" ").toLowerCase())
+    ).slice(0, SFX_SEARCH_LIMIT);
+    const sections = families
+      .map((c) => ({ c, items: hits.filter((x) => x.category === c) }))
+      .filter(({ items }) => items.length > 0);
+    body =
+      ids.length === 0 && !dissolve && hits.length === 0 ? (
+        <div className="py-2 text-[12px] text-muted-foreground">No sounds match.</div>
+      ) : (
+        <>
+          {(ids.length > 0 || dissolve) && (
+            <Section title={TREATMENTS}>{treatmentGrid(ids, dissolve)}</Section>
+          )}
+          {sections.map(({ c, items }) => (
+            <Section key={c} title={c}>
+              {soundGrid(items)}
+            </Section>
+          ))}
+        </>
+      );
+  } else {
+    const rows: { group: SoundGroup; count: number }[] = [
+      { group: FAVORITES, count: favoriteIds.length },
+      { group: TREATMENTS, count: AUDIO_EFFECT_IDS.length + 1 },
+      ...families.map((c) => ({ group: c, count: STOCK_SFX.filter((x) => x.category === c).length })),
+    ];
+    body = (
+      <div className="flex flex-col">
+        {rows.map((r) => (
+          <button
+            key={r.group}
+            type="button"
+            onClick={() => onOpen(r.group)}
+            // The hover pad hangs outside the row, so the name sits on the
+            // search field's left edge and the chevron on its right.
+            className="-mx-2 flex h-9 items-center gap-2 rounded-lg px-2 text-[12.5px] font-medium hover:bg-muted"
+          >
+            <span className="flex-1 truncate text-left">{r.group}</span>
+            <span className="font-mono text-[10px] text-muted-foreground tabular-nums">{r.count}</span>
+            <ChevronRight className="size-3.5 text-muted-foreground" />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="shrink-0 px-3.5 pb-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search sounds"
+            aria-label="Search sounds"
+            className="h-8 pl-8 text-[12px]"
+          />
+        </div>
+      </div>
+      <ScrollArea className="min-h-0 flex-1" contentClassName="flex flex-col gap-4 px-3.5 pt-1 pb-4">
+        {body}
+      </ScrollArea>
+    </>
+  );
+}
+
+/** A family's heading over its cards in the search results. */
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[12px] font-semibold tracking-tight">{title}</span>
+      {children}
+    </div>
+  );
+}
+
+/** One sound effect: the same card as the treatments, with its real waveform,
+ * its length in the corner, and a "+" that drops it at the playhead. Picking
+ * a sound plays it — by click or by arrowing onto it — so a run through the
+ * list is heard; picking it again stops it. */
+function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: boolean }) {
+  const pickId = `stock:${sound.id}`;
+  const { picked, pick } = useAssetPick(pickId);
+  const projectId = useEditor((s) => s.projectId);
+  const playing = usePreviewAudio((s) => s.url === sound.file);
+  const { flash, attachReveal } = useRevealFlash("stock", sound.id);
+  const copyRef = useRefCopy(() => [refFromStockSfx(sound)]);
+  const starred = useSoundFavorites((s) => s.ids.includes(sound.id));
+  const label = fullName ? stockTitle(sound.id) : sfxName(sound);
+  const choose = () => {
+    pick();
+    const preview = usePreviewAudio.getState();
+    if (picked) preview.stop(sound.file);
+    else if (preview.url !== sound.file) preview.toggle(sound.file);
+  };
+  const add = () => {
+    if (!projectId) return;
+    void importStockAudio(projectId, { url: sound.file, name: stockTitle(sound.id), duration: sound.duration })
+      .then((a) => useEditor.getState().addAssetAtPlayhead(a.id))
+      .catch(() => {});
+  };
+  return (
+    <SoundCard
+      cardRef={(el) => {
+        attachReveal(el);
+        copyRef(el);
+      }}
+      pickId={pickId}
+      label={label}
+      marked={picked}
+      flash={flash}
+      onChoose={choose}
+      onDragStart={(e) => {
+        setRefDragData(e, refFromStockSfx(sound));
+        setObjectDragImage(e);
+      }}
+      onDragEnd={clearRefDrag}
+      figure={<PeakStrip peaks={sound.peaks} className="mt-0 h-7 text-muted-foreground/70" />}
+      playing={playing}
+      onTogglePlay={() => usePreviewAudio.getState().toggle(sound.file)}
+      trailing={
+        // The add button lands on the length while the card is hovered.
+        <span className="shrink-0 font-mono text-[9px] text-muted-foreground tabular-nums transition-opacity group-hover:opacity-0">
+          {sound.duration.toFixed(1)}s
+        </span>
+      }
+      corner={
+        <>
+          <button
+            type="button"
+            title="Add at the playhead"
+            aria-label={`Add ${label} at the playhead`}
+            onClick={add}
+            className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100 hover:scale-105"
+          >
+            <Plus className="size-3" />
+          </button>
+          {/* The star stays once set; unstarred it shows on hover, so a card
+              that is not a favorite reads clean. */}
+          <button
+            type="button"
+            title={starred ? "Remove from favorites" : "Add to favorites"}
+            aria-label={`${starred ? "Remove" : "Add"} ${label} ${starred ? "from" : "to"} favorites`}
+            aria-pressed={starred}
+            onClick={() => useSoundFavorites.getState().toggle(sound.id)}
+            className={cn(
+              "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105",
+              starred ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            )}
+          >
+            <Star className={cn("size-3", starred && "fill-current")} />
+          </button>
+        </>
+      }
+    />
   );
 }
 

@@ -56,7 +56,11 @@ export function pickGridNav(e: React.KeyboardEvent<HTMLElement>) {
   if (from < 0) return;
   e.preventDefault();
   e.stopPropagation();
-  const cols = tiles.filter((t) => t.offsetTop === tiles[0].offsetTop).length;
+  // Rows are read from the viewport, since a tile's offsetTop is relative to
+  // its nearest positioned ancestor and a card wrapped for its overlays would
+  // report 0 like every other.
+  const top = tiles[0].getBoundingClientRect().top;
+  const cols = tiles.filter((t) => Math.abs(t.getBoundingClientRect().top - top) < 1).length;
   const step =
     e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" ? -cols : cols;
   const to = from + step;
