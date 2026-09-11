@@ -1,0 +1,42 @@
+// The blog on donkeycut.com/blog. A row is the post's metadata; the MDX body
+// and every image live in R2 under blog/<id>/ (src/lib/blog/keys.ts), so the
+// article text is never in the repository or the database.
+
+enum BlogPostStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model BlogPost {
+  id           String         @id @default(cuid())
+  slug         String         @unique
+  status       BlogPostStatus @default(DRAFT)
+  title        String
+  // The meta description, and the line under a card.
+  excerpt      String         @default("")
+  // The answer-first line under the article title.
+  summary      String?
+  tags         String[]       @default([])
+  keywords     String[]       @default([])
+  featured     Boolean        @default(false)
+  // The date shown on the post and the one the list sorts by; set in the CMS.
+  publishedAt  DateTime?
+  // Shown as "Updated …" when later than publishedAt.
+  revisedAt    DateTime?
+  headerKey    String?
+  headerAlt    String?
+  // CSS object-position for the header crop, "x% y%".
+  headerFocus  String?
+  thumbnailKey String?
+  // Overrides the <title>; the post title when empty.
+  seoTitle     String?
+  // Overrides the canonical URL when the piece was first published elsewhere.
+  canonicalUrl String?
+  noIndex      Boolean        @default(false)
+  bodyVersion  Int            @default(0)
+  authorUserId String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([status, publishedAt])
+}
