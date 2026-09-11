@@ -3,6 +3,7 @@
 import { useEffect, type CSSProperties, type ReactNode } from "react";
 
 import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
+import { SuCrumbProvider } from "@/app/su/SuCrumb";
 import { SuHeader } from "@/app/su/SuHeader";
 import { SuSidebar } from "@/app/su/SuSidebar";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
@@ -35,17 +36,19 @@ export function SuShell({ children }: { children: ReactNode }) {
       <NoSessionReplay />
       <RailState />
       <SuSidebar />
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <SuHeader />
-        <div className="min-h-0 flex-1">
-          <div className="mx-auto h-full w-full max-w-6xl px-4 md:px-10">
-            {/* The header is sticky and opaque, so the top of the gap below
-                it lives here: a focus ring on the first control needs room
-                that the header cannot paint over. */}
-            <div className="h-full px-px pt-1 pb-px">{children}</div>
+      <SuCrumbProvider>
+        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+          <SuHeader />
+          <div className="min-h-0 flex-1">
+            <div className="mx-auto h-full w-full max-w-6xl px-4 md:px-10">
+              {/* The header is sticky and opaque, so the top of the gap below
+                  it lives here: a focus ring on the first control needs room
+                  that the header cannot paint over. */}
+              <div className="h-full px-px pt-1 pb-px">{children}</div>
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+      </SuCrumbProvider>
     </SidebarProvider>
   );
 }

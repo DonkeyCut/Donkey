@@ -1,5 +1,6 @@
 "use client";
 
+import { Ellipsis, ExternalLink, Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -9,9 +10,17 @@ import { HeaderFocusPicker } from "@/app/su/blog/[id]/HeaderFocusPicker";
 import { ImageUpload } from "@/app/su/blog/[id]/ImageUpload";
 import { TagInput } from "@/app/su/blog/[id]/TagInput";
 import { Field } from "@/app/su/Field";
+import { useSuCrumb } from "@/app/su/SuCrumb";
 import { SuStandIn } from "@/app/su/SuStandIn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -127,6 +136,8 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
     draftRef.current = draft;
   }, [draft]);
 
+  useSuCrumb(draft.title.trim() || "Untitled post");
+
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(saved), [draft, saved]);
   const busy = save.isPending || publish.isPending || unpublish.isPending;
   const published = post.status === "PUBLISHED";
@@ -234,10 +245,6 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
   return (
     <Tabs defaultValue="write" className="gap-6 pb-9">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/blog" />}>
-          ← Posts
-        </Button>
-        <Badge variant={published ? "default" : "outline"}>{published ? "Published" : "Draft"}</Badge>
         <TabsList variant="line">
           <TabsTrigger value="write">Write</TabsTrigger>
           <TabsTrigger value="details">Details</TabsTrigger>
@@ -249,31 +256,46 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
           </span>
         ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => void openPreview()}>
-            Preview
-          </Button>
-          {published ? (
-            <Button
-              size="sm"
-              variant="outline"
-              nativeButton={false}
-              render={<a href={`${SU_APP_ORIGIN}/blog/${post.slug}`} target="_blank" rel="noreferrer" />}
-            >
-              View
-            </Button>
-          ) : null}
+          <Badge variant={published ? "default" : "outline"}>{published ? "Published" : "Draft"}</Badge>
           <Button size="sm" variant={dirty ? "default" : "outline"} disabled={busy || !dirty} onClick={() => void doSave()}>
             {save.isPending ? "Saving…" : "Save"}
           </Button>
-          {published ? (
-            <Button size="sm" variant="outline" disabled={busy} onClick={doUnpublish}>
-              {unpublish.isPending ? "Unpublishing…" : "Unpublish"}
-            </Button>
-          ) : (
+          {published ? null : (
             <Button size="sm" disabled={busy} onClick={() => void doPublish()}>
               {publish.isPending ? "Publishing…" : "Publish"}
             </Button>
           )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={<Button size="icon-sm" variant="outline" aria-label="More actions" disabled={busy} />}
+            >
+              <Ellipsis />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => void openPreview()}>
+                <Eye />
+                Preview
+              </DropdownMenuItem>
+              {published ? (
+                <DropdownMenuItem
+                  nativeButton={false}
+                  render={<a href={`${SU_APP_ORIGIN}/blog/${post.slug}`} target="_blank" rel="noreferrer" />}
+                >
+                  <ExternalLink />
+                  View on the site
+                </DropdownMenuItem>
+              ) : null}
+              {published ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={doUnpublish}>
+                    <EyeOff />
+                    {unpublish.isPending ? "Unpublishing…" : "Unpublish"}
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
