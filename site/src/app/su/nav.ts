@@ -64,7 +64,6 @@ export const SU_NAV = [
     href: "/blog",
     label: "Blog",
     title: "Blog",
-    description: "The posts on donkeycut.com/blog.",
   },
   {
     href: "/experiments",
