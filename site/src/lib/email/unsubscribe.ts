@@ -1,7 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
-import { getResend, isResendConfigured } from "@/lib/email/resend";
 import { prisma } from "@/lib/prisma";
 
 // Unsubscribe links authenticate with an HMAC over the userId, keyed by a
@@ -48,23 +47,12 @@ export function unsubscribeActionUrl(userId: string): string {
   return `${DONKEYCUT_CANONICAL}/api/email/unsubscribe?token=${unsubscribeToken(userId)}`;
 }
 
-type SetUnsubscribedOptions = {
-  // The Resend webhook passes false: the change came from Resend, so echoing
-  // it back would loop.
-  mirrorToResend?: boolean;
-};
-
-// The database row is authoritative; the Resend contact mirror is best-effort,
-// so a Resend outage can never block the user's choice. A missing user (deleted
-// account, dev-bypass caller) is a quiet no-op — unsubscribing is idempotent by
-// contract.
-export async function setMarketingUnsubscribed(
-  userId: string,
-  unsubscribed: boolean,
-  { mirrorToResend = true }: SetUnsubscribedOptions = {},
-): Promise<void> {
+// The database row is the record every marketing send reads. A missing user
+// (deleted account, dev-bypass caller) is a quiet no-op — unsubscribing is
+// idempotent by contract.
+export async function setMarketingUnsubscribed(userId: string, unsubscribed: boolean): Promise<void> {
   const user = await prisma.user.findUnique({
-    select: { email: true },
+    select: { id: true },
     where: { id: userId },
   });
   if (!user) {
@@ -77,20 +65,6 @@ export async function setMarketingUnsubscribed(
     update: { marketingUnsubscribedAt },
     where: { userId },
   });
-
-  if (!mirrorToResend || !isResendConfigured()) {
-    return;
-  }
-  const { error } = await getResend().contacts.update({
-    email: user.email,
-    unsubscribed,
-  });
-  if (error) {
-    console.error("[email] failed to mirror unsubscribe state to Resend", {
-      error,
-      userId,
-    });
-  }
 }
 
 // Gate for non-essential sends. Transactional and security email skips it;

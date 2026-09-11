@@ -5,15 +5,14 @@ import { deleteLibraryAssetCascade } from "@/cut/server/cloud/library";
 import { deleteProjectCascade } from "@/cut/server/cloud/projects";
 import { deletePrefix, INFERENCE_PREFIX, R2NotConfiguredError } from "@/cut/server/cloud/r2";
 import { getStripe, StripeNotConfiguredError } from "@/lib/billing/stripe";
-import { getResend, isResendConfigured } from "@/lib/email/resend";
 import { defineJob, JobFailure } from "@/lib/jobs/registry";
 import { deletedAccountKey } from "@/lib/onboarding/deleted-account";
 import { prisma } from "@/lib/prisma";
 
 // Deletes an account and everything it owns. Order matters: the Stripe
 // customer goes first (deleting it cancels any live subscription, so a crash
-// mid-job can never leave a paying customer with no account), then the Resend
-// contact, then the Cut cloud content — per-project and per-asset cascades,
+// mid-job can never leave a paying customer with no account), then the Cut
+// cloud content — per-project and per-asset cascades,
 // which also clear R2 objects and HLS ladder records — then the user-keyed
 // rows that carry no foreign key, an R2 sweep of anything left under the
 // user's prefixes, then the record the address leaves behind so a second
@@ -35,15 +34,6 @@ export const deleteUserJob = defineJob(
         const alreadyGone =
           e instanceof Stripe.errors.StripeError && e.code === "resource_missing";
         if (!alreadyGone && !(e instanceof StripeNotConfiguredError)) throw e;
-      }
-    }
-
-    if (isResendConfigured()) {
-      const removed = await getResend().contacts.remove({ email: user.email });
-      if (removed.error && removed.error.name !== "not_found") {
-        throw new Error(
-          `Resend contact remove failed: ${removed.error.name}: ${removed.error.message}`,
-        );
       }
     }
 
