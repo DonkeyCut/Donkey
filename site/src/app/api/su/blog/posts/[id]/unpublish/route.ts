@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { adminPost } from "@/lib/blog/admin";
 import { readBody } from "@/lib/blog/read";
-import { revalidateBlog } from "@/lib/blog/revalidate";
+import { revalidateBlogLater } from "@/lib/blog/revalidate";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
@@ -18,6 +18,6 @@ export const POST = withSuperUser(async (_request, { params }: Params) => {
   const existing = await prisma.blogPost.findUnique({ select: { id: true }, where: { id: id.data } });
   if (!existing) return notFoundResponse();
   const row = await prisma.blogPost.update({ where: { id: id.data }, data: { status: "DRAFT" } });
-  revalidateBlog([row.slug]);
+  revalidateBlogLater([row.slug]);
   return NextResponse.json({ post: { ...adminPost(row), body: await readBody(row.id) } });
 });

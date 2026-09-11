@@ -31,3 +31,7 @@ export const blogPageCount = (total: number) => Math.max(1, Math.ceil(total / BL
 export const blogPath = (slug: string) => `/blog/${slug}`;
 // Page 1 is the canonical /blog; later pages live under /blog/page/N.
 export const blogPageHref = (page: number) => (page <= 1 ? "/blog" : `/blog/page/${page}`);
+
+// Marks a page's loading state, so a warm-up fetch can tell the shell from
+// the finished page.
+export const BLOG_SKELETON_ATTR = "data-blog-skeleton";

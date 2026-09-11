@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { adminPost } from "@/lib/blog/admin";
 import { readBody } from "@/lib/blog/read";
-import { revalidateBlog } from "@/lib/blog/revalidate";
+import { revalidateBlogNow } from "@/lib/blog/revalidate";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
@@ -34,6 +34,6 @@ export const POST = withSuperUser(async (_request, { params }: Params) => {
       ? [prisma.blogPost.updateMany({ where: { featured: true, id: { not: id.data } }, data: { featured: false } })]
       : []),
   ]);
-  revalidateBlog([row.slug]);
+  await revalidateBlogNow([row.slug]);
   return NextResponse.json({ post: { ...adminPost(row), body } });
 });

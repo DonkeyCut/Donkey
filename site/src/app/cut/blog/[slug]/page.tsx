@@ -9,7 +9,7 @@ import { BlogShell } from "@/app/cut/blog/_components/BlogShell";
 import { formatBlogDate, titleCaseTag } from "@/app/cut/blog/_components/blogDate";
 import { ScrollToHash, TableOfContents } from "@/app/cut/blog/_components/TableOfContents";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
-import { blogPath } from "@/lib/blog/keys";
+import { BLOG_SKELETON_ATTR, blogPath } from "@/lib/blog/keys";
 import { getPost, listPublishedSlugs, type BlogPostPage } from "@/lib/blog/read";
 import { PostArticle } from "@/lib/blog/render";
 
@@ -179,7 +179,7 @@ async function Post({ params }: Params) {
 
 function PostSkeleton() {
   return (
-    <div aria-hidden className="animate-pulse">
+    <div aria-hidden className="animate-pulse" {...{ [BLOG_SKELETON_ATTR]: "" }}>
       <div className="mb-8 h-60 rounded-2xl border-2 border-ink/10 bg-cream" />
       <div className="max-w-[72ch] space-y-4">
         <div className="h-10 w-3/4 rounded-lg bg-ink/10" />

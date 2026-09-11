@@ -5,7 +5,7 @@ import { del, getObject, putObject } from "@/cut/server/cloud/r2";
 import { adminPost } from "@/lib/blog/admin";
 import { encodeBlogImage } from "@/lib/blog/images";
 import { blogImageKey, blogImageUrl, blogPrefix } from "@/lib/blog/keys";
-import { revalidateBlog } from "@/lib/blog/revalidate";
+import { revalidateBlogLater } from "@/lib/blog/revalidate";
 import { invalidResponse } from "@/lib/config/experimentList";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
@@ -51,6 +51,6 @@ export const POST = withSuperUser(async (request, { params }: Params) => {
     where: { id: existing.id },
     data: kind === "header" ? { headerKey: key } : { thumbnailKey: key },
   });
-  revalidateBlog([row.slug]);
+  revalidateBlogLater([row.slug]);
   return NextResponse.json({ image, post: adminPost(row) });
 });

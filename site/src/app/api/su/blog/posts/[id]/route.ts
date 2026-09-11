@@ -6,7 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { adminPost } from "@/lib/blog/admin";
 import { blogBodyKey, blogPrefix } from "@/lib/blog/keys";
 import { readBody } from "@/lib/blog/read";
-import { revalidateBlog } from "@/lib/blog/revalidate";
+import { revalidateBlogLater } from "@/lib/blog/revalidate";
 import { blogPostInputSchema } from "@/lib/blog/schema";
 import { invalidResponse } from "@/lib/config/experimentList";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
@@ -69,7 +69,7 @@ export const PUT = withSuperUser(async (request, { params }: Params) => {
     }
     throw error;
   }
-  revalidateBlog([existing.slug, row.slug]);
+  revalidateBlogLater([existing.slug, row.slug]);
   return NextResponse.json({ post: { ...adminPost(row), body: input.body } });
 });
 
@@ -81,6 +81,6 @@ export const DELETE = withSuperUser(async (_request, { params }: Params) => {
   if (!existing) return notFoundResponse();
   await prisma.blogPost.delete({ where: { id: id.data } });
   await deletePrefix(blogPrefix(existing.id));
-  revalidateBlog([existing.slug]);
+  revalidateBlogLater([existing.slug]);
   return NextResponse.json({ ok: true });
 });

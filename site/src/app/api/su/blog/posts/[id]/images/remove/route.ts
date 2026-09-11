@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { adminPost } from "@/lib/blog/admin";
-import { revalidateBlog } from "@/lib/blog/revalidate";
+import { revalidateBlogLater } from "@/lib/blog/revalidate";
 import { invalidResponse } from "@/lib/config/experimentList";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
@@ -24,6 +24,6 @@ export const POST = withSuperUser(async (request, { params }: Params) => {
     where: { id: existing.id },
     data: parsed.data.kind === "header" ? { headerKey: null, headerAlt: null, headerFocus: null } : { thumbnailKey: null },
   });
-  revalidateBlog([row.slug]);
+  revalidateBlogLater([row.slug]);
   return NextResponse.json({ post: adminPost(row) });
 });

@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { formatBlogDate, titleCaseTag } from "@/app/cut/blog/_components/blogDate";
 import type { BlogPostCard } from "@/lib/blog/read";
-import { blogPath } from "@/lib/blog/keys";
+import { BLOG_SKELETON_ATTR, blogPath } from "@/lib/blog/keys";
 
 function TagPills({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null;
@@ -109,7 +109,7 @@ export function BlogGrid({ posts, featured }: { posts: BlogPostCard[]; featured:
 
 export function BlogGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-y-8 lg:grid-cols-3" aria-hidden>
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-y-8 lg:grid-cols-3" aria-hidden {...{ [BLOG_SKELETON_ATTR]: "" }}>
       {Array.from({ length: 6 }, (_, i) => (
         <div key={i} className="aspect-[4/5] animate-pulse rounded-2xl border-2 border-ink/10 bg-cream" />
       ))}
