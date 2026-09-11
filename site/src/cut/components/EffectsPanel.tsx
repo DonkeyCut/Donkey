@@ -656,7 +656,7 @@ function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: bool
               starred ? "opacity-100" : "opacity-0 group-hover:opacity-100"
             )}
           >
-            <Star className={cn("size-3", starred && "fill-current")} />
+            <Star className={cn("size-3", starred && "fill-yellow-400 text-yellow-400")} />
           </button>
         </>
       }
