@@ -1114,24 +1114,43 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (ids.length === 0) throw new ToolError("ids is required: the clip ids to measure.");
       const targetId = input.target_id === undefined || input.target_id === null ? ids[0] : String(input.target_id);
       if (!ids.includes(targetId)) ids.push(targetId);
-      const rows = new Map<
-        string,
-        { id: string; name: string; kind: "video" | "soundtrack"; sourceDb: number; peakDb: number; audibleSeconds: number; volume: number; levelDb: number; muted?: boolean }
-      >();
+      type Row = {
+        id: string;
+        name: string;
+        kind: "video" | "soundtrack";
+        sourceDb: number;
+        loudestFrameDb: number;
+        audibleSeconds: number;
+        volume: number;
+        levelDb: number;
+        muted?: boolean;
+      };
+      const rows = new Map<string, Row | { id: string; name: string; kind: "video" | "soundtrack"; noAudio: string }>();
       await eachScanned(ids, async (id) => {
         const { asset, clip, from, to } = resolveWatchRange(s, { clip_id: id });
-        if (asset.type === "image") throw new ToolError(`"${asset.name}" is an image — it has no sound.`);
-        const level = await measureSourceLevel(asset.url, { from, ...(to !== undefined ? { to } : {}) }).catch((e) => {
-          throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
-        });
         const soundtrack = s.audioClips.some((a) => a.id === clip!.id);
+        const kind = soundtrack ? "soundtrack" : "video";
+        if (asset.type === "image") {
+          rows.set(id, { id, name: asset.name, kind, noAudio: "An image has no sound." });
+          return;
+        }
+        // A source with no audio track is reported, and the rest of the
+        // list still measures: "balance these three" must not fail on the
+        // one silent generated clip among them.
+        let level: Awaited<ReturnType<typeof measureSourceLevel>>;
+        try {
+          level = await measureSourceLevel(asset.url, { from, ...(to !== undefined ? { to } : {}) });
+        } catch (e) {
+          rows.set(id, { id, name: asset.name, kind, noAudio: e instanceof Error ? e.message : "Could not read the audio." });
+          return;
+        }
         const { volume = 1, muted = false } = clip as { volume?: number; muted?: boolean };
         rows.set(id, {
           id,
           name: asset.name,
-          kind: soundtrack ? "soundtrack" : "video",
+          kind,
           sourceDb: level.rmsDb,
-          peakDb: level.peakDb,
+          loudestFrameDb: level.loudestFrameDb,
           audibleSeconds: level.audibleSeconds,
           volume: round2(volume),
           // A muted clip plays nothing; its level is what it would play unmuted.
@@ -1140,13 +1159,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         });
       });
       const target = rows.get(targetId)!;
+      if ("noAudio" in target) throw new ToolError(`"${target.name}" (the target) has no sound to match: ${target.noAudio}`);
       // The volume that would land each clip at the target's level, from the
-      // clip's own level under its current volume. The volume range is 0..3, so
-      // a clip too quiet to reach the target says how far it gets.
+      // media's own level — so a clip turned all the way down still has a
+      // number to come back up to. The volume range is 0..3, so a clip too
+      // quiet to reach the target says how far it gets.
       const clips = ids.map((id) => {
         const row = rows.get(id)!;
-        if (id === targetId) return row;
-        const wanted = row.volume * 10 ** ((target.levelDb - row.levelDb) / 20);
+        if (id === targetId || "noAudio" in row) return row;
+        const wanted = 10 ** ((target.levelDb - row.sourceDb) / 20);
         const volumeToMatch = round2(clamp(wanted, 0, 3));
         return {
           ...row,

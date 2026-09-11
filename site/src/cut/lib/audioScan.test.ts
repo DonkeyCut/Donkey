@@ -164,7 +164,7 @@ describe("scanLevel", () => {
     const half = 20 * Math.log10(0.5);
     const level = await scanLevel(chunks([0.5, 0, 0.5]), { from: 0 });
     expect(level.rmsDb).toBeCloseTo(half, 1);
-    expect(level.peakDb).toBeCloseTo(half, 1);
+    expect(level.loudestFrameDb).toBeCloseTo(half, 1);
     expect(level.audibleSeconds).toBeCloseTo(2, 1);
   });
 

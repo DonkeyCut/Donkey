@@ -158,8 +158,8 @@ const LEVEL_FLOOR_DB = -45;
 export interface LevelScan {
   /** Power-mean level of the audible frames — what the ear averages. */
   rmsDb: number;
-  /** The loudest 20ms frame. */
-  peakDb: number;
+  /** The loudest 20ms frame, as RMS — a sample peak sits higher. */
+  loudestFrameDb: number;
   /** Seconds of the span that read as audible. */
   audibleSeconds: number;
 }
@@ -188,7 +188,7 @@ export function levelFrom(env: Envelope): LevelScan {
   const mean = audible > 0 ? power / audible : heard > 0 ? allPower / heard : 0;
   return {
     rmsDb: round2(Math.max(QUIET, 10 * Math.log10(mean || 1e-10))),
-    peakDb: round2(peak),
+    loudestFrameDb: round2(peak),
     audibleSeconds: round2(audible * env.hop),
   };
 }
