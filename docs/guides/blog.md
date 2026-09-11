@@ -35,7 +35,7 @@ happens inside the cache too, so a page costs one compile per publish.
 A row carries what the index card and the search result need: the address, the
 title, the meta description, an optional answer-first summary, tags, keywords,
 the publish and revised dates, whether it is the featured post, and the header
-and thumbnail images with the header's focus point. The search controls are
+and thumbnail images, each with the focus point it is cropped around. The search controls are
 per post: a meta title that overrides the title, a canonical address that
 overrides the page's own, and a switch that keeps the post out of results.
 
@@ -58,9 +58,10 @@ date in the future. The editor shows the same checklist the route enforces.
 
 Image bytes go straight to the bucket. The browser asks for a signed upload
 address under the post, puts the bytes there, then names that key to the
-encode route. The route reads it, encodes it to the size its role needs (the
-header crop, the thumbnail crop, or a width-capped inline image) as AVIF,
-writes it under its content hash, and deletes the upload. The media Worker
+encode route. The route reads it, encodes it as AVIF under the width its role
+needs, writes it under its content hash, and deletes the upload. The picture
+keeps its shape: the pages crop the header and the thumbnail to their boxes
+around the focus set by dragging the picture in the editor. The media Worker
 serves those hashed keys under `blog/` without a token and with an immutable
 cache; the article source and the upload scratch keys stay private.
 
