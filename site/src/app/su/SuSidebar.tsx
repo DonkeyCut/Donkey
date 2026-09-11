@@ -89,7 +89,7 @@ export function SuSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const here = suSurfaceAt(pathname);
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { setOpenMobile } = useSidebar();
 
   useEffect(() => {
     for (const href of RAIL_PAGES) router.prefetch(href);
@@ -100,10 +100,7 @@ export function SuSidebar() {
   }, [pathname, setOpenMobile]);
 
   return (
-    <Sidebar
-      collapsible={isMobile ? "offcanvas" : "none"}
-      className="hidden w-60 shrink-0 border-r border-sidebar-border md:flex"
-    >
+    <Sidebar collapsible="offcanvas" className="border-sidebar-border">
       <SidebarHeader className="mb-3 flex-row items-center gap-2.5 px-4 pt-4">
         <span className="grid size-9 shrink-0 place-items-center p-0.5">
           <img

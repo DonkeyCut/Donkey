@@ -1,11 +1,11 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 
 import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
 import { SuHeader } from "@/app/su/SuHeader";
 import { SuSidebar } from "@/app/su/SuSidebar";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { useWarmAnalyticsRollup } from "@/queries/analytics";
 
 // The section's two-pane shell. It mounts only for a super user: the proxy
@@ -29,9 +29,11 @@ export function SuShell({ children }: { children: ReactNode }) {
   return (
     <SidebarProvider
       translate="no"
+      style={{ "--sidebar-width": "15rem" } as CSSProperties}
       className="app-surface h-screen min-h-0 bg-background font-system text-foreground antialiased"
     >
       <NoSessionReplay />
+      <RailState />
       <SuSidebar />
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <SuHeader />
@@ -46,4 +48,15 @@ export function SuShell({ children }: { children: ReactNode }) {
       </main>
     </SidebarProvider>
   );
+}
+
+// The rail opens by default so the shell prerenders one way; a rail the
+// super user hid stays hidden across loads through the cookie the provider
+// writes on every toggle.
+function RailState() {
+  const { setOpen } = useSidebar();
+  useEffect(() => {
+    if (/(?:^|;\s*)sidebar_state=false(?:;|$)/.test(document.cookie)) setOpen(false);
+  }, [setOpen]);
+  return null;
 }
