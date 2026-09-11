@@ -32,7 +32,16 @@ export function useSliderCheckpoint() {
   };
 }
 
-export function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
+export function InfoTip({
+  label,
+  side = "bottom",
+  children,
+}: {
+  label: string;
+  /** Where the tip opens; a strip along the bottom of the screen opens up. */
+  side?: "top" | "bottom";
+  children: React.ReactNode;
+}) {
   return (
     <TooltipProvider>
       <Tooltip>
@@ -42,7 +51,7 @@ export function InfoTip({ label, children }: { label: string; children: React.Re
         >
           <Info className="size-3.5" />
         </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-60">
+        <TooltipContent side={side} className="max-w-60">
           {children}
         </TooltipContent>
       </Tooltip>

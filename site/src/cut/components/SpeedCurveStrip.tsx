@@ -11,7 +11,6 @@ import {
   SPEED_CURVE_PRESETS,
   speedCurveOf,
   speedCurvePresetOf,
-  type Retime,
   type SpeedNode,
 } from "@donkeycut/effects-kit";
 import {
@@ -22,6 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { PICKED_RING } from "@/cut/lib/assetPick";
+import { InfoTip } from "@/cut/components/panelBits";
 import { startDrag } from "@/cut/lib/drag";
 import {
   playheadAt,
@@ -106,10 +106,6 @@ function Strip({ clip }: { clip: VideoClip }) {
       : null,
   );
   const [draft, setDraft] = useState<SpeedNode[] | null>(null);
-  // The axis a drag started on. Width is timeline time, so editing the curve
-  // moves the ground under the cursor; holding the axis for the length of a
-  // drag keeps the node under the pointer and the tiles still.
-  const [heldAxis, setHeldAxis] = useState<Retime | null>(null);
   const nodes = useMemo(
     () => draft ?? speedCurveOf(clip) ?? flatSpeedCurve(clip),
     [draft, clip],
@@ -138,15 +134,14 @@ function Strip({ clip }: { clip: VideoClip }) {
 
   const innerW = Math.max(1, width - PAD_X * 2);
   const innerH = GRAPH_H - PAD_Y * 2;
-  // Left to right is the clip as it plays, the same axis the timeline bar
-  // uses, so a node sits over the picture the bar shows at that moment.
-  const axis = heldAxis ?? rt;
-  const axisLen = Math.max(1e-3, axis.len);
-  const xOf = (src: number) => PAD_X + (axis.tAt(src) / axisLen) * innerW;
+  // Left to right is the clip's trimmed source, `in` to `out`. Nodes live in
+  // source seconds, so a node holds its place while another one is dragged:
+  // changing a rate changes how long the footage plays, never where the
+  // footage is on the graph.
+  const span = Math.max(1e-6, clip.out - clip.in);
+  const xOf = (src: number) => PAD_X + ((src - clip.in) / span) * innerW;
   const srcOf = (x: number) =>
-    axis.srcAt(
-      Math.max(0, Math.min(axisLen, ((x - PAD_X) / innerW) * axisLen)),
-    );
+    clip.in + Math.max(0, Math.min(1, (x - PAD_X) / innerW)) * span;
   const yOf = (rate: number) =>
     PAD_Y +
     (1 - (Math.log10(clampRate(rate)) - LOG_MIN) / (LOG_MAX - LOG_MIN)) *
@@ -162,17 +157,34 @@ function Strip({ clip }: { clip: VideoClip }) {
     [asset?.beats, clip.in, clip.out],
   );
 
-  const curvePath = useMemo(() => {
-    if (innerW <= 1) return "";
+  // The curve, and the area between it and the 1× line wherever it dips
+  // under — the footage smoothing works on, shaded when smoothing is on so
+  // the button's reach is on the graph.
+  const { curvePath, slowPath } = useMemo(() => {
+    if (innerW <= 1) return { curvePath: "", slowPath: "" };
     const steps = Math.max(2, Math.min(400, Math.round(innerW / 2)));
+    // Sampled every couple of pixels, plus every node's own x, so the line
+    // passes through each node exactly however steep it turns there.
+    const xs: number[] = [];
+    for (let i = 0; i <= steps; i++) xs.push(PAD_X + (i / steps) * innerW);
+    for (const n of nodes) xs.push(xOf(n[0]));
+    xs.sort((a, b) => a - b);
     const pts: string[] = [];
-    for (let i = 0; i <= steps; i++) {
-      const x = PAD_X + (i / steps) * innerW;
-      pts.push(`${x.toFixed(1)},${yOf(rt.rateAtSrc(srcOf(x))).toFixed(1)}`);
+    const under: string[] = [];
+    const yOne = yOf(1);
+    for (const x of xs) {
+      const y = yOf(rt.rateAtSrc(srcOf(x)));
+      pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
+      under.push(`${x.toFixed(1)},${Math.max(y, yOne).toFixed(1)}`);
     }
-    return `M${pts.join("L")}`;
+    const x0 = PAD_X.toFixed(1);
+    const x1 = (PAD_X + innerW).toFixed(1);
+    return {
+      curvePath: `M${pts.join("L")}`,
+      slowPath: `M${under.join("L")}L${x1},${yOne.toFixed(1)}L${x0},${yOne.toFixed(1)}Z`,
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rt, axis, innerW, innerH]);
+  }, [rt, nodes, clip.in, clip.out, innerW, innerH]);
 
   // The playhead and the skimmer, mapped through the clip's map onto the
   // graph's axis. One DOM write per line per move.
@@ -194,6 +206,23 @@ function Strip({ clip }: { clip: VideoClip }) {
     paintLine(playheadRef.current, playheadAt());
     paintLine(skimRef.current, skimAt());
   };
+  // The playhead stays on the frame it was on. It is a timeline time, and
+  // every edit to the curve moves the footage under it; so when the map
+  // changes, the source second the playhead was over under the old map is
+  // found again under the new one and the playhead is put there. A play in
+  // progress keeps its clock.
+  const lastRt = useRef(rt);
+  useEffect(() => {
+    const prev = lastRt.current;
+    lastRt.current = rt;
+    if (prev === rt || useEditor.getState().playing) return;
+    const tLocal = playheadAt() - clip.start;
+    if (tLocal < -1e-6 || tLocal > prev.len + 1e-6) return;
+    const src = prev.srcAt(tLocal);
+    const next = clip.start + Math.max(0, Math.min(rt.len, rt.tAt(src)));
+    if (Math.abs(next - playheadAt()) > 1e-4) useEditor.getState().seek(next);
+  }, [rt, clip.start]);
+
   // The map and the geometry change with every draft and resize; the lines
   // read the newest through the ref and repaint after each render.
   useEffect(() => {
@@ -347,7 +376,6 @@ function Strip({ clip }: { clip: VideoClip }) {
   const onNodePointerDown = (e: React.PointerEvent, i: number) => {
     const node = nodes[i];
     pick(node[0]);
-    setHeldAxis(axis);
     const x0 = xOf(node[0]);
     const y0 = yOf(node[1]);
     const { lo, hi } = bounds(nodes, i);
@@ -369,7 +397,6 @@ function Strip({ clip }: { clip: VideoClip }) {
         pick(src);
       },
       onUp: (_dx, _dy, moved) => {
-        setHeldAxis(null);
         if (moved) commit(live);
       },
     });
@@ -418,7 +445,6 @@ function Strip({ clip }: { clip: VideoClip }) {
   // is "Custom", drawn as itself through the span.
   const presetId = speedCurvePresetOf(nodes, clip.in, clip.out);
   const preset = SPEED_CURVE_PRESETS.find((p) => p.id === presetId);
-  const span = Math.max(1e-6, clip.out - clip.in);
   const shape = useMemo<SpeedNode[]>(
     () =>
       preset?.shape ??
@@ -502,6 +528,21 @@ function Strip({ clip }: { clip: VideoClip }) {
             </MenuPrimitive.Arrow>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button
+          variant="outline"
+          size="xs"
+          className={cn(
+            "font-normal",
+            clip.smoothSlow && "border-[#0a84ff]/50 bg-[#0a84ff]/10 hover:bg-[#0a84ff]/15",
+          )}
+          aria-pressed={!!clip.smoothSlow}
+          onClick={() => useEditor.getState().setClipSmoothSlow(clip.id, !clip.smoothSlow)}
+        >
+          Smooth Slow-mo
+        </Button>
+        <InfoTip label="Smooth Slow-mo" side="top">
+          When on, everything under 1× is smoothed on export.
+        </InfoTip>
         <span className="mx-1 h-4 w-px bg-border" />
         <IconButton title="Add a node at the playhead" onClick={addAtPlayhead}>
           <Plus className="size-3.5" />
@@ -578,6 +619,7 @@ function Strip({ clip }: { clip: VideoClip }) {
               strokeOpacity={0.5}
             />
           ))}
+          {clip.smoothSlow && <path d={slowPath} fill="#0a84ff" fillOpacity={0.14} />}
           <path d={curvePath} fill="none" stroke="#0a84ff" strokeWidth={2} />
           {nodes.map((n, i) => {
             const isPicked = picked !== null && Math.abs(n[0] - picked) < 1e-6;
