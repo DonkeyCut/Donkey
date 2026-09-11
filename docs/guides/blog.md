@@ -44,6 +44,12 @@ a YouTube, Vimeo or direct file address, and two calls to action. Images in the
 article are plain markdown images pointing at the media host. A `## FAQs`
 section with `###` questions becomes FAQ structured data on its own.
 
+A button at the foot of the details fills them from the article: the text
+model writes the search copy, the tags, the keywords and the alt text, and
+describes one picture, which the image model paints and the route stores as
+the header and the thumbnail; the copy waits in the form to be looked over
+and saved.
+
 Publishing holds a post to a short contract: a title within the length a
 result shows, a meta description in range, both images, a body, and no publish
 date in the future. The editor shows the same checklist the route enforces.
