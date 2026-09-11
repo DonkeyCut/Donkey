@@ -57,8 +57,8 @@ export type BlogPostInput = z.infer<typeof blogPostInputSchema>;
 
 export type BlogPublishIssue = { path: string; message: string };
 
-// What has to be true before a post goes live. The same list drives the
-// editor's checklist and the publish route's refusal.
+// What a finished post has. The editor lists what is still missing as
+// suggestions; publishing does not wait for them.
 export function publishIssues(post: {
   title: string;
   excerpt: string;

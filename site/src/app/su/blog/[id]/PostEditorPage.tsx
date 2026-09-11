@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BlogEditor } from "@/app/su/blog/[id]/BlogEditor";
+import { DateTimeField } from "@/app/su/blog/[id]/DateTimeField";
 import { HeaderFocusPicker } from "@/app/su/blog/[id]/HeaderFocusPicker";
 import { ImageUpload } from "@/app/su/blog/[id]/ImageUpload";
 import { TagInput } from "@/app/su/blog/[id]/TagInput";
@@ -14,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { SU_APP_ORIGIN } from "@/cut/lib/hosts";
 import {
@@ -36,9 +38,9 @@ import {
   type BlogPostAdminWithBody,
 } from "@/queries/blog";
 
-// One post: the body on the left, everything the page and the search result
-// are built from on the right. Save writes the whole draft; Publish holds the
-// saved post to the contract in publishIssues and puts it on the site.
+// One post in two tabs: the writing (title and article) and the details the
+// page and the search result are built from. Save writes the whole draft;
+// Publish saves first, then puts the post on the site.
 
 export function PostEditorPage({ id }: { id: string }) {
   const post = useBlogPost(id);
@@ -74,20 +76,6 @@ const inputOf = (post: BlogPostAdminWithBody): BlogPostInput => ({
   body: post.body,
 });
 
-// datetime-local speaks local wall time without a zone; the row keeps an
-// instant.
-const toLocalInput = (iso: string | null): string => {
-  if (!iso) return "";
-  const date = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
-const fromLocalInput = (value: string): string | null => {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-};
-
 const issuesByPath = (error: unknown): Record<string, string> => {
   const map: Record<string, string> = {};
   if (error instanceof ApiError) {
@@ -103,6 +91,17 @@ function Count({ value, max, min = 0 }: { value: string; max: number; min?: numb
     <span className={`text-xs tabular-nums ${off ? "text-destructive" : "text-muted-foreground"}`}>
       {n}/{max}
     </span>
+  );
+}
+
+function CountedLabel({ htmlFor, children, value, max, min }: { htmlFor: string; children: string; value: string; max: number; min?: number }) {
+  return (
+    <div className="flex items-baseline justify-between">
+      <Label htmlFor={htmlFor} className="text-xs text-muted-foreground">
+        {children}
+      </Label>
+      <Count value={value} max={max} min={min} />
+    </div>
   );
 }
 
@@ -134,36 +133,40 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
 
   const patch = (next: Partial<BlogPostInput>) => setDraft((current) => ({ ...current, ...next }));
 
-  const doSave = useCallback(() => {
+  const fail = (error: Error) => {
+    setIssues(issuesByPath(error));
+    setNotice(error.message);
+  };
+
+  // Writes the draft; resolves true when it landed.
+  const doSave = useCallback(async () => {
     const submitted = draftRef.current;
-    if (save.isPending) return;
     setIssues({});
     setNotice(null);
-    save.mutate(submitted, {
-      onSuccess: ({ post: row }) => {
-        const next = inputOf(row);
-        setSaved(next);
-        // Keep what was typed during the save; otherwise take the row's
-        // normalized values so the form shows exactly what is stored.
-        setDraft((current) => (current === submitted ? next : current));
-      },
-      onError: (error) => {
-        setIssues(issuesByPath(error));
-        setNotice(error.message);
-      },
-    });
+    try {
+      const { post: row } = await save.mutateAsync(submitted);
+      const next = inputOf(row);
+      setSaved(next);
+      // Keep what was typed during the save; otherwise take the row's
+      // normalized values so the form shows exactly what is stored.
+      setDraft((current) => (current === submitted ? next : current));
+      return true;
+    } catch (error) {
+      fail(error as Error);
+      return false;
+    }
   }, [save]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        doSave();
+        if (!save.isPending) void doSave();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [doSave]);
+  }, [doSave, save.isPending]);
 
   useEffect(() => {
     if (!dirty) return;
@@ -174,7 +177,8 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  const doPublish = () => {
+  const doPublish = async () => {
+    if (dirty && !(await doSave())) return;
     setIssues({});
     setNotice(null);
     publish.mutate(undefined, {
@@ -184,10 +188,7 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
         setDraft((current) => ({ ...current, publishedAt: next.publishedAt }));
         setSlugTouched(true);
       },
-      onError: (error) => {
-        setIssues(issuesByPath(error));
-        setNotice(error.message);
-      },
+      onError: fail,
     });
   };
 
@@ -196,12 +197,17 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
     unpublish.mutate(undefined, { onError: (error) => setNotice(error.message) });
   };
 
+  const openPreview = async () => {
+    if (dirty && !(await doSave())) return;
+    window.open(`${SU_APP_ORIGIN}/api/blog/preview?id=${encodeURIComponent(post.id)}`, "_blank", "noopener");
+  };
+
   const uploadInline = useCallback(
     async (file: File) => (await uploadBlogImage(post.id, file, "inline")).image.url,
     [post.id],
   );
 
-  const checklist = publishIssues({
+  const suggestions = publishIssues({
     title: draft.title,
     excerpt: draft.excerpt,
     summary: draft.summary,
@@ -226,12 +232,16 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
     ) : null;
 
   return (
-    <div className="space-y-6 pb-9">
+    <Tabs defaultValue="write" className="gap-6 pb-9">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/blog" />}>
           ← Posts
         </Button>
         <Badge variant={published ? "default" : "outline"}>{published ? "Published" : "Draft"}</Badge>
+        <TabsList variant="line">
+          <TabsTrigger value="write">Write</TabsTrigger>
+          <TabsTrigger value="details">Details</TabsTrigger>
+        </TabsList>
         {dirty ? <span className="text-xs text-muted-foreground">Unsaved changes</span> : null}
         {notice ? (
           <span role="alert" className="text-xs text-destructive">
@@ -239,15 +249,7 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
           </span>
         ) : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={dirty}
-            title={dirty ? "Save to preview" : undefined}
-            onClick={() =>
-              window.open(`${SU_APP_ORIGIN}/api/blog/preview?id=${encodeURIComponent(post.id)}`, "_blank", "noopener")
-            }
-          >
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void openPreview()}>
             Preview
           </Button>
           {published ? (
@@ -260,7 +262,7 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
               View
             </Button>
           ) : null}
-          <Button size="sm" variant={dirty ? "default" : "outline"} disabled={busy || !dirty} onClick={doSave}>
+          <Button size="sm" variant={dirty ? "default" : "outline"} disabled={busy || !dirty} onClick={() => void doSave()}>
             {save.isPending ? "Saving…" : "Save"}
           </Button>
           {published ? (
@@ -268,21 +270,38 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
               {unpublish.isPending ? "Unpublishing…" : "Unpublish"}
             </Button>
           ) : (
-            <Button
-              size="sm"
-              disabled={busy || dirty || checklist.length > 0}
-              title={dirty ? "Save to publish" : checklist.length > 0 ? "See the checklist" : undefined}
-              onClick={doPublish}
-            >
+            <Button size="sm" disabled={busy} onClick={() => void doPublish()}>
               {publish.isPending ? "Publishing…" : "Publish"}
             </Button>
           )}
         </div>
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="min-w-0 space-y-5">
-          <div className="space-y-2">
+      <TabsContent value="write" className="space-y-4">
+        <div className="space-y-1.5">
+          <CountedLabel htmlFor="title" value={draft.title} max={BLOG_TITLE_MAX}>
+            Title
+          </CountedLabel>
+          <Input
+            id="title"
+            value={draft.title}
+            placeholder="Post title"
+            className="h-12 text-xl font-semibold md:text-xl"
+            onChange={(e) => {
+              const title = e.target.value;
+              patch(slugTouched ? { title } : { title, slug: slugFromTitle(title) || draftRef.current.slug });
+            }}
+          />
+          {error("title")}
+        </div>
+        <BlogEditor markdown={saved.body} diffMarkdown={saved.body} onChange={(body) => patch({ body })} uploadImage={uploadInline} />
+        {error("body")}
+      </TabsContent>
+
+      <TabsContent value="details" className="space-y-8">
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold">Header image</h2>
+          <ImageUpload postId={post.id} kind="header" url={post.headerUrl} label="Header, 1080×240 on the page" className="h-60 w-full">
             {post.headerUrl ? (
               <HeaderFocusPicker
                 src={post.headerUrl}
@@ -290,119 +309,42 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
                 focus={draft.headerFocus}
                 onChange={(focus) => patch({ headerFocus: focus })}
               />
-            ) : (
-              <div className="flex h-60 items-center justify-center rounded-2xl border-2 border-dashed text-sm text-muted-foreground">
-                Header image, shown 1080×240 on the page
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              <ImageUpload postId={post.id} kind="header" hasImage={Boolean(post.headerUrl)} />
-              {post.headerUrl ? (
-                <span className="text-xs text-muted-foreground">Click or drag on the image to set what stays in frame.</span>
-              ) : null}
-            </div>
-            {error("header")}
-            {post.headerUrl ? (
-              <Field label="Header alt text" htmlFor="headerAlt">
+            ) : null}
+          </ImageUpload>
+          {post.headerUrl ? (
+            <>
+              <p className="text-xs text-muted-foreground">Click or drag on the image to set what stays in frame.</p>
+              <Field label="Alt text" htmlFor="headerAlt">
                 <Input id="headerAlt" value={draft.headerAlt} onChange={(e) => patch({ headerAlt: e.target.value })} />
                 {error("headerAlt")}
               </Field>
-            ) : null}
-          </div>
+            </>
+          ) : null}
+        </section>
 
-          <div className="space-y-1.5">
-            <div className="flex items-baseline justify-between">
-              <Label htmlFor="title" className="text-xs text-muted-foreground">
-                Title
-              </Label>
-              <Count value={draft.title} max={BLOG_TITLE_MAX} />
-            </div>
-            <Input
-              id="title"
-              value={draft.title}
-              placeholder="Post title"
-              className="h-11 text-lg font-semibold"
-              onChange={(e) => {
-                const title = e.target.value;
-                patch(slugTouched ? { title } : { title, slug: slugFromTitle(title) || draftRef.current.slug });
-              }}
-            />
-            {error("title")}
-          </div>
-
-          <Field label="Address" htmlFor="slug">
-            <div className="flex items-center gap-1">
-              <span className="shrink-0 text-sm text-muted-foreground">donkeycut.com/blog/</span>
-              <Input
-                id="slug"
-                value={draft.slug}
-                onChange={(e) => {
-                  setSlugTouched(true);
-                  patch({ slug: e.target.value.toLowerCase() });
-                }}
-              />
-            </div>
-            {error("slug")}
-          </Field>
-
-          <div className="space-y-1.5">
-            <div className="flex items-baseline justify-between">
-              <Label htmlFor="summary" className="text-xs text-muted-foreground">
-                Summary, the answer-first line under the title
-              </Label>
-              <Count value={draft.summary} max={BLOG_DESCRIPTION_MAX} min={BLOG_DESCRIPTION_MIN} />
-            </div>
-            <Textarea id="summary" rows={2} value={draft.summary} onChange={(e) => patch({ summary: e.target.value })} />
-            {error("summary")}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Article</Label>
-            <BlogEditor
-              markdown={saved.body}
-              diffMarkdown={saved.body}
-              onChange={(body) => patch({ body })}
-              uploadImage={uploadInline}
-            />
-            {error("body")}
-          </div>
-        </div>
-
-        <aside className="space-y-8">
+        <div className="grid gap-8 md:grid-cols-2">
           <section className="space-y-4">
-            <h2 className="text-sm font-semibold">Publishing</h2>
-            {checklist.length > 0 ? (
-              <ul className="space-y-1 text-xs text-muted-foreground">
-                {checklist.map((issue) => (
-                  <li key={issue.path}>· {issue.message}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-xs text-muted-foreground">{published ? "Live on the site." : "Ready to publish."}</p>
-            )}
-            <Field label="Publish date" htmlFor="publishedAt">
-              <Input
-                id="publishedAt"
-                type="datetime-local"
-                value={toLocalInput(draft.publishedAt)}
-                onChange={(e) => patch({ publishedAt: fromLocalInput(e.target.value) })}
-              />
-              {error("publishedAt")}
+            <h2 className="text-sm font-semibold">Page</h2>
+            <Field label="Address" htmlFor="slug">
+              <div className="flex items-center gap-1">
+                <span className="shrink-0 text-sm text-muted-foreground">donkeycut.com/blog/</span>
+                <Input
+                  id="slug"
+                  value={draft.slug}
+                  onChange={(e) => {
+                    setSlugTouched(true);
+                    patch({ slug: e.target.value.toLowerCase() });
+                  }}
+                />
+              </div>
+              {error("slug")}
             </Field>
-            <Field label="Revised date" htmlFor="revisedAt">
-              <Input
-                id="revisedAt"
-                type="datetime-local"
-                value={toLocalInput(draft.revisedAt)}
-                onChange={(e) => patch({ revisedAt: fromLocalInput(e.target.value) })}
-              />
-              {error("revisedAt")}
-            </Field>
-            <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="featured" className="text-xs text-muted-foreground">
-                Featured on the index
-              </Label>
-              <Switch id="featured" checked={draft.featured} onCheckedChange={(featured) => patch({ featured })} />
+            <div className="space-y-1.5">
+              <CountedLabel htmlFor="summary" value={draft.summary} max={BLOG_DESCRIPTION_MAX} min={BLOG_DESCRIPTION_MIN}>
+                Summary, the answer-first line under the title
+              </CountedLabel>
+              <Textarea id="summary" rows={3} value={draft.summary} onChange={(e) => patch({ summary: e.target.value })} />
+              {error("summary")}
             </div>
             <Field label="Tags" htmlFor="tags">
               <TagInput
@@ -415,31 +357,38 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
               />
               {error("tags")}
             </Field>
-          </section>
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold">Thumbnail</h2>
-            {post.thumbnailUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- pre-encoded AVIF from the media host, not Next-optimizable
-              <img src={post.thumbnailUrl} alt="" className="aspect-[8/5] w-full rounded-xl border-2 border-ink object-cover" />
-            ) : (
-              <div className="flex aspect-[8/5] w-full items-center justify-center rounded-xl border-2 border-dashed text-xs text-muted-foreground">
-                800×500 on the index
-              </div>
-            )}
-            <ImageUpload postId={post.id} kind="thumbnail" hasImage={Boolean(post.thumbnailUrl)} />
-            {error("thumbnail")}
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="featured" className="text-xs text-muted-foreground">
+                Featured on the index
+              </Label>
+              <Switch id="featured" checked={draft.featured} onCheckedChange={(featured) => patch({ featured })} />
+            </div>
+            <Field label="Publish date" htmlFor="publishedAt">
+              <DateTimeField id="publishedAt" value={draft.publishedAt} onChange={(publishedAt) => patch({ publishedAt })} />
+              {error("publishedAt")}
+            </Field>
+            <Field label="Revised date" htmlFor="revisedAt">
+              <DateTimeField id="revisedAt" value={draft.revisedAt} onChange={(revisedAt) => patch({ revisedAt })} />
+              {error("revisedAt")}
+            </Field>
+            <div className="space-y-2">
+              <h3 className="text-xs font-medium text-muted-foreground">Thumbnail</h3>
+              <ImageUpload
+                postId={post.id}
+                kind="thumbnail"
+                url={post.thumbnailUrl}
+                label="Thumbnail, 800×500 on the index"
+                className="aspect-[8/5] w-full max-w-sm"
+              />
+            </div>
           </section>
 
           <section className="space-y-4">
             <h2 className="text-sm font-semibold">Search</h2>
             <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between">
-                <Label htmlFor="seoTitle" className="text-xs text-muted-foreground">
-                  Meta title
-                </Label>
-                <Count value={draft.seoTitle} max={BLOG_SEO_TITLE_MAX} />
-              </div>
+              <CountedLabel htmlFor="seoTitle" value={draft.seoTitle} max={BLOG_SEO_TITLE_MAX}>
+                Meta title
+              </CountedLabel>
               <Input
                 id="seoTitle"
                 value={draft.seoTitle}
@@ -449,12 +398,9 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
               {error("seoTitle")}
             </div>
             <div className="space-y-1.5">
-              <div className="flex items-baseline justify-between">
-                <Label htmlFor="excerpt" className="text-xs text-muted-foreground">
-                  Meta description
-                </Label>
-                <Count value={draft.excerpt} max={BLOG_DESCRIPTION_MAX} min={BLOG_DESCRIPTION_MIN} />
-              </div>
+              <CountedLabel htmlFor="excerpt" value={draft.excerpt} max={BLOG_DESCRIPTION_MAX} min={BLOG_DESCRIPTION_MIN}>
+                Meta description
+              </CountedLabel>
               <Textarea id="excerpt" rows={3} value={draft.excerpt} onChange={(e) => patch({ excerpt: e.target.value })} />
               {error("excerpt")}
             </div>
@@ -484,9 +430,19 @@ function PostEditor({ post }: { post: BlogPostAdminWithBody }) {
               </Label>
               <Switch id="noIndex" checked={draft.noIndex} onCheckedChange={(noIndex) => patch({ noIndex })} />
             </div>
+            {suggestions.length > 0 ? (
+              <div className="space-y-1">
+                <h3 className="text-xs font-medium text-muted-foreground">Suggested before publishing</h3>
+                <ul className="space-y-1 text-xs text-muted-foreground">
+                  {suggestions.map((issue) => (
+                    <li key={issue.path}>· {issue.message}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
-        </aside>
-      </div>
-    </div>
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 }

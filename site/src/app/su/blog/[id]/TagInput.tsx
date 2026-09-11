@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { useId, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 
 // A list of words as chips. Enter or a comma adds what is typed, Backspace on
@@ -40,20 +41,17 @@ export function TagInput({
       {value.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {value.map((word) => (
-            <span
-              key={word}
-              className="inline-flex items-center gap-1 rounded-full border bg-muted px-2.5 py-0.5 text-xs font-medium"
-            >
+            <Badge key={word} variant="secondary" className="gap-1 pr-1">
               {word}
               <button
                 type="button"
                 aria-label={`Remove ${word}`}
-                className="-mr-1 rounded-full p-0.5 text-muted-foreground hover:text-foreground"
+                className="rounded-full p-0.5 text-muted-foreground hover:text-foreground"
                 onClick={() => onChange(value.filter((other) => other !== word))}
               >
                 <X className="size-3" />
               </button>
-            </span>
+            </Badge>
           ))}
         </div>
       ) : null}

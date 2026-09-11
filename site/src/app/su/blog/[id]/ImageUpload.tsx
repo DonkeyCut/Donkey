@@ -1,55 +1,111 @@
 "use client";
 
-import { useRef } from "react";
+import { ImagePlus, Trash2, Upload } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import type { BlogImageKind } from "@/lib/blog/images";
+import { cn } from "@/lib/utils";
 import { useRemoveBlogImage, useUploadBlogImage } from "@/queries/blog";
 
 export const BLOG_IMAGE_ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/avif";
 
-// Upload, replace and remove for the header or the thumbnail. The bytes go
-// straight to storage and come back encoded; the row is updated by the route,
-// so the preview the caller draws follows the query.
+// The image box is the upload: empty, it takes a click or a dropped file;
+// filled, it draws the image (or whatever the caller puts there, such as the
+// focus picker) with replace and remove on hover. The bytes go straight to
+// storage and come back encoded; the route updates the row, so the caller's
+// image follows the query.
 export function ImageUpload({
   postId,
   kind,
-  hasImage,
-  onUploaded,
+  url,
+  label,
+  className,
+  children,
 }: {
   postId: string;
   kind: Exclude<BlogImageKind, "inline">;
-  hasImage: boolean;
-  onUploaded?: () => void;
+  url: string | null;
+  label: string;
+  className?: string;
+  children?: ReactNode;
 }) {
   const upload = useUploadBlogImage(postId);
   const remove = useRemoveBlogImage(postId);
   const input = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
   const busy = upload.isPending || remove.isPending;
 
+  const take = (file: File | undefined) => {
+    if (file && file.type.startsWith("image/")) upload.mutate({ file, kind });
+  };
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <input
-        ref={input}
-        type="file"
-        accept={BLOG_IMAGE_ACCEPT}
-        className="hidden"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-          if (file) upload.mutate({ file, kind }, { onSuccess: () => onUploaded?.() });
+    <div className="space-y-1.5">
+      <div
+        className={cn("group relative overflow-hidden rounded-2xl", className)}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setOver(true);
         }}
-      />
-      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => input.current?.click()}>
-        {upload.isPending ? "Uploading…" : hasImage ? "Replace" : "Upload"}
-      </Button>
-      {hasImage ? (
-        <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => remove.mutate(kind)}>
-          {remove.isPending ? "Removing…" : "Remove"}
-        </Button>
-      ) : null}
-      {upload.isError ? <span className="text-xs text-destructive">{upload.error.message}</span> : null}
-      {remove.isError ? <span className="text-xs text-destructive">{remove.error.message}</span> : null}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          event.preventDefault();
+          setOver(false);
+          take(event.dataTransfer.files[0]);
+        }}
+      >
+        <input
+          ref={input}
+          type="file"
+          accept={BLOG_IMAGE_ACCEPT}
+          className="hidden"
+          onChange={(event) => {
+            take(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+        {url ? (
+          <>
+            {children ?? <img src={url} alt="" className="size-full object-cover" />}
+            <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+              <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()}>
+                <Upload />
+                Replace
+              </Button>
+              <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => remove.mutate(kind)}>
+                <Trash2 />
+                Remove
+              </Button>
+            </div>
+          </>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => input.current?.click()}
+            className={cn(
+              "flex size-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed text-sm text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground",
+              over && "border-foreground/60 bg-muted text-foreground",
+            )}
+          >
+            <ImagePlus className="size-5" />
+            <span>{label}</span>
+            <span className="text-xs">Click or drop an image</span>
+          </button>
+        )}
+        {busy ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-sm">
+            {upload.isPending ? "Uploading…" : "Removing…"}
+          </div>
+        ) : over && url ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/70 text-sm">
+            Drop to replace
+          </div>
+        ) : null}
+      </div>
+      {upload.isError ? <p className="text-xs text-destructive">{upload.error.message}</p> : null}
+      {remove.isError ? <p className="text-xs text-destructive">{remove.error.message}</p> : null}
     </div>
   );
 }
