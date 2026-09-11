@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, MoreHorizontal, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
+import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, MoreHorizontal, PanelBottomClose, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
 import { EFFECT_CHIP_ICONS, effectIconKind, SHAPE_CHIP_ICONS, TRANSITION_ICONS } from "@/cut/components/entityIcons";
 import { Button } from "@/components/ui/button";
 import { GuidesMenu } from "@/cut/components/GuidesMenu";
@@ -2295,6 +2295,7 @@ export function Timeline() {
             <Button variant="ghost" size="sm" title="Fit timeline to window" onClick={fit}>
               Fit
             </Button>
+            <HideTimelineButton />
           </div>
           {barTight && <GuidesMenu />}
           {barTight && (
@@ -3506,8 +3507,28 @@ function TimelineToolsMenu({
             Fit
           </Button>
         </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => useEditor.getState().setTimelineOpen(false)}>
+          <PanelBottomClose /> Hide timeline
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Folds the timeline away under the preview; the button over the canvas
+ * brings it back. */
+function HideTimelineButton() {
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      aria-label="Hide timeline"
+      title="Hide timeline"
+      onClick={() => useEditor.getState().setTimelineOpen(false)}
+    >
+      <PanelBottomClose />
+    </Button>
   );
 }
 

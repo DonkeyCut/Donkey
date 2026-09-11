@@ -160,6 +160,7 @@ export function Editor({
   const [opened, setOpened] = useState(false);
   const exportOpen = useEditor((s) => s.exportOpen);
   const aiOpen = useEditor((s) => s.aiOpen);
+  const timelineOpen = useEditor((s) => s.timelineOpen);
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
   // The inspector only earns its column when the selection has a panel to
   // show; otherwise (nothing selected, a subtitle cue, a transition bar — the
@@ -1195,10 +1196,12 @@ export function Editor({
         </div>
         {/* The strip anchors to the timeline's top edge and floats over the
             row above it. */}
-        <div className="relative min-w-0">
-          <SpeedCurveStrip />
-          <Timeline />
-        </div>
+        {timelineOpen && (
+          <div className="relative min-w-0">
+            <SpeedCurveStrip />
+            <Timeline />
+          </div>
+        )}
       </div>
       {(!viewer || sharedFeatures?.chat) && (
         <AiPanel

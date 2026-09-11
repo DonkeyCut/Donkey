@@ -396,6 +396,9 @@ export interface EditorState {
   /** Whether the settings panel shows its body beside its tab rail. Hiding it
    * holds across sessions and selections: only the rail brings it back. */
   inspectorOpen: boolean;
+  /** Whether the timeline shows under the preview. Hiding it holds across
+   * sessions; a button over the canvas brings it back. */
+  timelineOpen: boolean;
   /** In-progress or finished brief-to-video run; persisted on ProjectDoc.genvideo
    * and driven by the genScene store. Absent when no scene was generated. */
   genvideo?: VideoProject;
@@ -827,6 +830,7 @@ export interface EditorState {
   setDropActive: (v: "media" | "other" | null) => void;
   setAiOpen: (v: boolean) => void;
   setInspectorOpen: (v: boolean) => void;
+  setTimelineOpen: (v: boolean) => void;
   undo: () => void;
   redo: () => void;
   upsertRender: (r: RenderRecord) => void;
@@ -1807,6 +1811,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     dropActive: null,
     aiOpen: typeof window !== "undefined" && localStorage.getItem("cut-ai-open") === "1",
     inspectorOpen: typeof window === "undefined" || localStorage.getItem("cut-inspector-open") !== "0",
+    timelineOpen: typeof window === "undefined" || localStorage.getItem("cut-timeline-open") !== "0",
     genvideo: undefined,
     renders: [],
 
@@ -5004,6 +5009,14 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       set({ inspectorOpen: v });
       try {
         localStorage.setItem("cut-inspector-open", v ? "1" : "0");
+      } catch {
+        // View preference only.
+      }
+    },
+    setTimelineOpen: (v) => {
+      set({ timelineOpen: v });
+      try {
+        localStorage.setItem("cut-timeline-open", v ? "1" : "0");
       } catch {
         // View preference only.
       }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Check, Copy, Loader2, ZoomIn, ZoomOut } from "lucide-react";
+import { Check, Copy, Loader2, PanelTopClose, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
@@ -706,7 +706,25 @@ export function Preview() {
           </div>
         </div>
       )}
+      <ShowTimelineButton />
     </section>
+  );
+}
+
+/** Sits over the canvas while the timeline is folded away and brings it back. */
+function ShowTimelineButton() {
+  const open = useEditor((s) => s.timelineOpen);
+  if (open) return null;
+  return (
+    <button
+      type="button"
+      title="Show timeline"
+      aria-label="Show timeline"
+      onClick={() => useEditor.getState().setTimelineOpen(true)}
+      className="absolute right-3 bottom-3 z-20 grid size-8 place-items-center rounded-full border bg-background/95 text-foreground shadow-md backdrop-blur hover:bg-accent"
+    >
+      <PanelTopClose className="size-4" />
+    </button>
   );
 }
 
