@@ -91,6 +91,29 @@ function needsWorker(row: JobRow): boolean {
   );
 }
 
+/** A client's own id for an import — the phone's inspiration item, the
+ * page's pending card. One path segment's worth of characters. */
+const validImportKey = (key: unknown): key is string | undefined =>
+  key === undefined || (typeof key === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(key));
+
+/** The import the client already queued under this key. A phone that never
+ * heard the first answer, or a page retrying its card, posts the same link
+ * again with the key it made for the item and gets the job it already has —
+ * the link lands once. A job that failed or was canceled is not handed back:
+ * a repeat after one of those is the retry the client means. */
+async function importJobFor(userId: string, key: string | undefined): Promise<{ id: string } | null> {
+  if (!key) return null;
+  return prisma.cutRenderJob.findFirst({
+    where: {
+      userId,
+      kind: "import_url",
+      state: { in: ["queued", "running", "done"] },
+      spec: { path: ["key"], equals: key },
+    },
+    select: { id: true },
+  });
+}
+
 /** The most bytes an import may bring in: what is left of the account's
  * storage, under the hard ceiling. */
 async function importByteCeiling(userId: string): Promise<number> {
@@ -622,9 +645,16 @@ export const jobsCloud = {
    * engine's synchronous route. */
   async importUrl(userId: string, projectId: string, req: Request) {
     try {
-      const { url, audio } = (await req.json()) as { url?: string; audio?: boolean };
+      const { url, audio, key } = (await req.json()) as {
+        url?: string;
+        audio?: boolean;
+        key?: string;
+      };
       if (!url) return err("No URL provided.", 400);
+      if (!validImportKey(key)) return err("Bad import key.", 400);
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      const open = await importJobFor(userId, key);
+      if (open) return Response.json({ jobId: open.id });
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
       // What lands counts against storage, so an account with none left gets
@@ -641,6 +671,7 @@ export const jobsCloud = {
             url,
             maxBytes,
             ...(audio === true ? { audio: true } : {}),
+            ...(key ? { key } : {}),
           } as unknown as Prisma.InputJsonValue,
         },
       });
@@ -656,12 +687,16 @@ export const jobsCloud = {
    * the assets, and the client polls this job for them. */
   async importUrlToLibrary(userId: string, req: Request) {
     try {
-      const { url, origin, audio } = (await req.json()) as {
+      const { url, origin, audio, key } = (await req.json()) as {
         url?: string;
         origin?: string;
         audio?: boolean;
+        key?: string;
       };
       if (!url) return err("No URL provided.", 400);
+      if (!validImportKey(key)) return err("Bad import key.", 400);
+      const open = await importJobFor(userId, key);
+      if (open) return Response.json({ jobId: open.id });
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
       const over = await quotaCheck(userId, 0);
@@ -679,6 +714,7 @@ export const jobsCloud = {
             // An inspiration link's downloads land in the Inspiration folder,
             // carrying the origin the Camera Roll and Library filters read.
             ...(origin === "inspiration" ? { origin } : {}),
+            ...(key ? { key } : {}),
           } as unknown as Prisma.InputJsonValue,
         },
       });

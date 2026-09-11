@@ -277,20 +277,24 @@ export function estimatedShape(url: string): { width: number; height: number } {
 const SHORT_FORM_URL =
   /^https?:\/\/[^/]*(?:youtube\.com\/shorts\/|tiktok\.com\/|instagram\.com\/(?:reels?|stories)\/)/i;
 
+/** Import a link into a shelf. `key` is the caller's own id for this import —
+ * the pending card's — and rides to the cloud with the link, so a retry of
+ * the same card gets the job it already queued and the link lands once. */
 export async function importUrlToLibrary(
   url: string,
   residency: Residency = activeResidency(),
   onStage?: (stage: ImportStage) => void,
+  key?: string,
 ): Promise<LibraryAsset[]> {
   url = normalizeLink(url);
   if (residency === "browser")
-    return importUrlThroughCloud(url, "browser", onStage);
+    return importUrlThroughCloud(url, "browser", onStage, key);
   onStage?.("downloading");
   const backend = backendFor(residency);
   const res = await backend.fetch("/api/cut/library/import-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, ...(key ? { key } : {}) }),
   });
   // The engine downloads inside the request; the cloud answers {jobId} and a
   // worker does the fetch, so that side waits on the job.
@@ -324,7 +328,7 @@ export async function importUrlToLibrary(
   // either: it is the shelf the user was importing to.
   const reason = body.error ?? "Could not import that URL.";
   try {
-    return await importUrlThroughCloud(url, residency, onStage);
+    return await importUrlThroughCloud(url, residency, onStage, key);
   } catch {
     throw new Error(reason);
   }
@@ -345,12 +349,13 @@ async function importUrlThroughCloud(
   url: string,
   target: Residency,
   onStage?: (stage: ImportStage) => void,
+  key?: string,
 ): Promise<LibraryAsset[]> {
   onStage?.("downloading");
   const res = await cloudBackend.fetch("/api/cut/library/import-url", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, ...(key ? { key } : {}) }),
   });
   const started = await apiJson<{ jobId?: string }>(res);
   if (!res.ok || !started.jobId)

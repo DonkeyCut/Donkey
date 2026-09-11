@@ -2,6 +2,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Prisma } from "@/generated/prisma/client";
+import { deleteLibraryAssetCascade } from "../server/cloud/library";
 import { dedupeName, inspirationFolderId, safeFileName, typeOf } from "../server/cloud/util";
 import type { LibraryAsset } from "../server/library";
 import { probeDuration } from "../server/frames";
@@ -64,6 +65,12 @@ export async function runImportUrlJob(
       update: {},
     });
   }
+
+  // A run of this job cut short — a worker drained mid-landing, a heartbeat
+  // lost — left rows behind for whichever worker claimed the retry. They go
+  // before this run lands anything, so the link lands once however many times
+  // the job runs.
+  if (toLibrary) await dropEarlierLanding(job);
 
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cut-dl-"));
   try {
@@ -136,7 +143,7 @@ export async function runImportUrlJob(
           });
         }
         const asset = await addLibraryRow(
-          job.userId,
+          job,
           objectId,
           fileName,
           f.file,
@@ -164,10 +171,22 @@ export async function runImportUrlJob(
   }
 }
 
+/** The library rows an earlier run of this job landed, taken down with their
+ * media. Tombstoned, so a phone that already listed one drops it too. */
+async function dropEarlierLanding(job: ClaimedJob): Promise<void> {
+  const rows = await prisma.cutLibraryAsset.findMany({
+    where: { userId: job.userId, deletedAt: null, meta: { path: ["importJobId"], equals: job.id } },
+    select: { id: true },
+  });
+  for (const row of rows)
+    await deleteLibraryAssetCascade(job.userId, row.id, { tombstone: true });
+}
+
 /** Register one downloaded file as a library asset, probing the local copy for
- * the shape the library card reads (duration, pixel size). */
+ * the shape the library card reads (duration, pixel size). The row names the
+ * job that landed it, so a rerun of that job can find it. */
 async function addLibraryRow(
-  userId: string,
+  job: ClaimedJob,
   mediaObjectId: string,
   fileName: string,
   localFile: string,
@@ -188,10 +207,11 @@ async function addLibraryRow(
     ...(source ? { source } : {}),
     ...(posterFile ? { posterFile } : {}),
     ...(filing ? { origin: filing.origin } : {}),
+    importJobId: job.id,
   };
   const row = await prisma.cutLibraryAsset.create({
     data: {
-      userId,
+      userId: job.userId,
       mediaObjectId,
       folderId: filing?.folderId ?? null,
       meta: meta as unknown as Prisma.InputJsonValue,

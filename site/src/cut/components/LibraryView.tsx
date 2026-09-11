@@ -526,8 +526,13 @@ export function LibraryView() {
     const id = crypto.randomUUID();
     const run = async () => {
       try {
-        const imported = await importUrlToLibrary(value, residency, (stage) =>
-          setStage(id, stage),
+        // The card's id goes with the link: a retry from this card gets the
+        // job it already queued.
+        const imported = await importUrlToLibrary(
+          value,
+          residency,
+          (stage) => setStage(id, stage),
+          id,
         );
         if (folderId) {
           for (const asset of imported) {
