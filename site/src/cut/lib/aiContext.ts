@@ -482,9 +482,9 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
 /** A clip's rate as the model reads it: one number, or the average plus the
  * curve's nodes as [sourceSeconds, rate] when the rate changes through the
  * footage. */
-function describeRate(c: { speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; in: number; out: number }) {
+function describeRate(c: { speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; smoothSlow?: boolean; in: number; out: number }) {
   const nodes = speedCurveOf(c);
-  const reverse = c.reverse ? { reverse: true } : {};
+  const reverse = { ...(c.reverse ? { reverse: true } : {}), ...(c.smoothSlow ? { smooth: true } : {}) };
   if (!nodes) return { speed: r(c.speed ?? 1), ...reverse };
   return {
     speed: r(retimeOf(c).rate),
@@ -541,7 +541,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
         : {}),
     ...(c.rotation ? { rotation: c.rotation } : {}),
     ...((c.opacity ?? 1) < 1 ? { opacity: r(c.opacity ?? 1) } : {}),
-    ...(retimeOf(c).rate !== 1 || c.speedCurve || c.reverse ? describeRate(c) : {}),
+    ...(retimeOf(c).rate !== 1 || c.speedCurve || c.reverse || c.smoothSlow ? describeRate(c) : {}),
     ...(c.grade ? { colorGrade: c.grade } : {}),
     ...(c.mask ? { mask: c.mask } : {}),
     ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),

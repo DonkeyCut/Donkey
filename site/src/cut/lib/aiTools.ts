@@ -955,6 +955,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
                 out: round2(clip.out),
                 speed: round2(speed),
                 ...(clip.reverse ? { reverse: true } : {}),
+                ...(clip.smoothSlow ? { smooth: true } : {}),
                 ...(speedCurveOf(clip)
                   ? {
                       speedCurve: speedCurveOf(clip)!.map(([at, rate]) => [round2(at), round2(rate)]),
@@ -3585,16 +3586,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   set_speed: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       const reverse = typeof input.reverse === "boolean" ? input.reverse : undefined;
-      if (!isNum(input.speed) && reverse === undefined)
-        throw new ToolError("speed (e.g. 1.5) or reverse is required.");
+      const smooth = typeof input.smooth === "boolean" ? input.smooth : undefined;
+      if (!isNum(input.speed) && reverse === undefined && smooth === undefined)
+        throw new ToolError("speed (e.g. 1.5), reverse, or smooth is required.");
       const before = clipLen(clip);
       if (isNum(input.speed)) s.setClipSpeed(clip.id, input.speed);
       if (reverse !== undefined) s.setClipReverse(clip.id, reverse);
+      if (smooth !== undefined) s.setClipSmoothSlow(clip.id, smooth);
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return {
         id: next.id,
         speed: next.speed ?? 1,
         ...(next.reverse ? { reverse: true } : {}),
+        ...(next.smoothSlow ? { smooth: true } : {}),
         lenBefore: round2(before),
         lenAfter: round2(clipLen(next)),
         ...tracksAfter(),
@@ -3633,11 +3637,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           s.setClipSpeedCurve(clip.id, nodes);
         }
       }
+      // After the curve, so a rejected curve leaves the flag alone too.
+      if (typeof input.smooth === "boolean") s.setClipSmoothSlow(clip.id, input.smooth);
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       const curve = speedCurveOf(next);
       return {
         id: next.id,
         speed: round2(retimeOf(next).rate),
+        ...(next.smoothSlow ? { smooth: true } : {}),
         nodes: curve ? curve.map(([at, speed]) => ({ at: round2(at), speed: round2(speed) })) : [],
         lenBefore: round2(before),
         lenAfter: round2(clipLen(next)),
@@ -4140,7 +4147,7 @@ function resolveWatchTarget(
   input: Record<string, unknown>
 ): {
   asset: MediaAsset;
-  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean } | null;
+  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; smoothSlow?: boolean } | null;
 } {
   if (input.clip_id !== undefined && input.clip_id !== null) {
     const id = String(input.clip_id);
@@ -4167,7 +4174,7 @@ function resolveWatchRange(
 ): {
   projectId: string;
   asset: MediaAsset;
-  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean } | null;
+  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; smoothSlow?: boolean } | null;
   speed: number;
   from: number;
   to: number | undefined;
