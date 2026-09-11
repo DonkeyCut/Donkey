@@ -38,10 +38,11 @@ import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { applyEffectToCanvas, evalOverlayFrame, retimeOf, grainTile, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
+import { applyEffectToCanvas, evalOverlayFrame, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
+import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
 import { renderElementPng } from "./textRender";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
@@ -170,10 +171,18 @@ const READER_GRACE = 2;
 const BACK_WINDOW_BYTES = 64 << 20;
 const BACK_WINDOW_MAX = 12;
 /** Canvases the reader's pools cycle, in frames: the forward pool plus the
- * backward window and the two frames a fill needs around it. */
+ * backward window, the frame it keeps beyond the ask, and the two a fill
+ * needs around it. */
 export function readerPoolFrames(r: { backWindow: number }): number {
-  return READER_POOL + (r.backWindow > 0 ? r.backWindow + 2 : 0);
+  return READER_POOL + (r.backWindow > 0 ? r.backWindow + 3 : 0);
 }
+
+const frameOfWrapped = (wrapped: WrappedCanvas): Frame => ({
+  kind: "ready",
+  image: wrapped.canvas,
+  width: wrapped.canvas.width,
+  height: wrapped.canvas.height,
+});
 
 /** A clip's source time at timeline time `t`. */
 function sourceTimeAt(span: ClipSpan, t: number): number {
@@ -280,22 +289,59 @@ export class ClipReader {
    * source has none — a still-less video, or a time past its end. A render
    * never reports `pending`: it waits for the decode instead of moving on. */
   async frameAt(at: number): Promise<Frame> {
-    let sink = await this.open();
     if (this.still) return this.still;
-    if (!sink) return MISSING_FRAME;
+    // A plain read cycles the pool past whatever pair was held.
+    this.pair = null;
+    const wrapped = await this.wrappedAt(at);
+    return wrapped ? frameOfWrapped(wrapped) : this.still ?? MISSING_FRAME;
+  }
+
+  /** The last pair handed out, kept while the asks stay between its two
+   * frames: an output frame between the same two sources costs no decode. */
+  private pair: { a: WrappedCanvas; b: WrappedCanvas | null } | null = null;
+
+  /**
+   * The source frames either side of `at`, for a clip smoothing its slow
+   * motion: `a` covers `at`, `b` is the next frame, or null at the end of the
+   * source. Asks walk forward like the plain read does — the pair advances by
+   * one decode when `at` passes `b`, and the frame that was `b` becomes `a`
+   * without being decoded again.
+   */
+  async pairAt(at: number): Promise<{ a: WrappedCanvas; b: WrappedCanvas | null } | null> {
+    if (this.still) return null;
+    const held = this.pair;
+    // A pair with no `b` is the source's last frame; it covers every ask
+    // from there on, so a render finishing on it never reads again.
+    if (held && at >= held.a.timestamp - 1e-4 && (!held.b || at < held.b.timestamp - 1e-4)) return held;
+    let a: WrappedCanvas | null;
+    if (held?.b && at >= held.b.timestamp - 1e-4 && at < held.b.timestamp + Math.max(held.b.duration, 1e-3) - 1e-4) {
+      a = held.b;
+      this.lastAt = at;
+    } else {
+      this.pair = null;
+      a = await this.wrappedAt(at);
+    }
+    if (!a) return null;
+    const b = await this.wrappedAt(a.timestamp + Math.max(a.duration, 1e-3));
+    this.pair = { a, b: b && b.timestamp > a.timestamp + 1e-4 ? b : null };
+    return this.pair;
+  }
+
+  /** The decoded frame covering source time `at`, null when the source has
+   * none there. Readers are rebuilt through decoder failures that pass. */
+  private async wrappedAt(at: number): Promise<WrappedCanvas | null> {
+    let sink = await this.open();
+    if (this.still || !sink) return null;
     const stepBack = at < this.lastAt - 1e-6;
     this.lastAt = at;
     for (;;) {
       try {
-        const wrapped = (stepBack && (await this.backFrame(at))) || (await sink.getCanvas(Math.max(0, at)));
+        const wrapped =
+          this.heldBack(at) ||
+          (stepBack && (await this.backFrame(at))) ||
+          (await sink.getCanvas(Math.max(0, at)));
         this.failStreak = 0;
-        if (!wrapped) return MISSING_FRAME;
-        return {
-          kind: "ready",
-          image: wrapped.canvas,
-          width: wrapped.canvas.width,
-          height: wrapped.canvas.height,
-        };
+        return wrapped ?? null;
       } catch (err) {
         // Decoders die mid-job for reasons that pass: a signed link that
         // expired under a long render (reopening resolves the URL again), a
@@ -328,41 +374,58 @@ export class ClipReader {
    * source has no frame there, and the ordinary read answers.
    */
   private async backFrame(at: number): Promise<WrappedCanvas | null> {
-    const covering = (f: WrappedCanvas) =>
-      f.timestamp <= at + 1e-4 && at < f.timestamp + Math.max(f.duration, 1e-4) + 1e-4;
-    const held = this.backFrames.find(covering);
+    const held = this.heldBack(at);
     if (held) return held;
     if (!this.track) return null;
     const kt = await keyframeTimeAt(this.track, Math.max(0, at));
     if (kt === null) return null;
     const window = this.windowFrames;
     this.backSink ??= frameSink(this.track, undefined, {
-      poolSize: window + 2,
+      poolSize: window + 3,
       ...(this.software ? { software: true } : {}),
     });
     const start = Math.max(kt, at - (window - 1) * this.frameDt, 0);
     const frames: WrappedCanvas[] = [];
     const stream = this.backSink.canvases(start);
+    // The window runs one frame past the ask: a clip smoothing its slow
+    // motion reads the frame after the one covering `at` as well, and that
+    // one beyond keeps the read inside the window.
+    let covered = false;
     try {
       for (;;) {
         const { value, done } = await stream.next();
         if (done || !value) break;
         if (value.duration > 0) this.frameDt = value.duration;
-        if (value.timestamp > at + 1e-4) break;
         frames.push(value);
-        if (frames.length > window) frames.shift();
-        if (value.timestamp + value.duration > at + 1e-4) break;
+        if (frames.length > window + 1) frames.shift();
+        if (covered || value.timestamp > at + 1e-4) break;
+        if (value.timestamp + value.duration > at + 1e-4) covered = true;
       }
     } finally {
       void stream.return(undefined).catch(() => {});
     }
     this.backFrames = frames;
-    return frames.find(covering) ?? frames[frames.length - 1] ?? null;
+    return (
+      this.heldBack(at) ??
+      frames.filter((f) => f.timestamp <= at + 1e-4).pop() ??
+      frames[frames.length - 1] ??
+      null
+    );
+  }
+
+  /** The frame in the backward window covering `at`, if it holds one. */
+  private heldBack(at: number): WrappedCanvas | null {
+    return (
+      this.backFrames.find(
+        (f) => f.timestamp <= at + 1e-4 && at < f.timestamp + Math.max(f.duration, 1e-4) + 1e-4
+      ) ?? null
+    );
   }
 
   private dropBack(): void {
     this.backFrames = [];
     this.backSink = null;
+    this.pair = null;
   }
 
   dispose() {
@@ -1101,6 +1164,34 @@ export class FramePainter {
    * holding a hundred decoders. Past the budget the least recently drawn are
    * let go, which costs one reopen if the cut returns to them.
    */
+  /** The frame maker for smoothed slow motion, opened on the first frame
+   * that needs it. Its load — the runtime and the model — is part of the
+   * render, so a failure there fails the export like a decoder would. */
+  private synth: Promise<FrameSynth> | null = null;
+
+  /**
+   * A clip's picture at timeline time `t`: its source frame, or, on a clip
+   * smoothing its slow motion where the rate is under 1×, the frame made
+   * between the two source frames around that moment. At either edge of the
+   * pair the real frame shows.
+   */
+  private async frameOf(span: ClipSpan, t: number): Promise<Frame> {
+    const reader = this.readerFor(span.asset);
+    const st = sourceTimeAt(span, t);
+    if (!smoothsAt(span.clip, retimeOf(span.clip), Math.max(0, t - span.start))) return reader.frameAt(st);
+    const pair = await reader.pairAt(st);
+    if (!pair) return reader.frameAt(st);
+    if (!pair.b) return frameOfWrapped(pair.a);
+    const w = synthWeight(st, pair.a.timestamp, pair.b.timestamp);
+    if (w <= SYNTH_EDGE) return frameOfWrapped(pair.a);
+    if (w >= 1 - SYNTH_EDGE) return frameOfWrapped(pair.b);
+    const synth = await (this.synth ??= exportFrameSynth());
+    const { width, height } = pair.a.canvas;
+    const key = `${span.asset.id}|${pair.a.timestamp.toFixed(4)}|${pair.b.timestamp.toFixed(4)}`;
+    const image = await synth.mid(key, pair.a.canvas, pair.b.canvas, width, height, w);
+    return { kind: "ready", image, width, height };
+  }
+
   private readerFor(asset: MediaAsset): ClipReader {
     let r = this.readers.get(asset.id);
     if (!r) this.readers.set(asset.id, (r = new ClipReader(asset, () => this.resolve(asset))));
@@ -1201,12 +1292,8 @@ export class FramePainter {
         const frame = await this.readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at);
         comp.drawLayer(frame, plan.backdrop.span.clip, false, 1, t);
       }
-      const masterFrame = master.clip.hidden
-        ? MISSING_FRAME
-        : await this.readerFor(master.asset).frameAt(sourceTimeAt(master, t));
-      const incFrame = plan.incoming
-        ? await this.readerFor(plan.incoming.asset).frameAt(sourceTimeAt(plan.incoming, t))
-        : MISSING_FRAME;
+      const masterFrame = master.clip.hidden ? MISSING_FRAME : await this.frameOf(master, t);
+      const incFrame = plan.incoming ? await this.frameOf(plan.incoming, t) : MISSING_FRAME;
       comp.drawCrossJoin(
         plan.style,
         plan.p,
@@ -1234,7 +1321,7 @@ export class FramePainter {
       const span = this.spanOfClip.get(layer.clip.id);
       if (!span) continue;
       await this.fetchRemovalMatte(span, t);
-      const frame = await this.readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
+      const frame = await this.frameOf(span, t);
       comp.drawIntoRect(
         frame,
         rectOf(layer.clip),
@@ -1284,6 +1371,8 @@ export class FramePainter {
     this.behind?.dispose();
     for (const r of this.readers.values()) r.dispose();
     this.readers.clear();
+    void this.synth?.then((s) => s.dispose()).catch(() => {});
+    this.synth = null;
     this.releaseMemory();
   }
 }
