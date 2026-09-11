@@ -771,7 +771,10 @@ export function AudioRow({
         aria-hidden
         className="pointer-events-none absolute inset-x-0 top-0 h-5 rounded-t-[7px] bg-gradient-to-b from-black/45 via-black/25 to-transparent"
       />
-      <span className="pointer-events-none absolute top-[3px] right-14 left-8 truncate text-[9.5px] font-medium text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.45)]">
+      <span
+        className="absolute top-[3px] right-14 left-8 truncate text-[9.5px] font-medium text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.45)]"
+        title={name}
+      >
         {name}
       </span>
       <button
