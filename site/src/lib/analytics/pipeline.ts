@@ -425,7 +425,7 @@ function fundedMicrosByUser(stripe: AnalyticsStripeSnapshot | undefined): Map<st
 }
 
 // The Stripe record folded into what the dashboard shows: subscription state
-// now, per-day money, and the window's declines and cancel requests with the
+// now, per-day money, and the window's charges and cancel requests with the
 // ids that link into Stripe. Abandoned checkouts never subscribed, so they
 // count nowhere in churn; past_due and paused sit outside both buckets until
 // Stripe resolves them.
@@ -503,6 +503,17 @@ export function buildBilling(
       if (charge.kind === "pro") revenue[i].proMicros += amount;
       else if (charge.kind === "topup") revenue[i].topupMicros += amount;
       else revenue[i].otherMicros += amount;
+      events.push({
+        amountMicros: charge.amountMicros,
+        customerId: charge.customerId,
+        day: charge.day,
+        detail: charge.kind,
+        email: charge.email,
+        ended: false,
+        endsAt: null,
+        kind: "paid",
+        objectId: charge.paymentIntentId,
+      });
     } else if (i !== undefined) {
       declinedMicros += amount;
       declinedCustomers.add(charge.customerId ?? charge.id);

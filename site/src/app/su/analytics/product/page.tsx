@@ -406,6 +406,10 @@ const netOf = (point: Pick<RevenuePoint, "pro" | "topups" | "other" | "refunds">
 
 type BillingEvent = AnalyticsBilling["events"][number];
 
+// What a paid charge bought, from the event's detail.
+const PAID_LABELS: Record<string, string> = { other: "Other", pro: "Pro", topup: "Top-up" };
+const paidLabel = (event: BillingEvent) => PAID_LABELS[event.detail ?? ""] ?? "Paid";
+
 /** Where a canceled subscription stands now: still running until its end
  * date, or already stopped. */
 function cancelStatus(event: BillingEvent): string {
@@ -433,18 +437,18 @@ function CancelMarker({ viewBox }: { viewBox?: { x: number; y: number; height: n
   );
 }
 
-/** The revenue tooltip: net on the date row, the day's money rows, and the
- * cancel requests made that day: who, and where the subscription stands
- * now. A day with no money shows only
- * its cancels, and a day with nothing at all shows no tooltip. */
+/** The revenue tooltip: net on the date row, the day's money rows, then the
+ * people behind them: who paid what, whose card was declined and why, and
+ * who asked to cancel, with where each subscription stands now. A day with
+ * nothing at all shows no tooltip. */
 function RevenueTooltipContent({
   events,
   ...props
 }: React.ComponentProps<typeof ChartTooltipContent> & { events: AnalyticsBilling["events"] }) {
   const point = props.payload?.[0]?.payload as RevenuePoint | undefined;
-  const cancels = point ? events.filter((e) => e.kind === "canceled" && e.day === point.day) : [];
+  const people = point ? events.filter((e) => e.day === point.day) : [];
   const hasMoney = props.payload?.some((item) => item.value !== 0) ?? false;
-  if (!hasMoney && cancels.length === 0) return null;
+  if (!hasMoney && people.length === 0) return null;
   return (
     <div className="grid gap-1.5">
       {hasMoney && (
@@ -462,15 +466,27 @@ function RevenueTooltipContent({
           )}
         />
       )}
-      {cancels.length > 0 && (
+      {people.length > 0 && (
         <div className="max-w-80 space-y-1.5 rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-xs shadow-xl">
-          {cancels.map((event) => (
-            <div key={event.objectId ?? event.email ?? event.day}>
+          {people.map((event) => (
+            <div key={`${event.kind}-${event.objectId ?? event.email ?? event.day}`}>
               <p className="flex items-center justify-between gap-3">
-                <span className="font-medium text-destructive">canceled</span>
-                <span className="font-medium text-foreground">{cancelStatus(event)}</span>
+                {event.kind === "canceled" ? (
+                  <>
+                    <span className="font-medium text-destructive">canceled</span>
+                    <span className="font-medium text-foreground">{cancelStatus(event)}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className={cn("font-medium", event.kind === "declined" ? "text-muted-foreground" : "text-foreground")}>
+                      {event.kind === "declined" ? "declined" : paidLabel(event)}
+                    </span>
+                    <span className="font-medium text-foreground tabular-nums">{formatMicros(event.amountMicros ?? "0")}</span>
+                  </>
+                )}
               </p>
               <p className="text-muted-foreground">{event.email ?? "unknown customer"}</p>
+              {event.kind === "declined" && event.detail && <p className="text-muted-foreground">{event.detail}</p>}
             </div>
           ))}
         </div>
@@ -485,6 +501,7 @@ const stripeLinks = (base: string) => ({
   declined: `${base}/payments?status%5B%5D=failed`,
   paid: `${base}/payments?status%5B%5D=successful`,
   payment: (id: string) => `${base}/payments/${id}`,
+  payments: `${base}/payments`,
   refunded: `${base}/payments?status%5B%5D=refunded`,
   subscribers: `${base}/subscriptions?status=active`,
   subscription: (id: string) => `${base}/subscriptions/${id}`,
@@ -517,7 +534,7 @@ function StripeLink({
 
 // The most recent declines and cancel requests shown under the chart; the
 // rest sit behind the Stripe link.
-const BILLING_EVENTS_SHOWN = 6;
+const BILLING_EVENTS_SHOWN = 10;
 
 // The dashboard blocks in their default order. The ids are the saved-layout
 // contract: renaming one drops that block back to its default position.
@@ -1345,7 +1362,9 @@ export default function SuAnalyticsPage() {
                           : links.canceled
                         : event.objectId
                           ? links.payment(event.objectId)
-                          : links.declined;
+                          : event.kind === "paid"
+                            ? links.paid
+                            : links.declined;
                     return (
                       <li
                         key={`${event.kind}-${event.objectId ?? event.day}`}
@@ -1355,7 +1374,9 @@ export default function SuAnalyticsPage() {
                         <StripeLink href={href} className="text-foreground">
                           {event.kind === "canceled"
                             ? "canceled"
-                            : `${formatMicros(event.amountMicros ?? "0")} declined`}
+                            : event.kind === "paid"
+                              ? `${formatMicros(event.amountMicros ?? "0")} ${paidLabel(event)}`
+                              : `${formatMicros(event.amountMicros ?? "0")} declined`}
                         </StripeLink>
                         {event.kind === "canceled" && (
                           <span className="shrink-0 text-foreground">{cancelStatus(event)}</span>
@@ -1371,7 +1392,7 @@ export default function SuAnalyticsPage() {
                   })}
                   {billing.events.length > BILLING_EVENTS_SHOWN && (
                     <li>
-                      <StripeLink href={links.declined}>
+                      <StripeLink href={links.payments}>
                         +{billing.events.length - BILLING_EVENTS_SHOWN} more in Stripe
                       </StripeLink>
                     </li>

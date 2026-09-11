@@ -240,18 +240,20 @@ export const analyticsRollupSchema = z.object({
           cancels: z.number(),
         }),
       ),
-      // The window's declined charges and cancel requests, newest first, each
-      // with the ids that link into Stripe.
+      // The window's paid and declined charges and cancel requests, newest
+      // first, each with the ids that link into Stripe. Paid charges are
+      // absent from rollups written before they shipped.
       events: z.array(
         z.object({
           day: analyticsDaySchema,
-          kind: z.enum(["declined", "canceled"]),
+          kind: z.enum(["paid", "declined", "canceled"]),
           email: z.string().nullable(),
           customerId: z.string().nullable(),
-          // Payment intent for a decline, subscription for a cancel.
+          // Payment intent for a charge, subscription for a cancel.
           objectId: z.string().nullable(),
           amountMicros: z.string().nullable(),
-          // The decline reason, or the cancel feedback and comment.
+          // What a paid charge bought (pro, topup, other), the decline
+          // reason, or the cancel feedback and comment.
           detail: z.string().nullable(),
           // For a cancel: when the subscription ends (or ended), and whether
           // it has already stopped.

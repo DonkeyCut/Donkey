@@ -21,6 +21,17 @@
     ],
     "events": [
       {
+        "amountMicros": "5000000",
+        "customerId": "cus_n",
+        "day": "2026-09-01",
+        "detail": "topup",
+        "email": "n@x.test",
+        "ended": false,
+        "endsAt": null,
+        "kind": "paid",
+        "objectId": "pi_2"
+      },
+      {
         "amountMicros": null,
         "customerId": "cus_p",
         "day": "2026-08-31",
@@ -41,6 +52,17 @@
         "endsAt": null,
         "kind": "declined",
         "objectId": "pi_3"
+      },
+      {
+        "amountMicros": "20000000",
+        "customerId": "cus_p",
+        "day": "2026-08-30",
+        "detail": "pro",
+        "email": "p@x.test",
+        "ended": false,
+        "endsAt": null,
+        "kind": "paid",
+        "objectId": "pi_1"
       }
     ],
     "funded": 2,

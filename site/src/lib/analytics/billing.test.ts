@@ -74,8 +74,10 @@ describe("buildBilling", () => {
     expect(billing.funded).toBe(2);
     expect(billing.fundedMicros).toBe("30000000");
     expect(billing.events.map((e) => [e.day, e.kind, e.objectId, e.detail])).toEqual([
+      ["2026-09-03", "paid", "pi_2", "topup"],
       ["2026-09-02", "canceled", "sub_1", "switched_service · Export broke."],
       ["2026-09-02", "declined", "pi_4", "Your card has insufficient funds."],
+      ["2026-09-01", "paid", "pi_1", "pro"],
     ]);
   });
 
