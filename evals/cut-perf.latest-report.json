@@ -9,6 +9,8 @@
     "outputLatencyS": 0,
     "netKbps": 0,
     "rttMs": 0,
+    "software": false,
+    "decode": 1,
     "lagP95S": 0.05,
     "stallShare": 0.002,
     "lateShare": 0.02,
@@ -43,75 +45,15 @@
       "late": {
         "p50": 0,
         "p95": 1,
-        "mean": 0.2,
-        "max": 2,
-        "n": 41
-      },
-      "frameMs": 16.7,
-      "scrub": {
-        "p50": 15.7,
-        "p95": 33.5,
-        "mean": 18.89,
-        "max": 47.8,
-        "n": 41
-      },
-      "longTasks": {
-        "p50": 0,
-        "p95": 0,
-        "mean": 0,
-        "max": 0,
-        "n": 0
-      },
-      "liveSamples": 48,
-      "machine": "desktop"
-    },
-    {
-      "name": "drag-backward-within-a-clip",
-      "bucket": "scrub",
-      "pass": true,
-      "notes": [],
-      "late": {
-        "p50": 0,
-        "p95": 1,
-        "mean": 0.15,
-        "max": 2,
-        "n": 41
-      },
-      "frameMs": 16.7,
-      "scrub": {
-        "p50": 15.9,
-        "p95": 32.4,
-        "mean": 18.11,
-        "max": 48.2,
-        "n": 41
-      },
-      "longTasks": {
-        "p50": 0,
-        "p95": 0,
-        "mean": 0,
-        "max": 0,
-        "n": 0
-      },
-      "liveSamples": 69,
-      "machine": "desktop"
-    },
-    {
-      "name": "drag-backward-across-a-cut",
-      "bucket": "scrub",
-      "pass": true,
-      "notes": [],
-      "late": {
-        "p50": 0,
-        "p95": 0,
-        "mean": 0.05,
+        "mean": 0.17,
         "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.7,
-        "p95": 16.6,
-        "mean": 16.25,
+        "p50": 15.8,
+        "p95": 31.6,
+        "mean": 18.23,
         "max": 32.2,
         "n": 41
       },
@@ -122,7 +64,67 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 101,
+      "liveSamples": 46,
+      "machine": "desktop"
+    },
+    {
+      "name": "drag-backward-within-a-clip",
+      "bucket": "scrub",
+      "pass": true,
+      "notes": [],
+      "late": {
+        "p50": 0,
+        "p95": 1,
+        "mean": 0.12,
+        "max": 1,
+        "n": 41
+      },
+      "frameMs": 16.7,
+      "scrub": {
+        "p50": 15.7,
+        "p95": 32.4,
+        "mean": 17.45,
+        "max": 33.1,
+        "n": 41
+      },
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 53,
+      "machine": "desktop"
+    },
+    {
+      "name": "drag-backward-across-a-cut",
+      "bucket": "scrub",
+      "pass": true,
+      "notes": [],
+      "late": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0.02,
+        "max": 1,
+        "n": 41
+      },
+      "frameMs": 16.7,
+      "scrub": {
+        "p50": 15.7,
+        "p95": 16,
+        "mean": 15.9,
+        "max": 31.6,
+        "n": 41
+      },
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 75,
       "machine": "desktop"
     },
     {
@@ -133,16 +135,16 @@
       "late": {
         "p50": 0,
         "p95": 0,
-        "mean": 0.04,
-        "max": 2,
+        "mean": 0.02,
+        "max": 1,
         "n": 81
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.6,
-        "p95": 16.6,
-        "mean": 15.75,
-        "max": 44.2,
+        "p50": 15.8,
+        "p95": 16.1,
+        "mean": 15.94,
+        "max": 32,
         "n": 81
       },
       "longTasks": {
@@ -152,7 +154,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 48,
+      "liveSamples": 32,
       "machine": "desktop"
     },
     {
@@ -169,9 +171,9 @@
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.9,
-        "p95": 31.8,
-        "mean": 18.15,
+        "p50": 15.8,
+        "p95": 32.5,
+        "mean": 18.4,
         "max": 32.7,
         "n": 41
       },
@@ -182,7 +184,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 65,
+      "liveSamples": 63,
       "machine": "desktop"
     },
     {
@@ -199,10 +201,10 @@
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.8,
-        "p95": 32.4,
-        "mean": 18.37,
-        "max": 33,
+        "p50": 16,
+        "p95": 32.7,
+        "mean": 18.45,
+        "max": 33.5,
         "n": 41
       },
       "longTasks": {
@@ -212,7 +214,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 54,
+      "liveSamples": 44,
       "machine": "desktop"
     },
     {
@@ -223,16 +225,16 @@
       "late": {
         "p50": 1,
         "p95": 1,
-        "mean": 0.9,
+        "mean": 0.95,
         "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 32.2,
-        "p95": 32.9,
-        "mean": 30.51,
-        "max": 33.1,
+        "p50": 32,
+        "p95": 33.6,
+        "mean": 31.26,
+        "max": 34.4,
         "n": 41
       },
       "longTasks": {
@@ -287,13 +289,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 808,
+      "presented": 810,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 808
+        "n": 810
       },
       "stallShare": 0,
       "decay": {
@@ -324,13 +326,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3240,
+      "presented": 3238,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 3240
+        "n": 3238
       },
       "stallShare": 0,
       "decay": {
@@ -361,13 +363,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 222,
+      "presented": 223,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.01,
         "max": 0.03,
-        "n": 222
+        "n": 223
       },
       "stallShare": 0,
       "decay": {
@@ -394,43 +396,6 @@
     },
     {
       "name": "play-user-project-cold",
-      "bucket": "playback",
-      "pass": true,
-      "notes": [],
-      "drops": 0,
-      "presented": 1029,
-      "lag": {
-        "p50": 0.02,
-        "p95": 0.03,
-        "mean": 0.02,
-        "max": 0.03,
-        "n": 1029
-      },
-      "stallShare": 0,
-      "decay": {
-        "first": 0,
-        "last": 0
-      },
-      "clock": {
-        "lead": 0.04,
-        "reported": 0.04
-      },
-      "longTasks": {
-        "p50": 0,
-        "p95": 0,
-        "mean": 0,
-        "max": 0,
-        "n": 0
-      },
-      "liveSamples": 60,
-      "liveSources": 6,
-      "keptSources": 6,
-      "warmMb": 0,
-      "memMb": 418,
-      "machine": "desktop"
-    },
-    {
-      "name": "play-user-project-replay",
       "bucket": "playback",
       "pass": true,
       "notes": [],
@@ -467,6 +432,43 @@
       "machine": "desktop"
     },
     {
+      "name": "play-user-project-replay",
+      "bucket": "playback",
+      "pass": true,
+      "notes": [],
+      "drops": 0,
+      "presented": 1028,
+      "lag": {
+        "p50": 0.02,
+        "p95": 0.03,
+        "mean": 0.02,
+        "max": 0.03,
+        "n": 1028
+      },
+      "stallShare": 0,
+      "decay": {
+        "first": 0,
+        "last": 0
+      },
+      "clock": {
+        "lead": 0.04,
+        "reported": 0.04
+      },
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 60,
+      "liveSources": 6,
+      "keptSources": 6,
+      "warmMb": 0,
+      "memMb": 418,
+      "machine": "desktop"
+    },
+    {
       "name": "play-one-long-clip",
       "bucket": "playback",
       "pass": true,
@@ -474,7 +476,7 @@
       "drops": 0,
       "presented": 3444,
       "lag": {
-        "p50": 0.02,
+        "p50": 0.01,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
@@ -512,7 +514,7 @@
       "presented": 3444,
       "lag": {
         "p50": 0.01,
-        "p95": 0.02,
+        "p95": 0.01,
         "mean": 0.01,
         "max": 0.02,
         "n": 3444
@@ -583,13 +585,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3443,
+      "presented": 3444,
       "lag": {
-        "p50": 0.02,
+        "p50": 0.01,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 3443
+        "n": 3444
       },
       "stallShare": 0,
       "decay": {
@@ -611,7 +613,7 @@
       "liveSources": 1,
       "keptSources": 1,
       "warmMb": 0,
-      "memMb": 134,
+      "memMb": 125,
       "machine": "desktop"
     },
     {
@@ -619,18 +621,18 @@
       "bucket": "playback",
       "pass": true,
       "notes": [],
-      "drops": 0,
-      "presented": 3439,
+      "drops": 1,
+      "presented": 3427,
       "lag": {
         "p50": 0.01,
         "p95": 0.01,
         "mean": 0.01,
-        "max": 0.02,
-        "n": 3439
+        "max": 0.1,
+        "n": 3427
       },
       "stallShare": 0,
       "decay": {
-        "first": 0,
+        "first": 0.001,
         "last": 0
       },
       "clock": {
@@ -638,11 +640,11 @@
         "reported": 0.04
       },
       "longTasks": {
-        "p50": 0,
-        "p95": 0,
-        "mean": 0,
-        "max": 0,
-        "n": 0
+        "p50": 257,
+        "p95": 257,
+        "mean": 257,
+        "max": 257,
+        "n": 1
       },
       "liveSamples": 10,
       "liveSources": 1,
@@ -694,13 +696,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 1620,
+      "presented": 1622,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 1620
+        "n": 1622
       },
       "stallShare": 0,
       "decay": {
@@ -757,6 +759,43 @@
         "max": 0.11,
         "n": 32
       }
+    },
+    {
+      "name": "play-4k-from-library",
+      "bucket": "playback",
+      "pass": true,
+      "notes": [],
+      "drops": 3,
+      "presented": 1095,
+      "lag": {
+        "p50": 0.02,
+        "p95": 0.03,
+        "mean": 0.01,
+        "max": 0.03,
+        "n": 1092
+      },
+      "stallShare": 0,
+      "decay": {
+        "first": 0.008,
+        "last": 0
+      },
+      "clock": {
+        "lead": 0.04,
+        "reported": 0.04
+      },
+      "longTasks": {
+        "p50": 137,
+        "p95": 137,
+        "mean": 136.5,
+        "max": 137,
+        "n": 2
+      },
+      "liveSamples": 10,
+      "liveSources": 1,
+      "keptSources": 1,
+      "warmMb": 0,
+      "memMb": 218,
+      "machine": "desktop"
     }
   ]
 }

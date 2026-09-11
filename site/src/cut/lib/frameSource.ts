@@ -472,6 +472,17 @@ export class FrameRing<T extends Timed> {
     );
   }
 
+  /** The first frame held after timestamp `ts`, bounded above by `to`: the
+   * other side of the pair a smoothed frame is made from. */
+  after(ts: number, to = Infinity): T | null {
+    let pick: T | null = null;
+    for (const i of this.items) {
+      if (i.timestamp <= ts + SAME || i.timestamp > to + SAME) continue;
+      if (!pick || i.timestamp < pick.timestamp) pick = i;
+    }
+    return pick;
+  }
+
   /** Whether any frame held starts at or before `t`. */
   hasAtOrBefore(t: number): boolean {
     return this.items.some((i) => i.timestamp <= t + SAME);
@@ -842,6 +853,28 @@ export class ClipFrameSource {
       if (rough && (!c || Math.abs(rough.timestamp - t) < Math.abs(c.timestamp - t))) c = rough;
     }
     return c ? frameOfCanvas(c) : null;
+  }
+
+  /**
+   * The frames either side of source time `t`, for a clip smoothing its slow
+   * motion: `a` is what `frameAt` gives, `b` the next sharp frame held after
+   * it, or null when the walk has not landed it yet — then `a` shows on its
+   * own, as it would unsmoothed. A coarse frame never makes a pair: blending
+   * toward a half-size picture is a step down, not a step between.
+   */
+  pairAt(t: number, from = -Infinity, to = Infinity): { a: SourceFrame; b: SourceFrame | null } | null {
+    const a = this.frameAt(t, from, to);
+    if (!a) return null;
+    if (this.still || a.timestamp > t + SAME) return { a, b: null };
+    const fine = this.back?.fine;
+    // The frame `frameAt` gave has to be a sharp one: the coarse spread is
+    // half size, and it only stands in where no sharp frame is near.
+    const sharp = FrameRing.nearer(t, this.ring.at(t, from, to), fine?.at(t, from, to) ?? null);
+    if (!sharp || Math.abs(sharp.timestamp - a.timestamp) > SAME) return { a, b: null };
+    let next = this.ring.after(a.timestamp, to);
+    const other = fine?.after(a.timestamp, to) ?? null;
+    if (other && (!next || other.timestamp < next.timestamp)) next = other;
+    return { a, b: next ? frameOfCanvas(next) : null };
   }
 
   /** Whether a frame covering `t` exactly is already held. Coarse frames do

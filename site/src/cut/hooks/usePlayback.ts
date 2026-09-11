@@ -9,7 +9,8 @@ import {
   projectDuration,
   useEditor,
 } from "@/cut/lib/store";
-import { headSrc, matteLumaToAlpha, retimeOf, srcSpan } from "@donkeycut/effects-kit";
+import { headSrc, matteLumaToAlpha, retimeOf, smoothsAt, srcSpan } from "@donkeycut/effects-kit";
+import { blendInto, SYNTH_EDGE, synthWeight } from "@/cut/lib/frameSynth";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
 import { assetIsSilent, clipCovers, projectFadeSeconds, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
@@ -220,6 +221,10 @@ class Engine {
    * deleted clips never pile up canvases. */
   private matteAlpha = new Map<string, { ts: number; canvas: RasterSurface }>();
   private static readonly MATTE_ALPHA_MAX = 8;
+  /** Per clip, the canvas its smoothed slow motion is blended on. Bounded
+   * like the mattes: the clips drawn longest ago give theirs up. */
+  private smoothed = new Map<string, RasterSurface>();
+  private static readonly SMOOTHED_MAX = 4;
 
   private unsubscribe: () => void;
   private unwatch: () => void;
@@ -256,6 +261,7 @@ class Engine {
       this.pool.closeAll();
       this.behind.clear();
       this.matteAlpha.clear();
+      this.smoothed.clear();
       this.mixer.releaseCaches();
       // The canvas keeps showing the frame it last painted, so nothing is
       // blank while the tab is away. The wake is for the return: it books the
@@ -468,7 +474,7 @@ class Engine {
     // to show goes missing. The clip's own span bounds the answer: two clips
     // split from one file share a source, and a held frame from across the
     // split would show the other scene at a paused playhead.
-    const frame = src.frameAt(st, span.clip.in, span.clip.out);
+    const frame = this.smoothFrame(span, t, st, src);
     // The picture on track 0 is the one being watched, so it is the one the
     // machine is judged on — see the meter in `perfTrace`.
     if (master && playing) {
@@ -480,6 +486,38 @@ class Engine {
     if (frame)
       return { kind: "ready", image: frame.image, width: frame.width, height: frame.height };
     return src.failed ? MISSING_FRAME : PENDING_FRAME;
+  }
+
+  /**
+   * The clip's picture at source time `st`, blended between the two source
+   * frames around it where the clip smooths its slow motion and the rate is
+   * under 1×. The blend is the preview's stand-in for the export's motion
+   * estimate: two draws, inside the frame budget. Everywhere else, and at
+   * either edge of the pair, the source frame shows as is.
+   */
+  private smoothFrame(span: ClipSpan, t: number, st: number, src: ClipFrameSource) {
+    const { clip } = span;
+    if (!smoothsAt(clip, retimeOf(clip), t - span.start)) return src.frameAt(st, clip.in, clip.out);
+    const pair = src.pairAt(st, clip.in, clip.out);
+    if (!pair) return null;
+    if (!pair.b) return pair.a;
+    const w = synthWeight(st, pair.a.timestamp, pair.b.timestamp);
+    if (w <= SYNTH_EDGE) return pair.a;
+    if (w >= 1 - SYNTH_EDGE) return pair.b;
+    const { width, height } = pair.a;
+    let canvas = this.smoothed.get(clip.id);
+    // Re-insert on every touch so the cap below drops the clip drawn longest ago.
+    this.smoothed.delete(clip.id);
+    if (!canvas) canvas = createRasterCanvas(width, height);
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    this.smoothed.set(clip.id, canvas);
+    if (this.smoothed.size > Engine.SMOOTHED_MAX) {
+      const oldest = this.smoothed.keys().next().value;
+      if (oldest !== undefined) this.smoothed.delete(oldest);
+    }
+    blendInto(canvas, pair.a.image, pair.b.image, w);
+    return { image: canvas as CanvasImageSource, width, height, timestamp: pair.a.timestamp };
   }
 
   /** Open and start the decoders for clips about to arrive — on track 0 and
