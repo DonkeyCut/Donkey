@@ -101,12 +101,15 @@ const CATALOG: CatalogItem[] = [
     ["shutter", 0.6, "A single DSLR camera shutter click, crisp mechanical mirror slap, dry.", ["camera", "shutter", "photo", "snap", "dslr"]],
     ["burst", 1.2, "A rapid burst of five DSLR camera shutter clicks, mechanical, dry.", ["camera", "shutter", "burst", "rapid", "photos"]],
     ["zoom", 0.8, "A quick camera lens zoom motor whir with a soft stop, dry, close-miked.", ["camera", "zoom", "lens", "motor", "whir"]],
-    ["focus", 0.9, "A camera autofocus lock: a short lens motor whir then two tiny beeps.", ["camera", "focus", "beep", "lens", "lock"]],
     ["phone-snap", 0.6, "A smartphone camera shutter sound, a short digital snap, clean.", ["camera", "phone", "snap", "shutter", "selfie"]],
     ["film-advance", 1, "A film camera shutter click followed by the film advance lever winding, mechanical.", ["camera", "film", "advance", "wind", "vintage"]],
     ["zoom-in-whoosh", 0.7, "A fast punch-in zoom whoosh, a quick rising air swipe that stops sharp.", ["camera", "zoom in", "punch in", "whoosh", "fast"]],
     ["zoom-out-whoosh", 0.7, "A fast zoom-out whoosh, a quick falling air swipe that stops sharp.", ["camera", "zoom out", "whoosh", "fast", "pull back"]],
   ], core),
+  // One focus sound, one take: the lock itself, the way a DSLR confirms it.
+  ...sfx("Camera", [
+    ["focus-lock", 0.6, "A single DSLR autofocus lock: one soft, precise lens click with a faint motor tick, dry, close-miked, no beep.", ["camera", "focus", "lock", "lens", "dslr"]],
+  ]),
   ...sfx("Flash", [
     ["pop", 0.8, "A camera flash firing: a quick rising electric charge whine then a bright pop.", ["flash", "camera", "pop", "charge", "quick cut"]],
     ["cut", 0.7, "A bright quick flash transition, a short shimmering white burst that cuts to silence.", ["flash", "transition", "bright", "burst", "quick cut"]],
