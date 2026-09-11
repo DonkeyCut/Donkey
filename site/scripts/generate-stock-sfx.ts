@@ -93,6 +93,9 @@ const CATALOG: CatalogItem[] = [
     ["pen", 0.5, "A single retractable pen click, small and dry, close-miked.", ["click", "pen", "small", "dry"]],
     ["switch", 0.5, "A single light switch flicking on, a small plastic click, dry.", ["click", "switch", "light", "flick", "toggle"]],
     ["tongue", 0.5, "A single sharp tongue click, a dry mouth tick, close-miked.", ["click", "tongue", "tick", "mouth", "snap"]],
+    ["mouse", 0.5, "A single computer mouse button click, one crisp plastic click, dry, close-miked.", ["click", "mouse", "button", "single", "computer"]],
+    ["mouse-release", 0.5, "A single computer mouse button press and release, two tiny plastic clicks close together, dry.", ["click", "mouse", "press", "release", "computer"]],
+    ["trackpad", 0.5, "A single laptop trackpad click, one soft flat plastic tap, dry, close-miked.", ["click", "trackpad", "laptop", "tap", "single"]],
   ], core),
   ...sfx("Camera", [
     ["shutter", 0.6, "A single DSLR camera shutter click, crisp mechanical mirror slap, dry.", ["camera", "shutter", "photo", "snap", "dslr"]],
