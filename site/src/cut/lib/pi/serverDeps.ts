@@ -3,6 +3,7 @@ import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
 import { MEDIA_RUNTIME_TOOLS, runAiTool, UI_TOOLS } from "../aiTools";
 import { normalizeRef } from "../assetRef";
+import { DETACHED_UI_NOTE } from "../chatResume";
 import { NO_CREDITS_MESSAGE } from "../credits";
 import { hostedPost } from "../hosted";
 import { bindHeadlessSession, type HeadlessSession } from "../headless/bind";
@@ -28,11 +29,7 @@ export function headlessDeps(session: HeadlessSession): CutAgentDeps {
         if (!doc) throw new Error(`No such skill. Available: ${AI_SKILL_INDEX.join(", ")}`);
         return doc;
       }
-      if (UI_TOOLS.has(name))
-        return {
-          noEditor: true,
-          note: "No editor page is attached to this session, so this tool had no effect. The project itself is unchanged — keep working from the editor state.",
-        };
+      if (UI_TOOLS.has(name)) return { noEditor: true, note: DETACHED_UI_NOTE };
       // The worker installs canvas and decoders at startup and these run as
       // written. A process that came up without them says so plainly.
       if (MEDIA_RUNTIME_TOOLS.has(name)) {

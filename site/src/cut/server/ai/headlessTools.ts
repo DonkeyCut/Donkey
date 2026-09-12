@@ -1,5 +1,6 @@
 import { copyFile } from "node:fs/promises";
 import { runAiTool, UI_TOOLS } from "../../lib/aiTools";
+import { DETACHED_MEDIA_ERROR, DETACHED_SESSION_ERROR, DETACHED_UI_NOTE } from "../../lib/chatResume";
 import { mp4NameFor, setHostMediaStore } from "../../lib/mediaConvert";
 import { setHostDocStore } from "../../lib/projectReference";
 import { serializeDoc, useEditor } from "../../lib/store";
@@ -144,21 +145,10 @@ async function executeHeadlessTool(
 ): Promise<{ output?: unknown; errorText?: string }> {
   if (UI_TOOLS.has(toolName))
     return {
-      output: {
-        noEditor: true,
-        note: "No editor page is attached to this session, so this tool had no effect. The project itself is unchanged — keep working from the editor state.",
-      },
+      output: { noEditor: true, note: DETACHED_UI_NOTE },
     };
-  if (PAGE_MEDIA_TOOLS.has(toolName))
-    return {
-      errorText:
-        "This tool reads media through the editor page and is unavailable while no tab is attached. Work from the editor state instead.",
-    };
-  if (PAGE_SESSION_TOOLS.has(toolName))
-    return {
-      errorText:
-        "This tool runs with the editor page's hosted sign-in and is unavailable while no tab is attached. Finish the edit from the project state; the user can run it from the editor.",
-    };
+  if (PAGE_MEDIA_TOOLS.has(toolName)) return { errorText: DETACHED_MEDIA_ERROR };
+  if (PAGE_SESSION_TOOLS.has(toolName)) return { errorText: DETACHED_SESSION_ERROR };
   const doc = await ensureOpen(projectId);
   if (!doc) return { errorText: "Project not found on this Mac." };
   try {
