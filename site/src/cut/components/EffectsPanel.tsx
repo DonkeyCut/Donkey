@@ -356,6 +356,8 @@ function SoundCard({
    * before it. */
   trailing?: React.ReactNode;
 }) {
+  const nameRef = useRef<HTMLSpanElement>(null);
+  const [nameHint, setNameHint] = useState(false);
   return (
     // The play control sits over the card as a sibling rather than inside it:
     // the card is what a drag carries, and the ghost of it is the boxed
@@ -392,9 +394,21 @@ function SoundCard({
               data-drag-omit
               className="absolute inset-x-2.5 bottom-1.5 flex items-baseline gap-1.5 text-[11.5px] leading-tight font-medium"
             >
-              <Tooltip>
-                <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>{label}</TooltipTrigger>
-                <TooltipContent>{label}</TooltipContent>
+              {/* The full name, only when the row cut it short, and under
+                  the row so it never sits on the card's own controls. */}
+              <Tooltip
+                open={nameHint}
+                onOpenChange={(open) => {
+                  const el = nameRef.current;
+                  setNameHint(open && !!el && el.scrollWidth > el.clientWidth);
+                }}
+              >
+                <TooltipTrigger render={<span ref={nameRef} className="min-w-0 flex-1 truncate" />}>
+                  {label}
+                </TooltipTrigger>
+                <TooltipContent side="bottom" sideOffset={2}>
+                  {label}
+                </TooltipContent>
               </Tooltip>
               {trailing}
             </span>
