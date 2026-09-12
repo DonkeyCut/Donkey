@@ -36,6 +36,7 @@ import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import "./grain.css";
 
 /**
@@ -358,54 +359,61 @@ function SoundCard({
   return (
     // The play control sits over the card as a sibling rather than inside it:
     // the card is what a drag carries, and the ghost of it is the boxed
-    // waveform — pressing play is not part of what is dragged.
-    <span className="group relative block">
-      <div
-        ref={cardRef}
-        data-pick-id={pickId}
-        data-drag-object
-        role="button"
-        tabIndex={0}
-        aria-pressed={marked}
-        draggable
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onClick={onChoose}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            onChoose();
-          }
-        }}
-        className={cn(
-          "flex scroll-m-2 cursor-grab flex-col overflow-hidden rounded-xl border border-border bg-muted/40 outline-none",
-          (marked || flash) && PICKED_RING
-        )}
-      >
-        <div className="relative h-16">
-          <span className="absolute inset-x-2.5 top-2.5 block">{figure}</span>
-          <span
-            data-drag-omit
-            className="absolute inset-x-2.5 bottom-1.5 flex items-baseline gap-1.5 text-[11.5px] leading-tight font-medium"
-          >
-            <span className="min-w-0 flex-1 truncate" title={label}>
-              {label}
+    // waveform — pressing play is not part of what is dragged. Every hint on
+    // the card is the app's own tooltip: the browser's title hint takes a
+    // second to appear, too slow for a grid of small controls.
+    <TooltipProvider>
+      <span className="group relative block">
+        <div
+          ref={cardRef}
+          data-pick-id={pickId}
+          data-drag-object
+          role="button"
+          tabIndex={0}
+          aria-pressed={marked}
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onClick={onChoose}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onChoose();
+            }
+          }}
+          className={cn(
+            "flex scroll-m-2 cursor-grab flex-col overflow-hidden rounded-xl border border-border bg-muted/40 outline-none",
+            (marked || flash) && PICKED_RING
+          )}
+        >
+          <div className="relative h-16">
+            <span className="absolute inset-x-2.5 top-2.5 block">{figure}</span>
+            <span
+              data-drag-omit
+              className="absolute inset-x-2.5 bottom-1.5 flex items-baseline gap-1.5 text-[11.5px] leading-tight font-medium"
+            >
+              <Tooltip>
+                <TooltipTrigger render={<span className="min-w-0 flex-1 truncate" />}>{label}</TooltipTrigger>
+                <TooltipContent>{label}</TooltipContent>
+              </Tooltip>
+              {trailing}
             </span>
-            {trailing}
-          </span>
+          </div>
         </div>
-      </div>
-      <button
-        type="button"
-        title={playing ? "Stop" : "Play"}
-        aria-label={`${playing ? "Stop" : "Play"} ${label}`}
-        onClick={onTogglePlay}
-        className="absolute top-1.5 left-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-transform hover:scale-105"
-      >
-        {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
-      </button>
-      {corner}
-    </span>
+        <Tooltip>
+          <TooltipTrigger
+            type="button"
+            aria-label={`${playing ? "Stop" : "Play"} ${label}`}
+            onClick={onTogglePlay}
+            className="absolute top-1.5 left-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-transform hover:scale-105"
+          >
+            {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
+          </TooltipTrigger>
+          <TooltipContent>{playing ? "Stop" : "Play"}</TooltipContent>
+        </Tooltip>
+        {corner}
+      </span>
+    </TooltipProvider>
   );
 }
 
@@ -634,30 +642,34 @@ function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: bool
       }
       corner={
         <>
-          <button
-            type="button"
-            title="Add at the playhead"
-            aria-label={`Add ${label} at the playhead`}
-            onClick={add}
-            className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100 hover:scale-105"
-          >
-            <Plus className="size-3" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              type="button"
+              aria-label={`Add ${label} at the playhead`}
+              onClick={add}
+              className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100 hover:scale-105"
+            >
+              <Plus className="size-3" />
+            </TooltipTrigger>
+            <TooltipContent>Add at the playhead</TooltipContent>
+          </Tooltip>
           {/* The star stays once set; unstarred it shows on hover, so a card
               that is not a favorite reads clean. */}
-          <button
-            type="button"
-            title={starred ? "Remove from favorites" : "Add to favorites"}
-            aria-label={`${starred ? "Remove" : "Add"} ${label} ${starred ? "from" : "to"} favorites`}
-            aria-pressed={starred}
-            onClick={() => useSoundFavorites.getState().toggle(sound.id)}
-            className={cn(
-              "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105",
-              starred ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-            )}
-          >
-            <Star className={cn("size-3", starred && "fill-yellow-400 text-yellow-400")} />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              type="button"
+              aria-label={`${starred ? "Remove" : "Add"} ${label} ${starred ? "from" : "to"} favorites`}
+              aria-pressed={starred}
+              onClick={() => useSoundFavorites.getState().toggle(sound.id)}
+              className={cn(
+                "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105",
+                starred ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              )}
+            >
+              <Star className={cn("size-3", starred && "fill-yellow-400 text-yellow-400")} />
+            </TooltipTrigger>
+            <TooltipContent>{starred ? "Remove from favorites" : "Add to favorites"}</TooltipContent>
+          </Tooltip>
         </>
       }
     />
