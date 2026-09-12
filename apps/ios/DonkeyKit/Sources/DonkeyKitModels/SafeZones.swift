@@ -1,44 +1,23 @@
 import Foundation
 
-/// A short-form platform whose own chrome covers part of a vertical frame:
-/// the bar across the top, the caption block along the bottom, the action
-/// column down the right edge. Whatever a shot needs stays out of them.
-nonisolated public enum SafeZonePlatform: String, CaseIterable, Codable, Sendable, Identifiable {
-    case tiktok, reels, shorts
+/// The short-form guide: the parts of a vertical frame that TikTok, Reels
+/// and Shorts cover with their own UI or crop away, merged into one keep-out
+/// so each region is the widest of the three. It is the same guide the
+/// editor's preview draws, measured September 2026 on a 1170×2532 phone and
+/// mapped onto a 1080×1920 frame: the top band is the status bar and the
+/// search row under it, the rail the actions from the avatar down, the
+/// bottom band the username, caption and music line, and the side strips
+/// what Reels and Shorts crop when they fill a taller phone screen.
+nonisolated public enum ShortFormGuide {
+    private static func phone(_ px: Double, of total: Double) -> Double { px / total }
 
-    public var id: String { rawValue }
-
-    public var title: String {
-        switch self {
-        case .tiktok: "TikTok"
-        case .reels: "Reels"
-        case .shorts: "Shorts"
-        }
-    }
-
-    /// The covered parts of a 9:16 frame, as fractions of its width and
-    /// height. The numbers approximate each platform's layout on a phone;
-    /// the platforms move their chrome now and then, so these are tuned by
-    /// eye against a current phone.
-    public var covered: [SafeZoneRegion] {
-        switch self {
-        case .tiktok: [
-            SafeZoneRegion(x: 0, y: 0, width: 1, height: 0.11),
-            SafeZoneRegion(x: 0, y: 0.76, width: 1, height: 0.24),
-            SafeZoneRegion(x: 0.87, y: 0.36, width: 0.13, height: 0.40),
-        ]
-        case .reels: [
-            SafeZoneRegion(x: 0, y: 0, width: 1, height: 0.12),
-            SafeZoneRegion(x: 0, y: 0.74, width: 1, height: 0.26),
-            SafeZoneRegion(x: 0.86, y: 0.40, width: 0.14, height: 0.34),
-        ]
-        case .shorts: [
-            SafeZoneRegion(x: 0, y: 0, width: 1, height: 0.09),
-            SafeZoneRegion(x: 0, y: 0.78, width: 1, height: 0.22),
-            SafeZoneRegion(x: 0.87, y: 0.44, width: 0.13, height: 0.34),
-        ]
-        }
-    }
+    public static let boxes: [SafeZoneRegion] = [
+        SafeZoneRegion(x: 0, y: 0, width: 1, height: phone(215, of: 1920), label: "Top bar"),
+        SafeZoneRegion(x: 0, y: 0, width: phone(50, of: 1080), height: 1, label: "Cropped"),
+        SafeZoneRegion(x: 1 - phone(50, of: 1080), y: 0, width: phone(50, of: 1080), height: 1, label: "Cropped"),
+        SafeZoneRegion(x: phone(895, of: 1080), y: phone(730, of: 1920), width: phone(185, of: 1080), height: phone(730, of: 1920), label: "Actions"),
+        SafeZoneRegion(x: 0, y: phone(1460, of: 1920), width: 1, height: phone(460, of: 1920), label: "Caption · music · nav"),
+    ]
 }
 
 /// A rectangle in a frame's own units: every value is a fraction of the
@@ -48,12 +27,14 @@ nonisolated public struct SafeZoneRegion: Equatable, Sendable {
     public var y: Double
     public var width: Double
     public var height: Double
+    public var label: String
 
-    public init(x: Double, y: Double, width: Double, height: Double) {
+    public init(x: Double, y: Double, width: Double, height: Double, label: String) {
         self.x = x
         self.y = y
         self.width = width
         self.height = height
+        self.label = label
     }
 }
 

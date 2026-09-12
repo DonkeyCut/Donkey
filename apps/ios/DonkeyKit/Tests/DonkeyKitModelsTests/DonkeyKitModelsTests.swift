@@ -75,13 +75,21 @@ import Testing
         #expect(frame.y < 0)
     }
 
-    @Test func everyPlatformKeepsRegionsInsideTheFrame() {
-        for platform in SafeZonePlatform.allCases {
-            for region in platform.covered {
-                #expect(region.x >= 0 && region.x + region.width <= 1)
-                #expect(region.y >= 0 && region.y + region.height <= 1)
-            }
+    @Test func theGuideKeepsEveryBoxInsideTheFrame() {
+        for region in ShortFormGuide.boxes {
+            #expect(region.x >= 0 && region.x + region.width <= 1 + 1e-9)
+            #expect(region.y >= 0 && region.y + region.height <= 1 + 1e-9)
+            #expect(!region.label.isEmpty)
         }
+    }
+
+    @Test func theGuideTogglesAndIsRemembered() {
+        let defaults = UserDefaults(suiteName: "guide-\(UUID())")!
+        let camera = CameraModel(defaults: defaults)
+        #expect(!camera.showsSafeZones)
+        camera.toggleSafeZones()
+        #expect(camera.showsSafeZones)
+        #expect(CameraModel(defaults: defaults).showsSafeZones)
     }
 }
 

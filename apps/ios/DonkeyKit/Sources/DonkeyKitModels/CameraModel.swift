@@ -41,13 +41,12 @@ public final class CameraModel {
         }
     }
 
-    /// The short-form platforms whose covered areas shade the picture. Kept
-    /// across sessions: a person who posts to one place frames for it every
-    /// time.
-    public private(set) var safeZones: Set<SafeZonePlatform> = [] {
+    /// Whether the short-form guide shades the picture. Kept across
+    /// sessions: a person who posts vertical video frames for it every time.
+    public private(set) var showsSafeZones = false {
         didSet {
-            if safeZones != oldValue {
-                defaults.set(safeZones.map(\.rawValue).sorted(), forKey: Self.safeZonesKey)
+            if showsSafeZones != oldValue {
+                defaults.set(showsSafeZones, forKey: Self.safeZonesKey)
             }
         }
     }
@@ -58,7 +57,7 @@ public final class CameraModel {
 
     private let defaults: UserDefaults
     private static let teleprompterKey = "teleprompterSettings"
-    private static let safeZonesKey = "safeZonePlatforms"
+    private static let safeZonesKey = "showsSafeZones"
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -66,17 +65,11 @@ public final class CameraModel {
            let settings = try? JSONDecoder().decode(TeleprompterSettings.self, from: data) {
             teleprompter.settings = settings
         }
-        if let stored = defaults.stringArray(forKey: Self.safeZonesKey) {
-            safeZones = Set(stored.compactMap(SafeZonePlatform.init(rawValue:)))
-        }
+        showsSafeZones = defaults.bool(forKey: Self.safeZonesKey)
     }
 
-    public func toggleSafeZone(_ platform: SafeZonePlatform) {
-        if safeZones.contains(platform) {
-            safeZones.remove(platform)
-        } else {
-            safeZones.insert(platform)
-        }
+    public func toggleSafeZones() {
+        showsSafeZones.toggle()
     }
 
     private func persistTeleprompterSettings() {

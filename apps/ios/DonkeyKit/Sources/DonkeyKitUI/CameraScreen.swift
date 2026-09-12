@@ -22,7 +22,6 @@ struct CameraScreen<CameraPreview: View>: View {
     @State private var showsZoomPicker = false
     @State private var showsQualityPopover = false
     @State private var showsTeleSettings = false
-    @State private var showsSafeZones = false
     @State private var showsNotePicker = false
     @State private var playingRecording: Recording?
     /// The take that just finished, docked in the corner until it is watched
@@ -62,8 +61,8 @@ struct CameraScreen<CameraPreview: View>: View {
             stage
             // Short-form chrome is shaded on the picture itself, under the
             // script and the controls, so a take is framed against it too.
-            if !camera.safeZones.isEmpty, !isSideways, camera.availability == .running {
-                SafeZoneOverlay(platforms: camera.safeZones)
+            if camera.showsSafeZones, !isSideways, camera.availability == .running {
+                SafeZoneOverlay()
             }
             if camera.isFillLightOn, camera.availability == .running {
                 FillLightOverlay()
@@ -298,20 +297,13 @@ struct CameraScreen<CameraPreview: View>: View {
                 .glassEffect(camera.teleprompter.isCardShown || camera.teleprompter.isRunning ? .regular.tint(.white.opacity(0.25)).interactive() : .regular.interactive())
 
                 Button {
-                    showsSafeZones.toggle()
-                    showsZoomPicker = false
-                    showsQualityPopover = false
+                    camera.toggleSafeZones()
                 } label: {
                     Image(systemName: "rectangle.dashed")
                         .frame(width: 40, height: 40)
                 }
-                .glassEffect(camera.safeZones.isEmpty ? .regular.interactive() : .regular.tint(.white.opacity(0.25)).interactive())
-                .popover(isPresented: $showsSafeZones, arrowEdge: .leading) {
-                    safeZonePopover
-                        .presentationCompactAdaptation(.popover)
-                        .preferredColorScheme(.dark)
-                        .presentationBackground(Color.black.opacity(0.78))
-                }
+                .glassEffect(camera.showsSafeZones ? .regular.tint(.white.opacity(0.25)).interactive() : .regular.interactive())
+                .accessibilityLabel(camera.showsSafeZones ? "Hide short-form guide" : "Show short-form guide")
 
                 Spacer().frame(height: 10)
 
@@ -411,22 +403,6 @@ struct CameraScreen<CameraPreview: View>: View {
         .frame(minWidth: 280)
     }
 
-    private var safeZonePopover: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Safe Zones")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            ForEach(SafeZonePlatform.allCases) { platform in
-                Toggle(platform.title, isOn: Binding(
-                    get: { camera.safeZones.contains(platform) },
-                    set: { _ in camera.toggleSafeZone(platform) }
-                ))
-            }
-        }
-        .padding(16)
-        .frame(minWidth: 220)
-    }
-
     private var resolutionBinding: Binding<CaptureResolution> {
         Binding(
             get: { camera.settings.resolution },
@@ -504,48 +480,73 @@ private struct CaptureFlight: View {
 
 /// A bright frame around the preview: the screen fill light for cameras
 /// without a torch.
-/// Shades the parts of the recorded frame a platform's chrome will cover.
-/// The picture fills the screen, so the frame is wider than the screen in
-/// portrait and the regions are placed against the frame, not the screen.
+/// The short-form guide over the picture, drawn the way the editor's
+/// preview draws it: each keep-out box a red wash under a diagonal hatch,
+/// a dashed red edge, and its name in white. The picture fills the screen,
+/// so the 9:16 frame is wider than the screen in portrait and every box is
+/// placed against the frame, not the screen.
 struct SafeZoneOverlay: View {
-    let platforms: Set<SafeZonePlatform>
-
     private static let verticalAspect = 9.0 / 16.0
+    private static let red = Color(red: 239 / 255, green: 68 / 255, blue: 68 / 255)
 
     var body: some View {
-        GeometryReader { geometry in
+        Canvas { context, size in
             let frame = FrameRect.aspectFill(
                 contentAspect: Self.verticalAspect,
-                containerWidth: geometry.size.width,
-                containerHeight: geometry.size.height
+                containerWidth: size.width,
+                containerHeight: size.height
             )
-            let shown = SafeZonePlatform.allCases.filter(platforms.contains)
-            ZStack(alignment: .topLeading) {
-                ForEach(Array(shown.enumerated()), id: \.element) { index, platform in
-                    ForEach(Array(platform.covered.enumerated()), id: \.offset) { _, region in
-                        Rectangle()
-                            .fill(.black.opacity(0.22))
-                            .overlay(Rectangle().strokeBorder(.white.opacity(0.4), lineWidth: 1))
-                            .frame(width: region.width * frame.width, height: region.height * frame.height)
-                            .offset(x: frame.x + region.x * frame.width, y: frame.y + region.y * frame.height)
+            let labelSize = max(9, min(12, frame.width / 36))
+            for box in ShortFormGuide.boxes {
+                let rect = CGRect(
+                    x: frame.x + box.x * frame.width,
+                    y: frame.y + box.y * frame.height,
+                    width: box.width * frame.width,
+                    height: box.height * frame.height
+                )
+                context.fill(Path(rect), with: .color(Self.red.opacity(0.12)))
+                context.drawLayer { hatch in
+                    hatch.clip(to: Path(rect))
+                    var lines = Path()
+                    // Diagonals eight points apart, running up and to the
+                    // right across the whole box.
+                    let span = rect.width + rect.height
+                    var start = -rect.height
+                    while start < span {
+                        lines.move(to: CGPoint(x: rect.minX + start, y: rect.maxY))
+                        lines.addLine(to: CGPoint(x: rect.minX + start + rect.height, y: rect.minY))
+                        start += 8 * 2.squareRoot()
                     }
-                    // The name sits at the top of the caption block, one row
-                    // per platform, so overlapping shades still read.
-                    if let bottom = platform.covered.dropFirst().first {
-                        Text(platform.title)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.8))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.black.opacity(0.4), in: Capsule())
-                            .offset(
-                                x: max(frame.x, 0) + 8,
-                                y: frame.y + bottom.y * frame.height + 6 + CGFloat(index) * 22
-                            )
+                    hatch.stroke(lines, with: .color(Self.red.opacity(0.45)), lineWidth: 1.5)
+                }
+                context.stroke(
+                    Path(rect.insetBy(dx: 0.5, dy: 0.5)),
+                    with: .color(Self.red.opacity(0.8)),
+                    style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                )
+                // A full-width band names itself at its inner edge; a rail at
+                // its top, where the keep-out meets the picture. A strip too
+                // narrow for its label runs the label down its length.
+                let fullWidth = box.width >= 0.99
+                let narrow = rect.width <= 40 && rect.height > 120
+                guard narrow || (rect.width > 40 && rect.height > labelSize * 2) else { continue }
+                let text = Text(box.label)
+                    .font(.system(size: labelSize, weight: .semibold))
+                    .foregroundStyle(.white)
+                var label = context.resolve(text)
+                label.shading = .color(.white)
+                let measured = label.measure(in: CGSize(width: 400, height: 40))
+                if narrow {
+                    context.drawLayer { turned in
+                        turned.translateBy(x: rect.midX, y: rect.minY + 8)
+                        turned.rotate(by: .degrees(90))
+                        turned.draw(label, at: CGPoint(x: 0, y: 0), anchor: .topLeading)
                     }
+                } else {
+                    let y = fullWidth && box.y <= 0.01 ? rect.maxY - 5 - measured.height : rect.minY + 4
+                    context.draw(label, at: CGPoint(x: max(rect.minX, 0) + 6, y: y), anchor: .topLeading)
                 }
             }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)

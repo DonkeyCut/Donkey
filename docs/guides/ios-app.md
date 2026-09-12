@@ -131,10 +131,10 @@ viewfinder.
 The camera shoots whichever way the phone is held: turn it sideways and the
 take is a landscape file, with the shutter across on the trailing edge.
 
-A rail button shades the parts of a vertical frame that TikTok, Reels or
-Shorts cover with their own chrome, placed against the recorded frame rather
-than the screen, kept across sessions, and drawn under the script so a take
-is framed against them too.
+A rail button under the teleprompter toggles the short-form guide: the same
+red keep-out the editor's preview draws for TikTok, Reels and Shorts, placed
+against the recorded frame rather than the screen, kept across sessions, and
+drawn under the script so a take is framed against it too.
 
 ## The Watch
 
