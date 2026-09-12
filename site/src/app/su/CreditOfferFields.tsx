@@ -69,7 +69,7 @@ export function CreditOfferFields({
         />
       </div>
       {value ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-[auto_repeat(3,minmax(0,1fr))]">
           <Field label="Landed by" htmlFor={`${idPrefix}-claim`}>
             <Select
               disabled={disabled}
@@ -77,8 +77,8 @@ export function CreditOfferFields({
               items={OFFER_CLAIM_NAMES}
               onValueChange={(v) => onChange({ ...value, claim: v as OfferClaim })}
             >
-              <SelectTrigger id={`${idPrefix}-claim`} className="w-full min-w-0">
-                <SelectValue className="truncate" />
+              <SelectTrigger id={`${idPrefix}-claim`} className="w-full">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {OFFER_CLAIMS.map((claim) => (
