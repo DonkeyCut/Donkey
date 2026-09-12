@@ -1,5 +1,7 @@
 import AVFoundation
+import CoreImage
 import DonkeyKitModels
+import ImageIO
 import UIKit
 
 /// Owns the capture side of the camera feature: permission prompts, the
@@ -61,6 +63,9 @@ final class CameraController: CameraControlling {
     func apply(_ settings: CameraSettings) { engine.apply(settings) }
     func startRecording() { engine.startRecording() }
     func stopRecording() { engine.stopRecording() }
+    /// Hands small JPEG frames of the live picture to `sink` until it is
+    /// set to nil. The watch is the one taker.
+    func setPreviewSink(_ sink: (@Sendable (Data) -> Void)?) { engine.setPreviewSink(sink) }
 
     /// Follows the phone. The coordinator reads the device against the
     /// preview layer: the preview takes the angle that keeps it upright on
@@ -119,7 +124,7 @@ final class CameraController: CameraControlling {
 /// All AVFoundation state, confined to one serial queue per Apple's capture
 /// guidance. `@unchecked Sendable` is the queue-confinement contract: nothing
 /// here is touched off `queue` after init.
-private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputRecordingDelegate, @unchecked Sendable {
+private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputRecordingDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     enum Event: Sendable {
         case running(ZoomMapping, hasTorch: Bool, effective: CameraSettings)
         case failed(reason: String)
@@ -133,6 +138,21 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
 
     private let queue = DispatchQueue(label: "com.donkeycut.donkeycut.capture")
     private let movieOutput = AVCaptureMovieFileOutput()
+    /// The live picture as sample buffers, for the watch's preview. Its
+    /// connection stays disabled until something asks for frames, so the
+    /// output costs nothing while nobody is watching.
+    private let previewOutput = AVCaptureVideoDataOutput()
+    /// Frames arrive here; the sink, the throttle and the CI context are
+    /// confined to it.
+    private let previewQueue = DispatchQueue(label: "com.donkeycut.donkeycut.capture.preview")
+    private var previewSink: (@Sendable (Data) -> Void)?
+    private var previewSentAt: TimeInterval = 0
+    private let previewContext = CIContext()
+    /// Frames a second the preview offers. The link to the watch gates the
+    /// rate below this on its own.
+    private static let previewFrameRate: Double = 8
+    /// The long side of a preview frame in pixels: a watch screen's worth.
+    private static let previewLongSide: CGFloat = 272
     private var videoInput: AVCaptureDeviceInput?
     private var facing: CameraFacing = .front
     private var settings = CameraSettings()
@@ -176,6 +196,15 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
                 if self.session.canAddOutput(self.movieOutput) {
                     self.session.addOutput(self.movieOutput)
                 }
+                self.previewOutput.videoSettings = [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                ]
+                self.previewOutput.alwaysDiscardsLateVideoFrames = true
+                self.previewOutput.setSampleBufferDelegate(self, queue: self.previewQueue)
+                if self.session.canAddOutput(self.previewOutput) {
+                    self.session.addOutput(self.previewOutput)
+                    self.previewOutput.connection(with: .video)?.isEnabled = false
+                }
                 self.session.commitConfiguration()
             }
             self.installCamera(facing: facing)
@@ -218,6 +247,7 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
         queue.async {
             self.captureRotation = angle
             self.applyCaptureRotation()
+            self.applyPreviewAim()
         }
     }
 
@@ -257,6 +287,35 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
         }
     }
 
+    func setPreviewSink(_ sink: (@Sendable (Data) -> Void)?) {
+        previewQueue.async { self.previewSink = sink }
+        queue.async { self.previewOutput.connection(with: .video)?.isEnabled = sink != nil }
+    }
+
+    // MARK: AVCaptureVideoDataOutputSampleBufferDelegate
+
+    func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard let previewSink else { return }
+        let now = Date.now.timeIntervalSinceReferenceDate
+        guard now - previewSentAt >= 1 / Self.previewFrameRate,
+              let pixelBuffer = sampleBuffer.imageBuffer else { return }
+        previewSentAt = now
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        let scale = Self.previewLongSide / max(image.extent.width, image.extent.height)
+        let small = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let data = previewContext.jpegRepresentation(
+                  of: small,
+                  colorSpace: colorSpace,
+                  options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.5]
+              ) else { return }
+        previewSink(data)
+    }
+
     // MARK: Queue-confined configuration
 
     private func installCamera(facing: CameraFacing) {
@@ -281,6 +340,21 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
         session.commitConfiguration()
         applyFormat()
         setZoomImmediate(display: 1)
+        applyPreviewAim()
+    }
+
+    /// The preview frames leave upright and, from the front camera, mirrored
+    /// the way the phone's own viewfinder is, so the watch shows the same
+    /// picture the person sees on the phone.
+    private func applyPreviewAim() {
+        guard let connection = previewOutput.connection(with: .video) else { return }
+        if connection.isVideoRotationAngleSupported(captureRotation) {
+            connection.videoRotationAngle = captureRotation
+        }
+        if connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = facing == .front
+        }
     }
 
     static func camera(for facing: CameraFacing) -> AVCaptureDevice? {

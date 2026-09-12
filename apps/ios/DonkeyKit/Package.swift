@@ -7,7 +7,7 @@ import PackageDescription
 // controllers. Both default to main-actor isolation per docs/guides/swift.md.
 let package = Package(
     name: "DonkeyKit",
-    platforms: [.iOS(.v26), .macOS(.v26)],
+    platforms: [.iOS(.v26), .macOS(.v26), .watchOS(.v26)],
     products: [
         .library(name: "DonkeyKitModels", targets: ["DonkeyKitModels"]),
         .library(name: "DonkeyKitUI", targets: ["DonkeyKitUI"]),

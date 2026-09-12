@@ -10,11 +10,38 @@
 		A100000100000000000000B1 /* DonkeyKitModels in Frameworks */ = {isa = PBXBuildFile; productRef = A100001100000000000000B1 /* DonkeyKitModels */; };
 		A100000200000000000000B1 /* DonkeyKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = A100001200000000000000B1 /* DonkeyKitUI */; };
 		A100000300000000000000B1 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = A100001300000000000000B1 /* GoogleSignIn */; };
+		A200000100000000000000B1 /* DonkeyWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = A200002100000000000000B1 /* DonkeyWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A200000200000000000000B1 /* DonkeyKitModels in Frameworks */ = {isa = PBXBuildFile; productRef = A200001100000000000000B1 /* DonkeyKitModels */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A200003300000000000000B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A100008100000000000000B1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A200004100000000000000B1;
+			remoteInfo = DonkeyWatch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A200005400000000000000B1 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				A200000100000000000000B1 /* DonkeyWatch.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A100002100000000000000B1 /* Donkey.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Donkey.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A100002200000000000000B1 /* Donkey.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Donkey.xcconfig; path = Config/Donkey.xcconfig; sourceTree = "<group>"; };
+		A200002100000000000000B1 /* DonkeyWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DonkeyWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -36,6 +63,11 @@
 			path = Donkey;
 			sourceTree = "<group>";
 		};
+		A200003200000000000000B1 /* DonkeyWatch */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DonkeyWatch;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,6 +81,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A200005100000000000000B1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A200000200000000000000B1 /* DonkeyKitModels in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -56,6 +96,7 @@
 			isa = PBXGroup;
 			children = (
 				A100003200000000000000B1 /* Donkey */,
+				A200003200000000000000B1 /* DonkeyWatch */,
 				A100002200000000000000B1 /* Donkey.xcconfig */,
 				A100006200000000000000B1 /* Products */,
 			);
@@ -65,6 +106,7 @@
 			isa = PBXGroup;
 			children = (
 				A100002100000000000000B1 /* Donkey.app */,
+				A200002100000000000000B1 /* DonkeyWatch.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -79,10 +121,12 @@
 				A100005200000000000000B1 /* Sources */,
 				A100005100000000000000B1 /* Frameworks */,
 				A100005300000000000000B1 /* Resources */,
+				A200005400000000000000B1 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A200003400000000000000B1 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				A100003200000000000000B1 /* Donkey */,
@@ -97,6 +141,29 @@
 			productReference = A100002100000000000000B1 /* Donkey.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A200004100000000000000B1 /* DonkeyWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A200007100000000000000B1 /* Build configuration list for PBXNativeTarget "DonkeyWatch" */;
+			buildPhases = (
+				A200005200000000000000B1 /* Sources */,
+				A200005100000000000000B1 /* Frameworks */,
+				A200005300000000000000B1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A200003200000000000000B1 /* DonkeyWatch */,
+			);
+			name = DonkeyWatch;
+			packageProductDependencies = (
+				A200001100000000000000B1 /* DonkeyKitModels */,
+			);
+			productName = DonkeyWatch;
+			productReference = A200002100000000000000B1 /* DonkeyWatch.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -108,6 +175,9 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					A100004100000000000000B1 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+					A200004100000000000000B1 = {
 						CreatedOnToolsVersion = 26.0;
 					};
 				};
@@ -131,12 +201,20 @@
 			projectRoot = "";
 			targets = (
 				A100004100000000000000B1 /* Donkey */,
+				A200004100000000000000B1 /* DonkeyWatch */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A100005300000000000000B1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A200005300000000000000B1 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -153,7 +231,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A200005200000000000000B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A200003400000000000000B1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A200004100000000000000B1 /* DonkeyWatch */;
+			targetProxy = A200003300000000000000B1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A10000A100000000000000B1 /* Debug */ = {
@@ -287,6 +380,64 @@
 			};
 			name = Release;
 		};
+		A20000A300000000000000B1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q593LLEXEN;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Donkey Cut";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.donkeycut.donkeycut;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.donkeycut.donkeycut.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		A20000A400000000000000B1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Q593LLEXEN;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Donkey Cut";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.donkeycut.donkeycut;
+				INFOPLIST_KEY_WKRunsIndependentlyOfCompanionApp = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.donkeycut.donkeycut.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -304,6 +455,15 @@
 			buildConfigurations = (
 				A10000A100000000000000B1 /* Debug */,
 				A10000A200000000000000B1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A200007100000000000000B1 /* Build configuration list for PBXNativeTarget "DonkeyWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A20000A300000000000000B1 /* Debug */,
+				A20000A400000000000000B1 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -341,6 +501,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = A100009200000000000000B1 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
 			productName = GoogleSignIn;
+		};
+		A200001100000000000000B1 /* DonkeyKitModels */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DonkeyKitModels;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

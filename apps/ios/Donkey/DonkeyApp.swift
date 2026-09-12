@@ -53,6 +53,7 @@ final class AppWiring {
     let auth: AuthModel
     let analytics: AnalyticsModel
     let cameraController: CameraController
+    let watchLink: WatchLinkController
     let sync: SyncEngine
     private let networkMonitor: NetworkMonitor
 
@@ -92,6 +93,7 @@ final class AppWiring {
 
         cameraController.model = camera
         camera.controller = cameraController
+        watchLink = WatchLinkController(app: app, camera: camera, cameraController: cameraController)
         cameraController.onRecordingFinished = { [media] url, duration, thumbnail in
             media.ingest(movieAt: url, duration: duration, thumbnail: thumbnail)
         }
