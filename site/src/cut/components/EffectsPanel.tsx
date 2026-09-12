@@ -361,9 +361,9 @@ function SoundCard({
   return (
     // The play control sits over the card as a sibling rather than inside it:
     // the card is what a drag carries, and the ghost of it is the boxed
-    // waveform — pressing play is not part of what is dragged. Every hint on
-    // the card is the app's own tooltip: the browser's title hint takes a
-    // second to appear, too slow for a grid of small controls.
+    // waveform — pressing play is not part of what is dragged. The only hint
+    // on a card is the full name when the row cut it short; the controls
+    // carry labels for assistive tech and nothing on hover.
     <TooltipProvider>
       <span className="group relative block">
         <div
@@ -414,17 +414,17 @@ function SoundCard({
             </span>
           </div>
         </div>
-        <Tooltip>
-          <TooltipTrigger
-            type="button"
-            aria-label={`${playing ? "Stop" : "Play"} ${label}`}
-            onClick={onTogglePlay}
-            className="absolute top-1.5 left-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-transform hover:scale-105"
-          >
-            {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
-          </TooltipTrigger>
-          <TooltipContent>{playing ? "Stop" : "Play"}</TooltipContent>
-        </Tooltip>
+        <button
+          type="button"
+          aria-label={`${playing ? "Stop" : "Play"} ${label}`}
+          onClick={onTogglePlay}
+          className={cn(
+            "absolute top-1.5 left-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105 focus-visible:opacity-100",
+            playing ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+          )}
+        >
+          {playing ? <Pause className="size-3" /> : <Play className="size-3 translate-x-px" />}
+        </button>
         {corner}
       </span>
     </TooltipProvider>
@@ -656,34 +656,28 @@ function SfxCard({ sound, fullName = false }: { sound: StockSfx; fullName?: bool
       }
       corner={
         <>
-          <Tooltip>
-            <TooltipTrigger
-              type="button"
-              aria-label={`Add ${label} at the playhead`}
-              onClick={add}
-              className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100 hover:scale-105"
-            >
-              <Plus className="size-3" />
-            </TooltipTrigger>
-            <TooltipContent>Add at the playhead</TooltipContent>
-          </Tooltip>
+          <button
+            type="button"
+            aria-label={`Add ${label} at the playhead`}
+            onClick={add}
+            className="absolute right-1.5 bottom-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground opacity-0 shadow-sm ring-1 ring-border transition-opacity group-hover:opacity-100 hover:scale-105"
+          >
+            <Plus className="size-3" />
+          </button>
           {/* The star stays once set; unstarred it shows on hover, so a card
               that is not a favorite reads clean. */}
-          <Tooltip>
-            <TooltipTrigger
-              type="button"
-              aria-label={`${starred ? "Remove" : "Add"} ${label} ${starred ? "from" : "to"} favorites`}
-              aria-pressed={starred}
-              onClick={() => useSoundFavorites.getState().toggle(sound.id)}
-              className={cn(
-                "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105",
-                starred ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-              )}
-            >
-              <Star className={cn("size-3", starred && "fill-yellow-400 text-yellow-400")} />
-            </TooltipTrigger>
-            <TooltipContent>{starred ? "Remove from favorites" : "Add to favorites"}</TooltipContent>
-          </Tooltip>
+          <button
+            type="button"
+            aria-label={`${starred ? "Remove" : "Add"} ${label} ${starred ? "from" : "to"} favorites`}
+            aria-pressed={starred}
+            onClick={() => useSoundFavorites.getState().toggle(sound.id)}
+            className={cn(
+              "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full bg-background text-foreground shadow-sm ring-1 ring-border transition-opacity hover:scale-105",
+              starred ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+            )}
+          >
+            <Star className={cn("size-3", starred && "fill-yellow-400 text-yellow-400")} />
+          </button>
         </>
       }
     />
