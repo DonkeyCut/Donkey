@@ -5,7 +5,7 @@ import type { ChatStatus } from "./ChatStatusBadge";
 import { chatRuntime } from "@/cut/lib/chatRuntime";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, type ChatTransport, type UIMessage } from "ai";
+import { DefaultChatTransport, type ChatTransport, type UIMessage, type UIMessageChunk } from "ai";
 import {
   ArrowUp,
   Brain,
@@ -101,6 +101,7 @@ import { runAiTool } from "@/cut/lib/aiTools";
 import { holdEditorChat } from "@/cut/lib/editorWork";
 import { recoverSceneCall } from "@/cut/lib/chatRecovery";
 import { replayChatStream } from "@/cut/lib/chatReplay";
+import { INTERRUPTED_ERROR, isResumeMessage, RESUME_LIMIT, resumePrompt, scrubLostTurn, unfinishedAsk, type ResumeMetadata, type TurnSettled } from "@/cut/lib/chatResume";
 import { claimEngineTool, cancelEngineChat } from "@/cut/lib/engineChat";
 import { projectBackend } from "@/cut/lib/residency";
 import { beginBrowserChat, browserChatRunning, cancelBrowserChat, watchBrowserChatTurns } from "@/cut/lib/browserChatTurns";
@@ -141,6 +142,11 @@ interface ChatThread {
   updatedAt: number;
   messages: UIMessage[];
   completedMessageId?: string;
+  /** How the newest turn ended when it did not complete. Unset while it runs
+   * and when the page lost it, which is what resumes it on return. */
+  turnSettled?: TurnSettled;
+  /** Continuations the newest ask has had. */
+  resumed?: number;
   /** Provider-native session ids so a resumed thread keeps its context. */
   sessions: Record<string, string>;
   /** The pi loop's LLM context (structured tool history included), when the
@@ -167,6 +173,22 @@ function readSeenReplies(projectId: string): Record<string, string> {
 // How long a streaming turn's newest snapshot may park before it must land —
 // the same cadence the cloud mirror debounces on.
 const THREAD_SAVE_MS = 1500;
+// How long a dropped connection rests before the turn picks itself back up.
+const RESUME_RETRY_MS = 1500;
+// How long after its last save a lost turn still resumes; an older thread is
+// one the user walked away from, and it waits for them.
+const RESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Attachments a restored message can still deliver: file blobs die with the
+ * page that made them, and a project asset may have been deleted since. */
+function liveRefs(refs: AssetRef[]): AssetRef[] {
+  return refs.filter(
+    (a) =>
+      !a.url?.startsWith("blob:") &&
+      (a.scope !== "project" ||
+        useEditor.getState().assets.some((x) => x.id === a.id)),
+  );
+}
 
 function readThreads(projectId: string): ChatThread[] {
   return readRawThreads(projectId).filter((t) => isStoredThread(t) && !t.deleted) as ChatThread[];
@@ -257,7 +279,7 @@ function settleInterruptedTools(messages: UIMessage[]): UIMessage[] {
       const t = p as { type: string; state?: string };
       if (!isToolPartType(t.type)) return p;
       if (t.state === "output-available" || t.state === "output-error") return p;
-      return { ...p, state: "output-error", errorText: "Interrupted." } as typeof p;
+      return { ...p, state: "output-error", errorText: INTERRUPTED_ERROR } as typeof p;
     }),
   }));
 }
@@ -869,6 +891,14 @@ function ChatSession({
   );
   const seenThreadAt = useRef(initialThread?.updatedAt ?? 0);
   const completedMessageId = useRef(initialThread?.completedMessageId);
+  const turnSettled = useRef<TurnSettled | undefined>(initialThread?.turnSettled);
+  const resumed = useRef(initialThread?.resumed ?? 0);
+  const userStopped = useRef(false);
+  // A dropped connection with continuations left: the turn rests, then resumes.
+  const [retryDisconnect, setRetryDisconnect] = useState(false);
+  // The engine journal reconnect for a turn the page lost: idle until the
+  // resume effect asks for one, pending while it runs, done once it answered.
+  const [reconnect, setReconnect] = useState<"idle" | "pending" | "done">("idle");
   const providerSessions = useRef<Record<string, string>>({
     ...(initialThread?.sessions ?? {}),
   });
@@ -940,6 +970,11 @@ function ChatSession({
       // Claude/Codex chat through the local engine; Gemini goes straight from
       // the page to Donkey's hosted inference with the user's session.
       sendMessages: async (options) => {
+        // A new turn opens with no verdict; a continuation keeps its ask's count.
+        turnSettled.current = undefined;
+        userStopped.current = false;
+        const newest = options.messages.at(-1);
+        if (!newest || !isResumeMessage(newest)) resumed.current = 0;
         if (provider(currentModel()) === "gemini") {
           setClientTools(true);
           const signal = registerBrowserTurn(options.abortSignal);
@@ -958,15 +993,22 @@ function ChatSession({
       reconnectToStream: async (options) => {
         if (provider(currentModel()) === "gemini") return Promise.resolve(null);
         setClientTools(false);
-        const stream = await engine().reconnectToStream(options);
-        return stream ? replayChatStream(stream, prepareReplay, attachReplay, completedMessageId.current) : null;
+        let replay: ReadableStream<UIMessageChunk> | null = null;
+        try {
+          const stream = await engine().reconnectToStream(options);
+          replay = stream ? await replayChatStream(stream, prepareReplay, attachReplay, completedMessageId.current) : null;
+        } finally {
+          // A replay settles the reconnect when it finishes (onFinish); with
+          // nothing to replay the resume effect moves on to a continuation.
+          if (!replay) setReconnect("done");
+        }
+        return replay;
       },
     };
   }, [threadId, projectId, currentModel, sessionFor, setClientTools, prepareReplay, attachReplay, registerBrowserTurn]);
 
-  const { messages, setMessages, sendMessage, stop, status, error, clearError } = useChat({
+  const { messages, setMessages, sendMessage, stop, status, error, clearError, resumeStream } = useChat({
     id: threadId,
-    resume: !readOnly && provider(model) !== "gemini",
     messages: initialThread && settleInterruptedTools(initialThread.messages),
     transport,
     onError: () => {
@@ -981,6 +1023,18 @@ function ChatSession({
       finishBrowserTurn.current = null;
       if (chatThreadDeleted(projectId, threadId)) return;
       if (!isAbort && !isDisconnect && !isError) completedMessageId.current = message.id;
+      // A verdict holds the thread for the user. A detach (this panel closing
+      // its reader while the engine keeps working) and a dropped connection
+      // with continuations left leave none, so the turn resumes.
+      const retrying = isDisconnect && resumed.current < RESUME_LIMIT;
+      if (isAbort) {
+        if (userStopped.current) turnSettled.current = "stopped";
+      } else if (isError && !retrying) {
+        turnSettled.current = "failed";
+      }
+      userStopped.current = false;
+      setRetryDisconnect(retrying);
+      setReconnect(retrying ? "idle" : "done");
       const stored = readThreads(projectId);
       const previous = stored.find((thread) => thread.id === threadId);
       const firstUser = finished.find((message) => message.role === "user");
@@ -990,6 +1044,8 @@ function ChatSession({
         title: firstUser?.parts.map((part) => part.type === "text" ? part.text : "").join("").trim().slice(0, 80) || "New chat",
         updatedAt: Date.now(),
         completedMessageId: completedMessageId.current,
+        turnSettled: turnSettled.current,
+        resumed: resumed.current,
         messages: recoverSceneCall(finished, threadId, useEditor.getState().projectId === projectId ? useEditor.getState().genvideo : undefined),
         sessions: { ...providerSessions.current },
         pi: readPiSession(threadId) ?? previous?.pi,
@@ -1118,6 +1174,8 @@ function ChatSession({
       seenThreadAt.current = thread.updatedAt;
       receivedThread.current = true;
       completedMessageId.current = thread.completedMessageId;
+      turnSettled.current = thread.turnSettled;
+      resumed.current = thread.resumed ?? 0;
       providerSessions.current = { ...thread.sessions };
       dropPiSession(threadId);
       hydratePiSession(threadId, thread.pi);
@@ -1172,7 +1230,13 @@ function ChatSession({
     // session has been let go reads back as undefined, and writing that would
     // erase the tool-call context the stored one still has. What is on disk
     // stands until a live session replaces it.
-    const merged = { ...thread, completedMessageId: completedMessageId.current, pi: thread.pi ?? stored.find((t) => t.id === thread.id)?.pi };
+    const merged = {
+      ...thread,
+      completedMessageId: completedMessageId.current,
+      turnSettled: turnSettled.current,
+      resumed: resumed.current,
+      pi: thread.pi ?? stored.find((t) => t.id === thread.id)?.pi,
+    };
     seenThreadAt.current = merged.updatedAt;
     writeThreads(projectId, [merged, ...stored.filter((t) => t.id !== thread.id)]);
     // Cloud projects mirror the thread server-side (debounced while it streams).
@@ -1332,6 +1396,64 @@ function ChatSession({
     setAttachments([]);
   };
 
+  // A turn the page lost picks itself back up. With an engine journal the
+  // panel reconnects and replays it; when there is none, or the replay shows
+  // a tool that needed this page, the model gets a continuation quoting the
+  // ask. The count rides the thread, so a reload loop ends at RESUME_LIMIT;
+  // a turn the user stopped, one that failed outright, and one left longer
+  // than RESUME_WINDOW_MS all wait for them.
+  const projectLoaded = useEditor((s) => s.projectId === projectId && s.loaded);
+  const signedIn = useGenerate((s) => s.signedIn);
+  const resumeOwed = useCallback(
+    () => (resumed.current < RESUME_LIMIT ? unfinishedAsk(messages, completedMessageId.current, turnSettled.current) : undefined),
+    [messages],
+  );
+  // A dropped connection rests briefly; clearing its error settles the
+  // status to ready, and the resume below takes it from there.
+  useEffect(() => {
+    if (status !== "error" || !retryDisconnect) return;
+    const timer = window.setTimeout(() => {
+      setRetryDisconnect(false);
+      clearError();
+    }, RESUME_RETRY_MS);
+    return () => window.clearTimeout(timer);
+  }, [status, retryDisconnect, clearError]);
+  useEffect(() => {
+    if (status !== "ready" || busy || readOnly || !projectLoaded || !currentAvailable) return;
+    if (provider(model) === "gemini" ? signedIn !== true : !info) return;
+    if (Date.now() - seenThreadAt.current > RESUME_WINDOW_MS) return;
+    const ask = resumeOwed();
+    if (!ask) return;
+    if (provider(model) !== "gemini") {
+      if (reconnect === "pending") return;
+      if (reconnect === "idle") {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the reconnect reacts to the thread settling unfinished; the state gates it to one attempt
+        setReconnect("pending");
+        void resumeStream();
+        return;
+      }
+    }
+    // Another tab holding this thread may have resumed it already.
+    const stored = readThreads(projectId).find((t) => t.id === threadId);
+    if ((stored?.resumed ?? 0) > resumed.current) {
+      resumed.current = stored?.resumed ?? 0;
+      return;
+    }
+    resumed.current += 1;
+    const refs = ((ask.metadata as { attachments?: unknown[] } | undefined)?.attachments ?? [])
+      .map(normalizeRef)
+      .filter((r): r is AssetRef => r !== null);
+    const live = liveRefs(refs);
+    setSendError(null);
+    pinnedRef.current = true;
+    // The continuation finishes the job in the lost turn's place, so the
+    // transcript drops that turn's failure before it goes out: the cut-off
+    // reply keeps the calls that landed and nothing else.
+    setMessages((current) => scrubLostTurn(current, ask.id));
+    const metadata: ResumeMetadata = { resume: true, ...(live.length > 0 ? { attachments: live } : {}) };
+    void sendMessage({ text: resumePrompt(ask), metadata });
+  }, [status, busy, readOnly, projectLoaded, currentAvailable, model, signedIn, info, reconnect, resumeOwed, resumeStream, setMessages, sendMessage, projectId, threadId]);
+
   // Drain the queue as turns settle. drainedRef keeps it to one dispatch per
   // ready period — the effect re-runs when the queue changes before useChat
   // surfaces the new turn's status. A dispatched row stays in the queue as
@@ -1348,6 +1470,8 @@ function ChatSession({
       return;
     }
     if (drainedRef.current || queuePaused || !currentAvailable) return;
+    // A thread still owed a reply resumes that first.
+    if (resumeOwed()) return;
     const next = queue.find(
       (m) => m.status === "queued" && m.id !== queueEditing,
     );
@@ -1368,17 +1492,12 @@ function ChatSession({
     // A restored row's attachments may point at assets deleted since it was
     // parked (or at file blobs that died with the last page); dropping the
     // dead refs keeps the message from claiming media it can't deliver.
-    const live = next.attachments.filter(
-      (a) =>
-        !a.url?.startsWith("blob:") &&
-        (a.scope !== "project" ||
-          useEditor.getState().assets.some((x) => x.id === a.id)),
-    );
+    const live = liveRefs(next.attachments);
     void sendMessage({
       text: next.text,
       ...(live.length > 0 && { metadata: { attachments: live } }),
     });
-  }, [status, queue, queuePaused, queueEditing, currentAvailable, sendMessage]);
+  }, [status, queue, queuePaused, queueEditing, currentAvailable, resumeOwed, sendMessage]);
 
   // Mirror the waiting rows to storage as they change; an empty queue clears
   // its slot.
@@ -1472,7 +1591,7 @@ function ChatSession({
               <LiveElapsed />
             </div>
           )}
-          {(error || (sendError && !currentAvailable)) && (
+          {((error && !retryDisconnect) || (sendError && !currentAvailable)) && (
             <div className="ai-error mt-2 flex items-start gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-[11.5px] leading-relaxed text-red-700">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
               <span>
@@ -1668,6 +1787,7 @@ function ChatSession({
                         // pausing it anyway would leave a stale flag.
                         if (queue.some((m) => m.status === "queued"))
                           setQueuePaused(true);
+                        userStopped.current = true;
                         toolAbort.current.abort();
                         if (provider(model) !== "gemini") void cancelEngineChat(projectId, threadId).catch((error) => showNotice(String(error)));
                         cancelBrowserChat(projectId, threadId);
@@ -2100,6 +2220,9 @@ const MessageView = memo(function MessageView({
 }: {
   message: UIMessage;
 }) {
+  // A continuation is the panel's own doing; the reply it brings reads as the
+  // ask's reply.
+  if (isResumeMessage(message)) return null;
   if (message.role === "user") {
     const text = message.parts
       .map((p) => (p.type === "text" ? p.text : ""))

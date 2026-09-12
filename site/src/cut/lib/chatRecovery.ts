@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai";
+import { INTERRUPTED_ERROR } from "./chatResume";
 import type { VideoProject } from "./genvideo/types";
 
 /** Reconcile the latest scene call with its persisted job after reconnecting. */
@@ -18,7 +19,7 @@ export function recoverSceneCall(
       if (typeof tool.input?.brief === "string" && tool.input.brief.trim() !== scene.brief) return part;
       if (typeof tool.input?.from_audio_asset_id === "string" && tool.input.from_audio_asset_id !== scene.audioAssetId) return part;
       if (tool.state === "output-available") return part;
-      if (tool.state === "output-error" && tool.errorText !== "Interrupted.") return part;
+      if (tool.state === "output-error" && tool.errorText !== INTERRUPTED_ERROR) return part;
       const { errorText: _error, ...rest } = part as typeof part & { errorText?: string };
       void _error;
       if (scene.phase === "failed")

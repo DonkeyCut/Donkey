@@ -2,6 +2,7 @@ import type { UIMessage, UIMessageChunk } from "ai";
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import { AI_TOOLS, attachedAssetsBlock, systemPrompt } from "@/cut/server/ai/catalog";
+import { isResumeMessage } from "../chatResume";
 import { parseTurnIntent, turnIntentInput, turnIntentPrompt, type TurnIntent } from "../turnIntent";
 import { enforceContextBudget } from "./contextBudget";
 import { donkeyModel, type ChatThinkingLevel } from "./donkeyModel";
@@ -310,17 +311,26 @@ function sessionFor(threadId: string, history: UIMessage[]): AgentMessage[] {
 
 const GATE_PROMPT = turnIntentPrompt();
 
+/** A message that runs routed from the start, with no gate call and no
+ * speculative round: one carrying attachments, or the continuation of a turn
+ * the page lost, which picks up whatever tools that turn was using. */
+function complexOnSight(lastUser: UIMessage | undefined): boolean {
+  if (!lastUser) return false;
+  if (isResumeMessage(lastUser)) return true;
+  const attached = (lastUser.metadata as { attachments?: unknown[] } | undefined)?.attachments;
+  return Array.isArray(attached) && attached.length > 0;
+}
+
 /** The turn's gate and router (ported from the legacy loop): judge the newest
  * message; "chat" withholds every tool, "simple" downgrades the model. A
- * message with attachments is complex by construction. Fails open. */
+ * message complex on sight skips the call. Fails open. */
 async function classifyTurnIntent(
   messages: UIMessage[],
   deps: CutAgentDeps,
   abortSignal?: AbortSignal
 ): Promise<{ intent: TurnIntent; skipped: boolean }> {
   const lastUser = messages.findLast((m) => m.role === "user");
-  const attached = (lastUser?.metadata as { attachments?: unknown[] } | undefined)?.attachments;
-  if (Array.isArray(attached) && attached.length > 0) return { intent: "complex", skipped: true };
+  if (complexOnSight(lastUser)) return { intent: "complex", skipped: true };
   const turns = messages.map((m) => ({
     role: m.role === "user" ? ("user" as const) : ("assistant" as const),
     text: m.parts
@@ -597,12 +607,10 @@ export function streamCutChat({
         // lands, so a chat or complex verdict aborts the run with nothing
         // shown and nothing executed, and the turn restarts routed — while a
         // simple verdict (the common case) keeps the run and pays no gate
-        // wall time at all. A message with attachments resolves complex
-        // instantly, so it runs routed from the start.
-        const attached = (lastUser?.metadata as { attachments?: unknown[] } | undefined)
-          ?.attachments;
+        // wall time at all. A message complex on sight runs routed from
+        // the start.
         let kept = false;
-        if (!(Array.isArray(attached) && attached.length > 0) && !abortSignal?.aborted) {
+        if (!complexOnSight(lastUser) && !abortSignal?.aborted) {
           const buffer: Record<string, unknown>[] = [];
           let mode: "buffering" | "live" | "discarded" = "buffering";
           const send = (chunk: Record<string, unknown>) => {
