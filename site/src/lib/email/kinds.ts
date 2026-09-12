@@ -171,10 +171,28 @@ const promotionTest = define({
   },
 });
 
+// The same promotion email, sent to one person from their Outreach row. It
+// spends the manual quota so it goes now, and its outbox row is keyed like
+// the segment send's, so the promotion counts it and never mails the person
+// again. The row's outreach entry is filed as sent, like a note.
+const promotionHand = define({
+  quota: "manual",
+  payload: z
+    .object({ promotionId: z.string().min(1), outreachId: z.string().min(1), actorUserId: z.string().min(1) })
+    .strict(),
+  build: async ({ promotionId }, row) => {
+    const [user, promotion] = await Promise.all([userOf(row), promotionRowOf(promotionId)]);
+    if (!user || (await isMarketingUnsubscribed(user.id))) return null;
+    return promotionEmailFor(promotion, user, (url) => clickUrl(row.id, url));
+  },
+  afterSend: async ({ outreachId, actorUserId }) => recordOutreachSent({ outreachId, actorUserId }),
+});
+
 export const EMAIL_KINDS: Record<EmailKindId, EmailKind> = {
   "reply-forward": replyForward as EmailKind,
   "credit-offer": creditOffer as EmailKind,
   outreach: outreach as EmailKind,
+  "promotion-hand": promotionHand as EmailKind,
   "promotion-test": promotionTest as EmailKind,
   welcome: welcome as EmailKind,
   "credit-expiry": creditExpiry as EmailKind,

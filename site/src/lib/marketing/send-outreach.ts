@@ -95,7 +95,7 @@ export async function buildOutreachEmail(payload: OutreachPayload, user: EmailUs
   };
 }
 
-export async function recordOutreachSent(payload: OutreachPayload): Promise<void> {
+export async function recordOutreachSent(payload: Pick<OutreachPayload, "outreachId" | "actorUserId">): Promise<void> {
   const now = new Date();
   const row = await prisma.userOutreach.findUnique({ select: { firstSentAt: true }, where: { id: payload.outreachId } });
   if (!row) return;

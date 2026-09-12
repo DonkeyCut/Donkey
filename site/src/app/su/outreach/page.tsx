@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/bytes";
-import { creditOfferTermsIfValid, type CreditOfferTerms } from "@/lib/credits/offerTerms";
+import { creditOfferTermsIfValid, OFFER_CLAIM_NAMES, type CreditOfferTerms } from "@/lib/credits/offerTerms";
 import { cn } from "@/lib/utils";
 import {
   OUTREACH_REASON_LABELS,
@@ -35,6 +35,7 @@ import {
 } from "@/lib/marketing/campaigns";
 import { isOfferPlaceholder, OUTREACH_PLACEHOLDERS } from "@/lib/marketing/placeholders";
 import { ApiError } from "@/queries/apiClient";
+import { usePromotions, type PromotionSummary } from "@/queries/promotions";
 import {
   useBusyOutreachIds,
   useOutreach,
@@ -58,9 +59,11 @@ const FILTERS: { status: OutreachStatus; label: string }[] = [
 
 const BLANK = "blank";
 
-// A place a note can start from: a saved template, or something this browser
-// already sent. Both are starting points; whatever ends up in the dialog —
-// words, send toggles and the credit offer alike — is what goes out.
+// A place a note can start from: a saved template, something this browser
+// already sent, or a promotion. The first two are starting points; whatever
+// ends up in the dialog — words, send toggles and the credit offer alike —
+// is what goes out. A promotion goes out as it is saved, the same email its
+// segment send mails, so it is read here and not edited.
 type StartPoint = {
   id: string;
   title: string;
@@ -73,7 +76,10 @@ type StartPoint = {
   at: number;
   remove?: () => void;
   busy?: boolean;
+  promotion?: PromotionSummary;
 };
+
+const promotionStartId = (id: string) => `promo:${id}`;
 
 function ago(iso: string | null): string {
   if (!iso) return "—";
@@ -161,6 +167,7 @@ export default function SuOutreachPage() {
   const act = useOutreachAction();
   const busy = useBusyOutreachIds();
   const templates = useOutreachTemplates();
+  const promotions = usePromotions();
   const saveTemplate = useSaveOutreachTemplate();
   const deleteTemplate = useDeleteOutreachTemplate();
   const { drafts, forget, remember } = useOutreachDrafts();
@@ -210,6 +217,18 @@ export default function SuOutreachPage() {
       trackReplies: draft.trackReplies,
       unsubscribeLink: draft.unsubscribeLink,
     })),
+    ...(promotions.data?.promotions ?? []).map((promotion) => ({
+      at: new Date(promotion.updatedAt).getTime(),
+      body: promotion.body,
+      creditOffer: promotion.creditOffer,
+      id: promotionStartId(promotion.id),
+      meta: `Promotion · ${promotion.counts.sent} sent`,
+      promotion,
+      subject: promotion.subject,
+      title: promotion.name || "Untitled",
+      trackReplies: false,
+      unsubscribeLink: true,
+    })),
   ].sort((a, b) => b.at - a.at);
 
   const sources: StartPoint[] = [
@@ -227,7 +246,10 @@ export default function SuOutreachPage() {
     ...starts,
   ];
 
-  const sendable = subject.trim() !== "" && body.trim() !== "";
+  // A promotion is checked whole by the server when it is sent, so the
+  // button is live and a blank field comes back as the reason.
+  const selectedPromotion = sources.find((s) => s.id === source)?.promotion;
+  const sendable = selectedPromotion !== undefined || (subject.trim() !== "" && body.trim() !== "");
   const selectedTemplate = source.startsWith("tpl:")
     ? saved.find((template) => `tpl:${template.id}` === source)
     : undefined;
@@ -305,7 +327,19 @@ export default function SuOutreachPage() {
 
   const submitSend = () => {
     const target = sendTarget;
-    if (!target || subject.trim() === "" || body.trim() === "") return;
+    if (!target || !sendable) return;
+    if (selectedPromotion) {
+      act.mutate(
+        { action: "promote", outreachId: target.id, promotionId: selectedPromotion.id },
+        {
+          onSuccess: () => {
+            setLastStart(source);
+            setSendTarget((current) => (current?.id === target.id ? null : current));
+          },
+        },
+      );
+      return;
+    }
     // Sending a start point exactly as it is stays that start point; a change
     // to its words or its toggles becomes an entry of its own.
     const from = sources.find((option) => option.id === source);
@@ -358,7 +392,7 @@ export default function SuOutreachPage() {
   const sending = sendTarget !== null && busy.has(sendTarget.id);
   // A failed send keeps its dialog open, so the reason belongs in there with
   // the words that still need fixing; the server names a bad placeholder.
-  const sendFailed = act.isError && act.variables?.action === "send";
+  const sendFailed = act.isError && (act.variables?.action === "send" || act.variables?.action === "promote");
   const sendIssue = sendFailed && act.error instanceof ApiError ? act.error.issues[0]?.message : undefined;
   const addFailed = act.isError && act.variables?.action === "add";
   const adding = act.isPending && act.variables?.action === "add";
@@ -544,9 +578,11 @@ export default function SuOutreachPage() {
             <DialogTitle>Email {sendTarget?.name}</DialogTitle>
             <DialogDescription>
               Goes to {sendTarget?.email}.{" "}
-              {trackReplies
-                ? "Replies come back to your inbox and mark this row replied."
-                : "Replies come straight back to your own address; the Mark replied button files the row."}
+              {selectedPromotion
+                ? "The promotion goes as its segment send would send it, counts in the promotion, and a later segment send skips this person."
+                : trackReplies
+                  ? "Replies come back to your inbox and mark this row replied."
+                  : "Replies come straight back to your own address; the Mark replied button files the row."}
             </DialogDescription>
           </DialogHeader>
 
@@ -623,7 +659,7 @@ export default function SuOutreachPage() {
                 </div>
               ) : (
                 <Button
-                  disabled={!sendable}
+                  disabled={!sendable || selectedPromotion !== undefined}
                   onClick={() => {
                     setTemplateName(selectedTemplate?.name ?? "");
                     setNaming(true);
@@ -646,6 +682,9 @@ export default function SuOutreachPage() {
               ) : null}
             </div>
 
+            {selectedPromotion ? (
+              <PromotionPreview promotion={selectedPromotion} issue={sendFailed ? sendIssue : undefined} />
+            ) : (
             <div className="flex min-h-0 min-w-0 flex-col gap-2">
               <Label htmlFor="outreach-subject">Subject</Label>
               <Input
@@ -694,11 +733,13 @@ export default function SuOutreachPage() {
                 </p>
               ) : null}
             </div>
+            )}
           </div>
 
           <DialogFooter>
             {/* The footer column is reversed below sm, so ordering the toggles
                 last keeps them painted above the send buttons there. */}
+            {selectedPromotion ? null : (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 max-sm:order-last sm:mr-auto">
               <Label className="gap-2 font-normal text-muted-foreground">
                 <Switch
@@ -712,13 +753,43 @@ export default function SuOutreachPage() {
                 Track replies
               </Label>
             </div>
+            )}
             <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
             <Button disabled={sending || !sendable} onClick={submitSend}>
-              {sending ? "Sending…" : "Send"}
+              {sending ? "Sending…" : selectedPromotion ? "Send promotion" : "Send"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// A promotion as it will go: the subject, the words, the button and the
+// offer, read from the saved row. Its words change on the Promotions tab.
+function PromotionPreview({ promotion, issue }: { promotion: PromotionSummary; issue: string | undefined }) {
+  const offer = promotion.creditOffer;
+  return (
+    <div className="flex min-h-0 min-w-0 flex-col gap-2">
+      <span className="text-xs font-medium text-muted-foreground">Subject</span>
+      <p className="text-sm">{promotion.subject || <span className="text-muted-foreground">No subject yet</span>}</p>
+      <span className="mt-1 text-xs font-medium text-muted-foreground">Message</span>
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap">
+        {promotion.body || <span className="text-muted-foreground">No message yet</span>}
+      </div>
+      {promotion.ctaLabel ? (
+        <p className="text-xs text-muted-foreground">
+          Button: {promotion.ctaLabel} → {promotion.ctaUrl}
+        </p>
+      ) : null}
+      {offer ? (
+        <p className="text-xs text-muted-foreground">
+          Credit offer: ${offer.dollars}, landed by {OFFER_CLAIM_NAMES[offer.claim].toLowerCase()}, {offer.claimWindowDays} days to claim,
+          lives {offer.expiresAfterDays} days.
+        </p>
+      ) : null}
+      <p className="text-xs text-muted-foreground">Edit the words on the Promotions tab.</p>
+      {issue ? <p className="text-sm text-destructive">{issue}</p> : null}
     </div>
   );
 }

@@ -99,6 +99,8 @@ type OutreachAction =
       trackReplies: boolean;
       creditOffer: CreditOfferTerms | null;
     }
+  // Sends a saved promotion to the row's account as it stands.
+  | { action: "promote"; outreachId: string; promotionId: string }
   | { action: "ignore" | "unignore" | "replied"; outreachId: string }
   // Puts the account with this address on the list, and answers with its row.
   | { action: "add"; email: string };

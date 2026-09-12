@@ -3,7 +3,7 @@ import { z } from "zod";
 import { queueEmails, scheduleDrain } from "@/lib/email/outbox";
 import { defineJob, JobFailure } from "@/lib/jobs/registry";
 import { activityRank, lastActiveByUser } from "@/lib/marketing/lastActive";
-import { promotionAudienceOf, resolvePromotionSegment } from "@/lib/marketing/promotions";
+import { promotionAudienceOf, promotionIdempotencyKey, resolvePromotionSegment } from "@/lib/marketing/promotions";
 import { prisma } from "@/lib/prisma";
 
 // Turns a promotion's segment into outbox rows, a page of accounts at a
@@ -40,7 +40,7 @@ export const promotionQueueJob = defineJob(
           const lastActiveBy = await lastActiveByUser(users.map((u) => u.id));
           queued += await queueEmails(
             users.map((user) => ({
-              idempotencyKey: `promotion:${promotionId}:${user.id}`,
+              idempotencyKey: promotionIdempotencyKey(promotionId, user.id),
               kind: "promotion",
               payload: { promotionId },
               promotionId,

@@ -141,7 +141,13 @@ export const SETTINGS = defineSettings({
   },
   emailPriorities: {
     schema: z
-      .object(Object.fromEntries(EMAIL_KIND_IDS.map((id) => [id, z.number().int().min(0).max(1000)])))
+      // A kind added after the override was saved reads its default, so the
+      // saved order for the rest keeps holding.
+      .object(
+        Object.fromEntries(
+          EMAIL_KIND_IDS.map((id) => [id, z.number().int().min(0).max(1000).default(DEFAULT_EMAIL_PRIORITIES[id])]),
+        ),
+      )
       .strict(),
     default: { ...DEFAULT_EMAIL_PRIORITIES },
     public: false,

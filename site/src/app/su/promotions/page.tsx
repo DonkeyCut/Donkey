@@ -137,7 +137,7 @@ function PromotionRow({
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-medium">{p.name}</span>
+            <span className="font-medium">{p.name || "Untitled"}</span>
             <Badge variant={STATUS_VARIANT[p.status]}>{p.status}</Badge>
           </div>
           <p className="mt-1 truncate text-sm text-muted-foreground">{p.subject}</p>
@@ -152,7 +152,7 @@ function PromotionRow({
                   p.finishedAt ? ` · finished ${when(p.finishedAt)}` : ""
                 }`}
           </p>
-          {p.status !== "draft" ? (
+          {p.status !== "draft" || recipients > 0 ? (
             <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2">
               {[
                 ["Sent", `${sent} of ${recipients}`],
@@ -215,7 +215,7 @@ function PromotionRow({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{p.name}”?</AlertDialogTitle>
             <AlertDialogDescription>
-              {p.status === "sent"
+              {recipients > 0
                 ? "Its recipient list goes with it, so a later promotion can no longer skip the people it reached."
                 : "The draft is removed."}
             </AlertDialogDescription>

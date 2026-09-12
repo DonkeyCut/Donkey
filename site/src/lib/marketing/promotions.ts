@@ -19,7 +19,7 @@ import {
 import { prisma } from "@/lib/prisma";
 import { PROMOTION_OFFER_KINDS } from "@/lib/credits/offerKinds";
 import type { OfferVars } from "@/lib/credits/offerTerms";
-import { creditOfferTermsOf } from "@/lib/credits/offerTerms";
+import { creditOfferDraftOf } from "@/lib/credits/offerTerms";
 
 // Promotions on the server: which address each sender is, who a segment
 // resolves to, one send, and the list su reads.
@@ -98,6 +98,12 @@ export function buildPromotionEmail(
 }
 
 export type PromotionSegment = { audience: Audience; excludePromotionIds: string[] };
+
+/** The outbox key for one person's copy of a promotion. The segment send and
+ * a send by hand share it, so a person gets a promotion once. */
+export function promotionIdempotencyKey(promotionId: string, userId: string): string {
+  return `promotion:${promotionId}:${userId}`;
+}
 
 export type SegmentResolution = SegmentCount & {
   // Where the walk stopped: the last account read when the deadline came,
@@ -185,7 +191,7 @@ type PromotionRow = NonNullable<Awaited<ReturnType<typeof prisma.promotion.findU
 function summarize(row: PromotionRow, counts: PromotionSummary["counts"]): PromotionSummary {
   return {
     id: row.id,
-    creditOffer: creditOfferTermsOf(row.creditOffer),
+    creditOffer: creditOfferDraftOf(row.creditOffer),
     name: row.name,
     subject: row.subject,
     body: row.body,

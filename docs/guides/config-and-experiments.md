@@ -130,7 +130,7 @@ by variant as well.
 
 ## Promotions
 
-A promotion is one email from su to an audience, minus anyone an earlier promotion reached; the Pro offers behind it (subscribe bonus, allowance multiplier) are Product-tab settings.
+A promotion is one email from su to an audience, minus anyone an earlier promotion reached; the Pro offers behind it (subscribe bonus, allowance multiplier) are Product-tab settings. A draft saves however it stands and is checked whole at a test or a send. The Outreach tab sends a promotion to one person by hand, as the same email under the same per-person outbox key, so it counts in the promotion and a later segment send skips them.
 Every outbound email is a row in one outbox, sent by one drainer in priority order under the email plan's monthly allowance, shared by the whole site. A promotion is read from the accounts table a page at a time by a job, queues its most recently active recipients first, and stops at what the rest of the billing cycle is forecast to need for welcome and credit emails, and for mail sent by hand on the work days left, then picks up the slots that go unused as the cycle runs down. The allowance, the renewal day, the reserves and the work hours are the Email send budget setting, and the order between kinds is the Email priorities setting.
 
 A credit promotion is a credit offer: one row that promises an account an

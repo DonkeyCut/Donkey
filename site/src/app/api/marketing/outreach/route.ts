@@ -20,6 +20,8 @@ import {
   UnknownPlaceholderError,
   type OutreachVars,
 } from "@/lib/marketing/placeholders";
+import { promotionIdempotencyKey } from "@/lib/marketing/promotions";
+import { sendIssue } from "@/lib/marketing/promotionSave";
 import { outreachIdempotencyKey } from "@/lib/marketing/send-outreach";
 import { prisma } from "@/lib/prisma";
 
@@ -29,9 +31,17 @@ const listQuerySchema = z.object({
   status: z.enum(OUTREACH_STATUSES).optional(),
 });
 
-// Three shapes: start a conversation with a user who is on the list, file a
-// row that is already on it, or put an account on the list by its address.
+// Four shapes: start a conversation with a user who is on the list, send
+// them a promotion as it stands, file a row that is already on it, or put an
+// account on the list by its address.
 const actionSchema = z.union([
+  z
+    .object({
+      action: z.literal("promote"),
+      outreachId: z.string().trim().min(1),
+      promotionId: z.string().trim().min(1),
+    })
+    .strict(),
   z
     .object({
       action: z.literal("send"),
@@ -306,6 +316,37 @@ export const POST = withSuperUser(async (request) => {
         unsubscribeLink: parsed.data.unsubscribeLink,
         vars,
       },
+      userId: outreach.user.id,
+    });
+    if (delivery.state === "failed") {
+      return NextResponse.json({ error: "not_sendable", message: delivery.error }, { status: 409 });
+    }
+    const row = await prisma.userOutreach.findUniqueOrThrow({ select: rowSelect, where: { id: outreach.id } });
+    return NextResponse.json({ delivery: delivery.state, row: serialize(row) });
+  }
+
+  // The promotion goes out as the segment send would send it, under the same
+  // per-person key, so it counts in the promotion and a later segment send
+  // skips this person. Someone it already reached is refused, since the key
+  // stands for the mail that went.
+  if (parsed.data.action === "promote") {
+    const promotion = await prisma.promotion.findUnique({ where: { id: parsed.data.promotionId } });
+    if (!promotion) return notFoundResponse();
+    const refused = sendIssue(promotion);
+    if (refused) return refused;
+    const idempotencyKey = promotionIdempotencyKey(promotion.id, outreach.user.id);
+    const earlier = await prisma.emailSend.findUnique({ select: { state: true }, where: { idempotencyKey } });
+    if (earlier && earlier.state !== "failed") {
+      const message =
+        earlier.state === "sent" ? "They already received this promotion." : "This promotion is already on its way to them.";
+      return NextResponse.json({ error: "Invalid request", issues: [{ message, path: "promotion" }] }, { status: 400 });
+    }
+    if (earlier) await prisma.emailSend.delete({ where: { idempotencyKey } });
+    const delivery = await deliverEmail({
+      idempotencyKey,
+      kind: "promotion-hand",
+      payload: { actorUserId, outreachId: outreach.id, promotionId: promotion.id },
+      promotionId: promotion.id,
       userId: outreach.user.id,
     });
     if (delivery.state === "failed") {
