@@ -3,6 +3,10 @@ import SwiftUI
 
 struct WatchCameraView: View {
     var link: WatchCameraLink
+    /// The crown's running count. Only the change between turns matters;
+    /// the range is wide so it never hits an end mid-take.
+    @State private var crown: Double = 0
+    @State private var crownRead: Double = 0
 
     var body: some View {
         ZStack {
@@ -21,6 +25,22 @@ struct WatchCameraView: View {
         .background(.black)
         .ignoresSafeArea()
         .animation(.spring(duration: 0.3), value: link.recordingStartedAt != nil)
+        // The crown scrolls the script on the phone, so a reader mid-take
+        // can bring the words back without reaching for the screen.
+        .focusable()
+        .digitalCrownRotation(
+            $crown,
+            from: -1_000_000,
+            through: 1_000_000,
+            by: 1,
+            sensitivity: .medium,
+            isContinuous: false,
+            isHapticFeedbackEnabled: false
+        )
+        .onChange(of: crown) { _, value in
+            link.scrollScript(by: value - crownRead)
+            crownRead = value
+        }
     }
 
     @ViewBuilder private var picture: some View {

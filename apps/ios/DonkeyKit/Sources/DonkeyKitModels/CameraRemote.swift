@@ -13,11 +13,20 @@ nonisolated public struct CameraRemoteState: Codable, Equatable, Sendable {
     public var facing: CameraFacing
     /// Seconds into the take, or nil when the camera is not recording.
     public var recordingElapsed: TimeInterval?
+    /// True while the script is running on the phone's picture, which is
+    /// when the watch's crown has something to move.
+    public var isScriptRunning: Bool
 
-    public init(isCameraOpen: Bool = false, facing: CameraFacing = .front, recordingElapsed: TimeInterval? = nil) {
+    public init(
+        isCameraOpen: Bool = false,
+        facing: CameraFacing = .front,
+        recordingElapsed: TimeInterval? = nil,
+        isScriptRunning: Bool = false
+    ) {
         self.isCameraOpen = isCameraOpen
         self.facing = facing
         self.recordingElapsed = recordingElapsed
+        self.isScriptRunning = isScriptRunning
     }
 
     public var isRecording: Bool { recordingElapsed != nil }
@@ -31,6 +40,8 @@ nonisolated public enum CameraRemoteCommand: Codable, Equatable, Sendable {
     case toggleRecording
     /// Whether the watch is looking at the picture and wants frames.
     case preview(Bool)
+    /// Move the running script by this many points, down for positive.
+    case nudgeScript(Double)
 }
 
 /// The envelope both ends put a state or a command in: one key, one JSON

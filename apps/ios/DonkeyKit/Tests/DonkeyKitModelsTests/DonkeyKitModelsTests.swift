@@ -40,6 +40,26 @@ import Testing
     }
 }
 
+@Suite struct TeleprompterNudgeTests {
+    @Test func nudgesAddUpAndAFreshRunClearsThem() {
+        let camera = CameraModel(defaults: UserDefaults(suiteName: "nudge-\(UUID())")!)
+        camera.loadTeleprompter(script: "One two three")
+        camera.startTeleprompter()
+        camera.nudgeTeleprompter(by: 40)
+        camera.nudgeTeleprompter(by: -15)
+        #expect(camera.teleprompter.nudge == 25)
+        camera.startTeleprompter()
+        #expect(camera.teleprompter.nudge == 0)
+    }
+
+    @Test func aStoppedScriptIgnoresNudges() {
+        let camera = CameraModel(defaults: UserDefaults(suiteName: "nudge-\(UUID())")!)
+        camera.loadTeleprompter(script: "One two three")
+        camera.nudgeTeleprompter(by: 40)
+        #expect(camera.teleprompter.nudge == 0)
+    }
+}
+
 @Suite struct SafeZoneTests {
     @Test func portraitFrameIsWiderThanThePhone() {
         let frame = FrameRect.aspectFill(contentAspect: 9.0 / 16.0, containerWidth: 390, containerHeight: 844)

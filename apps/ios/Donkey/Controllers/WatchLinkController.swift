@@ -37,6 +37,7 @@ final class WatchLinkController: NSObject, WCSessionDelegate {
             _ = camera.recordingStartedAt
             _ = camera.availability
             _ = camera.facing
+            _ = camera.teleprompter.isRunning
         } onChange: {
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -50,7 +51,8 @@ final class WatchLinkController: NSObject, WCSessionDelegate {
         CameraRemoteState(
             isCameraOpen: camera.availability == .running,
             facing: camera.facing,
-            recordingElapsed: camera.recordingStartedAt.map { Date.now.timeIntervalSince($0) }
+            recordingElapsed: camera.recordingStartedAt.map { Date.now.timeIntervalSince($0) },
+            isScriptRunning: camera.teleprompter.isRunning
         )
     }
 
@@ -82,6 +84,8 @@ final class WatchLinkController: NSObject, WCSessionDelegate {
             }
         case .preview(let wanted):
             setPreview(wanted)
+        case .nudgeScript(let points):
+            camera.nudgeTeleprompter(by: points)
         }
     }
 

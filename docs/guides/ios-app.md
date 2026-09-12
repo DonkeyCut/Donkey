@@ -142,8 +142,9 @@ The watch app is a remote for the phone's camera: a record button, a red
 clock while a take runs, and the picture itself, so the shot can be framed
 from where the person is standing. It works while the camera tab is up on the
 phone — a record command sent from another tab switches to the camera first —
-and the phone streams small frames only while the watch screen is on. The
-phone and the watch talk over Watch Connectivity: the phone sends the camera's
+and the phone streams small frames only while the watch screen is on. While the
+script is running, the crown scrolls it on the phone, the same nudge a drag
+on the picture makes. The phone and the watch talk over Watch Connectivity: the phone sends the camera's
 state on every change, and the watch sends its commands and acknowledges each
 frame, which is how the stream paces itself to the link.
 

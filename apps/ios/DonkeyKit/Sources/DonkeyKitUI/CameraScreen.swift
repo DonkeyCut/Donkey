@@ -690,10 +690,8 @@ struct TeleprompterOverlay: View {
     /// Rendered height of the paced script, measured off the Text itself so
     /// the scroll rate can pace the exact copy on screen.
     @State private var textHeight: Double = 0
-    /// How far the reader has dragged the script from where the pacing puts
-    /// it. It rides along with the scroll rather than replacing it, so a nudge
-    /// mid-take moves the words and the pace carries on.
-    @State private var dragged: Double = 0
+    /// The drag in flight. Its end lands on the model's nudge, beside what
+    /// the watch's crown sends.
     @GestureState private var dragging: Double = 0
     /// Breathing room between one pass of the script and the next, as a share
     /// of the prompter's height.
@@ -750,7 +748,7 @@ struct TeleprompterOverlay: View {
                     overlayHeight: height,
                     textHeight: textHeight,
                     gap: gap,
-                    nudge: dragged + dragging
+                    nudge: camera.teleprompter.nudge + dragging
                 )
                 VStack(alignment: .leading, spacing: gap) {
                     ForEach(0..<pass.copies, id: \.self) { copy in
@@ -789,12 +787,10 @@ struct TeleprompterOverlay: View {
             .gesture(
                 DragGesture(minimumDistance: 6)
                     .updating($dragging) { value, state, _ in state = value.translation.height }
-                    .onEnded { dragged += $0.translation.height }
+                    .onEnded { camera.nudgeTeleprompter(by: $0.translation.height) }
             )
         }
         .ignoresSafeArea()
-        // A fresh run puts the script back where the pacing wants it.
-        .onChange(of: camera.teleprompter.runStartedAt) { dragged = 0 }
     }
 
     /// Seconds into the script, counted from the press of play — or from the

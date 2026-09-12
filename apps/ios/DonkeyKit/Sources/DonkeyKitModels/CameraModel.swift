@@ -147,6 +147,15 @@ public final class CameraModel {
         teleprompter.isCardShown = false
         teleprompter.isRunning = true
         teleprompter.runStartedAt = .now
+        // A fresh run puts the script back where the pacing wants it.
+        teleprompter.nudge = 0
+    }
+
+    /// Moves the running script by `points`: down for positive, the way a
+    /// drag down moves it.
+    public func nudgeTeleprompter(by points: Double) {
+        guard teleprompter.isRunning else { return }
+        teleprompter.nudge += points
     }
 
     /// Takes the prompter off the picture: the card and the running script

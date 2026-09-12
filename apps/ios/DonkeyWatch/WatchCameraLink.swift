@@ -23,6 +23,14 @@ final class WatchCameraLink: NSObject, WCSessionDelegate {
 
     private let session = WCSession.default
     private var isWatching = false
+    /// Crown turns gathered between sends, in points, so a spin is a few
+    /// messages and the phone moves the script in one motion.
+    private var pendingNudge: Double = 0
+    private var nudgeFlush: Task<Void, Never>?
+    /// Points of script per crown unit. The crown turns "up" to send the
+    /// words up, the way a list scrolls under it.
+    private static let pointsPerCrownUnit: Double = 6
+    private static let nudgeSendInterval: Duration = .milliseconds(60)
 
     override init() {
         super.init()
@@ -39,6 +47,25 @@ final class WatchCameraLink: NSObject, WCSessionDelegate {
             return
         }
         session.sendMessage(CameraRemoteMessage.encode(.toggleRecording), replyHandler: nil)
+    }
+
+    /// A crown turn: `units` is the crown's own count, up for positive.
+    func scrollScript(by units: Double) {
+        guard state.isScriptRunning, session.isReachable else { return }
+        pendingNudge -= units * Self.pointsPerCrownUnit
+        guard nudgeFlush == nil else { return }
+        nudgeFlush = Task { [weak self] in
+            try? await Task.sleep(for: Self.nudgeSendInterval)
+            self?.flushNudge()
+        }
+    }
+
+    private func flushNudge() {
+        nudgeFlush = nil
+        let points = pendingNudge
+        pendingNudge = 0
+        guard points != 0, session.isReachable else { return }
+        session.sendMessage(CameraRemoteMessage.encode(.nudgeScript(points)), replyHandler: nil)
     }
 
     /// Whether the screen is up. On, the phone is asked for its state and

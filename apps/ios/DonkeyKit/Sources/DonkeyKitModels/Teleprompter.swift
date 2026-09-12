@@ -82,6 +82,11 @@ nonisolated public struct TeleprompterState: Equatable, Sendable {
     public var settings = TeleprompterSettings()
     /// When the run was asked for, so the script starts from the top.
     public var runStartedAt: Date?
+    /// How far the reader has moved the script from where the pacing puts
+    /// it, in points. It rides along with the scroll rather than replacing
+    /// it, so a nudge mid-take moves the words and the pace carries on. A
+    /// drag on the phone and the crown on the watch both land here.
+    public var nudge: Double = 0
 
     public init() {}
 
