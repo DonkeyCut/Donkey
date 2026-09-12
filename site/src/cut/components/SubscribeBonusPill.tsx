@@ -8,21 +8,11 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Gift } from "lucide-react";
-import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { creditValidity, OfferButton, OfferDialog, OfferDismiss, subscribeOfferCopy } from "@/cut/components/OfferDialog";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useInvalidateOnSettle } from "@/cut/lib/hosted";
 import { track } from "@/lib/analytics";
 import { formatUsd } from "@/lib/credits/format-usd";
-import { formatCreditExpiry } from "@/lib/credits/top-up";
 import { useStartCheckout } from "@/queries/billing";
 import { subscribeBonusQueryKey, useSubscribeBonus, type SubscribeBonus } from "@/queries/credits";
 
@@ -43,11 +33,10 @@ export function timeLeftLabel(minutes: number): string {
   return `${minutes}m left`;
 }
 
-/** How long the landed credit lasts, as a clause after the amount. */
-export function creditLifeClause(offer: { creditsExpireAt: string | null; creditsLifetime: string | null }): string {
-  if (offer.creditsExpireAt) return `, spendable through ${formatCreditExpiry(new Date(offer.creditsExpireAt))}`;
-  if (offer.creditsLifetime) return `, good for ${offer.creditsLifetime}`;
-  return "";
+/** How long the landed credit lasts, as the sentence after the offer. */
+export function creditLifeClause(offer: { creditsExpireAt: string | null; creditsLifetimeDays: number | null }): string {
+  const valid = creditValidity({ expiresAt: offer.creditsExpireAt, lifetimeDays: offer.creditsLifetimeDays });
+  return valid ? ` ${valid}` : "";
 }
 
 /** The deadline as people read it in their own clock: "Sep 8, 3:14 PM". */
@@ -139,29 +128,25 @@ function OpenOffer({ offer }: { offer: SubscribeBonus }) {
         <Gift className="size-3.5" />
         {dollars} with Pro · {timeLeftLabel(minutes)}
       </button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Get {dollars} in credits with Pro</DialogTitle>
-            <DialogDescription>
-              {offer.origin === "app" ? "You have used half of your signup credits. " : ""}
-              Subscribe to Pro for {CUT_PRO.price} by {formatDeadline(offer.closesAt)} and a one-time {dollars} in
-              credits lands in your account{creditLifeClause(offer)}.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              Not now
-            </Button>
-            <Button disabled={checkout.isPending} onClick={subscribe}>
-              {checkout.isPending ? "Starting…" : "Subscribe to Pro"}
-            </Button>
-          </DialogFooter>
-          {checkout.isError ? (
-            <p className="text-sm text-destructive">Billing is unavailable right now.</p>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      <OfferDialog
+        open={open}
+        onOpenChange={setOpen}
+        banner="subscribe"
+        title={`Get ${dollars} in credits with Pro`}
+        closesAt={offer.closesAt}
+        {...subscribeOfferCopy({
+          credits: dollars,
+          expiresAt: offer.creditsExpireAt,
+          lifetimeDays: offer.creditsLifetimeDays,
+        })}
+        cta={
+          <OfferButton disabled={checkout.isPending} onClick={subscribe}>
+            {checkout.isPending ? "Starting…" : "Subscribe to Pro"}
+          </OfferButton>
+        }
+        secondary={<OfferDismiss onClick={() => setOpen(false)}>Not now</OfferDismiss>}
+        error={checkout.isError ? "Billing is unavailable right now." : null}
+      />
     </>
   );
 }

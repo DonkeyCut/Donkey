@@ -123,7 +123,7 @@ export function ProCard() {
       ) : offer && offerOpen ? (
         <CardContent className="text-sm text-foreground">
           Subscribe for {CUT_PRO.price} by {formatDeadline(offer.closesAt)} and get a one-time{" "}
-          {formatUsd(offer.dollars)} in credits{creditLifeClause(offer)}.
+          {formatUsd(offer.dollars)} in credits.{creditLifeClause(offer)}
         </CardContent>
       ) : null}
       <CardFooter className="gap-3">

@@ -11,18 +11,9 @@
 // An offer landed by subscribing has a Subscribe button in place of Claim:
 // the press starts the Pro checkout, which carries the offer to the webhook.
 import { useSearchParams } from "next/navigation";
-import { Loader2, Sparkle } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
+import { claimOfferCopy, OfferButton, OfferDialog, OfferDismiss, subscribeOfferCopy } from "@/cut/components/OfferDialog";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { track } from "@/lib/analytics";
 import { formatCreditExpiry } from "@/lib/credits/top-up";
@@ -76,13 +67,15 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
     });
     checkout.mutate({ offerToken: token }, { onSuccess: (result) => window.location.assign(result.url) });
   };
-  // The dialog opens at once, checking the link, at the size it keeps: the
-  // body reserves two lines and every state ends in one row of buttons.
+  // The card opens at once, checking the link, at the size it keeps: the
+  // body reserves two lines and every state ends in one button.
   const done = claim.data ?? (offer.data?.claimed ? { expiresAt: offer.data.expiresAt } : null);
 
-  let title = "Claim your credits";
+  let title: React.ReactNode = "Claim your credits";
   let body: React.ReactNode;
-  let footer: React.ReactNode;
+  let terms: React.ReactNode = null;
+  let cta: React.ReactNode;
+  let secondary: React.ReactNode = <OfferDismiss onClick={onClose}>Not now</OfferDismiss>;
   if (offer.isPending) {
     body = (
       <span className="flex items-center gap-2">
@@ -90,14 +83,7 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
         Checking your offer…
       </span>
     );
-    footer = (
-      <>
-        <Button variant="ghost" onClick={onClose}>
-          Not now
-        </Button>
-        <Button disabled>Claim</Button>
-      </>
-    );
+    cta = <OfferButton disabled>Claim</OfferButton>;
   } else if (offer.isError) {
     const status = offer.error instanceof ApiError ? offer.error.status : null;
     title =
@@ -110,73 +96,65 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
           : status === 409
             ? "This offer is for accounts without a Pro subscription."
             : "The offer it pointed to is gone.";
-    footer = <Button onClick={onClose}>OK</Button>;
+    cta = <OfferButton onClick={onClose}>OK</OfferButton>;
+    secondary = null;
   } else if (done) {
-    body = `${offer.data.credits} in AI credits is on your account.${
+    title = `${offer.data.credits} is on your account`;
+    body = `${offer.data.credits} in AI credits is ready to spend.${
       done.expiresAt ? ` It expires ${formatCreditExpiry(new Date(done.expiresAt))}.` : ""
     }`;
-    footer = <Button onClick={onClose}>Start editing</Button>;
+    cta = <OfferButton onClick={onClose}>Start editing</OfferButton>;
+    secondary = null;
   } else if (offer.data.claim === "subscribe") {
     title = `Get ${offer.data.credits} in credits with Pro`;
-    body = `Subscribe to Pro for ${CUT_PRO.price}${
-      offer.data.closesAt ? ` by ${formatCreditExpiry(new Date(offer.data.closesAt))}` : ""
-    } and a one-time ${offer.data.credits} in AI credits lands in your account${
-      offer.data.lifetime ? `, good for ${offer.data.lifetime}` : ""
-    }.`;
-    footer = (
-      <>
-        <Button variant="ghost" onClick={onClose}>
-          Not now
-        </Button>
-        <Button disabled={checkout.isPending} onClick={subscribe}>
-          {checkout.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-          Subscribe to Pro
-        </Button>
-      </>
+    ({ body, terms } = subscribeOfferCopy({
+      credits: offer.data.credits,
+      expiresAt: null,
+      lifetimeDays: offer.data.lifetimeDays,
+    }));
+    cta = (
+      <OfferButton disabled={checkout.isPending} onClick={subscribe}>
+        {checkout.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
+        Subscribe to Pro
+      </OfferButton>
     );
   } else {
-    body = `You have ${offer.data.credits} in AI credits. They’re waiting for you.${
-      offer.data.lifetime ? ` Once claimed, it’s good for ${offer.data.lifetime}.` : ""
-    }${offer.data.closesAt ? ` Claim by ${formatCreditExpiry(new Date(offer.data.closesAt))}.` : ""}`;
-    footer = (
-      <>
-        <Button variant="ghost" onClick={onClose}>
-          Not now
-        </Button>
-        <Button disabled={claim.isPending} onClick={() => claim.mutate(token)}>
-          {claim.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
-          Claim {offer.data.credits}
-        </Button>
-      </>
+    title = `${offer.data.credits} in credits is waiting`;
+    ({ body, terms } = claimOfferCopy({
+      credits: offer.data.credits,
+      closesAt: offer.data.closesAt,
+      lifetimeDays: offer.data.lifetimeDays,
+    }));
+    cta = (
+      <OfferButton disabled={claim.isPending} onClick={() => claim.mutate(token)}>
+        {claim.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
+        Claim {offer.data.credits}
+      </OfferButton>
     );
   }
 
+  const error = checkout.isError
+    ? "Billing is unavailable right now."
+    : claim.isError
+      ? claim.error instanceof ApiError && claim.error.status === 403
+        ? "This offer belongs to a different account. Sign in with the address the email was sent to."
+        : claim.error instanceof ApiError && claim.error.status === 410
+          ? "The claim window for this offer has closed."
+          : "That didn’t go through. Try again."
+      : null;
+
   return (
-    <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="top-[18%] translate-y-0 px-6 sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg">
-            <Sparkle className="size-5 shrink-0 fill-violet-500/25 text-violet-500" />
-            {title}
-          </DialogTitle>
-          <DialogDescription className="min-h-12 text-base">{body}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter className="mx-0 mb-0 items-center border-0 bg-transparent p-0">
-          {checkout.isError && (
-            <p className="text-sm text-destructive sm:mr-auto">Billing is unavailable right now.</p>
-          )}
-          {claim.isError && (
-            <p className="text-sm text-destructive sm:mr-auto">
-              {claim.error instanceof ApiError && claim.error.status === 403
-                ? "This offer belongs to a different account. Sign in with the address the email was sent to."
-                : claim.error instanceof ApiError && claim.error.status === 410
-                ? "The claim window for this offer has closed."
-                : "That didn’t go through. Try again."}
-            </p>
-          )}
-          {footer}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <OfferDialog
+      open
+      onOpenChange={(next) => !next && onClose()}
+      banner={offer.data?.claim === "subscribe" ? "subscribe" : "credits"}
+      closesAt={offer.data && !done ? offer.data.closesAt : null}
+      title={title}
+      body={body}
+      terms={terms}
+      cta={cta}
+      secondary={secondary}
+      error={error}
+    />
   );
 }
