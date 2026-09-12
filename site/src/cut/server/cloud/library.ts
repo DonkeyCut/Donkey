@@ -11,7 +11,7 @@ import type {
   TemplateLayer,
   TemplateMedia,
 } from "../library";
-import { templateExtras } from "../library";
+import { templateExtras } from "../templateExtras";
 import { resolveParent } from "@/cut/lib/folderTree";
 import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";

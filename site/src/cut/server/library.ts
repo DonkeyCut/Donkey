@@ -6,6 +6,7 @@ import { resolveParent, settleParents } from "@/cut/lib/folderTree";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { mediaPath as projectMediaPath, readProject } from "./projects";
+import { templateExtras } from "./templateExtras";
 import { exists, uniqueName, writeJsonAtomic } from "./util";
 
 /** The Mac's library: reusable media that lives outside any project, shared by
@@ -122,19 +123,6 @@ export interface LibraryTemplate {
   captions?: unknown;
   project?: unknown;
 }
-
-/** The parts of a template the server carries whole. */
-export const templateExtras = (input: {
-  transitions?: unknown[];
-  stickers?: unknown[];
-  captions?: unknown;
-  project?: unknown;
-}) => ({
-  ...(input.transitions?.length ? { transitions: input.transitions } : {}),
-  ...(input.stickers?.length ? { stickers: input.stickers } : {}),
-  ...(input.captions ? { captions: input.captions } : {}),
-  ...(input.project ? { project: input.project } : {}),
-});
 
 interface LibraryIndex {
   assets: LibraryAsset[];
