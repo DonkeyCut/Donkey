@@ -69,6 +69,18 @@ struct CameraScreen<CameraPreview: View>: View {
                 TeleprompterOverlay(camera: camera, onTap: toggleChrome)
             }
             controls
+            // The timer rides above the chrome and outlives it: a take clears
+            // the stage, and the red clock is how a person knows the camera is
+            // still rolling.
+            if camera.isRecording {
+                VStack {
+                    RecordingTimer(camera: camera)
+                    Spacer()
+                }
+                .padding(.top, 8)
+                .allowsHitTesting(false)
+                .transition(.opacity)
+            }
             if isFlying, let poster = corner?.poster, wellFrame != .zero {
                 CaptureFlight(poster: poster, landing: wellFrame, corner: 10) {
                     isFlying = false
@@ -158,9 +170,6 @@ struct CameraScreen<CameraPreview: View>: View {
 
     private var controls: some View {
         VStack {
-            if camera.isRecording {
-                RecordingTimer(camera: camera)
-            }
             if camera.teleprompter.isCardShown, !camera.isRecording {
                 TeleprompterCard(
                     camera: camera,
@@ -473,13 +482,24 @@ struct RecordingTimer: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { context in
             if let startedAt = camera.recordingStartedAt {
-                Text(formattedDuration(context.date.timeIntervalSince(startedAt)))
-                    .font(.footnote.weight(.bold))
-                    .monospacedDigit()
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Color.recordPink.opacity(0.9), in: Capsule())
+                let elapsed = context.date.timeIntervalSince(startedAt)
+                HStack(spacing: 7) {
+                    // The dot blinks on the second, the way a camera's tally
+                    // light does.
+                    Circle()
+                        .fill(.white)
+                        .frame(width: 8, height: 8)
+                        .opacity(Int(elapsed * 2) % 2 == 0 ? 1 : 0.3)
+                    Text(formattedDuration(elapsed))
+                        .font(.footnote.weight(.bold))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.9), in: Capsule())
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Recording, \(formattedDuration(elapsed))")
             }
         }
     }
