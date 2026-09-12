@@ -36,10 +36,13 @@ final class WatchCameraLink: NSObject, WCSessionDelegate {
         guard session.activationState == .activated, session.isReachable else { return }
         session.sendMessage(CameraRemoteMessage.encode(.preview(watching)), replyHandler: nil)
         if watching {
-            session.sendMessage(CameraRemoteMessage.encode(.hello)) { [weak self] reply in
+            // WatchConnectivity calls the reply on its own queue, so the
+            // closure is declared Sendable and hops to the main actor itself.
+            let onReply: @Sendable ([String: Any]) -> Void = { [weak self] reply in
                 guard let state = CameraRemoteMessage.state(in: reply) else { return }
                 Task { @MainActor in self?.apply(state) }
             }
+            session.sendMessage(CameraRemoteMessage.encode(.hello), replyHandler: onReply)
         }
     }
 
