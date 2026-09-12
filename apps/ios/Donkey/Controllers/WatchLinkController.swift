@@ -17,8 +17,8 @@ final class WatchLinkController: NSObject, WCSessionDelegate {
     /// A record command waiting on the camera to come up, and when it lapses:
     /// a take nobody is expecting any more must never start on its own.
     private var pendingRecordUntil: Date?
-    /// Frames on the wire the watch has not acknowledged. The link carries
-    /// one at a time, so a slow link drops frames at the source.
+    /// Frames on the wire the watch has not acknowledged. Two ride at once
+    /// so the link stays busy, and a slow link drops frames at the source.
     private nonisolated let framesInFlight = Mutex(0)
 
     init(app: AppModel, camera: CameraModel, cameraController: CameraController) {
@@ -36,6 +36,7 @@ final class WatchLinkController: NSObject, WCSessionDelegate {
         withObservationTracking {
             _ = camera.recordingStartedAt
             _ = camera.availability
+            _ = camera.facing
         } onChange: {
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -48,6 +49,7 @@ final class WatchLinkController: NSObject, WCSessionDelegate {
     private var state: CameraRemoteState {
         CameraRemoteState(
             isCameraOpen: camera.availability == .running,
+            facing: camera.facing,
             recordingElapsed: camera.recordingStartedAt.map { Date.now.timeIntervalSince($0) }
         )
     }
@@ -95,7 +97,7 @@ final class WatchLinkController: NSObject, WCSessionDelegate {
         let session = WCSession.default
         guard session.isReachable else { return }
         let claimed = framesInFlight.withLock { count in
-            guard count < 1 else { return false }
+            guard count < 2 else { return false }
             count += 1
             return true
         }

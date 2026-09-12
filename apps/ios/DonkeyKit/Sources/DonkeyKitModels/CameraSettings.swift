@@ -37,7 +37,7 @@ nonisolated public struct CameraSettings: Equatable, Codable, Sendable {
     }
 }
 
-nonisolated public enum CameraFacing: Sendable, Equatable {
+nonisolated public enum CameraFacing: String, Codable, Sendable, Equatable {
     case front, back
 
     public var flipped: CameraFacing { self == .front ? .back : .front }

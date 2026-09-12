@@ -8,11 +8,15 @@ import Foundation
 nonisolated public struct CameraRemoteState: Codable, Equatable, Sendable {
     /// True while the phone's camera is on screen and running.
     public var isCameraOpen: Bool
+    /// Which camera the picture comes from. A change means the last frame
+    /// the watch holds is of the other camera.
+    public var facing: CameraFacing
     /// Seconds into the take, or nil when the camera is not recording.
     public var recordingElapsed: TimeInterval?
 
-    public init(isCameraOpen: Bool = false, recordingElapsed: TimeInterval? = nil) {
+    public init(isCameraOpen: Bool = false, facing: CameraFacing = .front, recordingElapsed: TimeInterval? = nil) {
         self.isCameraOpen = isCameraOpen
+        self.facing = facing
         self.recordingElapsed = recordingElapsed
     }
 

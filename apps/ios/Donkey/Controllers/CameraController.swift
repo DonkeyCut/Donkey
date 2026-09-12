@@ -150,9 +150,11 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
     private let previewContext = CIContext()
     /// Frames a second the preview offers. The link to the watch gates the
     /// rate below this on its own.
-    private static let previewFrameRate: Double = 8
-    /// The long side of a preview frame in pixels: a watch screen's worth.
-    private static let previewLongSide: CGFloat = 272
+    private static let previewFrameRate: Double = 10
+    /// The long side of a preview frame in pixels. The link to the watch is
+    /// Bluetooth most of the time, so a frame is kept to a few kilobytes:
+    /// enough to frame a shot, small enough to arrive as it happens.
+    private static let previewLongSide: CGFloat = 200
     private var videoInput: AVCaptureDeviceInput?
     private var facing: CameraFacing = .front
     private var settings = CameraSettings()
@@ -311,7 +313,7 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
               let data = previewContext.jpegRepresentation(
                   of: small,
                   colorSpace: colorSpace,
-                  options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.5]
+                  options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.4]
               ) else { return }
         previewSink(data)
     }
