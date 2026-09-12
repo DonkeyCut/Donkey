@@ -1430,12 +1430,10 @@ export async function sampleWatchFrames(
     const deadline = Date.now() + (opts.budgetMs ?? Infinity);
     const outOfTime = () => Date.now() > deadline;
     const sigG16At = async (t: number): Promise<Float32Array | null> => {
-      const one = await frameSink(track, { width: cw, height: ch, fit: "fill" })
-        .canvasesAtTimestamps([t])
-        .next();
-      if (one.done || !one.value) return null;
+      const one = await frameSink(track, { width: cw, height: ch, fit: "fill" }).getCanvas(t);
+      if (!one) return null;
       sigCtx.imageSmoothingQuality = "high";
-      sigCtx.drawImage(one.value.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
+      sigCtx.drawImage(one.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
       const data = sigCtx.getImageData(0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE).data;
       return frameSig({ width: SIGNATURE_SIZE, height: SIGNATURE_SIZE, channels: 4, data }).g16;
     };
@@ -1446,37 +1444,41 @@ export async function sampleWatchFrames(
     );
     let paused = false;
     let capped = false;
-    for (let i = 0; i < times.length; i++) {
-      if (opts.shouldPause?.() || outOfTime()) {
-        paused = true;
-        break;
+    try {
+      for (let i = 0; i < times.length; i++) {
+        if (opts.shouldPause?.() || outOfTime()) {
+          paused = true;
+          break;
+        }
+        // The keep-cap ends the pass — everything reported stays everything
+        // seen, and the caller resumes from coveredTo.
+        if (keptCount >= maxFrames) {
+          capped = true;
+          break;
+        }
+        const next = await cells.next();
+        if (next.done || !next.value) continue; // a moment the decoder had no frame for
+        if (!opts.metadataOnly) {
+          const copy = createRasterCanvas(cw, ch);
+          const cctx = copy.getContext("2d") as CanvasRenderingContext2D | null;
+          if (!cctx) throw new Error("Could not sample the video.");
+          cctx.drawImage(next.value.canvas as CanvasImageSource, 0, 0, cw, ch);
+          held.set(candTimes.length, copy);
+        }
+        candTimes.push(times[i]);
+        sigCtx.imageSmoothingQuality = "high";
+        sigCtx.drawImage(next.value.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
+        const rgb = {
+          width: SIGNATURE_SIZE,
+          height: SIGNATURE_SIZE,
+          channels: 4 as const,
+          data: sigCtx.getImageData(0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE).data,
+        };
+        candG16.push(frameSig(rgb).g16);
+        selector.push(rgb);
       }
-      // The keep-cap ends the pass — everything reported stays everything
-      // seen, and the caller resumes from coveredTo.
-      if (keptCount >= maxFrames) {
-        capped = true;
-        break;
-      }
-      const next = await cells.next();
-      if (next.done || !next.value) continue; // a moment the decoder had no frame for
-      if (!opts.metadataOnly) {
-        const copy = createRasterCanvas(cw, ch);
-        const cctx = copy.getContext("2d") as CanvasRenderingContext2D | null;
-        if (!cctx) throw new Error("Could not sample the video.");
-        cctx.drawImage(next.value.canvas as CanvasImageSource, 0, 0, cw, ch);
-        held.set(candTimes.length, copy);
-      }
-      candTimes.push(times[i]);
-      sigCtx.imageSmoothingQuality = "high";
-      sigCtx.drawImage(next.value.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
-      const rgb = {
-        width: SIGNATURE_SIZE,
-        height: SIGNATURE_SIZE,
-        channels: 4 as const,
-        data: sigCtx.getImageData(0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE).data,
-      };
-      candG16.push(frameSig(rgb).g16);
-      selector.push(rgb);
+    } finally {
+      await cells.return();
     }
     const selection = selector.finish();
     // Nothing decoded and nothing interrupted the pass: the source is

@@ -24,7 +24,7 @@ import { createRasterCanvas } from "../raster";
  */
 
 /** A sink over one video track that hands back server canvases. */
-class NodeFrameSink implements FrameCanvasSink {
+export class NodeFrameSink implements FrameCanvasSink {
   private readonly samples: VideoSampleSink;
 
   constructor(
@@ -39,12 +39,16 @@ class NodeFrameSink implements FrameCanvasSink {
     const { width, height, fit } = this.size ?? {};
     // Always a transform, even at native size: it is what bakes the
     // container's rotation into the pixels.
-    const out = await sample.transform({
-      ...(width !== undefined ? { width: Math.round(width) } : {}),
-      ...(height !== undefined ? { height: Math.round(height) } : {}),
-      ...(width !== undefined && height !== undefined ? { fit: fit ?? "fill" } : fit ? { fit } : {}),
-    });
-    sample.close();
+    let out: VideoSample;
+    try {
+      out = await sample.transform({
+        ...(width !== undefined ? { width: Math.round(width) } : {}),
+        ...(height !== undefined ? { height: Math.round(height) } : {}),
+        ...(width !== undefined && height !== undefined ? { fit: fit ?? "fill" } : fit ? { fit } : {}),
+      });
+    } finally {
+      sample.close();
+    }
     try {
       const pixels = new Uint8Array(out.allocationSize({ format: "RGBA" }));
       await out.copyTo(pixels, { format: "RGBA" });
