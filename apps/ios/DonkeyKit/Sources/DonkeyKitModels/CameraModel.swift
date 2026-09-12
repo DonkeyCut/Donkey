@@ -41,18 +41,41 @@ public final class CameraModel {
         }
     }
 
+    /// The short-form platforms whose covered areas shade the picture. Kept
+    /// across sessions: a person who posts to one place frames for it every
+    /// time.
+    public private(set) var safeZones: Set<SafeZonePlatform> = [] {
+        didSet {
+            if safeZones != oldValue {
+                defaults.set(safeZones.map(\.rawValue).sorted(), forKey: Self.safeZonesKey)
+            }
+        }
+    }
+
     public var isRecording: Bool { recordingStartedAt != nil }
 
     public var controller: (any CameraControlling)?
 
     private let defaults: UserDefaults
     private static let teleprompterKey = "teleprompterSettings"
+    private static let safeZonesKey = "safeZonePlatforms"
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         if let data = defaults.data(forKey: Self.teleprompterKey),
            let settings = try? JSONDecoder().decode(TeleprompterSettings.self, from: data) {
             teleprompter.settings = settings
+        }
+        if let stored = defaults.stringArray(forKey: Self.safeZonesKey) {
+            safeZones = Set(stored.compactMap(SafeZonePlatform.init(rawValue:)))
+        }
+    }
+
+    public func toggleSafeZone(_ platform: SafeZonePlatform) {
+        if safeZones.contains(platform) {
+            safeZones.remove(platform)
+        } else {
+            safeZones.insert(platform)
         }
     }
 

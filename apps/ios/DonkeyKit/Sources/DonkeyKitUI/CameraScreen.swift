@@ -22,6 +22,7 @@ struct CameraScreen<CameraPreview: View>: View {
     @State private var showsZoomPicker = false
     @State private var showsQualityPopover = false
     @State private var showsTeleSettings = false
+    @State private var showsSafeZones = false
     @State private var showsNotePicker = false
     @State private var playingRecording: Recording?
     /// The take that just finished, docked in the corner until it is watched
@@ -59,6 +60,11 @@ struct CameraScreen<CameraPreview: View>: View {
     var body: some View {
         ZStack {
             stage
+            // Short-form chrome is shaded on the picture itself, under the
+            // script and the controls, so a take is framed against it too.
+            if !camera.safeZones.isEmpty, !isSideways, camera.availability == .running {
+                SafeZoneOverlay(platforms: camera.safeZones)
+            }
             if camera.isFillLightOn, camera.availability == .running {
                 FillLightOverlay()
             }
@@ -291,6 +297,22 @@ struct CameraScreen<CameraPreview: View>: View {
                 }
                 .glassEffect(camera.teleprompter.isCardShown || camera.teleprompter.isRunning ? .regular.tint(.white.opacity(0.25)).interactive() : .regular.interactive())
 
+                Button {
+                    showsSafeZones.toggle()
+                    showsZoomPicker = false
+                    showsQualityPopover = false
+                } label: {
+                    Image(systemName: "rectangle.dashed")
+                        .frame(width: 40, height: 40)
+                }
+                .glassEffect(camera.safeZones.isEmpty ? .regular.interactive() : .regular.tint(.white.opacity(0.25)).interactive())
+                .popover(isPresented: $showsSafeZones, arrowEdge: .leading) {
+                    safeZonePopover
+                        .presentationCompactAdaptation(.popover)
+                        .preferredColorScheme(.dark)
+                        .presentationBackground(Color.black.opacity(0.78))
+                }
+
                 Spacer().frame(height: 10)
 
                 Button {
@@ -389,6 +411,22 @@ struct CameraScreen<CameraPreview: View>: View {
         .frame(minWidth: 280)
     }
 
+    private var safeZonePopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Safe Zones")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            ForEach(SafeZonePlatform.allCases) { platform in
+                Toggle(platform.title, isOn: Binding(
+                    get: { camera.safeZones.contains(platform) },
+                    set: { _ in camera.toggleSafeZone(platform) }
+                ))
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 220)
+    }
+
     private var resolutionBinding: Binding<CaptureResolution> {
         Binding(
             get: { camera.settings.resolution },
@@ -466,6 +504,54 @@ private struct CaptureFlight: View {
 
 /// A bright frame around the preview: the screen fill light for cameras
 /// without a torch.
+/// Shades the parts of the recorded frame a platform's chrome will cover.
+/// The picture fills the screen, so the frame is wider than the screen in
+/// portrait and the regions are placed against the frame, not the screen.
+struct SafeZoneOverlay: View {
+    let platforms: Set<SafeZonePlatform>
+
+    private static let verticalAspect = 9.0 / 16.0
+
+    var body: some View {
+        GeometryReader { geometry in
+            let frame = FrameRect.aspectFill(
+                contentAspect: Self.verticalAspect,
+                containerWidth: geometry.size.width,
+                containerHeight: geometry.size.height
+            )
+            let shown = SafeZonePlatform.allCases.filter(platforms.contains)
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(shown.enumerated()), id: \.element) { index, platform in
+                    ForEach(Array(platform.covered.enumerated()), id: \.offset) { _, region in
+                        Rectangle()
+                            .fill(.black.opacity(0.22))
+                            .overlay(Rectangle().strokeBorder(.white.opacity(0.4), lineWidth: 1))
+                            .frame(width: region.width * frame.width, height: region.height * frame.height)
+                            .offset(x: frame.x + region.x * frame.width, y: frame.y + region.y * frame.height)
+                    }
+                    // The name sits at the top of the caption block, one row
+                    // per platform, so overlapping shades still read.
+                    if let bottom = platform.covered.dropFirst().first {
+                        Text(platform.title)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.black.opacity(0.4), in: Capsule())
+                            .offset(
+                                x: max(frame.x, 0) + 8,
+                                y: frame.y + bottom.y * frame.height + 6 + CGFloat(index) * 22
+                            )
+                    }
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+    }
+}
+
 struct FillLightOverlay: View {
     var body: some View {
         Rectangle()

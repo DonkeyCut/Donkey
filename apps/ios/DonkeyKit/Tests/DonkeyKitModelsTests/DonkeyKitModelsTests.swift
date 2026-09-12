@@ -40,6 +40,31 @@ import Testing
     }
 }
 
+@Suite struct SafeZoneTests {
+    @Test func portraitFrameIsWiderThanThePhone() {
+        let frame = FrameRect.aspectFill(contentAspect: 9.0 / 16.0, containerWidth: 390, containerHeight: 844)
+        #expect(frame.height == 844)
+        #expect(abs(frame.width - 474.75) < 0.01)
+        #expect(frame.x < 0)
+        #expect(abs(frame.x * 2 + frame.width - 390) < 0.01)
+    }
+
+    @Test func landscapeFrameIsTallerThanTheScreen() {
+        let frame = FrameRect.aspectFill(contentAspect: 16.0 / 9.0, containerWidth: 844, containerHeight: 390)
+        #expect(frame.width == 844)
+        #expect(frame.y < 0)
+    }
+
+    @Test func everyPlatformKeepsRegionsInsideTheFrame() {
+        for platform in SafeZonePlatform.allCases {
+            for region in platform.covered {
+                #expect(region.x >= 0 && region.x + region.width <= 1)
+                #expect(region.y >= 0 && region.y + region.height <= 1)
+            }
+        }
+    }
+}
+
 @Suite struct ZoomTests {
     @Test func tripleCameraOffersUltraWide() {
         let mapping = ZoomMapping(wideBase: 2, minDisplay: 0.5, maxDisplay: 8)
