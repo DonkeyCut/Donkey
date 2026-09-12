@@ -30,11 +30,19 @@ declare module "bun:test" {
     toThrow(expected?: string | RegExp): void;
     rejects: Matchers;
     toHaveLength(expected: number): void;
+    toHaveBeenCalled(): void;
     toBeTruthy(): void;
     toBeFalsy(): void;
     not: Matchers;
   }
   export function expect(value: unknown): Matchers;
+  type Spy<T> = T extends (...args: infer Args) => infer Result ? {
+    mockImplementation(fn: (...args: Args) => Result): Spy<T>;
+    mockReturnValue(value: Result): Spy<T>;
+    mockResolvedValue(value: Awaited<Result>): Spy<T>;
+    mockRestore(): void;
+  } : never;
+  export function spyOn<T extends object, K extends keyof T>(object: T, method: K): Spy<T[K]>;
   /** Module mocking, for the tests that stand a dependency in. */
   export const mock: {
     module(specifier: string, factory: () => unknown): void;

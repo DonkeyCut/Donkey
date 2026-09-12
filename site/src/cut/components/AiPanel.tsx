@@ -3,6 +3,7 @@
 import type { ChatStatus } from "./ChatStatusBadge";
 
 import { chatRuntime } from "@/cut/lib/chatRuntime";
+import { ChatRequests } from "@/cut/lib/chatRequests";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type ChatTransport, type UIMessage, type UIMessageChunk } from "ai";
@@ -1140,7 +1141,15 @@ function ChatSession({
   );
 
   const browserRunning = useSyncExternalStore(watchBrowserChatTurns, () => browserChatRunning(projectId, threadId), () => false);
-  const busy = status === "submitted" || status === "streaming" || browserRunning;
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [requests] = useState(() => new ChatRequests());
+  const requestPending = useSyncExternalStore(requests.subscribe, requests.snapshot, () => false);
+  const dispatchChat = useCallback((request: () => Promise<void>) => {
+    void requests.run(request).catch((error: unknown) => {
+      setSendError(error instanceof Error ? error.message : String(error));
+    });
+  }, [requests]);
+  const busy = requestPending || status === "submitted" || status === "streaming" || browserRunning;
   useEffect(() => {
     toolAbort.current = new AbortController();
     return () => {
@@ -1318,7 +1327,6 @@ function ChatSession({
     if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
   }, [messages, busy, visible]);
 
-  const [sendError, setSendError] = useState<string | null>(null);
   // Messages submitted while a turn runs wait here and dispatch one at a time
   // as turns settle. Waiting rows persist per thread, so a reload or a trip
   // to another project brings them back — paused, so nothing fires on its
@@ -1362,7 +1370,7 @@ function ChatSession({
       setSendError(unavailableMessage());
       return;
     }
-    if (busy) {
+    if (busy || requests.snapshot()) {
       // A paused queue stays paused: parked rows fire only from the tray's
       // resume button, never as a side effect of submitting something new.
       setQueue((q) => [
@@ -1388,10 +1396,10 @@ function ChatSession({
       ),
     );
     pinnedRef.current = true;
-    void sendMessage({
+    dispatchChat(() => sendMessage({
       text: body,
       ...(all.length > 0 && { metadata: { attachments: all } }),
-    });
+    }));
     setInput("");
     setAttachments([]);
   };
@@ -1419,7 +1427,7 @@ function ChatSession({
     return () => window.clearTimeout(timer);
   }, [status, retryDisconnect, clearError]);
   useEffect(() => {
-    if (status !== "ready" || busy || readOnly || !projectLoaded || !currentAvailable) return;
+    if (status !== "ready" || busy || requests.snapshot() || readOnly || !projectLoaded || !currentAvailable) return;
     if (provider(model) === "gemini" ? signedIn !== true : !info) return;
     if (Date.now() - seenThreadAt.current > RESUME_WINDOW_MS) return;
     const ask = resumeOwed();
@@ -1429,7 +1437,7 @@ function ChatSession({
       if (reconnect === "idle") {
         // eslint-disable-next-line react-hooks/set-state-in-effect -- the reconnect reacts to the thread settling unfinished; the state gates it to one attempt
         setReconnect("pending");
-        void resumeStream();
+        dispatchChat(() => resumeStream());
         return;
       }
     }
@@ -1451,8 +1459,8 @@ function ChatSession({
     // reply keeps the calls that landed and nothing else.
     setMessages((current) => scrubLostTurn(current, ask.id));
     const metadata: ResumeMetadata = { resume: true, ...(live.length > 0 ? { attachments: live } : {}) };
-    void sendMessage({ text: resumePrompt(ask), metadata });
-  }, [status, busy, readOnly, projectLoaded, currentAvailable, model, signedIn, info, reconnect, resumeOwed, resumeStream, setMessages, sendMessage, projectId, threadId]);
+    dispatchChat(() => sendMessage({ text: resumePrompt(ask), metadata }));
+  }, [status, busy, requests, dispatchChat, readOnly, projectLoaded, currentAvailable, model, signedIn, info, reconnect, resumeOwed, resumeStream, setMessages, sendMessage, projectId, threadId]);
 
   // Drain the queue as turns settle. drainedRef keeps it to one dispatch per
   // ready period — the effect re-runs when the queue changes before useChat
@@ -1469,7 +1477,7 @@ function ChatSession({
       drainedRef.current = false;
       return;
     }
-    if (drainedRef.current || queuePaused || !currentAvailable) return;
+    if (busy || requests.snapshot() || drainedRef.current || queuePaused || !currentAvailable) return;
     // A thread still owed a reply resumes that first.
     if (resumeOwed()) return;
     const next = queue.find(
@@ -1493,11 +1501,11 @@ function ChatSession({
     // parked (or at file blobs that died with the last page); dropping the
     // dead refs keeps the message from claiming media it can't deliver.
     const live = liveRefs(next.attachments);
-    void sendMessage({
+    dispatchChat(() => sendMessage({
       text: next.text,
       ...(live.length > 0 && { metadata: { attachments: live } }),
-    });
-  }, [status, queue, queuePaused, queueEditing, currentAvailable, resumeOwed, sendMessage]);
+    }));
+  }, [status, busy, requests, dispatchChat, queue, queuePaused, queueEditing, currentAvailable, resumeOwed, sendMessage]);
 
   // Mirror the waiting rows to storage as they change; an empty queue clears
   // its slot.
@@ -1591,7 +1599,7 @@ function ChatSession({
               <LiveElapsed />
             </div>
           )}
-          {((error && !retryDisconnect) || (sendError && !currentAvailable)) && (
+          {((error && !retryDisconnect) || sendError) && (
             <div className="ai-error mt-2 flex items-start gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-[11.5px] leading-relaxed text-red-700">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
               <span>
