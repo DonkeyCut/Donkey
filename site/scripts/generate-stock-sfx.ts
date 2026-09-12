@@ -12,11 +12,28 @@
 //   cd site && ./node_modules/.bin/bun scripts/generate-stock-sfx.ts
 //   cd site && ./node_modules/.bin/bun scripts/generate-stock-sfx.ts camera-burst-3
 //
+// `--library` sources the takes from the ElevenLabs sound library, the
+// community catalog behind its Explore tab, in place of rendering them: for
+// each catalog sound the most-purchased matching entries are pulled, a text
+// pass keeps the ones whose prompt is this one sound, a listening pass over
+// their previews keeps the clean takes, and those go through the same trim,
+// normalize and upload as a render. A sound the library has no clean take for
+// keeps the take it ships with, and the run says which. Ids on the command
+// line narrow the pass to those sounds, and a category name (`Camera`) to
+// every sound in it; a sound's takes are re-picked every run, so
+// `--library camera-burst` is how a weak pick gets another go. The
+// previews are public files, so a library take costs no ElevenLabs credits.
+//
+//   cd site && ./node_modules/.bin/bun scripts/generate-stock-sfx.ts --library
+//   cd site && ./node_modules/.bin/bun scripts/generate-stock-sfx.ts --library camera-burst
+//
 // Needs ELEVENLABS_API_KEY and R2_ACCOUNT_ID / R2_ACCESS_KEY_ID /
-// R2_SECRET_ACCESS_KEY (bun auto-loads site/.env) and ffmpeg on PATH. Each take
-// is trimmed of leading and trailing silence and peak-normalized so every card
-// plays at the same level. The ElevenLabs response says what each take cost;
-// the run logs the running total and stops at MAX_CREDITS.
+// R2_SECRET_ACCESS_KEY (bun auto-loads site/.env) and ffmpeg on PATH; the
+// library pass also needs GOOGLE_APPLICATION_CREDENTIALS_JSON for the two
+// picking models. Each take is trimmed of leading and trailing silence and
+// peak-normalized so every card plays at the same level. The ElevenLabs
+// response says what each render cost; the run logs the running total and
+// stops at MAX_CREDITS.
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -24,8 +41,11 @@ import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { HeadObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import { GoogleGenAI, Type } from "@google/genai";
+import { JWT } from "google-auth-library";
 
 import { CUT_MEDIA_ORIGIN, STOCK_AUDIO_PUBLIC_KEY } from "../src/cut/lib/hosts";
+import { geminiModelRoles } from "../src/lib/inference/gemini-models";
 import type { StockSfxCategory } from "../src/cut/lib/stock";
 import { STOCK_SFX } from "../src/cut/lib/stockSfxManifest";
 
@@ -69,6 +89,22 @@ const CORE_TAKES = 3;
 // The run stops spending here. The plan's monthly allowance is 30k; the margin
 // leaves room for a re-run that only fills gaps.
 const MAX_CREDITS = 29_500;
+// The library pass. A search page is capped by the API; two searches per
+// sound (its first tags, then its name) give the text pick a wide field, and
+// the listening pick hears at most this many previews per sound.
+const LIBRARY_API = "https://api.us.elevenlabs.io/v1/shared-sound-generations";
+const LIBRARY_PAGE = 40;
+const LIBRARY_TEXT_PICKS = 8;
+// A one-shot preview longer than this many times the requested length (or
+// the floor) is a sequence or a pack, whatever its prompt said.
+const LIBRARY_ONESHOT_STRETCH = 3;
+const LIBRARY_ONESHOT_FLOOR_S = 2.5;
+const LIBRARY_LOOP_MIN_S = 3;
+const LIBRARY_DIR = path.join(CACHE_DIR, "library");
+const LIBRARY_SOURCES = path.join(CACHE_DIR, "library-sources.json");
+const LIBRARY_CONCURRENCY = 6;
+const TEXT_PICK_MODEL = geminiModelRoles.fastDecision;
+const LISTEN_PICK_MODEL = geminiModelRoles.review;
 
 /** One row: id suffix, seconds, prompt, tags. The id is `<category>-<suffix>`. */
 type Row = [suffix: string, seconds: number, prompt: string, tags: string[]];
@@ -491,7 +527,6 @@ const CATALOG: CatalogItem[] = [
     ["rustle", 1.5, "Clothes rustling as someone moves.", ["cloth", "rustle", "clothes", "move", "fabric"]],
     ["snap-fabric", 0.7, "A sheet of fabric snapping taut.", ["cloth", "fabric", "snap", "sheet", "taut"]],
     ["bag-zip", 1, "A backpack zipper opening slowly.", ["cloth", "backpack", "zipper", "open", "bag"]],
-    ["shoes", 1, "Sneakers squeaking on a gym floor.", ["cloth", "sneakers", "squeak", "gym", "floor"]],
     ["bag-rustle", 1.5, "A plastic shopping bag rustling.", ["cloth", "plastic bag", "rustle", "shopping", "crinkle"]],
   ]),
   ...sfx("Tech", [
@@ -1025,6 +1060,196 @@ async function adopt(r2: S3Client, name: string): Promise<boolean> {
 
 type Result = { duration: number; peaks: number[] };
 
+interface LibraryEntry {
+  generation_id: string;
+  text: string;
+  category: string;
+  purchased_count: number;
+  preview_url: string;
+}
+
+function makeGemini(): GoogleGenAI {
+  const raw = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON?.trim();
+  if (!raw) throw new Error("GOOGLE_APPLICATION_CREDENTIALS_JSON is not set (run from site/ so bun loads .env).");
+  const creds = JSON.parse(raw) as { project_id?: string; client_email?: string; private_key?: string; private_key_id?: string };
+  if (!creds.project_id || !creds.client_email || !creds.private_key) {
+    throw new Error("Service account JSON is missing project_id/client_email/private_key.");
+  }
+  const authClient = new JWT({
+    email: creds.client_email,
+    key: creds.private_key,
+    keyId: creds.private_key_id,
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  });
+  return new GoogleGenAI({ vertexai: true, location: "global", project: creds.project_id, googleAuthOptions: { authClient } });
+}
+
+async function librarySearch(apiKey: string, search: string): Promise<LibraryEntry[]> {
+  const q = new URLSearchParams({ page_size: String(LIBRARY_PAGE), sort: "purchased_count", page: "1", search });
+  const res = await fetch(`${LIBRARY_API}?${q}`, { headers: { "xi-api-key": apiKey } });
+  if (!res.ok) throw new Error(`library search "${search}": ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { shared_sound_generations: LibraryEntry[] };
+  return body.shared_sound_generations.filter((e) => e.preview_url);
+}
+
+/** The library's candidates for one sound: its first tags and its name, each
+ * searched, merged, and ordered by how often people took them. */
+async function libraryCandidates(apiKey: string, item: CatalogItem): Promise<LibraryEntry[]> {
+  const name = item.id.slice(item.category.toLowerCase().replace(/[^a-z0-9]+/g, "-").length + 1).replace(/-\d+$/, "");
+  const queries = [...new Set([item.tags.slice(0, 3).join(" "), `${name.replace(/-/g, " ")} ${item.category.toLowerCase()}`])];
+  const seen = new Map<string, LibraryEntry>();
+  for (const q of queries) for (const e of await librarySearch(apiKey, q)) seen.set(e.generation_id, e);
+  return [...seen.values()].sort((a, b) => b.purchased_count - a.purchased_count);
+}
+
+const pickSchema = {
+  type: Type.OBJECT,
+  properties: { ids: { type: Type.ARRAY, items: { type: Type.STRING } } },
+  required: ["ids"],
+};
+
+/** The candidates whose prompt describes this one sound, best first. */
+async function textPick(gemini: GoogleGenAI, item: CatalogItem, candidates: LibraryEntry[]): Promise<LibraryEntry[]> {
+  const kind = item.loop ? "a seamless bed that repeats" : "a single short one-shot";
+  const list = candidates
+    .map((c, i) => `${i + 1}. id=${c.generation_id} purchases=${c.purchased_count} category=${c.category}\n   ${c.text.replace(/\s+/g, " ").trim().slice(0, 400)}`)
+    .join("\n");
+  const response = await gemini.models.generateContent({
+    model: TEXT_PICK_MODEL,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            text:
+              `A video editor's stock library needs this sound effect, ${kind}, about ${item.seconds}s:\n` +
+              `Category: ${item.category}\nSound: ${item.prompt}\n\n` +
+              `Below are candidates from a community sound library, each with its generation prompt. ` +
+              `Return the ids of up to ${LIBRARY_TEXT_PICKS} candidates whose prompt describes exactly this sound as one clip: ` +
+              `no packs, no sequences of several different sounds, no music, no speech, no ambience unless the sound is a bed. ` +
+              `Best match first; more purchases breaks a tie. Return an empty list when none fit.\n\n${list}`,
+          },
+        ],
+      },
+    ],
+    config: { responseMimeType: "application/json", responseSchema: pickSchema },
+  });
+  const parsed = JSON.parse(response.text ?? "{}") as { ids?: unknown };
+  const ids = Array.isArray(parsed.ids) ? parsed.ids.filter((v): v is string => typeof v === "string") : [];
+  const byId = new Map(candidates.map((c) => [c.generation_id, c]));
+  return [...new Set(ids)].map((id) => byId.get(id)).filter((c): c is LibraryEntry => c !== undefined).slice(0, LIBRARY_TEXT_PICKS);
+}
+
+const libraryPath = (generationId: string) => path.join(LIBRARY_DIR, `${generationId}.mp3`);
+
+/** A candidate's preview, from the library cache or downloaded; null when the
+ * file is unreadable or its length says it is not this kind of clip. */
+async function fetchPreview(item: CatalogItem, entry: LibraryEntry): Promise<Buffer | null> {
+  await mkdir(LIBRARY_DIR, { recursive: true });
+  const file = libraryPath(entry.generation_id);
+  if (!existsSync(file)) {
+    const res = await fetch(entry.preview_url);
+    if (!res.ok) return null;
+    await writeFile(file, Buffer.from(await res.arrayBuffer()));
+  }
+  const proc = spawnSync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file]);
+  const sec = Number.parseFloat(proc.stdout?.toString().trim() ?? "");
+  if (proc.status !== 0 || !Number.isFinite(sec) || sec <= 0.05) return null;
+  if (item.loop ? sec < LIBRARY_LOOP_MIN_S : sec > Math.max(LIBRARY_ONESHOT_FLOOR_S, item.seconds * LIBRARY_ONESHOT_STRETCH)) return null;
+  return readFile(file);
+}
+
+/** Listens to the previews and returns the clean takes of this sound, best
+ * first, at most `takes` of them. */
+async function listenPick(
+  gemini: GoogleGenAI,
+  item: CatalogItem,
+  takes: number,
+  previews: { entry: LibraryEntry; mp3: Buffer }[]
+): Promise<LibraryEntry[]> {
+  const parts: ({ text: string } | { inlineData: { mimeType: string; data: string } })[] = [
+    {
+      text:
+        `A video editor's stock library needs this sound effect${item.loop ? ", a seamless bed that repeats" : ", a single one-shot"}:\n` +
+        `Category: ${item.category}\nSound: ${item.prompt}\n\n` +
+        `Listen to each clip below. Return the ids of up to ${takes} clips that are a clean, professional take of exactly this sound, best first. ` +
+        `Reject a clip that is noisy, hissy, muffled, clipped, the wrong sound, several sounds in a row, music, speech, or a room tone when the sound is a one-shot. ` +
+        `Return an empty list when none are good enough to ship.`,
+    },
+  ];
+  for (const { entry, mp3 } of previews) {
+    parts.push({ text: `Clip id=${entry.generation_id}` });
+    parts.push({ inlineData: { mimeType: "audio/mpeg", data: mp3.toString("base64") } });
+  }
+  const response = await gemini.models.generateContent({
+    model: LISTEN_PICK_MODEL,
+    contents: [{ role: "user", parts }],
+    config: { responseMimeType: "application/json", responseSchema: pickSchema },
+  });
+  const parsed = JSON.parse(response.text ?? "{}") as { ids?: unknown };
+  const ids = Array.isArray(parsed.ids) ? parsed.ids.filter((v): v is string => typeof v === "string") : [];
+  const byId = new Map(previews.map((p) => [p.entry.generation_id, p.entry]));
+  return [...new Set(ids)].map((id) => byId.get(id)).filter((c): c is LibraryEntry => c !== undefined).slice(0, takes);
+}
+
+/** Sources one sound's takes from the library and resolves to how many of
+ * its take ids got a library file; the rest keep what they ship with. */
+async function sourceFromLibrary(
+  apiKey: string,
+  gemini: GoogleGenAI,
+  r2: S3Client,
+  items: CatalogItem[],
+  results: Map<string, Result>,
+  sources: Record<string, string>
+): Promise<number> {
+  const [first] = items;
+  const candidates = await libraryCandidates(apiKey, first);
+  const shortlist = await textPick(gemini, first, candidates);
+  const previews: { entry: LibraryEntry; mp3: Buffer }[] = [];
+  for (const entry of shortlist) {
+    const mp3 = await fetchPreview(first, entry);
+    if (mp3) previews.push({ entry, mp3 });
+  }
+  if (previews.length === 0) return 0;
+  const picks = await listenPick(gemini, first, items.length, previews);
+  const byId = new Map(previews.map((p) => [p.entry.generation_id, p.mp3]));
+  let placed = 0;
+  for (const entry of picks) {
+    const item = items[placed];
+    if (!item) break;
+    const name = await nextName(r2, item.id);
+    const before = names.get(item.id);
+    names.set(item.id, name);
+    try {
+      await finish(item, byId.get(entry.generation_id)!);
+    } catch (e) {
+      // A take the trim left empty or a wall of noise; the next pick gets
+      // this slot.
+      if (before) names.set(item.id, before);
+      else names.delete(item.id);
+      console.error(`  ${item.id}: ${e instanceof Error ? e.message : e}`);
+      continue;
+    }
+    await upload(r2, name);
+    results.set(item.id, { duration: probeDuration(name), peaks: computePeaks(name) });
+    sources[item.id] = entry.generation_id;
+    placed++;
+  }
+  return placed;
+}
+
+/** The catalog's sounds grouped by prompt: every take of one sound, in order. */
+function bySound(items: CatalogItem[]): CatalogItem[][] {
+  const groups = new Map<string, CatalogItem[]>();
+  for (const c of items) {
+    const key = `${c.category}\n${c.prompt}`;
+    const g = groups.get(key);
+    if (g) g.push(c);
+    else groups.set(key, [c]);
+  }
+  return [...groups.values()];
+}
+
 async function writeManifest(results: Map<string, Result>) {
   const entries = CATALOG.filter((c) => results.has(c.id)).map((c) => ({
     id: c.id,
@@ -1048,14 +1273,60 @@ ${entries.map((e) => `  ${JSON.stringify(e)},`).join("\n")}
   await writeFile(MANIFEST, body);
 }
 
+/** The library pass over every sound (or the named ones): picks, uploads, and
+ * writes the manifest as it goes; a sound with no clean take keeps its file. */
+async function sourceLibrary(r2: S3Client, results: Map<string, Result>, named: Set<string>) {
+  const apiKey = process.env.ELEVENLABS_API_KEY!.trim();
+  const gemini = makeGemini();
+  const sources: Record<string, string> = existsSync(LIBRARY_SOURCES)
+    ? (JSON.parse(await readFile(LIBRARY_SOURCES, "utf8")) as Record<string, string>)
+    : {};
+  const sounds = bySound(CATALOG).filter(
+    (g) => named.size === 0 || g.some((c) => named.has(c.id) || named.has(c.category))
+  );
+  console.log(`library pass: ${sounds.length} sounds, text=${TEXT_PICK_MODEL} listen=${LISTEN_PICK_MODEL}`);
+  const kept: string[] = [];
+  let failed = 0;
+  const queue = [...sounds];
+  const worker = async () => {
+    for (let items = queue.shift(); items; items = queue.shift()) {
+      const [first] = items;
+      try {
+        const placed = await sourceFromLibrary(apiKey, gemini, r2, items, results, sources);
+        for (const c of items.slice(placed)) kept.push(c.id);
+        await writeManifest(results);
+        await writeFile(LIBRARY_SOURCES, JSON.stringify(sources, null, 2));
+        console.log(`${placed === items.length ? "✓" : placed === 0 ? "–" : "~"} ${first.id}: ${placed}/${items.length} from the library`);
+      } catch (e) {
+        failed++;
+        for (const c of items) kept.push(c.id);
+        console.error(`✗ ${first.id}: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: LIBRARY_CONCURRENCY }, worker));
+  await writeManifest(results);
+  console.log(`done: ${results.size} sounds, ${kept.length} kept their rendered take, ${failed} sounds failed`);
+  if (kept.length) console.log(`kept: ${kept.join(" ")}`);
+  if (failed) process.exit(1);
+}
+
 async function main() {
   const ids = new Set<string>();
   for (const c of CATALOG) {
     if (ids.has(c.id)) throw new Error(`duplicate catalog id ${c.id}`);
     ids.add(c.id);
   }
-  const redo = new Set(process.argv.slice(2));
-  for (const id of redo) if (!ids.has(id)) throw new Error(`${id} is not a catalog id`);
+  const args = process.argv.slice(2);
+  const library = args.includes("--library");
+  const named = new Set(args.filter((a) => a !== "--library"));
+  const categories = new Set<string>(CATALOG.map((c) => c.category));
+  for (const id of named) {
+    if (!ids.has(id) && !(library && categories.has(id))) throw new Error(`${id} is not a catalog id`);
+  }
+  // With --library the named ids pick which sounds to source; without it they
+  // are the sounds to render again.
+  const redo = library ? new Set<string>() : named;
   const { eleven, r2 } = makeClients();
   const results = new Map<string, Result>();
   for (const c of CATALOG) {
@@ -1067,6 +1338,10 @@ async function main() {
     if (shipped) names.set(c.id, shipped);
     const name = fileName(c);
     if (await adopt(r2, name)) results.set(c.id, { duration: probeDuration(name), peaks: computePeaks(name) });
+  }
+  if (library) {
+    await sourceLibrary(r2, results, named);
+    return;
   }
   const todo = CATALOG.filter((c) => !results.has(c.id));
   console.log(`model=${MODEL} existing=${results.size} generating=${todo.length}`);
