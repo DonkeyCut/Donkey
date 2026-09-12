@@ -29,11 +29,11 @@ struct WatchCameraView: View {
                 .resizable()
                 .scaledToFill()
                 .ignoresSafeArea()
-        } else {
+        } else if let hint {
             VStack(spacing: 8) {
-                Image(systemName: link.isPhoneReachable ? "iphone" : "iphone.slash")
+                Image(systemName: hint.icon)
                     .font(.title2)
-                Text(hint)
+                Text(hint.text)
                     .font(.footnote)
                     .multilineTextAlignment(.center)
             }
@@ -43,10 +43,17 @@ struct WatchCameraView: View {
         }
     }
 
-    private var hint: String {
-        if !link.isPhoneReachable { return "Open Donkey Cut on your iPhone" }
-        if !link.state.isCameraOpen { return "Open the camera on your iPhone" }
-        return "Waiting for the picture"
+    /// What to say while there is no picture. The phone's own word comes
+    /// first; a phone that has been out of reach for a while comes next;
+    /// anything in between stays quiet so nothing flashes on the way up.
+    private var hint: (icon: String, text: String)? {
+        if link.hasState, !link.state.isCameraOpen {
+            return ("iphone", "Open the camera on your iPhone")
+        }
+        if link.isPhoneAway {
+            return ("iphone.slash", "Open Donkey Cut on your iPhone")
+        }
+        return nil
     }
 
     private var recordButton: some View {
@@ -67,7 +74,6 @@ struct WatchCameraView: View {
             .animation(.snappy(duration: 0.2), value: link.recordingStartedAt != nil)
         }
         .buttonStyle(.plain)
-        .disabled(!link.isPhoneReachable)
         .accessibilityLabel(link.recordingStartedAt != nil ? "Stop recording" : "Start recording")
     }
 }

@@ -10,6 +10,13 @@ final class WatchCameraLink: NSObject, WCSessionDelegate {
     private(set) var state = CameraRemoteState()
     private(set) var frame: UIImage?
     private(set) var isPhoneReachable = false
+    /// True once the phone has answered, so `state` is the phone's word.
+    private(set) var hasState = false
+    /// True once the phone has been out of reach for a couple of seconds.
+    /// Reachability blinks off for an instant as the session comes up, and a
+    /// hint on that blink would be wrong before anyone could read it.
+    private(set) var isPhoneAway = false
+    private var awayTask: Task<Void, Never>?
     /// When the take began, on this watch's clock. Set once when a take
     /// starts so the timer never jumps as later state messages land.
     private(set) var recordingStartedAt: Date?
@@ -24,8 +31,13 @@ final class WatchCameraLink: NSObject, WCSessionDelegate {
         session.activate()
     }
 
+    /// The button is always live. With the phone out of reach the wrist gets
+    /// a failure tap and the screen says what to open.
     func toggleRecording() {
-        guard session.isReachable else { return }
+        guard session.isReachable else {
+            WKInterfaceDevice.current().play(.failure)
+            return
+        }
         session.sendMessage(CameraRemoteMessage.encode(.toggleRecording), replyHandler: nil)
     }
 
@@ -47,7 +59,13 @@ final class WatchCameraLink: NSObject, WCSessionDelegate {
     }
 
     private func apply(_ state: CameraRemoteState) {
+        // A frame from the other camera is wrong the moment the phone
+        // switches; the screen goes dark until the new camera's first frame.
+        if state.facing != self.state.facing {
+            frame = nil
+        }
         self.state = state
+        hasState = true
         switch (recordingStartedAt, state.recordingElapsed) {
         case (nil, let elapsed?):
             recordingStartedAt = .now.addingTimeInterval(-elapsed)
@@ -63,26 +81,40 @@ final class WatchCameraLink: NSObject, WCSessionDelegate {
         }
     }
 
+    /// The phone stopped answering: whatever it last said no longer holds.
+    private func phoneWentAway() {
+        state = CameraRemoteState()
+        hasState = false
+        frame = nil
+        recordingStartedAt = nil
+    }
+
+    private func reachabilityChanged(_ reachable: Bool) {
+        isPhoneReachable = reachable
+        awayTask?.cancel()
+        if reachable {
+            isPhoneAway = false
+            setWatching(isWatching)
+        } else {
+            phoneWentAway()
+            awayTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled else { return }
+                self?.isPhoneAway = true
+            }
+        }
+    }
+
     // MARK: WCSessionDelegate
 
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: (any Error)?) {
         let reachable = session.isReachable
-        Task { @MainActor in
-            isPhoneReachable = reachable
-            setWatching(isWatching)
-        }
+        Task { @MainActor in reachabilityChanged(reachable) }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
         let reachable = session.isReachable
-        Task { @MainActor in
-            isPhoneReachable = reachable
-            if reachable {
-                setWatching(isWatching)
-            } else {
-                apply(CameraRemoteState())
-            }
-        }
+        Task { @MainActor in reachabilityChanged(reachable) }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
