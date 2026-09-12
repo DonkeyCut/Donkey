@@ -4,21 +4,25 @@ import { z } from "zod";
 import { invalidResponse } from "@/lib/config/experimentList";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { deliverEmail } from "@/lib/email/outbox";
+import { sendIssue } from "@/lib/marketing/promotionSave";
 import { prisma } from "@/lib/prisma";
 
 type Params = { params: Promise<{ id: string }> };
 const idSchema = z.string().trim().min(1);
 
 // Mails the saved copy to the operator, placeholders filled with their own
-// account. A copy error comes back on the body field.
+// account, once the draft reads as a complete promotion. A copy error comes
+// back on the body field.
 export const POST = withSuperUser(async (request, { params }: Params) => {
   const id = idSchema.safeParse((await params).id);
   if (!id.success) return notFoundResponse();
   const [promotion, operator] = await Promise.all([
-    prisma.promotion.findUnique({ select: { id: true }, where: { id: id.data } }),
+    prisma.promotion.findUnique({ where: { id: id.data } }),
     prisma.user.findUnique({ select: { email: true, id: true }, where: { id: request.donkey.userId } }),
   ]);
   if (!promotion || !operator) return notFoundResponse();
+  const refused = sendIssue(promotion);
+  if (refused) return refused;
 
   const delivery = await deliverEmail({
     idempotencyKey: `promotion-test:${promotion.id}:${Date.now()}`,

@@ -1,9 +1,16 @@
 import { audienceSchema, type Audience } from "@donkeycut/abexp";
 import { z } from "zod";
-import { CLAIM_URL_PLACEHOLDER, creditOfferTermsSchema, type CreditOfferTerms } from "@/lib/credits/offerTerms";
+import {
+  CLAIM_URL_PLACEHOLDER,
+  creditOfferDraftSchema,
+  creditOfferTermsSchema,
+  type CreditOfferTerms,
+} from "@/lib/credits/offerTerms";
 
-// The shape of a promotion as su writes it and the routes validate it.
-// Client-safe: zod only, so the dialog parses the same schema the server does.
+// The shape of a promotion as su writes it and the routes validate it. A
+// draft saves whatever the row can hold, so work in progress is never lost;
+// a test or a send parses the strict shape first. Client-safe: zod only, so
+// the dialog parses the same schemas the server does.
 
 export const PROMOTION_SENDERS = ["bulk", "personal"] as const;
 export type PromotionSender = (typeof PROMOTION_SENDERS)[number];
@@ -13,6 +20,22 @@ export type PromotionSender = (typeof PROMOTION_SENDERS)[number];
 export const PROMOTION_STATUSES = ["draft", "queuing", "sending", "paused", "sent"] as const;
 
 export type PromotionStatus = (typeof PROMOTION_STATUSES)[number];
+
+export const promotionDraftSchema = z
+  .object({
+    name: z.string().trim().max(80),
+    subject: z.string().trim().max(200),
+    body: z.string().trim().max(10_000),
+    ctaLabel: z.string().trim().max(80).nullable(),
+    ctaUrl: z.string().trim().max(2000).nullable(),
+    creditOffer: creditOfferDraftSchema.nullable().default(null),
+    sender: z.enum(PROMOTION_SENDERS),
+    audience: audienceSchema,
+    excludePromotionIds: z.array(z.string().min(1)).max(100),
+  })
+  .strict();
+
+export type PromotionDraftInput = z.output<typeof promotionDraftSchema>;
 
 export const promotionInputSchema = z
   .object({

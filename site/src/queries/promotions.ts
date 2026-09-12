@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Audience } from "@donkeycut/abexp";
 
 import type {
-  PromotionInput,
+  PromotionDraftInput,
   PromotionSender,
   PromotionSummary,
   SegmentCount,
@@ -44,7 +44,7 @@ export function usePromotions() {
 export function useSavePromotion() {
   const takeList = useTakeList();
   return useMutation({
-    mutationFn: ({ id, ...input }: PromotionInput & { id: string | null }) =>
+    mutationFn: ({ id, ...input }: PromotionDraftInput & { id: string | null }) =>
       apiFetch<{ id: string; promotions: PromotionSummary[] }>(
         id ? `/api/su/promotions/${encodeURIComponent(id)}` : "/api/su/promotions",
         { body: JSON.stringify(input), method: id ? "PUT" : "POST" },

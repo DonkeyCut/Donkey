@@ -2,13 +2,18 @@ import { Prisma } from "@/generated/prisma/client";
 import { invalidResponse } from "@/lib/config/experimentList";
 import { UnknownPlaceholderError } from "@/lib/marketing/placeholders";
 import { renderPromotion, SAMPLE_RECIPIENT } from "@/lib/marketing/promotionCopy";
-import type { PromotionInput } from "@/lib/marketing/promotionInput";
+import {
+  promotionInputSchema,
+  type PromotionDraftInput,
+  type PromotionInput,
+} from "@/lib/marketing/promotionInput";
 
-// What a save of a promotion shares between create and edit: the copy is
-// rendered for a stand-in recipient, so a placeholder typo is refused at the
-// save and never reaches a send; and the row data the input maps to. The
-// claim link and its last day are minted per person at the send, so the
-// check fills them blank.
+// What a save of a promotion shares between create and edit: the row data a
+// draft maps to. What a test or a send checks first: the stored row parsed as
+// a complete promotion, and its copy rendered for a stand-in recipient, so a
+// blank field or a placeholder typo comes back to the form and never reaches
+// a mailbox. The claim link and its last day are minted per person at the
+// send, so the check fills them blank.
 
 export function copyIssue(input: PromotionInput): Response | null {
   try {
@@ -22,7 +27,33 @@ export function copyIssue(input: PromotionInput): Response | null {
   }
 }
 
-export function promotionData(input: PromotionInput, actorUserId: string) {
+export function sendIssue(row: {
+  name: string;
+  subject: string;
+  body: string;
+  ctaLabel: string | null;
+  ctaUrl: string | null;
+  creditOffer: Prisma.JsonValue;
+  sender: string;
+  audience: Prisma.JsonValue;
+  excludePromotionIds: string[];
+}): Response | null {
+  const parsed = promotionInputSchema.safeParse({
+    name: row.name,
+    subject: row.subject,
+    body: row.body,
+    ctaLabel: row.ctaLabel,
+    ctaUrl: row.ctaUrl,
+    creditOffer: row.creditOffer,
+    sender: row.sender,
+    audience: row.audience,
+    excludePromotionIds: row.excludePromotionIds,
+  });
+  if (!parsed.success) return invalidResponse(parsed.error.issues);
+  return copyIssue(parsed.data);
+}
+
+export function promotionData(input: PromotionDraftInput, actorUserId: string) {
   return {
     actorUserId,
     creditOffer: input.creditOffer ? (input.creditOffer as Prisma.InputJsonValue) : Prisma.DbNull,

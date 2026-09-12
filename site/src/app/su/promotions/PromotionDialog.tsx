@@ -2,6 +2,7 @@
 
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
+import type { z } from "zod";
 
 import { CreditOfferFields } from "@/app/su/CreditOfferFields";
 import {
@@ -32,7 +33,9 @@ import { cn } from "@/lib/utils";
 import { isOfferPlaceholder, PROMOTION_PLACEHOLDERS } from "@/lib/marketing/placeholders";
 import { BUTTON_MARK } from "@/lib/marketing/promotionCopy";
 import {
+  promotionDraftSchema,
   promotionInputSchema,
+  type PromotionDraftInput,
   type PromotionInput,
   type PromotionSender,
   type SegmentCount,
@@ -54,7 +57,8 @@ import { useOutreachTemplates, useSaveOutreachTemplate } from "@/queries/outreac
 
 // One form writes a promotion and sends it: the words, the button, which
 // address it comes from, who gets it, and which earlier promotions' readers
-// are left out. A sent promotion opens read-only.
+// are left out. A draft saves however it stands; a test or a send checks the
+// whole form first. A sent promotion opens read-only.
 
 type OfferDefaults = Settings["promotionCreditOffer"];
 
@@ -186,9 +190,9 @@ export function PromotionDialog({
   const readOnly = existing !== null && existing.status !== "draft";
   const dirty = !readOnly && JSON.stringify(draft) !== savedDraft;
   const busy = save.isPending || send.isPending || test.isPending || count.isPending || saveTemplate.isPending;
-  // Earlier promotions that reached anyone; the one being edited is not a
-  // choice against itself.
-  const earlier = promotions.filter((p) => p.id !== existing?.id && p.status !== "draft");
+  // Earlier promotions that reached anyone, by segment or by hand; the one
+  // being edited is not a choice against itself.
+  const earlier = promotions.filter((p) => p.id !== existing?.id && p.counts.recipients > 0);
 
   const setAudience = (patch: Partial<AudienceDraft>) =>
     setDraft((d) => ({ ...d, audience: { ...d.audience, ...patch } }));
@@ -209,8 +213,8 @@ export function PromotionDialog({
     });
   };
 
-  const parse = (): PromotionInput | null => {
-    const parsed = promotionInputSchema.safeParse(toInput(draft));
+  const parseWith = <T,>(schema: { safeParse: (v: unknown) => z.ZodSafeParseResult<T> }): T | null => {
+    const parsed = schema.safeParse(toInput(draft));
     if (!parsed.success) {
       setIssues(parsed.error.issues.map((i) => `${i.path.join(".") || "form"}: ${i.message}`));
       return null;
@@ -218,13 +222,15 @@ export function PromotionDialog({
     setIssues([]);
     return parsed.data;
   };
+  const parseDraft = (): PromotionDraftInput | null => parseWith(promotionDraftSchema);
+  const parse = (): PromotionInput | null => parseWith(promotionInputSchema);
 
   const fail = (e: Error) => setIssues([e.message]);
 
   // Every action past a plain save goes through the saved row, so the test
   // and the send read exactly what is stored.
   const ensureSaved = async (): Promise<string | null> => {
-    const input = parse();
+    const input = parseDraft();
     if (!input) return null;
     try {
       const result = await save.mutateAsync({ id: savedId, ...input });
@@ -268,6 +274,7 @@ export function PromotionDialog({
   const onTest = async () => {
     setNotice(null);
     setIssues([]);
+    if (!readOnly && !parse()) return;
     const id = readOnly ? existing.id : await ensureSaved();
     if (!id) return;
     test.mutate(id, {
@@ -278,10 +285,10 @@ export function PromotionDialog({
 
   const onSend = async () => {
     setNotice(null);
-    const id = await ensureSaved();
-    if (!id) return;
     const input = parse();
     if (!input) return;
+    const id = await ensureSaved();
+    if (!id) return;
     count.mutate(
       { audience: input.audience, excludePromotionIds: input.excludePromotionIds },
       { onSuccess: (c) => setConfirm({ id, count: c }), onError: fail },
@@ -306,7 +313,7 @@ export function PromotionDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-6xl">
         <DialogHeader>
-          <DialogTitle>{readOnly ? draft.name : existing ? "Edit promotion" : "New promotion"}</DialogTitle>
+          <DialogTitle>{readOnly ? draft.name || "Untitled" : existing ? "Edit promotion" : "New promotion"}</DialogTitle>
           <DialogDescription>
             {readOnly
               ? "Sent as it reads here."

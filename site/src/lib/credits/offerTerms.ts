@@ -33,9 +33,25 @@ export const creditOfferTermsSchema = z
 
 export type CreditOfferTerms = z.infer<typeof creditOfferTermsSchema>;
 
+// The terms as a draft holds them: the same fields, with a number still to be
+// typed allowed at 0. A send parses the strict terms.
+export const creditOfferDraftSchema = z
+  .object({
+    dollars: z.number().int().min(0).max(10000),
+    claimWindowDays: z.number().int().min(0).max(365),
+    expiresAfterDays: z.number().int().min(0).max(3650),
+    claim: z.enum(OFFER_CLAIMS).default("link"),
+  })
+  .strict();
+
 /** Stored terms, or null for none. Throws on a row that no longer parses. */
 export function creditOfferTermsOf(value: unknown): CreditOfferTerms | null {
   return value == null ? null : creditOfferTermsSchema.parse(value);
+}
+
+/** Stored draft terms, or null for none: what a saved draft reads back as. */
+export function creditOfferDraftOf(value: unknown): CreditOfferTerms | null {
+  return value == null ? null : creditOfferDraftSchema.parse(value);
 }
 
 /** Stored terms when they parse, else null: what a form loads from a template. */
