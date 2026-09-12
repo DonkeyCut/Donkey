@@ -23,6 +23,7 @@ import {
 } from "@/cut/lib/exportClient";
 import { EMPTY_LIBRARY, fileZoneAt, hasRefDrag, parseMentions, refCandidatesOf, selectionRefTokens } from "@/cut/lib/assetRef";
 import { placeRefAtPlayhead } from "@/cut/lib/refPlace";
+import { pasteCutPayload, payloadAssets, payloadFromHtml, writeCutClipboard } from "@/cut/lib/cutClipboard";
 import { useLibrary } from "@/cut/lib/queries";
 import { copyableRefs } from "@/cut/lib/refCopy";
 import { startUpload } from "@/cut/lib/importQueue";
@@ -1025,6 +1026,19 @@ export function Editor({
       const files = pasted.filter((f) => isMediaFile(f) && !isFontFile(f));
       if (files.length === 0) {
         if (fonts.length > 0) return;
+        // A copy made in Cut — this tab, another tab, another project — rides
+        // the HTML flavor whole. It is the newest copy whichever tab made it,
+        // so it goes ahead of this tab's own timeline clipboard; a card copy
+        // from this same project falls through to its tokens below.
+        const payload = payloadFromHtml(e.clipboardData?.getData("text/html"));
+        const projectId = s.projectId;
+        if (payload && projectId && (payload.projectId !== projectId || payload.items.length > 0)) {
+          e.preventDefault();
+          void pasteCutPayload(payload, { projectId, at, library: libraryRef.current }).catch((err) =>
+            reportSwallowed("[cut] paste from another project failed", err)
+          );
+          return;
+        }
         if (pasteOwn(at)) {
           e.preventDefault();
           return;
@@ -1036,7 +1050,6 @@ export function Editor({
         const library = libraryRef.current;
         const candidates = refCandidatesOf(s, library);
         const refs = parseMentions(e.clipboardData?.getData("text/plain") ?? "", candidates).refs;
-        const projectId = s.projectId;
         if (refs.length === 0 || !projectId) return;
         e.preventDefault();
         void (async () => {
@@ -1150,7 +1163,14 @@ export function Editor({
           const copied = s.copySelection();
           if (copied) clearCopiedFrame();
           if (copied || token) {
-            void navigator.clipboard.writeText(token ?? "").catch(() => {});
+            // The copy leaves the tab whole: the items and the assets they
+            // play, so ⌘V in another tab or another project lands them.
+            const items = copied ? s.copiedItems() : [];
+            const payload =
+              copied && s.projectId
+                ? { v: 1 as const, projectId: s.projectId, items, assets: payloadAssets(items, s.assets) }
+                : null;
+            void writeCutClipboard(token ?? "", payload).catch(() => {});
             e.preventDefault();
           }
         }

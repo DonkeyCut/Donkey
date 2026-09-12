@@ -28,8 +28,9 @@ import {
   refToken,
   type AssetRef,
 } from "./assetRef";
+import { writeCutClipboard } from "./cutClipboard";
 import { clearCopiedFrame } from "./stageFrame";
-import { useEditor } from "./store";
+import { storedAssets, useEditor } from "./store";
 
 type RefsFn = () => AssetRef[];
 
@@ -160,7 +161,13 @@ export const refClipboardText = (refs: AssetRef[]) => refs.map(refToken).join(" 
  */
 export function copyRefs(refs: AssetRef[]): boolean {
   if (refs.length === 0) return false;
-  void navigator.clipboard?.writeText(refClipboardText(refs.map(withHandle))).catch(() => {});
+  // A project asset's card carries the asset itself beside its token, so a
+  // paste in another project brings the media across.
+  const s = useEditor.getState();
+  const own = new Set(refs.filter((r) => r.scope === "project").map((r) => r.id));
+  const assets = storedAssets(s.assets.filter((a) => own.has(a.id)));
+  const payload = s.projectId && assets.length > 0 ? { v: 1 as const, projectId: s.projectId, items: [], assets } : null;
+  void writeCutClipboard(refClipboardText(refs.map(withHandle)), payload).catch(() => {});
   // The newer copy owns the clipboard: the timeline's own copy and a copied
   // preview frame step aside, so ⌘V on the timeline lands what was copied.
   useEditor.getState().clearClipboard();

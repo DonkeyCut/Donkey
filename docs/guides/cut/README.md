@@ -20,7 +20,7 @@ A project lives in one of three homes, chosen when it is created.
                        on-device speech)
 ```
 
-The user sees two places, Local and Cloud. Local is the Mac's engine once the app has connected and the browser's own storage otherwise, so a fully local project needs nothing installed. A project lives in exactly one home and the surfaces never proxy to each other.
+The user sees two places, Local and Cloud. Local is the Mac's engine once the app has connected and the browser's own storage otherwise, so a fully local project needs nothing installed. A project lives in exactly one home and the surfaces never proxy to each other. Copy and paste crosses homes: a selection or a media card copied in one project pastes into another with its media brought across, and a second paste of the same source finds the copy already there.
 
 AI is hosted whatever the home: image, video, and voiceover generation and the assistant's Gemini models run through Donkey's authenticated inference routes against the user's credits, and the results land in the project like any other file. The cloud's routes are the engine's hosted twin, same shapes with session auth and credit metering.
 
@@ -44,4 +44,4 @@ The chat drives everything the editor can do through typed tools, and every tool
 
 ## Where it lives
 
-The editor, its stores, and the backend seam live under the site's `cut` folder; the engine and worker share its server code; the Mac app is a menu bar shell that ships the engine and screen recording.
+The editor, its stores, and the backend seam live under the site's `cut` folder; the engine and worker share its server code; the Mac app is a menu bar shell that ships the engine and screen recording. Every kind of item the timeline can select is one entry in the item-kind table beside the store, and copy, paste, templates and the media collector read that table, so a new kind is copyable and pasteable by construction.
