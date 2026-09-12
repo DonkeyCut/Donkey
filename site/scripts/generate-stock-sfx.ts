@@ -16,13 +16,15 @@
 // community catalog behind its Explore tab, in place of rendering them: for
 // each catalog sound the most-purchased matching entries are pulled, a text
 // pass keeps the ones whose prompt is this one sound, a listening pass over
-// their previews keeps the clean takes, and those go through the same trim,
-// normalize and upload as a render. A sound the library has no clean take for
-// keeps the take it ships with, and the run says which. Ids on the command
-// line narrow the pass to those sounds, and a category name (`Camera`) to
-// every sound in it; a sound's takes are re-picked every run, so
-// `--library camera-burst` is how a weak pick gets another go. The
-// previews are public files, so a library take costs no ElevenLabs credits.
+// their previews keeps the clean takes, and each pick is then bought — the
+// public preview carries an audio watermark; the purchase call returns the
+// real file — and goes through the same trim, normalize and upload as a
+// render. A sound the library has no clean take for keeps the take it ships
+// with, and the run says which. The picks are kept in the cache, so a plain
+// re-run only buys picks not bought yet; ids on the command line make those
+// sounds pick again, and a category name (`Camera`) every sound in it, so
+// `--library camera-burst` is how a weak pick or a sound with no pick gets
+// another go.
 //
 //   cd site && ./node_modules/.bin/bun scripts/generate-stock-sfx.ts --library
 //   cd site && ./node_modules/.bin/bun scripts/generate-stock-sfx.ts --library camera-burst
@@ -66,6 +68,7 @@ const KEY_PREFIX = "stock/sfx/";
 const CACHE_DIR = path.join(import.meta.dirname, "..", ".cache", "stock-sfx");
 const MANIFEST = path.join(import.meta.dirname, "..", "src", "cut", "lib", "stockSfxManifest.ts");
 const CONCURRENCY = 4;
+const ADOPT_CONCURRENCY = 16;
 const PEAKS = 40;
 // Follow the prompt closely: a one-shot is picked for one exact job, so a take
 // that wanders from its description is a miss.
@@ -101,8 +104,19 @@ const LIBRARY_ONESHOT_STRETCH = 3;
 const LIBRARY_ONESHOT_FLOOR_S = 2.5;
 const LIBRARY_LOOP_MIN_S = 3;
 const LIBRARY_DIR = path.join(CACHE_DIR, "library");
+// Which library generation each take came from and the file it became; an
+// entry that is only the generation id is a pick from before purchases,
+// made from the watermarked preview, and gets bought on the next run.
 const LIBRARY_SOURCES = path.join(CACHE_DIR, "library-sources.json");
 const LIBRARY_CONCURRENCY = 6;
+// Purchases are rate-limited well below the search calls, to a few hundred
+// an hour with no header saying so: a 429 waits this long (or what the
+// answer asks for), doubling up to the cap, for as many tries as it takes
+// to see the window reopen.
+const PURCHASE_CONCURRENCY = 1;
+const PURCHASE_BACKOFF_MS = 15_000;
+const PURCHASE_BACKOFF_CAP_MS = 120_000;
+const PURCHASE_TRIES = 60;
 const TEXT_PICK_MODEL = geminiModelRoles.fastDecision;
 const LISTEN_PICK_MODEL = geminiModelRoles.review;
 
@@ -1192,17 +1206,100 @@ async function listenPick(
   return [...new Set(ids)].map((id) => byId.get(id)).filter((c): c is LibraryEntry => c !== undefined).slice(0, takes);
 }
 
+type LibrarySource = string | { generation: string; file: string };
+const sourceGeneration = (s: LibrarySource | undefined) => (typeof s === "string" ? s : s?.generation);
+const sourceBought = (s: LibrarySource | undefined) => typeof s === "object";
+
+const boughtPath = (generationId: string) => path.join(LIBRARY_DIR, `${generationId}.bought.mp3`);
+
+/** The real file for a library generation: bought once through the purchase
+ * call, which answers with the mp3, and kept in the library cache. */
+async function buyTake(apiKey: string, generationId: string): Promise<Buffer> {
+  const file = boughtPath(generationId);
+  if (existsSync(file)) return readFile(file);
+  let wait = PURCHASE_BACKOFF_MS;
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${LIBRARY_API}/${generationId}/purchase`, {
+        method: "POST",
+        headers: { "xi-api-key": apiKey, "content-type": "application/json" },
+        body: "{}",
+      });
+    } catch (e) {
+      // A dropped socket is the same wait-and-retry as a 429.
+      if (attempt >= PURCHASE_TRIES) throw e;
+      await new Promise((r) => setTimeout(r, wait));
+      wait = Math.min(wait * 2, PURCHASE_BACKOFF_CAP_MS);
+      continue;
+    }
+    if (res.status === 429 && attempt < PURCHASE_TRIES) {
+      const asked = Number.parseFloat(res.headers.get("retry-after") ?? "") * 1000;
+      await new Promise((r) => setTimeout(r, Number.isFinite(asked) && asked > 0 ? asked : wait));
+      wait = Math.min(wait * 2, PURCHASE_BACKOFF_CAP_MS);
+      continue;
+    }
+    if (!res.ok) throw new Error(`purchase ${generationId}: ${res.status} ${await res.text()}`);
+    const type = res.headers.get("content-type") ?? "";
+    if (!type.startsWith("audio/")) throw new Error(`purchase ${generationId} answered ${type || "no content type"}`);
+    const mp3 = Buffer.from(await res.arrayBuffer());
+    await mkdir(LIBRARY_DIR, { recursive: true });
+    await writeFile(file, mp3);
+    return mp3;
+  }
+}
+
+/** Buys one pick and makes it this take: trimmed, normalized, uploaded, and
+ * recorded. False when the bought file is not a take worth shipping. */
+async function placeTake(
+  apiKey: string,
+  r2: S3Client,
+  item: CatalogItem,
+  generationId: string,
+  results: Map<string, Result>,
+  sources: Record<string, LibrarySource>
+): Promise<boolean> {
+  const mp3 = await buyTake(apiKey, generationId);
+  const name = await nextName(r2, item.id);
+  const before = names.get(item.id);
+  names.set(item.id, name);
+  try {
+    await finish(item, mp3);
+  } catch (e) {
+    // A take the trim left empty or a wall of noise.
+    if (before) names.set(item.id, before);
+    else names.delete(item.id);
+    console.error(`  ${item.id}: ${e instanceof Error ? e.message : e}`);
+    return false;
+  }
+  await upload(r2, name);
+  results.set(item.id, { duration: probeDuration(name), peaks: computePeaks(name) });
+  sources[item.id] = { generation: generationId, file: name };
+  return true;
+}
+
 /** Sources one sound's takes from the library and resolves to how many of
- * its take ids got a library file; the rest keep what they ship with. */
+ * its take ids got a bought library file; the rest keep what they ship with.
+ * Takes already picked are bought and placed without a new pick. */
 async function sourceFromLibrary(
   apiKey: string,
   gemini: GoogleGenAI,
   r2: S3Client,
   items: CatalogItem[],
   results: Map<string, Result>,
-  sources: Record<string, string>
+  sources: Record<string, LibrarySource>,
+  repick: boolean
 ): Promise<number> {
   const [first] = items;
+  let placed = 0;
+  if (!repick && items.some((c) => sources[c.id])) {
+    for (const item of items) {
+      const src = sources[item.id];
+      if (!src) continue;
+      if (sourceBought(src) || (await placeTake(apiKey, r2, item, sourceGeneration(src)!, results, sources))) placed++;
+    }
+    return placed;
+  }
   const candidates = await libraryCandidates(apiKey, first);
   const shortlist = await textPick(gemini, first, candidates);
   const previews: { entry: LibraryEntry; mp3: Buffer }[] = [];
@@ -1212,28 +1309,10 @@ async function sourceFromLibrary(
   }
   if (previews.length === 0) return 0;
   const picks = await listenPick(gemini, first, items.length, previews);
-  const byId = new Map(previews.map((p) => [p.entry.generation_id, p.mp3]));
-  let placed = 0;
   for (const entry of picks) {
     const item = items[placed];
     if (!item) break;
-    const name = await nextName(r2, item.id);
-    const before = names.get(item.id);
-    names.set(item.id, name);
-    try {
-      await finish(item, byId.get(entry.generation_id)!);
-    } catch (e) {
-      // A take the trim left empty or a wall of noise; the next pick gets
-      // this slot.
-      if (before) names.set(item.id, before);
-      else names.delete(item.id);
-      console.error(`  ${item.id}: ${e instanceof Error ? e.message : e}`);
-      continue;
-    }
-    await upload(r2, name);
-    results.set(item.id, { duration: probeDuration(name), peaks: computePeaks(name) });
-    sources[item.id] = entry.generation_id;
-    placed++;
+    if (await placeTake(apiKey, r2, item, entry.generation_id, results, sources)) placed++;
   }
   return placed;
 }
@@ -1278,11 +1357,14 @@ ${entries.map((e) => `  ${JSON.stringify(e)},`).join("\n")}
 async function sourceLibrary(r2: S3Client, results: Map<string, Result>, named: Set<string>) {
   const apiKey = process.env.ELEVENLABS_API_KEY!.trim();
   const gemini = makeGemini();
-  const sources: Record<string, string> = existsSync(LIBRARY_SOURCES)
-    ? (JSON.parse(await readFile(LIBRARY_SOURCES, "utf8")) as Record<string, string>)
+  const sources: Record<string, LibrarySource> = existsSync(LIBRARY_SOURCES)
+    ? (JSON.parse(await readFile(LIBRARY_SOURCES, "utf8")) as Record<string, LibrarySource>)
     : {};
-  const sounds = bySound(CATALOG).filter(
-    (g) => named.size === 0 || g.some((c) => named.has(c.id) || named.has(c.category))
+  const forced = (g: CatalogItem[]) => g.some((c) => named.has(c.id) || named.has(c.category));
+  // A plain run buys the picks not bought yet; a named sound is picked again,
+  // which is also how a sound with no pick gets another try.
+  const sounds = bySound(CATALOG).filter((g) =>
+    named.size === 0 ? g.some((c) => sources[c.id] && !sourceBought(sources[c.id])) : forced(g)
   );
   console.log(`library pass: ${sounds.length} sounds, text=${TEXT_PICK_MODEL} listen=${LISTEN_PICK_MODEL}`);
   const kept: string[] = [];
@@ -1292,7 +1374,7 @@ async function sourceLibrary(r2: S3Client, results: Map<string, Result>, named: 
     for (let items = queue.shift(); items; items = queue.shift()) {
       const [first] = items;
       try {
-        const placed = await sourceFromLibrary(apiKey, gemini, r2, items, results, sources);
+        const placed = await sourceFromLibrary(apiKey, gemini, r2, items, results, sources, forced(items));
         for (const c of items.slice(placed)) kept.push(c.id);
         await writeManifest(results);
         await writeFile(LIBRARY_SOURCES, JSON.stringify(sources, null, 2));
@@ -1304,7 +1386,7 @@ async function sourceLibrary(r2: S3Client, results: Map<string, Result>, named: 
       }
     }
   };
-  await Promise.all(Array.from({ length: LIBRARY_CONCURRENCY }, worker));
+  await Promise.all(Array.from({ length: named.size === 0 ? PURCHASE_CONCURRENCY : LIBRARY_CONCURRENCY }, worker));
   await writeManifest(results);
   console.log(`done: ${results.size} sounds, ${kept.length} kept their rendered take, ${failed} sounds failed`);
   if (kept.length) console.log(`kept: ${kept.join(" ")}`);
@@ -1329,16 +1411,22 @@ async function main() {
   const redo = library ? new Set<string>() : named;
   const { eleven, r2 } = makeClients();
   const results = new Map<string, Result>();
-  for (const c of CATALOG) {
-    if (redo.has(c.id)) {
-      names.set(c.id, await nextName(r2, c.id));
-      continue;
+  // Every sound asks the bucket whether its file is there; hundreds of those
+  // one after another is minutes, so they go out in a pool.
+  const pending = [...CATALOG];
+  const settle = async () => {
+    for (let c = pending.shift(); c; c = pending.shift()) {
+      if (redo.has(c.id)) {
+        names.set(c.id, await nextName(r2, c.id));
+        continue;
+      }
+      const shipped = shippedName(c.id);
+      if (shipped) names.set(c.id, shipped);
+      const name = fileName(c);
+      if (await adopt(r2, name)) results.set(c.id, { duration: probeDuration(name), peaks: computePeaks(name) });
     }
-    const shipped = shippedName(c.id);
-    if (shipped) names.set(c.id, shipped);
-    const name = fileName(c);
-    if (await adopt(r2, name)) results.set(c.id, { duration: probeDuration(name), peaks: computePeaks(name) });
-  }
+  };
+  await Promise.all(Array.from({ length: ADOPT_CONCURRENCY }, settle));
   if (library) {
     await sourceLibrary(r2, results, named);
     return;
