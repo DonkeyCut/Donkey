@@ -25,9 +25,16 @@ struct WatchCameraView: View {
 
     @ViewBuilder private var picture: some View {
         if let frame = link.frame {
-            Image(uiImage: frame)
-                .resizable()
-                .scaledToFill()
+            // The picture rides as an overlay so its size never reaches the
+            // layout: a fill-scaled image laid out directly grows the stack
+            // past the screen and pushes the button off the bottom.
+            Color.black
+                .overlay {
+                    Image(uiImage: frame)
+                        .resizable()
+                        .scaledToFill()
+                }
+                .clipped()
                 .ignoresSafeArea()
         } else if let hint {
             VStack(spacing: 8) {
