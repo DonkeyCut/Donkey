@@ -100,11 +100,18 @@ export type SuPage = SuTab | SuSurface;
 export const suTabs = (surface: SuSurface): readonly SuTab[] | undefined =>
   "tabs" in surface ? surface.tabs : undefined;
 
+/** The public address of a route rendered under the proxy's /su prefix. */
+export function suPublicPath(pathname: string): string {
+  if (pathname === "/su") return "/";
+  return pathname.startsWith("/su/") ? pathname.slice(3) : pathname;
+}
+
 // The surface an address belongs to, and the page within it: the tab showing,
 // or the surface itself when it has none. A section address resolves to its
 // first tab, the one the proxy opens it on; an address outside the rail falls
 // back to the entry the host opens on.
 export function suSurfaceAt(pathname: string): { surface: SuSurface; page: SuPage } {
+  pathname = suPublicPath(pathname);
   const surface =
     SU_NAV.find((s) => pathname === s.href || pathname.startsWith(`${s.href}/`)) ??
     SU_NAV[0];

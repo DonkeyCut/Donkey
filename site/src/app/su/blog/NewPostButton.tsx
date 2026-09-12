@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
+import { suPublicPath } from "@/app/su/nav";
 
 import { Button } from "@/components/ui/button";
 import { useCreateBlogPost } from "@/queries/blog";
@@ -9,7 +10,7 @@ import { useCreateBlogPost } from "@/queries/blog";
 // editor has a post id to upload images under. The button belongs to the
 // list; an open post carries its own actions.
 export function NewPostButton() {
-  const pathname = usePathname();
+  const pathname = suPublicPath(usePathname());
   const router = useRouter();
   const create = useCreateBlogPost();
   if (pathname !== "/blog") return null;
