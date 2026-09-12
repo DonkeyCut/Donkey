@@ -61,16 +61,26 @@ export function outreachOfferScope(outreachId: string, attempt: number): string 
   return `outreach:${outreachId}:${attempt}`;
 }
 
+/** The scope of the offer a test note makes: the outbox row that carries it,
+ * so every test mints the operator a fresh link. */
+export function outreachTestOfferScope(outboxRowId: string): string {
+  return `outreach-test:${outboxRowId}`;
+}
+
 // Builds one outreach note. The reply target is the operator's call per
 // send: the row's own signed alias, or the sending address itself.
-export async function buildOutreachEmail(payload: OutreachPayload, user: EmailUser): Promise<EmailMessage> {
+export async function buildOutreachEmail(
+  payload: OutreachPayload,
+  user: EmailUser,
+  offerScope = outreachOfferScope(payload.outreachId, payload.attempt),
+): Promise<EmailMessage> {
   const from = emailFrom();
   if (!from) throw new PermanentSendError("RESEND_FROM_EMAIL is not configured.");
   if (await isMarketingUnsubscribed(user.id)) throw new PermanentSendError("That account is unsubscribed.");
 
   const offer = payload.creditOffer
     ? await createTermsCreditOffer({
-        scope: outreachOfferScope(payload.outreachId, payload.attempt),
+        scope: offerScope,
         userId: user.id,
         terms: payload.creditOffer,
         offeredByUserId: payload.actorUserId,

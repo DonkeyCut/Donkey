@@ -15,7 +15,12 @@ import { buildReplyForwardEmail, replyForwardPayloadSchema } from "@/lib/marketi
 import { UnknownPlaceholderError } from "@/lib/marketing/placeholders";
 import { creditOfferTermsOf } from "@/lib/credits/offerTerms";
 import { buildPromotionEmail, promotionCopyOf } from "@/lib/marketing/promotions";
-import { buildOutreachEmail, outreachPayloadSchema, recordOutreachSent } from "@/lib/marketing/send-outreach";
+import {
+  buildOutreachEmail,
+  outreachPayloadSchema,
+  outreachTestOfferScope,
+  recordOutreachSent,
+} from "@/lib/marketing/send-outreach";
 import { prisma } from "@/lib/prisma";
 
 // What each kind of email is on the server: whose quota it spends, what its
@@ -102,6 +107,18 @@ const outreach = define({
     return user ? buildOutreachEmail(payload, user) : null;
   },
   afterSend: async (payload) => recordOutreachSent(payload),
+});
+
+// The note as it stands, mailed to the operator with the row's values filled
+// in. A credit offer gives them their own working claim link; replies go to
+// the sending address, since the row's alias would file the row.
+const outreachTest = define({
+  quota: "manual",
+  payload: outreachPayloadSchema,
+  build: async (payload, row) => {
+    const user = await userOf(row);
+    return user ? buildOutreachEmail({ ...payload, trackReplies: false }, user, outreachTestOfferScope(row.id)) : null;
+  },
 });
 
 const replyForward = define({
@@ -192,6 +209,7 @@ export const EMAIL_KINDS: Record<EmailKindId, EmailKind> = {
   "reply-forward": replyForward as EmailKind,
   "credit-offer": creditOffer as EmailKind,
   outreach: outreach as EmailKind,
+  "outreach-test": outreachTest as EmailKind,
   "promotion-hand": promotionHand as EmailKind,
   "promotion-test": promotionTest as EmailKind,
   welcome: welcome as EmailKind,

@@ -99,6 +99,15 @@ type OutreachAction =
       trackReplies: boolean;
       creditOffer: CreditOfferTerms | null;
     }
+  // Mails the note to the operator with the row's values filled in.
+  | {
+      action: "test";
+      outreachId: string;
+      subject: string;
+      body: string;
+      unsubscribeLink: boolean;
+      creditOffer: CreditOfferTerms | null;
+    }
   // Sends a saved promotion to the row's account as it stands.
   | { action: "promote"; outreachId: string; promotionId: string }
   | { action: "ignore" | "unignore" | "replied"; outreachId: string }
@@ -114,7 +123,7 @@ export function useOutreachAction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: OutreachAction) =>
-      apiFetch<{ row: OutreachRow }>("/api/marketing/outreach", {
+      apiFetch<{ row: OutreachRow; sentTo?: string }>("/api/marketing/outreach", {
         body: JSON.stringify(input),
         method: "POST",
       }),

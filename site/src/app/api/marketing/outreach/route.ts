@@ -31,9 +31,17 @@ const listQuerySchema = z.object({
   status: z.enum(OUTREACH_STATUSES).optional(),
 });
 
-// Four shapes: start a conversation with a user who is on the list, send
-// them a promotion as it stands, file a row that is already on it, or put an
-// account on the list by its address.
+const noteSchema = z.object({
+  body: z.string().trim().min(1).max(5000),
+  outreachId: z.string().trim().min(1),
+  subject: z.string().trim().min(1).max(200),
+  unsubscribeLink: z.boolean(),
+  creditOffer: creditOfferTermsSchema.nullable().default(null),
+});
+
+// Five shapes: start a conversation with a user who is on the list, mail
+// the note to yourself first, send them a promotion as it stands, file a row
+// that is already on it, or put an account on the list by its address.
 const actionSchema = z.union([
   z
     .object({
@@ -42,17 +50,8 @@ const actionSchema = z.union([
       promotionId: z.string().trim().min(1),
     })
     .strict(),
-  z
-    .object({
-      action: z.literal("send"),
-      body: z.string().trim().min(1).max(5000),
-      outreachId: z.string().trim().min(1),
-      subject: z.string().trim().min(1).max(200),
-      trackReplies: z.boolean(),
-      unsubscribeLink: z.boolean(),
-      creditOffer: creditOfferTermsSchema.nullable().default(null),
-    })
-    .strict(),
+  noteSchema.extend({ action: z.literal("send"), trackReplies: z.boolean() }).strict(),
+  noteSchema.extend({ action: z.literal("test") }).strict(),
   z.object({ action: z.literal("add"), email: z.string().trim().min(1).max(320) }).strict(),
   z
     .object({
@@ -283,7 +282,7 @@ export const POST = withSuperUser(async (request) => {
   const now = new Date();
   const actorUserId = request.donkey.userId;
 
-  if (parsed.data.action === "send") {
+  if (parsed.data.action === "send" || parsed.data.action === "test") {
     const attempt = outreach.sentCount + 1;
     const vars = {
       balance: creditMicrosToString(outreach.balanceMicros),
@@ -301,6 +300,32 @@ export const POST = withSuperUser(async (request) => {
     );
     if (issue) {
       return NextResponse.json({ error: "Invalid request", issues: [{ message: issue, path: "body" }] }, { status: 400 });
+    }
+    // A test goes to the operator with the row's values filled in, so the
+    // note reads as the person would read it; the row is left as it is.
+    if (parsed.data.action === "test") {
+      const operator = await prisma.user.findUnique({ select: { email: true }, where: { id: actorUserId } });
+      if (!operator) return notFoundResponse();
+      const delivery = await deliverEmail({
+        idempotencyKey: `outreach-test:${outreach.id}:${Date.now()}`,
+        kind: "outreach-test",
+        payload: {
+          actorUserId,
+          attempt,
+          body: parsed.data.body,
+          creditOffer: parsed.data.creditOffer,
+          outreachId: outreach.id,
+          subject: parsed.data.subject,
+          trackReplies: false,
+          unsubscribeLink: parsed.data.unsubscribeLink,
+          vars,
+        },
+        userId: actorUserId,
+      });
+      if (delivery.state === "failed") {
+        return NextResponse.json({ error: "not_sendable", message: delivery.error }, { status: 409 });
+      }
+      return NextResponse.json({ delivery: delivery.state, row: serialize(outreach), sentTo: operator.email });
     }
     const delivery = await deliverEmail({
       idempotencyKey: outreachIdempotencyKey(outreach.id, attempt),

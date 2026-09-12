@@ -175,6 +175,7 @@ export default function SuOutreachPage() {
   const [unsubscribeLink, setUnsubscribeLink] = useState(true);
   const [trackReplies, setTrackReplies] = useState(true);
   const [creditOffer, setCreditOffer] = useState<CreditOfferTerms | null>(null);
+  const [testNotice, setTestNotice] = useState<string | null>(null);
   const offerDefaults = useCreditOfferDefaults();
 
   const saved = templates.data?.templates ?? [];
@@ -325,9 +326,22 @@ export default function SuOutreachPage() {
     });
   };
 
+  // The note as it stands goes to the operator's own inbox, filled with the
+  // row's values, so the words can be read as mail before they are sent.
+  const submitTest = () => {
+    const target = sendTarget;
+    if (!target || !sendable || selectedPromotion) return;
+    setTestNotice(null);
+    act.mutate(
+      { action: "test", body, creditOffer, outreachId: target.id, subject, unsubscribeLink },
+      { onSuccess: (result) => setTestNotice(`Test sent to ${result.sentTo}.`) },
+    );
+  };
+
   const submitSend = () => {
     const target = sendTarget;
     if (!target || !sendable) return;
+    setTestNotice(null);
     if (selectedPromotion) {
       act.mutate(
         { action: "promote", outreachId: target.id, promotionId: selectedPromotion.id },
@@ -392,7 +406,9 @@ export default function SuOutreachPage() {
   const sending = sendTarget !== null && busy.has(sendTarget.id);
   // A failed send keeps its dialog open, so the reason belongs in there with
   // the words that still need fixing; the server names a bad placeholder.
-  const sendFailed = act.isError && (act.variables?.action === "send" || act.variables?.action === "promote");
+  const sendFailed =
+    act.isError &&
+    (act.variables?.action === "send" || act.variables?.action === "test" || act.variables?.action === "promote");
   const sendIssue = sendFailed && act.error instanceof ApiError ? act.error.issues[0]?.message : undefined;
   const addFailed = act.isError && act.variables?.action === "add";
   const adding = act.isPending && act.variables?.action === "add";
@@ -570,10 +586,13 @@ export default function SuOutreachPage() {
       ) : null}
 
       <Dialog
-        onOpenChange={(open) => setSendTarget(open ? sendTarget : null)}
+        onOpenChange={(open) => {
+          if (!open) setTestNotice(null);
+          setSendTarget(open ? sendTarget : null);
+        }}
         open={sendTarget !== null}
       >
-        <DialogContent className="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-3xl">
+        <DialogContent className="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>Email {sendTarget?.name}</DialogTitle>
             <DialogDescription>
@@ -586,7 +605,7 @@ export default function SuOutreachPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid min-h-0 min-w-0 gap-4 md:grid-cols-[15rem_minmax(0,1fr)]">
+          <div className="grid min-h-0 min-w-0 gap-4 md:grid-cols-[18rem_minmax(0,1fr)]">
             <div className="flex min-h-0 flex-col gap-2 md:border-r md:pr-4">
               <span className="text-xs font-medium text-muted-foreground">
                 Start from
@@ -731,6 +750,8 @@ export default function SuOutreachPage() {
                   {sendIssue ??
                     "That didn’t go through. The account may have unsubscribed since the last scan, or the text may name a placeholder that doesn’t exist."}
                 </p>
+              ) : testNotice ? (
+                <p className="text-sm text-muted-foreground">{testNotice}</p>
               ) : null}
             </div>
             )}
@@ -741,6 +762,9 @@ export default function SuOutreachPage() {
                 last keeps them painted above the send buttons there. */}
             {selectedPromotion ? null : (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 max-sm:order-last sm:mr-auto">
+              <Button disabled={sending || !sendable} onClick={submitTest} variant="outline">
+                Send test to me
+              </Button>
               <Label className="gap-2 font-normal text-muted-foreground">
                 <Switch
                   checked={unsubscribeLink}
