@@ -5,7 +5,9 @@ import { CUT_APP_BASE } from "@/cut/lib/appBase";
 import { getGlobalSetting } from "@/lib/config/effective";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { grantCredits } from "@/lib/credits/inference";
-import { creditGrantExpiry } from "@/lib/credits/top-up";
+import { isLinkClaimedKind, MANUAL_OFFER_KIND, promotionOfferKind } from "@/lib/credits/offerKinds";
+import type { CreditOfferTerms, OfferVars } from "@/lib/credits/offerTerms";
+import { creditGrantExpiry, formatCreditExpiry } from "@/lib/credits/top-up";
 import { deliverEmail } from "@/lib/email/outbox";
 import { creditsOfferedIdempotencyKey } from "@/lib/email/send-credits-offered";
 import { prisma } from "@/lib/prisma";
@@ -15,10 +17,6 @@ import { prisma } from "@/lib/prisma";
 // unsubscribe link. The claim itself also needs the offered account's session.
 const TOKEN_DOMAIN = "donkey-credit-offer-v1";
 
-// The kind su makes by hand; a promotion's offers carry the promotion's key.
-export const MANUAL_OFFER_KIND = "manual";
-// The kind of an offer a promotion email made; its id is `${promotionId}:${userId}`.
-export const PROMOTION_OFFER_KIND = "promotion_email";
 
 function signature(offerId: string): Buffer {
   const secret = process.env.BETTER_AUTH_SECRET;
@@ -135,11 +133,11 @@ export async function landCreditOffer(
   return { grant: landed, offer: claimed };
 }
 
-// Claims an offer from its email link: the ones su sends by hand and the ones
-// a promotion mails. Every other kind lands from the act it rewards.
+// Claims an offer from its email link. Every other kind lands from the act
+// it rewards.
 export async function claimCreditOffer(offerId: string, userId: string) {
   const offer = await prisma.creditOffer.findUnique({ where: { id: offerId } });
-  if (!offer || (offer.kind !== MANUAL_OFFER_KIND && offer.kind !== PROMOTION_OFFER_KIND)) return null;
+  if (!offer || !isLinkClaimedKind(offer.kind)) return null;
   if (offer.userId !== userId) throw new CreditOfferNotYoursError();
   if (!offer.claimedAt && !creditOfferOpen(offer, new Date())) throw new CreditOfferClosedError();
   return landCreditOffer(offer, {
@@ -149,30 +147,44 @@ export async function claimCreditOffer(offerId: string, userId: string) {
   });
 }
 
-export async function createPromotionCreditOffer(input: {
-  promotionId: string;
+/** The offer an email with terms makes for one recipient, and what its
+ * words fill in. The id is the email's scope and the account, so the real
+ * send, the test send and a retry share one row and one link; the claim
+ * window runs from the first making. An unclaimed row takes the terms as
+ * they are now, so a test sent after a change of terms tests the change; a
+ * claimed row is what landed and stays. A promotion's scope is its id, an
+ * outreach note's names the row and the attempt. */
+export async function createTermsCreditOffer(input: {
+  scope: string;
   userId: string;
-  amountDollars: number;
-  claimWindowDays: number;
-  expiresAfterDays: number;
+  terms: CreditOfferTerms;
   offeredByUserId: string | null;
   now?: Date;
-}) {
+}): Promise<{ offer: CreditOffer; vars: OfferVars }> {
   const now = input.now ?? new Date();
-  const offerId = `${input.promotionId}:${input.userId}`;
-  const offer = await prisma.creditOffer.upsert({
-    where: { id: offerId },
-    create: {
-      id: offerId,
-      userId: input.userId,
-      kind: PROMOTION_OFFER_KIND,
-      amountMicros: BigInt(input.amountDollars) * BigInt(1_000_000),
-      expiresAfterDays: input.expiresAfterDays,
-      closesAt: new Date(now.getTime() + input.claimWindowDays * 86_400_000),
-      description: "Promotional AI credits",
-      offeredByUserId: input.offeredByUserId,
-    },
-    update: {},
-  });
-  return { offer, claimUrl: creditOfferClaimUrl(offer.id) };
+  const offerId = `${input.scope}:${input.userId}`;
+  const terms = {
+    kind: promotionOfferKind(input.terms.claim),
+    amountMicros: BigInt(input.terms.dollars) * BigInt(1_000_000),
+    expiresAfterDays: input.terms.expiresAfterDays,
+    offeredByUserId: input.offeredByUserId,
+  };
+  const existing = await prisma.creditOffer.findUnique({ where: { id: offerId } });
+  const offer = existing
+    ? existing.claimedAt
+      ? existing
+      : await prisma.creditOffer.update({ data: terms, where: { id: offerId } })
+    : await prisma.creditOffer.create({
+        data: {
+          id: offerId,
+          userId: input.userId,
+          closesAt: new Date(now.getTime() + input.terms.claimWindowDays * 86_400_000),
+          description: "Promotional AI credits",
+          ...terms,
+        },
+      });
+  return {
+    offer,
+    vars: { claimUrl: creditOfferClaimUrl(offer.id), claimBy: formatCreditExpiry(offer.closesAt ?? offer.createdAt) },
+  };
 }

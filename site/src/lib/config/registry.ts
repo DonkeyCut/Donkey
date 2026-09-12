@@ -9,7 +9,7 @@ import {
   type SettingsOf,
 } from "@donkeycut/abexp";
 import { z } from "zod";
-import { promotionOfferSchema } from "@/lib/marketing/promotionOfferInput";
+import { creditOfferTermsSchema } from "@/lib/credits/offerTerms";
 import { DEFAULT_EMAIL_PRIORITIES, EMAIL_KIND_IDS } from "@/lib/email/kindIds";
 
 import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/top-up";
@@ -32,8 +32,8 @@ function validTimeZone(zone: string): boolean {
 
 export const SETTINGS = defineSettings({
   promotionCreditOffer: {
-    schema: promotionOfferSchema.extend({ minimumAccountAgeDays: z.number().int().min(1).max(36500) }).strict(),
-    default: { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28, minimumAccountAgeDays: 7 },
+    schema: creditOfferTermsSchema.extend({ minimumAccountAgeDays: z.number().int().min(1).max(36500) }).strict(),
+    default: { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28, claim: "link", minimumAccountAgeDays: 7 },
     public: false,
     title: "Promotion credit offer",
     description: "Default credit offer and minimum account age for new promotion drafts. Saved drafts keep their terms.",

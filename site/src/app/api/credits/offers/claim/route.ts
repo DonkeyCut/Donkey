@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
 import { creditMicrosToString } from "@/lib/credits/amounts";
 import { formatUsdPlain } from "@/lib/credits/format-usd";
 import { getCreditBalance } from "@/lib/credits/inference";
+import { isLinkClaimedKind, isSubscribeClaimedKind } from "@/lib/credits/offerKinds";
 import {
   claimCreditOffer,
   CreditOfferClosedError,
   CreditOfferNotYoursError,
   creditOfferOpen,
-  MANUAL_OFFER_KIND,
   verifyCreditOfferToken,
 } from "@/lib/credits/offers";
 import { describeCreditLifetime } from "@/lib/email/send-credits-offered";
@@ -21,8 +22,12 @@ const claimRequestSchema = z.object({ token: z.string().min(1) }).strict();
 // Describes the offer a claim link names, for the dialog that presents it.
 // The token proves the link came from the offer's email; the session has to be
 // the offered account's, and a different account is told so before it tries.
-// An offer whose claim window closed unclaimed is gone (410).
+// An offer whose claim window closed unclaimed is gone (410). An offer landed
+// by subscribing is presented to an account that already holds Pro as one it
+// cannot take up (409).
 const goneResponse = () => NextResponse.json({ error: "This offer has closed." }, { status: 410 });
+const proHeldResponse = () =>
+  NextResponse.json({ error: "This offer is for accounts without Pro." }, { status: 409 });
 export const GET = withDonkeyAuth(async (request) => {
   const token = request.nextUrl.searchParams.get("token");
   const offerId = token ? verifyCreditOfferToken(token) : null;
@@ -39,10 +44,15 @@ export const GET = withDonkeyAuth(async (request) => {
     },
     where: { id: offerId },
   });
-  if (!offer || (offer.kind !== MANUAL_OFFER_KIND && offer.kind !== "promotion_email")) return notFoundResponse();
+  const claim = !offer ? null : isLinkClaimedKind(offer.kind) ? "link" : isSubscribeClaimedKind(offer.kind) ? "subscribe" : null;
+  if (!offer || !claim) return notFoundResponse();
   if (offer.userId !== request.donkey.userId) return forbiddenResponse();
   if (!offer.claimedAt && !creditOfferOpen(offer, new Date())) return goneResponse();
+  if (!offer.claimedAt && claim === "subscribe" && (await getActiveProSubscription(offer.userId))) {
+    return proHeldResponse();
+  }
   return NextResponse.json({
+    claim,
     claimed: offer.claimedAt !== null,
     closesAt: offer.closesAt?.toISOString() ?? null,
     credits: formatUsdPlain(creditMicrosToString(offer.amountMicros)),

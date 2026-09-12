@@ -4,6 +4,7 @@ import {
   firstNameOf,
   type PromotionVars,
 } from "@/lib/marketing/placeholders";
+import type { OfferVars } from "@/lib/credits/offerTerms";
 import type { PromotionSender } from "@/lib/marketing/promotionInput";
 
 // The words of a promotion, turned into what one recipient reads: the subject
@@ -59,8 +60,8 @@ export type RenderedPromotion = {
 
 /** What one recipient reads. Throws UnknownPlaceholderError on a typo, so a
  * save or a send fails before any mail leaves. */
-export function renderPromotion(copy: PromotionCopy, user: EmailUser, claimUrl?: string): RenderedPromotion {
-  const vars = { ...promotionVars(user), claimUrl };
+export function renderPromotion(copy: PromotionCopy, user: EmailUser, offer?: OfferVars): RenderedPromotion {
+  const vars = { ...promotionVars(user), ...offer };
   const subject = fillPromotionText(copy.subject, vars);
   const cta =
     copy.ctaLabel !== null && copy.ctaUrl !== null

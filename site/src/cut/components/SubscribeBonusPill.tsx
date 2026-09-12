@@ -1,8 +1,10 @@
 "use client";
 
-// The subscribe bonus in the top bar: while the account's offer is open, a
-// pill names the credit and how long is left, and opens the offer itself. The
-// offer opens once on its own the first time this tab sees it.
+// The offer for subscribing in the top bar: while the account's offer is
+// open, a pill names the credit and how long is left, and opens the offer
+// itself. A bonus the app made opens once on its own the first time this tab
+// sees it; an offer that came by email was presented by the email, so the
+// pill only keeps it in view.
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Gift } from "lucide-react";
@@ -34,10 +36,18 @@ export function minutesLeft(closesAt: string, now: number): number {
   return Math.max(0, Math.ceil((Date.parse(closesAt) - now) / 60_000));
 }
 
-/** "5h left" past the hour, "40m left" inside it. */
+/** "3d left" past the day, "5h left" past the hour, "40m left" inside it. */
 export function timeLeftLabel(minutes: number): string {
+  if (minutes >= 24 * 60) return `${Math.floor(minutes / (24 * 60))}d left`;
   if (minutes >= 60) return `${Math.floor(minutes / 60)}h left`;
   return `${minutes}m left`;
+}
+
+/** How long the landed credit lasts, as a clause after the amount. */
+export function creditLifeClause(offer: { creditsExpireAt: string | null; creditsLifetime: string | null }): string {
+  if (offer.creditsExpireAt) return `, spendable through ${formatCreditExpiry(new Date(offer.creditsExpireAt))}`;
+  if (offer.creditsLifetime) return `, good for ${offer.creditsLifetime}`;
+  return "";
 }
 
 /** The deadline as people read it in their own clock: "Sep 8, 3:14 PM". */
@@ -80,8 +90,9 @@ export function SubscribeBonusPill() {
 function OpenOffer({ offer }: { offer: SubscribeBonus }) {
   const queryClient = useQueryClient();
   const checkout = useStartCheckout();
-  // The offer presents itself once: the first time a tab sees it open.
-  const [open, setOpen] = useState(() => !seenBefore(offer));
+  // A bonus the app made presents itself once: the first time a tab sees it
+  // open.
+  const [open, setOpen] = useState(() => offer.origin === "app" && !seenBefore(offer));
   const [now, setNow] = useState(() => Date.now());
 
   // The clock the label reads; a minute is as fine as the label gets.
@@ -89,9 +100,10 @@ function OpenOffer({ offer }: { offer: SubscribeBonus }) {
     const id = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(id);
   }, []);
-  // The first showing is recorded, so the next load leaves the pill alone.
+  // The first showing of a bonus is recorded, so the next load leaves the
+  // pill alone.
   useEffect(() => {
-    if (seenBefore(offer)) return;
+    if (offer.origin !== "app" || seenBefore(offer)) return;
     markSeen(offer);
     track("subscribe_bonus_offered", { dollars: Number(offer.dollars) });
   }, [offer]);
@@ -132,12 +144,9 @@ function OpenOffer({ offer }: { offer: SubscribeBonus }) {
           <DialogHeader>
             <DialogTitle>Get {dollars} in credits with Pro</DialogTitle>
             <DialogDescription>
-              You have used half of your signup credits. Subscribe to Pro for {CUT_PRO.price} by{" "}
-              {formatDeadline(offer.closesAt)} and a one-time {dollars} in credits lands in your account
-              {offer.creditsExpireAt
-                ? `, spendable through ${formatCreditExpiry(new Date(offer.creditsExpireAt))}`
-                : ""}
-              .
+              {offer.origin === "app" ? "You have used half of your signup credits. " : ""}
+              Subscribe to Pro for {CUT_PRO.price} by {formatDeadline(offer.closesAt)} and a one-time {dollars} in
+              credits lands in your account{creditLifeClause(offer)}.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

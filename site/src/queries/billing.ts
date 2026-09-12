@@ -60,10 +60,15 @@ export function useUsage() {
 
 // Mutations return the Stripe URL; the caller redirects the browser. We don't
 // invalidate here because the user leaves the page for Stripe.
+// A checkout opened from an offer's claim link passes the offer's token, so
+// the credit that lands is the one the dialog described.
 export function useStartCheckout() {
   return useMutation({
-    mutationFn: () =>
-      apiFetch<{ url: string }>("/api/billing/checkout", { method: "POST" }),
+    mutationFn: (input?: { offerToken: string } | void) =>
+      apiFetch<{ url: string }>("/api/billing/checkout", {
+        method: "POST",
+        ...(input ? { body: JSON.stringify(input) } : {}),
+      }),
   });
 }
 

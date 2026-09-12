@@ -3,6 +3,7 @@
 import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 
+import { CreditOfferFields } from "@/app/su/CreditOfferFields";
 import {
   AudienceFields,
   audienceDraftFrom,
@@ -28,7 +29,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import type { Settings } from "@/lib/config/registry";
 import { cn } from "@/lib/utils";
-import { PROMOTION_PLACEHOLDERS } from "@/lib/marketing/placeholders";
+import { isOfferPlaceholder, PROMOTION_PLACEHOLDERS } from "@/lib/marketing/placeholders";
 import { BUTTON_MARK } from "@/lib/marketing/promotionCopy";
 import {
   promotionInputSchema,
@@ -36,7 +37,12 @@ import {
   type PromotionSender,
   type SegmentCount,
 } from "@/lib/marketing/promotionInput";
-import { CLAIM_URL_PLACEHOLDER, type PromotionOffer } from "@/lib/marketing/promotionOfferInput";
+import {
+  CLAIM_URL_PLACEHOLDER,
+  creditOfferTermsIfValid,
+  OFFER_BUTTON_LABELS,
+  type CreditOfferTerms,
+} from "@/lib/credits/offerTerms";
 import {
   useCountSegment,
   useSavePromotion,
@@ -53,7 +59,7 @@ import { useOutreachTemplates, useSaveOutreachTemplate } from "@/queries/outreac
 type OfferDefaults = Settings["promotionCreditOffer"];
 
 type Draft = {
-  creditOffer: PromotionOffer | null;
+  creditOffer: CreditOfferTerms | null;
   name: string;
   subject: string;
   body: string;
@@ -64,12 +70,13 @@ type Draft = {
   excludePromotionIds: string[];
 };
 
-const CLAIM_LABEL = "Claim my AI credits";
+const CLAIM_LABEL_SET = new Set(Object.values(OFFER_BUTTON_LABELS));
 
-const offerOf = (d: OfferDefaults): PromotionOffer => ({
+const offerOf = (d: OfferDefaults): CreditOfferTerms => ({
   dollars: d.dollars,
   claimWindowDays: d.claimWindowDays,
   expiresAfterDays: d.expiresAfterDays,
+  claim: d.claim,
 });
 
 // A new draft starts as a credit promotion on the setting's terms, reaching
@@ -78,7 +85,7 @@ const blank = (defaults: OfferDefaults): Draft => ({
   name: "",
   subject: "",
   body: "",
-  ctaLabel: CLAIM_LABEL,
+  ctaLabel: OFFER_BUTTON_LABELS[defaults.claim],
   ctaUrl: CLAIM_URL_PLACEHOLDER,
   creditOffer: offerOf(defaults),
   sender: "bulk",
@@ -99,10 +106,18 @@ const fromSummary = (p: PromotionSummary): Draft => ({
 });
 
 // Turning the offer on makes the button the claim link; turning it off takes
-// that button away, since it pointed at nothing else.
-const withOffer = (d: Draft, offer: PromotionOffer | null): Draft => {
+// that button away, since it pointed at nothing else. A label the form wrote
+// for one claim follows a change of claim; one the operator typed stays.
+const withOffer = (d: Draft, offer: CreditOfferTerms | null): Draft => {
   if (offer) {
-    return { ...d, creditOffer: offer, ctaUrl: CLAIM_URL_PLACEHOLDER, ctaLabel: d.ctaLabel.trim() || CLAIM_LABEL };
+    const label = d.ctaLabel.trim();
+    const written = !label || CLAIM_LABEL_SET.has(label);
+    return {
+      ...d,
+      creditOffer: offer,
+      ctaUrl: CLAIM_URL_PLACEHOLDER,
+      ctaLabel: written ? OFFER_BUTTON_LABELS[offer.claim] : label,
+    };
   }
   const wasClaim = d.ctaUrl === CLAIM_URL_PLACEHOLDER;
   return { ...d, creditOffer: null, ctaUrl: wasClaim ? "" : d.ctaUrl, ctaLabel: wasClaim ? "" : d.ctaLabel };
@@ -122,7 +137,11 @@ function toInput(draft: Draft): unknown {
   };
 }
 
-const placeholders = PROMOTION_PLACEHOLDERS.map((k) => `{{${k}}}`).join(", ");
+/** The placeholders the words may use: the offer's only while there is one. */
+const placeholdersFor = (offered: boolean) =>
+  PROMOTION_PLACEHOLDERS.filter((k) => offered || !isOfferPlaceholder(k))
+    .map((k) => `{{${k}}}`)
+    .join(", ");
 
 export function PromotionDialog({
   existing,
@@ -185,7 +204,8 @@ export function PromotionDialog({
     if (!template) return;
     setDraft((current) => {
       const next = { ...current, subject: template.subject, body: template.body };
-      return template.promotion ? withOffer(next, template.promotion as PromotionOffer) : next;
+      const offer = creditOfferTermsIfValid(template.promotion);
+      return offer ? withOffer(next, offer) : next;
     });
   };
 
@@ -351,7 +371,7 @@ export function PromotionDialog({
               onChange={(e) => setDraft({ ...draft, body: e.target.value })}
             />
             <p className="text-xs text-muted-foreground">
-              A blank line starts a new paragraph. {placeholders} fill in per person. A line that is only{" "}
+              A blank line starts a new paragraph. {placeholdersFor(draft.creditOffer !== null)} fill in per person. A line that is only{" "}
               {BUTTON_MARK} places the button; without it the button comes last.
             </p>
           </Field>
@@ -390,46 +410,13 @@ export function PromotionDialog({
           </button>
 
           <div id="promo-targeting" className={cn("content-start gap-5", showTargeting ? "grid" : "hidden lg:grid")}>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <Label htmlFor="promo-offer">Credit offer</Label>
-                <p className="text-xs text-muted-foreground">
-                  Each recipient gets a claim link for AI credits; the button link becomes {CLAIM_URL_PLACEHOLDER}.
-                </p>
-              </div>
-              <Switch
-                id="promo-offer"
-                checked={draft.creditOffer !== null}
-                disabled={readOnly}
-                onCheckedChange={(on) => setDraft(withOffer(draft, on ? offerOf(offerDefaults) : null))}
-              />
-            </div>
-            {draft.creditOffer ? (
-              <div className="grid grid-cols-3 gap-3">
-                {(
-                  [
-                    ["dollars", "Dollars"],
-                    ["claimWindowDays", "Days to claim"],
-                    ["expiresAfterDays", "Days the credit lives"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <Field key={key} label={label} htmlFor={`promo-offer-${key}`}>
-                    <Input
-                      id={`promo-offer-${key}`}
-                      type="number"
-                      min={1}
-                      disabled={readOnly}
-                      value={draft.creditOffer![key]}
-                      onChange={(e) =>
-                        setDraft({ ...draft, creditOffer: { ...draft.creditOffer!, [key]: Number(e.target.value) } })
-                      }
-                    />
-                  </Field>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          <CreditOfferFields
+            idPrefix="promo-offer"
+            value={draft.creditOffer}
+            defaults={offerOf(offerDefaults)}
+            disabled={readOnly}
+            onChange={(offer) => setDraft(withOffer(draft, offer))}
+          />
 
           <AudienceFields value={draft.audience} onChange={setAudience} countries={false} disabled={readOnly} />
 

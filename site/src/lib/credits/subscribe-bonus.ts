@@ -3,25 +3,35 @@ import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
 import { getSetting, type ConfigContext } from "@/lib/config/effective";
 import { creditMicrosToString, creditStringToMicros, zeroCreditMicros } from "@/lib/credits/amounts";
 import { creditOfferOpen } from "@/lib/credits/offers";
-import { SUBSCRIBE_BONUS_KIND } from "@/lib/credits/subscribe-bonus-claim";
+import { SUBSCRIBE_BONUS_KIND } from "@/lib/credits/offerKinds";
+import { bestOfferForSubscribing, findOffersForSubscribing } from "@/lib/credits/subscribe-bonus-claim";
+import { describeCreditLifetime } from "@/lib/email/send-credits-offered";
 import { prisma } from "@/lib/prisma";
 
 // The subscribe bonus: an account that has spent enough of its signup grant
 // is offered credit for subscribing to Pro within a window. The offer is a
 // credit offer of this kind, opened on the first read that finds the account
 // past the share; it lands from the subscription webhook
-// (src/lib/credits/subscribe-bonus-claim.ts).
+// (src/lib/credits/subscribe-bonus-claim.ts). The app reads one offer for
+// subscribing at a time, and a promotion emailed with a subscribe claim is
+// read through the same view.
 
 export const SIGNUP_GRANT_SOURCE = "signup";
 
 export type SubscribeBonusStatus = "open" | "closed" | "claimed";
 
 export type SubscribeBonusView = {
+  // Where the offer reached the person: the app opened the bonus on its own,
+  // a promotion came by email.
+  origin: "app" | "email";
   // USD, as a credit string.
   dollars: string;
   openedAt: string;
   closesAt: string;
+  // The credit's life once it lands: a fixed last moment, or a span from the
+  // claim as people read it ("a month"). Both null keeps it forever.
   creditsExpireAt: string | null;
+  creditsLifetime: string | null;
   status: SubscribeBonusStatus;
 };
 
@@ -54,12 +64,25 @@ export function subscribeBonusStatus(
 
 export function subscribeBonusView(offer: CreditOffer, facts: { now: Date; pro: boolean }): SubscribeBonusView {
   return {
+    origin: offer.kind === SUBSCRIBE_BONUS_KIND ? "app" : "email",
     dollars: creditMicrosToString(offer.amountMicros),
     openedAt: offer.createdAt.toISOString(),
     closesAt: (offer.closesAt ?? offer.createdAt).toISOString(),
     creditsExpireAt: offer.expiresAt?.toISOString() ?? null,
+    creditsLifetime: offer.expiresAt ? null : describeCreditLifetime(offer.expiresAfterDays),
     status: subscribeBonusStatus(offer, facts),
   };
+}
+
+/** The offer the app shows, of the account's offers for subscribing: the one
+ * a checkout would carry while any is open; past that, the latest to land,
+ * so the settings card can say so; past that, the latest to close. */
+export function shownOfferForSubscribing(offers: CreditOffer[], now: Date): CreditOffer | null {
+  const open = bestOfferForSubscribing(offers, now);
+  if (open) return open;
+  const latest = (rows: CreditOffer[]) =>
+    rows.reduce<CreditOffer | null>((best, row) => (!best || row.createdAt > best.createdAt ? row : best), null);
+  return latest(offers.filter((o) => o.claimedAt !== null)) ?? latest(offers);
 }
 
 /** Whether credit expiring at the day's end outlives the whole window, so a
@@ -68,25 +91,17 @@ export function creditOutlivesWindow(expiresAt: Date | null, closesAt: Date): bo
   return expiresAt === null || expiresAt.getTime() > closesAt.getTime();
 }
 
-/** The account's offer of this kind: the earliest, so two first reads that
- * raced agree on which one stands. */
-export function findSubscribeBonusOffer(userId: string) {
-  return prisma.creditOffer.findFirst({
-    where: { userId, kind: SUBSCRIBE_BONUS_KIND },
-    orderBy: { createdAt: "asc" },
-  });
-}
-
-/** The account's offer as it stands, opening it when the account has just
- * crossed the share. Null while there is nothing to offer: the setting makes
- * no offer for this account, the account holds Pro, or the signup grant is
- * not yet spent far enough. */
+/** The account's offer for subscribing as it stands, opening the subscribe
+ * bonus when the account has just crossed the share. Null while there is
+ * nothing to offer: no promotion reached the account, the setting makes no
+ * bonus for it, the account holds Pro, or the signup grant is not yet spent
+ * far enough. */
 export async function readSubscribeBonusOffer(ctx: ConfigContext, now = new Date()): Promise<SubscribeBonusView | null> {
   if (!ctx.hasAccount) return null;
-  // The indexed reads come first: the offer row, then the two facts that rule
+  // The indexed reads come first: the offer rows, then the two facts that rule
   // most accounts out before the configuration is resolved.
-  const [existing, pro, grant] = await Promise.all([
-    findSubscribeBonusOffer(ctx.userId),
+  const [offers, pro, grant] = await Promise.all([
+    findOffersForSubscribing(ctx.userId),
     getActiveProSubscription(ctx.userId),
     prisma.userCreditGrant.findFirst({
       where: { userId: ctx.userId, source: SIGNUP_GRANT_SOURCE },
@@ -94,23 +109,27 @@ export async function readSubscribeBonusOffer(ctx: ConfigContext, now = new Date
     }),
   ]);
   const facts = { now, pro: pro !== null };
-  if (existing) return subscribeBonusView(existing, facts);
-  if (pro || !grant || grant.remainingAmountMicros >= grant.originalAmountMicros) return null;
+  const shown = () => {
+    const offer = shownOfferForSubscribing(offers, now);
+    return offer ? subscribeBonusView(offer, facts) : null;
+  };
+  if (offers.some((o) => o.kind === SUBSCRIBE_BONUS_KIND)) return shown();
+  if (pro || !grant || grant.remainingAmountMicros >= grant.originalAmountMicros) return shown();
 
   const setting = await getSetting("subscribeBonus", ctx);
-  if (setting.dollars <= 0) return null;
+  if (setting.dollars <= 0) return shown();
   const lapsed = await prisma.userCreditLedgerEntry.aggregate({
     _sum: { amountMicros: true },
     where: { grantId: grant.id, type: "expiration" },
   });
   const lapsedMicros = -(lapsed._sum.amountMicros ?? zeroCreditMicros);
-  if (!crossedSpentShare(grant, lapsedMicros, setting.spentPercent)) return null;
+  if (!crossedSpentShare(grant, lapsedMicros, setting.spentPercent)) return shown();
 
   // A promise of credit that would be dead by the time it lands is no offer:
   // the setting's last day has to lie past the whole window.
   const closesAt = new Date(now.getTime() + setting.windowHours * 60 * 60 * 1000);
   const expiresAt = setting.creditsExpireOn ? endOfUtcDay(setting.creditsExpireOn) : null;
-  if (!creditOutlivesWindow(expiresAt, closesAt)) return null;
+  if (!creditOutlivesWindow(expiresAt, closesAt)) return shown();
 
   await prisma.creditOffer.create({
     data: {
@@ -123,6 +142,8 @@ export async function readSubscribeBonusOffer(ctx: ConfigContext, now = new Date
       userId: ctx.userId,
     },
   });
-  const row = await findSubscribeBonusOffer(ctx.userId);
-  return row ? subscribeBonusView(row, facts) : null;
+  // Re-read rather than trust the create: two first reads that raced both
+  // wrote, and the earliest row is the one that stands.
+  const offer = shownOfferForSubscribing(await findOffersForSubscribing(ctx.userId), now);
+  return offer ? subscribeBonusView(offer, facts) : null;
 }

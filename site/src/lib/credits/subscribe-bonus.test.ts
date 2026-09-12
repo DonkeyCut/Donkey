@@ -2,8 +2,41 @@ import { describe, expect, test } from "bun:test";
 
 import { creditStringToMicros } from "./amounts";
 import { creditOutlivesWindow, crossedSpentShare, endOfUtcDay, subscribeBonusStatus } from "./subscribe-bonus";
+import { bestOfferForSubscribing } from "./subscribe-bonus-claim";
 
 const usd = (s: string) => creditStringToMicros(s);
+
+const offer = (id: string, dollars: string, at: string, rest: Partial<{ claimedAt: Date; closesAt: Date }> = {}) => ({
+  id,
+  amountMicros: usd(dollars),
+  createdAt: new Date(at),
+  claimedAt: rest.claimedAt ?? null,
+  closesAt: rest.closesAt ?? null,
+});
+
+describe("the offer a subscription lands", () => {
+  const now = new Date("2026-09-12T12:00:00Z");
+
+  test("is the largest open one", () => {
+    const bonus = offer("bonus", "10", "2026-09-01T00:00:00Z");
+    const promotion = offer("promo:u", "60", "2026-09-10T00:00:00Z");
+    expect(bestOfferForSubscribing([bonus, promotion], now)?.id).toBe("promo:u");
+  });
+
+  test("the earliest made among equals", () => {
+    const first = offer("first", "10", "2026-09-01T00:00:00Z");
+    const second = offer("second", "10", "2026-09-02T00:00:00Z");
+    expect(bestOfferForSubscribing([second, first], now)?.id).toBe("first");
+  });
+
+  test("never one that closed or already landed", () => {
+    const closed = offer("closed", "100", "2026-09-01T00:00:00Z", { closesAt: new Date("2026-09-02T00:00:00Z") });
+    const landed = offer("landed", "100", "2026-09-01T00:00:00Z", { claimedAt: new Date("2026-09-03T00:00:00Z") });
+    const open = offer("open", "5", "2026-09-01T00:00:00Z", { closesAt: new Date("2026-09-30T00:00:00Z") });
+    expect(bestOfferForSubscribing([closed, landed, open], now)?.id).toBe("open");
+    expect(bestOfferForSubscribing([closed, landed], now)).toBeNull();
+  });
+});
 
 describe("the subscribe bonus", () => {
   test("opens once half of the signup grant is spent", () => {

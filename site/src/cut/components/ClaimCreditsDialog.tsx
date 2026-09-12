@@ -8,6 +8,8 @@
 // start the credit's lifetime before the person saw it. The address is clean
 // from the first paint, so a reload, a back step or a forward step opens
 // nothing; the link itself opens a claimed offer as the credit it landed.
+// An offer landed by subscribing has a Subscribe button in place of Claim:
+// the press starts the Pro checkout, which carries the offer to the webhook.
 import { useSearchParams } from "next/navigation";
 import { Loader2, Sparkle } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -20,9 +22,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
 import { useEngineUser } from "@/cut/lib/backend/hooks";
+import { track } from "@/lib/analytics";
 import { formatCreditExpiry } from "@/lib/credits/top-up";
 import { ApiError } from "@/queries/apiClient";
+import { useStartCheckout } from "@/queries/billing";
 import { useClaimCreditOffer, useCreditOffer } from "@/queries/credits";
 
 const PARAM = "claim";
@@ -61,6 +66,16 @@ function AddressedDialog() {
 function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) {
   const offer = useCreditOffer(token);
   const claim = useClaimCreditOffer();
+  const checkout = useStartCheckout();
+  const subscribe = () => {
+    if (!offer.data) return;
+    track("subscribe_bonus_checkout_started", {
+      dollars: Number(offer.data.credits.replace(/[^0-9.]/g, "")),
+      minutesLeft: offer.data.closesAt ? Math.max(0, Math.ceil((Date.parse(offer.data.closesAt) - Date.now()) / 60_000)) : 0,
+      source: "email",
+    });
+    checkout.mutate({ offerToken: token }, { onSuccess: (result) => window.location.assign(result.url) });
+  };
   // The dialog opens at once, checking the link, at the size it keeps: the
   // body reserves two lines and every state ends in one row of buttons.
   const done = claim.data ?? (offer.data?.claimed ? { expiresAt: offer.data.expiresAt } : null);
@@ -85,19 +100,40 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
     );
   } else if (offer.isError) {
     const status = offer.error instanceof ApiError ? offer.error.status : null;
-    title = status === 410 ? "This offer has expired" : "This link is no longer valid";
+    title =
+      status === 410 ? "This offer has expired" : status === 409 ? "You already have Pro" : "This link is no longer valid";
     body =
       status === 403
         ? "This offer belongs to a different account. Sign in with the address the email was sent to."
         : status === 410
           ? "The claim window for this offer has closed."
-          : "The offer it pointed to is gone.";
+          : status === 409
+            ? "This offer is for accounts without a Pro subscription."
+            : "The offer it pointed to is gone.";
     footer = <Button onClick={onClose}>OK</Button>;
   } else if (done) {
     body = `${offer.data.credits} in AI credits is on your account.${
       done.expiresAt ? ` It expires ${formatCreditExpiry(new Date(done.expiresAt))}.` : ""
     }`;
     footer = <Button onClick={onClose}>Start editing</Button>;
+  } else if (offer.data.claim === "subscribe") {
+    title = `Get ${offer.data.credits} in credits with Pro`;
+    body = `Subscribe to Pro for ${CUT_PRO.price}${
+      offer.data.closesAt ? ` by ${formatCreditExpiry(new Date(offer.data.closesAt))}` : ""
+    } and a one-time ${offer.data.credits} in AI credits lands in your account${
+      offer.data.lifetime ? `, good for ${offer.data.lifetime}` : ""
+    }.`;
+    footer = (
+      <>
+        <Button variant="ghost" onClick={onClose}>
+          Not now
+        </Button>
+        <Button disabled={checkout.isPending} onClick={subscribe}>
+          {checkout.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
+          Subscribe to Pro
+        </Button>
+      </>
+    );
   } else {
     body = `You have ${offer.data.credits} in AI credits. They’re waiting for you.${
       offer.data.lifetime ? ` Once claimed, it’s good for ${offer.data.lifetime}.` : ""
@@ -126,6 +162,9 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
           <DialogDescription className="min-h-12 text-base">{body}</DialogDescription>
         </DialogHeader>
         <DialogFooter className="mx-0 mb-0 items-center border-0 bg-transparent p-0">
+          {checkout.isError && (
+            <p className="text-sm text-destructive sm:mr-auto">Billing is unavailable right now.</p>
+          )}
           {claim.isError && (
             <p className="text-sm text-destructive sm:mr-auto">
               {claim.error instanceof ApiError && claim.error.status === 403

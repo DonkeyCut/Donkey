@@ -1,6 +1,13 @@
+import { OFFER_PLACEHOLDERS, type OfferVars } from "@/lib/credits/offerTerms";
+
 // What a subject or body may name, and where each value comes from. Saved
 // templates and hand-typed notes go through the same fill, so a placeholder
 // means the same thing either way.
+
+/** Whether a placeholder names the offer, so a note without one can say so. */
+export function isOfferPlaceholder(name: string): boolean {
+  return (OFFER_PLACEHOLDERS as readonly string[]).includes(name);
+}
 
 /** The values a placeholder resolves to, for one recipient. */
 export type OutreachVars = {
@@ -15,7 +22,7 @@ export type OutreachVars = {
   balance: string;
   /** Cloud media the account is holding, already in reading units ("120 MB"). */
   storage: string;
-};
+} & Partial<OfferVars>;
 
 export const OUTREACH_PLACEHOLDERS = [
   "firstName",
@@ -24,22 +31,22 @@ export const OUTREACH_PLACEHOLDERS = [
   "spent",
   "balance",
   "storage",
+  ...OFFER_PLACEHOLDERS,
 ] as const satisfies readonly (keyof OutreachVars)[];
 
 /** What a promotion may name: the account itself, nothing that costs a query
- * per recipient. */
+ * per recipient, and the offer when it carries one. */
 export type PromotionVars = {
   firstName: string;
   name: string;
   email: string;
-  claimUrl?: string;
-};
+} & Partial<OfferVars>;
 
 export const PROMOTION_PLACEHOLDERS = [
   "firstName",
   "name",
   "email",
-  "claimUrl",
+  ...OFFER_PLACEHOLDERS,
 ] as const satisfies readonly (keyof PromotionVars)[];
 
 const PLACEHOLDER = /\{\{\s*([a-zA-Z]+)\s*\}\}/g;

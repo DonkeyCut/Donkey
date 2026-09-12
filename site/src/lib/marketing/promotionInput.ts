@@ -1,6 +1,6 @@
 import { audienceSchema, type Audience } from "@donkeycut/abexp";
 import { z } from "zod";
-import { CLAIM_URL_PLACEHOLDER, promotionOfferSchema, type PromotionOffer } from "@/lib/marketing/promotionOfferInput";
+import { CLAIM_URL_PLACEHOLDER, creditOfferTermsSchema, type CreditOfferTerms } from "@/lib/credits/offerTerms";
 
 // The shape of a promotion as su writes it and the routes validate it.
 // Client-safe: zod only, so the dialog parses the same schema the server does.
@@ -26,7 +26,7 @@ export const promotionInputSchema = z
         z.url({ protocol: /^https?$/, error: "Use an HTTP or HTTPS link." }).max(2000),
       ])
       .nullable(),
-    creditOffer: promotionOfferSchema.nullable().default(null),
+    creditOffer: creditOfferTermsSchema.nullable().default(null),
     sender: z.enum(PROMOTION_SENDERS),
     audience: audienceSchema,
     // Earlier promotions whose recipients are left out.
@@ -45,7 +45,7 @@ export const promotionInputSchema = z
 export type PromotionInput = z.output<typeof promotionInputSchema>;
 
 export type PromotionSummary = {
-  creditOffer: PromotionOffer | null;
+  creditOffer: CreditOfferTerms | null;
   id: string;
   name: string;
   subject: string;

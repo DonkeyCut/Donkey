@@ -47,11 +47,17 @@ export function useCreditBalance() {
 }
 
 export type SubscribeBonus = {
+  // Where the offer reached the person: the app opened the bonus on its own,
+  // a promotion came by email.
+  origin: "app" | "email";
   // USD, as a credit string.
   dollars: string;
   openedAt: string;
   closesAt: string;
+  // The credit's life once it lands: a fixed last moment, or a span from the
+  // claim as people read it ("a month"). Both null keeps it forever.
   creditsExpireAt: string | null;
+  creditsLifetime: string | null;
   status: "open" | "closed" | "claimed";
 };
 
@@ -137,6 +143,9 @@ export function useOfferCredits() {
 export const creditOfferQueryKey = (token: string) => ["credits", "offer", token] as const;
 
 export type CreditOffer = {
+  // What lands the credit: the Claim button, or a Pro subscription started
+  // inside the window.
+  claim: "link" | "subscribe";
   claimed: boolean;
   // The last moment the offer can be claimed; null keeps it open.
   closesAt: string | null;
@@ -150,7 +159,8 @@ export type CreditOffer = {
 };
 
 // The offer a claim link names. 404 is a link that no longer opens anything;
-// 403 is an offer made to another account; 410 is a claim window that closed.
+// 403 is an offer made to another account; 410 is a claim window that closed;
+// 409 is a subscribe offer read by an account that already holds Pro.
 export function useCreditOffer(token: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     enabled: options.enabled ?? true,

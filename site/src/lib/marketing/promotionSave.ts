@@ -7,11 +7,12 @@ import type { PromotionInput } from "@/lib/marketing/promotionInput";
 // What a save of a promotion shares between create and edit: the copy is
 // rendered for a stand-in recipient, so a placeholder typo is refused at the
 // save and never reaches a send; and the row data the input maps to. The
-// claim link is minted per person at the send, so the check fills it blank.
+// claim link and its last day are minted per person at the send, so the
+// check fills them blank.
 
 export function copyIssue(input: PromotionInput): Response | null {
   try {
-    renderPromotion(input, SAMPLE_RECIPIENT, input.creditOffer ? "" : undefined);
+    renderPromotion(input, SAMPLE_RECIPIENT, input.creditOffer ? { claimUrl: "", claimBy: "" } : undefined);
     return null;
   } catch (error) {
     if (error instanceof UnknownPlaceholderError) {

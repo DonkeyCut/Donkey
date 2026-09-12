@@ -27,6 +27,16 @@ describe("promotionBlocks", () => {
     ]);
   });
 
+  test("a credit offer fills its link and last day", () => {
+    const rendered = renderPromotion(
+      { ...copy, body: "Subscribe by {{claimBy}}.", ctaUrl: "{{claimUrl}}" },
+      SAMPLE_RECIPIENT,
+      { claimUrl: "https://donkeycut.com/app?claim=t", claimBy: "September 30, 2026" },
+    );
+    expect(rendered.blocks[0]).toEqual({ kind: "text", text: "Subscribe by September 30, 2026." });
+    expect(rendered.cta?.url).toBe("https://donkeycut.com/app?claim=t");
+  });
+
   test("a body without the mark gets the button last", () => {
     expect(promotionBlocks("a\n\nb", true)).toEqual([
       { kind: "text", text: "a" },

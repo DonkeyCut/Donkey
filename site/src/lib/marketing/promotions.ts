@@ -17,8 +17,9 @@ import {
   type SegmentCount,
 } from "@/lib/marketing/promotionInput";
 import { prisma } from "@/lib/prisma";
-import { PROMOTION_OFFER_KIND } from "@/lib/credits/offers";
-import { promotionOfferOf } from "@/lib/marketing/promotionOfferInput";
+import { PROMOTION_OFFER_KINDS } from "@/lib/credits/offerKinds";
+import type { OfferVars } from "@/lib/credits/offerTerms";
+import { creditOfferTermsOf } from "@/lib/credits/offerTerms";
 
 // Promotions on the server: which address each sender is, who a segment
 // resolves to, one send, and the list su reads.
@@ -62,13 +63,13 @@ export function promotionAudienceOf(raw: Prisma.JsonValue): Audience {
 export function buildPromotionEmail(
   copy: PromotionCopy,
   user: EmailUser,
-  claimUrl: string | undefined,
+  offer: OfferVars | undefined,
   // Wraps the button's link so the follow is counted; the test send has none.
   trackClick?: (url: string) => string,
 ): EmailMessage {
   const from = promotionSenders()[copy.sender];
   if (!from) throw new PermanentSendError(`The ${copy.sender} sender is not configured.`);
-  const rendered = renderPromotion(copy, user, claimUrl);
+  const rendered = renderPromotion(copy, user, offer);
   const cta = rendered.cta && trackClick ? { ...rendered.cta, url: trackClick(rendered.cta.url) } : rendered.cta;
   return {
     from,
@@ -184,7 +185,7 @@ type PromotionRow = NonNullable<Awaited<ReturnType<typeof prisma.promotion.findU
 function summarize(row: PromotionRow, counts: PromotionSummary["counts"]): PromotionSummary {
   return {
     id: row.id,
-    creditOffer: promotionOfferOf(row.creditOffer),
+    creditOffer: creditOfferTermsOf(row.creditOffer),
     name: row.name,
     subject: row.subject,
     body: row.body,
@@ -220,7 +221,10 @@ export async function listPromotions(): Promise<PromotionSummary[]> {
       where: { clickedAt: { not: null }, promotionId: { not: null } },
     }),
     // A promotion's offers are keyed `${promotionId}:${userId}`.
-    prisma.creditOffer.findMany({ select: { id: true }, where: { claimedAt: { not: null }, kind: PROMOTION_OFFER_KIND } }),
+    prisma.creditOffer.findMany({
+      select: { id: true },
+      where: { claimedAt: { not: null }, kind: { in: [...PROMOTION_OFFER_KINDS] } },
+    }),
   ]);
   const countOf = (groups: { promotionId: string | null; _count: number }[]) =>
     new Map(groups.flatMap((g) => (g.promotionId ? [[g.promotionId, g._count] as const] : [])));

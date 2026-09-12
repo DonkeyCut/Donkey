@@ -17,10 +17,9 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { activeProPromotion, CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
-import { formatDeadline, minutesLeft } from "@/cut/components/SubscribeBonusPill";
+import { creditLifeClause, formatDeadline, minutesLeft } from "@/cut/components/SubscribeBonusPill";
 import { track } from "@/lib/analytics";
 import { formatUsd } from "@/lib/credits/format-usd";
-import { formatCreditExpiry } from "@/lib/credits/top-up";
 import { useSubscribeBonus } from "@/queries/credits";
 import { useAccountConfig } from "@/queries/accountConfig";
 
@@ -114,18 +113,17 @@ export function ProCard() {
               </div>
             ) : null}
             {offer?.status === "claimed" ? (
-              <div>Your {formatUsd(offer.dollars)} subscribe bonus landed in your credits.</div>
+              <div>
+                Your {formatUsd(offer.dollars)} {offer.origin === "app" ? "subscribe bonus" : "credit offer"} landed in
+                your credits.
+              </div>
             ) : null}
           </div>
         </CardContent>
       ) : offer && offerOpen ? (
         <CardContent className="text-sm text-foreground">
           Subscribe for {CUT_PRO.price} by {formatDeadline(offer.closesAt)} and get a one-time{" "}
-          {formatUsd(offer.dollars)} in credits
-          {offer.creditsExpireAt
-            ? `, spendable through ${formatCreditExpiry(new Date(offer.creditsExpireAt))}`
-            : ""}
-          .
+          {formatUsd(offer.dollars)} in credits{creditLifeClause(offer)}.
         </CardContent>
       ) : null}
       <CardFooter className="gap-3">
