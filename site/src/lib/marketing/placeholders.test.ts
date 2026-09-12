@@ -45,13 +45,20 @@ describe("fillOutreachText", () => {
 
   // The button row offers every name in the list, so every one of them has to
   // resolve to a value; a name the send path forgets to supply would mail the
-  // word "undefined" to a real person.
+  // word "undefined" to a real person. The offer's names fill once a note
+  // carries an offer, and are refused before that.
   test("every offered placeholder fills with the recipient's value", () => {
+    const withOffer = { ...vars, claimBy: "September 30, 2026", claimUrl: "https://donkeycut.com/app?claim=t" };
     for (const name of OUTREACH_PLACEHOLDERS) {
-      const filled = fillOutreachText(`{{${name}}}`, vars);
+      const filled = fillOutreachText(`{{${name}}}`, withOffer);
       expect(filled).not.toBe("");
       expect(filled).not.toContain("undefined");
     }
+  });
+
+  test("an offer placeholder in a note without an offer is refused", () => {
+    expect(refusedPlaceholder("{{claimUrl}}")).toBe(true);
+    expect(refusedPlaceholder("{{claimBy}}")).toBe(true);
   });
 });
 

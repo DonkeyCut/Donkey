@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { Prisma } from "@/generated/prisma/client";
+import { creditOfferTermsSchema } from "@/lib/credits/offerTerms";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
@@ -15,7 +16,8 @@ const saveSchema = z
     subject: z.string().trim().min(1).max(200),
     trackReplies: z.boolean(),
     unsubscribeLink: z.boolean(),
-    promotion: z.record(z.string(), z.unknown()).nullable().optional(),
+    // The credit offer the template starts a note with, if any.
+    promotion: creditOfferTermsSchema.nullable().optional(),
   })
   .strict();
 

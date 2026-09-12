@@ -32,9 +32,14 @@ export const OUTREACH_PAYMENT_WINDOW_DAYS = 60;
 /** The share of the storage quota at which an account counts as full. */
 export const OUTREACH_STORAGE_FULL_SHARE = 0.9;
 
+/** The reason on a row a person added by email. The scan never retires such
+ * a row; the next scan that lists the account replaces the reason with its own. */
+export const PICKED_REASON = "picked";
+
 /** Why an account is on the list. The first two are people using the product
- * well; the rest are walls they hit — the moment a note can turn into a
- * top-up, an upgrade, or a saved subscription. An account can carry several. */
+ * well; the next are walls they hit — the moment a note can turn into a
+ * top-up, an upgrade, or a saved subscription; the last is a person the
+ * operator added by hand. An account can carry several. */
 export const OUTREACH_REASONS = [
   "spent",
   "storage",
@@ -44,6 +49,7 @@ export const OUTREACH_REASONS = [
   "past_due",
   "canceling",
   "canceled",
+  PICKED_REASON,
 ] as const;
 
 export type OutreachReason = (typeof OUTREACH_REASONS)[number];
@@ -54,6 +60,7 @@ export const OUTREACH_REASON_LABELS: Record<OutreachReason, string> = {
   no_credits: "Out of credits",
   past_due: "Payment past due",
   payment_failed: "Payment declined",
+  picked: "Added by hand",
   spent: "Spending credits",
   storage: "Holding media",
   storage_full: "Storage full",

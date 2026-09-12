@@ -24,6 +24,7 @@ import {
   OUTREACH_RECONTACT_DAYS,
   OUTREACH_STORAGE_FULL_SHARE,
   type OutreachReason,
+  PICKED_REASON,
 } from "@/lib/marketing/campaigns";
 import { lastActiveByUser } from "@/lib/marketing/lastActive";
 import { prisma } from "@/lib/prisma";
@@ -155,9 +156,10 @@ async function scan() {
   const retire = async () => {
     // Anything this run did not touch no longer qualifies — unsubscribed,
     // went cold, cleared the wall, or never came back. Only untouched
-    // candidates go; a contacted row is history and stays.
+    // candidates go; a contacted row is history and stays, and so does a
+    // row a person added by hand.
     const { count } = await prisma.userOutreach.deleteMany({
-      where: { campaign, scannedAt: { lt: startedAt }, status: "todo" },
+      where: { campaign, scannedAt: { lt: startedAt }, status: "todo", NOT: { reasons: { has: PICKED_REASON } } },
     });
     return count;
   };

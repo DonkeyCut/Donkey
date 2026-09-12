@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { createTermsCreditOffer } from "@/lib/credits/offers";
+import { creditOfferTermsSchema } from "@/lib/credits/offerTerms";
 import { PermanentSendError } from "@/lib/email/errors";
 import { emailFrom, type EmailMessage, type EmailUser } from "@/lib/email/resend";
 import { isMarketingUnsubscribed, unsubscribePageUrl } from "@/lib/email/unsubscribe";
@@ -22,6 +24,9 @@ export const outreachPayloadSchema = z
     vars: z
       .object({ balance: z.string(), email: z.string(), firstName: z.string(), name: z.string(), spent: z.string(), storage: z.string() })
       .strict() satisfies z.ZodType<OutreachVars>,
+    // The credit offer the note carries, if any. The offer row is made when
+    // the note is built, and the words fill in its link and last day.
+    creditOffer: creditOfferTermsSchema.nullable().default(null),
     // Whether the note carries the opt-out footer. The operator decides per
     // send; the unsubscribed check always runs.
     unsubscribeLink: z.boolean(),
@@ -50,6 +55,12 @@ function outreachText(body: string, unsubscribeUrl: string | null): string {
   return `${trimmed}\n\n--\nUnsubscribe from product emails: ${unsubscribeUrl}\n`;
 }
 
+/** The scope of the offer one note makes: the row and the attempt, so a
+ * deliberate second note makes a fresh offer and a retry reuses the first. */
+export function outreachOfferScope(outreachId: string, attempt: number): string {
+  return `outreach:${outreachId}:${attempt}`;
+}
+
 // Builds one outreach note. The reply target is the operator's call per
 // send: the row's own signed alias, or the sending address itself.
 export async function buildOutreachEmail(payload: OutreachPayload, user: EmailUser): Promise<EmailMessage> {
@@ -57,11 +68,20 @@ export async function buildOutreachEmail(payload: OutreachPayload, user: EmailUs
   if (!from) throw new PermanentSendError("RESEND_FROM_EMAIL is not configured.");
   if (await isMarketingUnsubscribed(user.id)) throw new PermanentSendError("That account is unsubscribed.");
 
+  const offer = payload.creditOffer
+    ? await createTermsCreditOffer({
+        scope: outreachOfferScope(payload.outreachId, payload.attempt),
+        userId: user.id,
+        terms: payload.creditOffer,
+        offeredByUserId: payload.actorUserId,
+      })
+    : null;
+  const vars: OutreachVars = { ...payload.vars, ...offer?.vars };
   let subject: string;
   let body: string;
   try {
-    subject = fillOutreachText(payload.subject, payload.vars);
-    body = fillOutreachText(payload.body, payload.vars);
+    subject = fillOutreachText(payload.subject, vars);
+    body = fillOutreachText(payload.body, vars);
   } catch (error) {
     if (error instanceof UnknownPlaceholderError) throw new PermanentSendError(error.message);
     throw error;

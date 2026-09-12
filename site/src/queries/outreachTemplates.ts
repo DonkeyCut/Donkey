@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { CreditOfferTerms } from "@/lib/credits/offerTerms";
 import { apiFetch } from "@/queries/apiClient";
 
 export type SavedTemplate = {
@@ -12,7 +13,9 @@ export type SavedTemplate = {
   unsubscribeLink: boolean;
   trackReplies: boolean;
   updatedAt: string;
-  promotion: Record<string, unknown> | null;
+  // The credit offer the template starts a note with, as stored; a form
+  // parses it before use.
+  promotion: unknown;
 };
 
 export const outreachTemplatesQueryKey = ["outreach", "templates"] as const;
@@ -36,7 +39,7 @@ export function useSaveOutreachTemplate() {
       body: string;
       unsubscribeLink: boolean;
       trackReplies: boolean;
-      promotion?: Record<string, unknown> | null;
+      promotion?: CreditOfferTerms | null;
     }) =>
       apiFetch<{ template: SavedTemplate }>("/api/marketing/templates", {
         body: JSON.stringify(input),

@@ -3,6 +3,7 @@
 import { XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { CreditOfferFields, useCreditOfferDefaults } from "@/app/su/CreditOfferFields";
 import {
   useLastOutreachStart,
   useOutreachDrafts,
@@ -23,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes } from "@/lib/bytes";
+import { creditOfferTermsIfValid, type CreditOfferTerms } from "@/lib/credits/offerTerms";
 import { cn } from "@/lib/utils";
 import {
   OUTREACH_REASON_LABELS,
@@ -31,7 +33,8 @@ import {
   type OutreachReason,
   type OutreachStatus,
 } from "@/lib/marketing/campaigns";
-import { OUTREACH_PLACEHOLDERS } from "@/lib/marketing/placeholders";
+import { isOfferPlaceholder, OUTREACH_PLACEHOLDERS } from "@/lib/marketing/placeholders";
+import { ApiError } from "@/queries/apiClient";
 import {
   useBusyOutreachIds,
   useOutreach,
@@ -57,7 +60,7 @@ const BLANK = "blank";
 
 // A place a note can start from: a saved template, or something this browser
 // already sent. Both are starting points; whatever ends up in the dialog —
-// words and send toggles alike — is what goes out.
+// words, send toggles and the credit offer alike — is what goes out.
 type StartPoint = {
   id: string;
   title: string;
@@ -66,6 +69,7 @@ type StartPoint = {
   body: string;
   unsubscribeLink: boolean;
   trackReplies: boolean;
+  creditOffer: CreditOfferTerms | null;
   at: number;
   remove?: () => void;
   busy?: boolean;
@@ -163,6 +167,8 @@ export default function SuOutreachPage() {
   const [lastStart, setLastStart] = useLastOutreachStart();
   const [unsubscribeLink, setUnsubscribeLink] = useState(true);
   const [trackReplies, setTrackReplies] = useState(true);
+  const [creditOffer, setCreditOffer] = useState<CreditOfferTerms | null>(null);
+  const offerDefaults = useCreditOfferDefaults();
 
   const saved = templates.data?.templates ?? [];
 
@@ -187,10 +193,12 @@ export default function SuOutreachPage() {
       title: template.name,
       trackReplies: template.trackReplies,
       unsubscribeLink: template.unsubscribeLink,
+      creditOffer: creditOfferTermsIfValid(template.promotion),
     })),
     ...drafts.map((draft) => ({
       at: new Date(draft.savedAt).getTime(),
       body: draft.body,
+      creditOffer: draft.creditOffer,
       id: `draft:${draft.id}`,
       meta: `Sent ${ago(draft.savedAt)}`,
       remove: () => {
@@ -214,6 +222,7 @@ export default function SuOutreachPage() {
       title: "Blank",
       trackReplies: true,
       unsubscribeLink: true,
+      creditOffer: null,
     },
     ...starts,
   ];
@@ -231,6 +240,7 @@ export default function SuOutreachPage() {
     setBody(picked.body);
     setUnsubscribeLink(picked.unsubscribeLink);
     setTrackReplies(picked.trackReplies);
+    setCreditOffer(picked.creditOffer);
     setNaming(false);
   };
 
@@ -245,15 +255,20 @@ export default function SuOutreachPage() {
     setBody(start.body);
     setUnsubscribeLink(start.unsubscribeLink);
     setTrackReplies(start.trackReplies);
+    setCreditOffer(start.creditOffer);
     setNaming(false);
     setSendTarget(row);
   };
+
+  // An address that is not on the list is put there, then opened for a note.
+  const addByEmail = () =>
+    act.mutate({ action: "add", email: needle }, { onSuccess: (result) => openSend(result.row) });
 
   const submitTemplate = () => {
     const name = templateName.trim();
     if (name === "" || !sendable) return;
     saveTemplate.mutate(
-      { body, name, subject, trackReplies, unsubscribeLink },
+      { body, name, subject, trackReplies, unsubscribeLink, promotion: creditOffer },
       {
         onSuccess: (result) => {
           // The note now lives in a template, so the sent copy of the same
@@ -298,11 +313,13 @@ export default function SuOutreachPage() {
       from?.subject !== subject ||
       from.body !== body ||
       from.unsubscribeLink !== unsubscribeLink ||
-      from.trackReplies !== trackReplies;
+      from.trackReplies !== trackReplies ||
+      JSON.stringify(from.creditOffer) !== JSON.stringify(creditOffer);
     act.mutate(
       {
         action: "send",
         body,
+        creditOffer,
         outreachId: target.id,
         subject,
         trackReplies,
@@ -312,7 +329,7 @@ export default function SuOutreachPage() {
         onSuccess: () => {
           setLastStart(
             edited
-              ? `draft:${remember({ body, subject, trackReplies, unsubscribeLink })}`
+              ? `draft:${remember({ body, creditOffer, subject, trackReplies, unsubscribeLink })}`
               : source,
           );
           // A send in flight leaves the dialog free for the next row, so only
@@ -340,8 +357,13 @@ export default function SuOutreachPage() {
   const truncated = searching && matchTotal > rows.length;
   const sending = sendTarget !== null && busy.has(sendTarget.id);
   // A failed send keeps its dialog open, so the reason belongs in there with
-  // the words that still need fixing.
+  // the words that still need fixing; the server names a bad placeholder.
   const sendFailed = act.isError && act.variables?.action === "send";
+  const sendIssue = sendFailed && act.error instanceof ApiError ? act.error.issues[0]?.message : undefined;
+  const addFailed = act.isError && act.variables?.action === "add";
+  const adding = act.isPending && act.variables?.action === "add";
+  // The offer's placeholders are offered only while the note carries one.
+  const placeholders = OUTREACH_PLACEHOLDERS.filter((name) => creditOffer !== null || !isOfferPlaceholder(name));
 
   return (
     <div className="space-y-4 pb-9">
@@ -481,13 +503,22 @@ export default function SuOutreachPage() {
             ))}
           </ul>
         ) : (
-          <p className="p-5 text-sm text-muted-foreground">
-            {loading
-              ? "Loading…"
-              : searching
-                ? "No matches."
-                : "Nothing here. Run a scan to refresh."}
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3 p-5">
+            <p className="text-sm text-muted-foreground">
+              {loading
+                ? "Loading…"
+                : searching
+                  ? addFailed
+                    ? `No account has the address ${needle}.`
+                    : "No matches."
+                  : "Nothing here. Run a scan to refresh."}
+            </p>
+            {searching && !loading ? (
+              <Button disabled={adding} onClick={addByEmail} size="sm" variant="outline">
+                {adding ? "Adding…" : `Add ${needle} to the list`}
+              </Button>
+            ) : null}
+          </div>
         )}
       </div>
 
@@ -498,7 +529,7 @@ export default function SuOutreachPage() {
         </p>
       ) : null}
 
-      {act.isError && !sendFailed ? (
+      {act.isError && !sendFailed && !addFailed ? (
         <p className="text-sm text-destructive">
           That didn&apos;t go through. Run a scan and try again.
         </p>
@@ -638,7 +669,7 @@ export default function SuOutreachPage() {
                 <span className="text-xs text-muted-foreground">
                   Blank line starts a paragraph. Insert:
                 </span>
-                {OUTREACH_PLACEHOLDERS.map((name) => (
+                {placeholders.map((name) => (
                   <Button
                     key={name}
                     onClick={() => insertPlaceholder(name)}
@@ -649,11 +680,17 @@ export default function SuOutreachPage() {
                   </Button>
                 ))}
               </div>
+              <CreditOfferFields
+                idPrefix="outreach-offer"
+                value={creditOffer}
+                defaults={offerDefaults}
+                onChange={setCreditOffer}
+                hint="The note carries a link for AI credits; {{claimUrl}} is the link and {{claimBy}} the last day to claim."
+              />
               {sendFailed ? (
                 <p className="text-sm text-destructive">
-                  That didn&apos;t go through. The account may have unsubscribed
-                  since the last scan, or the text may name a placeholder that
-                  doesn&apos;t exist.
+                  {sendIssue ??
+                    "That didn’t go through. The account may have unsubscribed since the last scan, or the text may name a placeholder that doesn’t exist."}
                 </p>
               ) : null}
             </div>

@@ -8,6 +8,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
+import type { CreditOfferTerms } from "@/lib/credits/offerTerms";
 import type { OutreachReason, OutreachStatus } from "@/lib/marketing/campaigns";
 import { apiFetch } from "@/queries/apiClient";
 import type { AsyncJobStatus } from "@/queries/jobs";
@@ -96,8 +97,11 @@ type OutreachAction =
       body: string;
       unsubscribeLink: boolean;
       trackReplies: boolean;
+      creditOffer: CreditOfferTerms | null;
     }
-  | { action: "ignore" | "unignore" | "replied"; outreachId: string };
+  | { action: "ignore" | "unignore" | "replied"; outreachId: string }
+  // Puts the account with this address on the list, and answers with its row.
+  | { action: "add"; email: string };
 
 const outreachActionKey = ["outreach", "action"] as const;
 
@@ -121,8 +125,10 @@ export function useOutreachAction() {
 export function useBusyOutreachIds(): Set<string> {
   const running = useMutationState({
     filters: { mutationKey: outreachActionKey, status: "pending" },
-    select: (mutation) =>
-      (mutation.state.variables as OutreachAction | undefined)?.outreachId,
+    select: (mutation) => {
+      const variables = mutation.state.variables as OutreachAction | undefined;
+      return variables && "outreachId" in variables ? variables.outreachId : undefined;
+    },
   });
   return new Set(running.filter((id): id is string => typeof id === "string"));
 }

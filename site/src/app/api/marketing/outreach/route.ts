@@ -2,15 +2,24 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { formatBytes } from "@/lib/bytes";
-import { creditMicrosToString } from "@/lib/credits/amounts";
+import { creditMicrosToString, zeroCreditMicros } from "@/lib/credits/amounts";
+import { CLAIM_URL_PLACEHOLDER, creditOfferTermsSchema } from "@/lib/credits/offerTerms";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import {
   CREDIT_SPENDERS_CAMPAIGN,
   OUTREACH_REASONS,
   OUTREACH_STATUSES,
+  PICKED_REASON,
 } from "@/lib/marketing/campaigns";
 import { deliverEmail } from "@/lib/email/outbox";
-import { firstNameOf } from "@/lib/marketing/placeholders";
+import { lastActiveByUser } from "@/lib/marketing/lastActive";
+import {
+  fillOutreachText,
+  firstNameOf,
+  isOfferPlaceholder,
+  UnknownPlaceholderError,
+  type OutreachVars,
+} from "@/lib/marketing/placeholders";
 import { outreachIdempotencyKey } from "@/lib/marketing/send-outreach";
 import { prisma } from "@/lib/prisma";
 
@@ -20,8 +29,8 @@ const listQuerySchema = z.object({
   status: z.enum(OUTREACH_STATUSES).optional(),
 });
 
-// Two shapes: start a conversation with a user who is on the list, or file a
-// row that is already on it.
+// Three shapes: start a conversation with a user who is on the list, file a
+// row that is already on it, or put an account on the list by its address.
 const actionSchema = z.union([
   z
     .object({
@@ -31,8 +40,10 @@ const actionSchema = z.union([
       subject: z.string().trim().min(1).max(200),
       trackReplies: z.boolean(),
       unsubscribeLink: z.boolean(),
+      creditOffer: creditOfferTermsSchema.nullable().default(null),
     })
     .strict(),
+  z.object({ action: z.literal("add"), email: z.string().trim().min(1).max(320) }).strict(),
   z
     .object({
       action: z.enum(["ignore", "unignore", "replied"]),
@@ -177,6 +188,59 @@ export const GET = withSuperUser(async (request) => {
   return NextResponse.json({ rows: rows.map(serialize) });
 });
 
+// The words are filled once here with the row's own values, so a typo in a
+// placeholder, or an offer placeholder in a note that carries no offer, is
+// refused before anything is queued; so is an offer the words never link to,
+// since the link is the only way the person reaches it.
+function wordsIssue(subject: string, body: string, vars: OutreachVars, offered: boolean): string | null {
+  if (offered && !subject.includes(CLAIM_URL_PLACEHOLDER) && !body.includes(CLAIM_URL_PLACEHOLDER)) {
+    return `A note with a credit offer needs ${CLAIM_URL_PLACEHOLDER} in it.`;
+  }
+  try {
+    fillOutreachText(subject, vars);
+    fillOutreachText(body, vars);
+    return null;
+  } catch (error) {
+    if (!(error instanceof UnknownPlaceholderError)) throw error;
+    return isOfferPlaceholder(error.placeholder)
+      ? `Turn on the credit offer to use {{${error.placeholder}}}.`
+      : error.message;
+  }
+}
+
+/** Puts an account on the list by hand, with the numbers the list shows read
+ * now. An account already on it comes back as it is, whatever its status. */
+async function addByEmail(email: string) {
+  const user = await prisma.user.findFirst({
+    select: { id: true },
+    where: { email: { equals: email, mode: "insensitive" } },
+  });
+  if (!user) return null;
+  const [account, storage, lastActiveBy] = await Promise.all([
+    prisma.userCreditAccount.findUnique({
+      select: { balanceMicros: true, lifetimeChargedMicros: true },
+      where: { userId: user.id },
+    }),
+    prisma.cutStorageUsage.findUnique({ select: { bytes: true }, where: { userId: user.id } }),
+    lastActiveByUser([user.id]),
+  ]);
+  return prisma.userOutreach.upsert({
+    create: {
+      balanceMicros: account?.balanceMicros ?? zeroCreditMicros,
+      campaign: CREDIT_SPENDERS_CAMPAIGN,
+      lastActiveAt: lastActiveBy.get(user.id) ?? null,
+      reasons: [PICKED_REASON],
+      spentMicros: account?.lifetimeChargedMicros ?? zeroCreditMicros,
+      status: "todo",
+      storageBytes: storage?.bytes ?? BigInt(0),
+      userId: user.id,
+    },
+    select: rowSelect,
+    update: {},
+    where: { userId_campaign: { campaign: CREDIT_SPENDERS_CAMPAIGN, userId: user.id } },
+  });
+}
+
 export const POST = withSuperUser(async (request) => {
   const parsed = actionSchema.safeParse(await request.json());
   if (!parsed.success) {
@@ -192,6 +256,12 @@ export const POST = withSuperUser(async (request) => {
     );
   }
 
+  if (parsed.data.action === "add") {
+    const row = await addByEmail(parsed.data.email);
+    if (!row) return notFoundResponse();
+    return NextResponse.json({ row: serialize(row) });
+  }
+
   const outreach = await prisma.userOutreach.findUnique({
     select: rowSelect,
     where: { id: parsed.data.outreachId },
@@ -205,6 +275,23 @@ export const POST = withSuperUser(async (request) => {
 
   if (parsed.data.action === "send") {
     const attempt = outreach.sentCount + 1;
+    const vars = {
+      balance: creditMicrosToString(outreach.balanceMicros),
+      email: outreach.user.email,
+      firstName: firstNameOf(outreach.user.name),
+      name: outreach.user.name,
+      spent: creditMicrosToString(outreach.spentMicros),
+      storage: formatBytes(Number(outreach.storageBytes)),
+    };
+    const issue = wordsIssue(
+      parsed.data.subject,
+      parsed.data.body,
+      parsed.data.creditOffer ? { ...vars, claimUrl: "", claimBy: "" } : vars,
+      parsed.data.creditOffer !== null,
+    );
+    if (issue) {
+      return NextResponse.json({ error: "Invalid request", issues: [{ message: issue, path: "body" }] }, { status: 400 });
+    }
     const delivery = await deliverEmail({
       idempotencyKey: outreachIdempotencyKey(outreach.id, attempt),
       kind: "outreach",
@@ -212,18 +299,12 @@ export const POST = withSuperUser(async (request) => {
         actorUserId,
         attempt,
         body: parsed.data.body,
+        creditOffer: parsed.data.creditOffer,
         outreachId: outreach.id,
         subject: parsed.data.subject,
         trackReplies: parsed.data.trackReplies,
         unsubscribeLink: parsed.data.unsubscribeLink,
-        vars: {
-          balance: creditMicrosToString(outreach.balanceMicros),
-          email: outreach.user.email,
-          firstName: firstNameOf(outreach.user.name),
-          name: outreach.user.name,
-          spent: creditMicrosToString(outreach.spentMicros),
-          storage: formatBytes(Number(outreach.storageBytes)),
-        },
+        vars,
       },
       userId: outreach.user.id,
     });

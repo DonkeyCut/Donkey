@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 
 import { useLocalPref } from "@/cut/lib/uiState";
+import { creditOfferTermsIfValid, type CreditOfferTerms } from "@/lib/credits/offerTerms";
 
 // What was sent last, kept in this browser so the next note can start from it
 // and be edited. It stays here on purpose: the server keeps status and
@@ -14,6 +15,7 @@ export type OutreachDraft = {
   body: string;
   unsubscribeLink: boolean;
   trackReplies: boolean;
+  creditOffer: CreditOfferTerms | null;
   savedAt: string;
 };
 
@@ -27,6 +29,9 @@ type StoredDraft = {
   body: string;
   unsubscribeLink?: boolean;
   trackReplies?: boolean;
+  // Terms as stored; read through the schema, so an entry from before a
+  // field existed loads as no offer.
+  creditOffer?: unknown;
   savedAt: string;
 };
 
@@ -71,17 +76,20 @@ export function useOutreachDrafts(): {
     id: draft.id ?? draft.savedAt,
     trackReplies: draft.trackReplies ?? true,
     unsubscribeLink: draft.unsubscribeLink ?? true,
+    creditOffer: creditOfferTermsIfValid(draft.creditOffer),
   }));
 
   const remember = useCallback(
     ({
       body,
+      creditOffer,
       subject,
       trackReplies,
       unsubscribeLink,
     }: Omit<OutreachDraft, "id" | "savedAt">) => {
       const id = crypto.randomUUID();
       const savedAt = new Date().toISOString();
+      const offerKey = JSON.stringify(creditOffer);
       setStored((current) => {
         // Sending the same note twice moves the entry up rather than doubling it.
         const rest = current.filter(
@@ -89,10 +97,11 @@ export function useOutreachDrafts(): {
             draft.subject !== subject ||
             draft.body !== body ||
             (draft.unsubscribeLink ?? true) !== unsubscribeLink ||
-            (draft.trackReplies ?? true) !== trackReplies,
+            (draft.trackReplies ?? true) !== trackReplies ||
+            JSON.stringify(creditOfferTermsIfValid(draft.creditOffer)) !== offerKey,
         );
         return [
-          { body, id, savedAt, subject, trackReplies, unsubscribeLink },
+          { body, creditOffer, id, savedAt, subject, trackReplies, unsubscribeLink },
           ...rest,
         ].slice(0, LIMIT);
       });
