@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { Field } from "@/app/su/Field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -75,8 +77,8 @@ export function CreditOfferFields({
               items={OFFER_CLAIM_NAMES}
               onValueChange={(v) => onChange({ ...value, claim: v as OfferClaim })}
             >
-              <SelectTrigger id={`${idPrefix}-claim`}>
-                <SelectValue />
+              <SelectTrigger id={`${idPrefix}-claim`} className="w-full min-w-0">
+                <SelectValue className="truncate" />
               </SelectTrigger>
               <SelectContent>
                 {OFFER_CLAIMS.map((claim) => (
@@ -89,18 +91,50 @@ export function CreditOfferFields({
           </Field>
           {NUMBERS.map(([key, label]) => (
             <Field key={key} label={label} htmlFor={`${idPrefix}-${key}`}>
-              <Input
+              <NumberInput
                 id={`${idPrefix}-${key}`}
-                type="number"
-                min={1}
                 disabled={disabled}
                 value={value[key]}
-                onChange={(e) => onChange({ ...value, [key]: Number(e.target.value) })}
+                onChange={(n) => onChange({ ...value, [key]: n })}
               />
             </Field>
           ))}
         </div>
       ) : null}
     </div>
+  );
+}
+
+// The field holds what is typed as text, so it can be cleared and retyped;
+// the number goes up once the text is a whole number, and an empty field
+// reports 0 so the form's schema refuses it. A value set from outside (a
+// template load, the offer switched on) replaces the text.
+function NumberInput({
+  id,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: number;
+  disabled: boolean;
+  onChange: (n: number) => void;
+}) {
+  const [draft, setDraft] = useState({ text: String(value), value });
+  const text = draft.value === value ? draft.text : String(value);
+  return (
+    <Input
+      id={id}
+      type="number"
+      min={1}
+      disabled={disabled}
+      value={text}
+      onChange={(e) => {
+        const next = e.target.value;
+        const n = next === "" ? 0 : Number(next);
+        setDraft({ text: next, value: n });
+        onChange(n);
+      }}
+    />
   );
 }
