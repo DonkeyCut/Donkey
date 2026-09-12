@@ -867,6 +867,10 @@ export async function carryTemplateTo(
     audio: t.audio,
     texts: t.texts,
     cues: t.cues,
+    ...(t.transitions ? { transitions: t.transitions } : {}),
+    ...(t.stickers ? { stickers: t.stickers } : {}),
+    ...(t.captions ? { captions: t.captions } : {}),
+    ...(t.project ? { project: t.project } : {}),
   };
   const backend = backendFor(to);
   let res: Response;
@@ -1052,6 +1056,10 @@ export async function importTemplateToProject(
     audio: template.audio,
     texts: template.texts,
     cues: template.cues,
+    ...(template.transitions ? { transitions: template.transitions } : {}),
+    ...(template.stickers ? { stickers: template.stickers } : {}),
+    ...(template.captions ? { captions: template.captions } : {}),
+    ...(template.project ? { project: template.project } : {}),
   });
 }
 

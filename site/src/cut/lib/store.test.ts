@@ -1562,6 +1562,38 @@ describe("bars and clip edges", () => {
     expect(parkedTransitions(s().clips, s().transitions).map((t) => t.id)).toEqual([sound]);
   });
 
+  test("a copied cue pastes onto its caption track at the playhead, words and all", () => {
+    const cue: SubtitleCue = {
+      id: "q1",
+      start: 1,
+      end: 2,
+      text: "two words",
+      words: [
+        { t0: 1, t1: 1.4, w: "two" },
+        { t0: 1.5, t1: 2, w: "words" },
+      ],
+    };
+    const blocker: SubtitleCue = { id: "q2", start: 5, end: 6, text: "taken" };
+    useEditor.setState({
+      subtitles: { ...emptySubtitles(), cues: [cue, blocker] },
+      selection: { kind: "cue", id: "q1" },
+      multiSelection: [],
+    });
+    expect(s().copySelection()).toBe(true);
+    // The playhead sits inside the blocker, so the copy slides past it.
+    setPlayhead(5.5);
+    expect(s().paste()).toBe(true);
+    const cues = s().subtitles.cues;
+    expect(cues).toHaveLength(3);
+    const pasted = cues.find((c) => c.id !== "q1" && c.id !== "q2")!;
+    expect(pasted).toMatchObject({ start: 6, end: 7, text: "two words" });
+    expect(pasted.words).toEqual([
+      { t0: 6, t1: 6.4, w: "two" },
+      { t0: 6.5, t1: 7, w: "words" },
+    ]);
+    expect(s().selection).toEqual({ kind: "cue", id: pasted.id });
+  });
+
   test("a copied bar pastes onto the cut nearest the playhead", () => {
     const av = asset(12);
     const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });

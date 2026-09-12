@@ -26,6 +26,9 @@ export const AI_PANEL_TOOLS = [
       from: num("Source start s (default: the clip's in, else 0)"),
       to: num("Source end s (default: the clip's out, else the source's end; spans at most 600s per call)"),
       interval_seconds: num("Seconds between candidate frames, 0.5–30 (default 1; near-duplicates are dropped, so a dense default costs nothing)"),
+      project_link: str(
+        "A reference project's link or id (what read_project took): clip_id / asset_id then name that project's items, so you can look at footage of the reference whose notes and transcript leave it dark before mapping roles. A reference look is for deciding — nothing is written to the reference and no note is owed."
+      ),
     }),
   },
   {
@@ -118,6 +121,54 @@ export const AI_PANEL_TOOLS = [
         ),
       },
       ["url"]
+    ),
+  },
+  {
+    name: "read_project",
+    description:
+      "Read another Donkey Cut project as a reference: its whole edit in the same shape as <editor_state> — every clip with its trims, speed, framing, grade, look, mask, keyframes and animations; the transition bars; titles, shapes and stickers with their keyframes; the soundtrack; the caption look and cues; aspect, background and fades — plus each source's observed notes, transcript and asset id. Takes a project link (…/app/p/<id>), a share link (…/s/<token>), or a project id. The document IS the edit: never watch_video a reference to learn what its document already states; watch a reference source (project_link) only to see footage its notes leave dark. Every item carries its id, so replicate_project can bring the whole edit or just the items the user wants — a title, one clip's treatment, the music — and copy_project_media can bring files over on their own. Nothing in the open project changes.",
+    inputSchema: obj({ link: str("Project link, share link, or project id") }, ["link"]),
+  },
+  {
+    name: "replicate_project",
+    description:
+      "Rebuild a reference project's edit in this project, once: the whole thing, or only `items` (ids from read_project — clips on any track, soundtrack clips, titles/shapes/stickers, cues, transition bars; a chosen clip brings the bars playing on it). Clips and layers land after the current end of track 0; free-standing items (a title alone, a music clip) drop in at the playhead, timed from the earliest of them. `media` maps the reference's source asset ids to this project's asset ids playing the same role (video for video or a still, audio for audio); every reference source the chosen items use and you did not map — music, stickers, images, fonts, and any footage you left unmapped — is copied from the reference into this project. Trims clamp to each mapped source's real length and every clamp is listed in `adjustments`: fix or report each one. With the whole edit, the reference's frame (aspect, background, fades) and caption look come too; with `items` they come only when frame / caption_look are true. Caption cues copy with the whole edit only when captions is true (this project's speech differs, so generate them after); with `items`, name the cue ids. Background removal on a reference clip stays behind. One undo step reverts every item and the caption look; the frame is a project setting, so set_aspect / set_background / set_project_fade put it back. Afterwards tune with the ordinary tools.",
+    inputSchema: obj(
+      {
+        link: str("The same link read_project took"),
+        items: {
+          type: "array",
+          items: { type: "string" },
+          description: "Reference item ids to bring across (absent = the whole edit)",
+        },
+        media: {
+          type: "array",
+          description: "Role mapping, reference source → this project's asset",
+          items: obj(
+            {
+              source_asset_id: str("Reference asset id (from read_project's media)"),
+              asset_id: str("This project's asset id that plays that role"),
+            },
+            ["source_asset_id", "asset_id"]
+          ),
+        },
+        frame: bool("Also set this project's aspect, background and fades to the reference's (default: true for the whole edit, false with items)"),
+        caption_look: bool("Also apply the reference's caption look — style, font, size, position, words per cue, word effects (default: true for the whole edit, false with items)"),
+        captions: bool("With the whole edit, also copy the reference's caption cues (default false)"),
+      },
+      ["link"]
+    ),
+  },
+  {
+    name: "copy_project_media",
+    description:
+      "Copy files from a reference project into this one without placing anything: a music track, a sticker, a photo, a clip the user wants to reuse. Takes the reference's asset ids from read_project. Each copy keeps its notes, transcript and beat grid, lands on a card in this chat, and is a project asset from then on — add_clip places it when the user asks for it in the cut.",
+    inputSchema: obj(
+      {
+        link: str("The reference project's link or id"),
+        asset_ids: { type: "array", items: { type: "string" }, description: "Reference asset ids to copy" },
+      },
+      ["link", "asset_ids"]
     ),
   },
   {

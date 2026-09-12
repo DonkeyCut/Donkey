@@ -1,5 +1,7 @@
+import { copyFile } from "node:fs/promises";
 import { runAiTool, UI_TOOLS } from "../../lib/aiTools";
 import { mp4NameFor, setHostMediaStore } from "../../lib/mediaConvert";
+import { setHostDocStore } from "../../lib/projectReference";
 import { serializeDoc, useEditor } from "../../lib/store";
 import type { MediaAsset, ProjectDoc } from "../../lib/types";
 import { convertToMp4 } from "../convert";
@@ -79,6 +81,18 @@ setHostMediaStore({
   },
   drop(projectId, fileName) {
     return deleteMedia(projectId, fileName);
+  },
+});
+
+// Another project on this Mac, read as a reference: the doc off disk and a
+// file copied folder to folder. A cloud or shared reference needs the page's
+// sign-in, and the reader says so.
+setHostDocStore({
+  readDoc: (projectId) => readProject(projectId),
+  async copyMedia(srcProjectId, fileName, dstProjectId) {
+    const target = await uniqueName(fileName, (n) => mediaPath(dstProjectId, n));
+    await copyFile(mediaPath(srcProjectId, fileName), mediaPath(dstProjectId, target));
+    return target;
   },
 });
 

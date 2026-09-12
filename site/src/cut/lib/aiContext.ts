@@ -1,11 +1,12 @@
 "use client";
 
-import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf } from "./guides";
+import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import { hasOverlayAnim, retimeOf, speedCurveOf, type ClipSound, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { useMatteBakes } from "./removal/bakeJobs";
-import { getClipSpans, overlayLayers, resolveTransitions, totalDuration, useEditor } from "./store";
+import { deriveTransitionFields, getClipSpans, normalizeDocState, overlayLayers, resolveTransitions, totalDuration, useEditor } from "./store";
+import type { VideoProject } from "./genvideo/types";
 import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
 import { laneCues, subtitleLaneCount } from "./subtitles";
@@ -17,8 +18,15 @@ import {
   rectOf,
   regionLabel,
   uploadedFontId,
+  type Aspect,
+  type AudioClip,
   type ClipSpan,
+  type MediaAsset,
+  type MediaFolder,
   type Overlay,
+  type ProjectDoc,
+  type SubtitlesBlock,
+  type TimelineTransition,
   type VideoClip,
 } from "./types";
 
@@ -38,7 +46,7 @@ function transitionToNext(sp: ClipSpan, index: number, spans: ClipSpan[]) {
  * color state in the shape the grading tools take: the preset ref plus a
  * compact summary of the manual grade (nonzero sliders verbatim; curves and
  * wheels as presence flags; the touched hue bands by name). */
-function clipEffects(clip: VideoClip) {
+function clipEffects(clip: VideoClip, live: boolean) {
   const grade = clip.grade;
   const sliders: Record<string, number> = {};
   for (const [k, v] of Object.entries(grade ?? {})) {
@@ -68,17 +76,17 @@ function clipEffects(clip: VideoClip) {
       : {}),
     ...color,
     ...(clip.boxStyle ? { boxStyle: clip.boxStyle } : {}),
-    ...describeRemoval(clip),
+    ...describeRemoval(clip, live),
   };
 }
 
 /** The clip's cutout state: mode, whether its AI matte is ready (and at which
  * tier), a live bake's progress, and the stroke/background riding on it —
  * what set_removal claims must be grounded in. */
-function describeRemoval(clip: VideoClip) {
+function describeRemoval(clip: VideoClip, live: boolean) {
   const rm = clip.removal;
   if (!rm) return {};
-  const job = useMatteBakes.getState().jobs[clip.id];
+  const job = live ? useMatteBakes.getState().jobs[clip.id] : undefined;
   return {
     removal: {
       mode: rm.mode,
@@ -153,35 +161,10 @@ function noteFields(
  */
 export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | null }) {
   const s = useEditor.getState();
-  const cueCap = opts?.fullCues ? Infinity : 60;
   const chatId = opts?.chatId !== undefined ? opts.chatId : chatOwner();
-  const placed = new Set([...s.clips, ...s.audioClips].map((c) => c.assetId));
-  // An asset still owned by another chat: chat-made, tagged to a different
-  // thread, and not yet moved onto the timeline. Placed media is project
-  // content, so it stays visible even when a chat made it.
-  const ownedByOtherChat = (a: { origin?: string; chatId?: string; id: string }) =>
-    a.origin === "chat" && !!a.chatId && a.chatId !== chatId && !placed.has(a.id);
-  // A font asset is a typeface, not footage: it is listed under `fonts` with
-  // the account's shelf fonts, where a font id is what the model needs.
-  const visibleAssets = s.assets.filter((a) => a.type !== "font" && !ownedByOtherChat(a));
-  // The cap trims the tail of a huge media list, and a source someone has
-  // watched and written up stays regardless of where it sits: the record is
-  // what later decisions are made from.
-  const shownAssets =
-    visibleAssets.length <= cueCap
-      ? visibleAssets
-      : visibleAssets.filter((a, i) => i < cueCap || (a.watch?.notes?.length ?? 0) > 0);
+  const core = describeState(s, { fullCues: opts?.fullCues === true, chatId, live: true });
   const spans = getClipSpans(s.clips, s.assets);
-  const duration = totalDuration(s.clips);
   const assetById = new Map(s.assets.map((a) => [a.id, a]));
-  const subtitleTracks = subtitleLaneCount(s.subtitles);
-  // Scene-run lineage: which plan shot (1-based, what regenerate_shot takes)
-  // placed each clip, so "fix this clip" maps straight to a shot revision.
-  const shotByClip = new Map(
-    (s.genvideo?.shots ?? []).flatMap((sh, i) =>
-      sh.timelineClipId ? [[sh.timelineClipId, { n: i + 1, still: sh.status === "failed" }] as const] : []
-    )
-  );
 
   const selection = (() => {
     if (!s.selection) return null;
@@ -224,6 +207,174 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
   })();
 
   return {
+    project: core.project,
+    playhead: r(playheadAt()),
+    skimmer: skimAt() === null ? null : r(skimAt()!),
+    playing: s.playing,
+    selection,
+    // Every font a title or caption can be set in beyond the built-in list:
+    // the account's own, off the Library shelf, plus any still living in this
+    // project from before fonts moved to the shelf.
+    fonts: [
+      ...listLibraryFonts().map((f) => ({ id: libraryFontId(f.key), label: f.label })),
+      ...s.assets
+        .filter((a) => a.type === "font")
+        .map((a) => ({ id: uploadedFontId(a.id), label: a.name })),
+    ],
+    ...(core.mediaFolders ? { mediaFolders: core.mediaFolders } : {}),
+    media: core.media,
+    mediaTruncated: core.mediaTruncated,
+    // AI video renders for this project, live from the job store — what
+    // "rendering" claims must be grounded in. A done render names the asset
+    // it landed as (already in `media`); a failed one carries its error.
+    // Renders another chat launched stay out; chat-less panel renders show to
+    // every chat as shared project activity.
+    renders: useGenerate
+      .getState()
+      .jobs.filter(
+        (j) =>
+          j.kind === "video" &&
+          j.projectId === s.projectId &&
+          !(j.chatId && j.chatId !== chatId)
+      )
+      .slice(0, 8)
+      .map((j) => ({
+        jobId: j.id,
+        prompt: j.prompt.length > 80 ? `${j.prompt.slice(0, 77)}…` : j.prompt,
+        status: j.status,
+        ...(j.status === "running"
+          ? { elapsedSec: Math.round((Date.now() - j.startedAt) / 1000) }
+          : {}),
+        ...(j.status === "done" && j.assetId ? { assetId: j.assetId } : {}),
+        ...(j.status === "error" && j.error ? { error: j.error } : {}),
+      })),
+    videoTrack: core.videoTrack,
+    overlayVideo: core.overlayVideo,
+    transitions: core.transitions,
+    soundtrack: core.soundtrack,
+    overlays: core.overlays,
+    subtitles: core.subtitles,
+    publish: s.publish,
+    view: {
+      pxPerSec: r(s.pxPerSec),
+      timelineH: s.timelineH,
+      exportDialogOpen: s.exportOpen,
+    },
+  };
+}
+
+/** A stored document described the way the open project is: the same
+ * shape the model reads in <editor_state>, built from the document alone.
+ * This is how another project is read as a reference — its edit, its
+ * sources with their notes and transcripts, its caption look — and it goes
+ * through the store's own normalization so an old document reads like a
+ * new one. Live-only fields (playhead, selection, renders, view) stay out. */
+export function describeDoc(doc: ProjectDoc, opts?: { fullCues?: boolean; chatId?: string | null }) {
+  const assets: MediaAsset[] = (doc.assets ?? []).map((a) => ({ ...a, url: "" }));
+  const state = normalizeDocState(doc, assets);
+  const core = describeState(
+    {
+      projectId: doc.id ?? null,
+      projectName: doc.name ?? "",
+      assets,
+      // The store writes each clip's blend into the clip as it lands; the
+      // description reads the same fields.
+      clips: deriveTransitionFields(state.clips, state.transitions),
+      transitions: state.transitions,
+      audioClips: state.audioClips,
+      overlays: state.overlays,
+      subtitles: state.subtitles,
+      subtitleLane: 0,
+      subtitleStatus: state.subtitles.cues.length > 0 ? "ready" : "idle",
+      aspect: state.aspect ?? "9:16",
+      fadeIn: state.fadeIn,
+      fadeOut: state.fadeOut,
+      background: state.background,
+      guides: sanitizeGuides(doc.guides),
+      guideLines: sanitizeGuideLines(doc.guideLines),
+      genvideo: doc.genvideo ?? undefined,
+      mediaFolders: doc.mediaFolders ?? [],
+    },
+    { fullCues: opts?.fullCues === true, chatId: opts?.chatId ?? null, live: false }
+  );
+  const { mediaFolders, ...rest } = core;
+  return { ...rest, ...(mediaFolders ? { mediaFolders } : {}) };
+}
+
+/** The document-shaped part of the editor's state: what the store holds
+ * after opening a project, or a stored document normalized the same way. */
+interface DescribedState {
+  projectId: string | null;
+  projectName: string;
+  assets: MediaAsset[];
+  clips: VideoClip[];
+  transitions: TimelineTransition[];
+  audioClips: AudioClip[];
+  overlays: Overlay[];
+  subtitles: SubtitlesBlock;
+  subtitleLane: number;
+  subtitleStatus: string;
+  aspect: Aspect;
+  fadeIn: number;
+  fadeOut: number;
+  background: string;
+  guides: GuideId[];
+  guideLines: GuideLines;
+  genvideo?: VideoProject | null;
+  mediaFolders: MediaFolder[];
+}
+
+/** The media a project's timeline plays: project content whichever chat made it. */
+export const placedAssetIds = (s: { clips: VideoClip[]; audioClips: AudioClip[] }): Set<string> =>
+  new Set([...s.clips, ...s.audioClips].map((c) => c.assetId));
+
+/** An asset still owned by another chat: chat-made, tagged to a different
+ * thread, and not yet moved onto the timeline. Placed media is project
+ * content, so it stays visible even when a chat made it. The same rule reads
+ * the open project and a reference, so a chat sees no more of a project by
+ * reading it as a reference than by opening it. */
+export const hiddenFromChat = (
+  a: { origin?: string; chatId?: string; id: string },
+  chatId: string | null,
+  placed: Set<string>
+): boolean => a.origin === "chat" && !!a.chatId && a.chatId !== chatId && !placed.has(a.id);
+
+/** `live` marks the open project: the sweep's progress, the matte bakes in
+ * flight, and another chat's private media are facts about this page, and
+ * a document read as a reference has none of them. */
+function describeState(
+  s: DescribedState,
+  opts: { fullCues: boolean; chatId: string | null; live: boolean }
+) {
+  const cueCap = opts.fullCues ? Infinity : 60;
+  const chatId = opts.chatId;
+  const placed = placedAssetIds(s);
+  const ownedByOtherChat = (a: { origin?: string; chatId?: string; id: string }) =>
+    hiddenFromChat(a, chatId, placed);
+  // A font asset is a typeface, not footage: it is listed under `fonts` with
+  // the account's shelf fonts, where a font id is what the model needs.
+  const visibleAssets = s.assets.filter((a) => a.type !== "font" && !ownedByOtherChat(a));
+  // The cap trims the tail of a huge media list, and a source someone has
+  // watched and written up stays regardless of where it sits: the record is
+  // what later decisions are made from.
+  const shownAssets =
+    visibleAssets.length <= cueCap
+      ? visibleAssets
+      : visibleAssets.filter((a, i) => i < cueCap || (a.watch?.notes?.length ?? 0) > 0);
+  const spans = getClipSpans(s.clips, s.assets);
+  const duration = totalDuration(s.clips);
+  const assetById = new Map(s.assets.map((a) => [a.id, a]));
+  const subtitleTracks = subtitleLaneCount(s.subtitles);
+  // Scene-run lineage: which plan shot (1-based, what regenerate_shot takes)
+  // placed each clip, so "fix this clip" maps straight to a shot revision.
+  const shotByClip = new Map(
+    (s.genvideo?.shots ?? []).flatMap((sh, i) =>
+      sh.timelineClipId ? [[sh.timelineClipId, { n: i + 1, still: sh.status === "failed" }] as const] : []
+    )
+  );
+  const live = opts.live;
+
+  return {
     project: {
       id: s.projectId,
       name: s.projectName,
@@ -260,28 +411,14 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
           }
         : {}),
     },
-    playhead: r(playheadAt()),
-    skimmer: skimAt() === null ? null : r(skimAt()!),
-    playing: s.playing,
-    selection,
+    // The Media panel's folders, when the project has any; each filed asset
+    // carries its folderId below (media_organize moves them).
+    mediaFolders:
+      s.mediaFolders.length > 0 ? s.mediaFolders.map((f) => ({ id: f.id, name: f.name })) : null,
     // Every project asset visible to this chat, timeline-placed or not (media
     // another chat still owns is filtered out above). `origin` marks Cut-made
     // media (generated/voiceover/recording/stock/freeze); no origin = a user
     // import shown in the Media panel.
-    // Every font a title or caption can be set in beyond the built-in list:
-    // the account's own, off the Library shelf, plus any still living in this
-    // project from before fonts moved to the shelf.
-    fonts: [
-      ...listLibraryFonts().map((f) => ({ id: libraryFontId(f.key), label: f.label })),
-      ...s.assets
-        .filter((a) => a.type === "font")
-        .map((a) => ({ id: uploadedFontId(a.id), label: a.name })),
-    ],
-    // The Media panel's folders, when the project has any; each filed asset
-    // carries its folderId below (media_organize moves them).
-    ...(s.mediaFolders.length > 0
-      ? { mediaFolders: s.mediaFolders.map((f) => ({ id: f.id, name: f.name })) }
-      : {}),
     media: shownAssets.map((a) => ({
       id: a.id,
       name: a.name,
@@ -297,21 +434,21 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       ...(a.watch && a.watch.ranges.length > 0
         ? { mapped: a.watch.ranges.map((rg) => ({ from: r(rg.from), to: r(rg.to) })) }
         : {}),
-      ...(watchSweepActive(a.id) ? { watching: true } : {}),
+      ...(live && watchSweepActive(a.id) ? { watching: true } : {}),
       // The written record of this source — what someone looked at these
       // frames and wrote down (note_source). Unlike `mapped`, this IS seen
       // footage, and it survives the contact sheets that showed it, so a
       // source too long to hold in one conversation is decided from here.
       // The snapshot rides every model call, so it carries the notes while
       // they are small and hands the rest to get_state.
-      ...noteFields(a.watch?.notes, opts?.fullCues === true),
+      ...noteFields(a.watch?.notes, opts.fullCues),
       // The source's own transcript (built quietly by the sweep; no subtitle
       // track involved). The snapshot carries the verdict; get_state carries
       // the segments — read those for the words instead of inlining audio.
       ...(a.speech
         ? {
             speech: a.speech.noSpeech ? "none" : "transcribed",
-            ...(opts?.fullCues && a.speech.segments.length > 0
+            ...(opts.fullCues && a.speech.segments.length > 0
               ? {
                   transcript: a.speech.segments.map((sg) => ({
                     start: r(sg.start),
@@ -324,30 +461,6 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         : {}),
     })),
     mediaTruncated: shownAssets.length < visibleAssets.length,
-    // AI video renders for this project, live from the job store — what
-    // "rendering" claims must be grounded in. A done render names the asset
-    // it landed as (already in `media`); a failed one carries its error.
-    // Renders another chat launched stay out; chat-less panel renders show to
-    // every chat as shared project activity.
-    renders: useGenerate
-      .getState()
-      .jobs.filter(
-        (j) =>
-          j.kind === "video" &&
-          j.projectId === s.projectId &&
-          !(j.chatId && j.chatId !== chatId)
-      )
-      .slice(0, 8)
-      .map((j) => ({
-        jobId: j.id,
-        prompt: j.prompt.length > 80 ? `${j.prompt.slice(0, 77)}…` : j.prompt,
-        status: j.status,
-        ...(j.status === "running"
-          ? { elapsedSec: Math.round((Date.now() - j.startedAt) / 1000) }
-          : {}),
-        ...(j.status === "done" && j.assetId ? { assetId: j.assetId } : {}),
-        ...(j.status === "error" && j.error ? { error: j.error } : {}),
-      })),
     videoTrack: spans.map((sp, index) => ({
       index,
       id: sp.clip.id,
@@ -395,7 +508,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       ...(sp.clip.kf?.length
         ? { keyframes: sp.clip.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
         : {}),
-      ...clipEffects(sp.clip),
+      ...clipEffects(sp.clip, live),
     })),
     // Video layers composited over track 0 in track order (the topmost
     // full-frame clip covers the rest). Each track carries its own
@@ -409,7 +522,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
           const t = transitionToNext(sp, i, trackSpans);
           return t ? { transitionToNext: t } : {};
         })(),
-        ...clipEffects(sp.clip),
+        ...clipEffects(sp.clip, live),
       }));
     }),
     // Every transition bar in the doc. A bar is its own object on the
@@ -458,6 +571,18 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
       // How the captions READ: how many words one holds at a time. Changing it
       // re-cuts every track (set_caption_look words_per_cue).
       wordsPerCue: cueWordCount(s.subtitles),
+      // The look the captions wear, so a reference's caption treatment is
+      // legible without the cues: style preset, font, size, anchor, and the
+      // word effect.
+      ...(s.subtitles.style ? { style: s.subtitles.style } : {}),
+      ...(s.subtitles.font ? { font: s.subtitles.font } : {}),
+      ...(s.subtitles.size !== undefined ? { size: s.subtitles.size } : {}),
+      ...(s.subtitles.x !== undefined || s.subtitles.y !== undefined
+        ? { x: r(s.subtitles.x ?? 0.5), y: r(s.subtitles.y ?? 0.5) }
+        : {}),
+      ...(s.subtitles.wordHighlight ? { wordHighlight: true } : {}),
+      ...(s.subtitles.accentMode ? { accentMode: s.subtitles.accentMode } : {}),
+      ...(s.subtitles.accentColor ? { accentColor: s.subtitles.accentColor } : {}),
       status: s.subtitleStatus,
       // A window of cues by default; when truncated the model calls get_state
       // for the whole transcript (e.g. "clean up all the captions").
@@ -469,12 +594,6 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         ...(subtitleTracks > 1 ? { track: c.lane ?? 0 } : {}),
       })),
       cuesTruncated: s.subtitles.cues.length > cueCap,
-    },
-    publish: s.publish,
-    view: {
-      pxPerSec: r(s.pxPerSec),
-      timelineH: s.timelineH,
-      exportDialogOpen: s.exportOpen,
     },
   };
 }

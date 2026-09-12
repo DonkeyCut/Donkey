@@ -18,6 +18,7 @@ const READ_ONLY = new Set([
   "listen_audio",
   "measure_level",
   "read_color_stats",
+  "read_project",
   "library_list",
   "library_list_folder",
   "stock_search",
@@ -52,6 +53,12 @@ const ID_FIELDS = [
   "jobId",
   "trackId",
   "removed",
+  "clipIds",
+  "audioClipIds",
+  "overlayIds",
+  "transitionIds",
+  "cueIds",
+  "assetIds",
 ];
 
 export function harvestIds(response: unknown): string[] {

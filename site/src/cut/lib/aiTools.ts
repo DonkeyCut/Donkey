@@ -126,6 +126,9 @@ import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { STOCK_SFX } from "./stockSfxManifest";
 import { storedMediaUrl } from "./mediaSync";
+import { parseProjectLink } from "./projectLink";
+import { landReferenceAssets as landReferenceAssetsInto, openReference, referenceMediaUrl, type LandedAsset, type ReferenceProject } from "./projectReference";
+import { clampLayersToAssets, mediaTypeFits, templateFromDoc } from "./projectTemplate";
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
 import { isStylePresetTemplate } from "./stylePresets";
 import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
@@ -133,7 +136,7 @@ import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
-import { buildAiContext } from "./aiContext";
+import { buildAiContext, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
 import { fuseTimeline, renderFusedTimeline } from "./watch/fuse";
@@ -205,8 +208,10 @@ import {
   type Selection,
   type ShapeKind,
   type SidePanelTab,
+  type StoredAsset,
   type TransitionStyle,
   type VideoClip,
+  uploadedFontId,
 } from "./types";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -825,11 +830,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   watch_video: async (s, input) => {
-      const { asset, clip, speed, from, to } = resolveWatchRange(s, input);
+      // A look at a reference project's footage decides a mapping and writes
+      // nothing: no note owed, no frame map kept, no sweep started.
+      const reference = await resolveReferenceWatch(input);
+      const { asset, clip, speed, from, to } = reference ?? resolveWatchRange(s, input);
       // The reading of the last look comes before the next one. Without it a
       // long source is watched into a conversation that keeps dropping the
       // sheets, and the tail arrives with the head already gone.
-      const owed = unwritten.get(asset.id);
+      const owed = reference ? undefined : unwritten.get(asset.id);
       if (owed && !spanIsNoted(asset.watch, owed))
         throw new ToolError(
           `You watched ${round2(owed.from)}-${round2(owed.to)}s of "${asset.name}" and have not written down what it showed. ` +
@@ -869,7 +877,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // landed while this call was decoding, and a merge computed from the
       // pre-decode snapshot would overwrite it.
       const st = useEditor.getState();
-      const liveAsset = st.assets.find((x) => x.id === asset.id);
+      const liveAsset = reference ? undefined : st.assets.find((x) => x.id === asset.id);
       if (liveAsset) {
         // A pass that covered nothing records nothing.
         if (body.coveredTo > from) {
@@ -892,7 +900,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         queueWatchSweep(asset.id);
       }
       const unwatched = uncoveredSeconds(
-        useEditor.getState().assets.find((x) => x.id === asset.id)?.watch,
+        reference ? asset.watch : useEditor.getState().assets.find((x) => x.id === asset.id)?.watch,
         asset.duration
       );
       // Tile the kept frames 3×3 and stamp each cell's source time.
@@ -904,7 +912,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // the asset's own transcript serves — it is already source time, so it
       // fuses for asset-only watches too.
       let speech: { start: number; end: number; text: string }[] = [];
-      if (clip) {
+      if (clip && !reference) {
         speech = laneCues(s.subtitles, s.subtitleLane)
           .map((c) => ({
             start: retimeOf(clip).srcAt(c.start - clip.start),
@@ -949,6 +957,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           to: round2(g.to),
         })),
         source: { assetId: asset.id, name: asset.name, duration: round2(asset.duration) },
+        ...(reference
+          ? { reference: { projectId: reference.ref.projectId, name: reference.ref.doc.name ?? "" } }
+          : {}),
         ...(clip
           ? {
               clip: {
@@ -975,8 +986,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             }
           : {}),
         ...(timelineText ? { timeline: timelineText } : {}),
-        note:
-          "Cells read left→right then top→bottom; each stamp is SOURCE seconds. " +
+        note: reference
+          ? "Cells read left→right then top→bottom; each stamp is SOURCE seconds of the reference's file. This is a look at a reference project for deciding which of this project's sources plays its part — nothing is written to the reference and no note is owed." +
+            (sheets ? "" : " (Sheets unavailable — each image is one frame; sheetFrames lists the times.)")
+          : "Cells read left→right then top→bottom; each stamp is SOURCE seconds. " +
           "Cells are distinct moments (near-duplicates removed), so gaps between stamps mean nothing changed there. " +
           "sheetFrames says why each cell was kept: global = hard cut, action = local motion, settled = new settled detail (text/UI)." +
           (unwatched > 0.5
@@ -2987,6 +3000,176 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
   },
 
+  read_project: async (_s, input) => {
+      const ref = await openReferenceLink(input.link);
+      const reference = describeDoc(ref.doc, { fullCues: true, chatId: chatOwner() });
+      // Video sources nothing describes: neither a note nor a transcript. A
+      // role for these is decided by name, length and a reference look.
+      const unobserved = (ref.doc.assets ?? [])
+        .filter((a) => a.type === "video" && !a.watch?.notes?.length && !(a.speech && !a.speech.noSpeech))
+        .map((a) => a.id);
+      return {
+        source: {
+          kind: ref.link.kind,
+          id: ref.projectId,
+          name: ref.doc.name ?? "",
+          residency: ref.residency,
+        },
+        ...(ref.partial.length ? { partial: ref.partial } : {}),
+        reference,
+        unobserved,
+        note:
+          "Every item carries the id replicate_project takes; media[].id are the source asset ids for its `media` mapping and for copy_project_media. The document is the edit — watch a reference source (watch_video with project_link) only when its notes and transcript leave what it shows unclear.",
+      };
+  },
+
+  replicate_project: async (s, input) => {
+      const projectId = s.projectId;
+      if (!projectId) throw new ToolError("No project open.");
+      const ref = await openReferenceLink(input.link);
+      const items = Array.isArray(input.items) && input.items.length > 0 ? input.items.map(String) : undefined;
+      const whole = !items;
+      const built = templateFromDoc(ref.doc, { items });
+      if (built.unknownItems.length)
+        throw new ToolError(
+          `The reference has no items with ids ${built.unknownItems.join(", ")}. read_project lists every item and its id.`
+        );
+      const t = built.template;
+      if (t.layers.length === 0 && t.audio.length === 0 && t.texts.length === 0 && t.cues.length === 0)
+        throw new ToolError(whole ? "The reference's timeline is empty." : "None of those items can be placed.");
+      // The role mapping: each reference source the chosen items use plays
+      // from this project's own asset, or copies across.
+      const docAssets = ref.doc.assets ?? [];
+      const mapping = new Map<string, string>();
+      const rawMedia = Array.isArray(input.media) ? input.media : [];
+      for (const entry of rawMedia) {
+        if (!entry || typeof entry !== "object") continue;
+        const e = entry as Record<string, unknown>;
+        const sid = String(e.source_asset_id ?? "");
+        const aid = String(e.asset_id ?? "");
+        const source = docAssets.find((a) => a.id === sid);
+        if (!source) throw new ToolError(`No asset with id ${sid} in the reference. read_project's media lists them.`);
+        const target = s.assets.find((a) => a.id === aid);
+        if (!target) throw new ToolError(`No asset with id ${aid} in this project. See media in the editor state.`);
+        if (!mediaTypeFits(source.type, target.type))
+          throw new ToolError(
+            `"${target.name}" is ${target.type}; the reference's "${source.name}" is ${source.type}, so it cannot play that part.`
+          );
+        mapping.set(sid, aid);
+      }
+      const chatId = chatOwner();
+      const toCopy = built.sourceAssets.filter((a) => !mapping.has(a.id));
+      const landed = await landReferenceAssets(ref, toCopy, projectId, chatId);
+      const landedBySource = new Map(landed.map((l) => [l.sourceId, l.asset]));
+      const assetIds = built.assetByMedia.map(
+        (sid) => mapping.get(sid) ?? landedBySource.get(sid)?.id ?? ""
+      );
+      // A title or the captions set in a font the reference uploaded now
+      // point at the copy of that font.
+      const fontMap = new Map(
+        landed
+          .filter((l) => l.asset.type === "font")
+          .map((l) => [uploadedFontId(l.sourceId), uploadedFontId(l.asset.id)])
+      );
+      const texts = t.texts.map((o) =>
+        isTextOverlay(o) && fontMap.has(o.font) ? { ...o, font: fontMap.get(o.font)! } : o
+      );
+      const captions =
+        t.captions?.font && fontMap.has(t.captions.font)
+          ? { ...t.captions, font: fontMap.get(t.captions.font)! }
+          : t.captions;
+      const pool = [...useEditor.getState().assets];
+      const { template: clamped, adjustments } = clampLayersToAssets({ ...t, texts }, assetIds, pool, {
+        layers: built.itemByLayer.map((id) => `clip ${id}`),
+        audio: built.itemByAudio.map((id) => `soundtrack clip ${id}`),
+      });
+      const chosenClips = (ref.doc.clips ?? []).filter((c) => whole || items!.includes(c.id));
+      const skipped = chosenClips
+        .filter((c) => c.removal)
+        .map((c) => `background removal on clip ${c.id} stayed behind (its matte was baked from the reference's footage)`);
+      const frame = input.frame === undefined ? whole : input.frame === true;
+      const captionLook = input.caption_look === undefined ? whole : input.caption_look === true;
+      const cues = whole && input.captions !== true ? [] : clamped.cues;
+
+      const st = useEditor.getState();
+      const before = {
+        clips: new Set(st.clips.map((c) => c.id)),
+        audio: new Set(st.audioClips.map((c) => c.id)),
+        overlays: new Set(st.overlays.map((o) => o.id)),
+        transitions: new Set(st.transitions.map((x) => x.id)),
+        cues: new Set(st.subtitles.cues.map((c) => c.id)),
+      };
+      st.beginHistoryBatch();
+      try {
+        if (frame && t.project) {
+          st.setAspect(t.project.aspect);
+          st.setBackground(t.project.background);
+          st.setProjectFade({ fadeIn: t.project.fadeIn, fadeOut: t.project.fadeOut });
+        }
+        if (captionLook && captions && Object.keys(captions).length > 0) st.setSubtitlesView(captions);
+        st.insertTemplate({ ...clamped, cues, id: "", addedAt: 0 }, assetIds, playheadAt());
+      } finally {
+        useEditor.getState().endHistoryBatch();
+      }
+      const after = useEditor.getState();
+      const fresh = <T extends { id: string }>(list: T[], seen: Set<string>) =>
+        list.filter((x) => !seen.has(x.id)).map((x) => x.id);
+      return {
+        replicated: whole ? "the whole edit" : `${items!.length} items`,
+        from: { id: ref.projectId, name: ref.doc.name ?? "" },
+        clipIds: fresh(after.clips, before.clips),
+        audioClipIds: fresh(after.audioClips, before.audio),
+        overlayIds: fresh(after.overlays, before.overlays),
+        transitionIds: fresh(after.transitions, before.transitions),
+        cueIds: fresh(after.subtitles.cues, before.cues),
+        mapped: [...mapping].map(([sourceId, assetId]) => ({ sourceId, assetId })),
+        assetIds: landed.filter((l) => !l.reused).map((l) => l.asset.id),
+        copied: landed.map((l) => ({
+          sourceId: l.sourceId,
+          assetId: l.asset.id,
+          name: l.asset.name,
+          kind: l.asset.type,
+          ...(l.reused ? { reused: true } : {}),
+        })),
+        adjustments: adjustments.map((a) => ({ ...a, from: round2(a.from), to: round2(a.to) })),
+        skipped,
+        frame: frame && !!t.project,
+        captionLook: captionLook && !!captions && Object.keys(captions).length > 0,
+        captions: cues.length > 0 ? "cues copied" : "none copied",
+        ...tracksAfter(),
+      };
+  },
+
+  copy_project_media: async (s, input) => {
+      const projectId = s.projectId;
+      if (!projectId) throw new ToolError("No project open.");
+      const ref = await openReferenceLink(input.link);
+      const ids = Array.isArray(input.asset_ids) ? input.asset_ids.map(String) : [];
+      if (ids.length === 0) throw new ToolError("asset_ids is required — the reference assets to copy.");
+      const docAssets = ref.doc.assets ?? [];
+      const chatId = chatOwner();
+      // Another chat's unplaced media is not the reference's to hand over.
+      const placed = placedAssetIds({ clips: ref.doc.clips ?? [], audioClips: ref.doc.audioClips ?? [] });
+      const assets = ids.map((id) => {
+        const a = docAssets.find((x) => x.id === id);
+        if (!a || hiddenFromChat(a, chatId, placed))
+          throw new ToolError(`No asset with id ${id} in the reference. read_project's media lists them.`);
+        return a;
+      });
+      const landed = await landReferenceAssets(ref, assets, projectId, chatId);
+      return {
+        assets: landed.map((l) => ({
+          assetId: l.asset.id,
+          sourceId: l.sourceId,
+          name: l.asset.name,
+          kind: l.asset.type,
+          duration: round2(l.asset.type === "image" ? IMAGE_CLIP_SECONDS : l.asset.duration),
+          ...(l.reused ? { reused: true } : {}),
+        })),
+        note: "The copies preview on cards in this chat; add_clip places one when the user asks for it in the cut. A source this project already held a copy of comes back as that copy, marked reused.",
+      };
+  },
+
   library_list: async () => {
       const lib = await fetchLibrary();
       return {
@@ -4296,6 +4479,73 @@ function resolveWatchRange(
   if (to !== undefined && to <= from)
     throw new ToolError("from/to describe an empty range of the source.");
   return { projectId, asset, clip, speed, from, to };
+}
+
+/** A reference link the model typed into a tool argument, opened. Every
+ * failure is the reader's own plain reason. */
+async function openReferenceLink(raw: unknown): Promise<ReferenceProject> {
+  const link = parseProjectLink(String(raw ?? ""));
+  if (!link) throw new ToolError("Pass a Donkey Cut project link, share link, or project id.");
+  return openReference(link).catch((e) => {
+    throw new ToolError(e instanceof Error ? e.message : "Could not read that project.");
+  });
+}
+
+/** watch_video aimed at a reference project's source: the same target and
+ * span rules as the open project's, on the reference's document, with the
+ * file played from wherever the reference lives. */
+async function resolveReferenceWatch(
+  input: Record<string, unknown>
+): Promise<(ReturnType<typeof resolveWatchRange> & { ref: ReferenceProject }) | null> {
+  const raw = input.project_link;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return null;
+  const ref = await openReferenceLink(raw);
+  const docAssets = ref.doc.assets ?? [];
+  let stored: StoredAsset | undefined;
+  let clip: ReturnType<typeof resolveWatchTarget>["clip"] = null;
+  if (input.clip_id !== undefined && input.clip_id !== null) {
+    const id = String(input.clip_id);
+    const c =
+      (ref.doc.clips ?? []).find((x) => x.id === id) ??
+      (ref.doc.audioClips ?? []).find((x) => x.id === id);
+    if (!c) throw new ToolError(`No clip with id ${id} in the reference. read_project lists its clips.`);
+    stored = docAssets.find((a) => a.id === c.assetId);
+    clip = c;
+  } else if (input.asset_id !== undefined && input.asset_id !== null) {
+    stored = docAssets.find((a) => a.id === String(input.asset_id));
+    if (!stored)
+      throw new ToolError(`No asset with id ${String(input.asset_id)} in the reference. read_project lists its media.`);
+  } else {
+    throw new ToolError("Pass clip_id or asset_id from the reference — see read_project's videoTrack and media.");
+  }
+  if (!stored) throw new ToolError("That reference clip's media asset is missing.");
+  const asset: MediaAsset = { ...stored, url: await referenceMediaUrl(ref, stored.fileName) };
+  const speed = clip ? retimeOf(clip).rate : 1;
+  const dur = asset.duration > 0 ? asset.duration : Infinity;
+  const from = clamp(isNum(input.from) ? input.from : clip ? clip.in : 0, 0, dur);
+  const to = isNum(input.to)
+    ? clamp(input.to, 0, dur)
+    : clip
+      ? clip.out
+      : Number.isFinite(dur)
+        ? dur
+        : undefined;
+  if (to !== undefined && to <= from)
+    throw new ToolError("from/to describe an empty range of the source.");
+  return { projectId: ref.projectId, asset, clip, speed, from, to, ref };
+}
+
+/** The shared landing, with every failure a plain tool error. */
+async function landReferenceAssets(
+  ref: ReferenceProject,
+  sources: StoredAsset[],
+  projectId: string,
+  chatId: string | null
+): Promise<LandedAsset[]> {
+  if (sources.length === 0) return [];
+  return landReferenceAssetsInto(ref, sources, projectId, { chatId }).catch((e) => {
+    throw new ToolError(e instanceof Error ? e.message : "Could not copy the reference's media.");
+  });
 }
 
 /** Scans, a few clips at a time. Each one opens a decoder over its own span of

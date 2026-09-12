@@ -16,7 +16,9 @@ export function bindCloudSession(base: string, headers: Record<string, string>) 
   session = { base: base.replace(/\/$/, ""), headers };
 }
 
-function cloudRequest(path: string, init?: RequestInit): Promise<Response> {
+/** A request on the hosted site as this process's user: same-origin in the
+ * page, the bound session's origin and headers in a headless process. */
+export function cloudRequest(path: string, init?: RequestInit): Promise<Response> {
   if (!session) return fetch(path, init);
   return fetch(session.base + path, {
     ...init,

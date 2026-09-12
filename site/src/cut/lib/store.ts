@@ -24,6 +24,7 @@ import {
 import { create } from "zustand";
 import type {
   Aspect,
+  CaptionLook,
   AssetBeats,
   AudioClip,
   ClipAnim,
@@ -80,7 +81,8 @@ import { useGenNotify } from "./genNotify";
 import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
-import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, isTextOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
+import { assertNever, clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
+import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
@@ -108,6 +110,63 @@ const templateFraming = (l: TemplateLayer) => ({
   ...(l.panY ? { panY: l.panY } : {}),
   ...(l.rotation ? { rotation: l.rotation } : {}),
   ...((l.opacity ?? 1) < 1 ? { opacity: l.opacity } : {}),
+});
+
+/** The clip's rate, sound and treatment as a template layer carries them:
+ * everything on the clip that is the edit, so the clip a template stands up
+ * is the clip that was saved. A look is already an effect element by the
+ * time a clip is read (the loader lifts it), the clip's edges are its bars
+ * (the template carries those as transitions), and background removal stays
+ * behind. */
+const clipTreatment = (c: VideoClip) => ({
+  ...(c.volume !== undefined && c.volume !== 1 ? { volume: c.volume } : {}),
+  ...(c.speed ? { speed: c.speed } : {}),
+  ...(c.speedCurve ? { speedCurve: c.speedCurve } : {}),
+  ...(c.reverse ? { reverse: true } : {}),
+  ...(c.smoothSlow ? { smoothSlow: true } : {}),
+  ...(c.sound ? { sound: c.sound } : {}),
+  ...(c.grade ? { grade: c.grade } : {}),
+  ...(c.mask ? { mask: c.mask } : {}),
+  ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),
+  ...(c.kf?.length ? { kf: c.kf } : {}),
+  ...(c.hidden ? { hidden: true } : {}),
+});
+
+/** One clip as a template layer, timed from the template's start. A track-0
+ * clip re-materializes onto track 0 (asClip); an upper-track clip keeps its
+ * height as `track + 1`. */
+export function layerFromClip(
+  c: VideoClip,
+  start0: number,
+  mediaIndex: number,
+  timelineStart = c.start
+): TemplateLayer {
+  return {
+    media: mediaIndex,
+    start: timelineStart - start0,
+    in: c.in,
+    out: c.out,
+    ...framingOf(c),
+    muted: c.muted,
+    ...clipTreatment(c),
+    track: c.track === 0 ? 1 : c.track + 1,
+    ...(c.track === 0 ? { asClip: true } : {}),
+  };
+}
+
+/** The treatment back on a clip the layer stands up. */
+const templateTreatment = (l: TemplateLayer) => ({
+  ...(l.volume !== undefined ? { volume: l.volume } : {}),
+  ...(l.speed ? { speed: l.speed } : {}),
+  ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
+  ...(l.reverse ? { reverse: true } : {}),
+  ...(l.smoothSlow ? { smoothSlow: true } : {}),
+  ...(l.sound ? { sound: l.sound } : {}),
+  ...(l.grade ? { grade: l.grade } : {}),
+  ...(l.mask ? { mask: l.mask } : {}),
+  ...(l.boxStyle ? { boxStyle: l.boxStyle } : {}),
+  ...(l.kf?.length ? { kf: l.kf } : {}),
+  ...(l.hidden ? { hidden: true } : {}),
 });
 
 const MIN_LEN = 0.1;
@@ -717,7 +776,7 @@ export interface EditorState {
    * track's language. Timings copy over; word timings don't survive
    * translation, so the new cues carry none. */
   translateSubtitleTrack: (fromLane: number) => Promise<void>;
-  setSubtitlesView: (patch: Partial<Pick<SubtitlesBlock, "showOnVideo" | "showOnTimeline" | "locale" | "style" | "size" | "font" | "x" | "y" | "wordHighlight" | "accentMode" | "accentColor" | "accentScale" | "accentDim">>) => void;
+  setSubtitlesView: (patch: CaptionLook & Partial<Pick<SubtitlesBlock, "showOnTimeline" | "locale">>) => void;
   /** How many words a caption holds at a time. Every track is re-cut on its
    * own words and then measured against the cut's mix, so the new captions
    * land on the speech instead of on arithmetic. One undo step. */
@@ -840,8 +899,14 @@ export interface EditorState {
    * step. Used so a whole assistant turn reverts with a single ⌘Z. */
   beginHistoryBatch: () => void;
   endHistoryBatch: () => void;
-  /** Copy the selected clip/audio/overlay/title(s) to the timeline clipboard. */
+  /** Copy the selected clip/audio/overlay/title/cue(s) to the timeline clipboard. */
   copySelection: () => boolean;
+  /** What the timeline clipboard holds, for a copy that leaves the tab. */
+  copiedItems: () => TimelineClipboardItem[];
+  /** Hand the timeline clipboard items that arrived from elsewhere — another
+   * tab, another project — so the next paste lands them the way it lands a
+   * copy made here. */
+  setClipboard: (items: TimelineClipboardItem[]) => void;
   /** Empty the timeline clipboard, so the next paste is somebody else's — a
    * frame copied off the preview canvas takes the clipboard over this way. */
   clearClipboard: () => void;
@@ -881,12 +946,8 @@ const genAudioIds = new Set<string>();
 
 /** Timeline clipboard (⌘C/⌘V) — survives across projects in one session. One
  * entry per copied item so a multi-selection round-trips. */
-type ClipboardItem =
-  | { kind: "clip"; item: VideoClip }
-  | { kind: "audio"; item: AudioClip }
-  | { kind: "overlay"; item: Overlay }
-  | { kind: "transition"; item: TimelineTransition };
-let clipboard: ClipboardItem[] = [];
+export type { TimelineClipboardItem } from "./itemKinds";
+let clipboard: TimelineClipboardItem[] = [];
 
 /** How far (seconds) a pasted transition bar reaches for a cut or clip edge
  * around the playhead. Within it the bar lands playing that boundary, like a
@@ -2093,86 +2154,26 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     },
 
     applyDocState: (doc, assets, ui) => {
-      const docClips = doc.clips ?? [];
-      // Older docs stored video track 0 packed (array order implied the
-      // position); bake explicit starts in once so every clip is free-placed.
-      const legacy = (docClips as LegacyClip[]).some((c) => typeof c.start !== "number");
-      const folded = (legacy ? packStarts(docClips as LegacyClip[]) : docClips).map((c) => ({
-        ...c,
-        track: c.track ?? 0,
-      }));
-      // Older docs kept tracks other than 0 in a separate `overlayClips` array;
-      // fold them into the one clip list (each already carries its `track`).
-      // Entries whose id already sits in `clips` are the same clip persisted
-      // twice by a version-skewed save (an older engine keeps overlayClips
-      // after a merged client writes the folded list) — keep the folded copy.
-      // Entries with track 0 were unreachable dead data under the split shape
-      // (never rendered, never played); promoting them would insert them into
-      // track 0's sequence, so they stay dropped.
-      const seen = new Set(folded.map((c) => c.id));
-      const legacyLayers = (doc.overlayClips ?? []).filter(
-        (c) => c.track !== 0 && !seen.has(c.id)
-      );
-      // Tracks number 0..N bottom-up. Docs saved when tracks could go
-      // negative (backdrop rows below the spine) lift wholesale so the
-      // lowest row becomes track 0 — the bottom row is the spine now.
-      const joined = [...folded, ...legacyLayers];
-      const lift = Math.max(0, ...joined.map((c) => -c.track));
-      const lifted = lift ? joined.map((c) => ({ ...c, track: c.track + lift })) : joined;
-      // Stamp `kind: "text"` on pre-union titles so every in-memory element
-      // carries its discriminant; the serializer strips it back. Effects
-      // saved onto a shared row move to one of their own, and a clip graded
-      // back when a look was a clip property gets that grade as an element
-      // over it — so a project made before either rule reads like a new one.
-      // The behind-speaker boolean becomes an inverted subject mask on load,
-      // so one mask model covers it everywhere in memory and on save. Key
-      // tracks written by the retired move picker lift into the move slot,
-      // leaving `kf` to the keys users set themselves.
-      const stamped = liftMoveTracks(
-        normalizeElementLanes(migrateBehindSubject(stampOverlayKinds(doc.overlays ?? [])))
-      );
-      const subtitles = doc.subtitles ?? emptySubtitles();
-      // Docs saved when edge transition styles existed convert them into the
-      // equivalent clip animations, and docs saved when a transition was a
-      // physical overlap pull their intruding clips apart — clips never
-      // overlap, whatever wrote the file. Pulling them apart lengthens the
-      // cut, so the whole document goes through it together.
-      const merged = separateOverlaps({
-        clips: migrateLegacyTransitions(lifted),
-        audioClips: doc.audioClips ?? [],
-        overlays: stamped,
-        cues: subtitles.cues,
-      });
-      const withLooks =
-        liftClipLooks(merged.clips, merged.overlays, getClipSpans(merged.clips, assets)) ?? {
-          clips: merged.clips,
-          overlays: merged.overlays,
-        };
+      const state = normalizeDocState(doc, assets);
       hydrating = true;
       try {
         set({
           projectName: doc.name ?? "",
           assets,
-          clips: withLooks.clips,
-          // Bars from the doc, plus one adopted for each transition/animation
-          // a pre-bar doc stored as a clip field.
-          transitions: adoptTransitionFields(
-            withLooks.clips,
-            sanitizeTransitions(doc.transitions)
-          ),
-          audioClips: merged.audioClips,
-          // Elements from before they had hosts home to the clips under them.
-          overlays: adoptOverlayHosts(withLooks.clips, withLooks.overlays),
+          clips: state.clips,
+          transitions: state.transitions,
+          audioClips: state.audioClips,
+          overlays: state.overlays,
           templates: doc.templates ?? [],
           mediaFolders: doc.mediaFolders ?? [],
-          aspect: normalizeAspect(doc.aspect) ?? lastChosenAspect() ?? "9:16",
+          aspect: state.aspect ?? lastChosenAspect() ?? "9:16",
           aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
           guides: sanitizeGuides(doc.guides),
           guidesHidden: false,
           guideLines: sanitizeGuideLines(doc.guideLines),
-          fadeIn: doc.fadeIn ?? 0,
-          fadeOut: doc.fadeOut ?? 0,
-          background: projectBackground(doc.background),
+          fadeIn: state.fadeIn,
+          fadeOut: state.fadeOut,
+          background: state.background,
           // View state lives in IndexedDB; doc.ui covers projects saved
           // before the move.
           pxPerSec: clampPps(ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60),
@@ -2191,8 +2192,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             publishedAt: doc.notes?.publishedAt ?? "",
             links: doc.notes?.links ?? [],
           },
-          subtitles: { ...subtitles, cues: merged.cues },
-          subtitleStatus: merged.cues.length > 0 ? "ready" : "idle",
+          subtitles: state.subtitles,
+          subtitleStatus: state.subtitles.cues.length > 0 ? "ready" : "idle",
           genvideo: doc.genvideo ?? undefined,
           renders: Array.isArray(doc.renders) ? doc.renders : [],
           firstOpen: doc.firstOpen,
@@ -3918,23 +3919,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const layers: TemplateLayer[] = [];
       const audio: TemplateAudio[] = [];
       const texts: Overlay[] = [];
+      const stickers: { text: number; media: number }[] = [];
       const cues: SubtitleCue[] = [];
+      const clipIds = new Set<string>();
       for (const sel of sels) {
         if (sel.kind === "clip") {
           const sp = spans.find((x) => x.clip.id === sel.id);
-          if (sp) {
-            const mi = mediaFor(sp.clip.assetId);
-            if (mi == null) continue;
-            // Track-0 clips re-materialize onto track 0 (asClip), so a template
-            // stands up its own video instead of an empty timeline.
-            layers.push({ media: mi, start: sp.start - start0, in: sp.clip.in, out: sp.clip.out, ...framingOf(sp.clip), muted: sp.clip.muted, speed: sp.clip.speed, speedCurve: sp.clip.speedCurve, reverse: sp.clip.reverse, smoothSlow: sp.clip.smoothSlow, sound: sp.clip.sound, track: 1, asClip: true });
-          } else {
-            const c = s.clips.find((x) => x.id === sel.id);
-            if (!c) continue;
-            const mi = mediaFor(c.assetId);
-            if (mi == null) continue;
-            layers.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, ...framingOf(c), muted: c.muted, speed: c.speed, speedCurve: c.speedCurve, reverse: c.reverse, smoothSlow: c.smoothSlow, sound: c.sound, track: c.track + 1 });
-          }
+          const c = sp?.clip ?? s.clips.find((x) => x.id === sel.id);
+          if (!c) continue;
+          const mi = mediaFor(c.assetId);
+          if (mi == null) continue;
+          clipIds.add(c.id);
+          // Track-0 clips re-materialize onto track 0 (asClip), so a template
+          // stands up its own video instead of an empty timeline.
+          layers.push(layerFromClip(c, start0, mi, sp ? sp.start : c.start));
         } else if (sel.kind === "audio") {
           const c = s.audioClips.find((x) => x.id === sel.id);
           if (!c) continue;
@@ -3943,11 +3941,15 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           audio.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, speedCurve: c.speedCurve, reverse: c.reverse, sound: c.sound, duck: c.duck, lane: c.lane });
         } else if (sel.kind === "overlay") {
           const o = s.overlays.find((x) => x.id === sel.id);
-          // Asset-backed stickers stay out: a template copies only the media
-          // its layers/audio reference, so the sticker's bytes wouldn't travel.
-          if (o && !(isStickerOverlay(o) && o.assetId)) {
-            texts.push({ ...o, start: o.start - start0, end: o.end - start0 });
+          if (!o) continue;
+          // A sticker's image travels as template media, so it comes back
+          // pointing at the copy.
+          if (isStickerOverlay(o) && o.assetId) {
+            const mi = mediaFor(o.assetId);
+            if (mi == null) continue;
+            stickers.push({ text: texts.length, media: mi });
           }
+          texts.push({ ...o, start: o.start - start0, end: o.end - start0 });
         } else if (sel.kind === "cue") {
           const c = s.subtitles.cues.find((x) => x.id === sel.id);
           if (c) cues.push({ ...c, start: c.start - start0, end: c.end - start0 });
@@ -3957,7 +3959,23 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const duration = range
         ? range.end - range.start
         : Math.max(0.1, ...texts.map((t) => t.end), ...cues.map((c) => c.end));
-      return { name: "Template", duration, media, layers, audio, texts, cues };
+      // The bars playing between the saved clips travel too, timed from the
+      // template's start.
+      const roles = resolveTransitions(s.clips, s.transitions);
+      const transitions = s.transitions
+        .filter((t) => (roles.get(t.id) ?? []).some((rl) => clipIds.has(rl.clipId)))
+        .map((t) => ({ ...t, start: t.start - start0 }));
+      return {
+        name: "Template",
+        duration,
+        media,
+        layers,
+        audio,
+        texts,
+        cues,
+        ...(stickers.length ? { stickers } : {}),
+        ...(transitions.length ? { transitions } : {}),
+      };
     },
 
     addTemplate: (input) => {
@@ -4069,32 +4087,28 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           out: l.out,
           muted: l.muted,
           ...templateFraming(l),
-          ...(l.speed ? { speed: l.speed } : {}),
-          ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
-          ...(l.reverse ? { reverse: true } : {}),
-          ...(l.smoothSlow ? { smoothSlow: true } : {}),
-          ...(l.sound ? { sound: l.sound } : {}),
+          ...templateTreatment(l),
         }));
       const topTrack = Math.max(0, ...overlayLayers(get().clips).map((c) => c.track));
       // Template layers store `track` as the source track + 1 (so a track-1
       // layer saved as 2). Layers stack on top of the project's current top —
       // never onto track 0 itself, which would splice them into the transition
-      // sequence. Templates saved when tracks could go negative (backdrops)
-      // clamp into the stack above too.
+      // sequence — keeping their rows relative to each other: the template's
+      // lowest layer lands on the row above the top, so a project with no
+      // layers yet gets the template's layers on the rows they had. Templates
+      // saved when tracks could go negative (backdrops) clamp into the stack
+      // above too.
+      const lowest = Math.min(...overlayLayerDefs.map((l) => Math.max(1, l.track)));
       const newLayers: VideoClip[] = overlayLayerDefs.map((l) => ({
         id: uid(),
         assetId: assetIds[l.media],
-        track: topTrack + Math.max(1, l.track),
+        track: topTrack + 1 + (Math.max(1, l.track) - lowest),
         start: l.start + shift,
         in: l.in,
         out: l.out,
         muted: l.muted,
         ...templateFraming(l),
-        ...(l.speed ? { speed: l.speed } : {}),
-        ...(l.speedCurve ? { speedCurve: l.speedCurve } : {}),
-        ...(l.reverse ? { reverse: true } : {}),
-        ...(l.smoothSlow ? { smoothSlow: true } : {}),
-        ...(l.sound ? { sound: l.sound } : {}),
+        ...templateTreatment(l),
       }));
       const newAudio: AudioClip[] = template.audio
         .filter((a) => assetIds[a.media])
@@ -4120,27 +4134,49 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // move in the slot. Groups are remapped per application, so adding the
       // same template twice gives two independent groups.
       const regroup = groupRemap(uid);
+      // A sticker drawn from template media points at the copy that landed;
+      // one whose media is unmapped stays out, like a layer would.
+      const stickerMedia = new Map((template.stickers ?? []).map((st) => [st.text, st.media]));
       const newTexts: Overlay[] = liftMoveTracks(
         migrateBehindSubject(stampOverlayKinds(template.texts))
-      ).map((o) => ({
-        ...o,
-        id: uid(),
-        start: o.start + shift,
-        end: o.end + shift,
-        ...regroup(o),
-        // A template's element homes to whatever sits under where it lands.
-        ...(typeof o.hostClipId === "string" ? { hostClipId: undefined } : {}),
-      }));
+      )
+        // The sticker map is keyed by the template's own index, so each
+        // element keeps its index through the filter.
+        .map((o, i) => ({ o, i }))
+        .filter(({ i }) => {
+          const mi = stickerMedia.get(i);
+          return mi === undefined || !!assetIds[mi];
+        })
+        .map(({ o, i }) => ({
+          ...o,
+          id: uid(),
+          start: o.start + shift,
+          end: o.end + shift,
+          ...regroup(o),
+          // A template's element homes to whatever sits under where it lands.
+          ...(typeof o.hostClipId === "string" ? { hostClipId: undefined } : {}),
+          ...(stickerMedia.has(i) ? { assetId: assetIds[stickerMedia.get(i)!] } : {}),
+        }));
       const newCues: SubtitleCue[] = template.cues.map((c) => ({
         ...c,
         id: uid(),
         start: c.start + shift,
         end: c.end + shift,
+        // Word timings are timeline seconds, so they move with the cue.
+        ...(c.words ? { words: c.words.map((w) => ({ ...w, t0: w.t0 + shift, t1: w.t1 + shift })) } : {}),
+      }));
+      const newBars: TimelineTransition[] = (template.transitions ?? []).map((t) => ({
+        id: uid(),
+        start: t.start + shift,
+        seconds: clampBarSeconds(t.seconds),
+        style: t.style,
+        ...(t.hidden ? { hidden: true } : {}),
       }));
       set((s) => ({
         clips: [...s.clips, ...newClips, ...newLayers].sort((a, b) => a.start - b.start),
         audioClips: [...s.audioClips, ...newAudio],
         overlays: [...s.overlays, ...newTexts],
+        transitions: newBars.length ? [...s.transitions, ...newBars] : s.transitions,
         subtitles: {
           ...s.subtitles,
           cues: [...s.subtitles.cues, ...newCues].sort((a, b) => a.start - b.start),
@@ -5025,25 +5061,21 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     copySelection: () => {
       const s = get();
       const sels = s.multiSelection.length ? s.multiSelection : s.selection ? [s.selection] : [];
-      const items: ClipboardItem[] = [];
+      const items: TimelineClipboardItem[] = [];
       for (const sel of sels) {
-        if (sel?.kind === "clip") {
-          const c = s.clips.find((x) => x.id === sel.id);
-          if (c) items.push({ kind: "clip", item: { ...c } });
-        } else if (sel?.kind === "audio") {
-          const a = s.audioClips.find((x) => x.id === sel.id);
-          if (a) items.push({ kind: "audio", item: { ...a } });
-        } else if (sel?.kind === "overlay") {
-          const o = s.overlays.find((x) => x.id === sel.id);
-          if (o) items.push({ kind: "overlay", item: { ...o } });
-        } else if (sel?.kind === "transition") {
-          const t = s.transitions.find((x) => x.id === sel.id);
-          if (t) items.push({ kind: "transition", item: { ...t } });
-        }
+        if (!sel) continue;
+        const cb = clipboardItemFor(s, sel);
+        if (cb) items.push(cb);
       }
       if (items.length === 0) return false;
       clipboard = items;
       return true;
+    },
+
+    copiedItems: () => clipboard.map((cb) => ({ ...cb })),
+
+    setClipboard: (items) => {
+      clipboard = items.map((cb) => ({ ...cb }));
     },
 
     clearClipboard: () => {
@@ -5053,21 +5085,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     paste: () => {
       if (clipboard.length === 0) return false;
       const s = get();
-      // Every copied item's media must still exist in this project (asset
-      // stickers included; text and shapes reference none).
-      if (
-        clipboard.some((cb) => {
-          const assetId =
-            cb.kind === "transition"
-              ? undefined
-              : cb.kind === "overlay"
-                ? isStickerOverlay(cb.item)
-                  ? cb.item.assetId
-                  : undefined
-                : cb.item.assetId;
-          return assetId !== undefined && !s.assets.some((a) => a.id === assetId);
-        })
-      )
+      // Every asset a copied item names must still exist in this project.
+      if (clipboard.some((cb) => clipboardItemAssetIds(cb).some((id) => !s.assets.some((a) => a.id === id))))
         return false;
       push();
       // The paste lands under the skimmer while one is live, at the playhead
@@ -5079,6 +5098,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         let audioClips = cur.audioClips;
         let overlays = cur.overlays;
         let transitions = cur.transitions;
+        let cues = cur.subtitles.cues;
         // A copy is its own thing: pasted group members stay grouped with each
         // other and join nothing that was already on the timeline.
         const regroup = groupRemap(uid);
@@ -5109,7 +5129,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             const item: AudioClip = { ...cb.item, id: uid(), start: nextFreeStart(taken, t, clipLen(cb.item)) };
             audioClips = [...audioClips, item];
             newSel.push({ kind: "audio", id: item.id });
-          } else {
+          } else if (cb.kind === "overlay") {
             const len = Math.max(0.2, cb.item.end - cb.item.start);
             const taken = overlays
               .filter((o) => (o.lane ?? 0) === (cb.item.lane ?? 0))
@@ -5126,6 +5146,26 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             };
             overlays = [...overlays, item];
             newSel.push({ kind: "overlay", id: item.id });
+          } else if (cb.kind === "cue") {
+            // A cue lands on its own caption track, clear of the cues there.
+            const lane = cb.item.lane ?? 0;
+            const len = Math.max(0.1, cb.item.end - cb.item.start);
+            const taken = cues
+              .filter((c) => (c.lane ?? 0) === lane)
+              .map((c) => ({ start: c.start, end: c.end }));
+            const start = nextFreeStart(taken, t, len);
+            const shift = start - cb.item.start;
+            const cue: SubtitleCue = {
+              ...cb.item,
+              id: uid(),
+              start,
+              end: start + len,
+              ...(cb.item.words ? { words: cb.item.words.map((w) => ({ ...w, t0: w.t0 + shift, t1: w.t1 + shift })) } : {}),
+            };
+            cues = [...cues, cue].sort((a, b) => a.start - b.start);
+            newSel.push({ kind: "cue", id: cue.id });
+          } else {
+            assertNever(cb);
           }
         }
         // Transition bars land last, against the row as this paste left it.
@@ -5173,7 +5213,15 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             newSel.push({ kind: "transition", id: bar.id });
           }
         }
-        return { clips, audioClips, overlays, transitions, selection: newSel[newSel.length - 1] ?? null, multiSelection: newSel };
+        return {
+          clips,
+          audioClips,
+          overlays,
+          transitions,
+          ...(cues !== cur.subtitles.cues ? { subtitles: { ...cur.subtitles, cues } } : {}),
+          selection: newSel[newSel.length - 1] ?? null,
+          multiSelection: newSel,
+        };
       });
       return true;
     },
@@ -5289,7 +5337,7 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts }) => ({
+    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom }) => ({
       id,
       fileName,
       name,
@@ -5305,6 +5353,7 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(speech !== undefined ? { speech } : {}),
       ...(beats !== undefined ? { beats } : {}),
       ...(sceneCuts !== undefined ? { sceneCuts } : {}),
+      ...(copiedFrom !== undefined ? { copiedFrom } : {}),
     }));
 }
 
@@ -6181,6 +6230,95 @@ export function totalDuration(clips: VideoClip[]) {
 /** A track-0 clip as older docs stored it: packed by array order, no `start`. */
 type LegacyClip = Omit<VideoClip, "start"> & { start?: number };
 
+/** The timeline a stored document describes, in the shape the store holds
+ * it: every migration a project made under an older rule goes through here,
+ * so a doc reads the same whether it is opened into the editor, described
+ * to the assistant, or turned into a template. */
+export function normalizeDocState(
+  doc: Partial<ProjectDoc>,
+  assets: MediaAsset[]
+): {
+  clips: VideoClip[];
+  transitions: TimelineTransition[];
+  audioClips: AudioClip[];
+  overlays: Overlay[];
+  subtitles: SubtitlesBlock;
+  aspect: Aspect | null;
+  fadeIn: number;
+  fadeOut: number;
+  background: string;
+} {
+  const docClips = doc.clips ?? [];
+  // Older docs stored video track 0 packed (array order implied the
+  // position); bake explicit starts in once so every clip is free-placed.
+  const legacy = (docClips as LegacyClip[]).some((c) => typeof c.start !== "number");
+  const folded = (legacy ? packStarts(docClips as LegacyClip[]) : docClips).map((c) => ({
+    ...c,
+    track: c.track ?? 0,
+  }));
+  // Older docs kept tracks other than 0 in a separate `overlayClips` array;
+  // fold them into the one clip list (each already carries its `track`).
+  // Entries whose id already sits in `clips` are the same clip persisted
+  // twice by a version-skewed save (an older engine keeps overlayClips
+  // after a merged client writes the folded list) — keep the folded copy.
+  // Entries with track 0 were unreachable dead data under the split shape
+  // (never rendered, never played); promoting them would insert them into
+  // track 0's sequence, so they stay dropped.
+  const seen = new Set(folded.map((c) => c.id));
+  const legacyLayers = (doc.overlayClips ?? []).filter(
+    (c) => c.track !== 0 && !seen.has(c.id)
+  );
+  // Tracks number 0..N bottom-up. Docs saved when tracks could go
+  // negative (backdrop rows below the spine) lift wholesale so the
+  // lowest row becomes track 0 — the bottom row is the spine now.
+  const joined = [...folded, ...legacyLayers];
+  const lift = Math.max(0, ...joined.map((c) => -c.track));
+  const lifted = lift ? joined.map((c) => ({ ...c, track: c.track + lift })) : joined;
+  // Stamp `kind: "text"` on pre-union titles so every in-memory element
+  // carries its discriminant; the serializer strips it back. Effects
+  // saved onto a shared row move to one of their own, and a clip graded
+  // back when a look was a clip property gets that grade as an element
+  // over it — so a project made before either rule reads like a new one.
+  // The behind-speaker boolean becomes an inverted subject mask on load,
+  // so one mask model covers it everywhere in memory and on save. Key
+  // tracks written by the retired move picker lift into the move slot,
+  // leaving `kf` to the keys users set themselves.
+  const stamped = liftMoveTracks(
+    normalizeElementLanes(migrateBehindSubject(stampOverlayKinds(doc.overlays ?? [])))
+  );
+  const subtitles = doc.subtitles ?? emptySubtitles();
+  // Docs saved when edge transition styles existed convert them into the
+  // equivalent clip animations, and docs saved when a transition was a
+  // physical overlap pull their intruding clips apart — clips never
+  // overlap, whatever wrote the file. Pulling them apart lengthens the
+  // cut, so the whole document goes through it together.
+  const merged = separateOverlaps({
+    clips: migrateLegacyTransitions(lifted),
+    audioClips: doc.audioClips ?? [],
+    overlays: stamped,
+    cues: subtitles.cues,
+  });
+  const withLooks =
+    liftClipLooks(merged.clips, merged.overlays, getClipSpans(merged.clips, assets)) ?? {
+      clips: merged.clips,
+      overlays: merged.overlays,
+    };
+  return {
+    clips: withLooks.clips,
+    // Bars from the doc, plus one adopted for each transition/animation
+    // a pre-bar doc stored as a clip field.
+    transitions: adoptTransitionFields(withLooks.clips, sanitizeTransitions(doc.transitions)),
+    audioClips: merged.audioClips,
+    // Elements from before they had hosts home to the clips under them.
+    overlays: adoptOverlayHosts(withLooks.clips, withLooks.overlays),
+    subtitles: { ...subtitles, cues: merged.cues },
+    aspect: normalizeAspect(doc.aspect) ?? null,
+    fadeIn: doc.fadeIn ?? 0,
+    fadeOut: doc.fadeOut ?? 0,
+    background: projectBackground(doc.background),
+  };
+}
+
 /** Assign packed sequential starts (each clip abutting the previous): the
  * layout older docs implied by array order. */
 function packStarts(clips: LegacyClip[]): VideoClip[] {
@@ -6386,24 +6524,20 @@ export function assetIdsInUse(s: {
   clips: VideoClip[];
   audioClips: AudioClip[];
   overlays: Overlay[];
-  subtitles?: { font?: string } | null;
+  transitions?: TimelineTransition[];
+  subtitles?: { font?: string; cues?: SubtitleCue[] } | null;
 }): Set<string> {
-  const used = new Set<string>();
-  const font = (id: string | undefined) => {
-    const asset = id ? fontAssetId(id) : null;
-    if (asset) used.add(asset);
-  };
-  for (const c of s.clips) {
-    if (c.assetId) used.add(c.assetId);
-    if (c.removal?.matte?.assetId) used.add(c.removal.matte.assetId);
-    if (c.removal?.backdrop?.assetId) used.add(c.removal.backdrop.assetId);
-  }
-  for (const c of s.audioClips) if (c.assetId) used.add(c.assetId);
-  for (const o of s.overlays) {
-    if (isStickerOverlay(o) && o.assetId) used.add(o.assetId);
-    if (isTextOverlay(o)) font(o.font);
-  }
-  font(s.subtitles?.font);
+  // Every item kind says where its asset ids sit; the caption track's font
+  // is the one project-level reference beside them.
+  const used = listedAssetIds({
+    clips: s.clips,
+    audioClips: s.audioClips,
+    overlays: s.overlays,
+    transitions: s.transitions ?? [],
+    subtitles: { cues: s.subtitles?.cues ?? [] },
+  });
+  const captionFont = s.subtitles?.font ? fontAssetId(s.subtitles.font) : null;
+  if (captionFont) used.add(captionFont);
   return used;
 }
 

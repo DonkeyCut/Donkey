@@ -11,6 +11,7 @@ import type {
   TemplateLayer,
   TemplateMedia,
 } from "../library";
+import { templateExtras } from "../library";
 import { resolveParent } from "@/cut/lib/folderTree";
 import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
@@ -55,6 +56,10 @@ interface TemplateDoc {
   texts: unknown[];
   cues: unknown[];
   sound?: LibraryTemplate["sound"];
+  transitions?: unknown[];
+  stickers?: unknown[];
+  captions?: unknown;
+  project?: unknown;
 }
 
 /** A template with nothing on it saves nothing; a sound preset is a template
@@ -119,6 +124,7 @@ function templateView(row: {
     texts: doc.texts ?? [],
     cues: doc.cues ?? [],
     ...(doc.sound ? { sound: doc.sound } : {}),
+    ...(templateExtras(doc) as Pick<LibraryTemplate, "transitions" | "stickers" | "captions" | "project">),
   };
 }
 
@@ -869,6 +875,7 @@ export const libraryCloud = {
         texts: input.texts ?? [],
         cues: input.cues ?? [],
         ...(input.sound ? { sound: input.sound } : {}),
+        ...templateExtras(input),
       };
       const row = await prisma.cutTemplate.create({
         data: {
@@ -927,6 +934,7 @@ export const libraryCloud = {
         texts: input.texts ?? [],
         cues: input.cues ?? [],
         ...(input.sound ? { sound: input.sound } : {}),
+        ...templateExtras(input),
       };
       const row = await prisma.cutTemplate.create({
         data: {

@@ -211,6 +211,10 @@ export interface StoredAsset {
   /** Media panel folder this file is filed in (see ProjectDoc.mediaFolders);
    * absent/null = the panel's top level. */
   folderId?: string | null;
+  /** The project and asset this file was copied from — a paste or a
+   * replicate out of another project. A second copy of the same source finds
+   * this one and lands nothing twice. */
+  copiedFrom?: { projectId: string; assetId: string };
 }
 
 /** A folder in the Media panel's Project Files view — a flat, project-local
@@ -1052,11 +1056,21 @@ export interface TemplateLayer {
   rotation?: number;
   opacity?: number;
   muted: boolean;
+  volume?: number;
   speed?: number;
   speedCurve?: SpeedNode[];
   reverse?: boolean;
   smoothSlow?: boolean;
   sound?: ClipSound;
+  /** The clip's treatment, carried whole: manual grade, mask, box, pose
+   * keys. Absent on templates saved before the rail carried them. The
+   * clip's edges are bars, carried on the template's transitions; background
+   * removal stays behind, its matte baked from the footage it was cut from. */
+  grade?: ColorGrade;
+  mask?: Mask;
+  boxStyle?: BoxStyle;
+  kf?: OverlayKey[];
+  hidden?: boolean;
   track: number;
   /** Came from video track 0 — re-materializes as a timeline clip, not an
    * overlay, so a template stands up its own footage. */
@@ -1077,6 +1091,24 @@ export interface TemplateAudio {
   duck?: number;
   lane?: number;
 }
+/** The caption settings a template carries: how captions look and read,
+ * without the cues themselves. */
+export const CAPTION_LOOK_KEYS = [
+  "showOnVideo",
+  "style",
+  "size",
+  "font",
+  "x",
+  "y",
+  "wordsPerCue",
+  "wordHighlight",
+  "accentMode",
+  "accentColor",
+  "accentScale",
+  "accentDim",
+] as const;
+export type CaptionLook = Partial<Pick<SubtitlesBlock, (typeof CAPTION_LOOK_KEYS)[number]>>;
+
 export interface LibraryTemplate {
   id: string;
   name: string;
@@ -1088,6 +1120,18 @@ export interface LibraryTemplate {
   audio: TemplateAudio[];
   texts: Overlay[];
   cues: SubtitleCue[];
+  /** Transition bars inside the template, starts relative to its start. */
+  transitions?: TimelineTransition[];
+  /** Which `texts` entries are stickers drawn from a media entry: the
+   * sticker's image travels with the template and its assetId is rewritten
+   * to the copy when the template stands up. */
+  stickers?: { text: number; media: number }[];
+  /** The caption look the source wore. A whole-project template carries it;
+   * placing a template on a timeline leaves the project's own captions
+   * alone, and a replicate applies it. */
+  captions?: CaptionLook;
+  /** The frame the source was cut for, for a whole-project template. */
+  project?: { aspect: Aspect; background: string; fadeIn: number; fadeOut: number };
   /** A saved sound treatment: a template carrying only this is a sound
    * preset (see soundPresets.ts), listed in the audio inspector and kept
    * off the template shelf. */

@@ -370,6 +370,103 @@ export interface EvalMessage {
 
 let turnSeq = 0;
 
+/** A finished reference project as read_project returns it: two footage
+ * sources with notes and transcripts, a music bed, a crossfade, a title,
+ * captions in a look. The ids are what a replicate maps and picks. */
+export const REFERENCE_PROJECT = {
+  source: { kind: "project", id: "ref-123", name: "Kitchen tour", residency: "cloud" },
+  reference: {
+    project: {
+      id: "ref-123",
+      name: "Kitchen tour",
+      duration: 14,
+      aspect: "9:16",
+      frame: "1080x1920",
+      fadeIn: 0.3,
+      fadeOut: 0.5,
+      background: "#101010",
+    },
+    media: [
+      {
+        id: "r-v1",
+        name: "host-intro.mp4",
+        type: "video",
+        duration: 20,
+        observed: [{ from: 0, to: 20, text: "a person talks to camera in a kitchen, medium shot, warm light" }],
+        speech: "transcribed",
+        transcript: [{ start: 0, end: 6, text: "Welcome to my kitchen, here's how I set it up." }],
+      },
+      {
+        id: "r-v2",
+        name: "counter-broll.mp4",
+        type: "video",
+        duration: 15,
+        observed: [{ from: 0, to: 15, text: "slow pan across a marble counter with a coffee machine, no people" }],
+        speech: "none",
+      },
+      { id: "r-m1", name: "lofi-bed.mp3", type: "audio", duration: 60, origin: "generated" },
+    ],
+    mediaTruncated: false,
+    videoTrack: [
+      { index: 0, id: "rc1", asset: "host-intro.mp4", start: 0, len: 6, in: 0, out: 6, sourceDuration: 20, muted: false, framing: "fill", speed: 1, transitionToNext: { style: "crossfade", seconds: 0.5 } },
+      { index: 1, id: "rc2", asset: "counter-broll.mp4", start: 5.5, len: 8.5, in: 2, out: 10.5, sourceDuration: 15, muted: true, framing: "fill", speed: 1, colorGrade: { saturation: 12, temperature: 8 } },
+    ],
+    overlayVideo: [],
+    transitions: [{ id: "rt1", start: 5.5, seconds: 0.5, style: "crossfade", plays: [{ at: "cut", clipId: "rc2" }] }],
+    soundtrack: [
+      { id: "ra1", asset: "lofi-bed.mp3", start: 0, len: 14, in: 0, out: 14, volume: 0.35, fadeIn: 0.5, fadeOut: 1, duck: 0.4 },
+    ],
+    overlays: [
+      { id: "rt-title", kind: "text", text: "MY KITCHEN SETUP", start: 0.4, end: 3, x: 0.5, y: 0.2, size: 96, font: "sf", weight: 700, color: "#FFFFFF", plate: true },
+    ],
+    subtitles: {
+      count: 2,
+      showOnVideo: true,
+      showOnTimeline: true,
+      activeTrack: 0,
+      tracks: [{ track: 0, locale: "en-US", cues: 2 }],
+      wordsPerCue: 3,
+      style: "bubble",
+      status: "ready",
+      cues: [
+        { id: "rq1", start: 0.2, end: 2.8, text: "Welcome to my kitchen" },
+        { id: "rq2", start: 2.9, end: 6, text: "here's how I set it up" },
+      ],
+      cuesTruncated: false,
+    },
+  },
+  unobserved: [],
+  note: "Every item carries the id replicate_project takes; media[].id are the source asset ids for its `media` mapping and for copy_project_media.",
+};
+
+/** The project a replicate lands in: two transcribed clips of the user's
+ * own, no soundtrack, nothing on the timeline yet. */
+export const REPLICATE_STATE = {
+  ...EDITOR_STATE,
+  project: { ...EDITOR_STATE.project, duration: 0 },
+  media: [
+    {
+      id: "a-v1",
+      name: "me-talking.mp4",
+      type: "video",
+      duration: 25,
+      speech: "transcribed",
+      observed: [{ from: 0, to: 25, text: "a person speaks to camera at a desk, close shot" }],
+    },
+    {
+      id: "a-v2",
+      name: "desk-broll.mp4",
+      type: "video",
+      duration: 12,
+      speech: "none",
+      observed: [{ from: 0, to: 12, text: "slow slide across a desk with a laptop and a lamp, no people" }],
+    },
+  ],
+  videoTrack: [],
+  soundtrack: [],
+  overlays: [],
+};
+
 export function userTurn(
   text: string,
   opts?: {

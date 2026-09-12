@@ -63,7 +63,7 @@ export interface LibraryFolder {
 export interface TemplateMedia {
   fileName: string; // private copy inside the library media folder
   name: string;
-  type: "video" | "audio" | "image";
+  type: "video" | "audio" | "image" | "font";
   duration: number;
   width?: number;
   height?: number;
@@ -115,7 +115,26 @@ export interface LibraryTemplate {
   cues: unknown[]; // opaque SubtitleCue[]
   /** A template carrying only this is a saved sound preset. */
   sound?: ClipSound;
+  /** Opaque, round-tripped for the client: transition bars, which texts are
+   * stickers drawn from media, the caption look, the source's frame. */
+  transitions?: unknown[];
+  stickers?: unknown[];
+  captions?: unknown;
+  project?: unknown;
 }
+
+/** The parts of a template the server carries whole. */
+export const templateExtras = (input: {
+  transitions?: unknown[];
+  stickers?: unknown[];
+  captions?: unknown;
+  project?: unknown;
+}) => ({
+  ...(input.transitions?.length ? { transitions: input.transitions } : {}),
+  ...(input.stickers?.length ? { stickers: input.stickers } : {}),
+  ...(input.captions ? { captions: input.captions } : {}),
+  ...(input.project ? { project: input.project } : {}),
+});
 
 interface LibraryIndex {
   assets: LibraryAsset[];
@@ -471,7 +490,7 @@ export interface TemplateInput {
   media: {
     fileName: string;
     name: string;
-    type: "video" | "audio" | "image";
+    type: "video" | "audio" | "image" | "font";
     duration: number;
     width?: number;
     height?: number;
@@ -481,6 +500,10 @@ export interface TemplateInput {
   texts: unknown[];
   cues: unknown[];
   sound?: LibraryTemplate["sound"];
+  transitions?: unknown[];
+  stickers?: unknown[];
+  captions?: unknown;
+  project?: unknown;
 }
 
 /** A template with nothing on it saves nothing; a sound preset is a template
@@ -527,6 +550,7 @@ export async function importTemplate(
     texts: input.texts ?? [],
     cues: input.cues ?? [],
     ...(input.sound ? { sound: input.sound } : {}),
+    ...templateExtras(input),
     folderId: input.folderId ?? null,
   };
   await mutateIndex((idx) => {
@@ -569,6 +593,7 @@ export async function saveTemplate(
     texts: input.texts ?? [],
     cues: input.cues ?? [],
     ...(input.sound ? { sound: input.sound } : {}),
+    ...templateExtras(input),
   };
   await mutateIndex((idx) => {
     idx.templates = [...(idx.templates ?? []), template];

@@ -23,6 +23,8 @@ import {
   SCENE_DONE_STATE,
   STYLED_STATE,
   PARKED_STATE,
+  REFERENCE_PROJECT,
+  REPLICATE_STATE,
   STRANDED_TITLE_STATE,
   TWEET_ASSET,
   TWEET_STATE,
@@ -978,6 +980,64 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           meanSat: 0.24,
           warmth: 0.91,
         },
+      },
+    },
+    {
+      // A pasted project link is a document: read it, map the reference's two
+      // footage sources onto the user's own by content, leave the music to
+      // copy across, and rebuild in one call — no watching, no import, no
+      // generation, no template rail.
+      name: "replicate-link-reads-then-replicates",
+      bucket: "multi-tool",
+      input: () => [
+        userTurn("replicate https://donkeycut.com/app/p/ref-123 using my clips", {
+          state: REPLICATE_STATE,
+        }),
+      ],
+      reply: /replicat|rebuil|recreat|copied|landed/i,
+      requiredTools: ["read_project", "replicate_project"],
+      maxToolCalls: 6,
+      simulate: () => (name, args) => {
+        if (["watch_video", "import_url", "generate_video", "generate_scene", "generate_music", "template_add", "library_list"].includes(name))
+          throw new Error(`the reference is a document — ${name} is a violation here`);
+        if (name === "replicate_project") {
+          const media = (Array.isArray(args.media) ? args.media : []) as { source_asset_id: string; asset_id: string }[];
+          const by = new Map(media.map((m) => [m.source_asset_id, m.asset_id]));
+          if (by.get("r-v1") !== "a-v1" || by.get("r-v2") !== "a-v2")
+            throw new Error(`the talking head maps to a-v1 and the b-roll to a-v2; got ${JSON.stringify(media)}`);
+          if (by.has("r-m1")) throw new Error("the music has no counterpart here; leave it unmapped so it copies across");
+          if (args.items !== undefined) throw new Error("\"replicate this\" is the whole edit — no items");
+          return {
+            replicated: "the whole edit",
+            from: { id: "ref-123", name: "Kitchen tour" },
+            clipIds: ["c-n1", "c-n2"],
+            audioClipIds: ["au-n1"],
+            overlayIds: ["t-n1"],
+            transitionIds: ["tr-n1"],
+            cueIds: [],
+            mapped: [{ sourceId: "r-v1", assetId: "a-v1" }, { sourceId: "r-v2", assetId: "a-v2" }],
+            assetIds: ["a-m9"],
+            copied: [{ sourceId: "r-m1", assetId: "a-m9", name: "lofi-bed.mp3", kind: "audio" }],
+            adjustments: [],
+            skipped: [],
+            frame: true,
+            captionLook: true,
+            captions: "none copied",
+            videoTrack: [
+              { id: "c-n1", start: 0, len: 6 },
+              { id: "c-n2", start: 5.5, len: 8.5 },
+            ],
+            soundtrack: [{ id: "au-n1", lane: 0, start: 0, len: 14 }],
+          };
+        }
+        return undefined;
+      },
+      stubs: {
+        read_project: REFERENCE_PROJECT,
+        update_overlay: { ok: true },
+        subtitles_generate: { ok: true, cues: 2 },
+        refine_speech_cuts: { ok: true },
+        capture_frame: { image: "data:image/jpeg;base64,", at: 1 },
       },
     },
   ];
