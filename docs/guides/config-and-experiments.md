@@ -140,7 +140,12 @@ code: what opens the offer and what claims it. The manual credit su sends by
 email is one kind, and its link closes a few days after the send, a Product-tab
 setting; the subscribe bonus, offered when an account has spent a
 share of its signup grant and landed by a Pro subscription created inside the
-window, is another. A new promotion adds no table.
+window, is another. A promotion's offer is landed by its link or, when the
+promotion says so, by a Pro subscription started inside the window; a checkout
+carries the largest open offer of that kind, so one lands per subscription.
+An outreach note to one person carries the same offer terms, from the same
+form and the same templates, and the Outreach tab takes an account by its
+address so a note can go to anyone. A new promotion adds no table.
 
 ## Verification
 
