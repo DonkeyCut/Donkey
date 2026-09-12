@@ -20,6 +20,11 @@ export const DONKEYCUT_CANONICAL = "https://donkeycut.com";
 // custom domain in wrangler.jsonc; change that route and this together.
 export const CUT_MEDIA_HOST = "media.donkeycut.com";
 export const CUT_MEDIA_ORIGIN = `https://${CUT_MEDIA_HOST}`;
+// The bundled stock sounds are the one audio shape the media Worker serves
+// without a token: lowercase letters, digits and hyphens, then `.mp3`. The
+// generators refuse to upload a name outside it, since a file the Worker will
+// not serve is a card that plays nothing.
+export const STOCK_AUDIO_PUBLIC_KEY = /^stock\/(sfx|music)\/[a-z0-9-]+\.mp3$/;
 
 // Founder outreach replies land here: Resend receives mail for this subdomain
 // and posts it to /api/email/resend-webhook. It is deliberately a subdomain —

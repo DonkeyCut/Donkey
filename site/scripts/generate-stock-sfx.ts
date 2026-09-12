@@ -25,7 +25,7 @@ import path from "node:path";
 import { HeadObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 
-import { CUT_MEDIA_ORIGIN } from "../src/cut/lib/hosts";
+import { CUT_MEDIA_ORIGIN, STOCK_AUDIO_PUBLIC_KEY } from "../src/cut/lib/hosts";
 import type { StockSfxCategory } from "../src/cut/lib/stock";
 import { STOCK_SFX } from "../src/cut/lib/stockSfxManifest";
 
@@ -856,7 +856,7 @@ const cachePath = (name: string) => path.join(CACHE_DIR, `${name}.mp3`);
 const fileUrl = (name: string) => `${CUT_MEDIA_ORIGIN}/${keyFor(name)}`;
 
 /** Each sound's file name without its extension: the id for a first render,
- * `<id>.r<n>` once it has been rendered again. The shipped manifest says which
+ * `<id>-r<n>` once it has been rendered again. The shipped manifest says which
  * file a sound currently has; a redo takes the next free number. */
 const names = new Map<string, string>();
 const fileName = (c: CatalogItem) => names.get(c.id) ?? c.id;
@@ -874,7 +874,7 @@ async function inBucket(r2: S3Client, name: string): Promise<boolean> {
 }
 async function nextName(r2: S3Client, id: string): Promise<string> {
   for (let n = 2; ; n++) {
-    const name = `${id}.r${n}`;
+    const name = `${id}-r${n}`;
     if (!existsSync(cachePath(name)) && !(await inBucket(r2, name))) return name;
   }
 }
@@ -982,6 +982,9 @@ function computePeaks(name: string): number[] {
 }
 
 async function upload(r2: S3Client, name: string): Promise<void> {
+  if (!STOCK_AUDIO_PUBLIC_KEY.test(keyFor(name))) {
+    throw new Error(`${keyFor(name)} is a key the media Worker would not serve`);
+  }
   await r2.send(
     new PutObjectCommand({
       Bucket: BUCKET,
@@ -993,11 +996,19 @@ async function upload(r2: S3Client, name: string): Promise<void> {
   );
 }
 
-/** True when the bucket already holds this file; pulls it into the cache when
- * the local copy is missing so its peaks can be read. */
+/** True when this file is finished and in the bucket. A finished local take
+ * the bucket lacks (a run that died between the render and the upload) is
+ * uploaded here, so a re-run heals the gap; a bucket file the cache lacks is
+ * pulled down so its peaks can be read. */
 async function adopt(r2: S3Client, name: string): Promise<boolean> {
   if (existsSync(cachePath(name))) {
-    if (readable(name)) return true;
+    if (readable(name)) {
+      if (!(await inBucket(r2, name))) {
+        await upload(r2, name);
+        console.log(`↑ ${name} (uploaded from the cache)`);
+      }
+      return true;
+    }
     // A broken local file (a render cut short) is not a finished sound.
     await unlink(cachePath(name));
   }
@@ -1069,11 +1080,19 @@ async function main() {
       if (stopped) return;
       for (let attempt = 1; ; attempt++) {
         try {
-          const { mp3, credits } = await generateOne(eleven, item);
-          spent += credits;
-          await finish(item, mp3);
-          results.set(item.id, { duration: probeDuration(fileName(item)), peaks: computePeaks(fileName(item)) });
+          // A finished take from an earlier attempt whose upload failed is
+          // uploaded again; only a missing take costs another render.
+          let credits = 0;
+          if (!readable(fileName(item))) {
+            const take = await generateOne(eleven, item);
+            credits = take.credits;
+            spent += credits;
+            await finish(item, take.mp3);
+          }
+          // The manifest only ever points at a file the bucket holds: the
+          // upload lands before the sound counts as done.
           await upload(r2, fileName(item));
+          results.set(item.id, { duration: probeDuration(fileName(item)), peaks: computePeaks(fileName(item)) });
           await writeManifest(results);
           console.log(`✓ ${item.id} (${results.get(item.id)!.duration}s, ${credits} credits, ${spent} total)`);
           if (spent >= MAX_CREDITS) {

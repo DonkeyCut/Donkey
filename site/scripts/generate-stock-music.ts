@@ -23,7 +23,7 @@ import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from 
 import { GoogleGenAI } from "@google/genai";
 import { JWT } from "google-auth-library";
 
-import { CUT_MEDIA_ORIGIN } from "../src/cut/lib/hosts";
+import { CUT_MEDIA_ORIGIN, STOCK_AUDIO_PUBLIC_KEY } from "../src/cut/lib/hosts";
 import { geminiMusicModels } from "../src/lib/inference/gemini-models";
 import type { StockMusicCategory } from "../src/cut/lib/stock";
 
@@ -225,6 +225,9 @@ function computePeaks(id: string): number[] {
 }
 
 async function upload(r2: S3Client, id: string): Promise<void> {
+  if (!STOCK_AUDIO_PUBLIC_KEY.test(keyFor(id))) {
+    throw new Error(`${keyFor(id)} is a key the media Worker would not serve`);
+  }
   await r2.send(
     new PutObjectCommand({
       Bucket: BUCKET,

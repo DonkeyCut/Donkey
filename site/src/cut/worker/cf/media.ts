@@ -16,6 +16,7 @@
 //
 // This file is compiled by wrangler, not the site's tsconfig — workers globals
 // are typed loosely on purpose.
+import { STOCK_AUDIO_PUBLIC_KEY } from "../../lib/hosts";
 import { parseRange } from "../../server/cloud/httpRange";
 import { contentDisposition, mediaDownloadName } from "../../server/cloud/mediaName";
 
@@ -50,9 +51,9 @@ const EDGE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const PLAYLIST_TTL_SECONDS = 60;
 /** The key shapes served without a token: a blog image, content-addressed,
  * and a bundled stock sound (an effect or a music bed), which ships with the
- * editor and is the same file for everyone. */
+ * editor and is the same file for everyone; hosts.ts spells out the sound's
+ * shape so the generators can hold to it. */
 const PUBLIC_BLOG_IMAGE = /^blog\/[a-z0-9]+\/[a-f0-9]{64}\.avif$/;
-const PUBLIC_STOCK_AUDIO = /^stock\/(sfx|music)\/[a-z0-9-]+\.mp3$/;
 
 const encoder = new TextEncoder();
 
@@ -222,7 +223,7 @@ async function authorize(url: URL, env: MediaEnv): Promise<Granted | Response> {
   // by their bytes, so the key alone says what is served and nothing under
   // the prefix but that shape — never the article source or a raw upload — is
   // reachable without a token (src/lib/blog/keys.ts holds the same pattern).
-  if (key && (PUBLIC_BLOG_IMAGE.test(key) || PUBLIC_STOCK_AUDIO.test(key))) {
+  if (key && (PUBLIC_BLOG_IMAGE.test(key) || STOCK_AUDIO_PUBLIC_KEY.test(key))) {
     return { key, downloadName: "", version: "" };
   }
   const expires = Number(url.searchParams.get("e"));

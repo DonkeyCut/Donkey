@@ -18,7 +18,7 @@ for (let i = 0; i < SIZE; i++) BYTES[i] = i & 0xff;
 
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
-function makeEnv() {
+function makeEnv(key = KEY) {
   const counts = { whole: 0, ranged: 0 };
   const r2Object = (offset = 0, length = SIZE - offset) => ({
     body: new Response(BYTES.slice(offset, offset + length)).body,
@@ -32,9 +32,9 @@ function makeEnv() {
   const env: MediaEnv = {
     CUT_MEDIA_SIGNING_SECRET: SECRET,
     CUT_MEDIA: {
-      head: async (key: string) => (key === KEY ? r2Object() : null),
-      get: async (key: string, opts?: { range?: { offset: number; length?: number } }) => {
-        if (key !== KEY) return null;
+      head: async (k: string) => (k === key ? r2Object() : null),
+      get: async (k: string, opts?: { range?: { offset: number; length?: number } }) => {
+        if (k !== key) return null;
         if (opts?.range) {
           counts.ranged++;
           return r2Object(opts.range.offset, opts.range.length);
@@ -176,5 +176,30 @@ describe("serveMedia cold-cache fill", () => {
     // Three reads served the three responses; the fill added at most one more.
     expect(counts.whole).toBe(4);
     expect(fakeCaches.store.size).toBe(1);
+  });
+});
+
+describe("serveMedia public stock sounds", () => {
+  // A take rendered again keeps its id and gains `-r<n>`; the card in the
+  // editor points straight at it with no token, so the Worker has to serve
+  // that shape — the first burst redo shipped under a dotted name the Worker
+  // refused, a 404 and a silent card.
+  test("serves a first take, a redone take, and a music bed without a token", async () => {
+    for (const key of ["stock/sfx/camera-burst.mp3", "stock/sfx/camera-burst-r2.mp3", "stock/music/songs-open-road.mp3"]) {
+      const { env } = makeEnv(key);
+      const { ctx } = makeCtx();
+      const res = await serveMedia(new Request(`https://media.example.com/${key}`), env, ctx);
+      expect(res.status).toBe(200);
+      expect((await res.arrayBuffer()).byteLength).toBe(SIZE);
+    }
+  });
+
+  test("anything else under stock/ still needs a token", async () => {
+    for (const key of ["stock/sfx/camera-burst.r2.mp3", "stock/sfx/camera-burst.raw.mp3", "stock/sfx/Camera.mp3"]) {
+      const { env } = makeEnv(key);
+      const { ctx } = makeCtx();
+      const res = await serveMedia(new Request(`https://media.example.com/${key}`), env, ctx);
+      expect(res.status).not.toBe(200);
+    }
   });
 });
