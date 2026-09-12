@@ -3,7 +3,8 @@
 // The face of a credit offer, whichever way it reached the person: a picture
 // across the top, a title, a line of body, and one full-width button. The
 // email's claim link and the offer in the top bar both open this, so an
-// offer looks the same from anywhere.
+// offer looks the same from anywhere. Every slot keeps its height whether
+// or not it has words, so the card stands still as the offer is taken up.
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
@@ -139,12 +140,12 @@ export function OfferDialog({
             <DialogDescription className="min-h-12 text-base leading-relaxed text-muted-foreground">
               {body}
             </DialogDescription>
-            {terms ? <p className="text-base leading-relaxed text-muted-foreground">{terms}</p> : null}
+            <p className="min-h-[1lh] text-base leading-relaxed text-muted-foreground">{terms}</p>
           </DialogHeader>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           <div className="mt-5 flex flex-col gap-2">
             {cta}
-            {secondary}
+            <div className="min-h-8">{secondary}</div>
           </div>
         </div>
       </DialogContent>

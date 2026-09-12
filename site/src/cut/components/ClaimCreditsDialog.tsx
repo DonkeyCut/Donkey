@@ -67,24 +67,19 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
     });
     checkout.mutate({ offerToken: token }, { onSuccess: (result) => window.location.assign(result.url) });
   };
-  // The card opens at once, checking the link, at the size it keeps: the
-  // body reserves two lines and every state ends in one button.
+  // The card opens once the link is checked, as the offer it holds: its
+  // banner, title and button are the offer's from the first paint. The body
+  // reserves two lines and every state ends in one button, so the card keeps
+  // its size as the offer is claimed.
+  if (offer.isPending) return null;
   const done = claim.data ?? (offer.data?.claimed ? { expiresAt: offer.data.expiresAt } : null);
 
-  let title: React.ReactNode = "Claim your credits";
+  let title: React.ReactNode;
   let body: React.ReactNode;
   let terms: React.ReactNode = null;
   let cta: React.ReactNode;
   let secondary: React.ReactNode = <OfferDismiss onClick={onClose}>Not now</OfferDismiss>;
-  if (offer.isPending) {
-    body = (
-      <span className="flex items-center gap-2">
-        <Loader2 className="size-4 shrink-0 animate-spin" />
-        Checking your offer…
-      </span>
-    );
-    cta = <OfferButton disabled>Claim</OfferButton>;
-  } else if (offer.isError) {
+  if (offer.isError) {
     const status = offer.error instanceof ApiError ? offer.error.status : null;
     title =
       status === 410 ? "This offer has expired" : status === 409 ? "You already have Pro" : "This link is no longer valid";
