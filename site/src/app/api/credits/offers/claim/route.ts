@@ -13,7 +13,6 @@ import {
   creditOfferOpen,
   verifyCreditOfferToken,
 } from "@/lib/credits/offers";
-import { describeCreditLifetime } from "@/lib/email/send-credits-offered";
 import { forbiddenResponse, notFoundResponse, withDonkeyAuth } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 
@@ -57,7 +56,7 @@ export const GET = withDonkeyAuth(async (request) => {
     closesAt: offer.closesAt?.toISOString() ?? null,
     credits: formatUsdPlain(creditMicrosToString(offer.amountMicros)),
     expiresAt: offer.grant?.expiresAt?.toISOString() ?? null,
-    lifetime: describeCreditLifetime(offer.expiresAfterDays),
+    lifetimeDays: offer.expiresAfterDays,
   });
 });
 

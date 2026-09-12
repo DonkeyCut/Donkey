@@ -54,10 +54,10 @@ export type SubscribeBonus = {
   dollars: string;
   openedAt: string;
   closesAt: string;
-  // The credit's life once it lands: a fixed last moment, or a span from the
-  // claim as people read it ("a month"). Both null keeps it forever.
+  // The credit's life once it lands: a fixed last moment, or days from the
+  // claim. Both null keeps it forever.
   creditsExpireAt: string | null;
-  creditsLifetime: string | null;
+  creditsLifetimeDays: number | null;
   status: "open" | "closed" | "claimed";
 };
 
@@ -154,8 +154,8 @@ export type CreditOffer = {
   // When the claimed credit expires; null before the claim and for a credit
   // that keeps forever.
   expiresAt: string | null;
-  // "a week", or null when the credit keeps forever.
-  lifetime: string | null;
+  // How many days the claimed credit lasts; null when it keeps forever.
+  lifetimeDays: number | null;
 };
 
 // The offer a claim link names. 404 is a link that no longer opens anything;

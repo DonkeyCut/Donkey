@@ -5,7 +5,6 @@ import { creditMicrosToString, creditStringToMicros, zeroCreditMicros } from "@/
 import { creditOfferOpen } from "@/lib/credits/offers";
 import { SUBSCRIBE_BONUS_KIND } from "@/lib/credits/offerKinds";
 import { bestOfferForSubscribing, findOffersForSubscribing } from "@/lib/credits/subscribe-bonus-claim";
-import { describeCreditLifetime } from "@/lib/email/send-credits-offered";
 import { prisma } from "@/lib/prisma";
 
 // The subscribe bonus: an account that has spent enough of its signup grant
@@ -28,10 +27,10 @@ export type SubscribeBonusView = {
   dollars: string;
   openedAt: string;
   closesAt: string;
-  // The credit's life once it lands: a fixed last moment, or a span from the
-  // claim as people read it ("a month"). Both null keeps it forever.
+  // The credit's life once it lands: a fixed last moment, or days from the
+  // claim. Both null keeps it forever.
   creditsExpireAt: string | null;
-  creditsLifetime: string | null;
+  creditsLifetimeDays: number | null;
   status: SubscribeBonusStatus;
 };
 
@@ -69,7 +68,7 @@ export function subscribeBonusView(offer: CreditOffer, facts: { now: Date; pro: 
     openedAt: offer.createdAt.toISOString(),
     closesAt: (offer.closesAt ?? offer.createdAt).toISOString(),
     creditsExpireAt: offer.expiresAt?.toISOString() ?? null,
-    creditsLifetime: offer.expiresAt ? null : describeCreditLifetime(offer.expiresAfterDays),
+    creditsLifetimeDays: offer.expiresAt ? null : offer.expiresAfterDays,
     status: subscribeBonusStatus(offer, facts),
   };
 }
