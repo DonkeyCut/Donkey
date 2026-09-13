@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { GripVertical } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -35,6 +35,11 @@ export function useDragSort<T extends string>(
   commit: (next: T[]) => void,
 ) {
   const [drag, setDrag] = useState<{ id: T; preview: T[] } | null>(null);
+  const nodes = useRef(new Map<string, HTMLElement>());
+  const session = useRef<{
+    slots: { id: T; rect: DOMRect }[];
+    scroll: { el: HTMLElement; x: number; y: number }[];
+  } | null>(null);
   // The list keeps living during a drag — a queue drains, a card arrives — so
   // the preview is reconciled against it: ids that left drop out, ids that
   // arrived land at the end.
@@ -44,24 +49,49 @@ export function useDragSort<T extends string>(
         ...order.filter((id) => !drag.preview.includes(id)),
       ]
     : (order as T[]);
-  const nodeRef = useSlide(drag !== null);
+  const nodeRef = useSlide(drag !== null, nodes);
 
-  // Hovering another item moves the dragged one into that slot: forward past
-  // the hovered item, backward in front of it — so it lands where the pointer
-  // is. After the shift the pointer sits over the dragged item's own hole,
-  // which is ignored, so the preview settles instead of oscillating.
-  const hover = (id: T) => {
-    if (!drag || drag.id === id) return;
+  // Drop slots keep their starting geometry through every preview reorder.
+  // Animated cards can cross the pointer without changing its destination.
+  const hover = (e: React.DragEvent) => {
+    const active = session.current;
+    if (!drag || !active) return;
+    let x = e.clientX;
+    let y = e.clientY;
+    for (const origin of active.scroll) {
+      x += origin.el.scrollLeft - origin.x;
+      y += origin.el.scrollTop - origin.y;
+    }
+    let distance = Infinity;
+    let to = -1;
+    let index = 0;
+    for (const slot of active.slots) {
+      if (!order.includes(slot.id)) continue;
+      const dx = Math.max(slot.rect.left - x, 0, x - slot.rect.right);
+      const dy = Math.max(slot.rect.top - y, 0, y - slot.rect.bottom);
+      const next = dx * dx + dy * dy;
+      if (next < distance) {
+        distance = next;
+        to = index;
+      }
+      index++;
+    }
     const from = shown.indexOf(drag.id);
-    const to = shown.indexOf(id);
-    if (from < 0 || to < 0) return;
+    if (from < 0 || to < 0 || from === to) return;
     const preview = shown.slice();
     preview.splice(to, 0, ...preview.splice(from, 1));
     setDrag({ id: drag.id, preview });
   };
 
   const land = () => {
-    if (drag) commit(shown);
+    if (!session.current) return;
+    session.current = null;
+    if (drag && order.includes(drag.id)) commit(shown);
+    setDrag(null);
+  };
+
+  const cancel = () => {
+    session.current = null;
     setDrag(null);
   };
 
@@ -70,20 +100,32 @@ export function useDragSort<T extends string>(
   ): { dragging: boolean; ref: (el: HTMLElement | null) => void } & ItemHandlers => ({
     dragging: drag?.id === id,
     ref: nodeRef(id),
-    onDragEnd: () => setDrag(null),
+    onDragEnd: cancel,
     onDragOver: (e) => {
       if (!drag) return;
       e.preventDefault();
+      e.stopPropagation();
       e.dataTransfer.dropEffect = "move";
-      hover(id);
+      hover(e);
     },
     onDragStart: (e) => {
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData(SORT_MIME, id);
+      const slots = order.flatMap((item) => {
+        const el = nodes.current.get(item);
+        return el ? [{ id: item, rect: el.getBoundingClientRect() }] : [];
+      });
+      const scroll = [];
+      for (let el = e.currentTarget.parentElement; el; el = el.parentElement) {
+        scroll.push({ el, x: el.scrollLeft, y: el.scrollTop });
+      }
+      session.current = { slots, scroll };
       setDrag({ id, preview: [...order] });
     },
     onDrop: (e) => {
+      if (!drag) return;
       e.preventDefault();
+      e.stopPropagation();
       land();
     },
   });
@@ -95,6 +137,7 @@ export function useDragSort<T extends string>(
       if (!drag) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
+      hover(e);
     },
     onDrop: (e: React.DragEvent) => {
       if (!drag) return;
@@ -106,51 +149,71 @@ export function useDragSort<T extends string>(
   return { containerProps, dragging: drag?.id ?? null, itemProps, order: shown };
 }
 
-/**
- * Slides items between layout positions. Every commit records where the
- * registered nodes sit; while a drag is live, a commit that moved them puts
- * each one back where it was with a transform and then releases it, so the
- * reordering reads as movement rather than a jump. Layout offsets stand in for
- * viewport rects, so scrolling mid-drag does not register as movement.
- *
- * Measuring on every commit — rather than only when the order changes — is
- * what makes the first drag animate: the list is often laid out after the hook
- * first runs, and a stale record would have nothing to move from.
- */
-function useSlide(live: boolean) {
-  const nodes = useRef(new Map<string, HTMLElement>());
+/** Animate from each card's current visual position when its layout moves. */
+function useSlide(
+  live: boolean,
+  nodes: RefObject<Map<string, HTMLElement>>,
+) {
   const callbacks = useRef(new Map<string, (el: HTMLElement | null) => void>());
   const last = useRef(new Map<string, { x: number; y: number }>());
-  // The commit that ends a drag animates too: the list either settles into the
-  // dropped order or slides back from a cancel.
+  const animations = useRef(new Map<string, Animation>());
   const wasLive = useRef(false);
 
   useLayoutEffect(() => {
+    const running = animations.current;
+    return () => {
+      running.forEach((animation) => animation.cancel());
+      running.clear();
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    for (const id of callbacks.current.keys()) {
+      if (nodes.current.has(id)) continue;
+      callbacks.current.delete(id);
+      animations.current.get(id)?.cancel();
+      animations.current.delete(id);
+    }
     const now = new Map<string, { x: number; y: number }>();
-    nodes.current.forEach((el, id) => now.set(id, { x: el.offsetLeft, y: el.offsetTop }));
+    const moves: { id: string; el: HTMLElement; dx: number; dy: number }[] = [];
     const animate =
       (live || wasLive.current) &&
       !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (animate)
-      now.forEach((pos, id) => {
-        const was = last.current.get(id);
-        const el = nodes.current.get(id);
-        if (!was || !el) return;
-        const dx = was.x - pos.x;
-        const dy = was.y - pos.y;
-        if (!dx && !dy) return;
-        el.style.transition = "none";
-        el.style.transform = `translate(${dx}px, ${dy}px)`;
-        requestAnimationFrame(() => {
-          el.style.transition = `transform ${SLIDE_MS}ms cubic-bezier(0.2, 0, 0, 1)`;
-          el.style.transform = "";
-        });
+    // Finish all measurements before starting animations.
+    nodes.current.forEach((el, id) => {
+      const pos = { x: el.offsetLeft, y: el.offsetTop };
+      now.set(id, pos);
+      const was = last.current.get(id);
+      if (!animate || !was || (was.x === pos.x && was.y === pos.y)) return;
+      const transform = getComputedStyle(el).transform;
+      const matrix = transform === "none" ? null : new DOMMatrixReadOnly(transform);
+      moves.push({
+        id,
+        el,
+        dx: was.x - pos.x + (matrix?.m41 ?? 0),
+        dy: was.y - pos.y + (matrix?.m42 ?? 0),
       });
+    });
+    if (!animate) {
+      animations.current.forEach((animation) => animation.cancel());
+      animations.current.clear();
+    }
+    for (const { id, el, dx, dy } of moves) {
+      animations.current.get(id)?.cancel();
+      const animation = el.animate(
+        [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "translate(0, 0)" }],
+        { duration: SLIDE_MS, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+      );
+      animations.current.set(id, animation);
+      animation.onfinish = () => {
+        if (animations.current.get(id) === animation) animations.current.delete(id);
+      };
+    }
     last.current = now;
     wasLive.current = live;
   });
 
-  return useCallback((id: string) => {
+  return (id: string) => {
     let cb = callbacks.current.get(id);
     if (!cb) {
       cb = (el: HTMLElement | null) => {
@@ -160,7 +223,7 @@ function useSlide(live: boolean) {
       callbacks.current.set(id, cb);
     }
     return cb;
-  }, []);
+  };
 }
 
 /** Longest side of a drag ghost, px. */
