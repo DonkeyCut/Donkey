@@ -34,9 +34,9 @@ import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { DragBlock, useReorder } from "@/app/su/analytics/Reorder";
 import { OutreachComposeDialog } from "@/app/su/outreach/ComposeDialog";
+import { Button } from "@/components/ui/button";
 import { SuStandIn } from "@/app/su/SuStandIn";
 import { useRowWindow } from "@/app/su/analytics/rowWindow";
-import { Button } from "@/components/ui/button";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
 import { useOutreachAction, type OutreachRow } from "@/queries/outreach";
@@ -806,12 +806,12 @@ function ActivityGrid({
                         nothing. */}
                     <Button
                       aria-label={`Email ${user.name}`}
-                      className="absolute top-1/2 right-2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      className="absolute inset-y-0 right-2 my-auto opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                       onClick={() => emailUser(user)}
-                      size="icon"
+                      size="icon-sm"
                       variant="ghost"
                     >
-                      <Mail className="size-5" />
+                      <Mail />
                     </Button>
                     <span className="flex items-center gap-1.5">
                       <span className="block max-w-56 truncate text-sm" title={user.name}>
