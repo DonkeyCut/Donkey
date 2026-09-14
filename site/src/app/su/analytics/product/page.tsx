@@ -703,12 +703,23 @@ function ActivityGrid({
   // A row's email button puts the account on the outreach list and opens the
   // same note the Outreach tab writes, so a busy user gets a word or a deal
   // from here.
+  // The dialog opens on the click and fills in when the row lands.
   const outreach = useOutreachAction();
   const [sendTarget, setSendTarget] = useState<OutreachRow | null>(null);
-  const adding =
-    outreach.isPending && outreach.variables?.action === "add" ? outreach.variables.email : null;
-  const emailUser = (email: string) =>
-    outreach.mutate({ action: "add", email }, { onSuccess: (result) => setSendTarget(result.row) });
+  const [opening, setOpening] = useState<{ name: string; email: string } | null>(null);
+  const emailUser = (user: { name: string; email: string }) => {
+    setOpening({ name: user.name, email: user.email });
+    outreach.mutate(
+      { action: "add", email: user.email },
+      {
+        onError: () => setOpening(null),
+        onSuccess: (result) => {
+          setSendTarget(result.row);
+          setOpening(null);
+        },
+      },
+    );
+  };
 
   // Newest day sits in the leftmost column so the current dots are in view
   // before any horizontal scroll; each column keeps its index into the
@@ -795,13 +806,12 @@ function ActivityGrid({
                         nothing. */}
                     <Button
                       aria-label={`Email ${user.name}`}
-                      className="absolute top-1/2 right-3 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                      disabled={adding === user.email}
-                      onClick={() => emailUser(user.email)}
-                      size="icon-xs"
+                      className="absolute top-1/2 right-2 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      onClick={() => emailUser(user)}
+                      size="icon"
                       variant="ghost"
                     >
-                      <Mail />
+                      <Mail className="size-5" />
                     </Button>
                     <span className="flex items-center gap-1.5">
                       <span className="block max-w-56 truncate text-sm" title={user.name}>
@@ -878,7 +888,14 @@ function ActivityGrid({
       {outreach.isError ? (
         <p className="mt-2 text-sm text-destructive">Couldn&apos;t put that account on the outreach list.</p>
       ) : null}
-      <OutreachComposeDialog onClose={() => setSendTarget(null)} target={sendTarget} />
+      <OutreachComposeDialog
+        onClose={() => {
+          setSendTarget(null);
+          setOpening(null);
+        }}
+        opening={opening}
+        target={sendTarget}
+      />
     </div>
   );
 }

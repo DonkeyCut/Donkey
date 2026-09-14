@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -89,10 +90,14 @@ export function ago(iso: string | null): string {
 
 export function OutreachComposeDialog({
   target,
+  opening = null,
   onClose,
 }: {
   /** The row the note goes to; null keeps the dialog closed. */
   target: OutreachRow | null;
+  /** Who the note is for while their row is still being fetched: the dialog
+   * opens on them at once and fills in when the row lands. */
+  opening?: { name: string; email: string } | null;
   onClose: () => void;
 }) {
   const [source, setSource] = useState(BLANK);
@@ -381,190 +386,190 @@ export function OutreachComposeDialog({
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
-      open={target !== null}
+      open={target !== null || opening !== null}
     >
       <DialogContent className="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>Email {target?.name}</DialogTitle>
-          <DialogDescription>{target?.email}</DialogDescription>
+          <DialogTitle>Email {target?.name ?? opening?.name}</DialogTitle>
+          <DialogDescription>{target?.email ?? opening?.email}</DialogDescription>
         </DialogHeader>
 
         {/* The note and the person's past share the dialog; the tabs reset
             with each row so a new person opens on the note. */}
-        <Tabs
-          className="min-h-0 gap-3"
-          defaultValue="note"
-          key={target?.id ?? "none"}
-        >
-          <TabsList variant="line">
-            <TabsTrigger value="note">Note</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-          </TabsList>
-          <TabsContent className="min-h-0" value="history">
-            {target ? <UserHistoryPanel target={target} /> : null}
-          </TabsContent>
-          <TabsContent
-            className="grid min-h-0 min-w-0 gap-4 md:grid-cols-[18rem_minmax(0,1fr)]"
-            value="note"
-          >
-            <div className="flex min-h-0 flex-col gap-2 md:border-r md:pr-4">
-              <span className="text-xs font-medium text-muted-foreground">
-                Start from
-              </span>
-              <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto max-md:max-h-40">
-                {sources.map((option) => (
-                  <div className="group/start relative" key={option.id}>
-                    <button
-                      className={cn(
-                        "w-full rounded-lg px-2 py-1.5 pr-8 text-left transition-colors",
-                        source === option.id
-                          ? "bg-accent text-accent-foreground"
-                          : "hover:bg-accent/50",
-                      )}
-                      onClick={() => pickSource(option.id)}
-                      type="button"
-                    >
-                      <span className="block truncate text-sm">
-                        {option.title}
-                      </span>
-                      {option.meta ? (
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {option.meta}
-                        </span>
-                      ) : null}
-                    </button>
-                    {option.remove ? (
-                      <Button
-                        aria-label={`Delete ${option.title}`}
-                        className="absolute top-1.5 right-1 opacity-0 group-hover/start:opacity-100 focus-visible:opacity-100"
-                        disabled={option.busy}
-                        onClick={option.remove}
-                        size="icon-xs"
-                        variant="ghost"
+        {target === null ? (
+          <ComposeSkeleton />
+        ) : (
+          <Tabs className="min-h-0 gap-3" defaultValue="note" key={target.id}>
+            <TabsList variant="line">
+              <TabsTrigger value="note">Note</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+            </TabsList>
+            <TabsContent className="min-h-0" value="history">
+              <UserHistoryPanel target={target} />
+            </TabsContent>
+            <TabsContent
+              className="grid min-h-0 min-w-0 gap-4 md:grid-cols-[18rem_minmax(0,1fr)]"
+              value="note"
+            >
+              <div className="flex min-h-0 flex-col gap-2 md:border-r md:pr-4">
+                <span className="text-xs font-medium text-muted-foreground">
+                  Start from
+                </span>
+                <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto max-md:max-h-40">
+                  {sources.map((option) => (
+                    <div className="group/start relative" key={option.id}>
+                      <button
+                        className={cn(
+                          "w-full rounded-lg px-2 py-1.5 pr-8 text-left transition-colors",
+                          source === option.id
+                            ? "bg-accent text-accent-foreground"
+                            : "hover:bg-accent/50",
+                        )}
+                        onClick={() => pickSource(option.id)}
+                        type="button"
                       >
-                        <XIcon />
-                      </Button>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              {naming ? (
-                <div className="space-y-2">
-                  <Input
-                    aria-label="Template name"
-                    autoFocus
-                    maxLength={80}
-                    onChange={(event) => setTemplateName(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") submitTemplate();
-                    }}
-                    placeholder="Template name"
-                    value={templateName}
-                  />
-                  <div className="flex items-center gap-2">
-                    <Button
-                      className="flex-1"
-                      disabled={
-                        saveTemplate.isPending || templateName.trim() === ""
-                      }
-                      onClick={submitTemplate}
-                      size="sm"
-                    >
-                      {saveTemplate.isPending ? "Saving…" : "Save"}
-                    </Button>
-                    <Button
-                      onClick={() => setNaming(false)}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Button
-                  disabled={!sendable || selectedPromotion !== undefined}
-                  onClick={() => {
-                    setTemplateName(selectedTemplate?.name ?? "");
-                    setNaming(true);
-                  }}
-                  size="sm"
-                  variant="outline"
-                >
-                  Save as template
-                </Button>
-              )}
-              {saveTemplate.isError ? (
-                <p className="text-xs text-destructive">
-                  Couldn&apos;t save that template. Try a different name.
-                </p>
-              ) : null}
-              {deleteTemplate.isError ? (
-                <p className="text-xs text-destructive">
-                  Couldn&apos;t delete that template.
-                </p>
-              ) : null}
-            </div>
-
-            {selectedPromotion ? (
-              <PromotionPreview
-                promotion={selectedPromotion}
-                issue={sendFailed ? sendIssue : undefined}
-              />
-            ) : (
-              <div className="flex min-h-0 min-w-0 flex-col gap-2">
-                <Label htmlFor="outreach-subject">Subject</Label>
-                <Input
-                  id="outreach-subject"
-                  maxLength={200}
-                  onChange={(event) => setSubject(event.target.value)}
-                  value={subject}
-                />
-                <Label className="mt-1" htmlFor="outreach-body">
-                  Message
-                </Label>
-                <Textarea
-                  className="min-h-40 flex-1 resize-none field-sizing-fixed"
-                  id="outreach-body"
-                  maxLength={5000}
-                  onChange={(event) => setBody(event.target.value)}
-                  ref={bodyField}
-                  value={body}
-                />
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs text-muted-foreground">
-                    Blank line starts a paragraph. Insert:
-                  </span>
-                  {placeholders.map((name) => (
-                    <Button
-                      key={name}
-                      onClick={() => insertPlaceholder(name)}
-                      size="xs"
-                      variant="outline"
-                    >
-                      {`{{${name}}}`}
-                    </Button>
+                        <span className="block truncate text-sm">
+                          {option.title}
+                        </span>
+                        {option.meta ? (
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {option.meta}
+                          </span>
+                        ) : null}
+                      </button>
+                      {option.remove ? (
+                        <Button
+                          aria-label={`Delete ${option.title}`}
+                          className="absolute top-1.5 right-1 opacity-0 group-hover/start:opacity-100 focus-visible:opacity-100"
+                          disabled={option.busy}
+                          onClick={option.remove}
+                          size="icon-xs"
+                          variant="ghost"
+                        >
+                          <XIcon />
+                        </Button>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
-                <CreditOfferFields
-                  idPrefix="outreach-offer"
-                  value={creditOffer}
-                  defaults={offerDefaults}
-                  onChange={setCreditOffer}
-                  hint="The note carries a link for AI credits; {{claimUrl}} is the link and {{claimBy}} the last day to claim."
-                />
-                {sendFailed ? (
-                  <p className="text-sm text-destructive">
-                    {sendIssue ??
-                      "That didn’t go through. The account may have unsubscribed since the last scan, or the text may name a placeholder that doesn’t exist."}
+                {naming ? (
+                  <div className="space-y-2">
+                    <Input
+                      aria-label="Template name"
+                      autoFocus
+                      maxLength={80}
+                      onChange={(event) => setTemplateName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") submitTemplate();
+                      }}
+                      placeholder="Template name"
+                      value={templateName}
+                    />
+                    <div className="flex items-center gap-2">
+                      <Button
+                        className="flex-1"
+                        disabled={
+                          saveTemplate.isPending || templateName.trim() === ""
+                        }
+                        onClick={submitTemplate}
+                        size="sm"
+                      >
+                        {saveTemplate.isPending ? "Saving…" : "Save"}
+                      </Button>
+                      <Button
+                        onClick={() => setNaming(false)}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button
+                    disabled={!sendable || selectedPromotion !== undefined}
+                    onClick={() => {
+                      setTemplateName(selectedTemplate?.name ?? "");
+                      setNaming(true);
+                    }}
+                    size="sm"
+                    variant="outline"
+                  >
+                    Save as template
+                  </Button>
+                )}
+                {saveTemplate.isError ? (
+                  <p className="text-xs text-destructive">
+                    Couldn&apos;t save that template. Try a different name.
                   </p>
-                ) : testNotice ? (
-                  <p className="text-sm text-muted-foreground">{testNotice}</p>
+                ) : null}
+                {deleteTemplate.isError ? (
+                  <p className="text-xs text-destructive">
+                    Couldn&apos;t delete that template.
+                  </p>
                 ) : null}
               </div>
-            )}
-          </TabsContent>
-        </Tabs>
+
+              {selectedPromotion ? (
+                <PromotionPreview
+                  promotion={selectedPromotion}
+                  issue={sendFailed ? sendIssue : undefined}
+                />
+              ) : (
+                <div className="flex min-h-0 min-w-0 flex-col gap-2">
+                  <Label htmlFor="outreach-subject">Subject</Label>
+                  <Input
+                    id="outreach-subject"
+                    maxLength={200}
+                    onChange={(event) => setSubject(event.target.value)}
+                    value={subject}
+                  />
+                  <Label className="mt-1" htmlFor="outreach-body">
+                    Message
+                  </Label>
+                  <Textarea
+                    className="min-h-40 flex-1 resize-none field-sizing-fixed"
+                    id="outreach-body"
+                    maxLength={5000}
+                    onChange={(event) => setBody(event.target.value)}
+                    ref={bodyField}
+                    value={body}
+                  />
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground">
+                      Blank line starts a paragraph. Insert:
+                    </span>
+                    {placeholders.map((name) => (
+                      <Button
+                        key={name}
+                        onClick={() => insertPlaceholder(name)}
+                        size="xs"
+                        variant="outline"
+                      >
+                        {`{{${name}}}`}
+                      </Button>
+                    ))}
+                  </div>
+                  <CreditOfferFields
+                    idPrefix="outreach-offer"
+                    value={creditOffer}
+                    defaults={offerDefaults}
+                    onChange={setCreditOffer}
+                    hint="The note carries a link for AI credits; {{claimUrl}} is the link and {{claimBy}} the last day to claim."
+                  />
+                  {sendFailed ? (
+                    <p className="text-sm text-destructive">
+                      {sendIssue ??
+                        "That didn’t go through. The account may have unsubscribed since the last scan, or the text may name a placeholder that doesn’t exist."}
+                    </p>
+                  ) : testNotice ? (
+                    <p className="text-sm text-muted-foreground">{testNotice}</p>
+                  ) : null}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        )}
 
         <DialogFooter>
           {/* The footer column is reversed below sm, so ordering the toggles
@@ -572,7 +577,7 @@ export function OutreachComposeDialog({
           {selectedPromotion ? null : (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 max-sm:order-last sm:mr-auto">
               <Button
-                disabled={sending || !sendable}
+                disabled={target === null || sending || !sendable}
                 onClick={submitTest}
                 variant="outline"
               >
@@ -597,7 +602,7 @@ export function OutreachComposeDialog({
           <DialogClose render={<Button variant="outline" />}>
             Cancel
           </DialogClose>
-          <Button disabled={sending || !sendable} onClick={submitSend}>
+          <Button disabled={target === null || sending || !sendable} onClick={submitSend}>
             {sending
               ? "Sending…"
               : selectedPromotion
@@ -653,6 +658,32 @@ function PromotionPreview({
         Edit the words on the Promotions tab.
       </p>
       {issue ? <p className="text-sm text-destructive">{issue}</p> : null}
+    </div>
+  );
+}
+
+// The dialog's shape while the person's row is on its way: the tabs, the
+// start-from list and the note fields, as slabs.
+function ComposeSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-col gap-3">
+      <div className="flex gap-4 border-b pb-2">
+        <Skeleton className="h-4 w-10" />
+        <Skeleton className="h-4 w-14" />
+      </div>
+      <div className="grid min-h-0 gap-4 md:grid-cols-[18rem_minmax(0,1fr)]">
+        <div className="space-y-2 md:border-r md:pr-4">
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+        <div className="space-y-3">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-8 w-1/2" />
+        </div>
+      </div>
     </div>
   );
 }
