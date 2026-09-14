@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
-import { PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
+import { FOCUS_RING, PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
 import {
   collectRefs,
   mentionToken,
@@ -401,7 +401,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
     >
       <button
         ref={inViewRef}
-        className="block w-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn("block w-full", FOCUS_RING)}
         draggable
         onDragStart={(e) => {
           setAssetDragData(e, asset.id);

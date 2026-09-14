@@ -127,6 +127,7 @@ import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folde
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
 import { formatBytes } from "@/lib/bytes";
 import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 
 // A dragged library selection travels as a JSON array of asset ids, so a whole
 // marquee-selected collection can be dropped onto a folder at once.
@@ -1278,7 +1279,7 @@ export function LibraryCard({
               // scales with the tile, which runs from a panel column to a full row.
               font && "@container flex flex-col",
               selected || flash
-                ? "border-[#0a84ff] ring-2 ring-[#0a84ff]"
+                ? PICKED_RING
                 : font
                   ? "border-transparent"
                   : "border-border",

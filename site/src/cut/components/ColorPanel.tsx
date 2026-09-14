@@ -34,6 +34,7 @@ import { ValueSlider } from "@/cut/components/ValueSlider";
 import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { useClipSourceFrame } from "@/cut/components/usePlayheadFrame";
 import { cn } from "@/lib/utils";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 
@@ -313,7 +314,7 @@ function PresetTile({
       <span
         className={cn(
           "relative block aspect-square w-full overflow-hidden rounded-md bg-muted",
-          selected && "ring-2 ring-[#0a84ff] ring-offset-1 ring-offset-card"
+          selected && PICKED_RING
         )}
       >
         {src ? (

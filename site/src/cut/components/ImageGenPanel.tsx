@@ -7,7 +7,7 @@ import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { SectionTitle } from "@/cut/components/SectionTitle";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
-import { PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
+import { FOCUS_RING, PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
 import { collectRefs, mentionToken, useRefCandidates, useAssetDrop } from "@/cut/lib/assetRef";
 import { genPulseOverlay, useGenPulse } from "@/cut/lib/genNotify";
 import { useElapsed } from "@/cut/hooks/useElapsed";
@@ -247,7 +247,7 @@ function GeneratedTile({
       className={cn("group relative overflow-hidden rounded-lg", picked && PICKED_RING)}
     >
       <button
-        className="block w-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn("block w-full", FOCUS_RING)}
         title={asset.name}
         draggable
         onDragStart={(e) => {

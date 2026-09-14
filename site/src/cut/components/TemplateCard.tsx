@@ -37,6 +37,7 @@ import { EFFECT_LABELS, retimeOf, type SpeedNode } from "@donkeycut/effects-kit"
 import { SHAPE_LABELS } from "@/cut/lib/types";
 import type { LibraryTemplate, TemplateMedia } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 
 /** A template row card: name and parts, a "…" menu (Rename / extras / Delete)
  * and an optional "+" action, both revealed on hover. Rename swaps the name
@@ -157,7 +158,7 @@ export function TemplateCard({
       data-sel-id={selectId}
       className={cn(
         "group flex flex-col rounded-lg border bg-background px-2.5 py-1.5",
-        selected ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border",
+        selected ? PICKED_RING : "border-border",
         drag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         onRefDrop && refDrop.active && "border-primary bg-primary/10",
       )}

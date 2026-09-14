@@ -22,6 +22,7 @@ import {
 } from "@/cut/lib/voices";
 import { generateSubtitlesReadout } from "@/cut/lib/voiceover";
 import { cn } from "@/lib/utils";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 
 // Shared speech preferences (speaker voice, spoken language) for every surface
 // that generates audio (Audio tab, Subtitles tab, clip settings). Module-level
@@ -247,7 +248,7 @@ export function VoicePicker({
                         className={cn(
                           "block aspect-square overflow-hidden rounded-lg border bg-muted ring-offset-2 ring-offset-popover transition",
                           isSelected
-                            ? "border-transparent ring-2 ring-[#0a84ff]"
+                            ? cn("border-transparent", PICKED_RING, "ring-offset-2 ring-offset-popover")
                             : "border-input group-hover:border-transparent group-hover:ring-2 group-hover:ring-[#0a84ff]/40"
                         )}
                       >

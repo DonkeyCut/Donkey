@@ -22,6 +22,7 @@ import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
 
@@ -592,7 +593,7 @@ export function NotesView() {
                 onDragStart={(e) => onCardDragStart(e, n.id)}
                 className={cn(
                   "flex min-h-40 cursor-pointer flex-col gap-1.5 rounded-2xl p-4 text-left shadow-sm transition-transform hover:-translate-y-0.5",
-                  selected.has(n.id) && "ring-2 ring-[#0a84ff]",
+                  selected.has(n.id) && PICKED_RING,
                 )}
                 style={{ backgroundColor: noteColor(n.colorIndex).background, color: NOTE_INK }}
                 onClick={() => openNote(n)}

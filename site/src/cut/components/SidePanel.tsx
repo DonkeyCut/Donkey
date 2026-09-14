@@ -139,6 +139,7 @@ import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
 import { LibraryCard, ShelfBadge } from "./LibraryView";
 import { MediaCardShell } from "./MediaCardShell";
 import { lightboxItemFromAsset } from "@/cut/lib/lightbox";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 import { SubTabs } from "./SubTabs";
 
 // Drag a library clip onto a folder tile to file it (side panel, single card).
@@ -1451,7 +1452,7 @@ function AssetCard({
             data-drag-object
             className={cn(
               "relative aspect-square overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover:border-input",
-              (flash || selected) && "ring-2 ring-[#0a84ff] ring-offset-1"
+              (flash || selected) && PICKED_RING
             )}
           >
             {asset.type === "video" ? (

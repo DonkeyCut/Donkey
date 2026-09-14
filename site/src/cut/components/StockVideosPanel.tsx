@@ -11,6 +11,7 @@ import { useVideoGen } from "@/cut/lib/videoGen";
 import { aspectRatio, STOCK_CATEGORIES, stockTitle, type StockCategory, type StockVideo } from "@/cut/lib/stock";
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
 import { cn } from "@/lib/utils";
+import { FOCUS_RING, PICKED_RING } from "@/cut/lib/assetPick";
 import { CopyRefButton, RefHandlePill } from "./AssetRefs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -221,7 +222,7 @@ function StockTile({ item }: { item: StockVideo }) {
       }}
       className={cn(
         "group relative overflow-hidden rounded-lg",
-        flash && "ring-2 ring-[#0a84ff] ring-offset-1"
+        flash && PICKED_RING
       )}
       onMouseEnter={() => {
         const v = videoRef.current;
@@ -244,7 +245,7 @@ function StockTile({ item }: { item: StockVideo }) {
       }}
     >
       <button
-        className="block w-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn("block w-full", FOCUS_RING)}
         draggable
         onDragStart={(e) => {
           setRefDragData(e, refFromStockVideo(item));

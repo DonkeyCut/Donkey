@@ -92,6 +92,7 @@ import {
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
 import { formatBytes } from "@/lib/bytes";
 
@@ -730,7 +731,7 @@ export function ProjectsHome() {
           <div
             className={cn(
               "relative grid place-items-center overflow-hidden rounded-2xl border bg-muted transition-shadow group-hover:shadow-[0_6px_28px_rgba(0,0,0,0.12)]",
-              selected.has(p.id) ? "border-[#0a84ff] ring-2 ring-[#0a84ff]" : "border-border"
+              selected.has(p.id) ? PICKED_RING : "border-border"
             )}
             style={{ width: tileW, aspectRatio: `${frame.w} / ${frame.h}` }}
           >

@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 
 /**
  * A pickable square in a panel grid: a preview above, its name below. Clip
@@ -55,7 +56,7 @@ export function Tile({
       onBlur={() => onHover?.(false)}
       className={cn(
         "flex flex-col items-center gap-1.5 rounded-lg border border-border p-2.5 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-muted/60 hover:text-foreground",
-        selected && "bg-primary/10 text-foreground ring-2 ring-[#0a84ff] ring-offset-1 ring-offset-card",
+        selected && cn("bg-primary/10 text-foreground", PICKED_RING),
         className
       )}
       onClick={onClick}

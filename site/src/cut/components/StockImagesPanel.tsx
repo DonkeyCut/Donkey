@@ -11,6 +11,7 @@ import { useImageGen } from "@/cut/lib/imageGen";
 import { aspectRatio, STOCK_CATEGORIES, type StockCategory, type StockImage } from "@/cut/lib/stock";
 import { STOCK_IMAGES } from "@/cut/lib/stockManifest";
 import { cn } from "@/lib/utils";
+import { FOCUS_RING, PICKED_RING } from "@/cut/lib/assetPick";
 import { CopyRefButton, RefHandlePill } from "./AssetRefs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -163,11 +164,11 @@ function StockTile({ item }: { item: StockImage }) {
       }}
       className={cn(
         "group relative overflow-hidden rounded-lg",
-        flash && "ring-2 ring-[#0a84ff] ring-offset-1"
+        flash && PICKED_RING
       )}
     >
       <button
-        className="block w-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn("block w-full", FOCUS_RING)}
         draggable
         onDragStart={(e) => {
           setRefDragData(e, refFromStock(item));
