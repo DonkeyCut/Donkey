@@ -492,9 +492,11 @@ export function AiPanel({
   useEffect(() => {
     onStatusChange(projectId, chatStatus);
   }, [projectId, chatStatus, onStatusChange]);
-  // A cloud project's server threads merge into localStorage before the
-  // session reads it, so a project opened on another device resumes its chats.
-  const [chatsReady, setChatsReady] = useState(false);
+  // The owner's chat opens from this browser's storage at once; the cloud
+  // copy merges in behind it and a session reloads its thread when the merge
+  // writes it. A shared viewer has no thread of their own, so their view
+  // waits for the owner's threads to land before it can pick one.
+  const [chatsReady, setChatsReady] = useState(!readOnly);
   useEffect(() => {
     let alive = true;
     void ensureCloudThreads(projectId).then(() => {
