@@ -386,14 +386,7 @@ export function OutreachComposeDialog({
       <DialogContent className="grid max-h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>Email {target?.name}</DialogTitle>
-          <DialogDescription>
-            Goes to {target?.email}.{" "}
-            {selectedPromotion
-              ? "The promotion goes as its segment send would send it, counts in the promotion, and a later segment send skips this person."
-              : trackReplies
-                ? "Replies come back to your inbox and mark this row replied."
-                : "Replies come straight back to your own address; the Mark replied button files the row."}
-          </DialogDescription>
+          <DialogDescription>{target?.email}</DialogDescription>
         </DialogHeader>
 
         {/* The note and the person's past share the dialog; the tabs reset
