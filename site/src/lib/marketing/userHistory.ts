@@ -38,6 +38,8 @@ export type UserHistoryEmail = {
   id: string;
   kind: string;
   promotion: UserHistoryPromotion | null;
+  // The credit offer this email carried, when it carried one.
+  offerId: string | null;
   subject: string | null;
   sentAt: string;
   clickedAt: string | null;
@@ -134,13 +136,21 @@ export async function readUserHistory(userId: string): Promise<UserHistory> {
     })),
     emails: emails.flatMap((email) => {
       if (!email.sentAt) return [];
-      const payload = email.payload as { subject?: unknown } | null;
+      const payload = email.payload as { offerId?: unknown; subject?: unknown } | null;
       const subject = typeof payload?.subject === "string" ? payload.subject : null;
+      // A promotion's email and its offer share the promotion; a credit
+      // offer's email names the offer.
+      const offerId = email.promotionId
+        ? (offers.find((offer) => promotionIdOfOffer(offer) === email.promotionId)?.id ?? null)
+        : typeof payload?.offerId === "string"
+          ? payload.offerId
+          : null;
       return [
         {
           id: email.id,
           kind: email.kind,
           promotion: promotionOf(email.promotionId),
+          offerId,
           subject,
           sentAt: email.sentAt.toISOString(),
           clickedAt: iso(email.clickedAt),

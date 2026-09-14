@@ -6,7 +6,7 @@ import { formatBytes } from "@/lib/bytes";
 import { formatUsdPlain } from "@/lib/credits/format-usd";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { type OutreachRow } from "@/queries/outreach";
-import { useUserHistory, type UserHistory } from "@/queries/userHistory";
+import { useUserHistory, type UserHistory, type UserHistoryEmail } from "@/queries/userHistory";
 
 // What the site has already given and sent one person: paid money, storage
 // held, and one timeline of the offers that reached them, the credit that
@@ -53,12 +53,25 @@ type Event = {
 };
 
 // The three lists as one story, newest first. An offer says where it stands
-// — claimed, still open, or missed — and a grant what is left of it.
+// — claimed, still open, or missed — and a grant what is left of it. The
+// email that carried an offer is part of the offer's row: when it went out,
+// whether by hand, and whether the person clicked.
 function timeline(history: UserHistory, now: number): Event[] {
   const events: Event[] = [];
+  const emailsByOffer = new Map<string, UserHistoryEmail[]>();
+  for (const email of history.emails) {
+    if (!email.offerId) continue;
+    emailsByOffer.set(email.offerId, [...(emailsByOffer.get(email.offerId) ?? []), email]);
+  }
   for (const offer of history.offers) {
     const notes: string[] = [];
-    if (offer.emailSentAt) notes.push(`emailed ${day(offer.emailSentAt)}`);
+    const carriers = emailsByOffer.get(offer.id) ?? [];
+    const sentAt = carriers[0]?.sentAt ?? offer.emailSentAt;
+    if (sentAt) {
+      notes.push(`emailed ${day(sentAt)}${carriers.some((email) => email.kind === "promotion-hand") ? " by hand" : ""}`);
+    }
+    const clickedAt = carriers.find((email) => email.clickedAt)?.clickedAt;
+    if (clickedAt) notes.push(`clicked ${day(clickedAt)}`);
     let tone: Event["tone"] = "open";
     if (offer.claimedAt) {
       notes.push(`claimed ${day(offer.claimedAt)}`);
@@ -97,6 +110,7 @@ function timeline(history: UserHistory, now: number): Event[] {
     });
   }
   for (const email of history.emails) {
+    if (email.offerId && history.offers.some((offer) => offer.id === email.offerId)) continue;
     const subject = email.promotion?.subject ?? email.subject;
     events.push({
       at: email.sentAt,
