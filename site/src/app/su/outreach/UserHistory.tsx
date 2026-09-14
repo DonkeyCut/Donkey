@@ -149,7 +149,7 @@ export function UserHistoryPanel({ target }: { target: OutreachRow }) {
   const events = history.data ? timeline(history.data, now) : [];
 
   return (
-    <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1">
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto pr-1">
       <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
         <Fact label="Paid all-time" value={rolled?.fundedMicros ? dollars(rolled.fundedMicros) : "$0"} />
         <Fact label="Balance" value={formatUsdPlain(target.balance)} />
