@@ -850,6 +850,16 @@ function OverlayItem({
       const c = Math.round(Math.min(4, Math.max(0.25, v)) * 1000) / 1000;
       return Math.abs(c - 1) < 0.005 ? undefined : c;
     };
+    const stickerSize = (v: number) => Math.min(1.5, Math.max(0.02, v));
+    // A sticker's resting height as a frame fraction: the one it stores, or
+    // the grabbed box laid out under the source's own aspect. A side grip
+    // pins it so the other axis holds while one stretches.
+    const stickerH = (m: Overlay): number | undefined => {
+      if (m.kind !== "sticker") return undefined;
+      if (m.h) return m.h;
+      const laid = m.id === o.id ? el.offsetHeight / stageHeight : 0;
+      return laid > 0 ? laid : undefined;
+    };
     const scaled = (m: Overlay, k: number): Partial<Overlay> => {
       if (isTextOverlay(m)) {
         // A side grip pulls one axis of the glyph stretch; a corner scales
@@ -867,7 +877,14 @@ function OverlayItem({
         if (axis.x === 0) return h;
         return { ...w, ...h };
       }
-      if (m.kind === "sticker") return { w: Math.min(1.5, Math.max(0.02, m.w * k)) };
+      if (m.kind === "sticker") {
+        // A side grip stretches its own axis and pins the other; a corner
+        // scales the whole picture, the stored height riding along.
+        const h = stickerH(m);
+        if (axis.y === 0) return { w: stickerSize(m.w * k), ...(h ? { h } : {}) };
+        if (axis.x === 0) return h ? { h: stickerSize(h * k) } : { w: stickerSize(m.w * k) };
+        return { w: stickerSize(m.w * k), ...(m.h ? { h: stickerSize(m.h * k) } : {}) };
+      }
       return {};
     };
     // How much the grabbed element actually grew per axis once its size
@@ -890,8 +907,11 @@ function OverlayItem({
       if (self.kind === "shape")
         return { kx: (p.w ?? self.w) / self.w, ky: (p.h ?? self.h) / self.h };
       if (self.kind === "sticker") {
-        const k = (p.w ?? self.w) / self.w;
-        return { kx: k, ky: k };
+        const kx = (p.w ?? self.w) / self.w;
+        const h0 = stickerH(self);
+        // Height follows the width whenever it is not stored on its own.
+        const ky = p.h !== undefined && h0 ? p.h / h0 : axis.x === 0 ? 1 : kx;
+        return { kx, ky };
       }
       return { kx: 1, ky: 1 };
     };
@@ -1112,7 +1132,7 @@ function OverlayItem({
         ) : o.kind === "shape" ? (
           <ShapeView shape={o} stageWidth={stageWidth} stageHeight={stageHeight} scale={scale} />
         ) : o.kind === "sticker" ? (
-          <StickerView sticker={o} stageWidth={stageWidth} t={t} />
+          <StickerView sticker={o} stageWidth={stageWidth} stageHeight={stageHeight} t={t} />
         ) : null}
       </div>
       {/* The twin can't mount until its size is read, so the in-box chrome
@@ -2130,18 +2150,30 @@ function ShapeView({
 function StickerView({
   sticker: o,
   stageWidth,
+  stageHeight,
   t,
 }: {
   sticker: StickerOverlay;
   stageWidth: number;
+  stageHeight: number;
   t: number;
 }) {
   const asset = useEditor((s) =>
     o.assetId ? s.assets.find((a) => a.id === o.assetId) : undefined
   );
   if (!asset) return <span className="block size-8 rounded bg-white/20" />;
+  // A stretched sticker draws at its stored height; otherwise the source's
+  // own aspect sets it.
+  const height = o.h ? o.h * stageHeight : undefined;
   if (o.lottie) {
-    return <LottieView asset={asset} width={o.w * stageWidth} tLocal={Math.max(0, t - o.start)} />;
+    return (
+      <LottieView
+        asset={asset}
+        width={o.w * stageWidth}
+        height={height}
+        tLocal={Math.max(0, t - o.start)}
+      />
+    );
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- project media blob/engine URL
@@ -2150,7 +2182,7 @@ function StickerView({
       alt={asset.name}
       draggable={false}
       className="block max-w-none select-none"
-      style={{ width: o.w * stageWidth, height: "auto" }}
+      style={{ width: o.w * stageWidth, height: height ?? "auto" }}
     />
   );
 }
@@ -2161,10 +2193,13 @@ function StickerView({
 function LottieView({
   asset,
   width,
+  height,
   tLocal,
 }: {
   asset: { id: string; url: string; fileName: string; name: string };
   width: number;
+  /** An explicit height; absent draws under the animation's own aspect. */
+  height?: number;
   tLocal: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -2211,7 +2246,7 @@ function LottieView({
     <canvas
       ref={canvasRef}
       className="block max-w-none select-none"
-      style={{ width, height: width / aspect }}
+      style={{ width, height: height ?? width / aspect }}
     />
   );
 }

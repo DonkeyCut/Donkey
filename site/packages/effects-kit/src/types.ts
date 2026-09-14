@@ -124,14 +124,16 @@ export interface ShapeOverlay extends OverlayBase {
   stroke?: { color: string; width: number }; // outline, width px at 1080 short side
 }
 
-/** An image sticker. Height follows the source's own aspect, so only the
- * width is stored. */
+/** An image sticker. Height follows the source's own aspect until a side
+ * grip stretches it, which stores an explicit `h`. */
 export interface StickerOverlay extends OverlayBase {
   kind: "sticker";
   /** Host media asset holding the sticker image (PNG/JPG/SVG, or a Lottie
    * JSON document when `lottie` is set). */
   assetId?: string;
   w: number; // width, fraction of frame width
+  /** Height, fraction of frame height; absent means the source's own aspect. */
+  h?: number;
   /** The asset is a Lottie animation; it plays on a loop for the element's
    * whole duration, frame-seeked from timeline time. */
   lottie?: boolean;

@@ -39,7 +39,7 @@ export const ELEMENTS_TOOLS = [
   {
     name: "add_sticker",
     description:
-      "Add a sticker overlay from a project image asset (asset ids come from `media`; sticker uploads carry origin \"sticker\"). Width is a frame-width fraction; height follows the source's own aspect.",
+      "Add a sticker overlay from a project image asset (asset ids come from `media`; sticker uploads carry origin \"sticker\"). Width is a frame-width fraction; height follows the source's own aspect unless h sets it.",
     inputSchema: obj({
       asset_id: str("Project image asset id"),
       start: num("Start time s (default: playhead)"),
@@ -47,6 +47,7 @@ export const ELEMENTS_TOOLS = [
       x: num("Center x 0..1 (default 0.5)"),
       y: num("Center y 0..1 (default 0.5)"),
       w: num("Width, fraction of frame width (default 0.25)"),
+      h: num("Height, fraction of frame height; omit to keep the source's aspect"),
       rotation: num("Degrees clockwise, -180..180"),
       opacity: num("Whole-element opacity 0..1"),
       lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
@@ -63,6 +64,7 @@ export const ELEMENTS_TOOLS = [
       x: num("Center x 0..1 (default 0.5)"),
       y: num("Center y 0..1 (default 0.5)"),
       w: num("Width, fraction of frame width (default 0.25)"),
+      h: num("Height, fraction of frame height; omit to keep the source's aspect"),
       lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }, ["idea"]),
   },

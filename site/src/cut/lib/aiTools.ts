@@ -4933,5 +4933,8 @@ function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "
   }
 
   if (isNum(input.w)) patch.w = clamp(input.w, 0.02, 1.5);
+  // A sticker's height is its own once set; 0 hands it back to the source's
+  // aspect.
+  if (isNum(input.h)) patch.h = input.h > 0 ? clamp(input.h, 0.02, 1.5) : undefined;
   return patch;
 }

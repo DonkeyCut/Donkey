@@ -701,7 +701,7 @@ function describeOverlay(o: Overlay) {
     };
   }
   if (o.kind === "sticker") {
-    return { ...base, assetId: o.assetId, w: r(o.w) };
+    return { ...base, assetId: o.assetId, w: r(o.w), ...(o.h ? { h: r(o.h) } : {}) };
   }
   if (o.kind === "effect") {
     return {

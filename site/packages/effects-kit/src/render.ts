@@ -226,7 +226,7 @@ async function paintSticker(
     const handle = await env.resolveLottie?.(o.assetId);
     if (!handle) return;
     const aspect = handle.width > 0 && handle.height > 0 ? handle.width / handle.height : 1;
-    const h = w / aspect;
+    const h = stickerHeight(o, frame, w, aspect);
     ctx.drawImage(handle.seek(frame.t ?? 0), cx - w / 2, cy - h / 2, w, h);
     return;
   }
@@ -234,8 +234,14 @@ async function paintSticker(
   const img = await env.resolveAsset(o.assetId);
   if (!img) return;
   const aspect = img.width > 0 && img.height > 0 ? img.width / img.height : 1;
-  const h = w / aspect;
+  const h = stickerHeight(o, frame, w, aspect);
   ctx.drawImage(img.source, cx - w / 2, cy - h / 2, w, h);
+}
+
+/** A sticker's painted height in px: its stored height when a side grip set
+ * one, otherwise the width under the source's own aspect. */
+function stickerHeight(o: StickerOverlay, frame: PaintFrame, w: number, aspect: number): number {
+  return o.h ? Math.max(1, o.h * frame.height) : w / aspect;
 }
 
 /** The CSS font shorthand a text element paints (and loads faces) with. */
@@ -764,11 +770,11 @@ export async function measureElementBounds(
     if (s.lottie) {
       const handle = s.assetId ? await env.resolveLottie?.(s.assetId) : null;
       const aspect = handle && handle.width > 0 ? handle.width / handle.height : 1;
-      return { cx, cy, w, h: w / aspect };
+      return { cx, cy, w, h: stickerHeight(s, frame, w, aspect) };
     }
     const img = s.assetId && env.resolveAsset ? await env.resolveAsset(s.assetId) : null;
     const aspect = img && img.width > 0 && img.height > 0 ? img.width / img.height : 1;
-    return { cx, cy, w, h: w / aspect };
+    return { cx, cy, w, h: stickerHeight(s, frame, w, aspect) };
   }
   const o = overlay as TextOverlay;
   const fpx = o.size * frame.scale;

@@ -69,7 +69,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_overlay",
     description:
-      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/fill_opacity/radius/stroke; stickers take w. Every kind takes timing, position, rotation, opacity, hidden. This is the tool for 'make this text better' requests too.",
+      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/fill_opacity/radius/stroke; stickers take w/h. Every kind takes timing, position, rotation, opacity, hidden. This is the tool for 'make this text better' requests too.",
     inputSchema: obj({
       id: str("Overlay element id"),
       text: str("New text (titles)"),
@@ -93,7 +93,7 @@ export const INSPECTOR_TOOLS = [
       shadow: bool("Drop shadow (titles)"),
       plate: bool("Backdrop plate (titles)"),
       w: num("Width, fraction of frame width (shapes/stickers)"),
-      h: num("Height, fraction of frame height (shapes)"),
+      h: num("Height, fraction of frame height (shapes/stickers; a sticker's 0 returns it to the source's aspect)"),
       fill: str("Fill color (shapes)"),
       fill_opacity: num("Fill opacity 0..1 (rect/ellipse)"),
       radius: num("Rect corner radius, px at 1080 short side"),
