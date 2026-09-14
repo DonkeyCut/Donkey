@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { commitRow, landOnRow, NEW_ROW_PX, partAround, resolveRow } from "./laneTracks";
+import { commitRow, groupTrimEdges, landOnRow, NEW_ROW_PX, partAround, resolveRow } from "./laneTracks";
 import { clipLen, useEditor } from "./store";
 import { emptySubtitles } from "./types";
 import type { AudioClip, VideoClip } from "./types";
@@ -249,5 +249,27 @@ describe("a cross-row move keeps the lane sound", () => {
     expect(clipById(mover.id).track).toBe(1);
     expect(clipById(mover.id).start).toBeCloseTo(1.2);
     expect(clipById(resident.id).start).toBeCloseTo(3.2);
+  });
+});
+
+describe("groupTrimEdges", () => {
+  // Three right edges at 10, 12 and 8, each with its own room.
+  const edges = [
+    { at: 10, lo: 6, hi: 14 },
+    { at: 12, lo: 9, hi: 13 },
+    { at: 8, lo: 4, hi: 20 },
+  ];
+
+  test("every edge travels with the grabbed one", () => {
+    expect(groupTrimEdges(edges, 0, 2)).toEqual({ travel: 2, at: [12, 13, 10] });
+  });
+
+  test("the grabbed edge's own room holds the whole travel", () => {
+    expect(groupTrimEdges(edges, 0, 9)).toEqual({ travel: 4, at: [14, 13, 12] });
+    expect(groupTrimEdges(edges, 0, -9)).toEqual({ travel: -4, at: [6, 9, 4] });
+  });
+
+  test("a member out of room stops at its wall while the rest keep going", () => {
+    expect(groupTrimEdges(edges, 2, 5)).toEqual({ travel: 5, at: [14, 13, 13] });
   });
 });

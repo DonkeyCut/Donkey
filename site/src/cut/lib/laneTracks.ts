@@ -560,6 +560,41 @@ const memberOf = (s: S, sel: NonNullable<Selection>): GroupMember | null => {
   return null;
 };
 
+/** The set a grab on `id` carries when the item sits in a multi-selection:
+ * every selected lane item, and the unselected peers of any grouped overlay
+ * among them, so a group never tears apart. Null when the grab is on its
+ * own. */
+function selectedMembers(
+  s: S,
+  kind: LaneKind,
+  id: string
+): { grabbed: GroupMember; members: GroupMember[] } | null {
+  const selKind = laneSelectionKind(kind);
+  if (
+    s.multiSelection.length < 2 ||
+    !s.multiSelection.some((m) => m?.kind === selKind && m.id === id)
+  )
+    return null;
+  const seen = new Set<string>();
+  const members: GroupMember[] = [];
+  const admit = (m: GroupMember | null) => {
+    if (!m) return;
+    const key = `${m.kind}:${m.id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    members.push(m);
+  };
+  for (const sel of s.multiSelection) if (sel) admit(memberOf(s, sel));
+  for (const m of [...members]) {
+    const gid = m.kind === "overlay" ? (m.raw as Overlay).groupId : undefined;
+    if (!gid) continue;
+    for (const peer of s.overlays.filter((o) => o.groupId === gid))
+      admit(memberOf(s, { kind: "overlay", id: peer.id }));
+  }
+  const grabbed = members.find((m) => m.kind === kind && m.id === id) ?? members.find((m) => m.id === id);
+  return grabbed && members.length > 1 ? { grabbed, members } : null;
+}
+
 /**
  * Drag a whole multi-selection as one rigid set: every member shifts by the
  * same delta, so the arrangement — a title over its clip, a sound effect on
@@ -846,34 +881,11 @@ export function startLaneMove(e: React.PointerEvent, kind: LaneKind, id: string,
     return;
   }
   // A grab on one member of a multi-selection drags the whole selection as a
-  // rigid set. Grouped overlays ride too: unselected peers sharing a groupId
-  // join the set, so a group never tears apart under a multi-drag.
-  const selKind = laneSelectionKind(kind);
-  if (
-    s.multiSelection.length > 1 &&
-    s.multiSelection.some((m) => m?.kind === selKind && m.id === id)
-  ) {
-    const seen = new Set<string>();
-    const members: GroupMember[] = [];
-    const admit = (m: GroupMember | null) => {
-      if (!m) return;
-      const key = `${m.kind}:${m.id}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      members.push(m);
-    };
-    for (const sel of s.multiSelection) if (sel) admit(memberOf(s, sel));
-    for (const m of [...members]) {
-      const gid = m.kind === "overlay" ? (m.raw as Overlay).groupId : undefined;
-      if (!gid) continue;
-      for (const peer of s.overlays.filter((o) => o.groupId === gid))
-        admit(memberOf(s, { kind: "overlay", id: peer.id }));
-    }
-    const grabbed = members.find((m) => m.kind === kind && m.id === id) ?? members.find((m) => m.id === id);
-    if (grabbed && members.length > 1) {
-      startGroupMove(e, grabbed, members, ui);
-      return;
-    }
+  // rigid set.
+  const group = selectedMembers(s, kind, id);
+  if (group) {
+    startGroupMove(e, group.grabbed, group.members, ui);
+    return;
   }
   const ad = ADAPTERS[kind];
   const raw0 = ad.raws(s).find((r) => ad.view(r).id === id);
@@ -1182,6 +1194,13 @@ export function startLaneTrim(
   const bar = (e.currentTarget as HTMLElement).parentElement;
   const s = useEditor.getState();
   if (s.readOnly) return;
+  // A handle on one member of a multi-selection trims the same edge of
+  // every member together.
+  const group = selectedMembers(s, kind, id);
+  if (group) {
+    startGroupTrim(e, group.grabbed, group.members, side, ui);
+    return;
+  }
   const ad = ADAPTERS[kind];
   const raw0 = ad.raws(s).find((r) => ad.view(r).id === id);
   if (!raw0) return;
@@ -1440,6 +1459,104 @@ export function startLaneTrim(
         if (p >= 1) settle();
       };
       snapBack = { raf: requestAnimationFrame(step), finish };
+    },
+  });
+}
+
+/** One edge of every member of a group trim. The grabbed edge's travel,
+ * held within its own room, is the travel every member's edge takes; a
+ * member with less room stops at its own wall while the rest keep going, so
+ * the arrangement holds wherever it can. */
+export function groupTrimEdges(
+  edges: { at: number; lo: number; hi: number }[],
+  grabbed: number,
+  travel: number
+): { travel: number; at: number[] } {
+  const clamp = (e: { at: number; lo: number; hi: number }, t: number) =>
+    Math.min(e.hi, Math.max(e.lo, e.at + t));
+  const g = edges[grabbed];
+  const held = clamp(g, travel) - g.at;
+  return { travel: held, at: edges.map((e) => clamp(e, held)) };
+}
+
+/**
+ * Trim the same edge of a whole multi-selection with one handle: every
+ * member's edge moves with the grabbed one, snapping where the grabbed edge
+ * snaps. Each member keeps to its own room — the item's minimum length, its
+ * source bound, and the nearest item on its lane — so the document stays
+ * overlap-free at every instant and nothing else moves. One undo step.
+ */
+function startGroupTrim(
+  e: React.PointerEvent,
+  grabbed: GroupMember,
+  members: GroupMember[],
+  side: "l" | "r",
+  ui: LaneTrimUI
+) {
+  const s = useEditor.getState();
+  // The grab keeps the multi-selection and makes the grabbed item primary.
+  useEditor.setState({
+    selection: { kind: laneSelectionKind(grabbed.kind), id: grabbed.id },
+    selectedKey: null,
+  });
+  if (s.playing) s.setPlaying(false);
+  s.pushHistory();
+  const memberKeys = new Set(members.map((m) => `${m.kind}:${m.id}`));
+  const targets = snapTargetsExcluding(s, memberKeys, true);
+  const tol = SNAP_PX / ui.pps;
+  // Each member's edge and its room: the far edge less the minimum length
+  // on one side, the source bound or the nearest item on the lane on the
+  // other. Members count as neighbors too, since a trim leaves every other
+  // edge where it is.
+  const edges = members.map((m) => {
+    const ad = ADAPTERS[m.kind];
+    const lane = ad
+      .raws(s)
+      .map((r) => ad.view(r))
+      .filter((v) => v.id !== m.id && v.lane === m.lane);
+    const end = m.start + m.len;
+    if (side === "l") {
+      const prevEnd = lane
+        .filter((v) => v.start + v.len <= m.start + 1e-6)
+        .reduce((x, v) => Math.max(x, v.start + v.len), 0);
+      return { at: m.start, lo: Math.max(prevEnd, ad.leftFloor(s, m.raw)), hi: end - ad.minLen };
+    }
+    const nextStart = lane
+      .filter((v) => v.start >= end - 1e-6)
+      .reduce((x, v) => Math.min(x, v.start), Infinity);
+    return { at: end, lo: m.start + ad.minLen, hi: Math.min(nextStart, m.start + ad.maxLen(s, m.raw)) };
+  });
+  const gi = members.indexOf(grabbed);
+  const clips0 = members.some((m) => m.kind === "video") ? s.clips : null;
+  const apply = (at: number[]) => {
+    const buckets = new Map<LaneKind, Patch<LaneRaw>[]>();
+    members.forEach((m, i) => {
+      const ad = ADAPTERS[m.kind];
+      const list = buckets.get(m.kind) ?? [];
+      list.push(side === "l" ? ad.trimLeftPatch(m.raw, at[i]) : ad.trimRightPatch(m.raw, at[i]));
+      buckets.set(m.kind, list);
+    });
+    for (const [k, patches] of buckets) ADAPTERS[k].apply(patches);
+  };
+  startDrag(e, {
+    onMove: (dx, _dy, ev) => {
+      settleSnapBack();
+      const g = edges[gi];
+      let { travel, at } = groupTrimEdges(edges, gi, dx / ui.pps);
+      const hit = snapHeldOff(ev) ? null : nearestSnap(g.at + travel, targets, tol);
+      if (hit !== null && hit >= g.lo && hit <= g.hi) {
+        ({ travel, at } = groupTrimEdges(edges, gi, hit - g.at));
+        ui.onSnap(side === "l" ? leftGuide(hit, ui.pps) : rightGuide(hit, ui.pps));
+      } else ui.onSnap(null);
+      apply(at);
+    },
+    onUp: () => {
+      ui.onSnap(null);
+      // Transition bars re-seat onto the cuts the trim moved.
+      if (!clips0) return;
+      const st = useEditor.getState();
+      if (st.transitions.length)
+        useEditor.setState({ transitions: reanchorTransitions(clips0, st.clips, st.transitions) });
     },
   });
 }
