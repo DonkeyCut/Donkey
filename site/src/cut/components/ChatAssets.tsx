@@ -22,6 +22,7 @@ import { usePreviewAudio } from "@/cut/lib/previewAudio";
 import { useEditor } from "@/cut/lib/store";
 import { formatTime } from "@/cut/lib/time";
 import type { MediaAsset } from "@/cut/lib/types";
+import { FOCUS_RING, PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
 import { cn } from "@/lib/utils";
 import { AudioRow } from "./AudioPanel";
 import { DocText, useDocText } from "./DocText";
@@ -256,11 +257,23 @@ function MediaCard({ item, asset }: ChatCardProps) {
   const ratio =
     asset?.width && asset?.height ? asset.width / asset.height : item.kind === "image" ? 1 : 16 / 10;
   const width = Math.round(Math.min(248, Math.max(132, 210 * ratio)));
+  const { picked, pick } = useAssetPick(item.id);
   return (
     <div
       ref={tileRef}
-      className="ai-chat-asset group/card relative shrink-0 cursor-grab overflow-hidden rounded-xl border border-border bg-muted transition-colors hover:border-input"
+      className={cn(
+        "ai-chat-asset group/card relative shrink-0 cursor-grab overflow-hidden rounded-xl border border-border bg-muted transition-colors hover:border-input",
+        FOCUS_RING,
+        picked && PICKED_RING,
+      )}
       style={{ width, aspectRatio: ratio }}
+      // A click picks the card, the ring every panel tile wears; focusable,
+      // so a card clicked a moment ago still answers ⌘C / Ctrl+C once the
+      // pointer has moved on.
+      tabIndex={0}
+      onClick={(e) => {
+        if (!(e.target as Element).closest("button")) pick();
+      }}
       title={`${ref.name} — double-click to expand · drag to the timeline`}
       {...dragProps(item, asset)}
       onDoubleClick={() => expandRef(item, asset)}
@@ -310,8 +323,16 @@ function AudioCard({ item, asset }: ChatCardProps) {
     const url = ref.url;
     return () => usePreviewAudio.getState().stop(url);
   }, [ref.url]);
+  const { picked, pick } = useAssetPick(item.id);
   return (
-    <div className="ai-chat-asset w-full" onDoubleClick={() => expandRef(item, asset)}>
+    <div
+      className={cn("ai-chat-asset w-full rounded-[7px]", FOCUS_RING, picked && PICKED_RING)}
+      tabIndex={0}
+      onClick={(e) => {
+        if (!(e.target as Element).closest("button")) pick();
+      }}
+      onDoubleClick={() => expandRef(item, asset)}
+    >
       <AudioRow
         name={ref.name}
         duration={ref.duration ?? 0}
@@ -338,9 +359,18 @@ const DOC_PREVIEW_CHARS = 1200;
 function DocCard({ item, asset }: ChatCardProps) {
   const { text, failed } = useDocText(item.url);
   const clipped = text !== null && text.length > DOC_PREVIEW_CHARS;
+  const { picked, pick } = useAssetPick(item.id);
   return (
     <div
-      className="ai-chat-asset group/card relative w-full max-w-[280px] cursor-default overflow-hidden rounded-xl border border-border bg-background transition-colors hover:border-input"
+      className={cn(
+        "ai-chat-asset group/card relative w-full max-w-[280px] cursor-default overflow-hidden rounded-xl border border-border bg-background transition-colors hover:border-input",
+        FOCUS_RING,
+        picked && PICKED_RING,
+      )}
+      tabIndex={0}
+      onClick={(e) => {
+        if (!(e.target as Element).closest("button")) pick();
+      }}
       title={`${item.name} — double-click to expand`}
       {...dragProps(item, asset)}
       onDoubleClick={() => expandRef(item, asset)}

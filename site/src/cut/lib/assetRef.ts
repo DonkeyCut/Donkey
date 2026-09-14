@@ -459,6 +459,13 @@ export const EMPTY_LIBRARY: LibraryData = { assets: [], folders: [], templates: 
  * typeface file in a prompt, so they stay out of the handle numbering. Baked
  * mattes (origin "matte") are a cutout's internals the same way — numbering
  * them would shift every later @v handle when a bake lands. */
+/** The project assets kept out of the candidates — chat-owned files and
+ * mattes — as refs, so a token copied off one of their tiles still resolves
+ * where it is pasted. */
+export function unlistedRefs(assets: MediaAsset[]): AssetRef[] {
+  return assets.filter((a) => a.origin === "chat" || a.origin === "matte").map(refFromAsset);
+}
+
 export function projectRefs(assets: MediaAsset[]): AssetRef[] {
   const counters = { v: 0, i: 0, a: 0 };
   return assets
@@ -1033,7 +1040,9 @@ export function collectRefs(
   chips: AssetRef[],
   candidates: AssetRef[]
 ): { refs: AssetRef[]; text: string } {
-  const parsed = parseMentions(text, candidates);
+  // An attached ref resolves its own token: a chat-owned file is never a
+  // candidate, and rides as a chip from the paste that named it.
+  const parsed = parseMentions(text, [...chips, ...candidates]);
   // Re-resolve each ref's short handle from the live candidates — chips from
   // drags predate handle assignment, and the model reads handles to talk
   // about attachments ("v2") — and its URL from the live asset: a chip

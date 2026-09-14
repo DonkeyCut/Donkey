@@ -6,9 +6,11 @@ import {
   highlightMentions,
   liveRefUrl,
   mentionToken,
+  parseMentions,
   refToken,
   sameRef,
   splitMentions,
+  unlistedRefs,
   type AssetRef,
 } from "@/cut/lib/assetRef";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
@@ -1157,10 +1159,14 @@ export function MentionTextarea({
   // own — no picker step. One shot per mention; deleting the token and
   // re-typing it pins again at the playhead's new spot.
   const autoPinned = useRef(new Set<string>());
+  // Tokens resolve against the attachments first, then the candidates: a
+  // chip attached from a paste or a drop pills its token even when the file
+  // is one the picker never lists.
+  const pool = useMemo(() => [...(attachedRefs ?? []), ...candidates], [attachedRefs, candidates]);
   useEffect(() => {
     if (!onUpsertRef) return;
     const present = new Set<string>();
-    for (const seg of highlightMentions(value, candidates)) {
+    for (const seg of highlightMentions(value, pool)) {
       const ref = seg.ref;
       if (!ref || (ref.kind !== "video" && ref.kind !== "audio")) continue;
       const key = `${ref.scope}:${ref.id}`;
@@ -1173,20 +1179,20 @@ export function MentionTextarea({
       if (at !== null) onUpsertRef({ ...(attached ?? ref), t: at });
     }
     for (const k of [...autoPinned.current]) if (!present.has(k)) autoPinned.current.delete(k);
-  }, [value, candidates, attachedRefs, onUpsertRef]);
+  }, [value, pool, attachedRefs, onUpsertRef]);
 
   // Mirror segments with their character offsets, so a pill can tell when
   // the caret sits inside its token.
   const mirrorSegs = useMemo(
     () =>
-      highlightMentions(value, candidates).reduce<
+      highlightMentions(value, pool).reduce<
         { text: string; ref: AssetRef | null; start: number }[]
       >((acc, seg) => {
         const prev = acc[acc.length - 1];
         acc.push({ ...seg, start: prev ? prev.start + prev.text.length : 0 });
         return acc;
       }, []),
-    [value, candidates]
+    [value, pool]
   );
 
   // A pill cover is one box, so its token must move between lines whole —
@@ -1426,11 +1432,19 @@ export function MentionTextarea({
               return;
             }
           }
+          const text = e.clipboardData.getData("text/plain");
+          if (!text) return;
+          // A token copied off a tile the picker never lists — a file the
+          // chat made — attaches the file it names, and the chip pills it.
+          if (onUpsertRef) {
+            const hidden = unlistedRefs(useEditor.getState().assets);
+            for (const ref of parseMentions(text, [...pool, ...hidden]).refs) {
+              if (!pool.some((c) => sameRef(c, ref))) onUpsertRef(ref);
+            }
+          }
           // A token pasted flush against a neighbor never resolves — the
           // quote swallows the boundary. Restore the missing space on
           // whichever side needs one.
-          const text = e.clipboardData.getData("text/plain");
-          if (!text) return;
           const el = e.currentTarget;
           const s = el.selectionStart ?? 0;
           const sEnd = el.selectionEnd ?? s;

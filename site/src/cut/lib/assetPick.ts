@@ -35,6 +35,10 @@ export function useAssetPick(assetId: string): { picked: boolean; pick: () => vo
 
 /** The ring a picked tile wears. One class string so the tabs cannot drift. */
 export const PICKED_RING = "ring-2 ring-[#0a84ff] ring-offset-1 ring-offset-card";
+/** The same ring on keyboard focus, for a tile that is its own focus target.
+ * Spelled out so the classes are there for the build to see. */
+export const FOCUS_RING =
+  "outline-none focus-visible:ring-2 focus-visible:ring-[#0a84ff] focus-visible:ring-offset-1 focus-visible:ring-offset-card";
 
 /** Arrow-key navigation across a grid of pickable tiles. Mark each tile's
  * button with `data-pick-id` and put this handler on the grid container: while
