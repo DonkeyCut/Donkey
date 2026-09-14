@@ -24,8 +24,18 @@ nonisolated public enum CameraAvailability: Equatable, Sendable {
 @Observable
 public final class CameraModel {
     public internal(set) var availability: CameraAvailability = .idle
-    public private(set) var facing: CameraFacing = .front
-    public private(set) var settings = CameraSettings()
+    /// The camera and capture settings persist across launches: pick 4K on
+    /// the back camera once and every later session opens that way.
+    public private(set) var facing: CameraFacing = .front {
+        didSet {
+            if facing != oldValue { defaults.set(facing.rawValue, forKey: Self.facingKey) }
+        }
+    }
+    public private(set) var settings = CameraSettings() {
+        didSet {
+            if settings != oldValue { persistSettings() }
+        }
+    }
     /// What the device could honor for the current request, shown in the badge.
     public private(set) var effectiveSettings = CameraSettings()
     public internal(set) var zoomMapping = ZoomMapping(wideBase: 1, minDisplay: 1, maxDisplay: 1)
@@ -58,6 +68,8 @@ public final class CameraModel {
     private let defaults: UserDefaults
     private static let teleprompterKey = "teleprompterSettings"
     private static let safeZonesKey = "showsSafeZones"
+    private static let settingsKey = "cameraSettings"
+    private static let facingKey = "cameraFacing"
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -66,10 +78,22 @@ public final class CameraModel {
             teleprompter.settings = settings
         }
         showsSafeZones = defaults.bool(forKey: Self.safeZonesKey)
+        if let data = defaults.data(forKey: Self.settingsKey),
+           let settings = try? JSONDecoder().decode(CameraSettings.self, from: data) {
+            self.settings = settings
+        }
+        if let raw = defaults.string(forKey: Self.facingKey), let facing = CameraFacing(rawValue: raw) {
+            self.facing = facing
+        }
     }
 
     public func toggleSafeZones() {
         showsSafeZones.toggle()
+    }
+
+    private func persistSettings() {
+        guard let data = try? JSONEncoder().encode(settings) else { return }
+        defaults.set(data, forKey: Self.settingsKey)
     }
 
     private func persistTeleprompterSettings() {

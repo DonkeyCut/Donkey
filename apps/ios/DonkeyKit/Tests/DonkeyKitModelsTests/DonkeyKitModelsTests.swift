@@ -91,6 +91,23 @@ import Testing
         #expect(camera.showsSafeZones)
         #expect(CameraModel(defaults: defaults).showsSafeZones)
     }
+
+    @Test func captureSettingsAndCameraAreRemembered() {
+        let defaults = UserDefaults(suiteName: "capture-\(UUID())")!
+        let camera = CameraModel(defaults: defaults)
+        #expect(camera.settings == CameraSettings())
+        #expect(camera.facing == .front)
+        camera.update {
+            $0.resolution = .uhd
+            $0.frameRate = .fps60
+            $0.colorMode = .hdr
+        }
+        camera.flip()
+
+        let relaunched = CameraModel(defaults: defaults)
+        #expect(relaunched.settings == CameraSettings(resolution: .uhd, frameRate: .fps60, colorMode: .hdr))
+        #expect(relaunched.facing == .back)
+    }
 }
 
 @Suite struct ZoomTests {
