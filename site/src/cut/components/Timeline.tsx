@@ -59,7 +59,7 @@ import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
-import { assetIsSilent, emptySubtitles, IMAGE_CLIP_SECONDS, isAudioTransition, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
+import { assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, isTextOverlay, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox } from "@donkeycut/effects-kit";
@@ -5711,7 +5711,12 @@ function TextBar({
         onMenu({ x: e.clientX, y: e.clientY, id: o.id });
       }}
     >
-      <span className="pointer-events-none flex min-w-0 items-center truncate px-2 text-[10.5px] font-medium text-white">
+      <span
+        className="pointer-events-none flex min-w-0 items-center truncate px-2 text-[10.5px] font-medium text-white"
+        // A title's chip is set in its own typeface and color, so the row reads
+        // like the picture. The other text properties stay the bar's own.
+        style={isTextOverlay(o) ? { fontFamily: fontStack(o.font), color: o.color } : undefined}
+      >
         {chip}
       </span>
       {/* Keys sit on the bar where they fall, so a track is visible without
