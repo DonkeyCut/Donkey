@@ -975,9 +975,23 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
     return { dx: dx * Math.cos(a) - dy * Math.sin(a), dy: dx * Math.sin(a) + dy * Math.cos(a) };
   };
 
+  // The box turns about its own center, so a size worked out in its own axes
+  // moves that center along them: the walk turns with the box, and the
+  // planted edge holds its screen spot.
+  const turned = (next: { x: number; y: number; w: number; h: number }) => {
+    if (!rotation) return next;
+    const dcx = (next.x + next.w / 2 - (r.x + r.w / 2)) * stage.w;
+    const dcy = (next.y + next.h / 2 - (r.y + r.h / 2)) * stage.h;
+    const t = (rotation * Math.PI) / 180;
+    const ex = dcx * Math.cos(t) - dcy * Math.sin(t);
+    const ey = dcx * Math.sin(t) + dcy * Math.cos(t);
+    return { ...next, x: next.x + (ex - dcx) / stage.w, y: next.y + (ey - dcy) / stage.h };
+  };
+
   // A corner scales the box whole, the way every editor's corner does: the
   // shape holds and the opposite corner stays planted. A side grip pulls its
-  // own edge and snaps to the frame.
+  // own edge and snaps to the frame. Frame lines only mean something to an
+  // upright box, so a turned one sizes freely.
   const onResize = (handle: ResizeHandle, e: React.PointerEvent) => {
     e.stopPropagation();
     st().pushHistory();
@@ -1005,6 +1019,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
             axis: "x" | "y"
           ): EdgeHit[] =>
             [0, 0.5, 1].flatMap((line) => {
+              if (rotation) return [];
               const kt = (line - from) / (dir * size);
               if (kt < kMin || kt > kMax) return [];
               const d = Math.abs(from + dir * size * k - line) * stageSize;
@@ -1022,12 +1037,12 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
             y: hit?.axis === "y" ? hit.line : null,
           });
           patch({
-            frame: {
+            frame: turned({
               x: a.x > 0 ? r.x : r.x + r.w - w,
               y: a.y > 0 ? r.y : r.y + r.h - h,
               w,
               h,
-            },
+            }),
           });
           return;
         }
@@ -1043,7 +1058,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
           if (!dir) return { pos, size, guide: null as number | null };
           const far = dir > 0 ? pos : pos + size;
           const edge = (dir > 0 ? pos + size : pos) + d / stageSize;
-          const snapped = snapEdge(edge, SNAP_PX / stageSize);
+          const snapped = rotation ? null : snapEdge(edge, SNAP_PX / stageSize);
           const at = snapped ?? edge;
           // Signed: a grip dragged past the planted edge stops at the floor and
           // the box keeps its side.
@@ -1058,7 +1073,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
         const hx = pull(a.x, r.x, r.w, dx, stage.w);
         const hy = pull(a.y, r.y, r.h, dy, stage.h);
         setGuides({ x: hx.guide, y: hy.guide });
-        patch({ frame: { x: hx.pos, w: hx.size, y: hy.pos, h: hy.size } });
+        patch({ frame: turned({ x: hx.pos, w: hx.size, y: hy.pos, h: hy.size }) });
       },
       onUp: () => setGuides({ x: null, y: null }),
     });
