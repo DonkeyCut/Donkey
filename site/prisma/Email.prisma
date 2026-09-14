@@ -50,6 +50,7 @@ model EmailSend {
 
   @@index([state, priority, rank, createdAt])
   @@index([promotionId, state])
+  @@index([userId, sentAt])
 }
 
 // Global outbound email cap for free-tier limits: how many emails were sent

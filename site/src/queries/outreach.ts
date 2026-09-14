@@ -128,7 +128,11 @@ export function useOutreachAction() {
         method: "POST",
       }),
     mutationKey: outreachActionKey,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["outreach"] }),
+    // A send lands in the person's history too.
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["outreach"] });
+      void queryClient.invalidateQueries({ queryKey: ["su", "users"] });
+    },
   });
 }
 
