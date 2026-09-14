@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { AccountFeatureFlagGroup } from "@/lib/feature-flags";
 import { apiFetch } from "@/queries/apiClient";
 
 export const featureFlagsQueryKey = ["account-feature-flags"] as const;
@@ -10,7 +11,7 @@ export type AccountFlag = {
   id: string;
   title: string;
   description: string;
-  group: "editor" | "early";
+  group: AccountFeatureFlagGroup;
   enabled: boolean;
 };
 
