@@ -1,7 +1,7 @@
 "use client";
 
-import { ArrowUpRight } from "lucide-react";
-import { useMemo, useRef } from "react";
+import { ArrowUpRight, Mail } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -33,10 +33,13 @@ import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import { DragBlock, useReorder } from "@/app/su/analytics/Reorder";
+import { OutreachComposeDialog } from "@/app/su/outreach/ComposeDialog";
 import { SuStandIn } from "@/app/su/SuStandIn";
 import { useRowWindow } from "@/app/su/analytics/rowWindow";
+import { Button } from "@/components/ui/button";
 import { useAnalyticsRollup } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
+import { useOutreachAction, type OutreachRow } from "@/queries/outreach";
 
 // Everything here renders the nightly rollup (analytics/rollup.json via
 // /api/analytics/rollup) — stale until the next job run by design. "Active" is
@@ -697,6 +700,15 @@ function ActivityGrid({
   const users = useMemo(() => rankUsers(rollup, workBits, sort), [rollup, workBits, sort]);
   const body = useRef<HTMLTableSectionElement>(null);
   const rows = useRowWindow(users.length, body);
+  // A row's email button puts the account on the outreach list and opens the
+  // same note the Outreach tab writes, so a busy user gets a word or a deal
+  // from here.
+  const outreach = useOutreachAction();
+  const [sendTarget, setSendTarget] = useState<OutreachRow | null>(null);
+  const adding =
+    outreach.isPending && outreach.variables?.action === "add" ? outreach.variables.email : null;
+  const emailUser = (email: string) =>
+    outreach.mutate({ action: "add", email }, { onSuccess: (result) => setSendTarget(result.row) });
 
   // Newest day sits in the leftmost column so the current dots are in view
   // before any horizontal scroll; each column keeps its index into the
@@ -777,8 +789,20 @@ function ActivityGrid({
             {users.slice(rows.start, rows.end).map((user, offset) => {
               const index = rows.start + offset;
               return (
-                <tr key={user.id} data-row="">
-                  <td className="sticky left-0 z-10 bg-card py-1 pr-4 whitespace-nowrap">
+                <tr key={user.id} data-row="" className="group">
+                  <td className="sticky left-0 z-10 bg-card py-1 pr-12 whitespace-nowrap">
+                    {/* Pinned in the cell's right padding, so showing it moves
+                        nothing. */}
+                    <Button
+                      aria-label={`Email ${user.name}`}
+                      className="absolute top-1/2 right-3 -translate-y-1/2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                      disabled={adding === user.email}
+                      onClick={() => emailUser(user.email)}
+                      size="icon-xs"
+                      variant="ghost"
+                    >
+                      <Mail />
+                    </Button>
                     <span className="flex items-center gap-1.5">
                       <span className="block max-w-56 truncate text-sm" title={user.name}>
                         {user.email}
@@ -851,6 +875,10 @@ function ActivityGrid({
           data
         </span>
       </p>
+      {outreach.isError ? (
+        <p className="mt-2 text-sm text-destructive">Couldn&apos;t put that account on the outreach list.</p>
+      ) : null}
+      <OutreachComposeDialog onClose={() => setSendTarget(null)} target={sendTarget} />
     </div>
   );
 }
