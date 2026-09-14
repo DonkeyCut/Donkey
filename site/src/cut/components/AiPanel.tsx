@@ -159,16 +159,57 @@ interface ChatThread {
 const THREAD_LIMIT = 30;
 const seenRepliesKey = (projectId: string) => `cut-ai-seen-replies-${projectId}`;
 
+// Which reply each thread has been read up to, per project: a small store
+// over localStorage, so the panel reads it as a snapshot and any writer —
+// this tab or another — updates every reader.
+const NO_SEEN_REPLIES: Record<string, string> = {};
+const seenCache = new Map<string, { raw: string; value: Record<string, string> }>();
+const seenListeners = new Set<() => void>();
+
 function readSeenReplies(projectId: string): Record<string, string> {
+  let raw: string | null = null;
   try {
-    const stored: unknown = JSON.parse(localStorage.getItem(seenRepliesKey(projectId)) ?? "{}");
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
-    return Object.fromEntries(Object.entries(stored).filter((entry): entry is [string, string] =>
-      typeof entry[1] === "string",
-    ));
+    raw = localStorage.getItem(seenRepliesKey(projectId));
   } catch {
-    return {};
+    return NO_SEEN_REPLIES;
   }
+  if (raw === null) return NO_SEEN_REPLIES;
+  const cached = seenCache.get(projectId);
+  if (cached && cached.raw === raw) return cached.value;
+  let value: Record<string, string> = NO_SEEN_REPLIES;
+  try {
+    const stored: unknown = JSON.parse(raw);
+    if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+      value = Object.fromEntries(Object.entries(stored).filter((entry): entry is [string, string] =>
+        typeof entry[1] === "string",
+      ));
+    }
+  } catch {
+    // Unreadable state reads as nothing seen.
+  }
+  seenCache.set(projectId, { raw, value });
+  return value;
+}
+
+function writeSeenReplies(projectId: string, next: Record<string, string>): void {
+  try {
+    localStorage.setItem(seenRepliesKey(projectId), JSON.stringify(next));
+  } catch {
+    // A browser that keeps nothing forgets the read state on reload.
+  }
+  for (const listener of seenListeners) listener();
+}
+
+function subscribeSeenReplies(listener: () => void): () => void {
+  seenListeners.add(listener);
+  const remote = (event: StorageEvent) => {
+    if (event.key?.startsWith("cut-ai-seen-replies-")) listener();
+  };
+  window.addEventListener("storage", remote);
+  return () => {
+    seenListeners.delete(listener);
+    window.removeEventListener("storage", remote);
+  };
 }
 
 // How long a streaming turn's newest snapshot may park before it must land —
@@ -422,36 +463,31 @@ export function AiPanel({
   }, [anyRunning]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threads, setThreads] = useState<ChatThread[]>(() => readThreads(projectId));
-  const [seenReplies, setSeenReplies] = useState(() => readSeenReplies(projectId));
-  useEffect(() => {
-    const receive = (event: StorageEvent) => {
-      if (event.key === seenRepliesKey(projectId)) setSeenReplies(readSeenReplies(projectId));
-    };
-    window.addEventListener("storage", receive);
-    return () => window.removeEventListener("storage", receive);
-  }, [projectId]);
+  const seenReplies = useSyncExternalStore(
+    subscribeSeenReplies,
+    () => readSeenReplies(projectId),
+    () => NO_SEEN_REPLIES,
+  );
 
   const markThreadRead = (thread: ChatThread) => {
     const reply = thread.completedMessageId;
     if (!reply || runningThreads[thread.id] || thread.messages.at(-1)?.id !== reply ||
         seenReplies[thread.id] === reply) return;
-    const next = readSeenReplies(projectId);
+    const next = { ...readSeenReplies(projectId) };
     delete next[thread.id];
     next[thread.id] = reply;
-    const recent = Object.fromEntries(Object.entries(next).slice(-THREAD_LIMIT));
-    try {
-      localStorage.setItem(seenRepliesKey(projectId), JSON.stringify(recent));
-    } catch { /* Keep read state for this visit. */ }
-    setSeenReplies(recent);
+    writeSeenReplies(projectId, Object.fromEntries(Object.entries(next).slice(-THREAD_LIMIT)));
   };
   useEffect(() => {
     return subscribeChatThreads(projectId, () => setThreads(readThreads(projectId)));
   }, [projectId]);
-  const hasUnread = threads.some((thread) =>
-    !runningThreads[thread.id] && thread.completedMessageId &&
+  // A thread is unread while its finished reply is the last word and no one
+  // has read it: opened from the list, or on screen when the reply landed.
+  const unread = (thread: ChatThread) =>
+    !runningThreads[thread.id] && !!thread.completedMessageId &&
     thread.messages.at(-1)?.id === thread.completedMessageId &&
-    seenReplies[thread.id] !== thread.completedMessageId,
-  );
+    seenReplies[thread.id] !== thread.completedMessageId;
+  const hasUnread = threads.some(unread);
   const chatStatus: ChatStatus = anyRunning ? "working" : hasUnread ? "unread" : null;
   useEffect(() => {
     onStatusChange(projectId, chatStatus);
@@ -514,9 +550,28 @@ export function AiPanel({
   };
 
   const openThread = (t: ChatThread) => {
+    markThreadRead(t);
     setActiveChat(t.id);
     setHistoryOpen(false);
   };
+  // The thread on screen reads its own reply: a reply that lands while the
+  // panel shows the thread with the list closed is read once the tab is in
+  // front, whether that is now or when the person comes back to it.
+  const onScreen = visible && !historyOpen;
+  useEffect(() => {
+    if (!onScreen) return;
+    const shown = threads.find((t) => t.id === sessionThread);
+    if (!shown || !unread(shown)) return;
+    if (!document.hidden) {
+      markThreadRead(shown);
+      return;
+    }
+    const onShow = () => {
+      if (!document.hidden) markThreadRead(shown);
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
+  });
 
   const toggleHistory = () => {
     if (!historyOpen) setThreads(readThreads(projectId));
@@ -655,8 +710,6 @@ export function AiPanel({
                     key={t.id}
                     className="group relative flex w-full items-center gap-2 rounded-lg py-2 pr-9 pl-2.5 text-left transition-colors hover:bg-muted"
                     onClick={() => openThread(t)}
-                    onMouseEnter={() => markThreadRead(t)}
-                    onFocus={() => markThreadRead(t)}
                   >
                     <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="truncate text-[12px] font-medium">
@@ -678,8 +731,7 @@ export function AiPanel({
                           aria-label="Working"
                           className="size-3.5 animate-spin text-muted-foreground"
                         />
-                      ) : t.completedMessageId && t.messages.at(-1)?.id === t.completedMessageId &&
-                          seenReplies[t.id] !== t.completedMessageId ? (
+                      ) : unread(t) ? (
                         <span
                           role="img"
                           aria-label="Completed"
