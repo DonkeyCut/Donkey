@@ -12,6 +12,9 @@ public protocol CameraControlling: AnyObject {
     func apply(_ settings: CameraSettings)
     func startRecording()
     func stopRecording()
+    /// Starts or stops the stream of microphone levels that feeds
+    /// `CameraModel.audioLevel`.
+    func setAudioMetering(_ on: Bool)
 }
 
 nonisolated public enum CameraAvailability: Equatable, Sendable {
@@ -61,6 +64,21 @@ public final class CameraModel {
         }
     }
 
+    /// Whether the microphone meter sits on the picture. Kept across
+    /// sessions: a person burned by a silent take wants it every time.
+    public private(set) var showsAudioMeter = false {
+        didSet {
+            if showsAudioMeter != oldValue {
+                defaults.set(showsAudioMeter, forKey: Self.audioMeterKey)
+            }
+        }
+    }
+    /// How loud the microphone is right now, 0 for silence up to 1 for full
+    /// scale, read from the connection the movie file is written from. Nil
+    /// while the meter is off, and while the session has no microphone at
+    /// all, which is the case the meter exists to expose.
+    public internal(set) var audioLevel: Double?
+
     public var isRecording: Bool { recordingStartedAt != nil }
 
     public var controller: (any CameraControlling)?
@@ -68,6 +86,7 @@ public final class CameraModel {
     private let defaults: UserDefaults
     private static let teleprompterKey = "teleprompterSettings"
     private static let safeZonesKey = "showsSafeZones"
+    private static let audioMeterKey = "showsAudioMeter"
     private static let settingsKey = "cameraSettings"
     private static let facingKey = "cameraFacing"
 
@@ -78,6 +97,7 @@ public final class CameraModel {
             teleprompter.settings = settings
         }
         showsSafeZones = defaults.bool(forKey: Self.safeZonesKey)
+        showsAudioMeter = defaults.bool(forKey: Self.audioMeterKey)
         if let data = defaults.data(forKey: Self.settingsKey),
            let settings = try? JSONDecoder().decode(CameraSettings.self, from: data) {
             self.settings = settings
@@ -89,6 +109,12 @@ public final class CameraModel {
 
     public func toggleSafeZones() {
         showsSafeZones.toggle()
+    }
+
+    public func toggleAudioMeter() {
+        showsAudioMeter.toggle()
+        if !showsAudioMeter { audioLevel = nil }
+        controller?.setAudioMetering(showsAudioMeter)
     }
 
     private func persistSettings() {
@@ -194,6 +220,11 @@ public final class CameraModel {
 
     public func sessionFailed(reason: String) {
         availability = .unavailable(reason: reason)
+    }
+
+    public func audioLevelDidChange(_ level: Double?) {
+        guard showsAudioMeter else { return }
+        audioLevel = level
     }
 
     public func recordingDidStart() {

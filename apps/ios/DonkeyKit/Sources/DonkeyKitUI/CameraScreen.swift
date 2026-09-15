@@ -74,6 +74,19 @@ struct CameraScreen<CameraPreview: View>: View {
                 TeleprompterOverlay(camera: camera, onTap: toggleChrome)
             }
             controls
+            // The meter rides above the chrome too: a take clears the stage,
+            // and the sliver is how a person sees the microphone is live. It
+            // sits mid-way down the trailing edge, and climbs to the top
+            // corner when the phone is sideways and the shutter takes that
+            // edge.
+            if camera.showsAudioMeter, camera.availability == .running {
+                AudioMeter(level: camera.audioLevel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isSideways ? .topTrailing : .trailing)
+                    .padding(.trailing, 14)
+                    .padding(.top, isSideways ? 8 : 0)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
             // The timer rides above the chrome and outlives it: a take clears
             // the stage, and the red clock is how a person knows the camera is
             // still rolling.
@@ -304,6 +317,15 @@ struct CameraScreen<CameraPreview: View>: View {
                 }
                 .glassEffect(camera.showsSafeZones ? .regular.tint(.white.opacity(0.25)).interactive() : .regular.interactive())
                 .accessibilityLabel(camera.showsSafeZones ? "Hide short-form guide" : "Show short-form guide")
+
+                Button {
+                    camera.toggleAudioMeter()
+                } label: {
+                    Image(systemName: "waveform")
+                        .frame(width: 40, height: 40)
+                }
+                .glassEffect(camera.showsAudioMeter ? .regular.tint(.white.opacity(0.25)).interactive() : .regular.interactive())
+                .accessibilityLabel(camera.showsAudioMeter ? "Hide microphone meter" : "Show microphone meter")
 
                 Spacer().frame(height: 10)
 
@@ -560,6 +582,46 @@ struct FillLightOverlay: View {
             .blur(radius: 22)
             .ignoresSafeArea()
             .allowsHitTesting(false)
+    }
+}
+
+/// A vertical sliver that fills from the bottom with the microphone's level,
+/// red at a whisper through amber to green at speaking volume. A session
+/// with no microphone shows a crossed-out mic over an empty sliver: the take
+/// about to be shot would come out silent.
+struct AudioMeter: View {
+    /// 0...1, nil when the session has no microphone.
+    var level: Double?
+
+    private static var length: CGFloat { 140 }
+    private static var thickness: CGFloat { 6 }
+
+    private var fill: Color {
+        let level = level ?? 0
+        // Red below a quarter, amber through the middle, green from a half
+        // up: speech at a normal distance lands in the green.
+        return Color(hue: 0.33 * min(level * 2, 1), saturation: 0.9, brightness: 0.95)
+    }
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: level == nil ? "mic.slash.fill" : "mic.fill")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(level == nil ? .red : .white)
+            Capsule()
+                .fill(.white.opacity(0.25))
+                .overlay(alignment: .bottom) {
+                    Capsule()
+                        .fill(fill)
+                        .frame(height: Self.length * (level ?? 0))
+                        .animation(.linear(duration: 0.05), value: level)
+                }
+                .frame(width: Self.thickness, height: Self.length)
+        }
+        .padding(8)
+        .background(.black.opacity(0.35), in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(level == nil ? "No microphone" : "Microphone level \(Int((level ?? 0) * 100)) percent")
     }
 }
 

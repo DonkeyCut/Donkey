@@ -43,6 +43,7 @@ final class CameraController: CameraControlling {
             }
             let facing = model?.facing ?? .front
             engine.start(facing: facing, settings: model?.settings ?? CameraSettings())
+            engine.setMetering(model?.showsAudioMeter ?? false)
             trackRotation(facing: facing)
         }
     }
@@ -63,6 +64,7 @@ final class CameraController: CameraControlling {
     func apply(_ settings: CameraSettings) { engine.apply(settings) }
     func startRecording() { engine.startRecording() }
     func stopRecording() { engine.stopRecording() }
+    func setAudioMetering(_ on: Bool) { engine.setMetering(on) }
     /// Hands small JPEG frames of the live picture to `sink` until it is
     /// set to nil. The watch is the one taker.
     func setPreviewSink(_ sink: (@Sendable (Data) -> Void)?) { engine.setPreviewSink(sink) }
@@ -117,6 +119,8 @@ final class CameraController: CameraControlling {
             onRecordingFinished?(url, duration, thumbnail)
         case .recordingFailed:
             model?.recordingDidFinish()
+        case .audioLevel(let level):
+            model?.audioLevelDidChange(level)
         }
     }
 }
@@ -131,6 +135,9 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
         case recordingStarted
         case recordingFinished(URL, TimeInterval, Data?)
         case recordingFailed
+        /// The microphone's level on a 0...1 scale, nil when the session
+        /// has no microphone connected to the movie output.
+        case audioLevel(Double?)
     }
 
     let session = AVCaptureSession()
@@ -164,6 +171,15 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
     /// keeps the angle it started with, since a movie file output cannot be
     /// re-aimed once it is writing.
     private var captureRotation: CGFloat = 90
+    /// Polls the movie output's audio channels while the meter is on screen.
+    /// Reading the movie output's own connection means the meter reports
+    /// what the file gets: a microphone the session never picked up shows
+    /// as no level at all.
+    private var meterTimer: DispatchSourceTimer?
+    private static let meterInterval: DispatchTimeInterval = .milliseconds(50)
+    /// The quietest level the meter shows, in decibels below full scale.
+    /// Room tone sits under it; speech sits well above.
+    private static let meterFloorDecibels: Float = -50
 
     private static let recordableDimensions: Set<String> = [
         "1280x720", "1920x1080", "2560x1440", "3840x2160",
@@ -219,11 +235,38 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
 
     func stop() {
         queue.async {
+            self.meterTimer?.cancel()
+            self.meterTimer = nil
             if self.movieOutput.isRecording {
                 self.movieOutput.stopRecording()
             }
             self.session.stopRunning()
         }
+    }
+
+    func setMetering(_ on: Bool) {
+        queue.async {
+            self.meterTimer?.cancel()
+            self.meterTimer = nil
+            guard on else { return }
+            let timer = DispatchSource.makeTimerSource(queue: self.queue)
+            timer.schedule(deadline: .now(), repeating: Self.meterInterval)
+            timer.setEventHandler { [weak self] in self?.emitAudioLevel() }
+            timer.resume()
+            self.meterTimer = timer
+        }
+    }
+
+    private func emitAudioLevel() {
+        guard session.isRunning,
+              let channels = movieOutput.connection(with: .audio)?.audioChannels,
+              !channels.isEmpty else {
+            events?(.audioLevel(nil))
+            return
+        }
+        let decibels = channels.map(\.averagePowerLevel).max() ?? Self.meterFloorDecibels
+        let level = (decibels - Self.meterFloorDecibels) / -Self.meterFloorDecibels
+        events?(.audioLevel(Double(min(max(level, 0), 1))))
     }
 
     func set(facing: CameraFacing) {

@@ -136,6 +136,11 @@ red keep-out the editor's preview draws for TikTok, Reels and Shorts, placed
 against the recorded frame rather than the screen, kept across sessions, and
 drawn under the script so a take is framed against it too.
 
+The rail button under it toggles a microphone meter, a vertical sliver that
+fills red through green as a person speaks, read from the connection the movie
+file is written from, so a take that would come out silent shows an empty meter
+before the shutter is pressed.
+
 ## The Watch
 
 The watch app is a remote for the phone's camera: a record button, a red
