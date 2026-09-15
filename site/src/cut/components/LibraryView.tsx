@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -18,6 +18,7 @@ import {
   Music,
   Plus,
   RotateCcw,
+  Share2,
   Trash2,
   Type,
   Upload,
@@ -99,6 +100,8 @@ import {
   RESIDENCY_LABEL,
   type Residency,
 } from "@/cut/lib/residency";
+import { LibraryShareDialog } from "@/cut/components/LibraryShareDialog";
+import type { LibraryShareTarget } from "@/cut/lib/librarySharing";
 import { Lightbox } from "./Lightbox";
 import { TabStatus } from "./TabStatus";
 import { TemplateCard } from "./TemplateCard";
@@ -437,6 +440,12 @@ export function LibraryView() {
   const [pending, setPending] = useState<Pending[]>([]);
   // One drain bounds probe, decode, and transfer work across overlapping drops.
   const uploadTail = useRef(Promise.resolve());
+  const [sharing, setSharing] = useState<(LibraryShareTarget & { residency: Residency }) | null>(null);
+  useLayoutEffect(() => () => setSharing(null), []);
+  const shareFolder = (id: string) => {
+    const folder = folders.find((f) => f.id === id);
+    if (folder && live(folder.residency)) setSharing({ kind: "folder", id, residency: folder.residency });
+  };
   const [addOpen, setAddOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [folderCreating, setFolderCreating] = useState(false);
@@ -945,6 +954,7 @@ export function LibraryView() {
             />
           )}
           <div className="flex items-center gap-2">
+            {openFolder && openOwner && <Button variant="outline" disabled={!live(openOwner)} onClick={() => shareFolder(openFolder)}><Share2 data-icon="inline-start" /> Share</Button>}
             {(openFolder === null || newParent) && (
               <Button variant="outline" onClick={() => setFolderCreating(true)}>
                 <FolderPlus data-icon="inline-start" /> New folder
@@ -992,6 +1002,7 @@ export function LibraryView() {
               ) : null;
             }}
             onOpen={gotoFolder}
+            onShare={shareFolder}
             onCreate={async (name) => {
               if (!live(newShelf)) return;
               const f = await createLibraryFolder(name, newShelf, newParent);
@@ -1107,6 +1118,7 @@ export function LibraryView() {
                     <LibraryCard
                       key={a.id}
                       asset={a}
+                      onShare={() => setSharing({ kind: "asset", id: a.id, residency: a.residency })}
                       area={a.type === "audio" ? audioArea : TILE_AREA}
                       selected={selected.has(a.id)}
                       dragGroup={pickedRun}
@@ -1190,6 +1202,11 @@ export function LibraryView() {
               }}
               finalFocus={false}
             >
+              {ctxMenu.ids.length === 1 && <DropdownMenuItem onClick={() => {
+                const asset = shown.find((a) => a.id === ctxMenu.ids[0]);
+                if (asset && live(asset.residency)) setSharing({ kind: "asset", id: asset.id, residency: asset.residency });
+                setCtxMenu(null);
+              }}><Share2 /> Share</DropdownMenuItem>}
               <DropdownMenuItem
                 variant="destructive"
                 onClick={() => {
@@ -1234,6 +1251,12 @@ export function LibraryView() {
           </AlertDialogContent>
         </AlertDialog>
 
+        {sharing && library.data && <LibraryShareDialog
+          key={`${sharing.kind}:${sharing.id}`}
+          target={sharing} library={library.data}
+          onClose={() => setSharing(null)}
+          onCopied={(target) => gotoFolder(target.kind === "folder" ? target.id : null)}
+        />}
         <Lightbox />
       <TabStatus />
       </div>
@@ -1256,6 +1279,7 @@ export function LibraryCard({
   onClick,
   onDelete,
   onUse,
+  onShare,
   onDragStartExtra,
 }: {
   asset: LibraryAsset;
@@ -1279,6 +1303,7 @@ export function LibraryCard({
   onClick?: (e: React.MouseEvent) => void;
   onDelete?: () => void;
   onUse?: () => void;
+  onShare?: () => void;
   onDragStartExtra?: (e: React.DragEvent) => void;
 }) {
   // ⌘C over the card copies its mention token. A card inside the current
@@ -1582,6 +1607,7 @@ export function LibraryCard({
                 className="w-44"
                 onClick={(e) => e.stopPropagation()}
               >
+                {onShare && <DropdownMenuItem disabled={offline} onClick={onShare}><Share2 /> Share</DropdownMenuItem>}
                 <DropdownMenuItem
                   onClick={() => downloadLibraryAsset(a)}
                   disabled={offline}

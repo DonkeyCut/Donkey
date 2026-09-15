@@ -1,3 +1,4 @@
+import { librarySharing } from "@/cut/server/cloud/librarySharing";
 // The public shared-viewer API surface, namespaced under /api/cut-shared/*.
 // Paths mirror the engine table after the token segment so the client's shared
 // driver is a pure prefix rewrite of /api/cut/*. There is no auth wrapper:
@@ -14,6 +15,8 @@ interface SharedRoute extends RouteEntry {
 }
 
 const CUT_SHARED_ROUTES: SharedRoute[] = [
+  { method: "GET", path: "/api/cut-shared/library/:token", handler: (r, p) => librarySharing.list(r, p.token) },
+  { method: "GET", path: "/api/cut-shared/library/:token/media/:id", handler: (r, p) => librarySharing.media(r, p.token, p.id) },
   { method: "GET", path: "/api/cut-shared/:token", handler: (r, p) => sharedView.meta(p.token, r) },
   { method: "GET", path: "/api/cut-shared/:token/projects/:id", handler: (r, p) => sharedView.doc(p.token, p.id, r) },
   { method: "GET", path: "/api/cut-shared/:token/projects/:id/media/:file", handler: (r, p) => sharedView.serveMedia(p.token, p.id, p.file, r) },

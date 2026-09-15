@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Folder, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Folder, MoreHorizontal, Pencil, Share2, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -351,6 +351,7 @@ export function FolderShelf<F extends DeskFolder>({
   onCreate,
   onRename,
   onDelete,
+  onShare,
   onDropIds,
   onDropFolders,
   onDropFiles,
@@ -371,6 +372,7 @@ export function FolderShelf<F extends DeskFolder>({
   onCreate?: (name: string) => void | Promise<void>;
   onRename: (id: string, name: string) => void | Promise<void>;
   onDelete: (id: string) => void | Promise<void>;
+  onShare?: (id: string) => void;
   onDropIds: (ids: string[], folderId: string) => void;
   /** Folders dropped onto a folder tile — filed inside it. */
   onDropFolders?: (ids: string[], folderId: string) => void;
@@ -513,6 +515,7 @@ export function FolderShelf<F extends DeskFolder>({
               <MoreHorizontal className="size-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
+              {onShare && <DropdownMenuItem onClick={() => onShare(f.id)}><Share2 /> Share</DropdownMenuItem>}
               <DropdownMenuItem
                 onClick={() => {
                   setDraft(f.name);

@@ -37,6 +37,7 @@ declare module "bun:test" {
   }
   export function expect(value: unknown): Matchers;
   type Spy<T> = T extends (...args: infer Args) => infer Result ? {
+    mock: { calls: Args[] };
     mockImplementation(fn: (...args: Args) => Result): Spy<T>;
     mockReturnValue(value: Result): Spy<T>;
     mockResolvedValue(value: Awaited<Result>): Spy<T>;
@@ -45,6 +46,7 @@ declare module "bun:test" {
   export function spyOn<T extends object, K extends keyof T>(object: T, method: K): Spy<T[K]>;
   /** Module mocking, for the tests that stand a dependency in. */
   export const mock: {
+    <T extends (...args: never[]) => unknown>(fn: T): T & Spy<T>;
     module(specifier: string, factory: () => unknown): void;
   };
 }

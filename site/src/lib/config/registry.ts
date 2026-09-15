@@ -31,6 +31,13 @@ function validTimeZone(zone: string): boolean {
 }
 
 export const SETTINGS = defineSettings({
+  librarySharing: {
+    schema: z.object({ pageSize: z.number().int().min(10).max(100) }).strict(),
+    default: { pageSize: 40 },
+    public: false,
+    title: "Shared library",
+    description: "Folders, assets, and templates returned per shared library page.",
+  },
   promotionCreditOffer: {
     schema: creditOfferTermsSchema.extend({ minimumAccountAgeDays: z.number().int().min(1).max(36500) }).strict(),
     default: { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28, claim: "link", minimumAccountAgeDays: 7 },

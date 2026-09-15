@@ -1,5 +1,10 @@
 "use client";
 
+import { libraryShareTargetSchema, shareSettingsSchema, librarySharePath } from "@/cut/lib/librarySharing";
+import { requestSharing } from "@/cut/lib/sharingClient";
+import { copyLibraryForSharing } from "@/cut/lib/libraryShareCopy";
+import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+
 import { GUIDE_IDS, guideFits, guidePreset, isGuideId, sanitizeGuideLines, type GuideId } from "./guides";
 import {
   ALL_EFFECT_IDS,
@@ -3194,6 +3199,34 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         })),
         note: "The copies preview on cards in this chat; add_clip places one when the user asks for it in the cut. A source this project already held a copy of comes back as that copy, marked reused.",
       };
+  },
+
+  library_share: async (_s, input) => {
+    const parsed = libraryShareTargetSchema.safeParse({ kind: input.kind, id: input.id });
+    if (!parsed.success) throw new ToolError("Pass a library folder or asset id and kind.");
+    const action = input.action;
+    if (action !== "get" && action !== "save" && action !== "remove") throw new ToolError("Unknown sharing action.");
+    const settings = action === "save" ? shareSettingsSchema.safeParse({ access: input.access, emails: input.emails }) : null;
+    if (settings && !settings.success) throw new ToolError("Save requires access and a valid email list.");
+    const library = await fetchLibrary();
+    let target = parsed.data;
+    const item = target.kind === "folder"
+      ? library.folders.find((f) => f.id === target.id)
+      : library.assets.find((a) => a.id === target.id);
+    if (!item) throw new ToolError("Library item not found.");
+    if (item.residency !== "cloud") {
+      if (action !== "save" || input.copy_to_cloud !== true)
+        throw new ToolError("Sharing a local item requires a cloud copy. Use save with copy_to_cloud:true.");
+      target = await copyLibraryForSharing(target, item.residency, library);
+    }
+    const result = await requestSharing({ libraryTarget: target },
+      action === "save" ? "PUT" : action === "remove" ? "DELETE" : "GET",
+      settings?.success ? settings.data : undefined).catch((error: unknown) => {
+        throw new ToolError(`Sharing failed for cloud ${target.kind} ${target.id}: ${error instanceof Error ? error.message : "Request failed."}`);
+      });
+    return { target, share: result.share ?? null,
+      ...(result.share ? { url: `${DONKEYCUT_CANONICAL}${librarySharePath(result.share.id)}` } : {}),
+      ...(action === "remove" ? { removed: true } : {}) };
   },
 
   library_list: async () => {

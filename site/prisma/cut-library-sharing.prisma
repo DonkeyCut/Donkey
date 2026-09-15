@@ -1,0 +1,13 @@
+// Read-only links to a library folder tree or one asset.
+model CutLibraryShare {
+  id        String   @id
+  userId    String
+  kind      String
+  targetId  String
+  access    String   @default("restricted")
+  emails    Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, kind, targetId])
+}

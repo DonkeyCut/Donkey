@@ -84,10 +84,10 @@ async function takenLibraryNames(userId: string): Promise<Set<string>> {
   return new Set(rows.map((r) => r.fileName));
 }
 
-function assetView(
+export function assetView(
   row: { id: string; folderId: string | null; meta: unknown; createdAt: Date },
   obj: { fileName: string },
-): LibraryAsset {
+): LibraryAsset & { title?: string } {
   const meta = (row.meta ?? {}) as AssetMeta;
   return {
     id: row.id,
@@ -105,7 +105,7 @@ function assetView(
   };
 }
 
-function templateView(row: {
+export function templateView(row: {
   id: string;
   name: string;
   doc: unknown;

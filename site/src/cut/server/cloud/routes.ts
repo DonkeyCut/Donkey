@@ -1,3 +1,4 @@
+import { librarySharing } from "@/cut/server/cloud/librarySharing";
 // The hosted Cut API surface in one table, namespaced under /api/cut-cloud/*.
 // The client's cloud driver rewrites /api/cut/X -> /api/cut-cloud/X, so paths
 // mirror the engine table (http/routes.ts) with the cloud prefix, plus the
@@ -69,6 +70,9 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/projects/:id/convert", handler: (r, u, p) => jobsCloud.convert(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/media/presign-get", handler: (r, u) => mediaCloud.presignGetBatch(u, r) },
 
+  { method: "GET", path: "/api/cut-cloud/library/shares/:kind/:id", handler: (r, u, p) => librarySharing.manage(r, u, p.kind, p.id) },
+  { method: "PUT", path: "/api/cut-cloud/library/shares/:kind/:id", handler: (r, u, p) => librarySharing.manage(r, u, p.kind, p.id) },
+  { method: "DELETE", path: "/api/cut-cloud/library/shares/:kind/:id", handler: (r, u, p) => librarySharing.manage(r, u, p.kind, p.id) },
   { method: "GET", path: "/api/cut-cloud/library", handler: (r, u) => libraryCloud.list(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/presign", handler: (r, u) => libraryCloud.presign(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/complete", handler: (r, u) => libraryCloud.complete(u, r) },

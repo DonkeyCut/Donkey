@@ -66,7 +66,7 @@ model CutFolder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([userId, scope])
+  @@index([userId, scope, parentId])
 }
 
 // One R2 object. Quota and orphan GC read from here: `pending` rows were
@@ -120,6 +120,7 @@ model CutLibraryAsset {
   updatedAt     DateTime  @updatedAt
 
   @@index([userId, createdAt])
+  @@index([userId, folderId, id])
 }
 
 model CutTemplate {

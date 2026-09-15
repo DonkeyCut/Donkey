@@ -7,7 +7,7 @@ the site's own client views, signed in with a session cookie.
 endpoint is a deliberate exception with a product reason — today only Better
 Auth's own routes, the signature-verified Stripe and Resend webhooks, the
 HMAC-token-verified one-click email unsubscribe and promotion button redirect,
-and a plain health check. Ship
+the token-authorized Cut project and library share viewers, and a plain health check. Ship
 a handler without the wrapper and the endpoint is open to anyone.
 
 ## Authentication
