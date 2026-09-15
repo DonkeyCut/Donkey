@@ -137,12 +137,23 @@ const sfx = (category: StockSfxCategory, rows: Row[], opts: { loop?: boolean; ta
 const core = { takes: CORE_TAKES };
 const loops = { loop: true };
 
-// Every prompt names one dry, close one-shot unless it says otherwise. The
-// first nine families are the ones every social edit reaches for — clicks for
-// things popping up, camera and flash for cuts, whooshes for scene changes,
-// glitches, risers for tension, hits for landings, keyboard for typing — and
-// the rest are the sounds people search a library for most.
+// Every prompt names one dry, close one-shot unless it says otherwise.
+// Essentials leads: one sound for each job a short-form cut actually needs —
+// grab attention, build, transition, reveal, land a statement, punctuate a
+// joke — so a new editor has a working set without reading the whole library.
+// The families after it are the ones every social edit reaches for — clicks
+// for things popping up, camera and flash for cuts, whooshes for scene
+// changes, glitches, risers for tension, hits for landings, keyboard for
+// typing — and the rest are the sounds people search a library for most.
 const CATALOG: CatalogItem[] = [
+  ...sfx("Essentials", [
+    ["gasp", 1, "A single sharp human gasp of shock, a short breathy vocal exclamation cut off clean, close-miked, dry, no words, no music.", ["gasp", "shock", "reaction", "vocal", "surprise", "oh no", "fail", "attention"]],
+    ["riser", 3, "A tension riser: a smooth low-to-high sweep building steadily for three seconds and stopping dead at the top, cinematic, no impact at the end.", ["riser", "build up", "tension", "suspense", "sweep", "rise", "anticipation", "before the drop"]],
+    ["whoosh", 0.7, "A fast air whoosh passing left to right, a clean short swipe with a soft tail, dry.", ["whoosh", "transition", "swipe", "swoosh", "scene change", "cut", "fast", "pass by"]],
+    ["reveal", 2.5, "A reveal sting: a short suspenseful rising tone that lands on one deep bass hit, dramatic, clean, no music bed.", ["reveal", "sting", "suspense", "twist", "dramatic", "unexpected", "reveal moment", "dun dun"]],
+    ["bass-drop", 1, "One deep sub-bass drop hit, a short low blast with a tight decay, heavy and clean, no distortion.", ["bass", "drop", "impact", "statement", "emphasis", "deep", "sub", "boom"]],
+    ["boom", 1.5, "A single deep dramatic boom, a heavy low thud with a long resonant tail, dry and clean.", ["boom", "thud", "impact", "punchline", "comedy", "dramatic", "hit", "emphasis"]],
+  ], core),
   ...sfx("Clicks", [
     ["soft", 0.5, "A single short soft mouse click, clean and dry, close-miked, no reverb.", ["click", "mouse", "soft", "pop up", "ui"]],
     ["sharp", 0.5, "A single crisp sharp digital click, tight, dry, no reverb.", ["click", "sharp", "crisp", "digital", "pop up"]],

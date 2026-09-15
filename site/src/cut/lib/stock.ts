@@ -85,6 +85,7 @@ export interface StockSfx {
 }
 
 export const STOCK_SFX_CATEGORIES = [
+  "Essentials",
   "Clicks",
   "Camera",
   "Flash",
