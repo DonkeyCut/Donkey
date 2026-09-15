@@ -3534,7 +3534,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
   return (
     <Section
       title="Mask"
-      info="Trim the picture to a shape, to an outline you draw (Pen), or to the person in the shot (Subject). Drag the shape to move it, its grips to resize, the lollipop to rotate, the chevron under it to feather the edge, and the corner grip to round a box. Pen: click the picture to place corners and click the first one to close; drag a corner to move it, the small grip on an edge to add one, double-click a corner to remove it. Invert keeps what the shape leaves out — an inverted Subject mask sits the picture behind the speaker."
+      info="Use a shape, draw with Pen, or isolate the Subject."
       enabled={!!m}
       onEnabledChange={(v) => target.set(v ? { kind: "rect" } : undefined)}
       aside={
