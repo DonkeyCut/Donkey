@@ -1863,173 +1863,177 @@ function LibraryPanel({ projectId }: { projectId: string }) {
       )}
       onContextMenu={onShelfContextMenu}
     >
-      {openFolder !== null && (
-        <div className="flex h-12 shrink-0 items-center pr-2.5 pl-2.5">
-          <FolderCrumb
-            className="text-sm"
-            root="Library"
-            trail={trail}
-            mime={LIBRARY_MOVE_MIME}
-            folderMime={LIBRARY_FOLDER_MOVE_MIME}
-            onGo={setOpenFolder}
-            onDrop={(ids, id) => ids.forEach((fid) => void move(fid, id))}
-            onDropFolders={(ids, id) => void moveFolders(ids, id)}
-          />
-        </div>
-      )}
-      {shelfFolders.length > 0 ? (
-        <div className="shrink-0 px-3.5">
-          <FolderShelf
-            rows
-            folders={shelfFolders}
-            mime={LIBRARY_MOVE_MIME}
-            folderMime={LIBRARY_FOLDER_MOVE_MIME}
-            statOf={(id) => ({
-              count:
-                all.filter((a) => folderOf(a) === id).length +
-                templates.filter((t) => (t.folderId ?? null) === id).length +
-                childrenOf(folders, id).length,
-            })}
-            badgeOf={(id) => {
-              const r = folders.find((f) => f.id === id)?.residency;
-              return bothShelves && r ? <ShelfBadge residency={r} /> : null;
-            }}
-            onOpen={(id) => setOpenFolder(id)}
-            onRename={async (id, name) => {
-              const r = folders.find((f) => f.id === id)?.residency;
-              if (!r) return;
-              patch((d) => ({
-                ...d,
-                folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
-              }));
-              await updateLibraryFolder(r, id, { name }).catch(() => void reload());
-            }}
-            onDelete={async (id) => {
-              // What the folder held comes up one level, the way the shelf
-              // files it.
-              const gone = folders.find((f) => f.id === id);
-              if (!gone) return;
-              const up = parentOf(gone);
-              patch((d) => ({
-                folders: d.folders
-                  .filter((f) => f.id !== id)
-                  .map((f) => (parentOf(f) === id ? { ...f, parentId: up } : f)),
-                assets: d.assets.map((a) =>
-                  a.folderId === id ? { ...a, folderId: up } : a
-                ),
-                templates: d.templates.map((t) =>
-                  t.folderId === id ? { ...t, folderId: up } : t
-                ),
-              }));
-              await deleteLibraryFolder(gone.residency, id).catch(() => void reload());
-            }}
-            onDropIds={(ids, fid) => ids.forEach((id) => void move(id, fid))}
-            onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
-            onRefDrop={(ref, fid) => {
-              // Project media dropped on a folder tile (a Media card or a
-              // timeline clip): save it to the library, filed in that folder.
-              // The copy lands on the project's own shelf, so a folder on the
-              // other one can't take it.
-              if (ref.scope !== "project") return;
-              if (folders.find((f) => f.id === fid)?.residency !== activeResidency()) return;
-              const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
-              if (!asset) return;
-              void saveAssetToLibrary(projectId, asset)
-                .then((saved) => moveLibraryItem(saved.residency, saved.id, fid))
-                .then(() => void reload())
-                .catch(() => {});
-            }}
-          />
-        </div>
-      ) : null}
-      {shownTemplates.length > 0 && (
-        <div className="shrink-0 px-3.5 pb-3">
-          <div className="flex flex-col gap-1.5">
-            {shownTemplates.map((t) => (
-              <TemplateCard
-                key={t.id}
-                template={t}
-                mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
-                drag={{ scope: "library", template: t }}
-                onDragStartExtra={(e) => {
-                  e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([t.id]));
-                  e.dataTransfer.effectAllowed = "copyMove";
-                }}
-                addTitle="Add to this project"
-                onAdd={() => void addTemplateToProject(projectId, t)}
-                onRename={(name) => void commitTemplateRename(t.residency, t.id, name)}
-                onDelete={() => void removeTemplate(t.residency, t.id)}
-                onRefDrop={(r) => {
-                  if (r.scope !== "project") return;
-                  const asset = useEditor.getState().assets.find((a) => a.id === r.id);
-                  if (!asset) return;
-                  void addAssetToLibraryTemplate(projectId, t, asset)
-                    .then((updated) =>
-                      patch((d) => ({
-                        ...d,
-                        templates: d.templates.map((x) =>
-                          x.id === updated.id ? updated : x
-                        ),
-                      }))
-                    )
-                    .catch(() => void reload());
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
       {!loaded ? (
         <div className="grid flex-1 place-items-center text-muted-foreground">
           <Loader2 className="size-4 animate-spin" />
         </div>
-      ) : shown.length === 0 && uploading === 0 ? (
-        // At the root, filed-away assets, folders, and templates all count as
-        // content — the invitation is only for a truly empty library.
-        openFolder !== null ? (
-          shownTemplates.length === 0 ? (
-            <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">Empty folder</div>
-          ) : null
-        ) : all.length === 0 && folders.length === 0 && templates.length === 0 ? (
-          <div className="text-balance px-3.5 py-6 text-center text-xs text-muted-foreground">
-            Drag video, audio, image and font files here. Library assets are shared across all
-            projects.
-          </div>
-        ) : null
       ) : (
+        /* Crumb, folder rows, templates and cards scroll as one list, so a
+           long shelf and a full folder both reach their end. */
         <ScrollArea className="min-h-0 flex-1" contentClassName="pt-1 pb-3.5">
-          <Marquee
-            scope="self"
-            rootClassName="relative min-h-full px-3.5"
-            className="grid grid-cols-2 content-start gap-2.5"
-            selected={picked}
-            setSelected={setPicked}
-          >
-            {shown.map((a) => (
-              <LibraryCard
-                key={a.id}
-                asset={a}
-                mention
-                selected={picked.has(a.id)}
-                onClick={(e) => pick(e, a.id, shown.map((x) => x.id))}
-                dragGroup={pickedRun}
-                // A font is used from the font menu; there is nothing to place.
-                onUse={
-                  a.type === "font" ? undefined : () => void addLibraryAssetToProject(projectId, a)
-                }
-                onDelete={() => setDeleting(setOf(a))}
-                onDragStartExtra={(e) => onCardDragExtra(e, a)}
+          {openFolder !== null && (
+            <div className="flex h-9 shrink-0 items-center px-2 pb-1.5">
+              <FolderCrumb
+                className="text-sm"
+                root="Library"
+                trail={trail}
+                mime={LIBRARY_MOVE_MIME}
+                folderMime={LIBRARY_FOLDER_MOVE_MIME}
+                onGo={setOpenFolder}
+                onDrop={(ids, id) => ids.forEach((fid) => void move(fid, id))}
+                onDropFolders={(ids, id) => void moveFolders(ids, id)}
               />
-            ))}
-            {uploading > 0 && (
-              <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input text-[11px] text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                <span>
-                  Uploading… <LiveElapsed />
-                </span>
+            </div>
+          )}
+          {shelfFolders.length > 0 ? (
+            <div className="shrink-0 px-3.5">
+              <FolderShelf
+                rows
+                folders={shelfFolders}
+                mime={LIBRARY_MOVE_MIME}
+                folderMime={LIBRARY_FOLDER_MOVE_MIME}
+                statOf={(id) => ({
+                  count:
+                    all.filter((a) => folderOf(a) === id).length +
+                    templates.filter((t) => (t.folderId ?? null) === id).length +
+                    childrenOf(folders, id).length,
+                })}
+                badgeOf={(id) => {
+                  const r = folders.find((f) => f.id === id)?.residency;
+                  return bothShelves && r ? <ShelfBadge residency={r} /> : null;
+                }}
+                onOpen={(id) => setOpenFolder(id)}
+                onRename={async (id, name) => {
+                  const r = folders.find((f) => f.id === id)?.residency;
+                  if (!r) return;
+                  patch((d) => ({
+                    ...d,
+                    folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
+                  }));
+                  await updateLibraryFolder(r, id, { name }).catch(() => void reload());
+                }}
+                onDelete={async (id) => {
+                  // What the folder held comes up one level, the way the shelf
+                  // files it.
+                  const gone = folders.find((f) => f.id === id);
+                  if (!gone) return;
+                  const up = parentOf(gone);
+                  patch((d) => ({
+                    folders: d.folders
+                      .filter((f) => f.id !== id)
+                      .map((f) => (parentOf(f) === id ? { ...f, parentId: up } : f)),
+                    assets: d.assets.map((a) =>
+                      a.folderId === id ? { ...a, folderId: up } : a
+                    ),
+                    templates: d.templates.map((t) =>
+                      t.folderId === id ? { ...t, folderId: up } : t
+                    ),
+                  }));
+                  await deleteLibraryFolder(gone.residency, id).catch(() => void reload());
+                }}
+                onDropIds={(ids, fid) => ids.forEach((id) => void move(id, fid))}
+                onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
+                onRefDrop={(ref, fid) => {
+                  // Project media dropped on a folder tile (a Media card or a
+                  // timeline clip): save it to the library, filed in that folder.
+                  // The copy lands on the project's own shelf, so a folder on the
+                  // other one can't take it.
+                  if (ref.scope !== "project") return;
+                  if (folders.find((f) => f.id === fid)?.residency !== activeResidency()) return;
+                  const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
+                  if (!asset) return;
+                  void saveAssetToLibrary(projectId, asset)
+                    .then((saved) => moveLibraryItem(saved.residency, saved.id, fid))
+                    .then(() => void reload())
+                    .catch(() => {});
+                }}
+              />
+            </div>
+          ) : null}
+          {shownTemplates.length > 0 && (
+            <div className="shrink-0 px-3.5 pb-3">
+              <div className="flex flex-col gap-1.5">
+                {shownTemplates.map((t) => (
+                  <TemplateCard
+                    key={t.id}
+                    template={t}
+                    mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
+                    drag={{ scope: "library", template: t }}
+                    onDragStartExtra={(e) => {
+                      e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify([t.id]));
+                      e.dataTransfer.effectAllowed = "copyMove";
+                    }}
+                    addTitle="Add to this project"
+                    onAdd={() => void addTemplateToProject(projectId, t)}
+                    onRename={(name) => void commitTemplateRename(t.residency, t.id, name)}
+                    onDelete={() => void removeTemplate(t.residency, t.id)}
+                    onRefDrop={(r) => {
+                      if (r.scope !== "project") return;
+                      const asset = useEditor.getState().assets.find((a) => a.id === r.id);
+                      if (!asset) return;
+                      void addAssetToLibraryTemplate(projectId, t, asset)
+                        .then((updated) =>
+                          patch((d) => ({
+                            ...d,
+                            templates: d.templates.map((x) =>
+                              x.id === updated.id ? updated : x
+                            ),
+                          }))
+                        )
+                        .catch(() => void reload());
+                    }}
+                  />
+                ))}
               </div>
-            )}
-          </Marquee>
+            </div>
+          )}
+          {shown.length === 0 && uploading === 0 ? (
+            // At the root, filed-away assets, folders, and templates all count as
+            // content — the invitation is only for a truly empty library.
+            openFolder !== null ? (
+              shownTemplates.length === 0 ? (
+                <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">Empty folder</div>
+              ) : null
+            ) : all.length === 0 && folders.length === 0 && templates.length === 0 ? (
+              <div className="text-balance px-3.5 py-6 text-center text-xs text-muted-foreground">
+                Drag video, audio, image and font files here. Library assets are shared across all
+                projects.
+              </div>
+            ) : null
+          ) : (
+              <Marquee
+                scope="self"
+                rootClassName="relative px-3.5"
+                className="grid grid-cols-2 content-start gap-2.5"
+                selected={picked}
+                setSelected={setPicked}
+              >
+                {shown.map((a) => (
+                  <LibraryCard
+                    key={a.id}
+                    asset={a}
+                    mention
+                    selected={picked.has(a.id)}
+                    onClick={(e) => pick(e, a.id, shown.map((x) => x.id))}
+                    dragGroup={pickedRun}
+                    // A font is used from the font menu; there is nothing to place.
+                    onUse={
+                      a.type === "font" ? undefined : () => void addLibraryAssetToProject(projectId, a)
+                    }
+                    onDelete={() => setDeleting(setOf(a))}
+                    onDragStartExtra={(e) => onCardDragExtra(e, a)}
+                  />
+                ))}
+                {uploading > 0 && (
+                  <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input text-[11px] text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" />
+                    <span>
+                      Uploading… <LiveElapsed />
+                    </span>
+                  </div>
+                )}
+              </Marquee>
+          )}
         </ScrollArea>
       )}
 
