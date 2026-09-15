@@ -1,5 +1,7 @@
 "use client";
 
+import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previewSelection";
+
 import { libraryShareTargetSchema, shareSettingsSchema, librarySharePath } from "@/cut/lib/librarySharing";
 import { requestSharing } from "@/cut/lib/sharingClient";
 import { copyLibraryForSharing } from "@/cut/lib/libraryShareCopy";
@@ -1237,6 +1239,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { playing: Boolean(input.playing) };
   },
 
+  move_selection: (s, input) => {
+    if (!isNum(input.dx) || !isNum(input.dy)) throw new ToolError("dx and dy must be finite frame fractions.");
+    const positions = previewSelectionSnapshot(s, playheadAt());
+    if (!positions.length) throw new ToolError("Select visual items before moving them.");
+    s.pushHistory();
+    movePreviewSelection(s, positions, input.dx, input.dy);
+    return { moved: positions.length };
+  },
+
   select: (s, input) => {
       const kind = String(input.kind);
       if (kind === "none") {
@@ -1253,13 +1264,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             ? s.audioClips
             : kind === "overlay" || kind === "text"
               ? s.overlays
-              : null;
+              : kind === "cue" ? s.subtitles.cues : null;
       if (!pool) throw new ToolError(`Unknown kind: ${kind}`);
       if (!pool.some((x) => x.id === id)) throw new ToolError(`No ${kind} with id ${id}.`);
       const selKind =
-        kind === "overlayClip" ? "clip" : kind === "text" ? "overlay" : (kind as "clip" | "audio" | "overlay");
-      s.select({ kind: selKind, id });
-      return { selection: { kind: selKind, id } };
+        kind === "overlayClip" ? "clip" : kind === "text" ? "overlay" : (kind as "clip" | "audio" | "overlay" | "cue");
+      if (input.additive === true) s.toggleSelect({ kind: selKind, id });
+      else s.select({ kind: selKind, id });
+      return { selection: useEditor.getState().selection, multiSelection: useEditor.getState().multiSelection };
   },
 
   set_side_panel: (_s, input) => {

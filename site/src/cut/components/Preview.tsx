@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Check, Copy, Loader2, PanelTopClose, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
+import { startSelectionDrag } from "@/cut/components/previewSelectionDrag";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import {
   playheadAt,
@@ -496,7 +497,7 @@ export function Preview() {
   // its picture selects it, in the preview and the timeline alike. Full-frame
   // clips stay out: a click on the backdrop clears the selection.
   const clipAtPoint = (e: React.MouseEvent): string | null => {
-    const rct = e.currentTarget.getBoundingClientRect();
+    const rct = boxRef.current!.getBoundingClientRect();
     const px = (e.clientX - rct.left) / rct.width;
     const py = (e.clientY - rct.top) / rct.height;
     const s = useEditor.getState();
@@ -505,10 +506,18 @@ export function Preview() {
     for (const c of s.clips) {
       if (c.hidden) continue;
       const r = rectOf(c);
-      if (isFullRect(r)) continue;
+      if (isFullRect(r) && !e.metaKey && !e.ctrlKey) continue;
       const len = clipLen(c);
       if (t < c.start || t >= c.start + len) continue;
-      if (px < r.x || px > r.x + r.w || py < r.y || py > r.y + r.h) continue;
+      const pose = clipKeyed(c) ? clipPoseAt(c, t - c.start) : null;
+      const cx = pose?.x ?? r.x + r.w / 2;
+      const cy = pose?.y ?? r.y + r.h / 2;
+      const angle = -((pose?.rotation ?? c.rotation ?? 0) * Math.PI) / 180;
+      const dx = (px - cx) * rct.width, dy = (py - cy) * rct.height;
+      const x = dx * Math.cos(angle) - dy * Math.sin(angle);
+      const y = dx * Math.sin(angle) + dy * Math.cos(angle);
+      const scale = pose?.scale ?? 1;
+      if (Math.abs(x) > r.w * rct.width * scale / 2 || Math.abs(y) > r.h * rct.height * scale / 2) continue;
       if (!best || c.track > best.track) best = { id: c.id, track: c.track };
     }
     return best?.id ?? null;
@@ -522,6 +531,25 @@ export function Preview() {
         // A middle-button drag pans the camera from anywhere in the pane, ahead
         // of whatever gizmo or clip sits under the pointer.
         onPointerDownCapture={(e) => {
+          // Selection chrome can cover another item. Modifier picking follows
+          // the visible elements inside the stage.
+          if (e.button === 0 && (e.metaKey || e.ctrlKey) &&
+              (e.target as HTMLElement).closest("[data-preview-clip], [data-preview-kind]") &&
+              !(e.target as HTMLElement).closest("[title], [contenteditable=true]")) {
+            const element = document.elementsFromPoint(e.clientX, e.clientY)
+              .map((node) => node.closest<HTMLElement>(".overlay-item[data-preview-kind], .sub-caption[data-preview-kind]"))
+              .find((node) => node && e.currentTarget.contains(node));
+            const kind = element?.dataset.previewKind;
+            const id = element?.dataset.previewId;
+            const clipId = !id ? clipAtPoint(e) : null;
+            if ((id && (kind === "overlay" || kind === "cue")) || clipId) {
+              e.preventDefault();
+              e.stopPropagation();
+              useEditor.getState().toggleSelect(id && (kind === "overlay" || kind === "cue")
+                ? { kind, id } : { kind: "clip", id: clipId! });
+              return;
+            }
+          }
           if (e.button !== 1) return;
           e.preventDefault();
           e.stopPropagation();
@@ -593,7 +621,12 @@ export function Preview() {
               (e.target as HTMLElement).tagName === "CANVAS"
             ) {
               const hit = clipAtPoint(e);
-              if (hit) useEditor.getState().select({ kind: "clip", id: hit });
+              if (hit) {
+                const s = useEditor.getState();
+                const item = { kind: "clip" as const, id: hit };
+                if (e.metaKey || e.ctrlKey) s.toggleSelect(item);
+                else s.select(item);
+              }
             }
           }}
         >
@@ -639,7 +672,7 @@ export function Preview() {
         <GuideOverlay stage={stage} />
         <ClipMaskGizmo stage={stage} />
         <RemovalBrush stage={stage} />
-        <ClipTransformGizmo stage={stage} />
+        <ClipSelectionGizmos stage={stage} />
         </div>
       </div>
       <ZoomHud
@@ -860,9 +893,18 @@ function snapEdge(v: number, tol: number): number | null {
   return best;
 }
 
-function ClipTransformGizmo({ stage }: { stage: Stage }) {
+function ClipSelectionGizmos({ stage }: { stage: Stage }) {
   const selection = useEditor((s) => s.selection);
-  const clips = useEditor((s) => s.clips);
+  const multi = useEditor((s) => s.multiSelection);
+  const allClips = useEditor((s) => s.clips);
+  const clips = useMemo(() => {
+    const ids = new Set((multi.length ? multi : [selection]).flatMap((item) => item?.kind === "clip" ? [item.id] : []));
+    return allClips.filter((clip) => ids.has(clip.id));
+  }, [allClips, multi, selection]);
+  return clips.map((clip) => <ClipTransformGizmo key={clip.id} selectedClip={clip} stage={stage} />);
+}
+
+function ClipTransformGizmo({ stage, selectedClip }: { stage: Stage; selectedClip: VideoClip }) {
   const assets = useEditor((s) => s.assets);
   const skimTime = useSkim();
   const layerRef = useRef<HTMLDivElement>(null);
@@ -874,7 +916,6 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
   // The gizmo only cares whether its clip is on screen, so it subscribes to
   // that answer instead of to the clock: one render when the clip comes and
   // goes, rather than one per frame while it stays.
-  const selectedClip = selection?.kind === "clip" ? clips.find((c) => c.id === selection.id) : null;
   const brushClipId = useBrushUi((s) => s.clipId);
   const live = usePreviewSelector((t) => {
     if (!selectedClip) return false;
@@ -921,8 +962,15 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
     });
   };
   const asset = assets.find((a) => a.id === clip.assetId);
-  const r = rectOf(clip);
-  const rotation = clip.rotation ?? 0;
+  const restingRect = rectOf(clip);
+  const pose = clipKeyed(clip) ? clipPoseAt(clip, Math.max(0, previewAt() - clip.start)) : null;
+  const r = pose ? {
+    x: pose.x - restingRect.w * pose.scale / 2,
+    y: pose.y - restingRect.h * pose.scale / 2,
+    w: restingRect.w * pose.scale,
+    h: restingRect.h * pose.scale,
+  } : restingRect;
+  const rotation = pose?.rotation ?? clip.rotation ?? 0;
   const zoom = clipZoom(clip);
   // Where the source actually lands inside the box — the same geometry the
   // compositor draws and the export crops, measured in stage pixels so the two
@@ -956,7 +1004,15 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
 
   // The box may leave the frame — oversize it to focus on an area, or park it
   // partly off screen — as long as a sliver stays inside to grab.
-  const onMoveBox = (e: React.PointerEvent) =>
+  const onMoveBox = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      st().toggleSelect({ kind: "clip", id: clip.id });
+      return;
+    }
+    if (startSelectionDrag(e, stage.w, stage.h)) return;
     surfaceDrag(
       e,
       (dx, dy) => {
@@ -973,6 +1029,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
       },
       () => setGuides({ x: null, y: null })
     );
+  };
 
   // A turned box is grabbed on screen but sized in the frame's own axes, so a
   // grip's travel comes back the way the box went out.
@@ -1221,6 +1278,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
         <div
           className="pointer-events-auto absolute cursor-move rounded-[3px] border-2 border-dashed border-[#0a84ff]"
           style={box}
+          data-preview-clip={clip.id}
           onPointerDown={onMoveBox}
         >
           <TransformHandles

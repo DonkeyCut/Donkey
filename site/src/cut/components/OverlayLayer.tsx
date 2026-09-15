@@ -5,6 +5,7 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutE
 import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
+import { startSelectionDrag } from "@/cut/components/previewSelectionDrag";
 import { useSkim, usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
 import {
@@ -178,6 +179,7 @@ export function OverlayLayer({
     [allOverlays, from, to]
   );
   const selection = useEditor((s) => s.selection);
+  const multiSelection = useEditor((s) => s.multiSelection);
   const aspect = useEditor((s) => s.aspect);
   const shownGuides = useEditor((s) => s.guides);
   const guideLines = useEditor((s) => s.guideLines);
@@ -300,7 +302,9 @@ export function OverlayLayer({
   const scrubbing = skimTime !== null;
   const sel =
     selection?.kind === "overlay" ? overlays.find((o) => o.id === selection.id) : undefined;
-  const isolate = !!sel && !scrubbing && !(t >= sel.start && t <= sel.end);
+  const multiple = multiSelection.length > 1;
+  const selectedIds = useMemo(() => new Set(multiSelection.flatMap((item) => item?.kind === "overlay" ? [item.id] : [])), [multiSelection]);
+  const isolate = !multiple && !!sel && !scrubbing && !(t >= sel.start && t <= sel.end);
 
   return (
     <div
@@ -314,16 +318,13 @@ export function OverlayLayer({
         // (see StageEffects), so it draws nothing here and takes no box,
         // handles or drag. The timeline bar is the thing you grab.
         if (o.kind === "effect") return null;
-        const selected = sel?.id === o.id;
-        // A group drags as a unit, so any member is grabbable once the
-        // selection is anywhere inside it.
-        const inGroup = !!sel?.groupId && sel.groupId === o.groupId;
+        const selected = selectedIds.has(o.id) || sel?.id === o.id;
         const inRange = t >= o.start && t <= o.end;
         // While hover-scrubbing (paused, skimmer active) the preview must show the
         // exact frame under the skimmer — a selected but out-of-frame title can't
         // leak into a frame it isn't part of. Off the skimmer, a selected title
         // that sits off the playhead is shown alone (isolate) for editing.
-        if (isolate ? !selected : !inRange && (scrubbing || !selected)) return null;
+        if (isolate ? !selected : !inRange && (scrubbing || !selected || multiple)) return null;
         return (
           <OverlayItem
             key={o.id}
@@ -331,7 +332,7 @@ export function OverlayLayer({
             // The skimmer paints the bare frame: the item still renders, its
             // selection chrome (outline, resize handle) does not.
             selected={selected && !scrubbing}
-            armed={(selected || inGroup) && !scrubbing}
+            armed={selected && !scrubbing}
             ghost={!inRange && !selected}
             t={t}
             stageWidth={stageWidth}
@@ -449,6 +450,7 @@ function SubtitleCaption({
   const subtitles = useEditor((s) => s.subtitles);
   const frame = frameOf(useEditor((s) => s.aspect));
   const selection = useEditor((s) => s.selection);
+  const multiSelection = useEditor((s) => s.multiSelection);
   const stagePress = useContext(StagePress);
   const t = usePreviewTime();
 
@@ -457,7 +459,8 @@ function SubtitleCaption({
   if (!cue || !cue.text.trim()) return null;
   // The caption moves its whole track, so it takes the same rule the elements
   // take: the cue on screen has to be the selection before a drag moves it.
-  const armed = selection?.kind === "cue" && selection.id === cue.id;
+  const armed = (selection?.kind === "cue" && selection.id === cue.id) ||
+    multiSelection.some((item) => item?.kind === "cue" && item.id === cue.id);
 
   // Captions ride the same style/opener/anchor logic as the export burn-in,
   // so the preview and the rendered file match exactly.
@@ -476,12 +479,22 @@ function SubtitleCaption({
   return (
     <div
       ref={(el) => registerBox(subtitleBoxId(lane), el)}
+      data-preview-kind="cue"
+      data-preview-id={cue.id}
       className={cn(
         "sub-caption pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2 cursor-grab text-center whitespace-pre active:cursor-grabbing",
         armed && "outline-[1.5px] outline-offset-[3px] outline-[#0a84ff]"
       )}
       onPointerDown={(e) => {
+        if (e.button !== 0) return;
         const s = useEditor.getState();
+        if (e.metaKey || e.ctrlKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          s.toggleSelect({ kind: "cue", id: cue.id });
+          return;
+        }
+        if (armed && startSelectionDrag(e, stageWidth, stageHeight)) return;
         if (!armed && stagePress) {
           stagePress(e, () => s.select({ kind: "cue", id: cue.id }));
           return;
@@ -1021,8 +1034,15 @@ function OverlayItem({
   };
 
   const beginMove = (e: React.PointerEvent) => {
-    if (editing) return;
+    if (editing || e.button !== 0) return;
     const s = useEditor.getState();
+    if (e.metaKey || e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      s.toggleSelect({ kind: "overlay", id: o.id });
+      return;
+    }
+    if (armed && startSelectionDrag(e, stageWidth, stageHeight)) return;
     // Nothing moves until it is the selection: an unselected element is part
     // of the picture, so the stage pans under it and a stationary press picks
     // it up for the next drag.
@@ -1094,6 +1114,8 @@ function OverlayItem({
         editing && "cursor-text"
       )}
       style={style}
+      data-preview-kind="overlay"
+      data-preview-id={o.id}
       onPointerDown={beginMove}
       onDoubleClick={isText ? () => setEditing(true) : undefined}
     >
@@ -1165,6 +1187,8 @@ function OverlayItem({
                 <div
                   className="pointer-events-auto absolute cursor-grab active:cursor-grabbing"
                   style={twinStyle}
+                  data-preview-kind="overlay"
+                  data-preview-id={o.id}
                   onPointerDown={beginMove}
                   onDoubleClick={isText ? () => setEditing(true) : undefined}
                 >

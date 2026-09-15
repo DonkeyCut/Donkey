@@ -7,6 +7,7 @@
  */
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { SELECTABLE_ITEM_KINDS } from "@/cut/lib/previewSelection";
 import {
   TEXT_EMPHASIS_IDS,
   TEXT_LAYOUT_IDS,
@@ -20,10 +21,11 @@ export const TIMELINE_TOOLS = [
   {
     name: "select",
     description:
-      "Select a video clip (on any track), soundtrack clip, or overlay element — title, shape, or sticker (or clear the selection). Selection drives the inspector panel.",
+      "Select a video clip (on any track), soundtrack clip, or overlay element — title, shape, or sticker (or clear the selection). Selection appears in the timeline and preview. Use additive:true to toggle an item in the selection; move_selection moves the selected visual items together.",
     inputSchema: obj({
-      kind: { type: "string", enum: ["clip", "audio", "overlay", "none"], description: "What to select — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
+      kind: { type: "string", enum: [...SELECTABLE_ITEM_KINDS, "none"], description: "What to select — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
       id: str("The item id (omit for kind=none)"),
+      additive: bool("Toggle this item in the existing selection"),
     }, ["kind"]),
   },
   {
