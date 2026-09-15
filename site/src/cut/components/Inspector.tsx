@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PenTool, Scissors, Smile, Sparkles, Trash2, Type, User, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PenTool, Scissors, Smile, Sparkles, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import {
   EFFECT_LABELS,
@@ -1327,6 +1328,35 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             show={!!clip.rotation}
             onClick={() => updateClip(clip.id, { rotation: undefined })}
           />
+        </Row>
+        <Row label="Flip">
+          <div className="clip-flip flex rounded-lg border border-input p-0.5">
+            {(
+              [
+                ["flipH", "Flip horizontal", FlipHorizontal2],
+                ["flipV", "Flip vertical", FlipVertical2],
+              ] as const
+            ).map(([key, label, Icon]) => (
+              <TooltipProvider key={key}>
+                <Tooltip>
+                  <TooltipTrigger
+                    aria-label={label}
+                    aria-pressed={!!clip[key]}
+                    className={cn(
+                      "grid size-6 place-items-center rounded-md transition-colors",
+                      clip[key]
+                        ? "bg-neutral-900 text-white"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                    onClick={() => updateClip(clip.id, { [key]: clip[key] ? undefined : true })}
+                  >
+                    <Icon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{label}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ))}
+          </div>
         </Row>
         <Row label="Opacity">
           <ValueSlider

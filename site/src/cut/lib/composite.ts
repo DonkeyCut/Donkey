@@ -802,11 +802,22 @@ export class FrameCompositor {
     const rad = Math.max(0, (bs?.radius ?? 0) * ds);
     const prevAlpha = ctx.globalAlpha;
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    if (fill || dw > rw + 0.5 || dh > rh + 0.5 || rad > 0) {
+    const clipped = fill || dw > rw + 0.5 || dh > rh + 0.5 || rad > 0;
+    const flipped = !!(clip?.flipH || clip?.flipV);
+    if (clipped || flipped) {
       ctx.save();
-      ctx.beginPath();
-      ctx.roundRect(rx, ry, rw, rh, rad);
-      ctx.clip();
+      if (clipped) {
+        ctx.beginPath();
+        ctx.roundRect(rx, ry, rw, rh, rad);
+        ctx.clip();
+      }
+      if (flipped) {
+        // The mirror turns about the box center, so the framed picture stays
+        // in its box and the mask and pose passes see it where it was.
+        ctx.translate(rx + rw / 2, ry + rh / 2);
+        ctx.scale(clip?.flipH ? -1 : 1, clip?.flipV ? -1 : 1);
+        ctx.translate(-(rx + rw / 2), -(ry + rh / 2));
+      }
       ctx.drawImage(src, dx, dy, dw, dh);
       ctx.restore();
     } else {
@@ -880,10 +891,10 @@ export class FrameCompositor {
     }
     // A regioned track-0 clip (split-screen half) draws into its rect over the
     // black frame; the full-frame path below keeps the pan-crop behavior. A
-    // styled box (rounded corners, border) also routes through the rect path,
-    // which knows how to draw the style at full frame too.
+    // styled box (rounded corners, border) or a mirrored picture also routes
+    // through the rect path, which knows how to draw those at full frame too.
     const rect = rectOf(clip ?? {});
-    if (!isFullRect(rect) || clip?.boxStyle) {
+    if (!isFullRect(rect) || clip?.boxStyle || clip?.flipH || clip?.flipV) {
       this.drawIntoRect(frame, rect, !!clip && clipCovers(clip), alpha, at, zoom, clip);
       if (hasFx) ctx.restore();
       return;

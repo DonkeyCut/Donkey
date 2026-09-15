@@ -1173,6 +1173,8 @@ export async function captureFreezeFrame(
     zoom?: number;
     panX?: number;
     panY?: number;
+    flipH?: boolean;
+    flipV?: boolean;
   }
 ): Promise<MediaAsset> {
   const frame = await frameAt(sourceUrl, srcTime);
@@ -1198,6 +1200,11 @@ export async function captureFreezeFrame(
     ctx.beginPath();
     ctx.rect(0, 0, w, h);
     ctx.clip();
+    if (framed.flipH || framed.flipV) {
+      ctx.translate(w / 2, h / 2);
+      ctx.scale(framed.flipH ? -1 : 1, framed.flipV ? -1 : 1);
+      ctx.translate(-w / 2, -h / 2);
+    }
     ctx.drawImage(frame.canvas as CanvasImageSource, r.x, r.y, r.w, r.h);
     ctx.restore();
     picture = out;

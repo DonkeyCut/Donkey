@@ -254,14 +254,16 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_framing",
     description:
-      "Set how a video clip meets its box (the project frame, or its region): 'fit' letterboxes the whole picture (default), 'fill' scales it to cover the box and crops the overflow. zoom pushes further in from there, 1..4. Whenever the picture overflows, panX/panY (-1..1, 0=centered) choose what stays visible — e.g. panY=-1 keeps the top. Landscape footage in a vertical project usually wants fill plus a pan that holds the subject.",
+      "Set how a video clip meets its box (the project frame, or its region): 'fit' letterboxes the whole picture (default), 'fill' scales it to cover the box and crops the overflow. zoom pushes further in from there, 1..4. Whenever the picture overflows, panX/panY (-1..1, 0=centered) choose what stays visible — e.g. panY=-1 keeps the top. flipH mirrors the picture left for right (a front-camera take that reads backward, text and all, wants flipH true), flipV top for bottom. Only the fields you pass change; the rest of the clip's framing stays. Landscape footage in a vertical project usually wants fill plus a pan that holds the subject.",
     inputSchema: obj({
       clipId: str("Video clip id"),
       mode: { type: "string", enum: ["fit", "fill"], description: "Framing mode" },
       zoom: num("Zoom past the fitted size, 1 (none) .. 4"),
       panX: num("Crop pan -1 (left) .. 1 (right), when the picture overflows"),
       panY: num("Crop pan -1 (top) .. 1 (bottom), when the picture overflows"),
-    }, ["clipId", "mode"]),
+      flipH: bool("Mirror the picture horizontally"),
+      flipV: bool("Mirror the picture vertically"),
+    }, ["clipId"]),
   },
   {
     name: "set_clip_style",

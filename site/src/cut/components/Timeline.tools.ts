@@ -159,7 +159,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "update_overlay_video",
     description:
-      "Update an overlay video clip: move it (start, track), trim (in/out), mute, hide, change its frame region (layout preset, or a custom region rect in frame fractions), fit, or speed.",
+      "Update an overlay video clip: move it (start, track), trim (in/out), mute, hide, change its frame region (layout preset, or a custom region rect in frame fractions), fit, zoom, mirror (flipH/flipV), rotation, opacity, or speed.",
     inputSchema: obj({
       id: str("Overlay video clip id"),
       start: num("Timeline start s"),
@@ -181,6 +181,8 @@ export const TIMELINE_TOOLS = [
       }, ["x", "y", "w", "h"]),
       fit: { type: "string", enum: ["fit", "fill"], description: "How the video meets its region" },
       zoom: num("Zoom the picture past its fitted size, 1 (none) .. 4; the overflow crops"),
+      flipH: bool("Mirror the picture horizontally (left for right)"),
+      flipV: bool("Mirror the picture vertically (top for bottom)"),
       rotation: num("Resting turn in degrees clockwise, -180..180 (0 clears)"),
       opacity: num("Resting opacity 0..1 (1 clears)"),
       speed: num("Playback rate (1 = normal, no upper limit)"),

@@ -501,6 +501,8 @@ function describeState(
             panY: r(sp.clip.panY ?? 0),
           }
         : {}),
+      ...(sp.clip.flipH ? { flipH: true } : {}),
+      ...(sp.clip.flipV ? { flipV: true } : {}),
       ...(sp.clip.rotation ? { rotation: sp.clip.rotation } : {}),
       ...((sp.clip.opacity ?? 1) < 1 ? { opacity: r(sp.clip.opacity ?? 1) } : {}),
       ...(sp.clip.grade ? { colorGrade: sp.clip.grade } : {}),
@@ -658,6 +660,8 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
       : c.fit === "fill"
         ? { panX: r(c.panX ?? 0), panY: r(c.panY ?? 0) }
         : {}),
+    ...(c.flipH ? { flipH: true } : {}),
+    ...(c.flipV ? { flipV: true } : {}),
     ...(c.rotation ? { rotation: c.rotation } : {}),
     ...((c.opacity ?? 1) < 1 ? { opacity: r(c.opacity ?? 1) } : {}),
     ...(retimeOf(c).rate !== 1 || c.speedCurve || c.reverse || c.smoothSlow ? describeRate(c) : {}),

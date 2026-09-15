@@ -97,6 +97,8 @@ const framingOf = (c: VideoClip) => ({
   ...(c.zoom && c.zoom > 1 ? { zoom: c.zoom } : {}),
   ...(c.panX ? { panX: c.panX } : {}),
   ...(c.panY ? { panY: c.panY } : {}),
+  ...(c.flipH ? { flipH: true } : {}),
+  ...(c.flipV ? { flipV: true } : {}),
   ...(c.rotation ? { rotation: c.rotation } : {}),
   ...((c.opacity ?? 1) < 1 ? { opacity: c.opacity } : {}),
 });
@@ -108,6 +110,8 @@ const templateFraming = (l: TemplateLayer) => ({
   ...(l.zoom && l.zoom > 1 ? { zoom: l.zoom } : {}),
   ...(l.panX ? { panX: l.panX } : {}),
   ...(l.panY ? { panY: l.panY } : {}),
+  ...(l.flipH ? { flipH: true } : {}),
+  ...(l.flipV ? { flipV: true } : {}),
   ...(l.rotation ? { rotation: l.rotation } : {}),
   ...((l.opacity ?? 1) < 1 ? { opacity: l.opacity } : {}),
 });

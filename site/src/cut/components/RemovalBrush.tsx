@@ -263,10 +263,11 @@ function BrushSurface({
       vx /= scl;
       vy /= scl;
     }
-    return {
-      x: Math.min(1, Math.max(0, (vx - (pic.x - ax)) / Math.max(1, pic.w))),
-      y: Math.min(1, Math.max(0, (vy - (pic.y - ay)) / Math.max(1, pic.h))),
-    };
+    // The surface sits where the mirrored picture shows; a mirrored axis
+    // reads the source fraction from the other edge.
+    const fx = Math.min(1, Math.max(0, (vx - (pic.x - ax)) / Math.max(1, pic.w)));
+    const fy = Math.min(1, Math.max(0, (vy - (pic.y - ay)) / Math.max(1, pic.h)));
+    return { x: clip.flipH ? 1 - fx : fx, y: clip.flipV ? 1 - fy : fy };
   };
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -313,7 +314,7 @@ function BrushSurface({
   // surface travels with its picture.
   const r = rectOf(clip);
   const boxPx = { x: r.x * stage.w, y: r.y * stage.h, w: r.w * stage.w, h: r.h * stage.h };
-  const pic = contentRect(
+  const framed = contentRect(
     boxPx,
     asset.width!,
     asset.height!,
@@ -322,6 +323,13 @@ function BrushSurface({
     clip.panX ?? 0,
     clip.panY ?? 0
   );
+  // A mirrored picture lands on the other side of the box center; the
+  // surface follows the pixels, and the selection paints mirrored over them.
+  const pic = {
+    ...framed,
+    x: clip.flipH ? 2 * (boxPx.x + boxPx.w / 2) - (framed.x + framed.w) : framed.x,
+    y: clip.flipV ? 2 * (boxPx.y + boxPx.h / 2) - (framed.y + framed.h) : framed.y,
+  };
   const pose = clipKeyed(clip) ? clipPoseAt(clip, tLocal) : null;
   const ax = (pose ? pose.x : r.x + r.w / 2) * stage.w;
   const ay = (pose ? pose.y : r.y + r.h / 2) * stage.h;
@@ -381,7 +389,16 @@ function BrushSurface({
             if (!gesture.current) updatePointer(null);
           }}
         >
-          <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 size-full" />
+          <canvas
+            ref={overlayRef}
+            className="pointer-events-none absolute inset-0 size-full"
+            style={{
+              transform:
+                clip.flipH || clip.flipV
+                  ? `scale(${clip.flipH ? -1 : 1}, ${clip.flipV ? -1 : 1})`
+                  : undefined,
+            }}
+          />
           <div
             ref={ringRef}
             className="pointer-events-none absolute rounded-full border border-white/90 shadow-[0_0_0_1px_rgba(0,0,0,0.4)]"

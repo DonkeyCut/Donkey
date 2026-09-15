@@ -1381,6 +1381,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const z = clamp(input.zoom, 1, CLIP_MAX_ZOOM);
         patch.zoom = z > 1 ? z : undefined;
       }
+      if (typeof input.flipH === "boolean") patch.flipH = input.flipH || undefined;
+      if (typeof input.flipV === "boolean") patch.flipV = input.flipV || undefined;
       if (isNum(input.rotation)) {
         const deg = Math.round(clamp(input.rotation, -180, 180));
         patch.rotation = deg === 0 ? undefined : deg;
@@ -1400,6 +1402,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         layout: regionLabel(rectOf(next)),
         fit: next.fit ?? "fit",
         ...(clipZoom(next) > 1 ? { zoom: clipZoom(next) } : {}),
+        ...(next.flipH ? { flipH: true } : {}),
+        ...(next.flipV ? { flipV: true } : {}),
         ...(next.rotation ? { rotation: next.rotation } : {}),
         ...((next.opacity ?? 1) < 1 ? { opacity: next.opacity } : {}),
         muted: next.muted,
@@ -2218,15 +2222,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   set_framing: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
-      const mode = input.mode === "fill" ? "fill" : "fit";
-      const zoom = isNum(input.zoom) ? clamp(input.zoom, 1, CLIP_MAX_ZOOM) : 1;
+      // Only what the call names changes; the rest of the framing stays as
+      // the user left it.
+      const mode = input.mode === "fill" || input.mode === "fit" ? input.mode : clip.fit ?? "fit";
+      const zoom = isNum(input.zoom) ? clamp(input.zoom, 1, CLIP_MAX_ZOOM) : clipZoom(clip);
       // Pan only means something once something overflows the box.
       const pannable = mode === "fill" || zoom > 1;
+      const pan = (axis: "panX" | "panY") =>
+        !pannable ? 0 : isNum(input[axis]) ? clamp(input[axis], -1, 1) : clip[axis] ?? 0;
       s.updateClip(clip.id, {
         fit: mode,
         zoom: zoom > 1 ? zoom : undefined,
-        panX: pannable && isNum(input.panX) ? clamp(input.panX, -1, 1) : 0,
-        panY: pannable && isNum(input.panY) ? clamp(input.panY, -1, 1) : 0,
+        panX: pan("panX"),
+        panY: pan("panY"),
+        ...(typeof input.flipH === "boolean" ? { flipH: input.flipH || undefined } : {}),
+        ...(typeof input.flipV === "boolean" ? { flipV: input.flipV || undefined } : {}),
       });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
       return {
@@ -2235,6 +2245,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         zoom: clipZoom(next),
         panX: next.panX ?? 0,
         panY: next.panY ?? 0,
+        flipH: !!next.flipH,
+        flipV: !!next.flipV,
       };
   },
 
@@ -2444,6 +2456,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           zoom: clipZoom(span.clip),
           panX: span.clip.panX ?? 0,
           panY: span.clip.panY ?? 0,
+          flipH: span.clip.flipH,
+          flipV: span.clip.flipV,
         }).catch(
           (e) => {
             throw new ToolError(
@@ -2468,6 +2482,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               zoom: clipZoom(span.clip),
               panX: span.clip.panX ?? 0,
               panY: span.clip.panY ?? 0,
+              flipH: !!span.clip.flipH,
+              flipV: !!span.clip.flipV,
             },
           }),
         });

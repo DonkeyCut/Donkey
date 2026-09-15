@@ -928,7 +928,7 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
   // compositor draws and the export crops, measured in stage pixels so the two
   // axes share one scale.
   const boxPx = { x: r.x * stage.w, y: r.y * stage.h, w: r.w * stage.w, h: r.h * stage.h };
-  const pic =
+  const framed =
     asset?.width && asset?.height
       ? contentRect(
           boxPx,
@@ -940,6 +940,13 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
           clip.panY ?? 0
         )
       : boxPx;
+  // A mirrored picture lands on the other side of the box center, so the
+  // outline sits where the pixels are.
+  const pic = {
+    ...framed,
+    x: clip.flipH ? 2 * (boxPx.x + boxPx.w / 2) - (framed.x + framed.w) : framed.x,
+    y: clip.flipV ? 2 * (boxPx.y + boxPx.h / 2) - (framed.y + framed.h) : framed.y,
+  };
   const ox = Math.max(0, pic.w - boxPx.w);
   const oy = Math.max(0, pic.h - boxPx.h);
   const overflows = ox > 1 || oy > 1;
@@ -1138,7 +1145,11 @@ function ClipTransformGizmo({ stage }: { stage: Stage }) {
     surfaceDrag(
       e,
       (rawX, rawY) => {
-        const { dx, dy } = unturn(rawX, rawY);
+        const { dx: tx, dy: ty } = unturn(rawX, rawY);
+        // Content follows the pointer on screen; a mirrored axis runs the
+        // crop window the other way through the source.
+        const dx = clip.flipH ? -tx : tx;
+        const dy = clip.flipV ? -ty : ty;
         const vx = ox > 1 ? Math.max(-1, Math.min(1, panX0 - dx / (ox / 2))) : 0;
         const vy = oy > 1 ? Math.max(-1, Math.min(1, panY0 - dy / (oy / 2))) : 0;
         const sx = ox > 1 && Math.abs(vx) * (ox / 2) <= PAN_SNAP_PX;

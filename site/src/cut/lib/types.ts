@@ -540,6 +540,11 @@ export interface VideoClip {
    * box — covering it, zoomed into it, or both. */
   panX?: number;
   panY?: number;
+  /** Mirrors the framed picture across its box's vertical axis, left for
+   * right: a front-camera take reads the way its viewfinder did. */
+  flipH?: boolean;
+  /** Mirrors the framed picture top for bottom. */
+  flipV?: boolean;
   /** Resting turn, degrees clockwise about the box center; absent = upright.
    * A pose key track overrides it while it plays. */
   rotation?: number;
@@ -1049,10 +1054,13 @@ export interface TemplateLayer {
   out: number;
   frame?: FrameRect;
   fit?: "fit" | "fill";
-  /** The picture's own framing inside that box: zoom, crop pan, turn, fade. */
+  /** The picture's own framing inside that box: zoom, crop pan, mirror,
+   * turn, fade. */
   zoom?: number;
   panX?: number;
   panY?: number;
+  flipH?: boolean;
+  flipV?: boolean;
   rotation?: number;
   opacity?: number;
   muted: boolean;

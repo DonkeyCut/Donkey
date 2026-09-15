@@ -385,7 +385,14 @@ export const projectsApi = {
         srcTime?: number;
         duration?: number;
         frame?: { w?: number; h?: number };
-        framing?: { fit?: "fit" | "fill"; zoom?: number; panX?: number; panY?: number };
+        framing?: {
+          fit?: "fit" | "fill";
+          zoom?: number;
+          panX?: number;
+          panY?: number;
+          flipH?: boolean;
+          flipV?: boolean;
+        };
       };
       if (!body.file || typeof body.srcTime !== "number") {
         return err("file and srcTime are required.", 400);
@@ -400,6 +407,8 @@ export const projectsApi = {
             zoom: typeof body.framing?.zoom === "number" ? body.framing.zoom : 1,
             panX: typeof body.framing?.panX === "number" ? body.framing.panX : 0,
             panY: typeof body.framing?.panY === "number" ? body.framing.panY : 0,
+            flipH: body.framing?.flipH === true,
+            flipV: body.framing?.flipV === true,
           }
         : undefined;
       const made = await makeFreezeFrame(id, body.file, body.srcTime, body.duration ?? 1, frame, framing);

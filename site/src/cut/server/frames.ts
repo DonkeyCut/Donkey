@@ -65,6 +65,9 @@ export interface FreezeFraming {
   zoom?: number;
   panX: number;
   panY: number;
+  /** Mirror the framed picture left for right / top for bottom. */
+  flipH?: boolean;
+  flipV?: boolean;
 }
 
 /**
@@ -107,10 +110,12 @@ export async function makeFreezeFrame(
       const kx = (0.5 + (framing?.panX ?? 0) / 2).toFixed(4);
       const ky = (0.5 + (framing?.panY ?? 0) / 2).toFixed(4);
       const crop = `,crop=${fexpr(`min(iw,${w})`)}:${fexpr(`min(ih,${h})`)}:(iw-ow)*${kx}:(ih-oh)*${ky}`;
+      const mirror = (framing?.flipH ? ",hflip" : "") + (framing?.flipV ? ",vflip" : "");
       vf = cover
-        ? `scale=${even(w * z)}:${even(h * z)}:force_original_aspect_ratio=increase${crop}`
+        ? `scale=${even(w * z)}:${even(h * z)}:force_original_aspect_ratio=increase${crop}${mirror}`
         : `scale=${even(w * z)}:${even(h * z)}:force_original_aspect_ratio=decrease` +
           (z > 1.0001 ? crop : "") +
+          mirror +
           `,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black`;
     }
 
