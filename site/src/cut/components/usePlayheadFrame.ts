@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { getPreviewCanvas, sampleClipSource } from "@/cut/lib/previewCanvas";
-import { projectDuration, useEditor } from "@/cut/lib/store";
-import { usePreviewTimeEvery } from "@/cut/lib/playhead";
+import { clipLen, useEditor } from "@/cut/lib/store";
+import { usePreviewSelector, usePreviewTimeEvery } from "@/cut/lib/playhead";
 
 /** The sampled preview frame's short side, doubled from the tile swatch's
  * on-screen size so it stays sharp on retina displays. */
@@ -149,9 +149,15 @@ let lastFrame: { project: string; url: string } | null = null;
  * decoder has painted); null until the preview has a picture. */
 export function usePlayheadFrame(): string | null {
   const projectId = useEditor((s) => s.projectId);
-  // The tile shows the live frame, which a cut of titles and shapes over the
-  // background has as much as one made of footage.
-  const hasPicture = useEditor((s) => projectDuration(s) > 0);
+  const clips = useEditor((s) => s.clips);
+  // The tile shows the live frame while footage sits under the playhead — a
+  // video or a picture on any row. Over a stretch of titles and shapes on
+  // the background, or past the last clip, the tiles take their stand-in
+  // scene, the way the transition tiles do at a cut with no footage: a
+  // treatment reads on a landscape and vanishes on a plain color.
+  const hasPicture = usePreviewSelector((t) =>
+    clips.some((c) => !c.hidden && t >= c.start && t < c.start + clipLen(c))
+  );
   const frame = useSampledFrame(
     snapshotPreview,
     hasPicture && !!projectId,
