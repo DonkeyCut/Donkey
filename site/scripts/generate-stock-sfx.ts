@@ -956,8 +956,11 @@ function run(cmd: string, args: string[]): string {
 
 /** Cut the silence off both ends and bring the loudest sample to PEAK_DB, so a
  * one-shot starts the instant it lands on the timeline and every card plays at
- * the same level. A loop keeps its ends — trimming would break the seam. */
-async function finish(item: CatalogItem, raw: Buffer): Promise<void> {
+ * the same level. A loop keeps its ends — trimming would break the seam. The
+ * noise-wall gate catches a render the model gave up on; a library take was
+ * already heard and chosen, and a static, a hum or a bleep is meant to sit
+ * at its peak, so `judged` skips it. */
+async function finish(item: CatalogItem, raw: Buffer, judged = false): Promise<void> {
   await mkdir(CACHE_DIR, { recursive: true });
   const rawPath = path.join(CACHE_DIR, `${fileName(item)}.raw.mp3`);
   await writeFile(rawPath, raw);
@@ -979,7 +982,7 @@ async function finish(item: CatalogItem, raw: Buffer): Promise<void> {
   await unlink(rawPath);
   // A one-shot that never drops below half its peak is a wall of noise, a
   // take the model gave up on; throwing sends it back for another attempt.
-  if (!item.loop) {
+  if (!item.loop && !judged) {
     const peaks = computePeaks(fileName(item));
     const loud = peaks.filter((p) => p > 0.5).length / peaks.length;
     if (loud > NOISE_WALL_SHARE) {
@@ -1264,9 +1267,9 @@ async function placeTake(
   const before = names.get(item.id);
   names.set(item.id, name);
   try {
-    await finish(item, mp3);
+    await finish(item, mp3, true);
   } catch (e) {
-    // A take the trim left empty or a wall of noise.
+    // A take the trim left empty.
     if (before) names.set(item.id, before);
     else names.delete(item.id);
     console.error(`  ${item.id}: ${e instanceof Error ? e.message : e}`);
