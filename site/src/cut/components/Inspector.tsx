@@ -352,48 +352,79 @@ function RailButton({
   );
 }
 
-/** An element panel's title: the element's name, typed over in place. What
- * it is — the text, the shape, the effect — stands in until a name is given
- * and again when the name is cleared. Enter or leaving the field commits;
- * Escape puts back what was there. The timeline chip and chat references
- * show the same name. */
-function ElementTitle({ overlay: o }: { overlay: Overlay }) {
-  const update = useEditor((s) => s.updateOverlay);
+/** A name that renames in place: a plain label until it is clicked, then an
+ * input, the way the project title in the top bar renames. What the item is —
+ * the file, the text, the shape — stands in until a name is given and again
+ * when the name is cleared. Enter or leaving the field commits; Escape puts
+ * back what was there. */
+function InlineName({
+  name,
+  fallback,
+  label,
+  onRename,
+}: {
+  name?: string;
+  fallback: string;
+  label: string;
+  onRename: (name: string | undefined) => void;
+}) {
   const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? o.name ?? "";
   const commit = () => {
     if (draft === null) return;
-    const name = draft.trim().slice(0, 60);
+    const next = draft.trim().slice(0, 60);
     setDraft(null);
-    if ((name || undefined) !== (o.name || undefined)) update(o.id, { name: name || undefined });
+    if ((next || undefined) !== (name || undefined)) onRename(next || undefined);
   };
+  if (draft === null) {
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        className="-mx-2 min-w-0 max-w-full cursor-text truncate rounded-md px-2 py-1 text-left text-sm font-semibold tracking-tight hover:bg-muted"
+        onClick={() => setDraft(name ?? "")}
+      >
+        {name?.trim() || fallback}
+      </button>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      aria-label={label}
+      className="-mx-2 h-7 w-full min-w-0 rounded-md border border-input bg-transparent px-2 text-sm font-semibold tracking-tight outline-none select-text focus:border-ring"
+      value={draft}
+      placeholder={fallback}
+      spellCheck={false}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setDraft(null);
+      }}
+    />
+  );
+}
+
+/** An element panel's title: the element's name, renamed in place. The
+ * timeline chip and chat references show the same name. */
+function ElementTitle({ overlay: o }: { overlay: Overlay }) {
+  const update = useEditor((s) => s.updateOverlay);
   return (
     <div className="flex h-10 shrink-0 items-center px-3.5">
-      <input
+      <InlineName
         key={o.id}
-        aria-label="Element name"
-        className="h-7 w-full min-w-0 rounded-md bg-transparent px-1 -mx-1 text-sm font-semibold tracking-tight outline-none placeholder:text-foreground focus:bg-muted/60 focus:placeholder:text-muted-foreground"
-        value={shown}
-        placeholder={overlayName({ ...o, name: undefined } as Overlay) || "Text"}
-        spellCheck={false}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-          if (e.key === "Escape") {
-            setDraft(null);
-            e.currentTarget.blur();
-          }
-        }}
+        label="Element name"
+        name={o.name}
+        fallback={overlayName({ ...o, name: undefined } as Overlay) || "Text"}
+        onRename={(name) => update(o.id, { name })}
       />
     </div>
   );
 }
 
-/** One-line header for a media clip's panel: the clip's name, typed over
- * in place (the file's name stands in until one is given, and again when it
- * is cleared), and the clip's running length. Enter or leaving the field
- * commits; Escape puts back what was there. The timeline bar shows the same
+/** One-line header for a media clip's panel: the clip's name, renamed in
+ * place (the file's name stands in until one is given, and again when it is
+ * cleared), and the clip's running length. The timeline bar shows the same
  * name. */
 function ClipHead({
   clip,
@@ -406,31 +437,14 @@ function ClipHead({
   time: string;
   onRename: (name: string | undefined) => void;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const commit = () => {
-    if (draft === null) return;
-    const name = draft.trim().slice(0, 60);
-    setDraft(null);
-    if ((name || undefined) !== (clip.name || undefined)) onRename(name || undefined);
-  };
   return (
     <div className="mb-1.5 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border">
-      <input
+      <InlineName
         key={clip.id}
-        aria-label="Clip name"
-        className="h-7 w-full min-w-0 rounded-md bg-transparent px-1 -mx-1 text-sm font-semibold tracking-tight outline-none placeholder:text-foreground focus:bg-muted/60 focus:placeholder:text-muted-foreground"
-        value={draft ?? clip.name ?? ""}
-        placeholder={fileName}
-        spellCheck={false}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-          if (e.key === "Escape") {
-            setDraft(null);
-            e.currentTarget.blur();
-          }
-        }}
+        label="Clip name"
+        name={clip.name}
+        fallback={fileName?.trim() || "Clip"}
+        onRename={onRename}
       />
       <Value className="shrink-0 text-muted-foreground">{time}</Value>
     </div>
