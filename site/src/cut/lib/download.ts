@@ -18,3 +18,17 @@ export function downloadFromUrl(url: string, name: string) {
   a.click();
   a.remove();
 }
+
+/** Save text made in this tab — a captions file — to the user's Downloads
+ * folder. The blob is same-origin, so the anchor's own name is honored. */
+export function downloadText(text: string, name: string, type = "text/plain") {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
