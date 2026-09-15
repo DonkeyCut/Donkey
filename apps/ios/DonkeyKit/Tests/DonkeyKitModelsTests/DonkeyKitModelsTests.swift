@@ -1286,7 +1286,7 @@ import Testing
     }
 
     @Test func recordToggleRoutesThroughController() {
-        let model = CameraModel()
+        let model = CameraModel(defaults: UserDefaults(suiteName: "record-\(UUID())")!)
         let controller = FakeController()
         model.controller = controller
         model.toggleRecording()
@@ -1299,7 +1299,7 @@ import Testing
     }
 
     @Test func flipResetsZoomAndTorch() {
-        let model = CameraModel()
+        let model = CameraModel(defaults: UserDefaults(suiteName: "flip-\(UUID())")!)
         model.controller = FakeController()
         model.select(zoom: 2)
         model.toggleTorch()
