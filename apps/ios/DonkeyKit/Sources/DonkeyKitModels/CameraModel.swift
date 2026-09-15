@@ -64,9 +64,10 @@ public final class CameraModel {
         }
     }
 
-    /// Whether the microphone meter sits on the picture. Kept across
-    /// sessions: a person burned by a silent take wants it every time.
-    public private(set) var showsAudioMeter = false {
+    /// Whether the microphone meter sits on the picture. On by default, so a
+    /// silent take shows itself before the shutter is pressed; a person who
+    /// hides it stays without it across sessions.
+    public private(set) var showsAudioMeter = true {
         didSet {
             if showsAudioMeter != oldValue {
                 defaults.set(showsAudioMeter, forKey: Self.audioMeterKey)
@@ -97,7 +98,7 @@ public final class CameraModel {
             teleprompter.settings = settings
         }
         showsSafeZones = defaults.bool(forKey: Self.safeZonesKey)
-        showsAudioMeter = defaults.bool(forKey: Self.audioMeterKey)
+        showsAudioMeter = defaults.object(forKey: Self.audioMeterKey) as? Bool ?? true
         if let data = defaults.data(forKey: Self.settingsKey),
            let settings = try? JSONDecoder().decode(CameraSettings.self, from: data) {
             self.settings = settings

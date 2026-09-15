@@ -1266,22 +1266,23 @@ import Testing
         func setAudioMetering(_ on: Bool) { recorded.append("meter \(on)") }
     }
 
-    @Test func audioMeterTogglesIsRememberedAndOnlyReadsWhileShown() {
+    @Test func audioMeterShowsByDefaultIsRememberedAndOnlyReadsWhileShown() {
         let defaults = UserDefaults(suiteName: "meter-\(UUID())")!
         let model = CameraModel(defaults: defaults)
         let controller = FakeController()
         model.controller = controller
-        #expect(!model.showsAudioMeter)
-        model.audioLevelDidChange(0.5)
-        #expect(model.audioLevel == nil)
-        model.toggleAudioMeter()
         #expect(model.showsAudioMeter)
         model.audioLevelDidChange(0.5)
         #expect(model.audioLevel == 0.5)
-        #expect(CameraModel(defaults: defaults).showsAudioMeter)
         model.toggleAudioMeter()
+        #expect(!model.showsAudioMeter)
         #expect(model.audioLevel == nil)
-        #expect(controller.recorded == ["meter true", "meter false"])
+        model.audioLevelDidChange(0.5)
+        #expect(model.audioLevel == nil)
+        #expect(!CameraModel(defaults: defaults).showsAudioMeter)
+        model.toggleAudioMeter()
+        #expect(model.showsAudioMeter)
+        #expect(controller.recorded == ["meter false", "meter true"])
     }
 
     @Test func recordToggleRoutesThroughController() {
