@@ -61,6 +61,7 @@ export const ENGINE_LOST_EVENT = "cut-engine-lost";
  * connect. */
 export function engineLost() {
   resolvedOrigin = null;
+  features = null;
   gateOpened = new Promise<void>((resolve) => {
     openGate = resolve;
   });
@@ -169,6 +170,22 @@ export async function engineReady(): Promise<string> {
  * URLs built from it are correct once any apiFetch has succeeded. */
 export function engineOrigin(): string {
   return resolvedOrigin ?? "";
+}
+
+// What the connected engine build can carry (see lib/engineFeatures.ts),
+// read from its health answer once per connection. An engine from before the
+// list existed answers with none, so work it would drop is refused up front.
+let features: Promise<ReadonlySet<string>> | null = null;
+
+export function engineFeatures(): Promise<ReadonlySet<string>> {
+  features ??= fetch(`${engineOrigin()}/api/cut/engine/health`)
+    .then((res) => res.json() as Promise<{ features?: string[] }>)
+    .then((body) => new Set(Array.isArray(body.features) ? body.features : []) as ReadonlySet<string>)
+    .catch(() => {
+      features = null;
+      return new Set<string>();
+    });
+  return features;
 }
 
 // The signed-in Donkey account, set by RequireSession once the session

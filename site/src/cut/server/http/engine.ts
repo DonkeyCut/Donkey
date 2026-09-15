@@ -1,4 +1,5 @@
 import os from "node:os";
+import { ENGINE_FEATURES } from "../../lib/engineFeatures";
 
 /** The engine's version: the Donkey app passes its own release version when it
  * spawns the engine, so engine updates ride app updates. "dev" everywhere
@@ -23,6 +24,7 @@ export const engineApi = {
       engine: "donkey-cut",
       version: engineVersion(),
       user: engineUser(),
+      features: ENGINE_FEATURES,
     });
   },
 };
