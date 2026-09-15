@@ -63,8 +63,9 @@ import {
 } from "@/cut/lib/assetDrag";
 import { useInView } from "@/cut/hooks/useInView";
 import { MediaCardShell } from "./MediaCardShell";
-import { fileKind, isMediaFile, MEDIA_ACCEPT } from "@/cut/lib/media";
-import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
+import { assetTypeOf, fileKind, isMediaFile, MEDIA_ACCEPT } from "@/cut/lib/media";
+import { isFontArchive } from "@/cut/lib/fontArchive";
+import { libraryKey, libraryScope, patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   createLibraryFolder,
   deleteFromLibrary,
@@ -138,17 +139,20 @@ const LIBRARY_FOLDER_MOVE_MIME = "application/x-cut-library-folder";
 /** What an arriving item is doing right now. An upload is one push from this
  * browser; a link is fetched by whichever shelf is taking it, and comes down
  * in stages. */
-type PendingStage = "uploading" | ImportStage;
+type PendingStage = "preparing" | "uploading" | ImportStage;
 
 /** Media on its way into the library: the tile it will occupy, standing in
  * for it while the work runs. */
-interface Pending {
+type Pending = {
   id: string;
   /** The whole link, for the tile's tooltip: the label on the face is cut to
    * the site and the post's id. */
   source?: string;
   /** The file name being uploaded, or the link being imported. */
   name: string;
+  folderId: string | null;
+  file?: File;
+  mediaType?: LibraryAsset["type"];
   stage: PendingStage;
   startedAt: number;
   /** A guess at the media's shape, for a link, so the tile opens near the size
@@ -163,7 +167,7 @@ interface Pending {
    * calling this, with the file or link and where it was headed still in
    * hand. */
   run: () => Promise<void>;
-}
+};
 
 /** Routing words a path spends on the way to the thing: they say nothing about
  * which post this is, so a label built from one ("youtube.com/watch") reads the
@@ -205,8 +209,9 @@ function linkLabel(url: string): string {
 }
 
 const STAGE_LABEL: Record<PendingStage, string> = {
+  preparing: "Preparing",
   uploading: "Uploading",
-  queued: "Starting",
+  queued: "Queued",
   downloading: "Downloading",
   saving: "Saving",
 };
@@ -227,9 +232,34 @@ function PendingTile({
   onDismiss: () => void;
 }) {
   const elapsed = useElapsed(item.error ? null : item.startedAt);
+  const [previewUrl, setPreviewUrl] = useState<string>();
+  const file = item.file;
+  const mediaType = item.mediaType;
+  const tileRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || !file || !mediaType || mediaType === "font") return;
+      let url: string | undefined;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) return;
+          observer.disconnect();
+          url = URL.createObjectURL(file);
+          setPreviewUrl(url);
+        },
+        { rootMargin: "150px" },
+      );
+      observer.observe(node);
+      return () => {
+        observer.disconnect();
+        if (url) URL.revokeObjectURL(url);
+      };
+    },
+    [file, mediaType],
+  );
   const frame = item.shape ?? { width: 1, height: 1 };
   return (
     <div
+      ref={tileRef}
       className={cn(
         "relative max-w-full overflow-hidden rounded-xl border",
         item.error ? "border-destructive/50 bg-muted" : "border-border",
@@ -259,6 +289,19 @@ function PendingTile({
             <X data-icon="inline-start" /> Cancel
           </Button>
         </div>
+      ) : previewUrl && mediaType === "audio" ? (
+        <AudioCardFace url={previewUrl} duration={0} durationClassName="hidden" />
+      ) : previewUrl && mediaType === "image" ? (
+        // eslint-disable-next-line @next/next/no-img-element -- local file preview
+        <img src={previewUrl} alt={item.name} className="size-full object-cover" />
+      ) : previewUrl && mediaType === "video" ? (
+        <video
+          src={previewUrl}
+          muted
+          playsInline
+          preload="metadata"
+          className="size-full object-cover"
+        />
       ) : (
         <Skeleton className="size-full rounded-none" />
       )}
@@ -297,7 +340,14 @@ function PendingTile({
           </Tooltip>
         </TooltipProvider>
       ) : (
-        <span className="absolute bottom-1.5 left-1.5 flex max-w-[calc(100%-0.75rem)] items-center gap-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] text-white">
+        <span
+          className={cn(
+            "absolute bottom-1.5 flex items-center gap-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] text-white",
+            mediaType === "audio"
+              ? "right-1.5 max-w-[calc(100%-3.5rem)]"
+              : "left-1.5 max-w-[calc(100%-0.75rem)]",
+          )}
+        >
           <span className="truncate">{STAGE_LABEL[item.stage]}</span>
           <span className="shrink-0 font-mono tabular-nums">{elapsed}</span>
         </span>
@@ -385,6 +435,8 @@ export function LibraryView() {
   // from the moment it starts, so the library shows the work rather than the
   // dialog holding it.
   const [pending, setPending] = useState<Pending[]>([]);
+  // One drain bounds probe, decode, and transfer work across overlapping drops.
+  const uploadTail = useRef(Promise.resolve());
   const [addOpen, setAddOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [folderCreating, setFolderCreating] = useState(false);
@@ -462,7 +514,7 @@ export function LibraryView() {
           : p,
       ),
     );
-    void item.run();
+    uploadTail.current = uploadTail.current.then(item.run);
   };
 
   // Upload a batch into `folderId` (the open folder by default — folder tiles
@@ -471,28 +523,52 @@ export function LibraryView() {
     files: FileList | File[],
     into: string | null = openFolder,
   ) => {
-    const list = (await expandLinkedFiles(Array.from(files))).filter(
-      (f) => isMediaFile(f) || isLinkedFile(f),
-    );
     const { residency, folderId } = landing(into);
     if (!live(residency)) return;
-    for (const file of list) {
+    const accepts = (file: File) => isMediaFile(file) || isLinkedFile(file);
+    const prepare = (file: File): Pending => {
       const id = crypto.randomUUID();
+      // Filing can fail after storage succeeds. Retrying keeps that stored copy.
+      let asset: LibraryAsset | undefined;
       const run = async () => {
         try {
-          // Something the Library lends rather than copies, dropped outside a
-          // folder, takes the shelf every surface can read; dropped into one,
-          // the folder still decides.
-          const shelf =
-            isLinkedFile(file) && !folderId
+          if (isFontArchive(file)) {
+            setStage(id, "preparing");
+            const children = (await expandLinkedFiles([file]))
+              .filter(accepts)
+              .map(prepare);
+            if (!children.length) {
+              throw new Error("This archive contains no supported font files.");
+            }
+            setPending((q) => q.flatMap((p) => p.id === id ? children : [p]));
+            for (const child of children) await child.run();
+            return;
+          }
+          setStage(id, residency === "browser" ? "saving" : "uploading");
+          if (!asset) {
+            const shelf = isLinkedFile(file) && !folderId
               ? await shelfForNewItem(file.size)
               : residency;
-          const asset = await uploadToLibrary(file, shelf);
+            asset = await uploadToLibrary(file, shelf);
+          }
           if (folderId) {
-            await moveLibraryItem(shelf, asset.id, folderId).catch(() => {});
+            setStage(id, "saving");
+            await moveLibraryItem(asset.residency, asset.id, folderId);
             asset.folderId = folderId;
           }
-          patch((d) => ({ ...d, assets: [asset, ...d.assets] }));
+          const landed = asset;
+          // A drop can beat the first listing. Keep its tile until the cache
+          // can take the stored asset alongside the rest of the shelf.
+          if (!client.getQueryData(libraryKey(libraryScope()))) {
+            await reload();
+            if (!client.getQueryData(libraryKey(libraryScope()))) {
+              throw new Error("Could not refresh the library. Retry to show the saved file.");
+            }
+          }
+          patch((d) => ({
+            ...d,
+            assets: [landed, ...d.assets.filter((a) => a.id !== landed.id)],
+          }));
           // A lent item is only usable once it is in reach of the menus.
           if (isLinkedType(asset.type)) void syncLinkedLibrary();
           dropPending(id);
@@ -503,16 +579,27 @@ export function LibraryView() {
           );
         }
       };
-      addPending({
+      return {
         id,
         name: file.name,
-        stage: "uploading",
-        startStage: "uploading",
+        file,
+        mediaType: assetTypeOf(file) ?? (isLinkedFile(file) ? "font" : undefined),
+        folderId,
+        stage: "queued",
+        startStage: "queued",
         startedAt: Date.now(),
         run,
-      });
-      await run();
-    }
+      };
+    };
+    const batch = Array.from(files)
+      .filter((file) => accepts(file) || isFontArchive(file))
+      .map(prepare);
+    // Publish every tile before unpacking, probing, or sending the first file.
+    setPending((q) => [...q, ...batch]);
+    uploadTail.current = uploadTail.current.then(async () => {
+      for (const item of batch) await item.run();
+    });
+    await uploadTail.current;
   };
 
   // The link's tile goes up at once — shaped by what that kind of link usually
@@ -556,6 +643,7 @@ export function LibraryView() {
     addPending({
       id,
       name: linkLabel(value),
+      folderId,
       source: value,
       stage: "queued",
       startStage: "queued",
@@ -766,15 +854,15 @@ export function LibraryView() {
     if (found.length === 0) shownBands.set(key, found);
     return found;
   };
-  for (const p of pending)
+  const shownPending = pending.filter((p) => p.folderId === openFolder);
+  for (const p of shownPending)
     band(p.shape ? shapeBand(p.shape.width, p.shape.height) : 0).push({
       pending: p,
     });
   for (const a of shown) band(shapeOf(a)).push({ asset: a });
-  // Every tile takes the same area — a wide clip spreads, a tall one stands,
-  // and each carries equal weight on the page. The area is the projects grid's,
-  // so a clip and a project of the same shape are the same card.
+  // Sound tiles are 70% of the shared tile's width and height.
   const TILE_AREA = 180 * 320;
+  const audioArea = TILE_AREA * 0.7 ** 2;
   const shownTemplates = templates.filter(
     (t) => (t.folderId ?? null) === openFolder,
   );
@@ -945,7 +1033,7 @@ export function LibraryView() {
           />
         ) : null}
 
-        {!library.data && library.isPending ? (
+        {!library.data && library.isPending && shownPending.length === 0 ? (
           <div className="grid place-items-center py-24 text-muted-foreground">
             <Loader2 className="size-5 animate-spin" />
           </div>
@@ -965,7 +1053,7 @@ export function LibraryView() {
             </div>
           </button>
         ) : shown.length === 0 &&
-          pending.length === 0 &&
+          shownPending.length === 0 &&
           shownTemplates.length === 0 ? null : (
           <Marquee
             className="flex min-h-[40vh] flex-col content-start gap-8"
@@ -1009,7 +1097,7 @@ export function LibraryView() {
                       <PendingTile
                         key={tile.pending.id}
                         item={tile.pending}
-                        area={TILE_AREA}
+                        area={tile.pending.mediaType === "audio" ? audioArea : TILE_AREA}
                         onRetry={() => retryPending(tile.pending)}
                         onDismiss={() => dropPending(tile.pending.id)}
                       />
@@ -1019,7 +1107,7 @@ export function LibraryView() {
                     <LibraryCard
                       key={a.id}
                       asset={a}
-                      area={TILE_AREA}
+                      area={a.type === "audio" ? audioArea : TILE_AREA}
                       selected={selected.has(a.id)}
                       dragGroup={pickedRun}
                       offline={!live(a.residency)}
