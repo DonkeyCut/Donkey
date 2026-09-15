@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { retimeOf } from "@donkeycut/effects-kit";
 import {
+  narrowSpecToRange,
   runExport,
   type ExportPipelineIO,
   type ExportSpec,
@@ -680,6 +681,13 @@ describe("the project background in the filtergraph", () => {
     expect(g.join(";")).toContain("crop='min(iw,1080)':'min(ih,1920)'");
   });
 
+  test("a mirrored clip flips after its framing, inside its box", async () => {
+    const g = await graphFor({ clips: [clip("a.mp4", { fit: "fill", flipH: true })] });
+    expect(g.join(";")).toContain(":(ih-oh)*0.500,hflip,setsar=1");
+    const v = await graphFor({ clips: [clip("a.mp4", { flipV: true })] });
+    expect(v.join(";")).toContain(",vflip,pad=");
+  });
+
   test("no background named keeps the black frame every cut had before", async () => {
     const g = await graphFor({ clips: [clip("", { out: 4, hidden: true, muted: true })] });
     expect(g.join(";")).toContain("color=c=black:");
@@ -859,6 +867,78 @@ describe("delivery", () => {
     expect(args).not.toContain("-crf");
     expect(arg(args, "-b:v")).toBe("6000000");
     expect(arg(args, "-maxrate")).toBe("9000000");
+  });
+
+  test("H.264 and HEVC write the High profile with a key frame every two seconds", async () => {
+    const h264 = await encodeRun({ fps: 30 });
+    expect(arg(h264, "-profile:v")).toBe("high");
+    expect(arg(h264, "-g")).toBe("60");
+    const hevc = await encodeRun({ codec: "hevc", fps: 24 });
+    expect(arg(hevc, "-g")).toBe("48");
+    const prores = await encodeRun({ codec: "prores", container: "mov" });
+    expect(prores).not.toContain("-g");
+  });
+
+  test("a range is cut from the finished composite and sets the file's length", async () => {
+    const args = await encodeRun({ duration: 20, range: { start: 5, end: 12 } });
+    const graph = arg(args, "-filter_complex");
+    expect(graph).toContain("trim=start=5.000:end=12.000,setpts=PTS-STARTPTS[vrange]");
+    expect(graph).toContain("atrim=start=5.000:end=12.000,asetpts=PTS-STARTPTS[arange]");
+    expect(arg(args, "-map")).toBe("[vrange]");
+    expect(arg(args, "-t")).toBe("7.000");
+  });
+
+  test("a range hides the track-0 slots it cannot reach and drops the entries outside it", async () => {
+    const spec = {
+      projectId: "p", width: 1080, height: 1920, fps: 30, crf: 24, preset: "veryfast",
+      duration: 30,
+      range: { start: 12, end: 18 },
+      clips: ["a", "b", "c", "d", "e", "f"].map((n) => clip(`${n}.mp4`, { out: 5 })),
+      audio: [
+        { file: "m1.mp3", in: 0, out: 4, start: 0, volume: 1 },
+        { file: "m2.mp3", in: 0, out: 4, start: 15, volume: 1 },
+      ],
+      overlays: [
+        { file: "t1.png", start: 0, end: 3 },
+        { file: "t2.png", start: 17, end: 25 },
+      ],
+      captions: [
+        { file: "c1.png", start: 1, end: 2 },
+        { file: "c2.png", start: 13, end: 14 },
+      ],
+    } as unknown as ExportSpec;
+    const narrowed = narrowSpecToRange(spec);
+    // Five-second slots: [0,5) [5,10) [10,15) [15,20) [20,25) [25,30). The
+    // half-second slack keeps the slot ending at 10 hidden and the one
+    // starting at 20 hidden.
+    expect(narrowed.clips.map((c) => !!c.hidden)).toEqual([true, true, false, false, true, true]);
+    expect(narrowed.audio.map((a) => a.file)).toEqual(["m2.mp3"]);
+    expect(narrowed.overlays.map((o) => o.file)).toEqual(["t2.png"]);
+    expect(narrowed.captions?.map((c) => c.file)).toEqual(["c2.png"]);
+    expect(narrowed.duration).toBe(30);
+    const whole = { ...spec, range: undefined };
+    expect(narrowSpecToRange(whole)).toBe(whole);
+  });
+
+  test("a join at the range edge keeps its neighbor", async () => {
+    const spec = {
+      projectId: "p", width: 1080, height: 1920, fps: 30, crf: 24, preset: "veryfast",
+      duration: 15,
+      range: { start: 6, end: 8 },
+      clips: [clip("a.mp4", { out: 5, transition: 1 }), clip("b.mp4", { out: 5 }), clip("c.mp4", { out: 5 })],
+      audio: [],
+      overlays: [],
+    } as unknown as ExportSpec;
+    // Slots [0,5) [5,10) [10,15): a one-second join reaches 1.5 s past each
+    // edge, so the first slot (ending at 5, within 1.5 of 6) stays and the
+    // last (starting at 10, beyond 1.5 of 8) is hidden.
+    expect(narrowSpecToRange(spec).clips.map((c) => !!c.hidden)).toEqual([false, false, true]);
+  });
+
+  test("no range delivers the whole cut", async () => {
+    const args = await encodeRun({ duration: 20 });
+    expect(arg(args, "-filter_complex")).not.toContain("[vrange]");
+    expect(arg(args, "-t")).toBe("20.000");
   });
 });
 

@@ -9,7 +9,7 @@ import { getProject } from "./projects";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
 import { del, head, overlayKey, overlayPrefix, presignPut, projectExportKey } from "./r2";
 import { contentTypeFor } from "../serveFile";
-import { containerOfName, deliveryContainer, specMediaFiles, type ExportContainer } from "../../lib/exportDelivery";
+import { containerOfName, deliveryContainer, exportBaseName, specMediaFiles, type ExportContainer } from "../../lib/exportDelivery";
 import { addUsage, quotaCheck, reservedBytes, usageBytes } from "./usage";
 import { caught, err, redirect } from "./util";
 
@@ -161,8 +161,7 @@ async function exportName(
   // `containerExtension` does; a name alone (a tab's own claim) says it by its
   // suffix.
   const { ext } = container ? deliveryContainer(container) : containerOfName(baseName);
-  const base =
-    baseName.replace(/\.(mp4|mov)$/i, "").replace(/[/\\:*?"<>|]/g, "").trim().slice(0, 60) || "export";
+  const base = exportBaseName(baseName);
   const [files, jobs] = await Promise.all([
     tx.cutMediaObject.findMany({
       where: { userId, projectId, kind: "export" },

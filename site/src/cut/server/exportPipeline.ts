@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { deliveryContainer, videoBitrateFor } from "../lib/exportDelivery";
+import { deliveryContainer, deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor, type ExportRange } from "../lib/exportDelivery";
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoColorInfo, videoDecodeCost } from "./util";
@@ -69,6 +69,13 @@ export interface ExportSpec {
   audioCodec?: "aac" | "pcm";
   /** A bitrate the user typed, bits per second; absent = the `crf` tier. */
   bitrate?: number;
+  /** The file's name without its extension, as typed; absent = the project's
+   * name. */
+  name?: string;
+  /** The stretch of the timeline to deliver, seconds; absent = all of it. The
+   * graph composites the whole cut and the delivery is cut from it, so fades,
+   * captions and elements sit where the timeline has them. */
+  range?: ExportRange;
   duration: number;
   /** Whole-video fades, seconds: in from black / out to black, applied to the
    * final composite and mix after all overlays and soundtrack. */
@@ -94,6 +101,9 @@ export interface ExportSpec {
     zoom?: number;
     panX?: number; // crop-window pan -1..1, across whatever overflows
     panY?: number;
+    /** Mirror the framed picture left for right / top for bottom. */
+    flipH?: boolean;
+    flipV?: boolean;
     /** Region of the frame this clip fills; absent = full frame. */
     frame?: { x: number; y: number; w: number; h: number };
     speed?: number; // playback rate, default 1
@@ -185,6 +195,9 @@ export interface ExportSpec {
     zoom?: number;
     panX?: number; // crop-window pan -1..1, across whatever overflows
     panY?: number;
+    /** Mirror the framed picture left for right / top for bottom. */
+    flipH?: boolean;
+    flipV?: boolean;
     muted: boolean;
     /** Gain on the clip's own audio, 0..3; absent = 1 (unchanged). */
     volume?: number;
@@ -403,16 +416,19 @@ export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
   const codec = spec.codec ?? "h264";
   const bitrate = videoBitrateFor({ ...spec, codec });
   const rate = ["-b:v", String(bitrate), "-maxrate", String(Math.round(bitrate * 1.5)), "-bufsize", String(bitrate * 3)];
+  // A key frame every two seconds, the cadence the platforms ask for and the
+  // one the tab's encoder writes.
+  const gop = ["-g", String(Math.max(1, Math.round(spec.fps * KEYFRAME_INTERVAL_S)))];
   switch (enc) {
     case "libx264":
-      return ["-c:v", "libx264", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf)]), "-profile:v", "high", "-pix_fmt", "yuv420p"];
+      return ["-c:v", "libx264", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf)]), ...gop, "-profile:v", "high", "-pix_fmt", "yuv420p"];
     case "h264_videotoolbox":
-      return ["-c:v", "h264_videotoolbox", ...rate, "-profile:v", "high", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
+      return ["-c:v", "h264_videotoolbox", ...rate, ...gop, "-profile:v", "high", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
     case "libx265":
       // x265's CRF scale sits about four points above x264's for the same picture.
-      return ["-c:v", "libx265", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf + 4)]), "-x265-params", "log-level=error", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"];
+      return ["-c:v", "libx265", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf + 4)]), ...gop, "-x265-params", "log-level=error", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"];
     case "hevc_videotoolbox":
-      return ["-c:v", "hevc_videotoolbox", ...rate, "-profile:v", "main", "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
+      return ["-c:v", "hevc_videotoolbox", ...rate, ...gop, "-profile:v", "main", "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
     case "prores_ks":
       return ["-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0", "-pix_fmt", "yuv422p10le"];
     default:
@@ -544,6 +560,53 @@ function framedTimebase(
 const spanLen = (c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean }) =>
   Math.max(0.1, retimeOf(c).len);
 
+/** Seconds a range keeps on either side of itself beyond what a join or a
+ * sound handle reaches, so a boundary never lands on a frame the neighbor
+ * still shapes. */
+const RANGE_SLACK_S = 0.5;
+
+/**
+ * The spec with everything that cannot reach the range taken out of the
+ * graph's way: a track-0 clip whose slot ends before the range or starts
+ * after it is hidden — the slot keeps its length as a bare frame, so nothing
+ * shifts, and its file is never decoded, scaled, or graded — and the entries
+ * placed at absolute times (layers, sound, elements, captions, effects) are
+ * dropped when they lie wholly outside. A clip is kept while any join or
+ * sound handle it takes part in can still reach the range. A spec with no
+ * range is returned as it is.
+ */
+export function narrowSpecToRange(spec: ExportSpec): ExportSpec {
+  if (!spec.range) return spec;
+  const reach =
+    Math.max(
+      0,
+      ...spec.clips.map((c) =>
+        Math.max(c.transition ?? 0, c.soundCross ?? 0, c.soundAhead ?? 0, c.soundBack ?? 0)
+      )
+    ) + RANGE_SLACK_S;
+  const from = Math.max(0, spec.range.start) - reach;
+  const to = Math.min(spec.duration, spec.range.end) + reach;
+  const inside = (start: number, end: number) => end >= from && start <= to;
+  let cursor = 0;
+  const clips = spec.clips.map((c) => {
+    const start = cursor;
+    const end = cursor + spanLen(c);
+    cursor = end;
+    return c.hidden || inside(start, end) ? c : { ...c, hidden: true };
+  });
+  return {
+    ...spec,
+    clips,
+    ...(spec.overlayVideos
+      ? { overlayVideos: spec.overlayVideos.filter((o) => inside(o.start, o.start + spanLen(o))) }
+      : {}),
+    audio: spec.audio.filter((a) => inside(a.start, a.start + spanLen(a))),
+    overlays: spec.overlays.filter((o) => inside(o.start, o.end)),
+    ...(spec.captions ? { captions: spec.captions.filter((c) => inside(c.start, c.end)) } : {}),
+    ...(spec.effects ? { effects: spec.effects.filter((e) => inside(e.start, e.end)) } : {}),
+  };
+}
+
 /** A clip's frame region in even pixels, or null when it fills the whole frame
  * (the common case, which keeps the plain full-frame filter path). */
 
@@ -640,11 +703,12 @@ const realIO: ExportPipelineIO = {
  * `job.tmpDir` by base name in both. */
 export async function runExport(
   job: RenderHandle,
-  spec: ExportSpec,
+  given: ExportSpec,
   mediaPathFor: (file: string) => string,
   io: ExportPipelineIO = realIO
 ) {
-  if (spec.clips.length === 0) throw new Error("Nothing to export.");
+  if (given.clips.length === 0) throw new Error("Nothing to export.");
+  let spec = narrowSpecToRange(given);
   const { width: W, height: H, fps } = spec;
 
   // A clip that plays backward is rendered off a turned copy of its span,
@@ -664,6 +728,7 @@ export async function runExport(
       soundBack?: number;
       soundAhead?: number;
       image?: boolean;
+      hidden?: boolean;
     },
   >(
     c: T,
@@ -673,7 +738,7 @@ export async function runExport(
      * frame by frame for nothing. */
     soundOnly = false
   ): Promise<T> => {
-    if (!c.reverse || !c.file || c.image) return c;
+    if (!c.reverse || !c.file || c.image || c.hidden) return c;
     const src = await resolveMedia(io.stat, mediaPathFor, c.file);
     const rt = retimeOf(c);
     // The span plus the handles a crossing reaches into, so the copy holds
@@ -749,6 +814,10 @@ export async function runExport(
     const ky = num(0.5 + Math.max(-1, Math.min(1, panY ?? 0)) / 2);
     return `${scale},crop=${fexpr(`min(iw,${bw})`)}:${fexpr(`min(ih,${bh})`)}:(iw-ow)*${kx}:(ih-oh)*${ky}`;
   };
+  /** The mirror after the framing: the picture flips inside its box, the
+   * way the canvas turns it about the box center. */
+  const mirror = (c: { flipH?: boolean; flipV?: boolean }): string =>
+    (c.flipH ? ",hflip" : "") + (c.flipV ? ",vflip" : "");
   // One ffmpeg input per distinct media file (from the project folder),
   // plus one per uploaded overlay PNG.
   // Still images are excluded here: a plain `-i file` decodes one frame, so
@@ -1493,12 +1562,13 @@ export async function runExport(
         // The framed picture lands centered in its rect: a covering one fills
         // the rect exactly, a fitted one keeps its margins.
         frame =
-          `${boxFraming(rw, rh, c.fit === "fill", c.zoom, c.panX, c.panY)},` +
+          `${boxFraming(rw, rh, c.fit === "fill", c.zoom, c.panX, c.panY)}${mirror(c)},` +
           `pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${segPad}${win}`;
       } else {
         const cover = c.fit === "fill";
         frame =
           boxFraming(W, H, cover, c.zoom, c.panX, c.panY) +
+          mirror(c) +
           // A covering picture already spans the frame; a fitted one letterboxes.
           (cover ? "" : `,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${segPad}`);
       }
@@ -1864,7 +1934,7 @@ export async function runExport(
     const boxH = region ? region.rh : H;
     // The overlay's picture meets its box the same way a track-0 clip meets
     // the frame; whatever the box does not swallow sits centered in it.
-    const framing = boxFraming(boxW, boxH, cover, oc.zoom, oc.panX, oc.panY);
+    const framing = boxFraming(boxW, boxH, cover, oc.zoom, oc.panX, oc.panY) + mirror(oc);
     let pos: string;
     if (!region) {
       pos = cover ? "0:0" : `x=(${W}-w)/2:y=(${H}-h)/2`;
@@ -2303,6 +2373,18 @@ export async function runExport(
     aLabel = "afinal";
   }
 
+  // A range is cut from the finished composite, so it carries what the
+  // timeline shows there — fades, captions, and elements in place.
+  const span = deliverySpan(spec.range, spec.duration);
+  if (spec.range) {
+    const from = num(Math.max(0, spec.range.start));
+    const to = num(Math.min(spec.duration, spec.range.end));
+    filters.push(`[${vLabel}]trim=start=${from}:end=${to},setpts=PTS-STARTPTS[vrange]`);
+    vLabel = "vrange";
+    filters.push(`[${aLabel}]atrim=start=${from}:end=${to},asetpts=PTS-STARTPTS[arange]`);
+    aLabel = "arange";
+  }
+
   const enc = await io.videoEncoder(spec.codec ?? "h264");
 
   // Encode into the tmp dir, then re-emit the container to strip a stray output
@@ -2323,10 +2405,10 @@ export async function runExport(
       "-color_primaries", "bt709",
       "-color_trc", "bt709",
       ...audioCodecArgs(spec),
-      "-t", num(spec.duration),
+      "-t", num(span),
       encodePath,
     ],
-    (t) => (job.progress = Math.min(0.99, t / Math.max(0.1, spec.duration)))
+    (t) => (job.progress = Math.min(0.99, t / Math.max(0.1, span)))
   );
 
   // ffmpeg's autorotation already baked each source's display matrix into the

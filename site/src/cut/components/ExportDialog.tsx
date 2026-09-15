@@ -15,7 +15,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import {
+  DEFAULT_EXPORT_FPS,
   EXPORT_AUDIO,
   EXPORT_CODECS,
   EXPORT_CONTAINERS,
@@ -28,14 +30,20 @@ import {
   quickPresetOf,
   resolutionOptions,
   resolveResolution,
+  selectionRange,
   type ExportChoice,
   type ExportCodec,
   type ExportContainer,
+  type ExportSettings,
 } from "@/cut/lib/exportClient";
 import { useCutMode } from "@/cut/lib/backend/hooks";
-import { canRenderInBrowser } from "@/cut/lib/exportRender";
+import { downloadText } from "@/cut/lib/download";
+import { deliverySpan, exportBaseName } from "@/cut/lib/exportDelivery";
+import { canRenderInBrowser, sourceFrameRate, sourceFrameRateKey } from "@/cut/lib/exportRender";
 import { useExports } from "@/cut/lib/exportStore";
 import { projectDuration, useEditor } from "@/cut/lib/store";
+import { subtitleFiles } from "@/cut/lib/subtitleFile";
+import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
 
 /** A file format the menu offers: a container carrying a codec. MP4 cannot
@@ -64,6 +72,9 @@ export function ExportDialog() {
   const assets = useEditor((s) => s.assets);
   const audioClips = useEditor((s) => s.audioClips);
   const overlays = useEditor((s) => s.overlays);
+  const subtitles = useEditor((s) => s.subtitles);
+  const multiSelection = useEditor((s) => s.multiSelection);
+  const projectName = useEditor((s) => s.projectName);
   const duration = useMemo(
     () => projectDuration({ clips, audioClips, overlays }),
     [clips, audioClips, overlays]
@@ -72,7 +83,7 @@ export function ExportDialog() {
     () => resolutionOptions(aspect, clips, assets),
     [aspect, clips, assets]
   );
-  // The size rungs in slider order, smallest on the left, source on the right.
+  // The size rungs in slider order, smallest on the left, largest on the right.
   const rungs = useMemo(() => [...resolutions].reverse(), [resolutions]);
   const [choice, setChoice] = useState<ExportChoice>(EXPORT_QUICK_PRESETS[1].choice);
   // The field's own text, so a decimal in progress ("1.") survives the parse.
@@ -81,9 +92,59 @@ export function ExportDialog() {
   // options add up to, until a preset tile is clicked.
   const [customPicked, setCustomPicked] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // The file's name, the project's until typed over.
+  const [name, setName] = useState(projectName);
+  // What stretch of the timeline the file carries.
+  const [rangeMode, setRangeMode] = useState<"all" | "selection">("all");
+  // A captions file beside the video.
+  const [withCaptions, setWithCaptions] = useState(false);
+  // The footage's frame rate, read from the sources once the dialog opens;
+  // a "source" frame-rate choice resolves to it. Undefined while the probe
+  // runs, null for a cut with no readable video. The probe re-runs only when
+  // the set of sources it reads changes — an upload ticking its progress
+  // through the assets list leaves it alone — and a superseded probe closes
+  // its readers.
+  const probeKey = sourceFrameRateKey({ clips, assets });
+  const [probe, setProbe] = useState<{ key: string; fps: number | null } | null>(null);
+  useEffect(() => {
+    const abort = new AbortController();
+    const s = useEditor.getState();
+    void sourceFrameRate({ clips: s.clips, assets: s.assets }, (a) => a.url, { signal: abort.signal }).then(
+      (fps) => {
+        if (!abort.signal.aborted) setProbe({ key: probeKey, fps });
+      }
+    );
+    return () => abort.abort();
+  }, [probeKey]);
+  const probing = probe?.key !== probeKey;
+  const sourceFps = probing ? undefined : probe.fps;
+  const selection = useMemo(
+    () => selectionRange({ multiSelection, clips, audioClips, overlays, subtitles }),
+    [multiSelection, clips, audioClips, overlays, subtitles]
+  );
+  const range = rangeMode === "selection" && selection ? selection : undefined;
+  const span = deliverySpan(range, duration);
   const preset = customPicked ? null : quickPresetOf(choice, resolutions);
-  const settings = useMemo(() => choiceSettings(choice, resolutions), [choice, resolutions]);
+  // The file's base name. It rides in the settings only when typed over: the
+  // engine names a file after the project itself, so an untouched name asks
+  // nothing extra of it.
+  const baseName = exportBaseName(name || projectName);
+  const typedName = baseName !== exportBaseName(projectName);
+  const settings = useMemo<ExportSettings>(
+    () => ({
+      ...choiceSettings(choice, resolutions, sourceFps ?? DEFAULT_EXPORT_FPS),
+      ...(typedName ? { name: baseName } : {}),
+      ...(range ? { range } : {}),
+    }),
+    [choice, resolutions, sourceFps, typedName, baseName, range]
+  );
   const set = (patch: Partial<ExportChoice>) => setChoice((c) => ({ ...c, ...patch }));
+  const captionFiles = useMemo(
+    () => subtitleFiles(subtitles, baseName, range),
+    [subtitles, baseName, range]
+  );
+  // A "source" rate is not known until the probe answers; the button waits.
+  const waiting = probing && choice.fps === "source";
 
   // A browser-resident project renders in this tab when it can, and on the
   // cloud worker when it can't; ask up front which it is, so the dialog says
@@ -133,12 +194,17 @@ export function ExportDialog() {
         background: s.background,
       },
       settings,
-      s.projectName
+      baseName
     );
+    // The captions file is made here and saved at once; the video follows
+    // through the dock when its render lands.
+    if (withCaptions) {
+      for (const f of captionFiles) downloadText(f.text, f.name, "application/x-subrip");
+    }
     setExportOpen(false); // the dock takes it from here
   };
 
-  const sizeEstimate = formatSizeEstimate(estimateExportBytes(settings, duration));
+  const sizeEstimate = formatSizeEstimate(estimateExportBytes(settings, span));
   const prores = settings.codec === "prores";
   const resolution = resolveResolution(resolutions, choice.resolution);
   const rungIndex = Math.max(0, rungs.findIndex((r) => r.id === resolution.id));
@@ -156,7 +222,7 @@ export function ExportDialog() {
         </DialogHeader>
 
         <DialogBody className="mx-0 my-0 flex flex-col gap-6 px-6 pt-1 pb-6">
-          <div className="grid grid-cols-5 gap-1.5 max-sm:grid-cols-3" role="radiogroup" aria-label="Export preset">
+          <div className="grid grid-cols-6 gap-1.5 max-sm:grid-cols-3" role="radiogroup" aria-label="Export preset">
             {EXPORT_QUICK_PRESETS.map((p) => (
               <PresetTile
                 key={p.id}
@@ -180,9 +246,12 @@ export function ExportDialog() {
 
           <Scale
             label="Resolution"
-            value={`${settings.width} × ${settings.height}`}
+            value={`${settings.width} × ${settings.height}${resolution.upscale ? " · upscaled" : ""}`}
             index={rungIndex}
-            stops={rungs.map((r) => ({ label: r.label, title: `${r.width} × ${r.height}` }))}
+            stops={rungs.map((r) => ({
+              label: r.label,
+              title: `${r.width} × ${r.height}${r.upscale ? " · upscaled from the source" : ""}`,
+            }))}
             onIndex={(i) => set({ resolution: rungs[i]!.id })}
           />
 
@@ -200,12 +269,45 @@ export function ExportDialog() {
           />
 
           <div className="flex flex-col gap-3">
+            <Field label="File name">
+              <Input
+                aria-label="File name"
+                className="h-8 w-48 text-sm"
+                value={name}
+                placeholder={projectName}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </Field>
+            {selection && (
+              <Field label="Range">
+                <Select value={rangeMode} onValueChange={(v) => setRangeMode(v as "all" | "selection")}>
+                  <SelectTrigger className="w-fit min-w-32" aria-label="Range">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end">
+                    <SelectItem value="all">Whole video</SelectItem>
+                    <SelectItem
+                      value="selection"
+                      title="From the first selected item's start to the last one's end, every row included"
+                    >
+                      Selection · {formatTime(selection.start)}–{formatTime(selection.end)}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
             <Field label="Frame rate">
-              <Select value={String(choice.fps)} onValueChange={(v) => set({ fps: Number(v) })}>
-                <SelectTrigger className="w-32" aria-label="Frame rate">
+              <Select
+                value={String(choice.fps)}
+                onValueChange={(v) => set({ fps: v === "source" ? "source" : Number(v) })}
+              >
+                <SelectTrigger className="w-fit min-w-32" aria-label="Frame rate">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
+                  <SelectItem value="source" title="The rate the footage plays at">
+                    {probing ? "Source · reading…" : `Source · ${sourceFps ?? DEFAULT_EXPORT_FPS} fps`}
+                  </SelectItem>
                   {EXPORT_FRAME_RATES.map((f) => (
                     <SelectItem key={f} value={String(f)}>
                       {f} fps
@@ -302,6 +404,18 @@ export function ExportDialog() {
                   <span className="text-xs text-muted-foreground">Mbps</span>
                 </label>
               </Field>
+              {captionFiles.length > 0 && (
+                <Field
+                  label="Captions file"
+                  hint="Saves the captions as an SRT file to your Downloads folder, for platforms that take their own captions."
+                >
+                  <Switch
+                    aria-label="Save a captions file"
+                    checked={withCaptions}
+                    onCheckedChange={(v) => setWithCaptions(v === true)}
+                  />
+                </Field>
+              )}
             </CollapsibleContent>
           </Collapsible>
 
@@ -318,11 +432,12 @@ export function ExportDialog() {
             <span className="truncate">
               {settings.width} × {settings.height} · {settings.fps} fps ·{" "}
               {FORMATS.find((f) => f.id === formatId)?.label ?? formatId} · {settings.audioCodec.toUpperCase()}
+              {range ? ` · ${formatTime(span)}` : ""}
             </span>
             <span className="shrink-0 tabular-nums">{sizeEstimate}</span>
           </div>
-          <Button className="h-11 w-full text-base" onClick={run}>
-            Export video
+          <Button className="h-11 w-full text-base" onClick={run} disabled={waiting}>
+            {waiting ? "Reading the footage…" : "Export video"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -354,7 +469,7 @@ function PresetTile({
       aria-checked={checked}
       title={title}
       className={cn(
-        "flex h-8 min-w-0 items-center justify-center rounded-lg border px-2 text-sm font-medium whitespace-nowrap transition-colors",
+        "flex h-8 min-w-0 items-center justify-center rounded-lg border px-1.5 text-xs font-medium whitespace-nowrap transition-colors",
         checked
           ? "border-primary bg-primary/10 text-foreground"
           : "border-transparent bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground"

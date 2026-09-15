@@ -39,9 +39,13 @@ export const exportApi = {
    * file's name; the tab draws the frames and hands the file in below. */
   async createClient(req: Request) {
     try {
-      const body = (await req.json()) as { projectId?: string; container?: ExportSpec["container"] };
+      const body = (await req.json()) as {
+        projectId?: string;
+        container?: ExportSpec["container"];
+        name?: string;
+      };
       if (!body.projectId) return Response.json({ error: "Missing project." }, { status: 400 });
-      const job = await createClientJob(body.projectId, body.container);
+      const job = await createClientJob(body.projectId, body.container, body.name?.trim() || undefined);
       if (job.status === "error") return Response.json({ error: job.error }, { status: 400 });
       return Response.json({ id: job.id, outName: job.outName });
     } catch (e) {

@@ -1,6 +1,8 @@
 "use client";
 
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
+import { engineFeatures } from "./api";
+import type { EngineFeature } from "./engineFeatures";
 import {
   removeBrowserExportJob,
   reserveBrowserExportJob,
@@ -14,7 +16,7 @@ import { bitrateFor, renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { renderRemovalPieces } from "./removalVideo";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
-import { clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
+import { clipLen, clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
@@ -26,6 +28,7 @@ import type {
   ClipAnim,
   MediaAsset,
   Overlay,
+  Selection,
   SubtitlesBlock,
   VideoClip,
 } from "./types";
@@ -33,13 +36,15 @@ import type {
 import {
   deliveryContainer,
   EXPORT_CONTAINERS,
+  exportBaseName,
   specMediaFiles,
   type ExportAudioCodec,
   type ExportCodec,
   type ExportContainer,
+  type ExportRange,
 } from "./exportDelivery";
 export { EXPORT_CONTAINERS };
-export type { ExportAudioCodec, ExportCodec, ExportContainer };
+export type { ExportAudioCodec, ExportCodec, ExportContainer, ExportRange };
 
 export interface ExportSettings {
   width: number;
@@ -54,6 +59,11 @@ export interface ExportSettings {
   audioCodec: ExportAudioCodec;
   /** A bitrate the user typed, bits per second. Absent = the tier's model. */
   bitrate?: number;
+  /** The file's name without its extension, as typed; absent = the project's
+   * name. Sanitized by `exportBaseName` wherever a file is named. */
+  name?: string;
+  /** The stretch of the timeline to render, seconds; absent = all of it. */
+  range?: ExportRange;
 }
 
 /** The delivery every render that is not the user's own export uses — hover
@@ -136,7 +146,8 @@ export type ExportQualityId = (typeof EXPORT_QUALITIES)[number]["id"];
 export interface ExportChoice {
   /** A `resolutionOptions` id; one the project lacks falls back to "source". */
   resolution: string;
-  fps: number;
+  /** A fixed rate, or "source" for the rate the footage plays at. */
+  fps: number | "source";
   quality: ExportQualityId;
   codec: ExportCodec;
   container: ExportContainer;
@@ -155,28 +166,35 @@ export const EXPORT_QUICK_PRESETS = [
     label: "Share",
     detail: "1080p · plays everywhere",
     short: "1080p",
-    choice: { resolution: "1080", fps: 30, quality: "balanced", ...DELIVERY_DEFAULTS },
+    choice: { resolution: "1080", fps: "source", quality: "balanced", ...DELIVERY_DEFAULTS },
   },
   {
     id: "best",
     label: "Best",
     detail: "source size · H.264",
     short: "Source",
-    choice: { resolution: "source", fps: 30, quality: "high", ...DELIVERY_DEFAULTS },
+    choice: { resolution: "source", fps: "source", quality: "high", ...DELIVERY_DEFAULTS },
+  },
+  {
+    id: "social4k",
+    label: "Social 4K",
+    detail: "4K upscale · platforms transcode it at a higher bitrate",
+    short: "4K",
+    choice: { resolution: "2160", fps: "source", quality: "high", ...DELIVERY_DEFAULTS },
   },
   {
     id: "small",
     label: "Small",
     detail: "720p · fastest",
     short: "720p",
-    choice: { resolution: "720", fps: 30, quality: "small", ...DELIVERY_DEFAULTS },
+    choice: { resolution: "720", fps: "source", quality: "small", ...DELIVERY_DEFAULTS },
   },
   {
     id: "master",
     label: "Master",
     detail: "ProRes 422 HQ · MOV · PCM",
     short: "ProRes",
-    choice: { resolution: "source", fps: 30, quality: "high", codec: "prores", container: "mov", audioCodec: "pcm" },
+    choice: { resolution: "source", fps: "source", quality: "high", codec: "prores", container: "mov", audioCodec: "pcm" },
   },
 ] as const satisfies readonly { id: string; label: string; detail: string; short: string; choice: ExportChoice }[];
 
@@ -191,18 +209,27 @@ export function quickPresetOf(choice: ExportChoice, options: ResolutionOption[])
 /** The option a resolution id names, or the source frame when the project
  * has no such rung. */
 export function resolveResolution(options: ResolutionOption[], id: string): ResolutionOption {
-  return options.find((r) => r.id === id) ?? options[0];
+  return options.find((r) => r.id === id) ?? options.find((r) => r.id === "source") ?? options[0];
 }
 
+/** The rate an export runs at when the footage's own is not known: a cut of
+ * stills and titles, or a source the probe could not read. */
+export const DEFAULT_EXPORT_FPS = 30;
+
 /** The settings a choice adds up to, with the container fitted to the codec
- * and audio it has to carry. */
-export function choiceSettings(choice: ExportChoice, options: ResolutionOption[]): ExportSettings {
+ * and audio it has to carry. `sourceFps` is the footage's rate (see
+ * `sourceFrameRate`), what a "source" frame-rate choice resolves to. */
+export function choiceSettings(
+  choice: ExportChoice,
+  options: ResolutionOption[],
+  sourceFps: number = DEFAULT_EXPORT_FPS
+): ExportSettings {
   const q = EXPORT_QUALITIES.find((x) => x.id === choice.quality) ?? EXPORT_QUALITIES[0];
   const r = resolveResolution(options, choice.resolution);
   return fitContainer({
     width: r.width,
     height: r.height,
-    fps: choice.fps,
+    fps: choice.fps === "source" ? sourceFps : choice.fps,
     crf: q.crf,
     preset: q.preset,
     codec: choice.codec,
@@ -215,21 +242,27 @@ export function choiceSettings(choice: ExportChoice, options: ResolutionOption[]
   });
 }
 
-/** A size the dialog offers: the source's own frame, or a named rung under it. */
+/** A size the dialog offers: the source's own frame, or a named rung above
+ * or below it. */
 export interface ResolutionOption {
   id: string;
   label: string;
   width: number;
   height: number;
+  /** The rung is bigger than the footage: the render scales the picture up.
+   * Platforms transcode a 4K upload on a higher bitrate rung than a 1080p
+   * one, so an upscale can come back looking sharper than the source file
+   * would have. */
+  upscale?: boolean;
 }
 
 /**
  * The sizes this project can be exported at, largest first.
  *
- * "Source" leads and is the frame the footage justifies. The named rungs below
- * it are the ones genuinely smaller — a rung that matches or exceeds the source
- * would be the same render under a second name, or an upscale, and the dialog
- * offers neither.
+ * "Source" is the frame the footage justifies. The named rungs below it are
+ * the ones genuinely smaller; the ones above it are upscales, marked as such.
+ * A rung that matches the source would be the same render under a second
+ * name, so it is left out.
  */
 export function resolutionOptions(
   aspect: Aspect,
@@ -238,14 +271,54 @@ export function resolutionOptions(
 ): ResolutionOption[] {
   const src = sourceFrame(aspect, clips, assets);
   const srcShort = Math.min(src.width, src.height);
+  const rung = (r: (typeof EXPORT_RESOLUTIONS)[number]): ResolutionOption => ({
+    id: r.id,
+    label: r.label,
+    ...scaledFrame(aspect, r.shortSide),
+    ...(r.shortSide > srcShort ? { upscale: true } : {}),
+  });
   return [
+    ...EXPORT_RESOLUTIONS.filter((r) => r.shortSide > srcShort).map(rung),
     { id: "source", label: "Source", ...src },
-    ...EXPORT_RESOLUTIONS.filter((r) => r.shortSide < srcShort).map((r) => ({
-      id: r.id,
-      label: r.label,
-      ...scaledFrame(aspect, r.shortSide),
-    })),
+    ...EXPORT_RESOLUTIONS.filter((r) => r.shortSide < srcShort).map(rung),
   ];
+}
+
+/**
+ * The stretch of the timeline the selection covers: from the first selected
+ * item's start to the last one's end, whatever rows they sit on. Null when
+ * nothing with a place in time is selected.
+ */
+export function selectionRange(s: {
+  multiSelection: Selection[];
+  clips: VideoClip[];
+  audioClips: AudioClip[];
+  overlays: Overlay[];
+  subtitles: SubtitlesBlock;
+}): ExportRange | null {
+  let start = Infinity;
+  let end = -Infinity;
+  const take = (a: number, b: number) => {
+    start = Math.min(start, a);
+    end = Math.max(end, b);
+  };
+  for (const sel of s.multiSelection) {
+    if (!sel) continue;
+    if (sel.kind === "clip") {
+      const c = s.clips.find((x) => x.id === sel.id);
+      if (c) take(c.start, c.start + clipLen(c));
+    } else if (sel.kind === "audio") {
+      const a = s.audioClips.find((x) => x.id === sel.id);
+      if (a) take(a.start, a.start + clipLen(a));
+    } else if (sel.kind === "overlay") {
+      const o = s.overlays.find((x) => x.id === sel.id);
+      if (o) take(o.start, o.end);
+    } else if (sel.kind === "cue") {
+      const c = s.subtitles.cues.find((x) => x.id === sel.id);
+      if (c) take(c.start, c.end);
+    }
+  }
+  return end > start ? { start, end } : null;
 }
 
 /** Frame dims for an aspect scaled to a short-side target, even-rounded. */
@@ -638,7 +711,15 @@ async function renderClipShadowPictures(
     shapeCtx.roundRect(box.x, box.y, box.w, box.h, radius);
     shapeCtx.clip();
     if (sil) {
+      // The silhouette mirrors with the picture it was cut from.
+      shapeCtx.save();
+      if (clip.flipH || clip.flipV) {
+        shapeCtx.translate(box.x + box.w / 2, box.y + box.h / 2);
+        shapeCtx.scale(clip.flipH ? -1 : 1, clip.flipV ? -1 : 1);
+        shapeCtx.translate(-(box.x + box.w / 2), -(box.y + box.h / 2));
+      }
       shapeCtx.drawImage(sil, pic.x, pic.y, pic.w, pic.h);
+      shapeCtx.restore();
     } else {
       shapeCtx.fillStyle = "#ffffff";
       shapeCtx.fillRect(pic.x, pic.y, pic.w, pic.h);
@@ -801,6 +882,8 @@ export async function buildExportPayload(
     zoom: clipZoom(sp.clip),
     panX: sp.clip.panX ?? 0,
     panY: sp.clip.panY ?? 0,
+    flipH: sp.clip.flipH,
+    flipV: sp.clip.flipV,
     frame: sp.clip.frame,
     speed: clipSpeed(sp.clip),
     speedCurve: sp.clip.speedCurve,
@@ -1005,6 +1088,8 @@ export async function buildExportPayload(
           zoom: clipZoom(c),
           panX: c.panX ?? 0,
           panY: c.panY ?? 0,
+          flipH: c.flipH,
+          flipV: c.flipV,
           muted: c.muted,
           volume: c.volume,
           sound: c.sound,
@@ -1352,12 +1437,10 @@ async function postExport(
   });
 }
 
-/** The cloud names the output client-side (the engine derives it from the
- * project name itself, deduping on disk); mirror the engine's sanitize rule. */
+/** The output's file name: what the user typed, or the project's name, under
+ * the one sanitize rule every residency shares (the engine dedupes on disk). */
 function exportOutName(settings: ExportSettings): string {
-  const base =
-    useEditor.getState().projectName.replace(/[/\\:*?"<>|]/g, "").trim().slice(0, 60) || "export";
-  return `${base}${exportExtension(settings)}`;
+  return `${exportBaseName(settings.name ?? useEditor.getState().projectName)}${exportExtension(settings)}`;
 }
 
 /** Poll an export job to completion, reporting progress. Returns the file name. */
@@ -1392,6 +1475,24 @@ export function downloadExport(jobId: string, outName: string, backend: CutBacke
   a.remove();
 }
 
+/** The engine on this Mac ships inside the app, so it can be older than the
+ * page. An older build parses the spec by shape and drops the fields it does
+ * not know — a range export would come back as the whole cut, a typed name
+ * as the project's — so what the settings ask of the engine is checked
+ * against what it says it carries, and the export refuses with the fix. */
+async function assertEngineCarries(settings: ExportSettings): Promise<void> {
+  const wants: [EngineFeature, boolean, string][] = [
+    ["export.range", !!settings.range, "export a range"],
+    ["export.name", !!settings.name, "name the file"],
+  ];
+  const has = await engineFeatures();
+  for (const [feature, wanted, what] of wants) {
+    if (wanted && !has.has(feature)) {
+      throw new ExportRefusedError(`Update the Donkey app to ${what}.`);
+    }
+  }
+}
+
 /** Build the cut and hand it to the engine, returning the new job id. Progress,
  * cancel, download, and the finished-file actions are all driven from the
  * engine's job feed by the exports dock — this only kicks the render off, so it
@@ -1402,6 +1503,7 @@ export async function createExportJob(
   settings: ExportSettings
 ): Promise<string> {
   const backend = getBackend(); // pinned: the payload build takes a while
+  if (backend.kind === "local") await assertEngineCarries(settings);
   const payload = await buildExportPayload(projectId, doc, settings, "export");
   const res = await postExport(projectId, payload, exportOutName(settings), backend);
   const body = await apiJson<{ id?: string }>(res);
@@ -1529,10 +1631,11 @@ async function runEngineExport(
   opts: NonNullable<Parameters<typeof runBrowserExport>[3]>,
   backend: CutBackend
 ): Promise<string> {
+  await assertEngineCarries(settings);
   const claim = await backend.fetch("/api/cut/export/client", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ projectId, container: settings.container }),
+    body: JSON.stringify({ projectId, container: settings.container, name: settings.name }),
   });
   const claimed = await apiJson<{ id?: string; outName?: string }>(claim);
   if (!claim.ok || !claimed.id) throw new Error(claimed.error ?? "Export failed to start.");

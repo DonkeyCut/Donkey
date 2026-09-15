@@ -47,7 +47,7 @@ import { renderElementPng } from "./textRender";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc, ExportSettings } from "./exportClient";
-import { videoBitrateFor } from "./exportDelivery";
+import { deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor } from "./exportDelivery";
 
 /** Audio is written at the rate and width a delivery file wants, rather than
  * the 16 kHz mono a speech model reads. */
@@ -141,6 +141,103 @@ export interface RenderOptions {
  * the engine and the dialog's estimate read too. */
 export function bitrateFor(settings: ExportSettings): number {
   return videoBitrateFor(settings);
+}
+
+/** The stretch `[from, to]` of a rendered mix as a buffer of its own. */
+function sliceAudio(mix: AudioBuffer, from: number, to: number): AudioBuffer {
+  const a = Math.max(0, Math.min(mix.length, Math.round(from * mix.sampleRate)));
+  const b = Math.max(a + 1, Math.min(mix.length, Math.round(to * mix.sampleRate)));
+  const out = new AudioBuffer({
+    length: b - a,
+    numberOfChannels: mix.numberOfChannels,
+    sampleRate: mix.sampleRate,
+  });
+  for (let ch = 0; ch < mix.numberOfChannels; ch++) {
+    out.copyToChannel(mix.getChannelData(ch).subarray(a, b), ch);
+  }
+  return out;
+}
+
+/** The frame rates a delivered file is written at. A source's measured rate
+ * snaps to the nearest: 23.976 reads as 24, 29.97 as 30, 59.94 as 60. */
+const DELIVERY_RATES = [24, 25, 30, 48, 50, 60];
+
+/** Sources the probe reads for a rate: the ones with the most time on the
+ * timeline, so a cut of many files still answers quickly. */
+const RATE_PROBE_SOURCES = 6;
+
+/** How long the probe waits on a source before giving up on it. */
+const RATE_PROBE_TIMEOUT_MS = 8_000;
+
+/** The sources a rate probe would read, by footprint: the key a caller
+ * re-probes on, so a change elsewhere in the project leaves the answer. */
+export function sourceFrameRateKey(doc: Pick<ExportDoc, "clips" | "assets">): string {
+  return rateSources(doc)
+    .map(([id]) => id)
+    .join("|");
+}
+
+function rateSources(doc: Pick<ExportDoc, "clips" | "assets">): [string, number][] {
+  const byId = new Map(doc.assets.map((a) => [a.id, a]));
+  const footprint = new Map<string, number>();
+  for (const c of doc.clips) {
+    const asset = byId.get(c.assetId);
+    if (!asset || asset.type !== "video" || c.hidden) continue;
+    footprint.set(asset.id, (footprint.get(asset.id) ?? 0) + retimeOf(c).len);
+  }
+  return [...footprint.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, RATE_PROBE_SOURCES);
+}
+
+/**
+ * The rate the footage plays at: the delivery rate the most timeline seconds
+ * of video run at, read from each source's packet cadence. Null for a cut
+ * with no readable video — stills, titles, sound — which takes the default.
+ * An aborted probe closes its readers and answers null.
+ */
+export async function sourceFrameRate(
+  doc: Pick<ExportDoc, "clips" | "assets">,
+  resolve: (asset: MediaAsset) => string,
+  opts: { signal?: AbortSignal } = {}
+): Promise<number | null> {
+  const byId = new Map(doc.assets.map((a) => [a.id, a]));
+  const seconds = new Map<number, number>();
+  await Promise.all(
+    rateSources(doc).map(async ([id, len]) => {
+      if (opts.signal?.aborted) return;
+      const asset = byId.get(id)!;
+      const input = openMedia(resolve(asset));
+      // A cancel or the deadline closes the reader, which fails whatever it
+      // is waiting on; either way this source casts no vote.
+      const close = () => input.dispose();
+      const deadline = setTimeout(close, RATE_PROBE_TIMEOUT_MS);
+      opts.signal?.addEventListener("abort", close, { once: true });
+      try {
+        const track = await videoTrackOf(input);
+        if (!track) return;
+        const stats = await track.computePacketStats(120);
+        const rate = stats.averagePacketRate;
+        if (!(rate > 0) || opts.signal?.aborted) return;
+        const snapped = DELIVERY_RATES.reduce((best, r) =>
+          Math.abs(r - rate) < Math.abs(best - rate) ? r : best
+        );
+        seconds.set(snapped, (seconds.get(snapped) ?? 0) + len);
+      } catch {
+        // A source the probe cannot read casts no vote.
+      } finally {
+        clearTimeout(deadline);
+        opts.signal?.removeEventListener("abort", close);
+        close();
+      }
+    })
+  );
+  if (opts.signal?.aborted) return null;
+  let pick: number | null = null;
+  for (const [rate, len] of seconds) {
+    if (pick === null || len > seconds.get(pick)! || (len === seconds.get(pick) && rate > pick)) pick = rate;
+  }
+  return pick;
 }
 
 /** The frame reader for one open video source. */
@@ -829,6 +926,12 @@ export async function renderProjectToMp4(
   const { resolve, onProgress, signal } = opts;
   const duration = projectDuration(doc);
   if (!(duration > 0)) throw new Error("There is nothing to export yet.");
+  // The window of the timeline the file carries: a range when the settings
+  // name one, the whole cut otherwise. Frames are drawn at timeline time and
+  // written at file time, so the file starts at zero.
+  const from = Math.max(0, settings.range?.start ?? 0);
+  const span = deliverySpan(settings.range, duration);
+  if (!(span > 0)) throw new Error("The export range is empty.");
 
   const wanted = deliveryVideoCodec(settings);
   if (!wanted) throw new Error("This browser can't encode ProRes.");
@@ -847,18 +950,19 @@ export async function renderProjectToMp4(
   };
 
   onProgress?.({ ratio: 0, stage: "audio" });
-  const mix = await renderMix(mixSpecFor(doc, resolve), {
+  const whole = await renderMix(mixSpecFor(doc, resolve), {
     sampleRate: AUDIO_RATE,
     channels: AUDIO_CHANNELS,
     resolve: (file) => file, // mixSpecFor already resolved each asset to a URL
   });
+  const mix = whole && settings.range ? sliceAudio(whole, from, from + span) : whole;
   stop();
 
   const canvas = createRasterCanvas(settings.width, settings.height);
   const painter = new FramePainter(doc, canvas, resolve);
 
   const frameDur = 1 / settings.fps;
-  const frames = Math.max(1, Math.round(duration * settings.fps));
+  const frames = Math.max(1, Math.round(span * settings.fps));
 
   const dir = await scratchDir();
   void sweepScratch(dir);
@@ -884,6 +988,7 @@ export async function renderProjectToMp4(
     const video = new CanvasSource(canvas, {
       codec,
       quality: new Quality({ bitrate: bitrateFor(settings) }),
+      keyFrameInterval: KEYFRAME_INTERVAL_S,
     });
     // Reserving the index space needs a packet ceiling per track. The video's
     // is exact — one packet per frame; the audio's is the mix's sample count
@@ -919,7 +1024,7 @@ export async function renderProjectToMp4(
     for (let i = 0; i < frames; i++) {
       stop();
       const t = i * frameDur;
-      await painter.drawAt(t);
+      await painter.drawAt(from + t);
 
       await video.add(t, frameDur);
       if (i % 15 === 0) {
@@ -1413,7 +1518,7 @@ export async function canRenderInBrowser(
   settings: ExportSettings
 ): Promise<boolean> {
   const duration = projectDuration(doc);
-  if (!(duration > 0)) return false;
+  if (!(deliverySpan(settings.range, duration) > 0)) return false;
   if (
     typeof navigator.storage?.getDirectory !== "function" ||
     typeof FileSystemFileHandle === "undefined" ||

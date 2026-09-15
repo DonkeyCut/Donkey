@@ -5,6 +5,7 @@ import path from "node:path";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { containerExtension, runExport, type ExportSpec } from "./exportPipeline";
+import { exportBaseName } from "../lib/exportDelivery";
 import { exportsDir, mediaPath, projectDir, readProject, setActiveJobGuard } from "./projects";
 
 export type { ExportSpec } from "./exportPipeline";
@@ -185,8 +186,7 @@ export function cancelJob(id: string) {
 /** Export file named after the project, with a " 2", " 3"… suffix when the
  * name is already taken by a file on disk or an export still in flight. */
 async function exportName(projectId: string, projectName: string, ext: string) {
-  const base =
-    projectName.replace(/[/\\:*?"<>|]/g, "").trim().slice(0, 60) || "export";
+  const base = exportBaseName(projectName);
   const taken = new Set(
     await readdir(exportsDir(projectId)).catch(() => [] as string[])
   );
@@ -263,7 +263,7 @@ export async function createJob(form: FormData): Promise<Job> {
     if (!doc) throw new Error("Project not found.");
     job.projectName = doc.name;
     if (preview) job.outName = "preview.mp4";
-    else await claimExportName(job, doc.name, containerExtension(spec));
+    else await claimExportName(job, spec.name ?? doc.name, containerExtension(spec));
     job.outPath = path.join(
       preview ? projectDir(spec.projectId) : exportsDir(spec.projectId),
       job.outName
@@ -306,7 +306,8 @@ export async function createJob(form: FormData): Promise<Job> {
  */
 export async function createClientJob(
   projectId: string,
-  container: ExportSpec["container"]
+  container: ExportSpec["container"],
+  name?: string
 ): Promise<Job> {
   assertLocalRuntime();
   sweepClientJobs();
@@ -331,7 +332,7 @@ export async function createClientJob(
     const doc = await readProject(projectId);
     if (!doc) throw new Error("Project not found.");
     job.projectName = doc.name;
-    await claimExportName(job, doc.name, containerExtension({ container }));
+    await claimExportName(job, name ?? doc.name, containerExtension({ container }));
     job.outPath = path.join(exportsDir(projectId), job.outName);
     await mkdir(path.dirname(job.outPath), { recursive: true });
   } catch (err) {

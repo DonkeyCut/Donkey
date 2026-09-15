@@ -20,6 +20,39 @@ export const EXPORT_CONTAINERS: readonly DeliveryContainer[] = [
   { id: "mov", label: "MOV", ext: ".mov", mime: "video/quicktime" },
 ];
 
+/** A window of the timeline to deliver, seconds; absent = the whole cut. */
+export interface ExportRange {
+  start: number;
+  end: number;
+}
+
+/** How long a delivery runs: the range's span, or the whole cut. */
+export function deliverySpan(range: ExportRange | undefined, duration: number): number {
+  if (!range) return duration;
+  const start = Math.max(0, range.start);
+  const end = Math.min(duration, range.end);
+  return Math.max(0, end - start);
+}
+
+/** Seconds between key frames in a delivered file. Two is what the platforms
+ * ask for: seeks land within two seconds, and the encoder keeps most of its
+ * bits for the frames between. */
+export const KEYFRAME_INTERVAL_S = 2;
+
+/** The base of a delivered file's name, from what the user typed or the
+ * project is called: a container suffix dropped, path and shell characters
+ * stripped, trimmed, cut to sixty characters, with "export" standing in for
+ * nothing at all. The one rule every residency names its file by. */
+export function exportBaseName(raw: string): string {
+  return (
+    raw
+      .replace(/\.(mp4|mov)$/i, "")
+      .replace(/[/\\:*?"<>|]/g, "")
+      .trim()
+      .slice(0, 60) || "export"
+  );
+}
+
 export function deliveryContainer(id: ExportContainer | undefined): DeliveryContainer {
   return EXPORT_CONTAINERS.find((c) => c.id === id) ?? EXPORT_CONTAINERS[0];
 }
