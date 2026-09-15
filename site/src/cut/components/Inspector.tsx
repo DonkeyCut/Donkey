@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PenTool, Scissors, Smile, Sparkles, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
@@ -81,7 +81,7 @@ import { clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/
 import { PANEL_GLOBAL, usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
-import { AnimationCard, AnimationTiles } from "@/cut/components/AnimationTiles";
+import { AnimationTiles } from "@/cut/components/AnimationTiles";
 import { ColorField } from "@/cut/components/ColorField";
 import { wordTimesFor } from "@/cut/lib/textWords";
 import { NumberField } from "@/cut/components/NumberField";
@@ -151,22 +151,10 @@ import {
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { InfoTip, ResetButton, Row, Section, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
+import { ResetButton, Row, Section, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { ColorPanel } from "@/cut/components/ColorPanel";
 import { RemovalPanel } from "@/cut/components/RemovalPanel";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
-
-/** Where the animation panel is, for the panel that offers the way in. It is
- * held by the Inspector rather than by each panel because the animation panel
- * replaces the whole column, scroller included: it lays out its own bands, and
- * a band that must not move cannot sit inside something that scrolls. */
-type AnimNav = { view: "closed" | "open" | "returned"; open: () => void; back: () => void };
-const AnimNavContext = createContext<AnimNav>({
-  view: "closed",
-  open: () => {},
-  back: () => {},
-});
-const useAnimNav = () => useContext(AnimNavContext);
 
 export function Inspector() {
   const selection = useEditor((s) => s.selection);
@@ -231,27 +219,13 @@ function InspectorColumn({
   const itemId = clip?.id ?? audio?.id ?? overlay?.id ?? PANEL_GLOBAL;
   const [view, setView] = usePanelState<string>(itemId, "tab", "main");
   const homeScroll = useRememberedScroll(itemId, "main");
-  // Coming home from the animation view marks the return, so the overlay
-  // panel can scroll its Animation row back into sight; the mark clears on
-  // the next pick.
-  const [returned, setReturned] = useState(false);
   const pick = useCallback(
     (id: string) => {
-      setReturned(view === ANIM_TAB.id && id === "main");
       setView(id);
       setOpen(true);
     },
-    [view, setView, setOpen]
+    [setView, setOpen]
   );
-  const nav = useMemo<AnimNav>(
-    () => ({
-      view: view === ANIM_TAB.id ? "open" : returned ? "returned" : "closed",
-      open: () => pick(ANIM_TAB.id),
-      back: () => pick("main"),
-    }),
-    [view, returned, pick]
-  );
-
   const tabs = clip ? CLIP_TABS : overlay ? [ANIM_TAB] : [];
   const shown = tabs.some((t) => t.id === view) ? view : "main";
   return (
@@ -269,27 +243,23 @@ function InspectorColumn({
           {clip ? (
             <ClipColumn clip={clip} tab={shown} />
           ) : overlay && shown === ANIM_TAB.id ? (
-            <AnimNavContext.Provider value={nav}>
-              <AnimationPanel overlay={overlay} />
-            </AnimNavContext.Provider>
+            <AnimationPanel overlay={overlay} />
           ) : (
-            <AnimNavContext.Provider value={nav}>
-              <ScrollArea className="min-h-0 flex-1" {...homeScroll}>
-                {audio ? (
-                  <AudioPanel clip={audio} />
-                ) : overlay ? (
-                  isTextOverlay(overlay) ? (
-                    <TextPanel overlay={overlay} />
-                  ) : isShapeOverlay(overlay) ? (
-                    <ShapePanel overlay={overlay} />
-                  ) : isEffectOverlay(overlay) ? (
-                    <EffectPanel overlay={overlay} />
-                  ) : (
-                    <StickerPanel overlay={overlay} />
-                  )
-                ) : null}
-              </ScrollArea>
-            </AnimNavContext.Provider>
+            <ScrollArea className="min-h-0 flex-1" {...homeScroll}>
+              {audio ? (
+                <AudioPanel clip={audio} />
+              ) : overlay ? (
+                isTextOverlay(overlay) ? (
+                  <TextPanel overlay={overlay} />
+                ) : isShapeOverlay(overlay) ? (
+                  <ShapePanel overlay={overlay} />
+                ) : isEffectOverlay(overlay) ? (
+                  <EffectPanel overlay={overlay} />
+                ) : (
+                  <StickerPanel overlay={overlay} />
+                )
+              ) : null}
+            </ScrollArea>
           )}
         </div>
       )}
@@ -1746,7 +1716,6 @@ const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
 
 function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const update = useEditor((s) => s.updateOverlay);
-  const nav = useAnimNav();
   const sizeCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
   const opacityCk = useSliderCheckpoint();
@@ -2130,11 +2099,6 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
         <TransformRows overlay={o} />
         <FollowRow overlay={o} />
         <GroupRow overlay={o} />
-        <AnimationSection
-          overlay={o}
-          onOpen={nav.open}
-          reveal={nav.view === "returned"}
-        />
       </div>
     </>
   );
@@ -2287,145 +2251,6 @@ function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayA
   );
 }
 
-/** The set slot's Length (In/Out) or Speed (Loop) slider. */
-function AnimSlotSlider({
-  overlay: o,
-  slot,
-  label,
-}: {
-  overlay: Overlay;
-  slot: "in" | "out" | "loop";
-  label: string;
-}) {
-  const ck = useSliderCheckpoint();
-  const anim = o.anim ?? {};
-  const dur = Math.max(0.2, o.end - o.start);
-  /** A drag — one undo step for the whole gesture, not one per frame. */
-  const drag = (patch: Partial<OverlayAnim>) => {
-    ck.begin();
-    writeOverlayAnim(o, anim, patch);
-  };
-  if (slot === "loop") {
-    if (!anim.loop) return null;
-    return (
-      <Row label={label}>
-        <ValueSlider
-          label={label}
-          sliderClassName="data-horizontal:w-24"
-          valueClassName="w-9 text-muted-foreground"
-          value={anim.loop.speed}
-          min={0.25}
-          max={4}
-          step={0.25}
-          format={(v) => `${v.toFixed(2)}×`}
-          parse={parseSpeedInput}
-          onDraft={(v) => drag({ loop: { ...anim.loop!, speed: v } })}
-          onCommit={(v) => {
-            drag({ loop: { ...anim.loop!, speed: v } });
-            ck.end();
-          }}
-        />
-      </Row>
-    );
-  }
-  const active = anim[slot];
-  if (!active) return null;
-  return (
-    <Row label={label}>
-      <ValueSlider
-        label={label}
-        sliderClassName="data-horizontal:w-24"
-        valueClassName="w-9 text-muted-foreground"
-        value={active.seconds}
-        min={OVERLAY_ANIM_MIN_SECONDS}
-        max={Math.min(OVERLAY_ANIM_MAX_SECONDS, dur)}
-        step={0.05}
-        snap={[OVERLAY_ANIM_DEFAULT_SECONDS]}
-        format={(v) => `${v.toFixed(2)}s`}
-        parse={parseSecondsInput}
-        onDraft={(v) => drag({ [slot]: { ...active, seconds: v } })}
-        onCommit={(v) => {
-          drag({ [slot]: { ...active, seconds: v } });
-          ck.end();
-        }}
-      />
-    </Row>
-  );
-}
-
-/** The Animation entry every overlay panel carries: the current picks at a
- * glance on a drill-in to the picker, with each set slot's length or speed
- * right under it. */
-function AnimationSection({
-  overlay: o,
-  onOpen,
-  reveal,
-}: {
-  overlay: Overlay;
-  onOpen: () => void;
-  /** Mounted by the picker's back button: bring the section into view, since
-   * the pushed view scrolled away from it. */
-  reveal?: boolean;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (reveal) ref.current?.scrollIntoView({ block: "nearest" });
-  }, [reveal]);
-  const anim = o.anim ?? {};
-  const slots = (["in", "out", "loop", "words"] as const).filter((s) => anim[s]);
-  const clear = (slot: "in" | "out" | "loop" | "words") => {
-    stopAnimPreview();
-    useEditor.getState().pushHistory();
-    writeOverlayAnim(o, anim, { [slot]: undefined });
-  };
-  return (
-    <div ref={ref}>
-    <Section
-      title="Animation"
-      aside={
-        <button
-          type="button"
-          className="anim-open flex h-8 items-center gap-1 rounded-md border border-input px-2.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-          onClick={onOpen}
-        >
-          {slots.length || anim.move ? "Change" : "None"}
-          <ChevronRight className="size-3.5 shrink-0" />
-        </button>
-      }
-    >
-      {slots.length > 0 && (
-        <div className="mt-2 mb-1 grid grid-cols-3 gap-1.5">
-          {slots.map((slot, i) => (
-            <AnimationCard
-              key={slot}
-              slot={slot}
-              index={i}
-              style={anim[slot]!.style}
-              isText={isTextOverlay(o)}
-              seconds={
-                slot === "in" || slot === "out" ? anim[slot]!.seconds : OVERLAY_ANIM_DEFAULT_SECONDS
-              }
-              speed={anim.loop?.speed ?? 1}
-              textColor={isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT}
-              accentColor={anim.words?.color}
-              accentScale={anim.words?.scale}
-              accentDim={anim.words?.dim}
-              onOpen={onOpen}
-              onClear={() => clear(slot)}
-            />
-          ))}
-        </div>
-      )}
-      <AnimSlotSlider overlay={o} slot="in" label="In duration" />
-      <AnimSlotSlider overlay={o} slot="out" label="Out duration" />
-      <AnimSlotSlider overlay={o} slot="loop" label="Loop speed" />
-      <MoveStrengthRow overlay={o} />
-      {anim.words && <WordSettings overlay={o} />}
-    </Section>
-    </div>
-  );
-}
-
 /** The move's strength: how hard the hold pushes. The slider sits in two
  * places — the collapsed section, and the animation panel's Move tab — so it
  * is one component. */
@@ -2460,14 +2285,6 @@ function MoveStrengthSlider({ overlay: o, label }: { overlay: Overlay; label: st
       />
     </Row>
   );
-}
-
-/** The strength row in the collapsed section, there only once a move is on
- * the element — an empty slider with no move to scale would explain
- * nothing. */
-function MoveStrengthRow({ overlay: o }: { overlay: Overlay }) {
-  if (!o.anim?.move) return null;
-  return <MoveStrengthSlider overlay={o} label="Move strength" />;
 }
 
 /** The settings the picked word effect actually has: a swell has a size, a
@@ -3840,7 +3657,6 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
   const fillCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
   const strokeCk = useSliderCheckpoint();
-  const nav = useAnimNav();
   const boxShape = !lineLikeShape(o.shape);
   return (
     <>
@@ -3964,11 +3780,6 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
         <TransformRows overlay={o} />
         <FollowRow overlay={o} />
         <GroupRow overlay={o} />
-        <AnimationSection
-          overlay={o}
-          onOpen={nav.open}
-          reveal={nav.view === "returned"}
-        />
       </div>
     </>
   );
@@ -4156,7 +3967,6 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
   const asset = useEditor((s) =>
     o.assetId ? s.assets.find((a) => a.id === o.assetId) : undefined
   );
-  const nav = useAnimNav();
   return (
     <>
       <PanelTitle>Sticker</PanelTitle>
@@ -4192,11 +4002,6 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
         <TransformRows overlay={o} />
         <FollowRow overlay={o} />
         <GroupRow overlay={o} />
-        <AnimationSection
-          overlay={o}
-          onOpen={nav.open}
-          reveal={nav.view === "returned"}
-        />
       </div>
     </>
   );

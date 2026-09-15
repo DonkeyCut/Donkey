@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
 import {
   evalOverlayAnim,
   glyphStateAt,
@@ -503,86 +502,6 @@ function AnimTile({
         />
       </span>
     </Tile>
-  );
-}
-
-/**
- * One picked style as a card outside the picker: the slot it fills in a
- * corner, the name playing what that slot does, and an × that clears the slot
- * on the spot. The card itself opens the picker.
- */
-export function AnimationCard({
-  slot,
-  style,
-  isText,
-  seconds,
-  speed,
-  index = 0,
-  textColor,
-  accentColor,
-  accentScale,
-  accentDim,
-  onOpen,
-  onClear,
-}: {
-  slot: Slot;
-  style: string;
-  isText: boolean;
-  seconds: number;
-  speed: number;
-  /** Place in the row, which sets where in its cycle this card starts. */
-  index?: number;
-  /** The element's own text color, for a words card. */
-  textColor?: string;
-  /** The accent it was given, if any. */
-  accentColor?: string;
-  /** Its swell, so the card shows the size the element is wearing. */
-  accentScale?: number;
-  /** Its faded level, so the card shows the transparency it is wearing. */
-  accentDim?: number;
-  onOpen: () => void;
-  onClear: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const onScreen = useOnScreen(ref);
-  const label = labelOf(slot, style);
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        title={`${label} — change`}
-        className="flex w-full flex-col rounded-lg border border-border p-1 outline-none transition-colors hover:bg-muted/60"
-        onClick={onOpen}
-      >
-        <span className={STAGE}>
-          <AnimName
-            slot={slot}
-            style={style}
-            isText={isText}
-            seconds={seconds}
-            speed={speed}
-            index={index}
-            textColor={textColor}
-            accentColor={accentColor}
-            accentScale={accentScale}
-            accentDim={accentDim}
-            playing={onScreen}
-          />
-        </span>
-      </button>
-      <span className="pointer-events-none absolute top-0.5 left-1.5 text-[9px] font-medium text-muted-foreground/70 capitalize">
-        {slot}
-      </span>
-      <button
-        type="button"
-        aria-label={`No ${slot} animation`}
-        title={`No ${slot} animation`}
-        className="absolute top-0.5 right-0.5 grid size-4 place-items-center rounded-full text-muted-foreground/70 transition-colors hover:text-foreground"
-        onClick={onClear}
-      >
-        <X className="size-3" />
-      </button>
-    </div>
   );
 }
 
