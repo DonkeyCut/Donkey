@@ -14,6 +14,10 @@ import type { WordDraw } from "./words/types";
 /** Fields every overlay element carries, whatever its kind. */
 export interface OverlayBase {
   id: string;
+  /** What the person calls this element: the timeline chip, the inspector
+   * title and chat references read it. Absent = named by what it is (a
+   * title's text, a shape's kind). */
+  name?: string;
   start: number; // timeline seconds
   end: number;
   x: number; // center, fraction of frame width 0..1

@@ -20,7 +20,7 @@ import {
   isEffectOverlay,
   isShapeOverlay,
   isStickerOverlay,
-  isTextOverlay,
+  overlayName,
   SHAPE_LABELS,
   TRANSITION_STYLE_IDS,
   TRANSITION_STYLE_LABELS,
@@ -599,13 +599,7 @@ function overlayBaseName(o: Overlay, fallback: string): string {
   // A sticker's identity is its art — the pill shows the thumbnail — and its
   // asset name is often a generation prompt, which would collide with the
   // media asset carrying the same name. It names by kind.
-  const raw = isTextOverlay(o)
-    ? o.text
-    : isShapeOverlay(o)
-      ? SHAPE_LABELS[o.shape]
-      : isEffectOverlay(o)
-        ? EFFECT_LABELS[o.effect]
-        : "Sticker";
+  const raw = overlayName(o);
   const clean = (raw ?? "")
     .replace(/[\n"]+/g, " ")
     .replace(/\s+/g, " ")

@@ -1611,6 +1611,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { id: next.id, volume: next.volume ?? 1 };
   },
 
+  rename_item: (s, input) => {
+      const name = String(input.name ?? "").trim().slice(0, 60) || undefined;
+      const id = String(input.id ?? "");
+      if (s.clips.some((c) => c.id === id)) s.updateClip(id, { name });
+      else if (s.audioClips.some((a) => a.id === id)) s.updateAudio(id, { name });
+      else if (s.overlays.some((o) => o.id === id)) s.updateOverlay(id, { name });
+      else throw new ToolError(`No clip, soundtrack clip, or element with id ${id}.`);
+      return { id, name: name ?? null };
+  },
+
   set_clip_hidden: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       s.updateClip(clip.id, { hidden: input.hidden ? true : undefined });
@@ -4888,6 +4898,7 @@ function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "
   if (isNum(input.opacity))
     patch.opacity = input.opacity >= 0.995 ? undefined : clamp(input.opacity, 0, 1);
   if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
+  if (typeof input.name === "string") patch.name = input.name.trim().slice(0, 60) || undefined;
 
   if (kind === "text") {
     // A literal backslash-n in the call is always a meant newline — models

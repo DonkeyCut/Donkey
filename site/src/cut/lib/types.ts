@@ -1,5 +1,6 @@
 import type { GuideId, GuideLines } from "./guides";
 import {
+  EFFECT_LABELS,
   behindSubjectMask,
   overlayKind,
   poseAt,
@@ -508,6 +509,9 @@ export function regionLabel(r: FrameRect): string {
 export interface VideoClip {
   id: string;
   assetId: string;
+  /** What the person calls this clip on the timeline and in the inspector;
+   * absent = the file's name. */
+  name?: string;
   /** Which video track this clip sits on. Tracks number 0..N bottom-up:
    * track 0's clips form the sequence that drives playback; higher tracks
    * composite in front (highest wins where clips overlap). Every track
@@ -1005,6 +1009,9 @@ export function migrateLegacyTransitions(clips: VideoClip[]): VideoClip[] {
 export interface AudioClip {
   id: string;
   assetId: string;
+  /** What the person calls this clip on the timeline and in the inspector;
+   * absent = the file's name. */
+  name?: string;
   start: number; // timeline position, seconds
   in: number;
   out: number;
@@ -1274,6 +1281,26 @@ export function migrateBehindSubject<T extends Overlay>(overlays: T[]): T[] {
     delete (next as { behindSubject?: boolean }).behindSubject;
     return next;
   });
+}
+
+/** The name a clip goes by: the one the person gave it, or its file's. */
+export function clipName(c: { name?: string }, asset: { name: string } | undefined): string {
+  return c.name?.trim() || asset?.name || "";
+}
+
+/**
+ * The name an element goes by everywhere it is listed: the one the person
+ * gave it, or what it is — a title's text on one line, a shape's kind, an
+ * effect's name, "Sticker". A title with nothing typed yet has no name;
+ * each surface shows its own stand-in for that.
+ */
+export function overlayName(o: Overlay): string {
+  const own = o.name?.trim();
+  if (own) return own;
+  if (isTextOverlay(o)) return o.text.replace(/\s*\n\s*/g, " ").trim();
+  if (isShapeOverlay(o)) return SHAPE_LABELS[o.shape];
+  if (isEffectOverlay(o)) return EFFECT_LABELS[o.effect];
+  return "Sticker";
 }
 
 export const SHAPE_LABELS: Record<ShapeKind, string> = {

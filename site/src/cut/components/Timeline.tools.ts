@@ -88,6 +88,12 @@ export const TIMELINE_TOOLS = [
     inputSchema: obj({ clipId: str("Video clip id"), muted: bool("true to mute") }, ["clipId", "muted"]),
   },
   {
+    name: "rename_item",
+    description:
+      "Name any timeline item — a video or image clip on any track, a soundtrack clip, or a title/shape/sticker/effect element — by id. The name shows on its timeline bar, in the inspector and in editor_state, so a cut full of look-alike items stays legible. An empty name clears it, back to the file's name or what the element is.",
+    inputSchema: obj({ id: str("Clip, soundtrack clip, or element id"), name: str("The name, up to 60 characters; empty clears") }, ["id", "name"]),
+  },
+  {
     name: "set_clip_hidden",
     description:
       "Hide or show a video clip on any track. A hidden clip stays on the timeline (grayed) but is excluded from playback and export — its span plays black and silent on track 0; an overlay layer just disappears.",

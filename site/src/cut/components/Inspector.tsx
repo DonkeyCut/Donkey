@@ -25,7 +25,6 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  EFFECT_LABELS,
   hasMaskKeys,
   hasOverlayAnim,
   hasOverlayKeys,
@@ -123,7 +122,6 @@ import {
   onFontsChanged,
   rectOf,
   regionLabel,
-  SHAPE_LABELS,
   SPEED_FLOOR,
   SPEED_MAX,
   SPEED_MIN,
@@ -136,6 +134,7 @@ import {
   type LayoutId,
   type EffectOverlay,
   type MediaAsset,
+  overlayName,
   type Overlay,
   type ShapeOverlay,
   type StickerOverlay,
@@ -353,22 +352,86 @@ function RailButton({
   );
 }
 
-function PanelTitle({ children }: { children: React.ReactNode }) {
+/** An element panel's title: the element's name, typed over in place. What
+ * it is — the text, the shape, the effect — stands in until a name is given
+ * and again when the name is cleared. Enter or leaving the field commits;
+ * Escape puts back what was there. The timeline chip and chat references
+ * show the same name. */
+function ElementTitle({ overlay: o }: { overlay: Overlay }) {
+  const update = useEditor((s) => s.updateOverlay);
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? o.name ?? "";
+  const commit = () => {
+    if (draft === null) return;
+    const name = draft.trim().slice(0, 60);
+    setDraft(null);
+    if ((name || undefined) !== (o.name || undefined)) update(o.id, { name: name || undefined });
+  };
   return (
-    <div className="flex h-10 shrink-0 items-center px-3.5 text-sm font-semibold tracking-tight">
-      {children}
+    <div className="flex h-10 shrink-0 items-center px-3.5">
+      <input
+        key={o.id}
+        aria-label="Element name"
+        className="h-7 w-full min-w-0 rounded-md bg-transparent px-1 -mx-1 text-sm font-semibold tracking-tight outline-none placeholder:text-foreground focus:bg-muted/60 focus:placeholder:text-muted-foreground"
+        value={shown}
+        placeholder={overlayName({ ...o, name: undefined } as Overlay) || "Text"}
+        spellCheck={false}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setDraft(null);
+            e.currentTarget.blur();
+          }
+        }}
+      />
     </div>
   );
 }
 
-/** One-line header for a media clip's panel: the file name (ellipsised, with
- * the full name in its hover tooltip) and the clip's running length. */
-function ClipHead({ name, time }: { name?: string; time: string }) {
+/** One-line header for a media clip's panel: the clip's name, typed over
+ * in place (the file's name stands in until one is given, and again when it
+ * is cleared), and the clip's running length. Enter or leaving the field
+ * commits; Escape puts back what was there. The timeline bar shows the same
+ * name. */
+function ClipHead({
+  clip,
+  fileName,
+  time,
+  onRename,
+}: {
+  clip: { id: string; name?: string };
+  fileName?: string;
+  time: string;
+  onRename: (name: string | undefined) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const commit = () => {
+    if (draft === null) return;
+    const name = draft.trim().slice(0, 60);
+    setDraft(null);
+    if ((name || undefined) !== (clip.name || undefined)) onRename(name || undefined);
+  };
   return (
     <div className="mb-1.5 flex h-10 shrink-0 items-center justify-between gap-2 border-b border-border">
-      <div className="min-w-0 truncate text-sm font-semibold tracking-tight" title={name}>
-        {name}
-      </div>
+      <input
+        key={clip.id}
+        aria-label="Clip name"
+        className="h-7 w-full min-w-0 rounded-md bg-transparent px-1 -mx-1 text-sm font-semibold tracking-tight outline-none placeholder:text-foreground focus:bg-muted/60 focus:placeholder:text-muted-foreground"
+        value={draft ?? clip.name ?? ""}
+        placeholder={fileName}
+        spellCheck={false}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setDraft(null);
+            e.currentTarget.blur();
+          }
+        }}
+      />
       <Value className="shrink-0 text-muted-foreground">{time}</Value>
     </div>
   );
@@ -1097,7 +1160,12 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
   return (
     <>
       <div className="flex flex-col gap-1 px-3.5 pb-4">
-        <ClipHead name={asset?.name} time={formatTime(speedLen)} />
+        <ClipHead
+          clip={clip}
+          fileName={asset?.name}
+          time={formatTime(speedLen)}
+          onRename={(name) => updateClip(clip.id, { name })}
+        />
         <Row label="Trim">
           <ScrubValue
             label="Trim start"
@@ -1577,7 +1645,12 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
   return (
     <>
       <div className="flex flex-col gap-1 px-3.5 pb-4">
-        <ClipHead name={asset?.name} time={formatTime(len)} />
+        <ClipHead
+          clip={clip}
+          fileName={asset?.name}
+          time={formatTime(len)}
+          onRename={(name) => useEditor.getState().updateAudio(clip.id, { name })}
+        />
         <Row label="Trim">
           <ScrubValue
             label="Trim start"
@@ -1796,7 +1869,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
 
   return (
     <>
-      <PanelTitle>Text</PanelTitle>
+      <ElementTitle overlay={o} />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         <div className="relative mb-2">
           <Textarea
@@ -3690,7 +3763,7 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
   const boxShape = !lineLikeShape(o.shape);
   return (
     <>
-      <PanelTitle>{SHAPE_LABELS[o.shape]}</PanelTitle>
+      <ElementTitle overlay={o} />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         <Row label={boxShape ? "Fill" : "Color"}>
           <ColorField
@@ -3819,7 +3892,7 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
   const amountCk = useSliderCheckpoint();
   return (
     <>
-      <PanelTitle>{EFFECT_LABELS[o.effect]}</PanelTitle>
+      <ElementTitle overlay={o} />
       {/* Which effect this is belongs to the Effects tab: it marks this one and
           swaps it on a click, so the panel is only its knobs. */}
       <div className="flex flex-col gap-1 px-3.5 pb-4">
@@ -3999,7 +4072,7 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
   );
   return (
     <>
-      <PanelTitle>Sticker</PanelTitle>
+      <ElementTitle overlay={o} />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         {asset ? (
           <div className="mb-1 truncate text-[12px] text-muted-foreground" title={asset.name}>

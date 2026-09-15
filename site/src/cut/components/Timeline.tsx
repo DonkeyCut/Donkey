@@ -59,7 +59,7 @@ import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
-import { assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, isTextOverlay, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
+import { assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox } from "@donkeycut/effects-kit";
@@ -3887,6 +3887,18 @@ function ClipView({
           {barW >= 96 ? "Cutting…" : "C…"}
         </span>
       )}
+      {clip.name && !baking && !drag && (
+        // A clip the person named wears it over the film, where the hover
+        // controls live: it steps aside for the mention chip as they arrive.
+        <span
+          className={cn(
+            "tl-name-chip pointer-events-none absolute top-1 left-1 z-2 max-w-[calc(100%-8px)] truncate rounded-[5px] bg-black/65 px-1.5 py-px text-[10px] text-white transition-opacity",
+            mention && !loading && "group-hover:opacity-0"
+          )}
+        >
+          {clip.name}
+        </span>
+      )}
       {mention &&
         (drag ? (
           <span className="tl-dur-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] tabular-nums text-white">
@@ -5316,7 +5328,7 @@ function AudioView({
           mention && !drag && "group-hover:opacity-0"
         )}
       >
-        {asset.name}
+        {clipName(clip, asset)}
       </span>
       {mention && !drag && !loading && (
         <span className="tl-mention-chip pointer-events-none absolute top-1 left-1 z-2 rounded-[5px] bg-black/65 px-1.5 py-px font-mono text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100">
@@ -5666,20 +5678,20 @@ function TextBar({
     o.kind === "shape" ? (
       <>
         <ShapeIcon className="mr-1 size-2.5 shrink-0" />
-        {SHAPE_LABELS[o.shape]}
+        {overlayName(o)}
       </>
     ) : o.kind === "sticker" ? (
       <>
         <StickerThumb overlay={o} />
-        Sticker
+        {overlayName(o)}
       </>
     ) : o.kind === "effect" ? (
       <>
         <EffectChipIcon effect={o.effect} />
-        {EFFECT_LABELS[o.effect]}
+        {overlayName(o)}
       </>
     ) : (
-      o.text.replace(/\n/g, " ")
+      overlayName(o)
     );
 
   return (

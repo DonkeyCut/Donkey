@@ -23,6 +23,7 @@ import {
   type ClipSpan,
   type MediaAsset,
   type MediaFolder,
+  overlayName,
   type Overlay,
   type ProjectDoc,
   type SubtitlesBlock,
@@ -465,6 +466,7 @@ function describeState(
       index,
       id: sp.clip.id,
       asset: sp.asset.name,
+      ...(sp.clip.name ? { name: sp.clip.name } : {}),
       start: r(sp.start),
       len: r(sp.len),
       in: r(sp.clip.in),
@@ -615,13 +617,14 @@ function describeRate(c: { speed?: number; speedCurve?: SpeedNode[]; reverse?: b
 }
 
 function describeAudio(
-  a: { assetId: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
+  a: { assetId: string; name?: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
   assets: Map<string, { name: string }>
 ) {
   const rt = retimeOf(a);
   const speed = rt.rate;
   return {
     asset: assets.get(a.assetId)?.name ?? a.assetId,
+    ...(a.name ? { name: a.name } : {}),
     start: r(a.start),
     len: r(rt.len),
     in: r(a.in),
@@ -642,6 +645,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
   const rect = rectOf(c);
   return {
     asset: assets.get(c.assetId)?.name ?? c.assetId,
+    ...(c.name ? { name: c.name } : {}),
     track: c.track,
     start: r(c.start),
     len: r(retimeOf(c).len),
@@ -677,6 +681,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
 function describeOverlay(o: Overlay) {
   const base = {
     kind: o.kind ?? "text",
+    name: overlayName(o),
     start: r(o.start),
     end: r(o.end),
     x: r(o.x),

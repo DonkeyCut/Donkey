@@ -69,9 +69,10 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_overlay",
     description:
-      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/fill_opacity/radius/stroke; stickers take w/h. Every kind takes timing, position, rotation, opacity, hidden. This is the tool for 'make this text better' requests too.",
+      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/fill_opacity/radius/stroke; stickers take w/h. Every kind takes name, timing, position, rotation, opacity, hidden. This is the tool for 'make this text better' requests too.",
     inputSchema: obj({
       id: str("Overlay element id"),
+      name: str("What the person calls this element — shown on its timeline chip and inspector title (empty string clears it, back to what it is)"),
       text: str("New text (titles)"),
       follows_clip: bool(
         "Whether the element rides the clip under it (on by default): true homes it to that clip, false frees it where it is"
