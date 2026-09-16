@@ -4,6 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 import {
   useEmailOutbox,
@@ -105,56 +106,68 @@ function QuotaSection({ quota }: { quota: OutboxOverview["quota"] }) {
 
 function KindsSection({ kinds }: { kinds: OutboxOverview["kinds"] }) {
   const action = useOutboxAction();
+  // The fold sticks across visits.
+  const [open, setOpen] = useLocalPref<boolean>("su-email-kinds-open", true, (v) => typeof v === "boolean");
   const cell = "py-1.5 pr-3";
   return (
     <section className="space-y-2">
-      <h2 className="text-sm font-medium">Kinds, in send order</h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs text-muted-foreground">
-            <tr>
-              <th className="py-1 pr-3 font-normal">Kind</th>
-              <th className="py-1 pr-3 font-normal">Priority</th>
-              <th className="py-1 pr-3 font-normal">Quota</th>
-              <th className="py-1 pr-3 text-right font-normal">Queued</th>
-              <th className="py-1 pr-3 text-right font-normal">Sent today</th>
-              <th className="py-1 pr-3 text-right font-normal">Failed</th>
-              <th className="py-1" />
-            </tr>
-          </thead>
-          <tbody>
-            {[...kinds]
-              .sort((a, b) => b.priority - a.priority)
-              .map((k) => (
-                <tr key={k.kind} className="border-t hover:bg-muted/50">
-                  <td className={cn(cell, "font-medium")}>{k.kind}</td>
-                  <td className={cn(cell, "tabular-nums text-muted-foreground")}>{k.priority}</td>
-                  <td className={cn(cell, "text-muted-foreground")}>{k.quota}</td>
-                  <td className={cn(cell, "text-right tabular-nums")}>{k.queued}</td>
-                  <td className={cn(cell, "text-right tabular-nums")}>{k.sentToday}</td>
-                  <td className={cn(cell, "text-right tabular-nums", k.failed > 0 && "text-destructive")}>{k.failed}</td>
-                  <td className="py-1 text-right">
-                    <span className="inline-flex items-center gap-2">
-                      {action.isError && action.variables?.action === "drain" && action.variables.kind === k.kind ? (
-                        <span className="text-xs text-destructive">Failed.</span>
-                      ) : k.drainer?.state === "held" ? (
-                        <span className="text-xs text-muted-foreground">held · resumes {formatWhen(k.drainer.resumesAt)}</span>
-                      ) : null}
-                      <Button
-                        disabled={k.queued === 0 || k.drainer?.state === "running" || action.isPending}
-                        onClick={() => action.mutate({ action: "drain", kind: k.kind })}
-                        size="sm"
-                        variant="outline"
-                      >
-                        {k.drainer?.state === "running" ? "Draining…" : "Drain"}
-                      </Button>
-                    </span>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </div>
+      <button
+        type="button"
+        className="-mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-left text-sm font-medium hover:bg-muted/50"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <ChevronRight className={cn("size-4 shrink-0 transition-transform duration-200", open && "rotate-90")} />
+        Kinds, in send order
+      </button>
+      {open ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="py-1 pr-3 font-normal">Kind</th>
+                <th className="py-1 pr-3 font-normal">Priority</th>
+                <th className="py-1 pr-3 font-normal">Quota</th>
+                <th className="py-1 pr-3 text-right font-normal">Queued</th>
+                <th className="py-1 pr-3 text-right font-normal">Sent today</th>
+                <th className="py-1 pr-3 text-right font-normal">Failed</th>
+                <th className="py-1" />
+              </tr>
+            </thead>
+            <tbody>
+              {[...kinds]
+                .sort((a, b) => b.priority - a.priority)
+                .map((k) => (
+                  <tr key={k.kind} className="border-t hover:bg-muted/50">
+                    <td className={cn(cell, "font-medium")}>{k.kind}</td>
+                    <td className={cn(cell, "tabular-nums text-muted-foreground")}>{k.priority}</td>
+                    <td className={cn(cell, "text-muted-foreground")}>{k.quota}</td>
+                    <td className={cn(cell, "text-right tabular-nums")}>{k.queued}</td>
+                    <td className={cn(cell, "text-right tabular-nums")}>{k.sentToday}</td>
+                    <td className={cn(cell, "text-right tabular-nums", k.failed > 0 && "text-destructive")}>{k.failed}</td>
+                    <td className="py-1 text-right">
+                      <span className="inline-flex items-center gap-2">
+                        {action.isError && action.variables?.action === "drain" && action.variables.kind === k.kind ? (
+                          <span className="text-xs text-destructive">Failed.</span>
+                        ) : k.drainer?.state === "held" ? (
+                          <span className="text-xs text-muted-foreground">held · resumes {formatWhen(k.drainer.resumesAt)}</span>
+                        ) : null}
+                        <Button
+                          disabled={k.queued === 0 || k.drainer?.state === "running" || action.isPending}
+                          onClick={() => action.mutate({ action: "drain", kind: k.kind })}
+                          size="sm"
+                          variant="outline"
+                        >
+                          {k.drainer?.state === "running" ? "Draining…" : "Drain"}
+                        </Button>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
     </section>
   );
 }
