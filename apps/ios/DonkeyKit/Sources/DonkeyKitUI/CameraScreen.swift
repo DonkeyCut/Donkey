@@ -42,7 +42,7 @@ struct CameraScreen<CameraPreview: View>: View {
     /// gripping the short edge.
     private var isSideways: Bool { verticalSizeClass == .compact }
 
-    private static var stageSpace: String { "cameraStage" }
+    private nonisolated static var stageSpace: String { "cameraStage" }
     private static var wellSide: CGFloat { 54 }
     private static var wellLifetime: Duration { .seconds(30) }
 

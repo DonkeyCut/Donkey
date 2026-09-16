@@ -617,7 +617,7 @@ struct NoteCard: View {
     }
 }
 
-struct FoldCorner: Shape {
+nonisolated struct FoldCorner: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
