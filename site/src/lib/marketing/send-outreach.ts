@@ -1,12 +1,14 @@
 import { z } from "zod";
 
+import OutreachEmail from "@/emails/outreach";
 import { createTermsCreditOffer } from "@/lib/credits/offers";
 import { creditOfferTermsSchema } from "@/lib/credits/offerTerms";
 import { PermanentSendError } from "@/lib/email/errors";
 import { emailFrom, type EmailMessage, type EmailUser } from "@/lib/email/resend";
 import { isMarketingUnsubscribed, unsubscribePageUrl } from "@/lib/email/unsubscribe";
 import { outreachReplyAddress } from "@/lib/marketing/replyAddress";
-import { fillOutreachText, type OutreachVars, UnknownPlaceholderError } from "@/lib/marketing/placeholders";
+import { type OutreachVars, UnknownPlaceholderError } from "@/lib/marketing/placeholders";
+import { OutreachCopyError, renderOutreachCopy } from "@/lib/marketing/outreachCopy";
 import { prisma } from "@/lib/prisma";
 
 export const outreachPayloadSchema = z
@@ -44,11 +46,7 @@ export function outreachIdempotencyKey(outreachId: string, attempt: number): str
   return `outreach:${outreachId}:${attempt}`;
 }
 
-// One person writing to one person, so the message goes out as text/plain with
-// no markup, no template shell, and no bulk-mail headers. A mail provider reads
-// an HTML body or a `List-Unsubscribe` header as a mailing list and files the
-// note under promotions. When the operator turns the opt-out footer on, it
-// rides along as a line of text.
+// Every note carries a plain-text version, including its optional opt-out footer.
 function outreachText(body: string, unsubscribeUrl: string | null): string {
   const trimmed = body.trim();
   if (!unsubscribeUrl) return `${trimmed}\n`;
@@ -87,21 +85,21 @@ export async function buildOutreachEmail(
       })
     : null;
   const vars: OutreachVars = { ...payload.vars, ...offer?.vars };
-  let subject: string;
-  let body: string;
+  let copy: ReturnType<typeof renderOutreachCopy>;
   try {
-    subject = fillOutreachText(payload.subject, vars);
-    body = fillOutreachText(payload.body, vars);
+    copy = renderOutreachCopy(payload.subject, payload.body, vars, payload.creditOffer);
   } catch (error) {
-    if (error instanceof UnknownPlaceholderError) throw new PermanentSendError(error.message);
+    if (error instanceof UnknownPlaceholderError || error instanceof OutreachCopyError) throw new PermanentSendError(error.message);
     throw error;
   }
+  const unsubscribeUrl = payload.unsubscribeLink ? unsubscribePageUrl(user.id) : null;
   return {
     from,
     to: user.email,
     replyTo: payload.trackReplies ? outreachReplyAddress(payload.outreachId) : undefined,
-    subject,
-    text: outreachText(body, payload.unsubscribeLink ? unsubscribePageUrl(user.id) : null),
+    subject: copy.subject,
+    text: outreachText(copy.text, unsubscribeUrl),
+    ...(copy.cta ? { react: OutreachEmail({ blocks: copy.blocks, cta: copy.cta, unsubscribeUrl }) } : {}),
   };
 }
 

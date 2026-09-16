@@ -37,6 +37,7 @@ import {
   OUTREACH_PLACEHOLDERS,
 } from "@/lib/marketing/placeholders";
 import { cn } from "@/lib/utils";
+import { BUTTON_MARK } from "@/lib/marketing/promotionCopy";
 import { ApiError } from "@/queries/apiClient";
 import {
   useBusyOutreachIds,
@@ -551,13 +552,29 @@ export function OutreachComposeDialog({
                       {`{{${name}}}`}
                     </Button>
                   ))}
+                  {creditOffer ? (
+                    <Button
+                      onClick={() => {
+                        const field = bodyField.current;
+                        const start = field?.selectionStart ?? body.length;
+                        const end = field?.selectionEnd ?? start;
+                        const before = body.slice(0, start).trimEnd();
+                        const after = body.slice(end).trimStart();
+                        setBody(`${before ? `${before}\n\n` : ""}${BUTTON_MARK}${after ? `\n\n${after}` : ""}`);
+                      }}
+                      size="xs"
+                      variant="outline"
+                    >
+                      {BUTTON_MARK}
+                    </Button>
+                  ) : null}
                 </div>
                 <CreditOfferFields
                   idPrefix="outreach-offer"
                   value={creditOffer}
                   defaults={offerDefaults}
                   onChange={setCreditOffer}
-                  hint="The note carries a link for AI credits; {{claimUrl}} is the link and {{claimBy}} the last day to claim."
+                  hint="Put {{button}} in its own paragraph for a claim button. {{claimUrl}} inserts the URL; {{claimBy}} is the last day to claim."
                 />
                 {sendFailed ? (
                   <p className="text-sm text-destructive">

@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { formatBytes } from "@/lib/bytes";
 import { creditMicrosToString, zeroCreditMicros } from "@/lib/credits/amounts";
-import { CLAIM_URL_PLACEHOLDER, creditOfferTermsSchema } from "@/lib/credits/offerTerms";
+import { creditOfferTermsSchema, type CreditOfferTerms } from "@/lib/credits/offerTerms";
 import { notFoundResponse, withSuperUser } from "@/lib/donkey-api-auth";
 import {
   CREDIT_SPENDERS_CAMPAIGN,
@@ -14,7 +14,6 @@ import {
 import { deliverEmail } from "@/lib/email/outbox";
 import { lastActiveByUser } from "@/lib/marketing/lastActive";
 import {
-  fillOutreachText,
   firstNameOf,
   isOfferPlaceholder,
   UnknownPlaceholderError,
@@ -23,6 +22,7 @@ import {
 import { promotionIdempotencyKey } from "@/lib/marketing/promotions";
 import { sendIssue } from "@/lib/marketing/promotionSave";
 import { outreachIdempotencyKey } from "@/lib/marketing/send-outreach";
+import { OutreachCopyError, renderOutreachCopy } from "@/lib/marketing/outreachCopy";
 import { prisma } from "@/lib/prisma";
 
 const listQuerySchema = z.object({
@@ -201,15 +201,12 @@ export const GET = withSuperUser(async (request) => {
 // placeholder, or an offer placeholder in a note that carries no offer, is
 // refused before anything is queued; so is an offer the words never link to,
 // since the link is the only way the person reaches it.
-function wordsIssue(subject: string, body: string, vars: OutreachVars, offered: boolean): string | null {
-  if (offered && !subject.includes(CLAIM_URL_PLACEHOLDER) && !body.includes(CLAIM_URL_PLACEHOLDER)) {
-    return `A note with a credit offer needs ${CLAIM_URL_PLACEHOLDER} in it.`;
-  }
+function wordsIssue(subject: string, body: string, vars: OutreachVars, offer: CreditOfferTerms | null): string | null {
   try {
-    fillOutreachText(subject, vars);
-    fillOutreachText(body, vars);
+    renderOutreachCopy(subject, body, vars, offer);
     return null;
   } catch (error) {
+    if (error instanceof OutreachCopyError) return error.message;
     if (!(error instanceof UnknownPlaceholderError)) throw error;
     return isOfferPlaceholder(error.placeholder)
       ? `Turn on the credit offer to use {{${error.placeholder}}}.`
@@ -296,7 +293,7 @@ export const POST = withSuperUser(async (request) => {
       parsed.data.subject,
       parsed.data.body,
       parsed.data.creditOffer ? { ...vars, claimUrl: "", claimBy: "" } : vars,
-      parsed.data.creditOffer !== null,
+      parsed.data.creditOffer,
     );
     if (issue) {
       return NextResponse.json({ error: "Invalid request", issues: [{ message: issue, path: "body" }] }, { status: 400 });
