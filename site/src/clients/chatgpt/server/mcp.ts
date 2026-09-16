@@ -160,7 +160,7 @@ export function createChatgptServer(
     {
       title: "List Donkey Cut cloud projects",
       description:
-        "List the connected user's saved cloud projects. Browser and Mac projects become available after being saved to the cloud. Follow nextCursor for more results.",
+        "List the connected user's saved cloud projects, most recently edited first. Browser and Mac projects become available after being saved to the cloud. Follow nextCursor for more results.",
       inputSchema: z.object({ cursor: idSchema.optional() }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,

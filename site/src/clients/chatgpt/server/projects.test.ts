@@ -105,6 +105,7 @@ describe("ChatGPT cloud projects", () => {
     ]);
     expect(db.cutProject.findMany.mock.calls[0][0]).toMatchObject({
       where: { userId: "owner" },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
       take: 21,
       select: { id: true, name: true, version: true },
     });

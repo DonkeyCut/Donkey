@@ -258,7 +258,7 @@ export function projectTools(
       const rows = await db.cutProject.findMany({
         where: { userId: identity.userId },
         select: { id: true, name: true, version: true },
-        orderBy: { id: "asc" },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         take: 21,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
