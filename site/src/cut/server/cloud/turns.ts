@@ -1,14 +1,14 @@
 // One chat turn as a durable job. The page (or an API caller) posts the
 // thread's messages; the worker container claims the row, runs the headless
 // turn against the project doc, and settles the row with the reply. The
-// queued/running row doubles as the project's agent write lease — one turn at
-// a time per project — and the generic /jobs/:jobId route serves the poll.
+// queued/running row holds the project's agent write lease (lease.ts), and
+// the generic /jobs/:jobId route serves the poll.
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { cutLimitsFor, liveJobCheck } from "./limits";
+import { queueLeasedJob } from "./lease";
 import { getProject } from "./projects";
 import { caught, err } from "./util";
-import { wakeRenderWorker } from "./wake";
 
 // Well above a slimmed thread, well below anything that could hurt the row.
 const MAX_TURN_BYTES = 1_000_000;
@@ -58,27 +58,8 @@ export const turnsCloud = {
         messages: body.messages,
         ...(typeof body.model === "string" && body.model ? { model: body.model } : {}),
       };
-      // The write lease, race-safely: create first, then keep the row only if
-      // it is the oldest live turn for the project. Two concurrent queues both
-      // create, both re-check, and exactly one — the older row — survives.
-      const row = await prisma.cutRenderJob.create({
-        data: {
-          userId,
-          projectId,
-          kind: "agent_turn",
-          spec: spec as unknown as Prisma.InputJsonValue,
-        },
-      });
-      const oldest = await prisma.cutRenderJob.findFirst({
-        where: { userId, projectId, kind: "agent_turn", state: { in: ["queued", "running"] } },
-        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-        select: { id: true },
-      });
-      if (oldest && oldest.id !== row.id) {
-        await prisma.cutRenderJob.delete({ where: { id: row.id } }).catch(() => {});
-        return err("A turn is already running for this project.", 409);
-      }
-      wakeRenderWorker();
+      const row = await queueLeasedJob(userId, projectId, "agent_turn", spec as unknown as Prisma.InputJsonValue);
+      if (row instanceof Response) return row;
       return Response.json({ jobId: row.id });
     } catch (e) {
       return caught(e, "Could not start the turn.");

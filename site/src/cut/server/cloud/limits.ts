@@ -75,7 +75,7 @@ export async function liveJobCheck(userId: string): Promise<Response | null> {
   const live = await prisma.cutRenderJob.count({
     where: {
       userId,
-      kind: { in: [...COUNTED_JOB_KINDS, "agent_turn"] },
+      kind: { in: [...COUNTED_JOB_KINDS, "agent_turn", "commands"] },
       state: { in: ["queued", "running"] },
     },
   });

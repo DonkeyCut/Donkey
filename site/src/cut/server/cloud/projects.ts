@@ -120,6 +120,7 @@ export async function deleteProjectCascade(userId: string, id: string): Promise<
   await prisma.$transaction(async (tx) => {
     await tx.cutMediaObject.deleteMany({ where: { userId, projectId: id } });
     await tx.cutChatThread.deleteMany({ where: { userId, projectId: id } });
+    await tx.cutProjectCheckpoint.deleteMany({ where: { userId, projectId: id } });
     await tx.cutProjectShare.deleteMany({ where: { projectId: id } });
     // deleteMany, so ownership is enforced here rather than trusted from the
     // caller: a mismatched (userId, id) pair deletes nothing.

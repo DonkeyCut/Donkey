@@ -18,6 +18,24 @@ model CutProject {
   @@index([userId, updatedAt])
 }
 
+// One saved state of a cloud project, kept so an edit made from outside the
+// editor (the ChatGPT app) can be undone and redone from another request.
+// Rows form a linear history per project ordered by seq; `version` is the
+// CutProject.version whose doc this row holds, re-aliased when a restore
+// writes the same doc under a new version.
+model CutProjectCheckpoint {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  seq       Int
+  version   Int
+  doc       Json
+  label     String
+  createdAt DateTime @default(now())
+
+  @@index([projectId, seq])
+}
+
 // A read-only share of one cloud project. The row id doubles as the link
 // token: deleting the row kills the link, and re-sharing mints a fresh URL
 // without moving the project. For a public share the token is the only gate,
