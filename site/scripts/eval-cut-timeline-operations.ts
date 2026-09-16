@@ -58,8 +58,8 @@ try {
     }, selection);
     assert.equal(pasted.start, 10);
     if (id === "transition") {
-      const split = page.getByRole("button", { name: "Split", exact: true });
-      assert(await split.isDisabled());
+      // A transition cannot split, so the toolbar shows no Split button.
+      assert.equal(await page.getByRole("button", { name: "Split", exact: true }).count(), 0);
       await page.keyboard.press("s");
       assert.equal(await page.evaluate(() => window.__cutDev.useEditor.getState().clips.length), 1);
       assert.equal(await page.evaluate(() => window.__cutDev.useEditor.getState().transitions.length), 2);
@@ -98,14 +98,16 @@ try {
   });
   const group = page.getByRole("button", { name: "Group", exact: true });
   const ungroup = page.getByRole("button", { name: "Ungroup", exact: true });
+  // The toolbar shows Group for two or more items and Ungroup only for a
+  // selection that holds a group.
   assert(await group.isEnabled());
-  assert(await ungroup.isDisabled());
+  assert.equal(await ungroup.count(), 0);
   await group.click();
   await page.waitForFunction(() => !!window.__cutDev.useEditor.getState().transitions[0].groupId);
   assert(await ungroup.isEnabled());
   await ungroup.click();
   await page.waitForFunction(() => !window.__cutDev.useEditor.getState().transitions[0].groupId);
-  assert(await ungroup.isDisabled());
+  await ungroup.waitFor({ state: "detached" });
   await group.click();
   console.log("PASS group toolbar follows grouping and ungrouping a mixed selection");
   const grouped = await bar.boundingBox(); assert(grouped);
