@@ -148,3 +148,51 @@ export function Section({
     </section>
   );
 }
+
+/** A control that carries its own caption, for the two-up rows where the
+ * settings sit side by side instead of behind a label on the left. */
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="truncate text-[11px] text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/** Icon toggles that belong together, sat in one trough. */
+export function SegGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-secondary/60 p-0.5">
+      {children}
+    </div>
+  );
+}
+
+export function SegToggle({
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      className={cn(
+        "grid size-6 place-items-center rounded-[5px] text-muted-foreground transition-colors [&_svg]:size-3.5",
+        active ? "bg-foreground text-background" : "hover:bg-foreground/10 hover:text-foreground"
+      )}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}

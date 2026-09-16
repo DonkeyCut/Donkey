@@ -171,18 +171,10 @@ export function Editor({
   // and let the preview take the space.
   const hasInspector = useEditor((s) => {
     if (s.readOnly || s.selection == null) return false;
-    if (s.selection.kind === "cue" || s.selection.kind === "transition") return false;
-    if (s.multiSelection.length <= 1) return true;
-    // A multi-selection (marquee, ⌘-click) has no single item to edit, so the
-    // panel stays closed. The exception is a grouped element: selecting it
-    // selects its whole group, and the panel edits the clicked member.
-    const first = s.multiSelection[0];
-    if (first?.kind !== "overlay") return false;
-    const gid = s.overlays.find((o) => o.id === first.id)?.groupId;
-    if (!gid) return false;
-    return s.multiSelection.every(
-      (m) => m?.kind === "overlay" && s.overlays.find((o) => o.id === m.id)?.groupId === gid
-    );
+    // Two or more items open the group panel over what they share, whatever
+    // was clicked last; one item opens its own panel.
+    if (s.multiSelection.filter((m) => m && m.kind !== "cue" && m.kind !== "transition").length >= 2) return true;
+    return s.selection.kind !== "cue" && s.selection.kind !== "transition";
   });
   const [importing, setImporting] = useState(0);
   // Files being probed and named, plus the ones already placed whose bytes are

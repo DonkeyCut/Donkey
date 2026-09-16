@@ -35,6 +35,7 @@ export function ValueSlider({
   disabled,
   sliderClassName,
   valueClassName,
+  mixed,
 }: {
   label: string;
   value: number;
@@ -55,6 +56,8 @@ export function ValueSlider({
   disabled?: boolean;
   sliderClassName?: string;
   valueClassName?: string;
+  /** The readout reads "Mixed"; the thumb sits at `value`. */
+  mixed?: boolean;
 }) {
   // The slider commits what was last drafted: the draft passed through the
   // snap wrapper, so committing it (over Base UI's own committed argument)
@@ -92,6 +95,7 @@ export function ValueSlider({
         format={format}
         parse={parse}
         disabled={disabled}
+        mixed={mixed}
         onScrub={onDraft}
         onCommit={onCommit}
       />

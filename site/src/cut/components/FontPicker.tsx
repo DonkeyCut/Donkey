@@ -91,10 +91,14 @@ export function FontPicker({
   value,
   onChange,
   className,
+  mixed,
 }: {
   value: string;
   onChange: (id: string) => void;
   className?: string;
+  /** The titles behind the field set in different faces: the field reads
+   * "Mixed" and a pick lands one face on all of them. */
+  mixed?: boolean;
 }) {
   // The menu re-reads the registry when the bundled families finish registering
   // or a shelf font lands (the bump re-renders, and the render re-reads).
@@ -152,7 +156,7 @@ export function FontPicker({
   return (
     <>
       <Select
-        value={value}
+        value={mixed ? null : value}
         items={Object.fromEntries(fonts.map((f) => [f.id, f.label]))}
         onOpenChange={(open) => {
           if (open) measure();
@@ -174,7 +178,7 @@ export function FontPicker({
             fontSize: rowSize(fontStack(value)),
           }}
         >
-          <SelectValue />
+          <SelectValue placeholder="Mixed" />
         </SelectTrigger>
         {/* The menu is the field's own width: a face's name sets in a face
             that runs wide, and the panel it drops out of is narrow. */}

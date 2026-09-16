@@ -109,6 +109,7 @@ export function ColorField({
   opacity,
   label = "Color",
   className,
+  mixed,
 }: {
   value: string;
   onBegin: () => void;
@@ -120,9 +121,13 @@ export function ColorField({
     label: string;
     onDraft: (v: number) => void;
     onCommit: (v: number) => void;
+    mixed?: boolean;
   };
   label?: string;
   className?: string;
+  /** The items behind the field wear different colors: the swatch shows a
+   * wheel and the readout "Mixed"; a pick lands one color on all of them. */
+  mixed?: boolean;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [listOpen, setListOpen] = useState(false);
@@ -147,7 +152,7 @@ export function ColorField({
           aria-label={`${label} — open the picker`}
           title="Pick a color"
           className="color-field-swatch size-5 shrink-0 rounded-[5px] shadow-xs ring-1 ring-border transition-transform outline-none hover:scale-105 focus-visible:ring-2 focus-visible:ring-primary/60"
-          style={{ background: hex }}
+          style={{ background: mixed ? "conic-gradient(#f43f5e, #f59e0b, #22c55e, #3b82f6, #a855f7, #f43f5e)" : hex }}
         />
         <PopoverContent side="bottom" align="end" sideOffset={6} className="w-56 p-2.5">
           <ColorPicker value={hex} onBegin={onBegin} onLive={onLive} onCommit={commit} />
@@ -158,7 +163,7 @@ export function ColorField({
           aria-label={`${label} — open the list`}
           className="color-field-value w-[7ch] shrink-0 rounded-sm text-left font-mono text-[11.5px] tabular-nums text-foreground uppercase outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
         >
-          {hex.slice(1)}
+          {mixed ? <span className="font-sans italic normal-case">Mixed</span> : hex.slice(1)}
         </PopoverTrigger>
         <PopoverContent side="bottom" align="end" sideOffset={6} className="w-56 p-1">
           <ColorList
@@ -180,6 +185,7 @@ export function ColorField({
           step={0.01}
           format={(v) => `${Math.round(v * 100)}%`}
           parse={parsePercentInput}
+          mixed={opacity.mixed}
           onScrub={opacity.onDraft}
           onCommit={opacity.onCommit}
         />

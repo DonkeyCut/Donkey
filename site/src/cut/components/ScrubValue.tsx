@@ -29,6 +29,7 @@ export function ScrubValue({
   disabled,
   className,
   label,
+  mixed,
 }: {
   value: number;
   min: number;
@@ -47,6 +48,10 @@ export function ScrubValue({
   disabled?: boolean;
   className?: string;
   label: string;
+  /** The items behind this readout disagree: it reads "Mixed", and any
+   * scrub, keystroke or typed entry writes one value to all of them. `value`
+   * is where a scrub starts from. */
+  mixed?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -77,7 +82,7 @@ export function ScrubValue({
     liveArrowed.current = false;
     setEditWidth(buttonRef.current?.offsetWidth ?? 0);
     editStart.current = value;
-    setDraft(format(value));
+    setDraft(mixed ? "" : format(value));
     setEditing(true);
   };
 
@@ -211,7 +216,7 @@ export function ScrubValue({
         }
       }}
     >
-      {format(preview ?? value)}
+      {preview != null ? format(preview) : mixed ? <span className="font-sans italic">Mixed</span> : format(value)}
     </button>
   );
 }

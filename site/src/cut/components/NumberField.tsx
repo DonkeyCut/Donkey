@@ -29,6 +29,7 @@ export function NumberField({
   presets,
   icon,
   className,
+  mixed,
 }: {
   label: string;
   value: number;
@@ -46,20 +47,24 @@ export function NumberField({
   /** Drag handle. Omit for a field that only takes typed and picked values. */
   icon?: React.ReactNode;
   className?: string;
+  /** The items behind the field disagree: the box reads "Mixed" until a
+   * value is typed, dragged or picked, which lands on all of them. */
+  mixed?: boolean;
 }) {
-  const [entry, setEntry] = useState({ value, draft: format(value) });
+  const show = (v: number) => (mixed ? "" : format(v));
+  const [entry, setEntry] = useState({ value, mixed: !!mixed, draft: show(value) });
   const [open, setOpen] = useState(false);
   const drag = useRef<{ startX: number; startValue: number; last: number } | null>(null);
   // A drag rewrites the value under the field; the box follows it, and any
   // value it did not author (a preset pick, an undo) resets the draft.
-  if (entry.value !== value) setEntry({ value, draft: format(value) });
+  if (entry.value !== value || entry.mixed !== !!mixed) setEntry({ value, mixed: !!mixed, draft: show(value) });
 
   const clamp = (v: number) => Math.min(max, Math.max(min, v));
 
   const commitDraft = () => {
     const parsed = parse(entry.draft);
     if (parsed != null && Number.isFinite(parsed)) onCommit(clamp(parsed));
-    else setEntry({ value, draft: format(value) });
+    else setEntry({ value, mixed: !!mixed, draft: show(value) });
   };
 
   const stepBy = (dir: number, coarse: boolean) => {
@@ -112,10 +117,11 @@ export function NumberField({
       <input
         aria-label={label}
         value={entry.draft}
+        placeholder={mixed ? "Mixed" : undefined}
         inputMode="decimal"
         spellCheck={false}
         className="w-full min-w-0 bg-transparent font-mono text-[11.5px] tabular-nums outline-none"
-        onChange={(e) => setEntry({ value, draft: e.target.value })}
+        onChange={(e) => setEntry({ value, mixed: !!mixed, draft: e.target.value })}
         onFocus={(e) => e.currentTarget.select()}
         onBlur={commitDraft}
         onKeyDown={(e) => {
@@ -124,7 +130,7 @@ export function NumberField({
             commitDraft();
             e.currentTarget.blur();
           } else if (e.key === "Escape") {
-            setEntry({ value, draft: format(value) });
+            setEntry({ value, mixed: !!mixed, draft: show(value) });
           } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
             e.preventDefault();
             stepBy(e.key === "ArrowUp" ? 1 : -1, e.shiftKey);

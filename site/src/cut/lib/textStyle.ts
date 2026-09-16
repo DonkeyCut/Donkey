@@ -23,3 +23,6 @@ export function writeTextStyle(style: Partial<TextStyle>) {
     // Storage full/blocked — the style just won't persist.
   }
 }
+
+/** The sizes the text size menu offers, px at the 1080 design frame. */
+export const TEXT_SIZES = [32, 48, 64, 80, 96, 120, 160, 200, 240];

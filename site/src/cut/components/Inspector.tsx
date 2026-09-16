@@ -110,7 +110,7 @@ import {
   type SoundPreset,
 } from "@/cut/lib/soundPresets";
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
-import { writeTextStyle } from "@/cut/lib/textStyle";
+import { TEXT_SIZES, writeTextStyle } from "@/cut/lib/textStyle";
 import { formatTime } from "@/cut/lib/time";
 import {
   fontStack,
@@ -136,6 +136,7 @@ import {
   type MediaAsset,
   overlayName,
   type Overlay,
+  type Selection,
   type ShapeOverlay,
   type StickerOverlay,
   type TextOverlay,
@@ -151,13 +152,21 @@ import {
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ResetButton, Row, Section, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
+import { Field, ResetButton, Row, Section, SegGroup, SegToggle, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { ColorPanel } from "@/cut/components/ColorPanel";
+import { GroupPanel } from "@/cut/components/GroupPanel";
 import { RemovalPanel } from "@/cut/components/RemovalPanel";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 
 export function Inspector() {
   const selection = useEditor((s) => s.selection);
+  const multi = useEditor((s) => s.multiSelection);
+  // Two or more items open the group panel over what they share; one item
+  // opens its own panel.
+  const group = useMemo(() => {
+    const items = multi.filter((m): m is NonNullable<Selection> => !!m && m.kind !== "cue" && m.kind !== "transition");
+    return items.length >= 2 ? items : null;
+  }, [multi]);
   const clip = useEditor((s) =>
     selection?.kind === "clip" ? s.clips.find((c) => c.id === selection.id) : undefined
   );
@@ -173,10 +182,11 @@ export function Inspector() {
       {/* Keyed on what is selected: picking something else builds a fresh
           column, so it opens on that thing's own fields. */}
       <InspectorColumn
-        key={selection?.id ?? "none"}
-        clip={clip}
-        audio={audio}
-        overlay={overlay}
+        key={group ? group.map((g) => `${g.kind}:${g.id}`).join() : selection?.id ?? "none"}
+        clip={group ? undefined : clip}
+        audio={group ? undefined : audio}
+        overlay={group ? undefined : overlay}
+        group={group ?? undefined}
       />
     </aside>
   );
@@ -207,16 +217,18 @@ function InspectorColumn({
   clip,
   audio,
   overlay,
+  group,
 }: {
   clip?: VideoClip;
   audio?: AudioClip;
   overlay?: Overlay;
+  group?: NonNullable<Selection>[];
 }) {
   const open = useEditor((s) => s.inspectorOpen);
   const setOpen = useEditor((s) => s.setInspectorOpen);
   // The open tab and the Home scroller's place hold per item for the
   // session, so coming back to an item lands on its panel as it was left.
-  const itemId = clip?.id ?? audio?.id ?? overlay?.id ?? PANEL_GLOBAL;
+  const itemId = clip?.id ?? audio?.id ?? overlay?.id ?? (group ? `group:${group.map((g) => g.id).join()}` : PANEL_GLOBAL);
   const [view, setView] = usePanelState<string>(itemId, "tab", "main");
   const homeScroll = useRememberedScroll(itemId, "main");
   const pick = useCallback(
@@ -246,7 +258,9 @@ function InspectorColumn({
             <AnimationPanel overlay={overlay} />
           ) : (
             <ScrollArea className="min-h-0 flex-1" {...homeScroll}>
-              {audio ? (
+              {group ? (
+                <GroupPanel selection={group} />
+              ) : audio ? (
                 <AudioPanel clip={audio} />
               ) : overlay ? (
                 isTextOverlay(overlay) ? (
@@ -450,55 +464,6 @@ function ClipHead({
     </div>
   );
 }
-
-/** A control that carries its own caption, for the two-up rows where the
- * settings sit side by side instead of behind a label on the left. */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <span className="truncate text-[11px] text-muted-foreground">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-/** Icon toggles that belong together, sat in one trough. */
-function SegGroup({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex shrink-0 items-center gap-0.5 rounded-md bg-secondary/60 p-0.5">
-      {children}
-    </div>
-  );
-}
-
-function SegToggle({
-  label,
-  active,
-  onClick,
-  children,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      aria-pressed={active}
-      className={cn(
-        "grid size-6 place-items-center rounded-[5px] text-muted-foreground transition-colors [&_svg]:size-3.5",
-        active ? "bg-foreground text-background" : "hover:bg-foreground/10 hover:text-foreground"
-      )}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}
-
 
 /** Matches the store's MIN_LEN: the shortest a trim can leave a clip. */
 const MIN_TRIM = 0.1;
@@ -1827,7 +1792,6 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
 
 /** The sizes and spacings a title usually wants, offered under each field's
  * chevron; any value in range can still be typed or dragged. */
-const TEXT_SIZES = [32, 48, 64, 80, 96, 120, 160, 200, 240];
 const LINE_HEIGHTS = [0.9, 1, 1.15, 1.25, 1.5, 1.75, 2];
 const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
 
