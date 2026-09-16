@@ -15,8 +15,8 @@ import {
   updateFolder,
   renameTemplate,
   saveTemplate,
-  useInProject,
-  useTemplate,
+  copyLibraryAssetToProject,
+  copyTemplateToProject,
   type LibrarySource,
   type TemplateInput,
 } from "../library";
@@ -74,7 +74,7 @@ export const libraryApi = {
   async useTemplate(req: Request, { id }: { id: string }) {
     try {
       const { projectId } = (await req.json()) as { projectId: string };
-      return Response.json(await useTemplate(id, projectId));
+      return Response.json(await copyTemplateToProject(id, projectId));
     } catch (e) {
       return caught(e, "Could not add the template.");
     }
@@ -210,7 +210,7 @@ export const libraryApi = {
         assetId: string;
         projectId: string;
       };
-      const fileName = await useInProject(assetId, projectId);
+      const fileName = await copyLibraryAssetToProject(assetId, projectId);
       return Response.json({ fileName });
     } catch (e) {
       return caught(e, "Could not add from library.");

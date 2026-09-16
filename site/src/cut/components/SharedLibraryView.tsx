@@ -2,34 +2,24 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { Download, Folder, Loader2, Type } from "lucide-react";
+import { Download, Folder, Loader2 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { useSharedLibrary } from "@/queries/sharing";
 import { ApiError } from "@/queries/apiClient";
 import { librarySharePath, type SharedLibraryAsset } from "@/cut/lib/librarySharing";
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
-import { useInView } from "@/cut/hooks/useInView";
+import { LibraryCard, LIBRARY_TILE_AREA, LIBRARY_AUDIO_TILE_AREA } from "@/cut/components/LibraryCard";
+import { Lightbox } from "@/cut/components/Lightbox";
 import { useCutBase } from "@/cut/lib/nav";
 
 function Asset({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
-  const [ref, visible] = useInView<HTMLDivElement>();
   const src = `/api/cut-shared/library/${encodeURIComponent(token)}/media/${encodeURIComponent(asset.id)}`;
-  return <div ref={ref} className="overflow-hidden rounded-xl border bg-background">
-    <div className="grid aspect-video place-items-center bg-muted">
-      {visible && (asset.type === "video"
-        ? <video aria-label={asset.name} controls playsInline preload="metadata" src={src} className="size-full object-contain" />
-        : asset.type === "audio"
-          ? <audio aria-label={asset.name} controls preload="none" src={src} className="w-full px-3" />
-          : asset.type === "image"
-            // eslint-disable-next-line @next/next/no-img-element -- Protected media resolves through the share access check.
-            ? <img alt={asset.name} src={src} loading="lazy" className="size-full object-contain" />
-            : <Type className="size-8 text-muted-foreground" />)}
-    </div>
-    <div className="flex items-center justify-between gap-3 p-3">
-      <span className="truncate text-sm font-medium" title={asset.name}>{asset.name}</span>
-      <a href={`${src}?download=1`} aria-label={`Download ${asset.name}`} className={buttonVariants({ variant: "ghost", size: "icon" })}><Download className="size-4" /></a>
-    </div>
-  </div>;
+  const poster = asset.hasPoster ? `${src}?poster=1` : undefined;
+  return <LibraryCard
+    asset={{ ...asset, addedAt: 0, residency: "cloud" }}
+    area={asset.type === "audio" ? LIBRARY_AUDIO_TILE_AREA : LIBRARY_TILE_AREA}
+    sharedMedia={{ src, poster, downloadHref: `${src}?download=1` }}
+  />;
 }
 
 export function SharedLibraryView() {
@@ -49,7 +39,7 @@ export function SharedLibraryView() {
   };
   const data = query.data;
   const status = query.error instanceof ApiError ? query.error.status : 0;
-  return <main className="app-surface min-h-dvh bg-background font-system text-foreground">
+  return <main className="app-surface min-h-dvh min-w-0 bg-background font-system text-foreground">
     <div className="mx-auto max-w-6xl px-5 py-9 sm:px-10">
       <header className="mb-8 flex items-center justify-between gap-4">
         <Link href={base} className="text-lg font-semibold">Donkey Cut</Link>
@@ -73,7 +63,7 @@ export function SharedLibraryView() {
               <Folder className="size-10 fill-[#8cc5ff] text-[#8cc5ff]" /><span className="line-clamp-2 text-xs font-medium">{f.name}</span>
             </Link>)}
           </div>}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="flex flex-wrap items-start gap-4">
             {data.assets.map((asset) => <Asset key={asset.id} asset={asset} token={token} />)}
           </div>
           {data.templates.map((t) => <section key={t.id} className="mt-5 rounded-xl border p-4">
@@ -88,5 +78,6 @@ export function SharedLibraryView() {
           </nav>
         </>}
     </div>
+    <Lightbox />
   </main>;
 }

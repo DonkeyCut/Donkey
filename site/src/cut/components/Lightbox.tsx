@@ -374,6 +374,7 @@ function FontBody({ item }: { item: LightboxItem }) {
     >
       <FontSpecimen
         assetId={item.libraryId ?? ""}
+        src={!item.libraryId ? item.src : undefined}
         poster={item.poster}
         lines={SPECIMEN_ALPHABET}
         pad={0}

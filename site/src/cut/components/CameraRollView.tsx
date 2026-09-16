@@ -20,7 +20,7 @@ import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import { formatDate } from "@/cut/lib/time";
 import { shapeBand } from "@/cut/lib/types";
 import { Lightbox } from "./Lightbox";
-import { LibraryCard } from "./LibraryView";
+import { LibraryCard } from "@/cut/components/LibraryCard";
 
 /** The phone's recordings, synced up from the iOS app: every cloud library
  * asset tagged origin "camera", newest first. Clips here are ordinary library

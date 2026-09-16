@@ -134,4 +134,38 @@ describe("library sharing", () => {
     expect((await api.media(request(), token, "asset")).status).toBe(404);
   });
 
+  test("shared cards receive dimensions and poster availability without private metadata", async () => {
+    const { api, db } = harness();
+    const meta = { ...asset.meta, width: 1920, height: 1080, posterFile: "private-cover.jpg", source: { url: "https://private.test" } };
+    db.cutLibraryAsset.findMany.mockResolvedValue([{ ...asset, meta }]);
+    const body = await (await api.list(request(), token)).json();
+    expect(body.assets[0]).toMatchObject({ width: 1920, height: 1080, hasPoster: true });
+    expect(JSON.stringify(body)).not.toContain("private");
+  });
+
+  test("poster requests resolve only the asset's stored poster in the owner's library", async () => {
+    const { api, db, sign } = harness();
+    const meta = { ...asset.meta, posterFile: "cover.jpg" };
+    db.cutLibraryAsset.findFirst.mockResolvedValue({ ...asset, meta });
+    db.cutMediaObject.findFirst.mockResolvedValue({ id: "poster", fileName: "cover.jpg", r2Key: "cut/owner/library/cover.jpg", updatedAt: now });
+    const response = await api.media(new Request(`${request().url}?poster=1&file=unrelated.jpg`), token, "asset");
+    expect(response.status).toBe(302);
+    expect(db.cutMediaObject.findFirst.mock.calls[0][0]).toEqual({ where: { userId: "owner", kind: "library", uploadState: "complete", fileName: "cover.jpg" } });
+    expect(sign.mock.calls[0]).toEqual(["cut/owner/library/cover.jpg", { version: String(now.getTime()) }]);
+  });
+
+  test("posters keep share access and folder boundaries", async () => {
+    const req = new Request(`${request().url}?poster=1`);
+    for (const scenario of ["missing", "moved", "restricted", "revoked"] as const) {
+      const { api, db, sign } = harness();
+      const meta = { ...asset.meta, posterFile: "cover.jpg" };
+      if (scenario === "moved") db.cutLibraryAsset.findFirst.mockResolvedValue({ ...asset, meta, folderId: "sibling" });
+      if (scenario === "restricted") db.cutLibraryShare.findUnique.mockResolvedValue({ ...share, access: "restricted" });
+      if (scenario === "revoked") db.cutLibraryShare.findUnique.mockResolvedValue(null);
+      expect((await api.media(req, token, "asset")).status).toBe(scenario === "restricted" ? 401 : 404);
+      expect(sign).not.toHaveBeenCalled();
+      expect(db.cutMediaObject.findFirst).not.toHaveBeenCalled();
+    }
+  });
+
 });

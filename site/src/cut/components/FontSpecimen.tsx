@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { isCurrentSpecimen, SPECIMEN_LINES } from "@/cut/lib/fontSpecimen";
 import { linkIdForAsset, onLinkedChanged } from "@/cut/lib/linkedLibrary";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
@@ -30,6 +30,7 @@ const SAFETY = 0.97;
  */
 export function FontSpecimen({
   assetId,
+  src,
   poster,
   lines: LINES = SPECIMEN_LINES,
   fitHeight = false,
@@ -38,6 +39,8 @@ export function FontSpecimen({
 }: {
   /** The library asset holding the font file. */
   assetId: string;
+  /** A protected font URL for a viewer outside the signed-in library. */
+  src?: string;
   /** The specimen the shelf keeps for this file. */
   poster?: string;
   /** What to set in the face. A card takes one line, the big view the whole
@@ -59,8 +62,22 @@ export function FontSpecimen({
   useEffect(() => onFontsChanged(again), []);
   useEffect(() => onLinkedChanged(again), []);
   const id = linkIdForAsset(assetId) ?? "";
-  const family = fontStack(id);
-  const installed = hasFont(id);
+  const localId = useId();
+  const [loadedFont, setLoadedFont] = useState<{ src: string; family: string } | null>(null);
+  useEffect(() => {
+    if (!src) return;
+    let live = true;
+    const face = new FontFace(`shared-${localId}`, `url(${JSON.stringify(src)})`);
+    void face.load().then(() => {
+      if (!live) return;
+      document.fonts.add(face);
+      setLoadedFont({ src, family: face.family });
+    }).catch(() => {});
+    return () => { live = false; document.fonts.delete(face); };
+  }, [src, localId]);
+  const localFamily = loadedFont?.src === src ? loadedFont?.family : undefined;
+  const family = localFamily ? JSON.stringify(localFamily) : fontStack(id);
+  const installed = !!localFamily || hasFont(id);
   const box = useRef<HTMLDivElement>(null);
   const probe = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState(0);

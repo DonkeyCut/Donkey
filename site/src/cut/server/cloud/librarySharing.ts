@@ -98,7 +98,10 @@ export function createLibrarySharing(
         const object = byId.get(a.mediaObjectId);
         if (!object) return [];
         const v = assetView(a, object);
-        return [{ id: v.id, name: v.title || v.name, fileName: v.fileName, type: v.type, duration: v.duration }];
+        return [{ id: v.id, name: v.title || v.name, fileName: v.fileName, type: v.type, duration: v.duration,
+          ...(v.width && v.height ? { width: v.width, height: v.height } : {}),
+          ...(v.posterFile ? { hasPoster: true } : {}),
+        }];
       });
       const body: SharedLibraryPage = {
         name: trail[0]?.name ?? publicAssets[0]?.name ?? "Shared asset",
@@ -121,13 +124,14 @@ export function createLibrarySharing(
         template: z.string().min(1).max(128).optional(),
         file: z.string().min(1).max(512).optional(),
         download: z.enum(["1"]).optional(),
+        poster: z.enum(["1"]).optional(),
       }).safeParse(Object.fromEntries(new URL(req.url).searchParams));
       if (!query.success) return err("Invalid media request.", 400);
       let folderId: string | null;
       let fileName: string;
       let mediaObjectId: string | undefined;
       if (query.data.template) {
-        if (target.kind !== "folder" || query.data.template !== assetId) return err("Not found.", 404);
+        if (query.data.poster || target.kind !== "folder" || query.data.template !== assetId) return err("Not found.", 404);
         const row = await db.cutTemplate.findFirst({ where: { id: assetId, userId: share.userId } });
         if (!row) return err("Not found.", 404);
         const template = templateView(row);
@@ -142,8 +146,14 @@ export function createLibrarySharing(
         });
         if (!row) return err("Not found.", 404);
         folderId = row.folderId;
-        mediaObjectId = row.mediaObjectId;
-        fileName = "";
+        if (query.data.poster) {
+          const posterFile = assetView(row, { fileName: "" }).posterFile;
+          if (!posterFile) return err("Not found.", 404);
+          fileName = posterFile;
+        } else {
+          mediaObjectId = row.mediaObjectId;
+          fileName = "";
+        }
       }
       if (target.kind === "folder") {
         if (!folderId || !(await sharedFolderTrail(target.id, folderId, (id) =>

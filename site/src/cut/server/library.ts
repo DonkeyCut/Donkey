@@ -359,7 +359,7 @@ export async function addDownloaded(
 
 /** Copy a library asset into a project's media folder. Returns the file name
  * inside the project. */
-export async function useInProject(
+export async function copyLibraryAssetToProject(
   assetId: string,
   projectId: string,
 ): Promise<string> {
@@ -591,7 +591,7 @@ export async function saveTemplate(
 
 /** Materialize a template into a project: copy its media in and hand the client
  * the project file names (in template media order) plus the stored edit. */
-export async function useTemplate(templateId: string, projectId: string) {
+export async function copyTemplateToProject(templateId: string, projectId: string) {
   if (!(await readProject(projectId))) throw new Error("Project not found.");
   const idx = await readIndex();
   const template = (idx.templates ?? []).find((x) => x.id === templateId);

@@ -22,6 +22,9 @@ export type SharedLibraryAsset = {
   type: "video" | "audio" | "image" | "font";
   duration: number;
   fileName: string;
+  width?: number;
+  height?: number;
+  hasPoster?: boolean;
 };
 export type SharedLibraryPage = {
   name: string;

@@ -1,26 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Cloud,
-  Download,
-  Ellipsis,
-  ExternalLink,
-  Film,
   FolderOpen,
   FolderPlus,
-  Image as ImageIcon,
-  Laptop,
   Link as LinkIcon,
   Loader2,
-  Music,
-  Plus,
   RotateCcw,
   Share2,
   Trash2,
-  Type,
   Upload,
   X,
 } from "lucide-react";
@@ -29,8 +19,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useElapsed } from "@/cut/hooks/useElapsed";
 import {
@@ -57,14 +45,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
-import { MEDIA_CORS } from "@/cut/lib/mediaCors";
-import {
-  setLibraryDragData,
-  setObjectDragImage,
-} from "@/cut/lib/assetDrag";
-import { useInView } from "@/cut/hooks/useInView";
-import { MediaCardShell } from "./MediaCardShell";
-import { assetTypeOf, fileKind, isMediaFile, MEDIA_ACCEPT } from "@/cut/lib/media";
+import { setObjectDragImage } from "@/cut/lib/assetDrag";
+import { LibraryCard, LIBRARY_TILE_AREA, LIBRARY_AUDIO_TILE_AREA } from "@/cut/components/LibraryCard";
+import { ShelfBadge } from "@/cut/components/ShelfBadge";
+import { assetTypeOf, isMediaFile, MEDIA_ACCEPT } from "@/cut/lib/media";
 import { isFontArchive } from "@/cut/lib/fontArchive";
 import { libraryKey, libraryScope, patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
@@ -72,11 +56,9 @@ import {
   deleteFromLibrary,
   deleteLibraryFolder,
   deleteTemplate,
-  downloadLibraryAsset,
   estimatedShape,
   importUrlToLibrary,
   libraryMediaUrl,
-  libraryPosterUrl,
   carryAssetTo,
   carryTemplateTo,
   moveLibraryItem,
@@ -95,11 +77,7 @@ import { reportActivity } from "@/cut/lib/tabActivity";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { setNeedsApp } from "@/cut/lib/needsApp";
-import {
-  availableResidencies,
-  RESIDENCY_LABEL,
-  type Residency,
-} from "@/cut/lib/residency";
+import type { Residency } from "@/cut/lib/residency";
 import { LibraryShareDialog } from "@/cut/components/LibraryShareDialog";
 import type { LibraryShareTarget } from "@/cut/lib/librarySharing";
 import { Lightbox } from "./Lightbox";
@@ -116,22 +94,10 @@ import {
   syncLinkedLibrary,
 } from "@/cut/lib/linkedLibrary";
 import { shapeBand } from "@/cut/lib/types";
-import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
-import { refFromLibrary } from "@/cut/lib/assetRef";
-import { CopyNameLabel } from "./AssetRefs";
-import { FontSpecimen } from "./FontSpecimen";
-import {
-  SPECIMEN_BG,
-  SPECIMEN_INK,
-  SPECIMEN_META,
-} from "@/cut/lib/fontSpecimen";
 import { AudioCardFace } from "./AudioPanel";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
-import { formatBytes } from "@/lib/bytes";
-import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
-import { PICKED_RING } from "@/cut/lib/assetPick";
 
 // A dragged library selection travels as a JSON array of asset ids, so a whole
 // marquee-selected collection can be dropped onto a folder at once.
@@ -356,33 +322,6 @@ function PendingTile({
         </span>
       )}
     </div>
-  );
-}
-
-/** Which shelf an item sits on, on its card. The library merges both, so the
- * badge is how you tell a clip on this Mac from one in the cloud — and, when
- * the app isn't answering, why that clip is showing but not usable. */
-export function ShelfBadge({
-  residency,
-  offline = false,
-  className,
-}: {
-  residency: Residency;
-  offline?: boolean;
-  className?: string;
-}) {
-  const Icon = residency === "cloud" ? Cloud : Laptop;
-  return (
-    <span
-      title={
-        offline
-          ? "Local — open the Donkey app to use it"
-          : RESIDENCY_LABEL[residency]
-      }
-      className={className}
-    >
-      <Icon className="size-3" />
-    </span>
   );
 }
 
@@ -870,8 +809,8 @@ export function LibraryView() {
     });
   for (const a of shown) band(shapeOf(a)).push({ asset: a });
   // Sound tiles are 70% of the shared tile's width and height.
-  const TILE_AREA = 180 * 320;
-  const audioArea = TILE_AREA * 0.7 ** 2;
+  const TILE_AREA = LIBRARY_TILE_AREA;
+  const audioArea = LIBRARY_AUDIO_TILE_AREA;
   const shownTemplates = templates.filter(
     (t) => (t.folderId ?? null) === openFolder,
   );
@@ -1261,401 +1200,5 @@ export function LibraryView() {
       <TabStatus />
       </div>
     </div>
-  );
-}
-
-/** A font's card is set in the font: once the shelf sync has installed it, the
- * family resolves through the registry and the tile shows the typeface itself.
- * Until then (or on a shelf that isn't answering) it falls back to the UI face,
- * which still reads as a name. */
-export function LibraryCard({
-  asset: a,
-  selected,
-  offline = false,
-  area,
-  mention = false,
-  caption,
-  dragGroup,
-  onClick,
-  onDelete,
-  onUse,
-  onShare,
-  onDragStartExtra,
-}: {
-  asset: LibraryAsset;
-  selected?: boolean;
-  /** The shelf this item is on isn't answering: it lists from memory, so the
-   * card shows what it knows and reaches for no media it can't load. */
-  offline?: boolean;
-  /** Tile area in square pixels. When set, the tile takes the media's own
-   * aspect at this shared area — a wide clip spreads, a tall one stands, and
-   * every card carries the same weight. Unset, the tile fills its grid cell
-   * as a square. Audio and unmeasured assets sit square either way. */
-  area?: number;
-  /** The card sits beside a prompt (the editor's Library panel), so its name
-   * doubles as a mention token to copy. */
-  mention?: boolean;
-  /** A line under the tile — where the Camera Roll puts a recording's date. */
-  caption?: ReactNode;
-  /** Everything picked on this shelf right now. Dragging a card that is one of
-   * them carries the whole set, so a drop lands the lot. */
-  dragGroup?: LibraryAsset[];
-  onClick?: (e: React.MouseEvent) => void;
-  onDelete?: () => void;
-  onUse?: () => void;
-  onShare?: () => void;
-  onDragStartExtra?: (e: React.DragEvent) => void;
-}) {
-  // ⌘C over the card copies its mention token. A card inside the current
-  // selection carries the whole set, the same rule its drag follows. A font is
-  // used from the font menu, so it names nothing a prompt can point a tool
-  // at.
-  const refs = () =>
-    (selected && dragGroup?.length ? dragGroup : [a])
-      .filter((x) => x.type !== "font")
-      .map(refFromLibrary);
-  // With one shelf listed, every card is on it — the badge would say nothing.
-  // Phone recordings all come up from the cloud, so they carry none either.
-  const bothShelves =
-    a.origin !== "camera" && (availableResidencies().length > 1 || offline);
-  // Each card is a real media element, so the source waits until the tile has
-  // been scrolled near: a large library would otherwise pull every file's
-  // metadata across the network the moment the page opened.
-  const [tileRef, seen] = useInView<HTMLDivElement>();
-  // Poster from the video itself so the still matches what plays on hover.
-  // An ffmpeg still washes out iPhone HDR (HLG) footage — the browser tone-maps
-  // the video correctly, so we render the frame instead of a baked thumbnail.
-  const posterT = Math.min(1, Math.max(0.1, (a.duration || 2) / 10));
-  // Whether the tile's own picture has painted. Until it does the tile is a
-  // shimmering slab, so a clip that lands while the page is open takes its
-  // place in the grid at once and resolves into itself a moment later.
-  const [painted, setPainted] = useState(false);
-  // The size pill only shows on hover, so the lookup waits for the first one.
-  // A font wears its size in the footer at rest, so that one asks as it scrolls
-  // into view.
-  const [hovered, setHovered] = useState(false);
-  const font = a.type === "font";
-  const sizeBytes = useMediaFileSize(
-    offline ? "" : libraryMediaUrl(a.fileName, a.residency),
-    hovered || (font && seen),
-  );
-  // TTF · 42 KB — what the file is, and how much of it there is.
-  const fontMeta = [
-    fileKind(a.fileName),
-    sizeBytes != null && formatBytes(sizeBytes),
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const frame =
-    area && a.type !== "audio" && a.width && a.height
-      ? { w: a.width, h: a.height }
-      : font
-        ? { w: 16, h: 6 }
-        : { w: 1, h: 1 };
-  const tileStyle = {
-    ...(area
-      ? {
-          width: Math.round(Math.sqrt((area * frame.w) / frame.h)),
-          aspectRatio: `${frame.w} / ${frame.h}`,
-        }
-      : {}),
-    ...(font ? { backgroundColor: SPECIMEN_BG, color: SPECIMEN_INK } : {}),
-  };
-
-  return (
-    <MediaCardShell
-      scope="library"
-      id={a.id}
-      refs={refs}
-      // Without a + button there is no project to add it to, so the viewer
-      // opens bare.
-      view={offline ? undefined : () => lightboxItemFromLibrary(a, !onUse)}
-      restTime={posterT}
-      draggable={!offline}
-      className="group flex flex-col"
-      onClick={onClick}
-      onDragStart={(e) => {
-        setLibraryDragData(e, a, dragGroup);
-        onDragStartExtra?.(e);
-      }}
-      onHover={() => setHovered(true)}
-    >
-      {({ flash, videoRef }) => (
-        <>
-          <div
-            ref={tileRef}
-            data-drag-object
-            className={cn(
-              "relative max-w-full cursor-grab overflow-hidden rounded-xl border bg-muted transition-shadow group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)] active:cursor-grabbing",
-              !area && (font ? "aspect-[16/7]" : "aspect-square"),
-              // The sheet is the card, so nothing is drawn around it; the type
-              // scales with the tile, which runs from a panel column to a full row.
-              font && "@container flex flex-col",
-              selected || flash
-                ? PICKED_RING
-                : font
-                  ? "border-transparent"
-                  : "border-border",
-            )}
-            style={tileStyle}
-          >
-            {font ? (
-              // A pangram set in the face, and under a hairline the name it goes by
-              // with the file behind it. Nothing to load from a shelf that isn't
-              // answering, so that card shows the kind mark instead.
-              <div className="flex size-full min-h-0 flex-col">
-                <div className="grid min-h-0 flex-1 place-items-center px-3 pt-3 @[220px]:px-5 @[220px]:pt-5">
-                  {offline ? (
-                    <Type className="size-6 text-white/35" />
-                  ) : (
-                    <FontSpecimen
-                      assetId={a.id}
-                      fitHeight
-                      pad={0}
-                      className="size-full"
-                    />
-                  )}
-                </div>
-                <div className="mx-3 flex items-center justify-between gap-2 border-t border-white/10 py-2 @[220px]:mx-5 @[220px]:py-3">
-                  <CopyNameLabel
-                    name={a.name}
-                    label={a.title}
-                    dark
-                    mention={false}
-                    className="min-w-0 text-[11px] font-medium @[220px]:text-[13px]"
-                  />
-                  {fontMeta && (
-                    <span
-                      data-drag-omit
-                      className="shrink-0 text-[10px] tabular-nums @[220px]:text-[11px]"
-                      style={{ color: SPECIMEN_META }}
-                    >
-                      {fontMeta}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ) : offline ? (
-              // Nothing to load from a shelf that isn't answering, so the card
-              // shows what it knows: the kind of file, its name, its length.
-              <span className="grid size-full place-items-center">
-                {a.type === "audio" ? (
-                  <Music className="size-6 text-muted-foreground/50" />
-                ) : a.type === "image" ? (
-                  <ImageIcon className="size-6 text-muted-foreground/50" />
-                ) : (
-                  <Film className="size-6 text-muted-foreground/50" />
-                )}
-              </span>
-            ) : a.type === "video" ? (
-              seen && (
-                <>
-                  <video
-                    crossOrigin={MEDIA_CORS}
-                    ref={videoRef}
-                    src={`${libraryMediaUrl(a.fileName, a.residency)}#t=${posterT}`}
-                    poster={libraryPosterUrl(a)}
-                    muted
-                    loop
-                    playsInline
-                    preload="metadata"
-                    className="size-full object-cover"
-                    // Whichever lands first: a clip with a stored poster paints
-                    // from that, one without paints its own first frame.
-                    onLoadedMetadata={() => setPainted(true)}
-                    onLoadedData={() => setPainted(true)}
-                    onError={() => setPainted(true)}
-                  />
-                  {/* The source's own cover — a video's thumbnail where it came
-                      from — is the face at rest: the element's poster gives way as
-                      soon as the browser has the frame at #t, and that frame is
-                      whatever the clip happens to hold a second in. Hovering
-                      uncovers the video, which is what plays. */}
-                  {libraryPosterUrl(a) && (
-                    // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
-                    <img
-                      crossOrigin={MEDIA_CORS}
-                      src={libraryPosterUrl(a)}
-                      alt=""
-                      aria-hidden
-                      className="pointer-events-none absolute inset-0 size-full object-cover transition-opacity group-hover:opacity-0"
-                      onLoad={() => setPainted(true)}
-                      onError={() => setPainted(true)}
-                    />
-                  )}
-                </>
-              )
-            ) : a.type === "image" ? (
-              // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
-              <img
-                crossOrigin={MEDIA_CORS}
-                src={libraryMediaUrl(a.fileName, a.residency)}
-                alt={a.name}
-                loading="lazy"
-                className="size-full object-cover"
-                onLoad={() => setPainted(true)}
-                onError={() => setPainted(true)}
-              />
-            ) : (
-              <AudioCardFace
-                url={libraryMediaUrl(a.fileName, a.residency)}
-                duration={a.duration}
-                // On hover the + button takes the pill's corner.
-                durationClassName={
-                  !!onUse && "transition-opacity group-hover:opacity-0"
-                }
-              />
-            )}
-            {!offline && !font && a.type !== "audio" && !painted && (
-              <Skeleton
-                data-drag-omit
-                aria-hidden
-                className="pointer-events-none absolute inset-0 rounded-none"
-              />
-            )}
-            {a.type !== "audio" &&
-              !font &&
-              (a.type === "video" || sizeBytes != null) && (
-                // Length and size share one pill in the corner: on a card this narrow
-                // two of them collide. The length reads at rest, the size takes over
-                // on hover, where the + button is what the pointer is there for.
-                <span
-                  data-drag-omit
-                  className={cn(
-                    "absolute right-1.5 bottom-1.5 rounded-md bg-black/65 px-1.5 py-0.5 font-mono text-[10px] text-white tabular-nums",
-                    a.type !== "video" &&
-                      "opacity-0 transition-opacity group-hover:opacity-100",
-                  )}
-                >
-                  {a.type === "video" && (
-                    <span className={cn(sizeBytes != null && "group-hover:hidden")}>
-                      {formatTime(a.duration)}
-                    </span>
-                  )}
-                  {sizeBytes != null && (
-                    <span
-                      className={cn(
-                        a.type === "video" && "hidden group-hover:inline",
-                      )}
-                    >
-                      {formatBytes(sizeBytes)}
-                    </span>
-                  )}
-                </span>
-              )}
-            {a.type === "audio" && sizeBytes != null && (
-              // Clear of the play circle, matching the face's duration pill.
-              <span className="absolute bottom-3 left-12 rounded-md bg-[#2b4e42] px-1.5 py-0.5 font-mono text-[10px] text-[#d6eddf] tabular-nums opacity-0 transition-opacity group-hover:opacity-100">
-                {formatBytes(sizeBytes)}
-              </span>
-            )}
-            {onUse && (
-              <button
-                aria-label="Add to timeline"
-                title="Add to timeline"
-                className={cn(
-                  "absolute grid size-6 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-all group-hover:opacity-100 hover:scale-110",
-                  // Audio keeps play bottom-left; + swaps in where the badge hides.
-                  // A font's bottom edge is its footer, so its + takes the corner
-                  // the name used to sit in.
-                  a.type === "audio"
-                    ? "right-1.5 bottom-1.5"
-                    : font
-                      ? "top-1.5 left-1.5"
-                      : "bottom-1.5 left-1.5",
-                )}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onUse();
-                }}
-              >
-                <Plus className="size-3.5" />
-              </button>
-            )}
-            {bothShelves && (
-              <ShelfBadge
-                residency={a.residency}
-                offline={offline}
-                className={cn(
-                  "absolute top-2 right-2 transition-opacity",
-                  offline ? "text-muted-foreground" : "text-white/85",
-                  // The actions menu takes this corner on hover.
-                  "group-hover:opacity-0",
-                )}
-              />
-            )}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label="More actions"
-                title="More actions"
-                className={cn(
-                  "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100",
-                  // A black scrim disappears into the charcoal sheet.
-                  font
-                    ? "bg-white/10 hover:bg-white/20"
-                    : "bg-black/40 hover:bg-black/60",
-                )}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Ellipsis className="size-3.5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                // Hung off the card's right edge rather than laid over the media:
-                // the tile stays readable behind the open menu.
-                align="start"
-                alignOffset={4}
-                className="w-44"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {onShare && <DropdownMenuItem disabled={offline} onClick={onShare}><Share2 /> Share</DropdownMenuItem>}
-                <DropdownMenuItem
-                  onClick={() => downloadLibraryAsset(a)}
-                  disabled={offline}
-                >
-                  <Download /> Download
-                </DropdownMenuItem>
-                {a.source?.url && (
-                  // An imported clip keeps the link it came from, so the post it was
-                  // cut out of is one click away.
-                  <DropdownMenuItem
-                    onClick={() =>
-                      window.open(a.source!.url, "_blank", "noopener,noreferrer")
-                    }
-                  >
-                    <ExternalLink /> Open original
-                  </DropdownMenuItem>
-                )}
-                {onDelete && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                      <Trash2 /> Delete
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {!font && (
-              <CopyNameLabel
-                name={a.name}
-                label={a.title}
-                dark={a.type === "audio"}
-                mention={mention}
-                className={cn(
-                  "absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-2.75rem)]",
-                  // The emerald fill is its own backdrop; thumbnails need the scrim pill.
-                  a.type !== "audio" && "rounded-lg bg-black/55 backdrop-blur-sm",
-                )}
-              />
-            )}
-          </div>
-          {caption && (
-            <div data-drag-omit className="mt-2 px-0.5 text-xs text-muted-foreground">
-              {caption}
-            </div>
-          )}
-        </>
-      )}
-    </MediaCardShell>
   );
 }
