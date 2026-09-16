@@ -1,21 +1,45 @@
 # ChatGPT App
 
-The ChatGPT app connects a Donkey Cut account, lists its cloud projects, and plays
-rendered previews inside the conversation. ChatGPT chooses the tools; Donkey Cut
-checks ownership and renders the saved project revision.
+The ChatGPT app connects a Donkey Cut account and lets ChatGPT edit its cloud
+projects: import footage, inspect it, cut it, caption it, preview, undo, and
+export, with the preview and the export download playing inside the
+conversation. ChatGPT is the model; Donkey Cut checks ownership and runs the
+typed commands it sends.
 
 **The one rule:** the ChatGPT adapter lives under `site/src/clients/chatgpt`.
-Shared rendering stays in Cut, and reusable playback lives in a workspace package.
+Editing, rendering and playback stay in Cut; the adapter only translates.
 
 ```text
-ChatGPT tools and embedded preview
+ChatGPT tools and embedded card
               ↓
 Scoped OAuth connection
               ↓
-Cloud project and preview services
+Cloud project, command, history and render services
               ↓
+Command batch → worker runs the editor's own tools → versioned save + checkpoint
 Captured document → worker renderer → signed media
 ```
+
+## Editing from ChatGPT
+
+ChatGPT reads the editor's tool catalog through `list_commands` and
+`describe_commands`, then sends a batch through `edit_project`. The batch runs as
+a job in the worker container: the project document opens into the editor store,
+each command runs through the same executor the chat assistant uses, the
+document saves through the versioned PUT, and the whole batch becomes one
+checkpoint in the project's undo history. `inspect_project` runs the same way
+without saving, so contact sheets and captured frames come back as images.
+Imports are the existing URL-import job with adoption turned on, so footage the
+user attaches in ChatGPT or links to lands as project assets; exports are the
+document export the phone uses, with the download offered on the card.
+
+Undo and redo walk the checkpoint line, which is anchored to the project's
+version: a save from the editor moves the version off the line, so ChatGPT
+never reverts an edit the user made in the app. Editing, previews and exports
+spend no credits; commands that generate media spend the account's credits, and
+imports and exports use its storage allowance. The server's instructions and
+tool descriptions say so, with the repository linked, so ChatGPT explains the
+economics before it acts.
 
 ## Client boundaries
 
@@ -25,10 +49,12 @@ buffers, visibility handling, and teardown. HLS loads on demand. The widget's
 hashed assets are built by `npm run chatgpt:build`, which also runs before the
 site's development and production builds. Rebuild it after editing widget code.
 
-The MCP adapter exposes project listing, project opening, preview rendering,
-and render status. Its schemas and widget data types share one contract. Signed
-media URLs travel in tool-result metadata, which reaches the widget. The model
-gets project metadata, render state, and an Open in Donkey Cut link.
+The MCP adapter exposes project listing, creation and opening, the command
+catalog and guides, editing, importing, undo and redo, previews, exports and job
+polling. Its schemas and widget data types share one contract. Signed media and
+download URLs travel in tool-result metadata, which reaches the widget. The
+model gets project metadata, command outcomes, render state, and an Open in
+Donkey Cut link.
 
 Cloud previews use the existing headless renderer and a captured document.
 Repeated requests for the same saved revision reuse a queued, running, or
@@ -61,7 +87,7 @@ limits are configured through `chatgptApp.oauthRequestsPerIpMinute`.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `/api/chatgpt/mcp` | Stateless MCP over HTTP POST |
+| `/api/chatgpt/mcp` | Stateless MCP over HTTP POST, serving protocol 2026-07-28 requests directly and older initialize-based clients the same way |
 | `/.well-known/oauth-authorization-server` | OAuth server discovery |
 | `/.well-known/oauth-protected-resource/api/chatgpt/mcp` | MCP resource discovery |
 | `/api/chatgpt/oauth/authorize` | Login and explicit consent |
@@ -81,8 +107,16 @@ to the render container so document-backed renders can read media and fonts
 through the authenticated hosted API.
 
 Create a ChatGPT developer-mode app pointing at
-`https://donkeycut.com/api/chatgpt/mcp`. Use the predefined public OAuth client
-ID `donkey-chatgpt`, no client secret, and scopes `projects:read previews:render`.
+`https://donkeycut.com/api/chatgpt/mcp`. Upload `site/public/chatgpt-app-icon.png`
+as the app icon: 256×256, under 10 KB, a full-bleed white square with square
+corners, because ChatGPT applies its own rounded mask, and the mark inside a
+safe area so the mask never clips it. Use the predefined public OAuth client
+ID `donkey-chatgpt`, no client secret, and scopes
+`projects:read previews:render projects:write`. The app listing's description
+should say what the server instructions say: Donkey Cut is an open-source video
+editor (Apache 2.0, github.com/DonkeyCut/Donkey) that ChatGPT can edit with
+directly; editing, previews and exports are free, hosted AI generation spends
+credits, and cloud storage counts against the account's allowance.
 Configure the exact redirect URI supplied by ChatGPT in `chatgptApp.redirectUris`.
 The default is ChatGPT's stable callback; discovery advertises issuer
 identification, and every authorization redirect includes `iss`. The embedded
@@ -98,16 +132,21 @@ the submission portal when that challenge is issued.
 
 Run the client tests with `bun test src/clients/chatgpt`. The browser fixture
 `bun run scripts/eval-chatgpt-widget.ts` checks selection, repeated polling,
-playback, URL recovery, hidden playback, and teardown against a mock host.
+playback, URL recovery, hidden playback, and teardown against a mock host. With
+the dev server and a local worker up, `bun run scripts/eval-chatgpt-workflow.ts`
+drives the whole editing workflow through the MCP tools in process: create,
+import, inspect, edit, preview, undo, redo, export.
 The final deployment check connects a real account in ChatGPT, opens a cloud
 project, renders it, and reconnects after revocation. The fixture does not
 exercise ChatGPT's account-linking UI or the production database.
 
 ## Source entrypoints
 
-- `site/src/clients/chatgpt/server/` — OAuth, MCP tools, and cloud-project adapter.
+- `site/src/clients/chatgpt/server/` — OAuth, MCP tools, the command catalog, and the cloud-project adapter.
 - `site/src/clients/chatgpt/ui/` — standalone MCP Apps widget and host bridge.
 - `site/packages/artifact-player/` — shared website and widget playback.
+- `site/src/cut/server/cloud/commands.ts` and `history.ts` — the command job and the checkpoint history.
+- `site/src/cut/worker/commandJob.ts` — the batch runner and import adoption in the container.
 - `site/src/cut/server/cloud/previewJobs.ts` — revision reuse and document-backed rendering.
 
 The protocol follows OpenAI's [authentication guidance](https://developers.openai.com/apps-sdk/build/auth)

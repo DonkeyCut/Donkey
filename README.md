@@ -51,6 +51,10 @@ Install the [Donkey Cut companion app](https://github.com/DonkeyCut/Donkey/relea
 
 When the app is running, cloud projects can also use your Mac for transcription.
 
+### Edit from ChatGPT
+
+Connect Donkey Cut in ChatGPT and it edits your cloud projects with the editor's own tools: import footage, cut it, caption it, preview, undo, and export, with the preview and the download right in the conversation. Editing, previews and exports are free; hosted AI generation spends credits, and cloud storage counts against your allowance.
+
 ### Generate what you can't shoot
 
 Describe a shot in chat and keep iterating until you get what you want.
