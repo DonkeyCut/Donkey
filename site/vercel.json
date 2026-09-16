@@ -1,4 +1,5 @@
 {
+  "ignoreCommand": "git diff HEAD^ HEAD --quiet -- .",
   "crons": [
     { "path": "/api/chatgpt/gc", "schedule": "15 4 * * *" },
     { "path": "/api/credits/expire", "schedule": "30 0 * * *" },
