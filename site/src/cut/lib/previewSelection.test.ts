@@ -82,3 +82,36 @@ test("chat can add, move, and remove preview selections", async () => {
   await runAiTool("select", { kind: "overlay", id: "a", additive: true });
   expect(st().multiSelection).toEqual([{ kind: "overlay", id: "b" }]);
 });
+
+test("scaling grows what each kind stores about the anchor", () => {
+  const { scalePreviewSelection } = require("@/cut/lib/previewSelection");
+  useEditor.setState({
+    overlays: [title("a", 0.4, 0.4), { id: "box", kind: "shape", shape: "rect", start: 0, end: 4, x: 0.6, y: 0.6, w: 0.2, h: 0.1, fill: "#fff" }],
+    clips: [clip],
+  });
+  st().setMultiSelection([{ kind: "overlay", id: "a" }, { kind: "overlay", id: "box" }, { kind: "clip", id: "video" }]);
+  const snapshot = previewSelectionSnapshot(st(), 1);
+  scalePreviewSelection(st(), snapshot, { x: 0.2, y: 0.2 }, 2, 2);
+  expect(st().overlays[0].x).toBeCloseTo(0.6);
+  expect((st().overlays[0] as TextOverlay).size).toBeCloseTo(120);
+  expect(st().overlays[1].x).toBeCloseTo(0.98);
+  expect((st().overlays[1] as { w: number }).w).toBeCloseTo(0.4);
+  expect(st().clips[0].frame).toEqual({ x: 0.0, y: 0.0, w: 0.6, h: 0.6 });
+  scalePreviewSelection(st(), snapshot, { x: 0.2, y: 0.2 }, 2, 1);
+  expect((st().overlays[0] as TextOverlay).size).toBe(60);
+  expect((st().overlays[0] as TextOverlay).stretchX).toBeCloseTo(2);
+});
+
+test("rotating orbits every center and turns every item", () => {
+  const { rotatePreviewSelection } = require("@/cut/lib/previewSelection");
+  useEditor.setState({ overlays: [title("a", 0.7, 0.5), title("b", 0.3, 0.5)], clips: [clip] });
+  st().setMultiSelection([{ kind: "overlay", id: "a" }, { kind: "overlay", id: "b" }, { kind: "clip", id: "video" }]);
+  const snapshot = previewSelectionSnapshot(st(), 1);
+  rotatePreviewSelection(st(), snapshot, { x: 0.5, y: 0.5 }, 90, 1);
+  expect(st().overlays[0].x).toBeCloseTo(0.5);
+  expect(st().overlays[0].y).toBeCloseTo(0.7);
+  expect(st().overlays[0].rotation).toBe(90);
+  expect(st().overlays[1].y).toBeCloseTo(0.3);
+  expect(st().clips[0].rotation).toBe(90);
+  expect(st().clips[0].frame!.x + 0.15).toBeCloseTo(0.75);
+});

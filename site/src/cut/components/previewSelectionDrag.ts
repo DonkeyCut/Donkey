@@ -19,8 +19,10 @@ export function togglePreviewSelection(e: PointerEvent, item: NonNullable<Select
   return true;
 }
 
-/** Selected items share one gesture and one undo checkpoint. */
-export function startSelectionDrag(e: PointerEvent, width: number, height: number): boolean {
+/** Selected items share one gesture and one undo checkpoint. A press on one
+ * member that never travels narrows the selection to that member, the way a
+ * plain click anywhere does. */
+export function startSelectionDrag(e: PointerEvent, width: number, height: number, item?: NonNullable<Selection>): boolean {
   const s = useEditor.getState();
   if (s.multiSelection.length < 2) return false;
   const positions = previewSelectionSnapshot(s, previewAt());
@@ -34,6 +36,9 @@ export function startSelectionDrag(e: PointerEvent, width: number, height: numbe
         began = true;
       }
       movePreviewSelection(useEditor.getState(), positions, dx / width, dy / height);
+    },
+    onUp: (_dx, _dy, moved) => {
+      if (!moved && item) useEditor.getState().select(item);
     },
   });
   return true;

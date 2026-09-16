@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
 import { startSelectionDrag, togglePreviewSelection } from "@/cut/components/previewSelectionDrag";
+import { pictureGroupSelected } from "@/cut/lib/previewSelection";
 import { useSkim, usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
 import {
@@ -303,6 +304,7 @@ export function OverlayLayer({
   const sel =
     selection?.kind === "overlay" ? overlays.find((o) => o.id === selection.id) : undefined;
   const multiple = multiSelection.length > 1;
+  const grouped = pictureGroupSelected(multiSelection);
   const selectedIds = useMemo(() => new Set(multiSelection.flatMap((item) => item?.kind === "overlay" ? [item.id] : [])), [multiSelection]);
   const isolate = !multiple && !!sel && !scrubbing && !(t >= sel.start && t <= sel.end);
 
@@ -333,6 +335,7 @@ export function OverlayLayer({
             // selection chrome (outline, resize handle) does not.
             selected={selected && !scrubbing}
             armed={selected && !scrubbing}
+            grouped={grouped}
             ghost={!inRange && !selected}
             t={t}
             stageWidth={stageWidth}
@@ -538,6 +541,7 @@ function OverlayItem({
   overlay: o,
   selected,
   armed,
+  grouped,
   ghost,
   t,
   stageWidth,
@@ -552,6 +556,9 @@ function OverlayItem({
   /** Whether a press on this element moves it. Only the selection (or the
    * group holding it) drags; everything else hands the press to the stage. */
   armed: boolean;
+  /** One of several selected items: it wears its outline alone, and the
+   * selection frame carries the grips for the whole set. */
+  grouped: boolean;
   ghost: boolean;
   /** The previewed timeline moment (playhead or paused skimmer). */
   t: number;
@@ -675,7 +682,7 @@ function OverlayItem({
   // size is read off the real box, which keeps auto-sized text honest.
   const chromeHost = useContext(OverlayChromeHost);
   const stagePress = useContext(StagePress);
-  const liftChrome = !!chromeHost && selected && !editing;
+  const liftChrome = !!chromeHost && selected && !editing && !grouped;
   const [chromeSize, setChromeSize] = useState<{ w: number; h: number } | null>(null);
   useLayoutEffect(() => {
     if (!liftChrome) return;
@@ -1030,7 +1037,7 @@ function OverlayItem({
     if (editing || e.button !== 0) return;
     const s = useEditor.getState();
     if (togglePreviewSelection(e, { kind: "overlay", id: o.id })) return;
-    if (armed && startSelectionDrag(e, stageWidth, stageHeight)) return;
+    if (armed && startSelectionDrag(e, stageWidth, stageHeight, { kind: "overlay", id: o.id })) return;
     // Nothing moves until it is the selection: an unselected element is part
     // of the picture, so the stage pans under it and a stationary press picks
     // it up for the next drag.
@@ -1060,7 +1067,7 @@ function OverlayItem({
     });
   };
 
-  const chrome = selected && !editing && (
+  const chrome = selected && !editing && !grouped && (
     <>
       {/* The rotate button clears the element's own top edge, so moving is
           never caught by it. Its cursor rides the element's rotation, so

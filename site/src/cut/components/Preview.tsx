@@ -5,6 +5,7 @@ import { Check, Copy, Loader2, PanelTopClose, ZoomIn, ZoomOut } from "lucide-rea
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
 import { isPreviewSelectionModifier, startSelectionDrag, togglePreviewSelection } from "@/cut/components/previewSelectionDrag";
+import { pictureGroupSelected } from "@/cut/lib/previewSelection";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import {
   playheadAt,
@@ -28,6 +29,7 @@ import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./Ov
 import { GuideHandles, GuideOverlay } from "./GuideOverlay";
 import { RemovalBrush } from "./RemovalBrush";
 import { CORNER_HANDLES, HANDLE_AXIS, TransformHandles, type ResizeHandle } from "./TransformHandles";
+import { SelectionFrame } from "./SelectionFrame";
 import {
   StageEffectPaint,
   StagePictureFx,
@@ -670,6 +672,7 @@ export function Preview() {
         <ClipMaskGizmo stage={stage} />
         <RemovalBrush stage={stage} />
         <ClipSelectionGizmos stage={stage} />
+        <SelectionFrame stage={stage} />
         </div>
       </div>
       <ZoomHud
@@ -898,10 +901,13 @@ function ClipSelectionGizmos({ stage }: { stage: Stage }) {
     const ids = new Set((multi.length ? multi : [selection]).flatMap((item) => item?.kind === "clip" ? [item.id] : []));
     return allClips.filter((clip) => ids.has(clip.id));
   }, [allClips, multi, selection]);
-  return clips.map((clip) => <ClipTransformGizmo key={clip.id} selectedClip={clip} stage={stage} />);
+  const grouped = pictureGroupSelected(multi);
+  return clips.map((clip) => <ClipTransformGizmo key={clip.id} selectedClip={clip} stage={stage} grouped={grouped} />);
 }
 
-function ClipTransformGizmo({ stage, selectedClip }: { stage: Stage; selectedClip: VideoClip }) {
+/** `grouped`: one of several selected items — the box still moves the set,
+ * and the selection frame carries the grips for all of them. */
+function ClipTransformGizmo({ stage, selectedClip, grouped }: { stage: Stage; selectedClip: VideoClip; grouped: boolean }) {
   const assets = useEditor((s) => s.assets);
   const skimTime = useSkim();
   const layerRef = useRef<HTMLDivElement>(null);
@@ -1004,7 +1010,7 @@ function ClipTransformGizmo({ stage, selectedClip }: { stage: Stage; selectedCli
   const onMoveBox = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     if (togglePreviewSelection(e, { kind: "clip", id: clip.id })) return;
-    if (startSelectionDrag(e, stage.w, stage.h)) return;
+    if (startSelectionDrag(e, stage.w, stage.h, { kind: "clip", id: clip.id })) return;
     surfaceDrag(
       e,
       (dx, dy) => {
@@ -1254,7 +1260,7 @@ function ClipTransformGizmo({ stage, selectedClip }: { stage: Stage; selectedCli
             title={overflows ? "Drag to pan the picture" : undefined}
             onPointerDown={overflows ? onPanPicture : undefined}
           >
-            {overflows && (
+            {overflows && !grouped && (
               <TransformHandles
                 color="#c7c7cc"
                 handles={CORNER_HANDLES}
@@ -1273,14 +1279,16 @@ function ClipTransformGizmo({ stage, selectedClip }: { stage: Stage; selectedCli
           data-preview-clip={clip.id}
           onPointerDown={onMoveBox}
         >
-          <TransformHandles
-            color="#0a84ff"
-            className="z-20"
-            rotation={rotation}
-            angle={turning}
-            onResize={onResize}
-            onRotate={onRotate}
-          />
+          {!grouped && (
+            <TransformHandles
+              color="#0a84ff"
+              className="z-20"
+              rotation={rotation}
+              angle={turning}
+              onResize={onResize}
+              onRotate={onRotate}
+            />
+          )}
         </div>
       </div>
       {/* The solid ring and the snap guides live outside the turn: the ring's
