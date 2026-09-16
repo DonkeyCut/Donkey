@@ -49,7 +49,7 @@ import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { keyboardToEditor, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { additiveClick } from "@/cut/lib/hostKeys";
-import { CLIP_GAP, landOnRow, laneDragFor, laneDragParts, resolveRow, startLaneMove, startLaneTrim, type LaneDrag, type RowBox } from "@/cut/lib/laneTracks";
+import { CLIP_GAP, landOnRow, laneDragFor, laneDragParts, laneDragSlots, resolveRow, startLaneMove, startLaneTrim, type LaneDrag, type RowBox } from "@/cut/lib/laneTracks";
 import { reportSwallowed } from "@/cut/lib/report";
 import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockAudio, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
@@ -943,10 +943,10 @@ export function Timeline() {
   }, [overlays]);
   // The color an element drag paints its landing slot with: the carried item's
   // own, so the move reads as one thing from grab to drop.
-  const draggedFamily = useMemo<OverlayFamily>(() => {
-    const held = laneDrag?.kind === "overlay" ? overlays.find((o) => o.id === laneDrag.id) : null;
+  const slotFamily = (id: string): OverlayFamily => {
+    const held = overlays.find((o) => o.id === id);
     return held ? overlayFamily(held) : "text";
-  }, [laneDrag, overlays]);
+  };
 
   // Video tracks above track 0 (PiP / composited layers), listed highest-first
   // so the top row is the frontmost layer and track 0 sits at the bottom of
@@ -1404,10 +1404,16 @@ export function Timeline() {
   // A transition bar mid-drag, drawn where the pointer has it.
   // A drag past the top edge opens a row there, pushing the stack down by one
   // for as long as it is aimed that way.
-  const topRowShift =
-    (laneDrag?.kind === "overlay" && laneDrag.targetRow < 0) || elementDrop?.row === -1 ? TEXT_H : 0;
-  const audioTopShift =
-    (laneDrag?.kind === "audio" && laneDrag.targetRow < 0) || audioDrop?.row === -1 ? AUDIO_H : 0;
+  // A group drag aims every member at its own row, so the band opens as many
+  // rows past either end as the set needs.
+  const overlaySlots = laneDragSlots(laneDrag, "overlay");
+  const audioSlots = laneDragSlots(laneDrag, "audio");
+  const videoSlots = laneDragSlots(laneDrag, "video");
+  const cueSlots = laneDragSlots(laneDrag, "cue");
+  const rowsAbove = (slots: LaneDrag[]) => Math.max(0, ...slots.map((d) => -d.targetRow));
+  const lastRow = (slots: LaneDrag[]) => Math.max(-1, ...slots.map((d) => d.targetRow));
+  const topRowShift = Math.max(rowsAbove(overlaySlots), elementDrop?.row === -1 ? 1 : 0) * TEXT_H;
+  const audioTopShift = Math.max(rowsAbove(audioSlots), audioDrop?.row === -1 ? 1 : 0) * AUDIO_H;
 
   // Scrub with auto-scroll when the pointer nears the viewport edges.
   //
@@ -1822,21 +1828,26 @@ export function Timeline() {
   // carries the rows below it down with the pointer's own ghost), so the row
   // the drag came from stays where it was. Dropping here opens a brand-new
   // track at z-level `level`.
+  // A group drag can carry members several rows past the edge; each row it
+  // reaches mounts, nearest the stack last on top and first below.
   const newTrackRow = (level: number) => {
     const place: TrackTarget = { kind: "insert", level };
+    const edge = level === 0 ? videoRowCount : -1;
+    const reach = level === 0 ? lastRow(videoSlots) - videoRowCount + 1 : rowsAbove(videoSlots);
     const aimed =
-      (laneDrag?.kind === "video" && laneDrag.targetRow === (level === 0 ? videoRowCount : -1)) ||
+      reach > 0 ||
       (dropType === "video" && samePlacement(overlayDrop?.target ?? null, place));
     if (!aimed) return null;
-    return (
-      <div className="relative mt-1.5" style={{ height: OVERLAY_H }}>
+    const rows = Array.from({ length: Math.max(1, reach) }, (_, i) => (level === 0 ? edge + i : edge - (reach - 1 - i)));
+    return rows.map((row) => (
+      <div key={row} className="relative mt-1.5" style={{ height: OVERLAY_H }}>
         {laneRail(OVERLAY_H - 2)}
-        {trackSlot(place, OVERLAY_H - 4)}
-        {laneDrag?.kind === "video" && (
-          <LaneSlot drag={laneDrag} pps={pps} top={2} barH={OVERLAY_H - 4} className={VIDEO_SLOT} />
-        )}
+        {row === edge && trackSlot(place, OVERLAY_H - 4)}
+        {videoSlots.filter((d) => d.targetRow === row).map((d) => (
+          <LaneSlot key={d.id} drag={d} pps={pps} top={2} barH={OVERLAY_H - 4} className={VIDEO_SLOT} />
+        ))}
       </div>
-    );
+    ));
   };
 
 
@@ -2234,8 +2245,8 @@ export function Timeline() {
                   Math.max(
                     overlayLanes.count,
                     // An in-flight element drag aimed under the band opens
-                    // the row it will land on.
-                    laneDrag?.kind === "overlay" ? laneDrag.targetRow + 1 : 0,
+                    // the rows it will land on.
+                    lastRow(overlaySlots) + 1,
                     // A panel drag over an empty band opens the first row for
                     // its landing preview.
                     elementDrop !== null ? elementDrop.row + 1 : 0
@@ -2249,9 +2260,8 @@ export function Timeline() {
               {Array.from(
                 {
                   length:
-                    Math.max(overlayLanes.count, (elementDrop?.row ?? -1) + 1) +
-                    (topRowShift ? 1 : 0) +
-                    (laneDrag?.kind === "overlay" && laneDrag.targetRow === overlayLanes.count ? 1 : 0),
+                    Math.max(overlayLanes.count, (elementDrop?.row ?? -1) + 1, lastRow(overlaySlots) + 1) +
+                    topRowShift / TEXT_H,
                 },
                 (_, r) => laneRail((r + 1) * TEXT_H - 4, r)
               )}
@@ -2342,15 +2352,16 @@ export function Timeline() {
                     </>
                   );
                 })()}
-              {laneDrag?.kind === "overlay" && (
+              {overlaySlots.map((d) => (
                 <LaneSlot
-                  drag={laneDrag}
+                  key={d.id}
+                  drag={d}
                   pps={pps}
-                  top={laneDrag.targetRow * TEXT_H + 2 + topRowShift}
+                  top={d.targetRow * TEXT_H + 2 + topRowShift}
                   barH={TEXT_H - 6}
-                  className={cn("rounded-[3px]", FAMILY_STYLE[draggedFamily].slot)}
+                  className={cn("rounded-[3px]", FAMILY_STYLE[slotFamily(d.id)].slot)}
                 />
-              )}
+              ))}
               {overlays.map((o) => {
                 const homeRow = overlayLanes.rowOf.get(o.lane ?? 0) ?? 0;
                 const drag = laneDragFor(laneDrag, "overlay", o.id);
@@ -2517,9 +2528,9 @@ export function Timeline() {
             >
               {laneRail(rowH - 2 + railH)}
               {gapHighlight({ kind: "video", index: track }, rowH - 4)}
-              {laneDrag?.kind === "video" && laneDrag.targetRow === row && (
-                <LaneSlot drag={laneDrag} pps={pps} top={2} barH={rowH - 4} className={VIDEO_SLOT} />
-              )}
+              {videoSlots.filter((d) => d.targetRow === row).map((d) => (
+                <LaneSlot key={d.id} drag={d} pps={pps} top={2} barH={rowH - 4} className={VIDEO_SLOT} />
+              ))}
               {trackSpans.map((span) => (
                 <ClipView
                   key={span.clip.id}
@@ -2573,9 +2584,9 @@ export function Timeline() {
             {spans.length > 0 && laneRail(rowH0 - 2 + rail0)}
             {gapHighlight({ kind: "video", index: 0 }, rowH0 - 4)}
             {trackSlot(TRACK_ZERO, rowH0 - 4)}
-            {laneDrag?.kind === "video" && laneDrag.targetRow === aboveTracks.length && (
-              <LaneSlot drag={laneDrag} pps={pps} top={2} barH={rowH0 - 4} className={VIDEO_SLOT} />
-            )}
+            {videoSlots.filter((d) => d.targetRow === aboveTracks.length).map((d) => (
+              <LaneSlot key={d.id} drag={d} pps={pps} top={2} barH={rowH0 - 4} className={VIDEO_SLOT} />
+            ))}
             {assetDrop &&
               (assetDrop.ghost ? (
                 <GhostClip ghost={assetDrop.ghost} t={assetDrop.t} len={assetDrop.len} h={rowH0 - 4} pps={pps} />
@@ -2626,7 +2637,7 @@ export function Timeline() {
                     audioLanes.count,
                     // An in-flight audio drag aimed under the band opens the
                     // row it will land on.
-                    laneDrag?.kind === "audio" ? laneDrag.targetRow + 1 : 0,
+                    lastRow(audioSlots) + 1,
                     (audioDrop?.row ?? -1) + 1
                   ) *
                     AUDIO_H +
@@ -2638,9 +2649,8 @@ export function Timeline() {
               {Array.from(
                 {
                   length:
-                    Math.max(audioLanes.count, (audioDrop?.row ?? -1) + 1) +
-                    (audioTopShift ? 1 : 0) +
-                    (laneDrag?.kind === "audio" && laneDrag.targetRow === audioLanes.count ? 1 : 0),
+                    Math.max(audioLanes.count, (audioDrop?.row ?? -1) + 1, lastRow(audioSlots) + 1) +
+                    audioTopShift / AUDIO_H,
                 },
                 (_, r) => laneRail((r + 1) * AUDIO_H - 2, r)
               )}
@@ -2665,15 +2675,16 @@ export function Timeline() {
                   }}
                 />
               )}
-              {laneDrag?.kind === "audio" && (
+              {audioSlots.map((d) => (
                 <LaneSlot
-                  drag={laneDrag}
+                  key={d.id}
+                  drag={d}
                   pps={pps}
-                  top={laneDrag.targetRow * AUDIO_H + 2 + audioTopShift}
+                  top={d.targetRow * AUDIO_H + 2 + audioTopShift}
                   barH={AUDIO_H - 4}
                   className="rounded-[2.5px] bg-emerald-500/10 shadow-[inset_0_0_0_1.5px_rgba(16,185,129,0.5)]"
                 />
-              )}
+              ))}
               {audioClips.map((a) => {
                 const homeRow = audioLanes.rowOf.get(a.lane ?? 0) ?? 0;
                 const drag = laneDragFor(laneDrag, "audio", a.id);
@@ -2717,15 +2728,16 @@ export function Timeline() {
               {[...new Set(subtitles.cues.map((c) => c.lane ?? 0))].map((lane) =>
                 laneRail((lane + 1) * SUB_H - 3, lane)
               )}
-              {laneDrag?.kind === "cue" && (
+              {cueSlots.map((d) => (
                 <LaneSlot
-                  drag={laneDrag}
+                  key={d.id}
+                  drag={d}
                   pps={pps}
-                  top={laneDrag.targetRow * SUB_H + 1}
+                  top={d.targetRow * SUB_H + 1}
                   barH={SUB_H - 4}
                   className="rounded-[2.5px] bg-amber-400/15 shadow-[inset_0_0_0_1.5px_rgba(245,158,11,0.55)]"
                 />
-              )}
+              ))}
               {subtitles.cues.map((c) => (
                 <SubBar
                   key={c.id}

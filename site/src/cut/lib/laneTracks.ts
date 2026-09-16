@@ -486,8 +486,19 @@ export interface LaneDrag {
   slotStart: number; // resolved landing start, seconds
   len: number; // dragged item length, seconds
   /** The rest of a group drag's set: each member rides the pointer as its own
-   * ghost, shifted by the same delta as the grabbed item. */
-  members?: { kind: LaneKind; id: string; ghostX: number }[];
+   * ghost, shifted by the same delta as the grabbed item, and aims at its own
+   * landing row and slot. */
+  members?: LaneDragMember[];
+}
+
+export interface LaneDragMember {
+  kind: LaneKind;
+  id: string;
+  ghostX: number;
+  ghostY: number;
+  targetRow: number;
+  slotStart: number;
+  len: number;
 }
 
 /** The drag a bar renders with: the carried item's own LaneDrag, or — when
@@ -497,7 +508,16 @@ export function laneDragFor(d: LaneDrag | null, kind: LaneKind, id: string): Lan
   if (!d) return null;
   if (d.kind === kind && d.id === id) return d;
   const m = d.members?.find((x) => x.kind === kind && x.id === id);
-  return m ? { ...d, kind, id, ghostX: m.ghostX } : null;
+  return m ? { ...d, ...m } : null;
+}
+
+/** Every landing slot a drag draws in one band: the carried item's and each
+ * member's of that kind, so a group drag shows where the whole set lands. */
+export function laneDragSlots(d: LaneDrag | null, kind: LaneKind): LaneDrag[] {
+  if (!d) return [];
+  const out: LaneDrag[] = d.kind === kind ? [d] : [];
+  for (const m of d.members ?? []) if (m.kind === kind) out.push({ ...d, ...m });
+  return out;
 }
 
 /** True when a live drag moves items on this kind's lanes and this bar is
@@ -635,27 +655,34 @@ function startGroupMove(
     ? laneOrder(grabbed.kind, s, [...ADAPTERS[grabbed.kind].raws(s).map((r) => ADAPTERS[grabbed.kind].view(r).lane)])
     : [];
   const rowOf = (lane: number) => usedLanes.indexOf(lane);
-  // A row past either end opens a brand-new track, and a selection that holds
-  // an outermost row by itself has nothing to open on that side: the row it
-  // leaves collapses behind it and the fresh one renumbers straight back to
-  // where the picture already was — see `startLaneMove`, which draws the same
-  // line for a single item.
-  const rowsHeld = new Set(members.map((m) => rowOf(m.lane)));
+  const homeRow = vertical ? rowOf(grabbed.lane) : ui.homeRow;
+  // The set reorders across the band the way one item does: the grabbed
+  // member reaches the row past either end and the rest ride beyond it, each
+  // opening the row it needs. A side is open when something outside the set
+  // sits past a member on that side; with nothing there the move would
+  // collapse straight back to the picture already on screen.
+  const rowsHeld = members.map((m) => rowOf(m.lane));
   const heldIds = new Set(members.map((m) => m.id));
-  const others = vertical
+  const otherRows = vertical
     ? ADAPTERS[grabbed.kind]
         .raws(s)
         .map((r) => ADAPTERS[grabbed.kind].view(r))
         .filter((v) => !heldIds.has(v.id))
+        .map((v) => rowOf(v.lane))
     : [];
-  const holdsRowAlone = (row: number) =>
-    rowsHeld.has(row) && !others.some((v) => rowOf(v.lane) === row);
-  const edges = { top: !holdsRowAlone(0), bottom: !holdsRowAlone(usedLanes.length - 1) };
-  const rowLo = vertical ? (edges.top ? -1 : 0) - Math.min(...rowsHeld) : 0;
-  const rowHi = vertical
-    ? usedLanes.length - (edges.bottom ? 0 : 1) - Math.max(...rowsHeld)
-    : 0;
-  const homeRow = vertical ? rowOf(grabbed.lane) : ui.homeRow;
+  const edges = {
+    top: otherRows.some((r) => r < Math.max(...rowsHeld)),
+    bottom: otherRows.some((r) => r > Math.min(...rowsHeld)),
+  };
+  const rowLo = vertical && edges.top ? -1 - homeRow : 0;
+  const rowHi = vertical && edges.bottom ? usedLanes.length - homeRow : 0;
+  // Where each member rests in its own band, for the slot it draws while a
+  // mixed set (which only moves in time) is on the move.
+  const restRow = (m: GroupMember) => {
+    if (vertical) return rowOf(m.lane);
+    const ad = ADAPTERS[m.kind];
+    return ad.multiLane ? laneOrder(m.kind, s, ad.raws(s).map((r) => ad.view(r).lane)).indexOf(m.lane) : 0;
+  };
 
   const scroller = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-tl-scroll]");
   const sc0 = scroller?.scrollLeft ?? 0;
@@ -748,9 +775,10 @@ function startGroupMove(
       ui.onSnap(guide);
       layout(dt);
       // Ghosts ride the raw pointer delta, clamped so the set's earliest
-      // member holds at 0 — the same rigid floor the landing uses.
+      // member holds at 0 — the same rigid floor the landing uses. A set that
+      // only moves in time keeps every bar in its row.
       const dtGhost = Math.max(-minStart, effDx / ui.pps);
-      const ghostY = dy - (homeTop(rows) - rowTop0);
+      const ghostY = vertical ? dy - (homeTop(rows) - rowTop0) : 0;
       ui.onDrag({
         kind: grabbed.kind,
         id: grabbed.id,
@@ -763,6 +791,10 @@ function startGroupMove(
           kind: m.kind,
           id: m.id,
           ghostX: (m.start + dtGhost) * ui.pps,
+          ghostY,
+          targetRow: restRow(m) + rowDelta,
+          slotStart: m.start + dt,
+          len: m.len,
         })),
       });
     },
