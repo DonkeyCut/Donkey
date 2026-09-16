@@ -27,7 +27,7 @@ export function CutWorksWith() {
       </div>
       <p className="mx-auto mt-12 max-w-[720px] text-[17px] leading-[1.55] text-[#454545]">
         The assistant uses the Claude and Codex apps already signed in on your
-        Mac. If you have a subscription, you're done — no setup, no API keys.
+        Mac. If you have a subscription, you’re done — no setup, no API keys.
       </p>
     </section>
   );

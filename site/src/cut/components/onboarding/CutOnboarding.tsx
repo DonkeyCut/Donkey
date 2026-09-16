@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -70,8 +70,12 @@ export function CutOnboarding() {
   const { data: pro } = useProSubscription();
   const save = useSaveOnboarding();
   const [rawStep, setStep] = useState(0);
-  const [referrals, setReferrals] = useState<ReferralSource[]>([]);
-  const [referralOther, setReferralOther] = useState("");
+  const saved = useMemo(() => (state?.referralSources ?? []).filter(isKnownReferralSource), [state]);
+  const savedOther = saved.includes("other") ? (state?.referralOther ?? "") : "";
+  const [referralDraft, setReferrals] = useState<ReferralSource[] | null>(null);
+  const [otherDraft, setReferralOther] = useState<string | null>(null);
+  const referrals = referralDraft ?? saved;
+  const referralOther = otherDraft ?? savedOther;
   const [dismissed, setDismissed] = useState(false);
   const [replaying, setReplaying] = useState(false);
   // Read once per mount: whether this browser can skip the wait below.
@@ -85,22 +89,7 @@ export function CutOnboarding() {
   );
   // What the account already has, so leaving the question without changing
   // anything writes nothing.
-  const savedReferrals = useRef("");
-
-  // An answer given in the past shows again: once the account read lands, the
-  // question opens already filled in, and it reads as saved rather than as a
-  // pending change.
-  const seeded = useRef(false);
-  useEffect(() => {
-    if (!state || seeded.current) return;
-    seeded.current = true;
-    const saved = (state.referralSources ?? []).filter(isKnownReferralSource);
-    if (!saved.length) return;
-    const other = saved.includes("other") ? (state.referralOther ?? "") : "";
-    setReferrals(saved);
-    setReferralOther(other);
-    savedReferrals.current = referralSignature(saved, other);
-  }, [state]);
+  const savedReferrals = useRef<string | null>(null);
 
   // Which run is on screen, derived rather than set: the account read landing
   // is what opens a first run, and nothing has to push that into state. On the
@@ -185,14 +174,14 @@ export function CutOnboarding() {
   const commitReferrals = useCallback(() => {
     const other = referrals.includes("other") ? referralOther.trim() : "";
     const signature = referralSignature(referrals, other);
-    if (!referrals.length || signature === savedReferrals.current) return;
+    if (!referrals.length || signature === (savedReferrals.current ?? referralSignature(saved, savedOther))) return;
     savedReferrals.current = signature;
     track("onboarding_referral_selected", {
       referralSources: referrals,
       ...(other && { referralOther: other }),
     });
     save.mutate({ referralSources: referrals, ...(other && { referralOther: other }) });
-  }, [referrals, referralOther, save]);
+  }, [referrals, referralOther, saved, savedOther, save]);
 
   const finish = useCallback(
     (skipped: boolean) => {
@@ -285,11 +274,12 @@ export function CutOnboarding() {
   }
 
   const toggleReferral = (source: ReferralSource) => {
-    setReferrals((current) =>
-      current.includes(source)
+    setReferrals((draft) => {
+      const current = draft ?? saved;
+      return current.includes(source)
         ? current.filter((s) => s !== source)
-        : [...current, source],
-    );
+        : [...current, source];
+    });
   };
 
   const last = step === slideCount - 1;

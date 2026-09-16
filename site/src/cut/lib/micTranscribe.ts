@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { hasLocalCompute } from "./backend";
 import { localBackend } from "./backend/local";
 import { cloudTranscribeRecording } from "./cloudTranscribe";
@@ -67,7 +67,9 @@ export function useMicTranscription(onResult: (text: string) => void): MicContro
   const feedTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const onResultRef = useRef(onResult);
-  onResultRef.current = onResult;
+  useLayoutEffect(() => {
+    onResultRef.current = onResult;
+  }, [onResult]);
 
   /** Stop and forget the cloud recorder (before its tracks stop). */
   const discardRecorder = useCallback(() => {

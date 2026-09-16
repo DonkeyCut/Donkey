@@ -116,7 +116,7 @@ export function ConnectGate({ children }: { children: ReactNode }) {
     setReached(false);
   }, []);
 
-  const check = useCallback(async () => {
+  const check = useCallback(() => permissionState().then(async (perm) => {
     const forced = forcedGate();
     if (forced) {
       setSeen(true);
@@ -124,7 +124,6 @@ export function ConnectGate({ children }: { children: ReactNode }) {
       setBlocked(forced === "blocked");
       return bindCloud();
     }
-    const perm = await permissionState();
     setSeen(engineSeen());
     setBlocked(perm === "denied");
     const quiet =
@@ -141,7 +140,7 @@ export function ConnectGate({ children }: { children: ReactNode }) {
       }
     }
     bindCloud();
-  }, [bindCloud, bindEngine]);
+  }), [bindCloud, bindEngine]);
 
   // The probe carries the account id like every other engine call, so it waits
   // for one. The banner and the app around it paint before that.

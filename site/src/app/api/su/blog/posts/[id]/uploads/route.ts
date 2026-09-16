@@ -12,8 +12,8 @@ type Params = { params: Promise<{ id: string }> };
 const idSchema = z.string().trim().min(1);
 
 // What the encoder can read. HEIC needs a decoder the bundled sharp lacks.
-export const BLOG_UPLOAD_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
-export const BLOG_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+const BLOG_UPLOAD_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/avif"]);
+const BLOG_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 
 const bodySchema = z
   .object({

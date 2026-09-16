@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -97,6 +97,17 @@ import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
 import { formatBytes } from "@/lib/bytes";
 
 type View = "gallery" | "list";
+const viewListeners = new Set<() => void>();
+const readView = (): View => localStorage.getItem("cut-projects-view") === "list" ? "list" : "gallery";
+const serverView = (): View => "gallery";
+const subscribeView = (notify: () => void) => {
+  viewListeners.add(notify);
+  window.addEventListener("storage", notify);
+  return () => {
+    viewListeners.delete(notify);
+    window.removeEventListener("storage", notify);
+  };
+};
 
 // The home lists every residency the user has, talking to the backend objects
 // directly — the global mode is only bound when a project opens into the
@@ -277,7 +288,7 @@ export function ProjectsHome() {
     ? (residencies.find((r) => data[r].folders.some((f) => f.id === openFolder)) ?? null)
     : null;
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [view, setView] = useState<View>("gallery");
+  const view = useSyncExternalStore(subscribeView, readView, serverView);
   // The residency the pending creation was launched for; null when the naming
   // dialog is closed.
   const [createIn, setCreateIn] = useState<Residency | null>(null);
@@ -299,11 +310,6 @@ export function ProjectsHome() {
   const [fileOver, setFileOver] = useState(false);
   const dragDepth = useRef(0);
 
-  useEffect(() => {
-    const saved = localStorage.getItem("cut-projects-view");
-    if (saved === "list" || saved === "gallery") setView(saved);
-  }, []);
-
   // A folder the URL names and no listed shelf answers for — deleted
   // elsewhere — goes back to the top level.
   const allSettled = residencies.every((r) => data[r].projects !== null || data[r].error);
@@ -313,8 +319,8 @@ export function ProjectsHome() {
   }, [staleFolder, router, base]);
 
   const switchView = (v: View) => {
-    setView(v);
     localStorage.setItem("cut-projects-view", v);
+    viewListeners.forEach((notify) => notify());
   };
 
   // Each mutation below opens with the same guard: a shelf that isn't
