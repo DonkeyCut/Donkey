@@ -1,37 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject, type VideoHTMLAttributes } from "react";
 
 /** How many fatal errors playback may recover from before it is treated as
  * broken. A real network blip resolves in one or two; anything past this is a
  * permanent failure wearing a transient error's clothes. */
 const MAX_RECOVERIES = 3;
 
-/**
- * A `<video>` playing an HLS master playlist.
- *
- * Safari and iOS play HLS natively, so they get the URL directly and hls.js
- * never loads — attaching it there would replace a well-tuned platform player
- * with a worse one. Everywhere else (Chrome and Android have no native HLS)
- * hls.js is imported on demand, so its weight lands only on the browsers that
- * need it and never on the initial page.
- */
-export function HlsVideo({
-  src,
-  poster,
-  className,
-  onError,
-  onPlaying,
-}: {
+export type ArtifactVideoProps = Omit<VideoHTMLAttributes<HTMLVideoElement>, "src" | "onError"> & {
   src: string;
-  poster?: string;
-  className?: string;
+  format: "hls" | "file";
+  videoRef?: RefObject<HTMLVideoElement | null>;
   onError?: () => void;
-  /** Fires once playback is actually running, so a caller can avoid replacing
-   * a video someone is watching. */
-  onPlaying?: () => void;
-}) {
-  const ref = useRef<HTMLVideoElement>(null);
+  active?: boolean;
+};
+
+/** Playback owns its decoder, buffers and teardown independently of an editor. */
+export function ArtifactVideo({
+  src, format, videoRef, onError, active = true, controls = true, autoPlay = false, preload = "metadata", ...props
+}: ArtifactVideoProps) {
+  const ownRef = useRef<HTMLVideoElement>(null);
+  const ref = videoRef ?? ownRef;
   const [failed, setFailed] = useState(false);
   // Held in a ref so the effect below does not depend on it. A caller passing an
   // inline arrow — the normal way to write this — would otherwise hand over a
@@ -43,7 +32,7 @@ export function HlsVideo({
 
   useEffect(() => {
     const video = ref.current;
-    if (!video) return;
+    if (!video || !active) return;
     setFailed(false);
     let live = true;
 
@@ -56,7 +45,7 @@ export function HlsVideo({
 
     // Native HLS. Checked before loading the library so Safari/iOS take this
     // path — canPlayType answers for the platform player, not for hls.js.
-    if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    if (format === "file" || video.canPlayType("application/vnd.apple.mpegurl")) {
       // The platform player reports through the element, and this is the only
       // channel it has: without it an expired token 403s every segment, the
       // video stalls on a black frame, and nothing upstream ever learns that
@@ -66,6 +55,9 @@ export function HlsVideo({
       return () => {
         live = false;
         video.removeEventListener("error", giveUp);
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
       };
     }
 
@@ -107,24 +99,42 @@ export function HlsVideo({
       hls.loadSource(src);
       hls.attachMedia(ref.current);
       destroy = () => hls.destroy();
-    });
+    }).catch(giveUp);
 
     return () => {
       live = false;
       destroy?.();
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
     };
-  }, [src]);
+  }, [src, format, ref, active]);
+
+  useEffect(() => {
+    const video = ref.current;
+    if (!video) return;
+    if (!active) video.pause();
+    const hide = () => { if (document.hidden) video.pause(); };
+    const observer = typeof IntersectionObserver === "undefined" ? null : new IntersectionObserver((entries) => {
+      if (entries.some((entry) => !entry.isIntersecting)) video.pause();
+    });
+    observer?.observe(video);
+    document.addEventListener("visibilitychange", hide);
+    return () => {
+      observer?.disconnect();
+      document.removeEventListener("visibilitychange", hide);
+    };
+  }, [active, ref]);
 
   return (
     <video
+      {...props}
       ref={ref}
-      poster={poster}
-      controls
+      controls={controls}
       playsInline
-      preload="metadata"
-      className={className}
-      onPlaying={onPlaying}
-      aria-label={failed ? "Video unavailable" : undefined}
+      autoPlay={active && autoPlay}
+      preload={preload}
+      aria-label={failed ? "Video unavailable" : props["aria-label"]}
     />
   );
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { ArtifactVideo } from "./ArtifactVideo";
+
 import { useEffect, useRef, useState } from "react";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { exportFileUrl } from "@/cut/lib/exportClient";
@@ -143,8 +145,10 @@ export function PlatformPreviewDialog({
               : undefined
           }
         >
-          <video
-            ref={videoRef}
+          <ArtifactVideo
+            format="file"
+            controls={false}
+            videoRef={videoRef}
             crossOrigin={MEDIA_CORS}
             src={url}
             className="absolute inset-0 size-full object-cover"

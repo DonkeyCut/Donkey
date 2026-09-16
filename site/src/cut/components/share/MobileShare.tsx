@@ -5,7 +5,7 @@ import { Clapperboard, FileText, Images, Loader2, MessageSquare, Captions } from
 import { Button } from "@/components/ui/button";
 import type { ProjectDoc, ShareFeatures, StoredAsset } from "@/cut/lib/types";
 import { BottomSheet } from "./BottomSheet";
-import { HlsVideo } from "./HlsVideo";
+import { ArtifactVideo } from "../ArtifactVideo";
 
 /**
  * The share as a phone should see it: the cut playing as one video, with the
@@ -41,17 +41,18 @@ const MAX_STREAM_POLL_MS = 60_000;
  * on this visit and a reload is the honest way to find out otherwise. */
 const MAX_STREAM_POLLS = 12;
 
-export function MobileShare({
-  token,
-  projectId,
-  name,
-  features,
-}: {
+type MobileShareProps = {
   token: string;
   projectId: string;
   name: string;
   features: ShareFeatures;
-}) {
+};
+
+export function MobileShare(props: MobileShareProps) {
+  return <MobileShareContent key={`${props.token}:${props.projectId}`} {...props} />;
+}
+
+function MobileShareContent({ token, projectId, name, features }: MobileShareProps) {
   const api = useCallback(
     (path: string) => `/api/cut-shared/${encodeURIComponent(token)}${path}`,
     [token]
@@ -169,7 +170,8 @@ export function MobileShare({
 
       <div className="flex min-h-0 flex-1 items-center justify-center bg-black">
         {stream.state === "ready" ? (
-          <HlsVideo
+          <ArtifactVideo
+            format="hls"
             src={stream.url}
             className="max-h-full max-w-full"
             onError={onStreamError}
@@ -180,7 +182,8 @@ export function MobileShare({
           // the path directly. It 404s on its own when the project has no proxy
           // — or when the share hides Subtitles and this render has them burned
           // in — which is the case that shows "preparing".
-          <video
+          <ArtifactVideo
+            format="file"
             src={stream.url}
             controls
             playsInline
