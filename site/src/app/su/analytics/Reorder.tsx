@@ -30,8 +30,6 @@ export function useReorder<T extends string>(key: string, ids: readonly T[]) {
   return {
     blockProps: sort.itemProps,
     containerProps: sort.containerProps,
-    customized: saved.length > 0,
     order: sort.order,
-    reset: () => setSaved([]),
   };
 }

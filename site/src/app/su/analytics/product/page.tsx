@@ -1497,21 +1497,6 @@ export default function SuAnalyticsPage() {
 
   return (
     <div className="space-y-6 pb-9">
-      {(tiles.customized || cards.customized) && (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => {
-              tiles.reset();
-              cards.reset();
-            }}
-            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-          >
-            Reset layout
-          </button>
-        </div>
-      )}
-
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" {...tiles.containerProps}>
         {tiles.order.map((id) => (
           <DragBlock key={id} {...tiles.blockProps(id)}>
