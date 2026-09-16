@@ -64,3 +64,7 @@ next-env.d.ts
 /public/cut-fonts/
 /public/models/rife_v4.25.onnx
 /public/ort/
+
+# Generated MCP Apps UI resource
+/src/clients/chatgpt/widget.generated.ts
+/public/clients/chatgpt/

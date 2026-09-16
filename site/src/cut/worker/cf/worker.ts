@@ -17,6 +17,7 @@ type WorkerEnv = MediaEnv & {
   R2_ACCESS_KEY_ID: string;
   R2_SECRET_ACCESS_KEY: string;
   CUT_WAKE_SECRET: string;
+  CUT_RUNNER_SECRET?: string;
   CUT_COPY_EXECUTE_URL: string;
   CUT_COPY_EXECUTE_SECRET: string;
   JOBS_EXECUTE_URL: string;
@@ -57,6 +58,8 @@ export class CutRenderWorker extends Container<WorkerEnv> {
       R2_ACCOUNT_ID: env.R2_ACCOUNT_ID,
       R2_ACCESS_KEY_ID: env.R2_ACCESS_KEY_ID,
       R2_SECRET_ACCESS_KEY: env.R2_SECRET_ACCESS_KEY,
+      // Document-backed renders authenticate their media and font reads on the site.
+      ...(env.CUT_RUNNER_SECRET ? { CUT_RUNNER_SECRET: env.CUT_RUNNER_SECRET } : {}),
       // The container records a finished HLS ladder in KV. It is not a Worker,
       // so it has no binding and goes over the REST API like the site does.
       CLOUDFLARE_KV_API_TOKEN: env.CLOUDFLARE_KV_API_TOKEN,

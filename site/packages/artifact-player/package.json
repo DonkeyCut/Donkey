@@ -1,0 +1,15 @@
+{
+  "name": "@donkeycut/artifact-player",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./ArtifactVideo": "./src/ArtifactVideo.tsx"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "dependencies": {
+    "hls.js": "^1.6.16"
+  }
+}

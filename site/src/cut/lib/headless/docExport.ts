@@ -5,6 +5,7 @@ import {
   EXPORT_PRESETS,
   originalSettings,
   presetSettings,
+  previewSettings,
   type ExportSettings,
 } from "../exportClient";
 import { renderDoc, type ExportDoc } from "@/cut/lib/renderSnapshot";
@@ -44,12 +45,13 @@ export async function buildDocExportSpec(
   projectId: string,
   preset: DocExportPreset,
   tmpDir: string,
-  snapshot: CloudDocSnapshot
+  snapshot: CloudDocSnapshot,
+  target: "export" | "preview" = "export"
 ): Promise<object> {
   bindHeadlessSession(session);
   await openCloudSnapshot(session, projectId, snapshot);
   const doc = renderDoc(useEditor.getState());
-  const payload = await buildExportPayload(projectId, doc, settingsFor(preset, doc), "export");
+  const payload = await buildExportPayload(projectId, doc, target === "preview" ? previewSettings(doc.aspect) : settingsFor(preset, doc), target);
   await Promise.all(
     payload.pngs.map(async (p) =>
       writeFile(

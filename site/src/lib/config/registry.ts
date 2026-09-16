@@ -31,6 +31,29 @@ function validTimeZone(zone: string): boolean {
 }
 
 export const SETTINGS = defineSettings({
+  chatgptApp: {
+    schema: z.object({
+      enabled: z.boolean(),
+      issuer: z.url().pipe(z.string().refine((v) => new URL(v).protocol === "https:" && new URL(v).origin === v)),
+      redirectUris: z.array(z.url().pipe(z.string().refine((v) => new URL(v).protocol === "https:" && !new URL(v).hash))).min(1),
+      accessSeconds: z.number().int().min(60).max(3600),
+      refreshDays: z.number().int().min(1).max(90),
+      requestsPerMinute: z.number().int().min(10).max(600),
+      oauthRequestsPerIpMinute: z.number().int().min(10).max(10000).default(600),
+      pollMs: z.number().int().min(1000).max(30000),
+    }).strict(),
+    default: { enabled: false, issuer: "https://donkeycut.com", redirectUris: ["https://chatgpt.com/connector_platform_oauth_redirect"], accessSeconds: 3600, refreshDays: 30, requestsPerMinute: 120, oauthRequestsPerIpMinute: 600, pollMs: 2000 },
+    public: false,
+    title: "ChatGPT app",
+    description: "Account linking, allowed OAuth callbacks, token lifetimes, and preview polling. Enable after the OAuth tables are deployed.",
+  },
+  cutPreviewJobs: {
+    schema: z.object({ maxAttempts: z.number().int().min(1).max(10) }).strict(),
+    default: { maxAttempts: 5 },
+    public: false,
+    title: "Cloud preview queue",
+    description: "Maximum attempts when concurrent preview submissions conflict.",
+  },
   cutStorageTransactions: {
     schema: z.object({ maxAttempts: z.number().int().min(1).max(10) }).strict(),
     default: { maxAttempts: 5 },

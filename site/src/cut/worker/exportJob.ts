@@ -139,7 +139,8 @@ export async function runExportJob(
             projectId,
             isDocExportPreset(stored.fromDoc.preset) ? stored.fromDoc.preset : "original",
             handle.tmpDir,
-            stored.fromDoc.snapshot
+            stored.fromDoc.snapshot,
+            job.kind === "preview" ? "preview" : "export"
           )) as ExportSpec,
         }
       : stored;

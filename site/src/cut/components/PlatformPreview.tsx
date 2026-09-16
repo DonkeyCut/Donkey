@@ -1,6 +1,6 @@
 "use client";
 
-import { ArtifactVideo } from "./ArtifactVideo";
+import { ArtifactVideo } from "@donkeycut/artifact-player/ArtifactVideo";
 
 import { useEffect, useRef, useState } from "react";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";

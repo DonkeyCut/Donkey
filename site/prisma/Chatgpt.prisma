@@ -1,0 +1,30 @@
+// Each connection owns a rotating token family. Only token hashes are stored.
+model ChatgptGrant {
+  id           String @id @default(cuid())
+  userId       String
+  user         User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId     String
+  resource     String
+  scope        String
+  redirectUri  String
+  challenge    String
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+  tokens       ChatgptToken[]
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model ChatgptToken {
+  hash       String @id
+  grantId    String
+  grant      ChatgptGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  kind       String // code | access | refresh
+  expiresAt  DateTime
+  consumedAt DateTime?
+
+  @@index([grantId])
+  @@index([expiresAt])
+}

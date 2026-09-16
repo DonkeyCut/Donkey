@@ -23,6 +23,7 @@ model User {
   creditLimits UserCreditLimit[]
   creditAutoReload CreditAutoReload?
   apiKeys       Apikey[]
+  chatgptGrants ChatgptGrant[]
   proSubscription ProSubscription?
   avatar        UserAvatar?
   onboarding    UserOnboarding?

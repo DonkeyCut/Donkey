@@ -18,6 +18,8 @@ Supported product and engineering guides live in `docs/guides/`. This list is th
 - [Local Compute](guides/cut/local-compute.md) — why a project the engine doesn't store still uses the Mac when there is one, and the rule that keeps its data where it lives regardless.
 - [Performance](guides/performance.md) — the frame budget, the four ways we keep the main thread clear, the memory budget, and how a change is measured before it ships.
 
+- [ChatGPT App](guides/chatgpt-app.md) — account linking, cloud project previews, and the boundary between the ChatGPT client and shared playback.
+
 **Site and backend**
 
 - [Backend API Guide](guides/backend-apis.md) — the hosted routes the app and site call for model-backed work.

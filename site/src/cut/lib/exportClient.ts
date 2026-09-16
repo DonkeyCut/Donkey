@@ -1896,6 +1896,10 @@ export async function renderShareLadder(
   }
 }
 
+export function previewSettings(aspect: Aspect): ExportSettings {
+  return { ...scaledFrame(aspect, 360), fps: 24, crf: 30, preset: "veryfast", ...DELIVERY_DEFAULTS };
+}
+
 export type PreviewArtifact = { id: string; projectId: string; revision: string; url: string; expiresAt?: number };
 export type PreviewJob = PreviewArtifact & { status: "queued" | "done"; statusUrl?: string };
 
@@ -1906,7 +1910,7 @@ export async function submitPreviewSnapshot(
 ): Promise<PreviewJob> {
   const { operation: { projectId, backend }, doc, revision } = snapshot;
   signal?.throwIfAborted();
-  const settings: ExportSettings = { ...scaledFrame(doc.aspect, 360), fps: 24, crf: 30, preset: "veryfast", ...DELIVERY_DEFAULTS };
+  const settings = previewSettings(doc.aspect);
   if (backend.kind === "browser") {
     const directory = await projectDir(projectId);
     if (!directory) throw new Error("Project not found in browser storage.");

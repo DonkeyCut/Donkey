@@ -7,7 +7,9 @@ the site's own client views, signed in with a session cookie.
 endpoint is a deliberate exception with a product reason — today only Better
 Auth's own routes, the signature-verified Stripe and Resend webhooks, the
 HMAC-token-verified one-click email unsubscribe and promotion button redirect,
-the token-authorized Cut project and library share viewers, and a plain health check. Ship
+the token-authorized Cut project and library share viewers, the scoped OAuth
+ChatGPT MCP endpoint and its OAuth discovery/exchange endpoints, authenticated
+cron jobs, and a plain health check. Ship
 a handler without the wrapper and the endpoint is open to anyone.
 
 ## Authentication
@@ -35,6 +37,10 @@ refetch the session on focus.
 The hosted deploy needs `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`,
 `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`. Never commit real OAuth
 credentials.
+
+The [ChatGPT app](chatgpt-app.md) uses scoped OAuth tokens for its MCP transport.
+Its consent submission requires the existing Donkey Cut session and a browser-bound
+challenge. OAuth tokens authorize only the tools exposed by that adapter.
 
 ## Handler Rules
 

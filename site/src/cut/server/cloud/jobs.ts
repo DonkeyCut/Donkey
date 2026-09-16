@@ -5,6 +5,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { cutLimitsFor, EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
+import { queuePreview } from "./previewJobs";
 import { getProject } from "./projects";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { del, head, overlayKey, overlayPrefix, presignPut, projectExportKey } from "./r2";
@@ -309,25 +310,7 @@ export const jobsCloud = {
       } as unknown as Prisma.InputJsonValue;
 
       if (target === "preview") {
-        const row = await prisma.$transaction(async (tx) => {
-          if (body.revision) {
-            const existing = await tx.cutRenderJob.findFirst({
-              where: { userId, projectId, kind: target, state: { in: ["queued", "running", "done"] },
-                spec: { path: ["revision"], equals: body.revision } },
-            });
-            if (existing && (existing.state !== "done" || (existing.outputKey && await tx.cutMediaObject.findUnique({
-              where: { r2Key: existing.outputKey }, select: { id: true },
-            })))) return existing;
-          }
-          await tx.cutRenderJob.updateMany({
-            where: { userId, projectId, kind: target, state: "queued" },
-            data: { state: "canceled", error: "A newer preview was requested." },
-          });
-          return tx.cutRenderJob.create({
-            data: { userId, projectId, kind: target, spec: jobSpec, outName: "preview.mp4" },
-          });
-        }, { isolationLevel: "Serializable" });
-        wakeRenderWorker();
+        const row = await queuePreview(userId, projectId, jobSpec, body.revision);
         return Response.json({ id: row.id });
       }
 

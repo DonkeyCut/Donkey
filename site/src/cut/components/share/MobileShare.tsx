@@ -5,7 +5,7 @@ import { Clapperboard, FileText, Images, Loader2, MessageSquare, Captions } from
 import { Button } from "@/components/ui/button";
 import type { ProjectDoc, ShareFeatures, StoredAsset } from "@/cut/lib/types";
 import { BottomSheet } from "./BottomSheet";
-import { ArtifactVideo } from "../ArtifactVideo";
+import { ArtifactVideo } from "@donkeycut/artifact-player/ArtifactVideo";
 
 /**
  * The share as a phone should see it: the cut playing as one video, with the

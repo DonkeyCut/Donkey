@@ -4,7 +4,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   pageExtensions: ["js", "jsx", "ts", "tsx", "md", "mdx"],
   // Workspace packages ship TypeScript source; the app build transpiles them.
-  transpilePackages: ["@donkeycut/effects-kit", "@donkeycut/abexp"],
+  transpilePackages: ["@donkeycut/effects-kit", "@donkeycut/abexp", "@donkeycut/artifact-player"],
   // Cache Components: pages prerender to a static shell and anything uncached
   // streams behind its own Suspense boundary. It is what the `instant`
   // export on the public pages and the app's home routes validates against, and
@@ -36,6 +36,14 @@ const nextConfig: NextConfig = {
   // every chunk, stylesheet and font in Search Console as a candidate page.
   // The header lets them be fetched and keeps them out of the index.
   headers: async () => [
+    {
+      source: "/clients/chatgpt/:path*",
+      headers: [
+        { key: "Access-Control-Allow-Origin", value: "*" },
+        { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+        { key: "X-Content-Type-Options", value: "nosniff" },
+      ],
+    },
     {
       source: "/_next/static/:path*",
       headers: [{ key: "X-Robots-Tag", value: "noindex" }],
