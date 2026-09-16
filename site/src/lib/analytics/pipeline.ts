@@ -154,6 +154,22 @@ export async function runAnalyticsDaily(payload: {
   };
 }
 
+export async function extractCreditActivity(day: string): Promise<string[]> {
+  // Usage charges record a user action. Grants, expirations and write-offs
+  // are bookkeeping that can run while the account is idle.
+  const rows = await prisma.userCreditLedgerEntry.groupBy({
+    by: ["userId"],
+    where: {
+      createdAt: {
+        gte: new Date(`${day}T00:00:00Z`),
+        lt: new Date(`${addUtcDays(day, 1)}T00:00:00Z`),
+      },
+      type: "usage",
+    },
+  });
+  return rows.map((row) => row.userId).sort();
+}
+
 async function extractDbDay(day: string): Promise<AnalyticsDbDayFile> {
   const range = {
     createdAt: {
@@ -165,7 +181,7 @@ async function extractDbDay(day: string): Promise<AnalyticsDbDayFile> {
   // Every table indexes (userId, createdAt).
   const queries = {
     copies: () => prisma.cutCopyJob.groupBy({ by: ["userId"], where: range }),
-    creditLedger: () => prisma.userCreditLedgerEntry.groupBy({ by: ["userId"], where: range }),
+    creditLedger: async () => (await extractCreditActivity(day)).map((userId) => ({ userId })),
     inference: () => prisma.inferenceUsageEvent.groupBy({ by: ["userId"], where: range }),
     libraryAssets: () => prisma.cutLibraryAsset.groupBy({ by: ["userId"], where: range }),
     renders: () => prisma.cutRenderJob.groupBy({ by: ["userId"], where: range }),
