@@ -1,5 +1,5 @@
 import { type ChildProcess } from "node:child_process";
-import { mkdir, mkdtemp, open, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, open, readdir, rename, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { assertLocalRuntime } from "./local-only";
@@ -45,6 +45,7 @@ const MAX_RUNNING = 2; // concurrent ffmpeg exports; extra exports queue behind 
 // are active work, not backlog, so they are exempt from eviction.
 const { jobs, retire } = createJobRegistry<Job>("__veditorJobs", {
   isTerminal: (j) => j.status === "done" || j.status === "error",
+  onEvict: (job) => { if (job.target === "preview" && job.outPath) void rm(job.outPath, { force: true }); },
 });
 
 /** Renders holding an ffmpeg slot. A tab's own render is in the feed with
@@ -104,13 +105,39 @@ function pump() {
   }
 }
 
+const previewPublications = new Map<string, Promise<void>>();
+
+function publishPreview(job: Job): Promise<void> {
+  const directory = projectDir(job.projectId);
+  const previous = previewPublications.get(directory) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(async () => {
+    const newest = [...jobs.values()].filter((j) =>
+      j.projectId === job.projectId && j.target === "preview" && j.status !== "error"
+    ).at(-1);
+    if (newest?.id !== job.id) return;
+    const staged = path.join(directory, `.preview-${job.id}.mp4`);
+    try {
+      await copyFile(job.outPath, staged);
+      await rename(staged, path.join(directory, "preview.mp4"));
+    } finally {
+      await rm(staged, { force: true });
+    }
+  });
+  previewPublications.set(directory, next);
+  void next.finally(() => {
+    if (previewPublications.get(directory) === next) previewPublications.delete(directory);
+  }).catch(() => {});
+  return next;
+}
+
 /** Move a job from queued to running and drive its ffmpeg render. Its settle
  * frees the slot and pumps the queue. */
 function startRun(job: Job, spec: ExportSpec) {
   job.status = "running";
   job.startedAt = Date.now();
   void runExport(job, spec, (file) => mediaPath(spec.projectId, file))
-    .then(() => {
+    .then(async () => {
+      if (job.target === "preview") await publishPreview(job);
       job.status = "done";
     })
     .catch((err: unknown) => {
@@ -265,10 +292,17 @@ export async function createJob(form: FormData): Promise<Job> {
     if (preview) job.outName = "preview.mp4";
     else await claimExportName(job, spec.name ?? doc.name, containerExtension(spec));
     job.outPath = path.join(
-      preview ? projectDir(spec.projectId) : exportsDir(spec.projectId),
-      job.outName
+      preview ? path.join(projectDir(spec.projectId), ".previews") : exportsDir(spec.projectId),
+      preview ? `${job.id}.mp4` : job.outName
     );
     await mkdir(path.dirname(job.outPath), { recursive: true });
+    if (preview) {
+      const activePaths = new Set([...jobs.values()].map((entry) => entry.outPath));
+      for (const name of await readdir(path.dirname(job.outPath))) {
+        const file = path.join(path.dirname(job.outPath), name);
+        if (!activePaths.has(file)) await rm(file, { force: true });
+      }
+    }
     job.tmpDir = await mkdtemp(path.join(os.tmpdir(), "veditor-"));
     // Overlay PNGs are rendered in the browser and uploaded with the spec.
     for (const [key, value] of form.entries()) {

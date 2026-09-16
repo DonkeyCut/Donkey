@@ -15,12 +15,10 @@ import {
 import { knownDocVersion } from "@/cut/lib/backend/cloud";
 import { loadedDocVersion } from "@/cut/lib/backend/shared";
 import { flushCachedDocWrites, writeCachedDoc, writeCachedDocDirty } from "@/cut/lib/docCache";
-import {
-  refreshShareCard,
-  refreshShareLadder,
-  renderPreviewProxy,
-  type ExportDoc,
-} from "@/cut/lib/exportClient";
+import { refreshProjectPreviews } from "@/cut/lib/exportClient";
+import { captureRenderSnapshot, renderDoc, type ExportDoc } from "@/cut/lib/renderSnapshot";
+import { projectOperation, type ProjectOperation } from "@/cut/lib/projectOperation";
+import { createPreviewQueue } from "@/cut/lib/previewQueue";
 import { EMPTY_LIBRARY, fileZoneAt, hasRefDrag, parseMentions, refCandidatesOf } from "@/cut/lib/assetRef";
 import { placeRefAtPlayhead } from "@/cut/lib/refPlace";
 import { copyTimelineSelection, pasteCutPayload, payloadFromHtml } from "@/cut/lib/cutClipboard";
@@ -428,41 +426,35 @@ export function Editor({
   // own export queued behind it.
   useEffect(() => {
     if (viewer) return;
-    let pending: ExportDoc | null = null;
-    let rendering = false;
-    let lastRun = 0;
-    // The stashed doc renders as captured, so a flush that lands after the
-    // store has moved on still writes this project's proxy rather than nothing.
-    // `final` marks a one-shot exit (the project closing, the page going away):
-    // there is no next chance, so it skips the rate floor rather than leaving
-    // the card frozen mid-edit.
-    const flush = async (final = false) => {
-      const doc = pending;
-      if (!doc || rendering || (!final && Date.now() - lastRun < PROXY_MIN_GAP_MS)) return;
-      pending = null;
-      rendering = true;
-      lastRun = Date.now();
-      try {
-        await renderPreviewProxy(projectId, doc);
-        refreshShareCard(projectId);
-        // The share's streaming ladder rides this same lull. It is the most
-        // expensive of the three — the whole cut, once per rung — so it runs
-        // last, and it no-ops for a project that isn't shared.
-        await refreshShareLadder(projectId);
-      } finally {
-        rendering = false;
-      }
-    };
+    let closing = false;
+    let browserRender: AbortController | null = null;
+    const queue = createPreviewQueue<{ operation: ProjectOperation; doc: ExportDoc }, void>(
+      async ({ operation, doc }) => {
+        // Browser encoding yields to visible editing and ends with its page.
+        if (operation.residency === "browser" && (closing || document.visibilityState !== "hidden")) return;
+        const controller = operation.residency === "browser" ? new AbortController() : null;
+        browserRender = controller;
+        try {
+          await refreshProjectPreviews(captureRenderSnapshot(operation, doc), controller?.signal);
+        } finally {
+          if (browserRender === controller) browserRender = null;
+        }
+      },
+      PROXY_MIN_GAP_MS
+    );
+    const flush = queue.flush;
     // Backgrounding the tab is the reliable signal that the user has stepped
     // away — it fires on a tab switch, a window blur, and on the way out of the
     // page, where an unmount alone never runs.
     const onVisibility = () => {
       if (document.visibilityState === "hidden") void flush();
+      else { closing = false; browserRender?.abort(); }
     };
-    const onPageHide = () => void flush(true);
+    const onPageHide = () => { closing = true; browserRender?.abort(); void flush(true); };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("pagehide", onPageHide);
     let last: {
+      assets: unknown;
       clips: unknown;
       audioClips: unknown;
       overlays: unknown;
@@ -476,7 +468,8 @@ export function Editor({
       if (!s.loaded || s.projectId !== projectId) return;
       const changed =
         last !== null &&
-        (s.clips !== last.clips ||
+        (s.assets !== last.assets ||
+          s.clips !== last.clips ||
           s.audioClips !== last.audioClips ||
           s.overlays !== last.overlays ||
           s.subtitles !== last.subtitles ||
@@ -485,6 +478,7 @@ export function Editor({
           s.fadeOut !== last.fadeOut ||
           s.background !== last.background);
       last = {
+        assets: s.assets,
         clips: s.clips,
         audioClips: s.audioClips,
         overlays: s.overlays,
@@ -498,23 +492,15 @@ export function Editor({
       // A cut of titles and shapes over the background has a picture to show;
       // only an empty project has nothing to render a card from.
       if (projectDuration(s) <= 0) return;
-      pending = {
-        aspect: s.aspect,
-        assets: s.assets,
-        clips: s.clips,
-        audioClips: s.audioClips,
-        overlays: s.overlays,
-        subtitles: s.subtitles,
-        fadeIn: s.fadeIn,
-        fadeOut: s.fadeOut,
-        background: s.background,
-      };
+      queue.stage({ operation: projectOperation(projectId), doc: renderDoc(s) });
     });
     return () => {
       unsub();
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pagehide", onPageHide);
-      void flush(true); // the project is closing: land whatever is still stashed
+      closing = true;
+      browserRender?.abort();
+      void flush(true);
     };
   }, [projectId, viewer]);
 

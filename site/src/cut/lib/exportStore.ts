@@ -13,9 +13,9 @@ import {
   ExportRefusedError,
   runBrowserExport,
   runBrowserExportInCloud,
-  type ExportDoc,
   type ExportSettings,
 } from "./exportClient";
+import type { ExportDoc } from "./renderSnapshot";
 import { canRenderInBrowser } from "./exportRender";
 import { useGenNotify } from "./genNotify";
 

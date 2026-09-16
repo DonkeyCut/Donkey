@@ -1,7 +1,10 @@
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
+import { UI_TOOLS } from "@/cut/lib/projectCommands";
 import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
+import { projectOperation } from "../projectOperation";
+import { useEditor } from "../store";
 import { buildAiContext } from "../aiContext";
-import { MEDIA_RUNTIME_TOOLS, runAiTool, UI_TOOLS } from "../aiTools";
+import { MEDIA_RUNTIME_TOOLS, runProjectCommand } from "../aiTools";
 import { normalizeRef } from "../assetRef";
 import { DETACHED_UI_NOTE } from "../chatResume";
 import { NO_CREDITS_MESSAGE } from "../credits";
@@ -39,7 +42,9 @@ export function headlessDeps(session: HeadlessSession): CutAgentDeps {
             "This session has no media runtime, so it cannot decode or draw media. Work from the editor state and the transcript instead."
           );
       }
-      return runAiTool(name, args);
+      const projectId = useEditor.getState().projectId;
+      if (!projectId) throw new Error("No project open.");
+      return runProjectCommand(projectOperation(projectId), name, args);
     },
     models: {
       simple: geminiModelRoleNames.chatSimple,

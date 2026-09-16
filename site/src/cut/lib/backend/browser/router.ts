@@ -402,6 +402,10 @@ export async function dispatchBrowserRoute(
     }
     // /projects/:id/<action>
     if (rest.length === 3) {
+      if (rest[2] === "preview" && method === "GET") {
+        const file = await store.readFileAt(await store.projectDir(id), "preview.mp4");
+        return file ? serveFile(file, "preview.mp4", download) : err("Preview not ready.", 404);
+      }
       if (rest[2] === "duplicate" && method === "POST") return duplicateProject(id);
       if (rest[2] === "move" && method === "POST") return moveProject(req(), id);
       if (rest[2] === "media" && method === "POST") return uploadMedia(req(), id);

@@ -92,11 +92,25 @@ async function claimNext(): Promise<ClaimedJob | null> {
       select: { id: true, userId: true, projectId: true, kind: true, spec: true, outName: true },
     });
     for (const c of candidates) {
-      const { count } = await prisma.cutRenderJob.updateMany({
-        where: { id: c.id, state: "queued" },
-        data: { state: "running", claimedAt: new Date(), progress: 0, error: null },
-      });
-      if (count === 1) return c;
+      const claimed = await prisma.$transaction(async (tx) => {
+        if (["preview", "card", "hls"].includes(c.kind)) {
+          const running = await tx.cutRenderJob.findFirst({
+            where: { userId: c.userId, projectId: c.projectId, kind: c.kind, state: "running" },
+            select: { id: true },
+          });
+          if (running) return null;
+        }
+        const updated = await tx.cutRenderJob.updateMany({
+          where: { id: c.id, state: "queued" },
+          data: { state: "running", claimedAt: new Date(), progress: 0, error: null },
+        });
+        if (updated.count !== 1) return null;
+        return tx.cutRenderJob.findUnique({
+          where: { id: c.id },
+          select: { id: true, userId: true, projectId: true, kind: true, spec: true, outName: true },
+        });
+      }, { isolationLevel: "Serializable" });
+      if (claimed) return claimed;
     }
   }
   return null;

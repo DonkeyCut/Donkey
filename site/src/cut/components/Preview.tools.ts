@@ -9,6 +9,11 @@ import { bool, num, obj, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 export const PREVIEW_TOOLS = [
   {
+    name: "render_preview",
+    description: "Render a low-resolution video of the current cut, including overlays and captions. Returns a job with its captured revision, status and playback URL. A queued cloud or Mac job becomes playable when its status URL reports done. This renders the whole cut; use capture_frame for a single frame.",
+    inputSchema: obj({}),
+  },
+  {
     name: "move_selection",
     description: "Move selected visual items together in the preview, preserving their spacing. dx/dy are fractions of frame width/height. Supports video, titles, shapes, stickers, and caption tracks; audio and effects keep their timing. Keyframed items receive position keys at the playhead. One undo step.",
     inputSchema: obj({ dx: num("Horizontal movement as a frame fraction"), dy: num("Vertical movement as a frame fraction") }, ["dx", "dy"]),

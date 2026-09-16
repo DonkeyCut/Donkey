@@ -28,6 +28,24 @@ AI is hosted whatever the home: image, video, and voiceover generation and the a
 
 The preview scrubs and plays from per-clip decoders held in memory. It shows a frame the moment it arrives and refines behind it, so the timeline always answers and a jump lands on a picture. Every cache is bounded by one memory budget sized to the machine. The performance guide holds the frame budget and how a change is measured.
 
+Background previews capture a project operation and a render document before asynchronous work starts. The operation carries the project, residency, document version, capabilities, and transport. The preview queue coalesces edits and drains the final edit when the editor closes. Cloud exports requested from a document store that document in the queued job, so a later edit cannot change the export's input.
+
+```
+Project operation + captured document
+                ↓
+       Render preparation
+                ↓
+         Residency renderer
+                ↓
+        Preview artifact
+                ↓
+         ArtifactVideo
+```
+
+Browser previews use the browser compositor and replace one cached proxy in OPFS. A browser without the required encoders borrows the cloud worker and brings the result back to OPFS. Automatic browser renders run while the page is hidden and stop when editing resumes or the editor closes; the shelf uses the last completed proxy or its source thumbnail. Mac previews use the engine, retain a file per live job, and publish the project card atomically. Cloud preview jobs have immutable object keys; only the newest requested job can publish the project's preview pointer. A job ID resolves to a fresh delivery URL. Retired cloud previews expire after a day, while the current project preview stays available. The shared viewer plays MP4 or HLS with its own media element and releases its resources on source changes and unmount.
+
+Cloud source media, generated media, and retained exports count toward storage. Derived previews, share cards, and HLS ladders are quota-exempt; staging inputs are temporary. Garbage collection also corrects accounting for older preview and card objects in bounded batches. Transports expose structured storage, credit, and authentication failures. Each host chooses their presentation; the website mounts its storage dialog separately.
+
 Timeline and preview share selection: ⌘/Ctrl-click or Shift-click toggles items, and dragging moves them together with one undo step. Items move independently until grouped, and groups save with the project.
 
 Guides draw over the preview from the button beside the timeline zoom: thirds, center, safe margins, the short-form keep-out zone where TikTok, Reels and Shorts draw their own UI or crop the sides of a 9:16 frame, and custom lines dragged into place on the preview. They save with the project, snap a dragged element to their edges, never export, and the assistant reads the safe area they leave when it places graphics.

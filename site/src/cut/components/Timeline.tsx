@@ -42,7 +42,8 @@ import {
   saveAssetToLibrary,
   type LibraryAsset,
 } from "@/cut/lib/library";
-import { originalSettings, type ExportDoc } from "@/cut/lib/exportClient";
+import { originalSettings } from "@/cut/lib/exportClient";
+import type { ExportDoc } from "@/cut/lib/renderSnapshot";
 import { useExports } from "@/cut/lib/exportStore";
 import { isDragActive, startDrag, subscribeDragActive } from "@/cut/lib/drag";
 import { keyboardToEditor, shortcutDecline } from "@/cut/lib/shortcutGate";

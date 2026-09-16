@@ -1,5 +1,9 @@
 "use client";
 
+import { captureRenderSnapshot, renderDoc, type ExportDoc, type RenderSnapshot } from "./renderSnapshot";
+import { operationFailure, type OperationFailure } from "./operationFailure";
+import { projectOperation } from "./projectOperation";
+
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { engineFeatures } from "./api";
 import type { EngineFeature } from "./engineFeatures";
@@ -8,11 +12,11 @@ import {
   reserveBrowserExportJob,
   updateBrowserExportJob,
 } from "./backend/browser/exportJobs";
-import { exportsDir, readFileAt, saveExport } from "./backend/browser/opfs";
+import { exportsDir, projectDir, writeFileAt, readFileAt, saveExport } from "./backend/browser/opfs";
 import { holdRegistered, registerBlobFile, releaseRegistered, resolveRegisteredBlob } from "./backend/browser/registry";
-import { cloudBackend, quotaErrorMessage } from "./backend/cloud";
+import { captureCloudBackend } from "./backend/cloud";
 import { downloadFromUrl } from "./download";
-import { bitrateFor, renderProjectToMp4 } from "./exportRender";
+import { bitrateFor, canRenderInBrowser, renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { renderRemovalPieces } from "./removalVideo";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
@@ -444,25 +448,6 @@ export async function deleteExport(projectId: string, file: string) {
     throw new Error(body.error ?? "Could not delete the export.");
   }
 }
-
-export interface ExportDoc {
-  /** Output frame ratio the cut renders at — keeps burn-in layout (caption
-   * wrap) in the same design space as the live preview. */
-  aspect: Aspect;
-  assets: MediaAsset[];
-  /** Every video clip, any track (track 0 folds sequentially, others composite). */
-  clips: VideoClip[];
-  audioClips: AudioClip[];
-  overlays: Overlay[];
-  subtitles: SubtitlesBlock;
-  /** Whole-video fades (seconds): in from black / out to black on the final
-   * composite. */
-  fadeIn?: number;
-  fadeOut?: number;
-  /** The frame's own color behind every clip and element (hex); absent = black. */
-  background?: string;
-}
-
 
 /** The neutral built cut: the engine spec plus the browser-rendered overlay
  * PNGs. The local path serializes it to the engine's multipart form; the
@@ -1359,16 +1344,17 @@ export async function buildExportPayload(
  * its render cap. The worker would say the same, so the export ends here with
  * the gate's own words.
  */
-export class ExportRefusedError extends Error {}
+export class ExportRefusedError extends Error {
+  constructor(message: string, readonly failure?: OperationFailure) { super(message); }
+}
 
 /** Concurrent PUTs a cloud export's inputs go up on. */
 const UPLOAD_LANES = 4;
 
 function cloudRefusal(res: Response, body: { error?: string; bytes?: number; quotaBytes?: number } | null | undefined): ExportRefusedError | null {
   if (res.ok) return null;
-  if (res.status === 401) return new ExportRefusedError("Sign in to render this export in the cloud.");
-  const quota = quotaErrorMessage(res.status, body);
-  if (quota) return new ExportRefusedError(quota);
+  const failure = operationFailure(res.status, body);
+  if (failure) return new ExportRefusedError(failure.message, failure);
   if (res.status === 429 || res.status === 413) return new ExportRefusedError(body?.error ?? "Export failed to start.");
   return null;
 }
@@ -1395,12 +1381,14 @@ async function postExport(
   extra?: Record<string, unknown>,
   signal?: AbortSignal
 ): Promise<Response> {
+  signal?.throwIfAborted();
   if (backend.kind !== "cloud") {
     return backend.fetch("/api/cut/export", { method: "POST", body: exportFormFromPayload(payload) });
   }
   const overlays: { name: string; key: string }[] = [];
   if (payload.pngs.length > 0) {
     const pre = await backend.fetch("/api/cut/export/presign", {
+      signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1430,11 +1418,19 @@ async function postExport(
     );
     for (const p of payload.pngs) overlays.push({ name: p.name, key: byName.get(p.name)!.key });
   }
+  signal?.throwIfAborted();
   return backend.fetch("/api/cut/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ spec: payload.spec, overlays, projectId, outName, ...extra }),
   });
+}
+
+function renderAssetUrl(projectId: string, asset: MediaAsset): string {
+  const state = useEditor.getState();
+  return state.projectId === projectId
+    ? state.assets.find((candidate) => candidate.id === asset.id)?.url ?? asset.url
+    : asset.url;
 }
 
 /** The output's file name: what the user typed, or the project's name, under
@@ -1459,7 +1455,7 @@ export async function pollExport(
       progress?: number;
       outName?: string;
     }>(st);
-    if (!st.ok || status.status === "error") throw new Error(status.error ?? "Export failed.");
+    if (!st.ok || status.status === "error" || status.status === "canceled") throw new Error(status.error ?? "Export failed.");
     onProgress("Rendering", status.progress ?? 0);
     if (status.status === "done") return status.outName ?? "export.mp4";
   }
@@ -1502,14 +1498,13 @@ export async function createExportJob(
   doc: ExportDoc,
   settings: ExportSettings
 ): Promise<string> {
-  const backend = getBackend(); // pinned: the payload build takes a while
+  const backend = projectOperation(projectId).backend;
+  const outName = exportOutName(settings);
   if (backend.kind === "local") await assertEngineCarries(settings);
   const payload = await buildExportPayload(projectId, doc, settings, "export");
-  const res = await postExport(projectId, payload, exportOutName(settings), backend);
+  const res = await postExport(projectId, payload, outName, backend);
   const body = await apiJson<{ id?: string }>(res);
   if (!res.ok || !body.id) {
-    // A quota rejection raises the upgrade wall on its way through, the same as
-    // one from an upload — otherwise the only sign is a terse line in the dock.
     throw cloudRefusal(res, body) ?? new Error(body.error ?? "Export failed to start.");
   }
   return body.id;
@@ -1544,7 +1539,7 @@ export async function runBrowserExport(
     onClaimed?: (jobId: string) => void;
   } = {}
 ): Promise<string> {
-  const backend = getBackend(); // pinned: the render outlives navigation
+  const backend = projectOperation(projectId).backend;
   if (backend.kind === "browser") return runStoreExport(projectId, doc, settings, opts);
   if (backend.kind === "local") return runEngineExport(projectId, doc, settings, opts, backend);
 
@@ -1574,7 +1569,7 @@ export async function runBrowserExport(
       // snapshot: a long render can outlive the links it started with, and the
       // store re-mints them behind it.
       resolve: (asset) =>
-        useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? asset.url,
+        renderAssetUrl(projectId, asset),
       signal: opts.signal,
       // The render is nearly all of the work; the upload is the tail of the bar.
       onProgress: ({ ratio }) => opts.onProgress?.(ratio * 0.9),
@@ -1664,7 +1659,7 @@ async function runEngineExport(
   try {
     const rendered = await renderProjectToMp4(doc, settings, {
       resolve: (asset) =>
-        useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? asset.url,
+        renderAssetUrl(projectId, asset),
       signal: opts.signal,
       // The render is nearly all of the work; the hand-in to the engine on
       // this machine is the tail of the bar.
@@ -1718,13 +1713,14 @@ async function runStoreExport(
   settings: ExportSettings,
   opts: Parameters<typeof runBrowserExport>[3] = {}
 ): Promise<string> {
+  const requestedName = exportOutName(settings);
   const job = reserveBrowserExportJob(projectId, opts.projectName);
   opts.onClaimed?.(job.id);
   holdRegistered(`/api/cut/projects/${projectId}/`);
   try {
     const rendered = await renderProjectToMp4(doc, settings, {
       resolve: (asset) =>
-        useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? asset.url,
+        renderAssetUrl(projectId, asset),
       signal: opts.signal,
       onProgress: ({ ratio }) => {
         opts.onProgress?.(ratio);
@@ -1733,7 +1729,7 @@ async function runStoreExport(
     });
     let outName: string;
     try {
-      outName = await saveExport(projectId, rendered.file, exportOutName(settings));
+      outName = await saveExport(projectId, rendered.file, requestedName);
     } finally {
       void rendered.discard();
     }
@@ -1769,6 +1765,46 @@ async function runStoreExport(
  * project's own exports folder. The cloud keeps nothing: the uploads and the
  * output are the job's scratch, gone when the job is dismissed or swept.
  */
+async function renderBorrowedFile(
+  projectId: string,
+  doc: ExportDoc,
+  settings: ExportSettings,
+  target: "export" | "preview",
+  opts: Parameters<typeof runBrowserExport>[3] = {}
+): Promise<File> {
+  const backend = captureCloudBackend();
+  const requestedName = exportOutName(settings);
+  let cloudJobId: string | null = null;
+  const stop = () => opts.signal?.throwIfAborted();
+  holdRegistered(`/api/cut/projects/${projectId}/`);
+  try {
+    const payload = await buildExportPayload(projectId, doc, settings, target);
+    stop();
+    for (const name of specMediaFiles(payload.spec as Parameters<typeof specMediaFiles>[0])) {
+      const asset = doc.assets.find((a) => a.fileName === name);
+      const url = asset ? renderAssetUrl(projectId, asset) : null;
+      const blob = url ? resolveRegisteredBlob(url) : null;
+      if (!blob) throw new Error(`${name} is not in this browser's storage.`);
+      payload.pngs.push({ name, blob });
+    }
+    const res = await postExport(projectId, payload, requestedName, backend, { mediaFrom: "overlays" }, opts.signal);
+    const body = await apiJson<{ id?: string }>(res);
+    if (!res.ok || !body.id) throw cloudRefusal(res, body) ?? new Error(body.error ?? "Render failed to start.");
+    cloudJobId = body.id;
+    opts.onClaimed?.(cloudJobId);
+    const outName = await pollExport(cloudJobId, (_stage, ratio) => opts.onProgress?.(ratio * 0.95), () => !!opts.signal?.aborted, backend);
+    stop();
+    const fileRes = await backend.fetch(`/api/cut/export/${cloudJobId}/file`, { signal: opts.signal });
+    if (!fileRes.ok) throw new Error("Could not fetch the rendered file.");
+    const file = new File([await fileRes.blob()], outName, { type: deliveryContainer(settings.container).mime });
+    stop();
+    return file;
+  } finally {
+    if (cloudJobId) cancelExportJob(cloudJobId, backend);
+    releaseRegistered(`/api/cut/projects/${projectId}/`);
+  }
+}
+
 async function runBorrowedExport(
   projectId: string,
   doc: ExportDoc,
@@ -1777,75 +1813,22 @@ async function runBorrowedExport(
 ): Promise<string> {
   const job = reserveBrowserExportJob(projectId, opts.projectName);
   opts.onClaimed?.(job.id);
-  let cloudJobId: string | null = null;
-  const stop = () => {
-    if (opts.signal?.aborted) throw new DOMException("Export canceled.", "AbortError");
-  };
-  // The payload build reads the project's store-served blob URLs and can take
-  // a while; the hold keeps them alive if the user opens another project
-  // meanwhile, and the asset's URL is read live for the same reason.
-  holdRegistered(`/api/cut/projects/${projectId}/`);
   try {
-    const payload = await buildExportPayload(projectId, doc, settings, "export");
-    stop();
-    for (const name of specMediaFiles(payload.spec as Parameters<typeof specMediaFiles>[0])) {
-      const asset = doc.assets.find((a) => a.fileName === name);
-      const url = asset
-        ? (useEditor.getState().assets.find((a) => a.id === asset.id)?.url ?? asset.url)
-        : null;
-      const blob = url ? resolveRegisteredBlob(url) : null;
-      if (!blob) throw new Error(`${name} is not in this browser's storage.`);
-      payload.pngs.push({ name, blob });
-    }
-    const res = await postExport(
-      projectId,
-      payload,
-      exportOutName(settings),
-      cloudBackend,
-      { mediaFrom: "overlays" },
-      opts.signal
-    );
-    const body = await apiJson<{ id?: string }>(res);
-    if (!res.ok || !body.id) {
-      throw cloudRefusal(res, body) ?? new Error(body.error ?? "Export failed to start.");
-    }
-    cloudJobId = body.id;
-    // The cloud row is this export too; the dock shows the local row alone.
-    opts.onClaimed?.(cloudJobId);
-    const outName = await pollExport(
-      cloudJobId,
-      (_stage, ratio) => {
-        opts.onProgress?.(ratio * 0.95);
-        updateBrowserExportJob(job.id, { progress: ratio * 0.95 });
-      },
-      () => !!opts.signal?.aborted,
-      cloudBackend
-    );
-    stop();
-    const fileRes = await cloudBackend.fetch(`/api/cut/export/${cloudJobId}/file`, {
-      signal: opts.signal,
+    const file = await renderBorrowedFile(projectId, doc, settings, "export", {
+      ...opts,
+      onProgress: (progress) => { opts.onProgress?.(progress); updateBrowserExportJob(job.id, { progress }); },
     });
-    if (!fileRes.ok) throw new Error("Could not fetch the rendered export.");
-    const file = new File([await fileRes.blob()], outName, {
-      type: deliveryContainer(settings.container).mime,
-    });
-    stop();
-    const saved = await saveExport(projectId, file, outName);
+    const saved = await saveExport(projectId, file, file.name);
     const stored = await readFileAt(await exportsDir(projectId), saved);
     if (stored) {
       registerBlobFile(`/api/cut/export/${job.id}/file`, stored);
       registerBlobFile(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(saved)}`, stored);
     }
     updateBrowserExportJob(job.id, { status: "done", progress: 1, outName: saved });
-    // The cloud's copy was the job's scratch; dismissing the job drops it.
-    cancelExportJob(cloudJobId, cloudBackend);
     return job.id;
-  } catch (err) {
-    if (cloudJobId) cancelExportJob(cloudJobId, cloudBackend);
+  } catch (error) {
     removeBrowserExportJob(job.id);
-    throw err;
-  } finally {
-    releaseRegistered(`/api/cut/projects/${projectId}/`);
+    throw error;
   }
 }
 
@@ -1886,9 +1869,9 @@ export function cancelExportJob(jobId: string, backend: CutBackend = getBackend(
 export async function renderShareLadder(
   projectId: string,
   doc: ExportDoc,
-  shareSubtitles: boolean
+  shareSubtitles: boolean,
+  backend: CutBackend = getBackend()
 ): Promise<void> {
-  const backend = getBackend(); // pinned: the ladder outlives the dialog
   // The master renders at "Original" — the ladder caps its top rung at this
   // frame, so anything given up here is given up for every viewer. The encode
   // preset is loosened because this master is an intermediate: every rung is
@@ -1913,23 +1896,87 @@ export async function renderShareLadder(
   }
 }
 
-/** Low-res proxy of the actual edit for the project card's hover preview.
- * Renders through the same pipeline (overlays and all), writing the project's
- * preview.mp4. Best-effort: silently no-ops if a slot is busy or there's no
- * footage yet. */
-export async function renderPreviewProxy(projectId: string, doc: ExportDoc) {
-  const backend = getBackend(); // pinned: the proxy render outlives navigation
+export type PreviewArtifact = { id: string; projectId: string; revision: string; url: string; expiresAt?: number };
+export type PreviewJob = PreviewArtifact & { status: "queued" | "done"; statusUrl?: string };
+
+export async function submitPreviewSnapshot(
+  snapshot: RenderSnapshot,
+  onProgress: (stage: string, ratio: number) => void = () => {},
+  signal?: AbortSignal
+): Promise<PreviewJob> {
+  const { operation: { projectId, backend }, doc, revision } = snapshot;
+  signal?.throwIfAborted();
   const settings: ExportSettings = { ...scaledFrame(doc.aspect, 360), fps: 24, crf: 30, preset: "veryfast", ...DELIVERY_DEFAULTS };
-  let res: Response;
-  try {
-    const payload = await buildExportPayload(projectId, doc, settings, "preview");
-    res = await postExport(projectId, payload, "preview.mp4", backend);
-  } catch {
-    return; // no clips yet
+  if (backend.kind === "browser") {
+    const directory = await projectDir(projectId);
+    if (!directory) throw new Error("Project not found in browser storage.");
+    holdRegistered(`/api/cut/projects/${projectId}/`);
+    try {
+      const rendered = await canRenderInBrowser(doc, settings)
+        ? await renderProjectToMp4(doc, settings, {
+            resolve: (asset) => asset.url, signal,
+            onProgress: ({ ratio }) => onProgress("Rendering", ratio),
+          })
+        : {
+            file: await renderBorrowedFile(projectId, doc, { ...settings, name: "preview" }, "preview", {
+              signal, onProgress: (ratio) => onProgress("Rendering", ratio),
+            }),
+            discard: async () => {},
+          };
+      try {
+        signal?.throwIfAborted();
+        await writeFileAt(directory, "preview.mp4", rendered.file);
+        const file = await readFileAt(directory, "preview.mp4");
+        if (!file) throw new Error("Could not read the rendered preview.");
+        const url = registerBlobFile(`/api/cut/projects/${projectId}/preview`, file);
+        return { id: revision, projectId, revision, url, status: "done" };
+      } finally {
+        await rendered.discard();
+      }
+    } finally {
+      releaseRegistered(`/api/cut/projects/${projectId}/`);
+    }
   }
-  const body = (await res.json().catch(() => ({}))) as { id?: string };
-  if (!res.ok || !body.id) return; // a slot was busy; try again later
-  await pollExport(body.id, () => {}, undefined, backend).catch(() => {});
+  const payload = await buildExportPayload(projectId, doc, settings, "preview");
+  signal?.throwIfAborted();
+  const res = await postExport(projectId, payload, "preview.mp4", backend, { revision }, signal);
+  const body = await apiJson<{ id?: string }>(res);
+  if (!res.ok || !body.id) throw cloudRefusal(res, body) ?? new Error(body.error ?? "Preview failed to start.");
+  if (signal?.aborted) {
+    cancelExportJob(body.id, backend);
+    signal.throwIfAborted();
+  }
+  return {
+    id: body.id, projectId, revision, status: "queued",
+    url: backend.url(`/api/cut/export/${body.id}/file`),
+    statusUrl: backend.url(`/api/cut/export/${body.id}`),
+  };
+}
+
+export async function renderPreviewSnapshot(
+  snapshot: RenderSnapshot,
+  onProgress: (stage: string, ratio: number) => void = () => {},
+  signal?: AbortSignal
+): Promise<PreviewArtifact> {
+  const job = await submitPreviewSnapshot(snapshot, onProgress, signal);
+  if (job.status === "done") return job;
+  const backend = snapshot.operation.backend;
+  const cancel = () => cancelExportJob(job.id, backend);
+  signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    if (signal?.aborted) cancel();
+    await pollExport(job.id, onProgress, () => signal?.aborted === true, backend);
+    if (backend.kind === "cloud") {
+      const response = await backend.fetch(`/api/cut/export/${job.id}`);
+      const body = await apiJson<{ artifact?: { url: string; expiresIn: number } }>(response);
+      if (!response.ok || !body.artifact) throw new Error(body.error ?? "Preview is unavailable.");
+      return { id: job.id, projectId: job.projectId, revision: job.revision, url: body.artifact.url,
+        expiresAt: Date.now() + body.artifact.expiresIn * 1000 };
+    }
+    return { id: job.id, projectId: job.projectId, revision: job.revision, url: job.url };
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+  }
 }
 
 /** Seconds of the cut a share card shows. */
@@ -1986,8 +2033,7 @@ function cardSettings(aspect: Aspect): ExportSettings {
  *
  * Best-effort throughout — a project with no footage, an unconfigured
  * backend, or a busy render slot simply keeps the card it already had. */
-async function renderShareCard(projectId: string, doc: ExportDoc): Promise<void> {
-  const backend = getBackend(); // pinned: the card render outlives navigation
+async function renderShareCard(projectId: string, doc: ExportDoc, backend: CutBackend): Promise<void> {
   if (backend.kind !== "cloud") return;
   try {
     const res = await backend.fetch(`/api/cut/projects/${projectId}/share`);
@@ -2019,17 +2065,8 @@ async function renderShareCard(projectId: string, doc: ExportDoc): Promise<void>
 export function refreshShareCard(projectId: string): void {
   const s = useEditor.getState();
   if (!s.loaded || s.projectId !== projectId || projectDuration(s) <= 0) return;
-  void renderShareCard(projectId, {
-    aspect: s.aspect,
-    assets: s.assets,
-    clips: s.clips,
-    audioClips: s.audioClips,
-    overlays: s.overlays,
-    subtitles: s.subtitles,
-    fadeIn: s.fadeIn,
-    fadeOut: s.fadeOut,
-    background: s.background,
-  }).catch(() => {});
+  const snapshot = captureRenderSnapshot(projectOperation(projectId), renderDoc(s));
+  void renderShareCard(projectId, snapshot.doc, snapshot.operation.backend).catch(() => {});
 }
 
 /**
@@ -2048,29 +2085,25 @@ export function refreshShareCard(projectId: string): void {
 export async function refreshShareLadder(projectId: string): Promise<void> {
   const s = useEditor.getState();
   if (!s.loaded || s.projectId !== projectId || projectDuration(s) <= 0) return;
-  const backend = getBackend();
-  // The share decides what the render may contain, so it is read first. This
-  // also settles whether to render at all: an unshared project has no viewer to
-  // build a ladder for.
+  const snapshot = captureRenderSnapshot(projectOperation(projectId), renderDoc(s));
+  await refreshSnapshotLadder(snapshot);
+}
+
+async function refreshSnapshotLadder({ operation, doc }: RenderSnapshot): Promise<void> {
+  const { projectId, backend } = operation;
+  if (backend.kind !== "cloud") return;
   const res = await backend.fetch(`/api/cut/projects/${projectId}/share`).catch(() => null);
   if (!res?.ok) return;
   const body = (await res.json().catch(() => null)) as {
     share?: { features?: { subtitles?: boolean } } | null;
   } | null;
-  if (!body?.share) return;
-  await renderShareLadder(
-    projectId,
-    {
-      aspect: s.aspect,
-      assets: s.assets,
-      clips: s.clips,
-      audioClips: s.audioClips,
-      overlays: s.overlays,
-      subtitles: s.subtitles,
-      fadeIn: s.fadeIn,
-      fadeOut: s.fadeOut,
-      background: s.background,
-    },
-    body.share.features?.subtitles === true
-  );
+  if (body?.share) await renderShareLadder(projectId, doc, body.share.features?.subtitles === true, backend);
+}
+
+/** All derived representations consume the same captured document and transport. */
+export async function refreshProjectPreviews(snapshot: RenderSnapshot, signal?: AbortSignal): Promise<void> {
+  const { projectId, backend } = snapshot.operation;
+  await renderPreviewSnapshot(snapshot, undefined, signal);
+  await renderShareCard(projectId, snapshot.doc, backend);
+  await refreshSnapshotLadder(snapshot);
 }

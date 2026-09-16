@@ -1,5 +1,8 @@
 import { copyFile } from "node:fs/promises";
-import { runAiTool, UI_TOOLS } from "../../lib/aiTools";
+import { UI_TOOLS } from "@/cut/lib/projectCommands";
+import { runProjectCommand } from "../../lib/aiTools";
+import { projectOperation } from "../../lib/projectOperation";
+import { localBackend } from "../../lib/backend/local";
 import { DETACHED_MEDIA_ERROR, DETACHED_SESSION_ERROR, DETACHED_UI_NOTE } from "../../lib/chatResume";
 import { mp4NameFor, setHostMediaStore } from "../../lib/mediaConvert";
 import { setHostDocStore } from "../../lib/projectReference";
@@ -31,6 +34,7 @@ const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "refine_speech_cuts",
   "freeze_frame",
   "capture_frame",
+  "render_preview",
   "create_sticker",
   "subtitles_generate",
   "captions_generate",
@@ -153,7 +157,7 @@ async function executeHeadlessTool(
   const doc = await ensureOpen(projectId);
   if (!doc) return { errorText: "Project not found on this Mac." };
   try {
-    const output = await runAiTool(toolName, (input ?? {}) as Record<string, unknown>);
+    const output = await runProjectCommand(projectOperation(projectId, localBackend), toolName, (input ?? {}) as Record<string, unknown>);
     await flush(doc);
     return { output: output ?? null };
   } catch (err) {

@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { cutLimitsFor, EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
 import { getProject } from "./projects";
-import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl } from "./mediaCdn";
+import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { del, head, overlayKey, overlayPrefix, presignPut, projectExportKey } from "./r2";
 import { contentTypeFor } from "../serveFile";
 import { containerOfName, deliveryContainer, exportBaseName, specMediaFiles, type ExportContainer } from "../../lib/exportDelivery";
@@ -50,6 +50,7 @@ const IMPORT_MAX_BYTES = 2 * 1024 ** 3;
 const HEARTBEAT_QUIET_MS = 30_000;
 
 type JobRow = {
+  spec: unknown;
   id: string;
   projectId: string | null;
   kind: string;
@@ -201,15 +202,13 @@ export const jobsCloud = {
       };
       if (!Array.isArray(files) || files.length === 0) return err("files is required.", 400);
       if (files.length > MAX_OVERLAY_FILES) return err("Too many overlays.", 400);
-      // The overlays exist for a render, so the gates that render passes apply
-      // here too: a user's export meets the daily and live caps, the editor's
-      // own renders (proxy, card, ladder) only the storage margin.
+      // Retained exports pass their storage and render gates before staging inputs.
       if (target === undefined || target === "export") {
         const capped = await renderJobCheck(userId);
         if (capped) return capped;
+        const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+        if (over) return over;
       }
-      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
-      if (over) return over;
       let total = 0;
       for (const f of files) {
         if (!Number.isInteger(f.bytes) || f.bytes! < 1) return err("Every overlay needs its size.", 400);
@@ -251,6 +250,7 @@ export const jobsCloud = {
         projectId?: string;
         outName?: string;
         burnedSubtitles?: boolean;
+        revision?: string;
         /** "overlays": the cut's media was uploaded beside the stills, so the
          * project it names is not one the cloud stores — a browser-resident
          * project borrowing the worker. */
@@ -259,6 +259,8 @@ export const jobsCloud = {
       if (!body.spec || typeof body.spec !== "object") return err("spec is required.", 400);
       const projectId = body.projectId ?? body.spec.projectId;
       if (!projectId) return err("projectId is required.", 400);
+      if (body.revision !== undefined && (typeof body.revision !== "string" || body.revision.length > 128 || !body.revision))
+        return err("Invalid render revision.", 400);
       const borrowed = body.mediaFrom === "overlays";
       const project = await getProject(userId, projectId);
       if (!project && !borrowed) return err("Project not found.", 400);
@@ -290,24 +292,44 @@ export const jobsCloud = {
           : "export";
       const refused = specRefusal(body.spec as Record<string, unknown>);
       if (refused) return err(refused, 400);
-      // Every render lands bytes, so every target passes the storage margin.
-      // The finished file's size isn't knowable until it renders; what is
-      // knowable is whether this account is already too far past its quota to
-      // be handed more, so that is the gate. The daily and live caps count
-      // renders the user asked for; the editor's own renders are held to one
-      // running and one queued per project below.
+      // Retained exports pass storage and render gates. Derived playback
+      // artifacts use a bounded queue and expire through garbage collection.
       if (target === "export") {
         const capped = await renderJobCheck(userId);
         if (capped) return capped;
+        const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+        if (over) return over;
       }
-      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
-      if (over) return over;
       const jobSpec = {
+        ...(body.revision ? { revision: body.revision } : {}),
         spec: body.spec,
         overlays: body.overlays ?? [],
         ...(borrowed ? { mediaFrom: "overlays" } : {}),
         ...(target === "hls" ? { burnedSubtitles: body.burnedSubtitles === true } : {}),
       } as unknown as Prisma.InputJsonValue;
+
+      if (target === "preview") {
+        const row = await prisma.$transaction(async (tx) => {
+          if (body.revision) {
+            const existing = await tx.cutRenderJob.findFirst({
+              where: { userId, projectId, kind: target, state: { in: ["queued", "running", "done"] },
+                spec: { path: ["revision"], equals: body.revision } },
+            });
+            if (existing && (existing.state !== "done" || (existing.outputKey && await tx.cutMediaObject.findUnique({
+              where: { r2Key: existing.outputKey }, select: { id: true },
+            })))) return existing;
+          }
+          await tx.cutRenderJob.updateMany({
+            where: { userId, projectId, kind: target, state: "queued" },
+            data: { state: "canceled", error: "A newer preview was requested." },
+          });
+          return tx.cutRenderJob.create({
+            data: { userId, projectId, kind: target, spec: jobSpec, outName: "preview.mp4" },
+          });
+        }, { isolationLevel: "Serializable" });
+        wakeRenderWorker();
+        return Response.json({ id: row.id });
+      }
 
       if (target !== "export") {
         if (target === "hls") {
@@ -362,13 +384,7 @@ export const jobsCloud = {
     }
   },
 
-  /**
-   * Queue a whole-timeline export for a client that cannot build a render spec
-   * — the phone. The row carries the project and the size; the worker opens
-   * the project document and builds the spec itself, so what renders is the
-   * cut as it stands, overlays and captions and all, exactly as the web
-   * dialog would have rendered it.
-   */
+  /** Capture the requested document in the queue; the worker prepares its render spec. */
   async exportFromDoc(userId: string, projectId: string, req: Request) {
     try {
       const body = (await req.json().catch(() => ({}))) as { preset?: string };
@@ -387,7 +403,7 @@ export const jobsCloud = {
           userId,
           projectId,
           kind: "export",
-          spec: { fromDoc: { preset } } as unknown as Prisma.InputJsonValue,
+          spec: { fromDoc: { preset, snapshot: { doc: project.doc, version: String(project.version) } } } as unknown as Prisma.InputJsonValue,
           outName,
         },
       });
@@ -408,6 +424,11 @@ export const jobsCloud = {
       progress: row.progress,
       error,
       outName: row.outName || undefined,
+      artifact: row.state === "done" && row.outputKey ? {
+        id: row.id, projectId: row.projectId, kind: row.kind,
+        url: mediaObjectUrl(row.outputKey), expiresIn: mediaUrlLifetime(),
+        revision: (row.spec as { revision?: string } | null)?.revision ?? null,
+      } : null,
     });
   },
 
@@ -569,6 +590,10 @@ export const jobsCloud = {
       const row = await findJob(userId, jobId);
       if (!row || row.state !== "done" || !row.outputKey) {
         return new Response("Export not ready.", { status: 404 });
+      }
+      if (row.kind === "preview" && !row.outputKey.startsWith(overlayPrefix(userId))) {
+        const artifact = await prisma.cutMediaObject.findUnique({ where: { r2Key: row.outputKey }, select: { id: true } });
+        if (!artifact) return err("Preview expired. Render it again.", 410);
       }
       // A finished job's output never changes, so the redirect is cacheable.
       return redirect(

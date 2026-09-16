@@ -46,7 +46,8 @@ import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./fr
 import { renderElementPng } from "./textRender";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
-import type { ExportDoc, ExportSettings } from "./exportClient";
+import type { ExportDoc } from "./renderSnapshot";
+import type { ExportSettings } from "./exportClient";
 import { deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor } from "./exportDelivery";
 
 /** Audio is written at the rate and width a delivery file wants, rather than

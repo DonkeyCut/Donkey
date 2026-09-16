@@ -1,4 +1,5 @@
 import type { HeadlessSession } from "./bind";
+import { noteProjectRevision } from "../projectRevision";
 import { fetchWithRetry } from "./http";
 import { syncFontAssets } from "../fontAssets";
 import { syncLinkedLibrary } from "../linkedLibrary";
@@ -35,6 +36,16 @@ export async function openCloudProject(
   if (!version)
     throw new Error("The project read carried no doc version; refusing an unversioned session.");
   const doc = (await res.json()) as ProjectDoc;
+  return openCloudSnapshot(s, projectId, { doc, version });
+}
+
+export type CloudDocSnapshot = { doc: ProjectDoc; version: string };
+
+export async function openCloudSnapshot(
+  s: HeadlessSession,
+  projectId: string,
+  { doc, version }: CloudDocSnapshot
+): Promise<HeadlessDocSession> {
   // Media rides signed R2 URLs: tool paths that read asset bytes (attachment
   // refs, sticker decodes) fetch them bare, and the /media route would answer
   // those unauthenticated fetches 401. The route URL stays the fallback for
@@ -63,6 +74,7 @@ export async function openCloudProject(
     url: signed.get(a.fileName) ?? `${projectPath(s, projectId)}/media/${encodeURIComponent(a.fileName)}`,
   }));
   await useEditor.getState().openProjectDoc(projectId, doc, assets);
+  noteProjectRevision(projectId, version);
   // The page does this from the editor; a run has to do it before it draws,
   // or a title set in the user's own font comes out in the fallback face. The
   // account's shelf fonts come along the same way — a run reaches the cloud
@@ -95,5 +107,6 @@ export async function pushCloudProject(
   if (!res.ok) throw new Error(`Could not save project ${session.projectId} (${res.status}).`);
   const body = (await res.json()) as { version?: number };
   if (body.version !== undefined) session.version = String(body.version);
+  noteProjectRevision(session.projectId, session.version);
   return session;
 }

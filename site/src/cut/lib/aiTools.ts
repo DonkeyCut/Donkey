@@ -1,5 +1,11 @@
 "use client";
 
+import { projectRevision } from "@/cut/lib/projectRevision";
+import { assertProjectCommand } from "./projectCommands";
+import { projectOperation, type ProjectOperation } from "./projectOperation";
+import { captureRenderSnapshot, renderDoc } from "./renderSnapshot";
+import { submitPreviewSnapshot } from "./exportClient";
+
 import { ITEM_KIND_IDS, ITEM_KINDS, type ItemKind } from "./itemKinds";
 import { timelineItem } from "./timelineItems";
 import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previewSelection";
@@ -405,7 +411,7 @@ type BrowserToolName = Exclude<
 
 type Editor = ReturnType<typeof useEditor.getState>;
 
-type ToolRun = (s: Editor, input: Record<string, unknown>) => Promise<unknown> | unknown;
+type ToolRun = (s: Editor, input: Record<string, unknown>, operation?: ProjectOperation) => Promise<unknown> | unknown;
 
 /** The browser handler for every tool, keyed by the names the `*.tools.ts`
  * modules beside the components export, so a tool added, removed, or renamed
@@ -806,6 +812,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // The tool result carries the whole transcript; the per-message context
       // snapshot trims it, so this is how the model pulls every cue when needed.
       return buildAiContext({ fullCues: true });
+  },
+
+  render_preview: async (s, _input, operation) => {
+    if (!s.projectId || !s.loaded) throw new ToolError("No project open.");
+    return submitPreviewSnapshot(captureRenderSnapshot(operation ?? projectOperation(s.projectId), renderDoc(s)));
   },
 
   capture_frame: async (s, input) => {
@@ -4218,21 +4229,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
 class ToolError extends Error {}
 
-/**
- * Execute an assistant tool call against the live editor store.
- * Returns a small JSON-safe result; throws ToolError with a readable message.
- */
-/** Tools whose whole effect is the editor UI in an open tab — panel focus,
- * scroll, playback. A session with no page answers them with a typed no-op so
- * the model keeps its footing. Everything else runs anywhere the media
- * primitives do. */
-export const UI_TOOLS: ReadonlySet<string> = new Set([
-  "set_side_panel",
-  "set_view",
-  "open_export",
-  "set_playing",
-]);
-
 /** Tools that decode or rasterize media — frame grabs, audio scans, image
  * decodes, the transcription mixdown. A page has those primitives and a
  * headless process installs them; a process that installed neither refuses
@@ -4246,6 +4242,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "detect_beats",
   "refine_speech_cuts",
   "capture_frame",
+  "render_preview",
   "freeze_frame",
   "create_sticker",
   "subtitles_generate",
@@ -4260,13 +4257,31 @@ export async function runAiTool(
   name: string,
   input: Record<string, unknown>
 ): Promise<unknown> {
-  const s = useEditor.getState();
+  return dispatchTool(useEditor.getState(), name, input);
+}
 
+async function dispatchTool(s: Editor, name: string, input: Record<string, unknown>, operation?: ProjectOperation): Promise<unknown> {
   // "update_title" stays as an alias so older threads keep working.
   const key = name === "update_title" ? "update_overlay" : name;
   const run = (toolRuns as Partial<Record<string, ToolRun>>)[key];
   if (!run) throw new ToolError(`Unknown tool: ${name}`);
-  return run(s, input);
+  return run(s, input, operation);
+}
+
+/** Used inside the existing serialized engine session or isolated cloud worker.
+ * The caller supplies a hydrated project; deterministic commands invoke no model. */
+export async function runProjectCommand(
+  operation: ProjectOperation,
+  name: string,
+  input: Record<string, unknown>
+): Promise<unknown> {
+  const state = useEditor.getState();
+  assertProjectCommand(operation, state.projectId, name, projectRevision(operation.projectId));
+  if (!state.loaded) throw new ToolError("The project is still opening.");
+  const result = await dispatchTool(state, name, input, operation);
+  if (useEditor.getState().projectId !== operation.projectId)
+    throw new ToolError("The project changed while the command was running.");
+  return result;
 }
 
 /** Synthesize speech segments with hosted Gemini voices (the user's Donkey

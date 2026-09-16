@@ -1,11 +1,12 @@
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { CloudDocSnapshot } from "../lib/headless/docSession";
 import { buildDocExportSpec, isDocExportPreset } from "../lib/headless/docExport";
 import { runExport, type ExportSpec, type RenderHandle } from "../server/exportPipeline";
 import { storeCardArtifacts } from "./cardJob";
 import { prisma, registerObject, type ClaimedJob } from "./db";
-import { downloadToFile, exportKey, mediaKey, mimeFor, previewKey, uploadFile } from "./r2";
+import { downloadToFile, exportKey, mediaKey, mimeFor, uploadFile } from "./r2";
 import { overlayKey } from "../server/cloud/r2";
 import { specMediaFiles } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
@@ -19,7 +20,7 @@ export interface ExportJobSpec {
   /** A render asked for by a client that cannot build a spec — the phone. The
    * row carries the size and nothing else; the worker opens the project doc
    * and builds the spec itself. */
-  fromDoc?: { preset?: string };
+  fromDoc?: { preset?: string; snapshot: CloudDocSnapshot };
   overlays?: { name: string; key: string }[];
   /** "overlays": the cut's media came up with the job — a browser-resident
    * project borrowing this worker. Its output is the job's scratch too: it
@@ -119,6 +120,8 @@ export async function runExportJob(
   const stored = job.spec as ExportJobSpec;
   const projectId = job.projectId ?? stored.spec?.projectId;
   if (!projectId) throw new Error("Export job has no project.");
+  if (stored.fromDoc && !stored.fromDoc.snapshot?.doc)
+    throw new Error("This render has no captured document. Queue the export again.");
   if (!stored.fromDoc && (!stored.spec || !Array.isArray(stored.spec.clips))) {
     throw new Error("Malformed export spec.");
   }
@@ -135,7 +138,8 @@ export async function runExportJob(
             runnerSession(job),
             projectId,
             isDocExportPreset(stored.fromDoc.preset) ? stored.fromDoc.preset : "original",
-            handle.tmpDir
+            handle.tmpDir,
+            stored.fromDoc.snapshot
           )) as ExportSpec,
         }
       : stored;
@@ -175,7 +179,7 @@ export async function runExportJob(
       return { outputKey: key, outName };
     }
     const key = preview
-      ? previewKey(job.userId, projectId)
+      ? `cut/${job.userId}/projects/${projectId}/previews/${job.id}.mp4`
       : exportKey(job.userId, projectId, outName);
     const bytes = await uploadFile(key, handle.outPath, mime);
     await registerObject({
@@ -188,10 +192,20 @@ export async function runExportJob(
       kind: preview ? "preview" : "export",
     });
     if (preview) {
-      // Best-effort: a project deleted mid-render just drops its proxy.
-      await prisma.cutProject
-        .update({ where: { id: projectId }, data: { previewKey: key } })
-        .catch(() => {});
+      await prisma.$transaction(async (tx) => {
+        const project = await tx.cutProject.findUnique({ where: { id: projectId }, select: { previewKey: true } });
+        if (!project) return;
+        const newest = await tx.cutRenderJob.findFirst({
+          where: { userId: job.userId, projectId, kind: "preview" },
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true },
+        });
+        if (newest?.id !== job.id) return;
+        // A newer completion changes the pointer, so this write cannot replace it.
+        await tx.cutProject.updateMany({
+          where: { id: projectId, userId: job.userId, previewKey: project.previewKey },
+          data: { previewKey: key },
+        });
+      });
     }
     return { outputKey: key, outName };
   });

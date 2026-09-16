@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { foldClips } from "./audioMix";
 import { bitrateFor, mixSpecFor } from "./exportRender";
-import type { ExportDoc } from "./exportClient";
+import type { ExportDoc } from "./renderSnapshot";
 import type { MediaAsset, VideoClip } from "./types";
 
 const asset = (id: string): MediaAsset => ({

@@ -1,5 +1,7 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import * as pipeline from "./exportPipeline";
+import type { Job } from "./jobs";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,6 +11,7 @@ const root = await mkdtemp(path.join(os.tmpdir(), "cut-jobs-test-"));
 process.env.DONKEY_CUT_DATA_DIR = root;
 const jobs = await import("./jobs");
 const projects = await import("./projects");
+afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
 const exists = (file: string) =>
   stat(file).then(
@@ -28,9 +31,6 @@ describe("a render the tab carries itself", () => {
   let projectId = "";
   beforeAll(async () => {
     projectId = (await projects.createProject("Tab Render")).id;
-  });
-  afterAll(async () => {
-    await rm(root, { recursive: true, force: true });
   });
 
   test("holds a name and a running row, then lands the file under that name", async () => {
@@ -106,4 +106,56 @@ describe("a render the tab carries itself", () => {
     const job = await jobs.createClientJob("nope", "mp4");
     expect(job.status).toBe("error");
   });
+});
+
+describe("preview publication", () => {
+  async function request(projectId: string) {
+    const form = new FormData();
+    form.set("spec", JSON.stringify({ projectId, target: "preview" }));
+    return jobs.createJob(form);
+  }
+
+  async function settled(job: Job) {
+    const deadline = Date.now() + 2000;
+    while ((job.status === "running" || job.status === "queued") && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(["done", "error"]).toContain(job.status);
+  }
+
+  for (const outcome of ["rejected", "failed", "done"] as const) {
+    test(`a newer ${outcome} preview ${outcome === "done" ? "keeps its publication" : "allows the earlier render to publish"}`, async () => {
+      const projectId = (await projects.createProject(`Preview ${outcome}`)).id;
+      const finishes = new Map<pipeline.RenderHandle, { resolve: () => void; reject: (error: Error) => void }>();
+      const render = spyOn(pipeline, "runExport").mockImplementation(async (job) => {
+        await new Promise<void>((resolve, reject) => finishes.set(job, { resolve, reject }));
+        await writeFile(job.outPath, path.basename(job.outPath));
+      });
+      const created: Job[] = [];
+      try {
+        const first = await request(projectId);
+        created.push(first);
+        if (outcome === "rejected") {
+          const other = (await projects.createProject("Busy preview slot")).id;
+          created.push(await request(other));
+        }
+        const newer = await request(projectId);
+        created.push(newer);
+        if (outcome === "failed") finishes.get(newer)!.reject(new Error("Render failed"));
+        if (outcome === "done") finishes.get(newer)!.resolve();
+        await settled(newer);
+        expect(newer.status).toBe(outcome === "done" ? "done" : "error");
+        finishes.get(first)!.resolve();
+        await settled(first);
+        expect(first.status).toBe("done");
+        const winner = outcome === "done" ? newer : first;
+        expect(await readFile(path.join(projects.projectDir(projectId), "preview.mp4"), "utf8"))
+          .toBe(path.basename(winner.outPath));
+      } finally {
+        for (const finish of finishes.values()) finish.resolve();
+        await Promise.all(created.map(settled));
+        for (const job of created) jobs.cancelJob(job.id);
+        render.mockRestore();
+      }
+    });
+  }
 });

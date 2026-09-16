@@ -5,19 +5,16 @@ import {
   EXPORT_PRESETS,
   originalSettings,
   presetSettings,
-  type ExportDoc,
   type ExportSettings,
 } from "../exportClient";
+import { renderDoc, type ExportDoc } from "@/cut/lib/renderSnapshot";
 import { useEditor } from "../store";
 import { bindHeadlessSession, type HeadlessSession } from "./bind";
-import { openCloudProject } from "./docSession";
+import { openCloudSnapshot, type CloudDocSnapshot } from "./docSession";
 
-// A whole-timeline export built where the tab used to be. A client that can
-// render the cut itself sends the finished spec up; a client that cannot —
-// the phone — asks for the project by id, and this builds the same spec from
-// the stored document: open the doc into the editor store, run the export
-// payload builder the dialog runs, and drop the overlay pictures straight
-// into the render's own tmp dir.
+// Queued document exports hydrate their captured revision in an isolated
+// worker, prepare the same payload as the editor, and stage its overlay
+// pictures in the render's own scratch directory.
 
 /** The sizes a doc-built export offers, named as the export dialog names
  * them. `original` is derived from the footage on the timeline; the rest are
@@ -28,22 +25,6 @@ export type DocExportPreset = (typeof DOC_EXPORT_PRESETS)[number];
 
 export function isDocExportPreset(value: unknown): value is DocExportPreset {
   return typeof value === "string" && (DOC_EXPORT_PRESETS as readonly string[]).includes(value);
-}
-
-/** The editor store's current contents as the builder's neutral document. */
-function docFromStore(): ExportDoc {
-  const s = useEditor.getState();
-  return {
-    aspect: s.aspect,
-    assets: s.assets,
-    clips: s.clips,
-    audioClips: s.audioClips,
-    overlays: s.overlays,
-    subtitles: s.subtitles,
-    fadeIn: s.fadeIn,
-    fadeOut: s.fadeOut,
-    background: s.background,
-  };
 }
 
 function settingsFor(preset: DocExportPreset, doc: ExportDoc): ExportSettings {
@@ -62,11 +43,12 @@ export async function buildDocExportSpec(
   session: HeadlessSession,
   projectId: string,
   preset: DocExportPreset,
-  tmpDir: string
+  tmpDir: string,
+  snapshot: CloudDocSnapshot
 ): Promise<object> {
   bindHeadlessSession(session);
-  await openCloudProject(session, projectId);
-  const doc = docFromStore();
+  await openCloudSnapshot(session, projectId, snapshot);
+  const doc = renderDoc(useEditor.getState());
   const payload = await buildExportPayload(projectId, doc, settingsFor(preset, doc), "export");
   await Promise.all(
     payload.pngs.map(async (p) =>

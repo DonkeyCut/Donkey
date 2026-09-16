@@ -9,6 +9,7 @@
  * here, so the UI and the model always offer the same catalog.
  */
 
+import { UI_TOOLS } from "@/cut/lib/projectCommands";
 import { STOCK_SFX_CATEGORIES } from "@/cut/lib/stock";
 import { AI_PANEL_TOOLS } from "@/cut/components/AiPanel.tools";
 import {
@@ -79,6 +80,10 @@ export const AI_TOOLS: AiToolDef[] = [
   ...TOP_BAR_TOOLS,
   ...EDITOR_TOOLS,
 ];
+
+/** Shared project schemas for hosts that provide their own conversation UI. */
+export const PROJECT_TOOLS: AiToolDef[] = AI_TOOLS.filter((tool) => !tool.server && !UI_TOOLS.has(tool.name));
+
 
 /** Deep documentation the model can pull in on demand. */
 export const AI_SKILLS: Record<string, string> = {

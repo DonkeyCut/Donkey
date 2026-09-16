@@ -26,7 +26,7 @@ import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { FrameCompositor, MISSING_FRAME } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
 import { ClipReader, WORKING_VIDEO_CODECS } from "./exportRender";
-import type { ExportDoc } from "./exportClient";
+import type { ExportDoc } from "./renderSnapshot";
 import { createRasterCanvas } from "./raster";
 import { getClipSpans } from "./store";
 import { clipCovers, frameOf, isEffectOverlay, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset } from "./types";

@@ -15,7 +15,7 @@ export interface JobRegistry<J> {
 
 export function createJobRegistry<J extends { id: string; status: string }>(
   globalKey: string,
-  opts: { maxJobs?: number; retireMs?: number; isTerminal?: (job: J) => boolean } = {}
+  opts: { maxJobs?: number; retireMs?: number; isTerminal?: (job: J) => boolean; onEvict?: (job: J) => void } = {}
 ): JobRegistry<J> {
   const maxJobs = opts.maxJobs ?? 50;
   const retireMs = opts.retireMs ?? 10 * 60 * 1000;
@@ -37,12 +37,12 @@ export function createJobRegistry<J extends { id: string; status: string }>(
     if (retiring.has(job.id)) return;
     retiring.add(job.id);
     setTimeout(() => {
-      jobs.delete(job.id);
+      if (jobs.delete(job.id)) opts.onEvict?.(job);
       retiring.delete(job.id);
     }, retireMs).unref();
     const terminal = [...jobs.values()].filter(isTerminal);
     for (let i = 0; i < terminal.length - maxJobs; i++) {
-      jobs.delete(terminal[i].id);
+      if (jobs.delete(terminal[i].id)) opts.onEvict?.(terminal[i]);
       retiring.delete(terminal[i].id);
     }
   };

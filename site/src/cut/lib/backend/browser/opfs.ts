@@ -17,6 +17,7 @@
 // Project directories are named by id — no Finder here, so nothing follows
 // display names. Everything is functions over handles; no module-level DOM or
 // storage access, because this file rides along in the engine bundle.
+import { registerBlobFile } from "./registry";
 import { isDeliveryName } from "../../exportDelivery";
 import type { ProjectDoc, ProjectFolder, ProjectSummary } from "../../types";
 import { currentEngineUser } from "../../api";
@@ -222,6 +223,8 @@ async function dirBytes(dir: FileSystemDirectoryHandle | null): Promise<number> 
 
 /** The engine's summary shape for a doc in the store. */
 export async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSummary> {
+  const preview = await readFileAt(await projectDir(id), "preview.mp4");
+  if (preview) registerBlobFile(`/api/cut/projects/${id}/preview`, preview);
   const track0 = doc.clips.filter((c) => (c.track ?? 0) === 0);
   const firstClip = track0[0];
   const firstClipAsset = firstClip ? doc.assets.find((a) => a.id === firstClip.assetId) : undefined;
@@ -238,7 +241,7 @@ export async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSum
     previewFile: previewAsset?.fileName,
     previewIsImage: previewAsset?.type === "image",
     previewStart: firstClipAsset && firstClip ? firstClip.in : 0,
-    hasPreview: false,
+    hasPreview: preview !== null,
     aspect: doc.aspect,
     folderId: doc.folderId ?? null,
     sizeBytes: await dirBytes(await projectDir(id)),
