@@ -2194,16 +2194,23 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   update_overlay: (s, input) => {
-      const o = requireItem(s.overlays, input.id, "overlay element");
-      s.updateOverlay(o.id, overlayPatch(input, o.kind ?? "text"));
-      const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
-      return {
-        id: next.id,
-        kind: next.kind ?? "text",
-        ...(isTextOverlay(next) ? { text: next.text, color: next.color, size: next.size } : {}),
-        start: round2(next.start),
-        end: round2(next.end),
+      const ids = Array.isArray(input.ids) && input.ids.length ? input.ids.map(String) : null;
+      if (!ids && typeof input.id !== "string") throw new ToolError("Pass id or ids.");
+      const targets = (ids ?? [String(input.id)]).map((id) => requireItem(s.overlays, id, "overlay element"));
+      // One undo step for the whole write, however many elements it lands on.
+      s.pushHistory();
+      for (const o of targets) applyOverlayPatchSettled(o.id, overlayPatch(input, o.kind ?? "text"));
+      const report = (id: string) => {
+        const next = useEditor.getState().overlays.find((x) => x.id === id)!;
+        return {
+          id: next.id,
+          kind: next.kind ?? "text",
+          ...(isTextOverlay(next) ? { text: next.text, color: next.color, size: next.size } : {}),
+          start: round2(next.start),
+          end: round2(next.end),
+        };
       };
+      return ids ? { overlayIds: targets.map((o) => o.id), updated: targets.map((o) => report(o.id)) } : report(targets[0].id);
   },
 
   update_audio: (s, input) => {
