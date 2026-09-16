@@ -136,7 +136,7 @@ async function suHost(req: NextRequest, pathname: string): Promise<NextResponse>
   // until the router follows it.
   const home = suSectionHome(pathname);
   if (home) {
-    const url = req.nextUrl.clone();
+    const url = new URL(req.url);
     url.pathname = home;
     return NextResponse.redirect(url, 307);
   }
@@ -157,7 +157,7 @@ async function suHost(req: NextRequest, pathname: string): Promise<NextResponse>
   }
   if (!account.superUser) return NextResponse.redirect(`${SU_APP_ORIGIN}/app`);
 
-  const url = req.nextUrl.clone();
+  const url = new URL(req.url);
   url.pathname = `${SU_ROOT}${pathname === "/" ? "" : pathname}`;
   const res = NextResponse.rewrite(url);
   res.headers.set("X-Robots-Tag", "noindex, nofollow");
@@ -174,7 +174,7 @@ export function proxy(req: NextRequest) {
 
   // Aliases (www.) canonicalize to the apex.
   if (isDonkeycutHost(host) && host?.split(":")[0] !== "donkeycut.com") {
-    const url = req.nextUrl.clone();
+    const url = new URL(req.url);
     return NextResponse.redirect(
       `${DONKEYCUT_CANONICAL}${pathname}${url.search}`,
       308,
@@ -184,7 +184,7 @@ export function proxy(req: NextRequest) {
   // Legacy direct /cut/… links canonicalize to the rewritten address:
   // /cut/app/… → /app/….
   if (underPath(pathname, "/cut")) {
-    const url = req.nextUrl.clone();
+    const url = new URL(req.url);
     url.pathname = pathname.slice("/cut".length) || "/";
     return NextResponse.redirect(url, 308);
   }
@@ -192,7 +192,7 @@ export function proxy(req: NextRequest) {
   if (underPath(pathname, "/api")) return NextResponse.next();
   if (passesThrough(pathname)) return NextResponse.next();
 
-  const url = req.nextUrl.clone();
+  const url = new URL(req.url);
   url.pathname =
     pathname === "/sitemap.xml"
       ? "/cut/sitemap.xml"

@@ -19,6 +19,9 @@ const nextConfig: NextConfig = {
   // published after the deploy) is rendered in the background on that first
   // visit and served fully static from then on.
   partialPrefetching: true,
+  // Keep the server origin intact when the proxy rewrites a local request.
+  // Normalizing 127.0.0.1 to localhost makes Next treat it as an external hop.
+  skipProxyUrlNormalize: true,
   // Cut (the video editor) uploads large media. Two independent limits apply:
   // its media route reads req.formData() (a route handler), so it isn't covered
   // by serverActions.bodySizeLimit; and src/proxy.ts runs on /api/cut/* on every

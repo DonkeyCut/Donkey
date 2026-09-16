@@ -61,6 +61,7 @@ import { createServer as createHttpsServer } from "node:https";
 import path from "node:path";
 import { promisify } from "node:util";
 import { CUT_MEDIA_ORIGIN } from "../src/cut/lib/hosts";
+import { lockPerfRun } from "./lib/cut-eval/perfRunLock";
 
 const SITE = path.resolve(import.meta.dir, "..");
 const OUT = path.resolve(SITE, "..", "dist", "cut-perf");
@@ -390,10 +391,12 @@ function run(cmd: string, cmdArgs: string[]): Promise<number | null> {
   return new Promise((resolve, reject) => {
     const p = spawn(cmd, cmdArgs);
     let err = "";
-    p.stderr.on("data", (d) => (err += d.toString()));
+    let out = "";
+    p.stderr.on("data", (d) => (err = (err + d.toString()).slice(-8000)));
+    p.stdout.on("data", (d) => (out = (out + d.toString()).slice(-8000)));
     p.on("error", reject);
     p.on("close", (code) => {
-      if (code !== 0) reject(new Error(`${cmd} exited ${code}: ${err.slice(-800)}`));
+      if (code !== 0) reject(new Error(`${cmd} exited ${code}:\n${out}\n${err}`));
       resolve(code);
     });
   });
@@ -912,7 +915,18 @@ async function playThrough(page: Page, duration: number): Promise<void> {
     // Generous: a machine given a twelfth of a CPU still has to get to the end,
     // and the point of the wait is that it does.
     { timeout: Math.max(30_000, duration * 6000), polling: 100 }
-  );
+  ).catch(async (error) => {
+    const state = await page.evaluate(() => {
+      const dev = (window as unknown as {
+        __cutDev: { playheadAt(): number; useEditor: { getState(): { playing: boolean; buffering: boolean } } };
+      }).__cutDev;
+      const s = dev.useEditor.getState();
+      return { at: dev.playheadAt(), playing: s.playing, buffering: s.buffering };
+    });
+    console.error(`[playback-timeout] ${JSON.stringify(state)}`);
+    await dumpDetail(page, 0);
+    throw error;
+  });
   await setPlaying(page, false);
 }
 
@@ -2526,6 +2540,8 @@ const audioShim = (seconds: number) => `
 })();
 `;
 
+const hmrStates = new WeakMap<Page, { frozen: boolean }>();
+
 async function launch(): Promise<{ browser: Browser; page: Page }> {
   const browser = await chromium.launch({
     channel: "chrome",
@@ -2545,6 +2561,18 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     // The fixture server's certificate is its own.
     ignoreHTTPSErrors: true,
   });
+  // Next's development handshake boots the page. Once the editor is ready,
+  // keep the loaded code stable throughout the measurement.
+  const hmr = { frozen: false };
+  await context.routeWebSocket(
+    (url) => url.pathname === "/_next/hmr",
+    (socket) => {
+      const server = socket.connectToServer();
+      server.onMessage((message) => {
+        if (!hmr.frozen) socket.send(message);
+      });
+    }
+  );
   // The shim is what enforces the slot limit as well as the per-frame cost, so
   // asking for slots on a profile that pays no CPU cost has to install it too.
   // Without this, `--slots 2` on a profile whose `softwareMs` is 0 parses,
@@ -2676,6 +2704,7 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
     route.continue({ url: fixtureUrl(fixtures, "link", request.url()) })
   );
   const page = await context.newPage();
+  hmrStates.set(page, hmr);
   if (MACHINE.cpu > 1 || MACHINE.softwareMs > 0 || arg("--slots")) {
     if (MACHINE.cpu > 1) {
       const cdp = await context.newCDPSession(page);
@@ -2698,6 +2727,8 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
 
 /** Load the editor and wait until it can be driven. */
 async function open(page: Page, projectId: string): Promise<void> {
+  const hmr = hmrStates.get(page)!;
+  hmr.frozen = false;
   await page.goto(`${BASE}/app/p/${projectId}`, { waitUntil: "domcontentloaded", timeout: 120_000 });
   await page.waitForFunction(
     () => {
@@ -2710,6 +2741,7 @@ async function open(page: Page, projectId: string): Promise<void> {
     undefined,
     { timeout: 120_000 }
   );
+  hmr.frozen = true;
 }
 
 /**
@@ -2913,7 +2945,16 @@ async function writeReport(results: CaseResult[]): Promise<void> {
   }
 }
 
-main().catch((e) => {
+async function runExclusive(): Promise<void> {
+  const lock = CHILD ? null : await lockPerfRun();
+  try {
+    await main();
+  } finally {
+    lock?.close();
+  }
+}
+
+runExclusive().catch((e) => {
   console.error(e);
   process.exit(1);
 });
