@@ -49,14 +49,15 @@ import { Switch } from "@/components/ui/switch";
  * checkpoint per gesture, and preview, filmstrip and exports render the same
  * numbers.
  */
-export function ColorPanel({ clip }: { clip: VideoClip }) {
+export function ColorPanel({ clip, peers }: { clip: VideoClip; peers?: readonly VideoClip[] }) {
   // The open level holds for the session per clip, so deselecting and coming
-  // back lands on the same view.
+  // back lands on the same view. A multi-selection reads the first clip's
+  // grade and lands every write on all of them.
   const [view, setView] = usePanelState<"presets" | "adjust">(clip.id, "colorView", "presets");
   if (view === "adjust") {
-    return <AdjustView clip={clip} onBack={() => setView("presets")} />;
+    return <AdjustView clip={clip} peers={peers} onBack={() => setView("presets")} />;
   }
-  return <PresetView clip={clip} onAdjust={() => setView("adjust")} />;
+  return <PresetView clip={clip} peers={peers} onAdjust={() => setView("adjust")} />;
 }
 
 /** The tools of the Adjust view; `dirty` feeds each tab's marker dot. */
@@ -71,7 +72,7 @@ type Tool = (typeof TOOLS)[number]["id"];
 
 /** Shared write path: normalize and store a whole grade, transiently while a
  * gesture is live, committed at its end. */
-function useGradeWriter(clip: VideoClip) {
+function useGradeWriter(clip: VideoClip, peers?: readonly VideoClip[]) {
   const ck = useSliderCheckpoint();
   const write = (g: ColorGrade | undefined) => {
     // The checkpoint taken on the gesture's first change is the whole undo
@@ -79,7 +80,8 @@ function useGradeWriter(clip: VideoClip) {
     // the transient updater. updateClip would push a second checkpoint and
     // make ⌘Z a two-press affair.
     ck.begin();
-    useEditor.getState().updateClipTransient(clip.id, { grade: normalizeGrade(g) });
+    const grade = normalizeGrade(g);
+    useEditor.getState().updateClipsTransient((peers ?? [clip]).map((c) => ({ id: c.id, patch: { grade } })));
   };
   const commit = (g: ColorGrade | undefined) => {
     write(g);
@@ -92,7 +94,7 @@ function useGradeWriter(clip: VideoClip) {
 /* Level 1: presets                                                    */
 /* ------------------------------------------------------------------ */
 
-function PresetView({ clip, onAdjust }: { clip: VideoClip; onAdjust: () => void }) {
+function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readonly VideoClip[]; onAdjust: () => void }) {
   const [category, setCategory] = usePanelState<GradePresetCategory | "all">(
     clip.id,
     "colorPresetCategory",
@@ -102,7 +104,7 @@ function PresetView({ clip, onAdjust }: { clip: VideoClip; onAdjust: () => void 
   // The clip's own frame, ungraded: a swatch shows what its preset does to the
   // footage, never what the clip's current grade already did.
   const frame = useClipSourceFrame(clip.id);
-  const { draft, commit } = useGradeWriter(clip);
+  const { draft, commit } = useGradeWriter(clip, peers);
   const active = clip.grade?.preset;
   const manualDirty = TOOLS.some((t) => gradeToolDirty(clip.grade, t.id));
   const presets =
@@ -360,11 +362,11 @@ function StandInScene({ filter, tint }: { filter: string; tint: string | null })
 /* Level 2: adjust                                                     */
 /* ------------------------------------------------------------------ */
 
-function AdjustView({ clip, onBack }: { clip: VideoClip; onBack: () => void }) {
+function AdjustView({ clip, peers, onBack }: { clip: VideoClip; peers?: readonly VideoClip[]; onBack: () => void }) {
   // The picked tool holds for the session, the same way the open level does.
   const [tool, setTool] = usePanelState<Tool>(clip.id, "colorTool", "basic");
   const toolScroll = useRememberedScroll(clip.id, `color-adjust:${tool}`);
-  const { draft, commit } = useGradeWriter(clip);
+  const { draft, commit } = useGradeWriter(clip, peers);
   const grade = clip.grade;
   // Manual adjustments only — reset-all keeps the preset layer.
   const manualDirty = TOOLS.some((t) => gradeToolDirty(grade, t.id));

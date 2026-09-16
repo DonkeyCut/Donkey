@@ -119,6 +119,7 @@ import {
   isEffectOverlay,
   isShapeOverlay,
   isTextOverlay,
+  type ClipAnim,
   LAYOUTS,
   onFontsChanged,
   rectOf,
@@ -211,6 +212,12 @@ const CLIP_TABS: readonly RailTab[] = [
 /** An overlay's one deep view: its animation. */
 const ANIM_TAB: RailTab = { id: "animate", label: "Animation", Icon: Sparkles };
 
+/** The deep views a selection of video clips shares. */
+const GROUP_CLIP_TABS: readonly RailTab[] = [
+  { id: "color", label: "Color", Icon: Palette },
+  ANIM_TAB,
+];
+
 /**
  * The panel for one selection: the tab rail on its left, the open view's
  * body beside it. The view belongs to the selection — the column is keyed on
@@ -243,7 +250,26 @@ function InspectorColumn({
     },
     [setView, setOpen]
   );
-  const tabs = clip ? CLIP_TABS : overlay ? [ANIM_TAB] : [];
+  // A group's deep views are the ones every member has: clips share Color and
+  // Animation, elements share Animation, and an effect (which animates
+  // nothing) or a mix of kinds leaves the rail with Home alone.
+  const allClips = useEditor((s) => s.clips);
+  const allOverlays = useEditor((s) => s.overlays);
+  const groupClips = useMemo(
+    () => (group ? allClips.filter((c) => group.some((g) => g.kind === "clip" && g.id === c.id)) : []),
+    [group, allClips]
+  );
+  const groupOverlays = useMemo(
+    () => (group ? allOverlays.filter((o) => group.some((g) => g.kind === "overlay" && g.id === o.id)) : []),
+    [group, allOverlays]
+  );
+  const groupTabs =
+    group && groupClips.length === group.length
+      ? GROUP_CLIP_TABS
+      : group && groupOverlays.length === group.length && !groupOverlays.some(isEffectOverlay)
+        ? [ANIM_TAB]
+        : [];
+  const tabs = clip ? CLIP_TABS : overlay ? [ANIM_TAB] : groupTabs;
   const shown = tabs.some((t) => t.id === view) ? view : "main";
   return (
     <>
@@ -261,6 +287,12 @@ function InspectorColumn({
             <ClipColumn clip={clip} tab={shown} />
           ) : overlay && shown === ANIM_TAB.id ? (
             <AnimationPanel overlay={overlay} />
+          ) : group && shown === "color" && groupClips.length ? (
+            <ColorPanel clip={groupClips[0]} peers={groupClips} />
+          ) : group && shown === ANIM_TAB.id && groupClips.length ? (
+            <ClipAnimationPanel clip={groupClips[0]} peers={groupClips} />
+          ) : group && shown === ANIM_TAB.id && groupOverlays.length ? (
+            <AnimationPanel overlay={groupOverlays[0]} peers={groupOverlays} />
           ) : (
             <ScrollArea className="min-h-0 flex-1" {...homeScroll}>
               {group ? (
@@ -887,7 +919,7 @@ const soundSummary = (sound: ClipSound | undefined) => {
 
 /** The row on an audio panel that opens the Sound quality view, reading
  * what the clip carries. */
-function SoundQualityRow({ sound, onOpen }: { sound: ClipSound | undefined; onOpen: () => void }) {
+export function SoundQualityRow({ sound, onOpen }: { sound: ClipSound | undefined; onOpen: () => void }) {
   return (
     <Row label="Sound quality">
       <button
@@ -903,7 +935,7 @@ function SoundQualityRow({ sound, onOpen }: { sound: ClipSound | undefined; onOp
 }
 
 /** The Sound quality view, pushed over an audio panel. */
-function SoundQualityPanel({
+export function SoundQualityPanel({
   itemId,
   sound,
   write,
@@ -1798,10 +1830,10 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
 
 /** The sizes and spacings a title usually wants, offered under each field's
  * chevron; any value in range can still be typed or dragged. */
-const LINE_HEIGHTS = [0.9, 1, 1.15, 1.25, 1.5, 1.75, 2];
-const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
+export const LINE_HEIGHTS = [0.9, 1, 1.15, 1.25, 1.5, 1.75, 2];
+export const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
 /** Glyph stretch stops, percent of the face's own width or height. */
-const STRETCHES = [50, 75, 100, 125, 150, 200];
+export const STRETCHES = [50, 75, 100, 125, 150, 200];
 
 function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const update = useEditor((s) => s.updateOverlay);
@@ -2227,7 +2259,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
 
 /** Named text-style presets from the shared Library: chips that apply a saved
  * look to the selected title, plus saving the current look under a name. */
-function StylePresetsRow({ overlay: o }: { overlay: TextOverlay }) {
+export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; peers?: readonly TextOverlay[] }) {
   const [presets, setPresets] = useState<StylePreset[] | null>(null);
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
@@ -2301,7 +2333,11 @@ function StylePresetsRow({ overlay: o }: { overlay: TextOverlay }) {
                 type="button"
                 title={`Apply ${p.name}`}
                 className="flex items-center gap-1.5 rounded-md border border-input px-2 py-1 text-[11.5px] transition-colors hover:border-ring"
-                onClick={() => useEditor.getState().updateOverlay(o.id, { ...p.style })}
+                onClick={() => {
+                  const st = useEditor.getState();
+                  st.pushHistory();
+                  st.updateOverlaysTransient((peers ?? [o]).map((el) => ({ id: el.id, patch: { ...p.style } })));
+                }}
               >
                 <span
                   className="leading-none"
@@ -2343,7 +2379,7 @@ function StylePresetsRow({ overlay: o }: { overlay: TextOverlay }) {
 /** Write an animation patch to the element — and its whole group, since a
  * grouped element's animation stamps the group. Neutral (all slots off)
  * stores as absence. */
-function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayAnim>) {
+function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayAnim>, peers?: readonly Overlay[]) {
   const next = { ...anim, ...patch };
   if (!next.in) delete next.in;
   if (!next.out) delete next.out;
@@ -2352,8 +2388,9 @@ function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayA
   if (!next.words) delete next.words;
   const value = hasOverlayAnim(next) ? next : undefined;
   const st = useEditor.getState();
-  const peers = o.groupId ? st.overlays.filter((x) => x.groupId === o.groupId) : [];
-  const targets = peers.length > 1 ? peers : [o];
+  // A multi-selection names its targets; a lone grouped element stamps its group.
+  const grouped = o.groupId ? st.overlays.filter((x) => x.groupId === o.groupId) : [];
+  const targets = peers ?? (grouped.length > 1 ? grouped : [o]);
   st.updateOverlaysTransient(
     targets.map((el) => {
       if (!value?.words || !isTextOverlay(el)) return { id: el.id, patch: { anim: value } };
@@ -2375,14 +2412,14 @@ function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayA
 /** The move's strength: how hard the hold pushes. The slider sits in two
  * places — the collapsed section, and the animation panel's Move tab — so it
  * is one component. */
-function MoveStrengthSlider({ overlay: o, label }: { overlay: Overlay; label: string }) {
+function MoveStrengthSlider({ overlay: o, label, peers }: { overlay: Overlay; label: string; peers?: readonly Overlay[] }) {
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const move = anim.move;
   const write = (strength: number) => {
     if (!move) return;
     ck.begin();
-    writeOverlayAnim(o, anim, { move: { ...move, strength } });
+    writeOverlayAnim(o, anim, { move: { ...move, strength } }, peers);
   };
   return (
     <Row label={label}>
@@ -2413,7 +2450,7 @@ function MoveStrengthSlider({ overlay: o, label }: { overlay: Overlay; label: st
  * effect does not use is left out — a slider with nothing to move explains
  * nothing. With no effect picked the rows sit greyed, so the panel floor
  * keeps its height while the reader scrolls the grid. */
-function WordSettings({ overlay: o }: { overlay: Overlay }) {
+function WordSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
   const words = anim.words;
@@ -2425,11 +2462,11 @@ function WordSettings({ overlay: o }: { overlay: Overlay }) {
   const write = (patch: { scale?: number; dim?: number }) => {
     if (!words) return;
     ck.begin();
-    writeOverlayAnim(o, anim, { words: { ...words, ...patch } });
+    writeOverlayAnim(o, anim, { words: { ...words, ...patch } }, peers);
   };
   const setColor = (color: string) => {
     if (!words) return;
-    writeOverlayAnim(o, anim, { words: { ...words, color } });
+    writeOverlayAnim(o, anim, { words: { ...words, color } }, peers);
   };
   return (
     <>
@@ -2535,7 +2572,7 @@ const CLIP_ANIM_SLOTS = ["in", "out"] as const;
  * grid, the ramp's length on the floor. A pick lands as the bar on that edge —
  * the timeline draws it, the Transitions tab marks it, and the assistant's
  * set_animation writes the same one — and plays itself on the footage. */
-function ClipAnimationPanel({ clip }: { clip: VideoClip }) {
+export function ClipAnimationPanel({ clip, peers }: { clip: VideoClip; peers?: readonly VideoClip[] }) {
   const [picked, setSlot] = usePanelState<"in" | "out">(clip.id, "animSlot", "in");
   const slot = picked === "out" ? "out" : "in";
   const tilesScroll = useRememberedScroll(clip.id, `anim:${slot}`);
@@ -2543,16 +2580,25 @@ function ClipAnimationPanel({ clip }: { clip: VideoClip }) {
   // The ramp's length lands once, on release: every write to the edge is a
   // bar edit with its own undo step.
   const [secondsDraft, setSecondsDraft] = useState<number | null>(null);
-  const len = clipLen(clip);
+  const targets = peers ?? [clip];
+  // The ramp fits the shortest clip it lands on.
+  const len = Math.min(...targets.map(clipLen));
   const rehearse = (seconds: number) =>
-    previewBar({ start: slot === "in" ? clip.start : clip.start + len - seconds, seconds });
+    previewBar({ start: slot === "in" ? clip.start : clip.start + clipLen(clip) - seconds, seconds });
+  // One undo step across every target.
+  const setAll = (value: ClipAnim | null) => {
+    const st = useEditor.getState();
+    st.beginHistoryBatch();
+    for (const c of targets) st.setClipAnim(c.id, slot, value);
+    st.endHistoryBatch();
+  };
   const pick = (style: AnimStyle | null) => {
     if (!style) {
-      if (anim) useEditor.getState().setClipAnim(clip.id, slot, null);
+      if (anim) setAll(null);
       return;
     }
     const seconds = anim?.seconds ?? ANIM_DEFAULT_SECONDS;
-    useEditor.getState().setClipAnim(clip.id, slot, { style, seconds });
+    setAll({ style, seconds });
     rehearse(seconds);
   };
   return (
@@ -2596,7 +2642,7 @@ function ClipAnimationPanel({ clip }: { clip: VideoClip }) {
             onCommit={(v) => {
               setSecondsDraft(null);
               if (!anim) return;
-              useEditor.getState().setClipAnim(clip.id, slot, { ...anim, seconds: v });
+              setAll({ ...anim, seconds: v });
               rehearse(v);
             }}
           />
@@ -2610,13 +2656,14 @@ function ClipAnimationPanel({ clip }: { clip: VideoClip }) {
  * the tile grid, the active slot's own control under it. The slots pick from
  * the same grid, one at a time — the tiles are big enough to read the motion,
  * which a stack of grids would not be. */
-function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
+export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
   const anim = o.anim ?? {};
   // The active slot holds for the session, like every settings view's tab.
   const [picked, setSlot] = usePanelState<AnimSlot>(o.id, "animSlot", "in");
   // Word emphasis is a title's slot; a shape or a sticker has no words, so
   // selecting one hands the picker back to the entrance.
-  const tabs: AnimSlot[] = isTextOverlay(o)
+  // Word emphasis needs words on every target.
+  const tabs: AnimSlot[] = (peers ?? [o]).every(isTextOverlay)
     ? ["in", "out", "loop", "move", "words"]
     : ["in", "out", "loop", "move"];
   const slot = tabs.includes(picked) ? picked : "in";
@@ -2642,7 +2689,7 @@ function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
             }
           : undefined,
       };
-      writeOverlayAnim(o, anim, patch);
+      writeOverlayAnim(o, anim, patch, peers);
       // The pick sweeps itself along the line, the same as any other slot.
       if (style) {
         const el = useEditor.getState().overlays.find((x) => x.id === o.id) ?? o;
@@ -2658,7 +2705,7 @@ function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
       const patch: Partial<OverlayAnim> = {
         move: style ? { style, strength: activeMove?.strength ?? 1 } : undefined,
       };
-      writeOverlayAnim(o, anim, patch);
+      writeOverlayAnim(o, anim, patch, peers);
       // The pick plays itself on the stage, the same as any other slot.
       if (style) playAnimPreview({ ...o, anim: { ...anim, ...patch } }, "move");
       else stopAnimPreview();
@@ -2667,7 +2714,7 @@ function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
     if (!style) {
       stopAnimPreview();
       useEditor.getState().pushHistory();
-      writeOverlayAnim(o, anim, { [slot]: undefined });
+      writeOverlayAnim(o, anim, { [slot]: undefined }, peers);
       return;
     }
     const patch: Partial<OverlayAnim> =
@@ -2680,7 +2727,7 @@ function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
             },
           };
     useEditor.getState().pushHistory();
-    writeOverlayAnim(o, anim, patch);
+    writeOverlayAnim(o, anim, patch, peers);
     // The pick plays itself on the stage, for exactly its own length.
     playAnimPreview({ ...o, anim: { ...anim, ...patch } }, slot);
   };
@@ -2738,7 +2785,7 @@ function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
           onPick={pick}
         />
       </ScrollArea>
-      <AnimationToolbar overlay={o} slot={slot} />
+      <AnimationToolbar overlay={o} slot={slot} peers={peers} />
     </div>
   );
 }
@@ -2749,25 +2796,26 @@ function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
  * pushes — so the bar shows the tab's own control and nothing else. It stays
  * put with the slot unset, greyed rather than gone, because a bar that comes
  * and goes moves the grid under the pointer. */
-function AnimationToolbar({ overlay: o, slot }: { overlay: Overlay; slot: AnimSlot }) {
+function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot: AnimSlot; peers?: readonly Overlay[] }) {
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
-  const dur = Math.max(0.2, o.end - o.start);
+  // The ramp fits the shortest element it lands on.
+  const dur = Math.max(0.2, Math.min(...(peers ?? [o]).map((el) => el.end - el.start)));
   const edge = slot === "in" || slot === "out" ? anim[slot] : undefined;
 
   const bar = (children: React.ReactNode) => (
     <div className="shrink-0 border-t border-border bg-card px-3.5 py-0.5">{children}</div>
   );
 
-  if (slot === "move") return bar(<MoveStrengthSlider overlay={o} label="Strength" />);
+  if (slot === "move") return bar(<MoveStrengthSlider overlay={o} label="Strength" peers={peers} />);
 
-  if (slot === "words") return bar(<WordSettings overlay={o} />);
+  if (slot === "words") return bar(<WordSettings overlay={o} peers={peers} />);
 
   if (slot === "loop") {
     const write = (speed: number) => {
       if (!anim.loop) return;
       ck.begin();
-      writeOverlayAnim(o, anim, { loop: { ...anim.loop, speed } });
+      writeOverlayAnim(o, anim, { loop: { ...anim.loop, speed } }, peers);
     };
     return bar(
       <Row label="Speed">
@@ -2796,7 +2844,7 @@ function AnimationToolbar({ overlay: o, slot }: { overlay: Overlay; slot: AnimSl
   const write = (secs: number) => {
     if (!edge) return;
     ck.begin();
-    writeOverlayAnim(o, anim, { [slot]: { ...edge, seconds: secs } });
+    writeOverlayAnim(o, anim, { [slot]: { ...edge, seconds: secs } }, peers);
   };
   return bar(
     <Row label="Duration">
