@@ -17,16 +17,8 @@ import { openCloudSnapshot, type CloudDocSnapshot } from "./docSession";
 // worker, prepare the same payload as the editor, and stage its overlay
 // pictures in the render's own scratch directory.
 
-/** The sizes a doc-built export offers, named as the export dialog names
- * them. `original` is derived from the footage on the timeline; the rest are
- * the fixed presets flipped to the project's ratio. */
-export const DOC_EXPORT_PRESETS = ["original", ...EXPORT_PRESETS.map((p) => p.id)] as const;
-
-export type DocExportPreset = (typeof DOC_EXPORT_PRESETS)[number];
-
-export function isDocExportPreset(value: unknown): value is DocExportPreset {
-  return typeof value === "string" && (DOC_EXPORT_PRESETS as readonly string[]).includes(value);
-}
+export { DOC_EXPORT_PRESETS, isDocExportPreset, type DocExportPreset } from "../exportPresets";
+import type { DocExportPreset } from "../exportPresets";
 
 function settingsFor(preset: DocExportPreset, doc: ExportDoc): ExportSettings {
   const fixed = EXPORT_PRESETS.find((p) => p.id === preset);

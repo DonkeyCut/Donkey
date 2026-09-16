@@ -16,6 +16,8 @@ export interface HeadlessDocSession {
   projectId: string;
   /** The doc version the store's contents are built on. */
   version: string;
+  /** The document as read, before any edit. */
+  doc: ProjectDoc;
 }
 
 const projectPath = (s: HeadlessSession, projectId: string) =>
@@ -80,12 +82,19 @@ export async function openCloudSnapshot(
   // account's shelf fonts come along the same way — a run reaches the cloud
   // shelf, so a font kept on a device shelf is the one case that falls back.
   await Promise.all([syncFontAssets(assets), syncLinkedLibrary()]);
-  return { projectId, version };
+  return { projectId, version, doc };
 }
 
 /** Push the store's persistable slice back up on the session's version. A 409
  * means another writer moved the document past this session's base; the
  * caller decides whether to reopen and redo or surface the conflict. */
+/** The versioned PUT lost: another writer saved a newer version first. */
+export class ProjectConflictError extends Error {
+  constructor() {
+    super("The project changed under this session — another writer holds a newer version.");
+  }
+}
+
 export async function pushCloudProject(
   s: HeadlessSession,
   session: HeadlessDocSession
@@ -102,8 +111,7 @@ export async function pushCloudProject(
     },
     `save project ${session.projectId}`
   );
-  if (res.status === 409)
-    throw new Error("The project changed under this session — another writer holds a newer version.");
+  if (res.status === 409) throw new ProjectConflictError();
   if (!res.ok) throw new Error(`Could not save project ${session.projectId} (${res.status}).`);
   const body = (await res.json()) as { version?: number };
   if (body.version !== undefined) session.version = String(body.version);

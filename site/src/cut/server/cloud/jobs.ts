@@ -4,6 +4,7 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { cutLimitsFor, EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
+import { liveLeaseHolder } from "./lease";
 import { wakeRenderWorker } from "./wake";
 import { queuePreview } from "./previewJobs";
 import { getProject } from "./projects";
@@ -185,6 +186,72 @@ async function exportName(
     const candidate = n === 1 ? `${base}${ext}` : `${base} ${n}${ext}`;
     if (!taken.has(candidate)) return candidate;
   }
+}
+
+/** Queue a render of the stored document at a named size. A refusal — a
+ * missing project, the render or storage caps — comes back as its Response. */
+export async function queueDocExport(
+  userId: string,
+  projectId: string,
+  preset: string
+): Promise<{ id: string; outName: string } | Response> {
+  const project = await getProject(userId, projectId);
+  if (!project) return err("Project not found.", 404);
+  const capped = await renderJobCheck(userId);
+  if (capped) return capped;
+  const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+  if (over) return over;
+  const outName = await exportName(userId, projectId, project.name, undefined);
+  const row = await prisma.cutRenderJob.create({
+    data: {
+      userId,
+      projectId,
+      kind: "export",
+      spec: { fromDoc: { preset, snapshot: { doc: project.doc, version: String(project.version) } } } as unknown as Prisma.InputJsonValue,
+      outName,
+    },
+  });
+  wakeRenderWorker();
+  return { id: row.id, outName };
+}
+
+/** Queue a URL import into a project. `adopt` asks the worker to register
+ * what lands as project assets itself — for a caller with no editor of its
+ * own to adopt them (the ChatGPT app); `name` is what that asset is called.
+ * A refusal comes back as its Response. */
+export async function queueImportUrl(
+  userId: string,
+  projectId: string,
+  opts: { url: string; audio?: boolean; key?: string; adopt?: { name?: string } }
+): Promise<{ id: string } | Response> {
+  if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+  const open = await importJobFor(userId, opts.key);
+  if (open) return { id: open.id };
+  const capped = await renderJobCheck(userId);
+  if (capped) return capped;
+  if (opts.adopt && (await liveLeaseHolder(userId, projectId)))
+    return err("An edit is still running for this project. Wait for it to finish, then import.", 409);
+  // What lands counts against storage, so an account with none left gets
+  // no download, and the worker downloads no more than what is left.
+  const over = await quotaCheck(userId, 0);
+  if (over) return over;
+  const maxBytes = await importByteCeiling(userId);
+  const row = await prisma.cutRenderJob.create({
+    data: {
+      userId,
+      projectId,
+      kind: "import_url",
+      spec: {
+        url: opts.url,
+        maxBytes,
+        ...(opts.audio === true ? { audio: true } : {}),
+        ...(opts.key ? { key: opts.key } : {}),
+        ...(opts.adopt ? { adopt: opts.adopt } : {}),
+      } as unknown as Prisma.InputJsonValue,
+    },
+  });
+  wakeRenderWorker();
+  return { id: row.id };
 }
 
 export const jobsCloud = {
@@ -371,27 +438,11 @@ export const jobsCloud = {
   async exportFromDoc(userId: string, projectId: string, req: Request) {
     try {
       const body = (await req.json().catch(() => ({}))) as { preset?: string };
-      const project = await getProject(userId, projectId);
-      if (!project) return err("Project not found.", 404);
-      const capped = await renderJobCheck(userId);
-      if (capped) return capped;
-      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
-      if (over) return over;
       // The worker owns the size list (it builds the spec), and falls back to
       // the source-matched original for anything it does not know.
-      const preset = typeof body.preset === "string" ? body.preset : "original";
-      const outName = await exportName(userId, projectId, project.name, undefined);
-      const row = await prisma.cutRenderJob.create({
-        data: {
-          userId,
-          projectId,
-          kind: "export",
-          spec: { fromDoc: { preset, snapshot: { doc: project.doc, version: String(project.version) } } } as unknown as Prisma.InputJsonValue,
-          outName,
-        },
-      });
-      wakeRenderWorker();
-      return Response.json({ id: row.id, outName });
+      const queued = await queueDocExport(userId, projectId, typeof body.preset === "string" ? body.preset : "original");
+      if (queued instanceof Response) return queued;
+      return Response.json(queued);
     } catch (e) {
       return caught(e, "Export failed to start.");
     }
@@ -659,31 +710,9 @@ export const jobsCloud = {
       };
       if (!url) return err("No URL provided.", 400);
       if (!validImportKey(key)) return err("Bad import key.", 400);
-      if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
-      const open = await importJobFor(userId, key);
-      if (open) return Response.json({ jobId: open.id });
-      const capped = await renderJobCheck(userId);
-      if (capped) return capped;
-      // What lands counts against storage, so an account with none left gets
-      // no download, and the worker downloads no more than what is left.
-      const over = await quotaCheck(userId, 0);
-      if (over) return over;
-      const maxBytes = await importByteCeiling(userId);
-      const row = await prisma.cutRenderJob.create({
-        data: {
-          userId,
-          projectId,
-          kind: "import_url",
-          spec: {
-            url,
-            maxBytes,
-            ...(audio === true ? { audio: true } : {}),
-            ...(key ? { key } : {}),
-          } as unknown as Prisma.InputJsonValue,
-        },
-      });
-      wakeRenderWorker();
-      return Response.json({ jobId: row.id });
+      const queued = await queueImportUrl(userId, projectId, { url, audio: audio === true, key });
+      if (queued instanceof Response) return queued;
+      return Response.json({ jobId: queued.id });
     } catch (e) {
       return caught(e, "Could not import that URL.");
     }

@@ -1,6 +1,7 @@
 "use client";
 
 import { captureRenderSnapshot, renderDoc, type ExportDoc, type RenderSnapshot } from "./renderSnapshot";
+import { DELIVERY_DEFAULTS, EXPORT_PRESETS } from "./exportPresets";
 import { operationFailure, type OperationFailure } from "./operationFailure";
 import { projectOperation } from "./projectOperation";
 
@@ -70,9 +71,7 @@ export interface ExportSettings {
   range?: ExportRange;
 }
 
-/** The delivery every render that is not the user's own export uses — hover
- * proxies, share cards, ladder masters, the phone's presets. */
-export const DELIVERY_DEFAULTS = { codec: "h264", container: "mp4", audioCodec: "aac" } as const;
+export { DELIVERY_DEFAULTS, EXPORT_PRESETS } from "./exportPresets";
 
 export const EXPORT_CODECS = [
   { id: "h264", label: "H.264", detail: "plays everywhere" },
@@ -98,31 +97,6 @@ export function exportExtension(settings: Pick<ExportSettings, "container">): st
   return deliveryContainer(settings.container).ext;
 }
 
-/** Presets pick a short-side target; `presetSettings` derives both dims from
- * the project ratio. */
-export const EXPORT_PRESETS = [
-  {
-    id: "tiktok",
-    label: "Best · 1080p",
-    detail: "H.264 · best quality",
-    shortSide: 1080,
-    settings: { fps: 30, crf: 19, preset: "medium", ...DELIVERY_DEFAULTS },
-  },
-  {
-    id: "fast",
-    label: "Quick share · 1080p",
-    detail: "smaller file, faster",
-    shortSide: 1080,
-    settings: { fps: 30, crf: 24, preset: "veryfast", ...DELIVERY_DEFAULTS },
-  },
-  {
-    id: "light",
-    label: "Draft · 720p",
-    detail: "fastest render",
-    shortSide: 720,
-    settings: { fps: 30, crf: 24, preset: "veryfast", ...DELIVERY_DEFAULTS },
-  },
-] as const;
 
 /**
  * The axes the export dialog offers, each one independent of the others: how
