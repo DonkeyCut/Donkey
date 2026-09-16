@@ -31,6 +31,13 @@ function validTimeZone(zone: string): boolean {
 }
 
 export const SETTINGS = defineSettings({
+  cutStorageTransactions: {
+    schema: z.object({ maxAttempts: z.number().int().min(1).max(10) }).strict(),
+    default: { maxAttempts: 5 },
+    public: false,
+    title: "Cut storage transactions",
+    description: "Maximum attempts for storage accounting transactions that encounter a database write conflict.",
+  },
   librarySharing: {
     schema: z.object({ pageSize: z.number().int().min(10).max(100) }).strict(),
     default: { pageSize: 40 },

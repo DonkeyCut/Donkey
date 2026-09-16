@@ -1,6 +1,28 @@
+import { adjustStorageBytes } from "../server/cloud/storageCounter";
+import { artifactLifecycle, artifactUsageBytes } from "../lib/artifactPolicy";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma/client";
+import { resolveSettings } from "@/lib/config/resolve";
 
 export { prisma };
+
+/** A conflict rolls back every write; retry with a fresh transaction snapshot. */
+async function storageTransaction<T>(run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+  const override = await prisma.settingOverride.findUnique({
+    where: { key: "cutStorageTransactions" }, select: { value: true },
+  });
+  const { maxAttempts } = resolveSettings(
+    override ? { cutStorageTransactions: override.value } : {}, []
+  ).settings.cutStorageTransactions;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await prisma.$transaction(run, { isolationLevel: "Serializable" });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2034" || attempt >= maxAttempts)
+        throw error;
+    }
+  }
+}
 
 /** The columns a claimed CutRenderJob row hands the job runners. */
 export interface ClaimedJob {
@@ -28,34 +50,22 @@ export async function registerObject(opts: {
   bytes: number;
   kind: string;
 }): Promise<string> {
-  const prior = await prisma.cutMediaObject.findUnique({
-    where: { r2Key: opts.r2Key },
-    select: { bytes: true, uploadState: true },
-  });
-  const priorBytes = prior?.uploadState === "complete" ? prior.bytes : BigInt(0);
-  const delta = BigInt(opts.bytes) - priorBytes;
-  const [row] = await prisma.$transaction([
-    prisma.cutMediaObject.upsert({
+  return storageTransaction(async (tx) => {
+    const prior = await tx.cutMediaObject.findUnique({
       where: { r2Key: opts.r2Key },
-      create: {
-        userId: opts.userId,
-        projectId: opts.projectId,
-        r2Key: opts.r2Key,
-        fileName: opts.fileName,
-        mime: opts.mime,
-        bytes: BigInt(opts.bytes),
-        kind: opts.kind,
-        uploadState: "complete",
-      },
-      update: { bytes: BigInt(opts.bytes), uploadState: "complete" },
-    }),
-    prisma.cutStorageUsage.upsert({
-      where: { userId: opts.userId },
-      create: { userId: opts.userId, bytes: delta },
-      update: { bytes: { increment: delta } },
-    }),
-  ]);
-  return row.id;
+      select: { bytes: true, uploadState: true, quotaExempt: true },
+    });
+    const quotaExempt = artifactLifecycle(opts.kind) !== "retained";
+    const priorBytes = prior ? artifactUsageBytes(prior.bytes, prior.uploadState === "complete", prior.quotaExempt) : BigInt(0);
+    const delta = artifactUsageBytes(BigInt(opts.bytes), true, quotaExempt) - priorBytes;
+    const row = await tx.cutMediaObject.upsert({
+      where: { r2Key: opts.r2Key },
+      create: { ...opts, bytes: BigInt(opts.bytes), quotaExempt, uploadState: "complete" },
+      update: { bytes: BigInt(opts.bytes), uploadState: "complete", quotaExempt },
+    });
+    if (delta !== BigInt(0)) await adjustStorageBytes(tx, opts.userId, delta);
+    return row.id;
+  });
 }
 
 /**
@@ -65,23 +75,17 @@ export async function registerObject(opts: {
  */
 export async function unregisterObjects(userId: string, r2Keys: string[]): Promise<void> {
   if (r2Keys.length === 0) return;
-  const rows = await prisma.cutMediaObject.findMany({
-    where: { userId, r2Key: { in: r2Keys } },
-    select: { id: true, bytes: true, uploadState: true },
-  });
-  if (rows.length === 0) return;
-  const bytes = rows.reduce(
-    (sum, r) => (r.uploadState === "complete" ? sum + Number(r.bytes) : sum),
-    0
-  );
-  await prisma.$transaction(async (tx) => {
-    await tx.cutMediaObject.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
-    const usage = await tx.cutStorageUsage.findUnique({ where: { userId } });
-    const next = Math.max(0, (usage ? Number(usage.bytes) : 0) - bytes);
-    await tx.cutStorageUsage.upsert({
-      where: { userId },
-      create: { userId, bytes: BigInt(next) },
-      update: { bytes: BigInt(next) },
+  await storageTransaction(async (tx) => {
+    const rows = await tx.cutMediaObject.findMany({
+      where: { userId, r2Key: { in: r2Keys } },
+      select: { id: true, bytes: true, uploadState: true, quotaExempt: true },
     });
+    if (rows.length === 0) return;
+    const bytes = rows.reduce(
+      (sum, row) => sum + artifactUsageBytes(row.bytes, row.uploadState === "complete", row.quotaExempt),
+      BigInt(0)
+    );
+    await tx.cutMediaObject.deleteMany({ where: { id: { in: rows.map((row) => row.id) } } });
+    await adjustStorageBytes(tx, userId, -bytes);
   });
 }

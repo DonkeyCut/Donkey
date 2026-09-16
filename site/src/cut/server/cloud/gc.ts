@@ -268,6 +268,22 @@ async function sweepStaleOverlays(): Promise<number> {
 }
 
 export async function runGc(): Promise<Response> {
+  // Existing derived files adopt the same accounting as newly rendered ones.
+  const chargedDerived = await prisma.cutMediaObject.findMany({
+    where: { kind: { in: ["preview", "card"] }, quotaExempt: false, uploadState: "complete" },
+    take: RECLAIM_SCAN_LIMIT,
+    select: { id: true, userId: true, bytes: true },
+  });
+  for (const object of chargedDerived) {
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.cutMediaObject.updateMany({
+        where: { id: object.id, quotaExempt: false, bytes: object.bytes },
+        data: { quotaExempt: true },
+      });
+      if (changed.count) await addUsage(tx, object.userId, -Number(object.bytes));
+    });
+  }
+
   const pending = await prisma.cutMediaObject.findMany({
     where: {
       uploadState: "pending",
@@ -316,6 +332,22 @@ export async function runGc(): Promise<Response> {
       return [p.id, new Set(assets.map((a) => a.fileName))];
     })
   );
+  const activeRenders = await prisma.cutRenderJob.findMany({
+    where: { state: { in: ["queued", "running"] }, projectId: { in: docProjects.map((p) => p.id) } },
+    select: { projectId: true, spec: true },
+  });
+  for (const job of activeRenders) {
+    if (!job.projectId) continue;
+    const spec = job.spec as {
+      fromDoc?: { snapshot?: { doc?: { assets?: { fileName: string }[] } } };
+      spec?: { clips?: { file?: string }[]; audio?: { file?: string }[]; overlayVideos?: { file?: string }[] };
+    } | null;
+    const files = referenced.get(job.projectId) ?? new Set<string | undefined>();
+    for (const asset of spec?.fromDoc?.snapshot?.doc?.assets ?? []) files.add(asset.fileName);
+    for (const item of [...(spec?.spec?.clips ?? []), ...(spec?.spec?.audio ?? []), ...(spec?.spec?.overlayVideos ?? [])])
+      if (item.file) files.add(item.file);
+    referenced.set(job.projectId, files);
+  }
   const orphans = mediaCandidates.filter((c) => !referenced.get(c.projectId!)?.has(c.fileName));
   const byUser = new Map<string, typeof orphans>();
   for (const o of orphans) {
@@ -331,6 +363,26 @@ export async function runGc(): Promise<Response> {
       await addUsage(tx, userId, -counted.reduce((sum, r) => sum + Number(r.bytes), 0));
     });
     await del(rows.map((r) => r.r2Key));
+  }
+
+  // Retired preview revisions get the same grace as other unreferenced media.
+  // The current preview remains available for an idle project indefinitely.
+  const previews = await prisma.cutMediaObject.findMany({
+    where: { kind: "preview", updatedAt: { lt: new Date(Date.now() - ORPHAN_MAX_AGE_MS) } },
+    select: { id: true, userId: true, projectId: true, r2Key: true, bytes: true, quotaExempt: true },
+  });
+  const previewProjects = await prisma.cutProject.findMany({
+    where: { id: { in: previews.flatMap((p) => p.projectId ? [p.projectId] : []) } },
+    select: { previewKey: true },
+  });
+  const livePreviewKeys = new Set(previewProjects.map((p) => p.previewKey));
+  for (const preview of previews) {
+    if (livePreviewKeys.has(preview.r2Key)) continue;
+    await prisma.$transaction(async (tx) => {
+      const removed = await tx.cutMediaObject.deleteMany({ where: { id: preview.id } });
+      if (removed.count && !preview.quotaExempt) await addUsage(tx, preview.userId, -Number(preview.bytes));
+    });
+    await del([preview.r2Key]);
   }
 
   // Old terminal jobs go together with their overlay PNGs — the worker deletes

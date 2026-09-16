@@ -1,5 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { adjustStorageBytes } from "./storageCounter";
 import { graceState } from "./grace";
 import { cutLimitsFor } from "./limits";
 
@@ -32,13 +33,7 @@ export async function reservedBytes(userId: string): Promise<number> {
 /** Adjust the user's stored-bytes counter inside the caller's transaction, so
  * it moves with the CutMediaObject rows it mirrors. Clamped at zero. */
 export async function addUsage(tx: Prisma.TransactionClient, userId: string, delta: number) {
-  const row = await tx.cutStorageUsage.findUnique({ where: { userId } });
-  const next = Math.max(0, (row ? Number(row.bytes) : 0) + Math.round(delta));
-  await tx.cutStorageUsage.upsert({
-    where: { userId },
-    create: { userId, bytes: BigInt(next) },
-    update: { bytes: BigInt(next) },
-  });
+  await adjustStorageBytes(tx, userId, BigInt(Math.round(delta)));
 }
 
 /** 413 when `incoming` more bytes would break the account's storage quota,
