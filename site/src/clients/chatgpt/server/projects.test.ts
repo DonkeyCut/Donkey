@@ -4,7 +4,7 @@ import { SETTINGS } from "@/lib/config/registry";
 import { projectTools } from "@/clients/chatgpt/server/projects";
 
 const config = SETTINGS.chatgptApp.schema.parse(SETTINGS.chatgptApp.default);
-function createTestContext() {
+function createTestContext(scopes: string[] = ["projects:read"]) {
   const project = { id: "mine", userId: "owner", name: "My video", version: 4 };
   const jobs = mock(async (args: unknown) => {
     void args;
@@ -34,7 +34,7 @@ function createTestContext() {
   return {
     db,
     tools: projectTools(
-      { userId: "owner", scopes: ["projects:read"] },
+      { userId: "owner", scopes },
       config,
       db as unknown as typeof prisma,
     ),
@@ -51,9 +51,18 @@ describe("ChatGPT cloud projects", () => {
     expect(db.cutRenderJob.findFirst).not.toHaveBeenCalled();
     expect(db.cutProject.findMany).not.toHaveBeenCalled();
   });
-  test("read scope cannot enqueue renders", async () => {
+  test("read scope cannot enqueue renders or edits", async () => {
     const { tools } = createTestContext();
     await expect(tools.render("mine")).rejects.toThrow("permission");
+    await expect(tools.edit("mine", [{ name: "set_aspect", input: { aspect: "9:16" } }])).rejects.toThrow("permission");
+    await expect(tools.undo("mine")).rejects.toThrow("permission");
+    await expect(tools.exportVideo("mine", "original")).rejects.toThrow("permission");
+  });
+  test("a batch names only catalog commands, and inspection stays read-only", async () => {
+    const { tools } = createTestContext(["projects:read", "projects:write"]);
+    await expect(tools.edit("mine", [{ name: "not_a_command", input: {} }])).rejects.toThrow("Unknown command: not_a_command");
+    await expect(tools.edit("foreign", [{ name: "set_aspect", input: {} }])).rejects.toThrow("Project not found");
+    await expect(tools.inspect("mine", [{ name: "set_aspect", input: { aspect: "9:16" } }])).rejects.toThrow("reads only");
   });
   test("status is constrained to the owner, selected project, and preview kind", async () => {
     const { tools, db } = createTestContext();

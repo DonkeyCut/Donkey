@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSettings } from "@/lib/config/resolve";
 
 export const CLIENT_ID = "donkey-chatgpt";
-export const SCOPES = ["projects:read", "previews:render"] as const;
+export const SCOPES = ["projects:read", "previews:render", "projects:write"] as const;
 export const MCP_PATH = "/api/chatgpt/mcp";
 export const OAUTH_PATH = "/api/chatgpt/oauth";
 export const RESOURCE_METADATA_PATH =

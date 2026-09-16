@@ -323,10 +323,8 @@ function consentCookie(value: string, maxAgeSeconds: number) {
 }
 
 function consentPage(nonce: string, authorization: Authorization) {
-  const canRender = authorization.scope.split(" ").includes("previews:render");
-  const renderPermission = canRender
-    ? " It can also render previews of your saved edits."
-    : "";
+  const scopes = authorization.scope.split(" ");
+  const access = scopes.includes("projects:write") ? "view and edit" : "view";
   const escapedNonce = nonce.replace(
     /[&<>"']/g,
     (character) =>
@@ -343,20 +341,22 @@ function consentPage(nonce: string, authorization: Authorization) {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Connect Donkey Cut to ChatGPT</title>
+    <title>Connect to ChatGPT</title>
     <style>
       body { font: 17px system-ui; max-width: 460px; margin: 12vh auto; padding: 24px; color: #202020; background: #faf9f7; }
-      h1 { font-size: 30px; }
-      p { line-height: 1.6; }
+      .app { display: flex; align-items: center; gap: 12px; font-weight: 600; margin-bottom: 28px; }
+      .app img { width: 44px; height: 44px; }
+      h1 { font-size: 30px; margin: 0 0 12px; }
+      p { line-height: 1.6; margin: 0 0 24px; }
       button { font: inherit; padding: 12px 20px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
       button[value=allow] { background: #202020; color: white; }
       form { display: flex; gap: 12px; }
     </style>
   </head>
   <body>
-    <h1>Connect Donkey Cut to ChatGPT</h1>
-    <p>ChatGPT can read your cloud project names and play their previews.${renderPermission}</p>
-    <p>Preview rendering uses no AI credits. Your existing storage allowance applies to retained media.</p>
+    <div class="app"><img src="/donkey-logo.svg" alt="">Donkey Cut</div>
+    <h1>Connect to ChatGPT</h1>
+    <p>ChatGPT can ${access} your projects.</p>
     <form method="post" action="${OAUTH_PATH}/authorize">
       <input type="hidden" name="nonce" value="${escapedNonce}">
       <button name="decision" value="allow">Connect</button>
@@ -369,6 +369,7 @@ function consentPage(nonce: string, authorization: Authorization) {
   const callbackOrigin = new URL(authorization.redirect_uri).origin;
   const contentSecurityPolicy = [
     "default-src 'none'",
+    "img-src 'self'",
     "style-src 'unsafe-inline'",
     `form-action 'self' ${callbackOrigin}`,
     "frame-ancestors 'none'",

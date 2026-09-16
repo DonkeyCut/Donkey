@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "@modelcontextprotocol/ext-apps";
-import { playbackSchema, viewSchema, type Playback, type ProjectView } from "../contracts";
+import { downloadSchema, playbackSchema, viewSchema, type Download, type Playback, type ProjectView } from "../contracts";
 
 type ToolResult = { isError?: boolean; structuredContent?: unknown; _meta?: Record<string, unknown>; content?: unknown[] };
 
@@ -11,6 +11,7 @@ export function useProjectApp() {
   const [ready, setReady] = useState(false);
   const [view, setView] = useState<ProjectView | null>(null);
   const [playback, setPlayback] = useState<Playback | null>(null);
+  const [download, setDownload] = useState<Download | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState(!document.hidden);
@@ -22,10 +23,12 @@ export function useProjectApp() {
     const parsed = viewSchema.safeParse(result.structuredContent);
     if (!parsed.success) throw new Error("The preview response could not be read.");
     const media = playbackSchema.safeParse(result._meta?.playback);
+    const file = downloadSchema.safeParse(result._meta?.download);
     const interval = result._meta?.pollMs;
     if (typeof interval === "number" && interval >= 1000 && interval <= 30000) setPollMs(interval);
     setView(parsed.data);
     setPlayback(media.success ? media.data : null);
+    setDownload(file.success ? file.data : null);
     setError(null);
   }, []);
 
@@ -81,6 +84,19 @@ export function useProjectApp() {
     return () => window.clearTimeout(timeout);
   }, [ready, visible, busy, error, projectId, jobId, status, playback, pollMs, run, view]);
 
+  // An export in flight polls the same way; a finished one renews its
+  // download link before it expires.
+  const exportId = view?.export?.id;
+  const exportStatus = view?.export?.status;
+  useEffect(() => {
+    if (!ready || !visible || busy || error || !exportId) return;
+    const waiting = exportStatus === "queued" || exportStatus === "running";
+    if (!waiting && !download) return;
+    const delay = waiting ? pollMs : Math.max(1000, download!.expiresAt - Date.now() - 60000);
+    const timeout = window.setTimeout(() => { void run("get_export_status", { jobId: exportId }, false); }, delay);
+    return () => window.clearTimeout(timeout);
+  }, [ready, visible, busy, error, exportId, exportStatus, download, pollMs, run, view]);
+
   const playbackFailed = useCallback(() => {
     if (!projectId || !jobId) return;
     if (recoveries.current++ >= 1) { setError("Video could not load. Try opening the project again."); return; }
@@ -88,10 +104,12 @@ export function useProjectApp() {
     void run("get_preview_status", { projectId, jobId }, false);
   }, [projectId, jobId, run]);
 
-  const openDonkey = async () => {
-    if (!view?.project || !appRef.current) return;
-    try { const result = await appRef.current.openLink({ url: view.project.url }); if (result.isError) setError("Could not open Donkey Cut."); }
-    catch { setError("Could not open Donkey Cut."); }
+  const openLink = async (url: string, failure: string) => {
+    if (!appRef.current) return;
+    try { const result = await appRef.current.openLink({ url }); if (result.isError) setError(failure); }
+    catch { setError(failure); }
   };
-  return { ready, view, playback, error, busy, visible, run, playbackFailed, openDonkey };
+  const openDonkey = () => { if (view?.project) void openLink(view.project.url, "Could not open Donkey Cut."); };
+  const openDownload = () => { if (download) void openLink(download.url, "Could not open the download."); };
+  return { ready, view, playback, download, error, busy, visible, run, playbackFailed, openDonkey, openDownload };
 }

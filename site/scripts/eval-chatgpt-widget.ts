@@ -22,7 +22,7 @@ const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
 window.calls = []; window.links = [];
-const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true});
+const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:false,export:null,job:null,results:[],changed:false,history:null,account:null});
 const result = (data, playback = null) => ({content:[{type:'text',text:'Preview'}],structuredContent:data,_meta:{playback,pollMs:1000}});
 const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,result},'*');
 window.addEventListener('message', ({source,data}) => {
