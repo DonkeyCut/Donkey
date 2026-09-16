@@ -1,4 +1,5 @@
 "use client";
+import { TimelineGroupActions } from "@/cut/components/TimelineGroupActions";
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, MoreHorizontal, PanelBottomClose, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
@@ -51,6 +52,7 @@ import { reportSwallowed } from "@/cut/lib/report";
 import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockAudio, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
 import { waveGain } from "@/cut/lib/waveform";
+import { canSplitItem } from "@/cut/lib/itemKinds";
 import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, maxClipFade, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
@@ -59,7 +61,7 @@ import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
-import { assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_MAX, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
+import { assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox } from "@donkeycut/effects-kit";
@@ -735,9 +737,9 @@ export function Timeline() {
   // doesn't resize under the pointer; it commits on release.
   const dragging = useSyncExternalStore(subscribeDragActive, isDragActive, () => false);
   const liveContentW = Math.max(total * pps + PAD_END, viewportW - PAD_SIDE * 2, 600);
-  const heldContentW = useRef(liveContentW);
-  if (!dragging) heldContentW.current = liveContentW;
-  const contentW = heldContentW.current;
+  const [widthHold, setWidthHold] = useState({ dragging, width: liveContentW });
+  if (widthHold.dragging !== dragging) setWidthHold({ dragging, width: liveContentW });
+  const contentW = dragging ? widthHold.width : liveContentW;
 
   // Drop preview while dragging a media asset onto video track 0: where the
   // clip would land, how long it runs, and what the source looks like, so the
@@ -1157,22 +1159,6 @@ export function Timeline() {
     [audioRowBoxes, audioDrop]
   );
 
-  // The element row under the pointer, or undefined for a point outside the
-  // band — a drop there takes the element's home row.
-  const overlayRowAt = useCallback(
-    (clientY: number): number | undefined => {
-      const el = overlayRef.current;
-      if (!el || overlayLanes.count === 0) return undefined;
-      const r = el.getBoundingClientRect();
-      if (clientY < r.top || clientY > r.bottom) return undefined;
-      return Math.min(overlayLanes.count - 1, Math.max(0, Math.floor((clientY - r.top) / TEXT_H)));
-    },
-    [overlayLanes]
-  );
-  const overlayLaneAt = (clientY: number): number | undefined => {
-    const row = overlayRowAt(clientY);
-    return row === undefined ? undefined : overlayLanes.used[row];
-  };
   // Every place on every video track a transition can sit: the cuts, where one
   // clip hands over to the next, and the open edges — a clip's head with
   // nothing before it, its tail with nothing after — where it arrives from or
@@ -1304,7 +1290,7 @@ export function Timeline() {
     st.endHistoryBatch();
     st.select({ kind: "transition", id });
   };
-  // A pasted transition lands through the same closure a dropped one does.
+  // A transition copied from a catalog tile uses the panel drop placement.
   const dropTransitionRef = useRef(dropTransitionAt);
   useEffect(() => {
     dropTransitionRef.current = dropTransitionAt;
@@ -1314,80 +1300,15 @@ export function Timeline() {
     []
   );
 
-  // Drag a bar anywhere along the row. An anchor within reach pulls the drop
-  // onto itself and lights the room it takes; released anywhere else the bar
-  // stays exactly there — parked, playing nothing until a cut or a clip edge
-  // lines up with it. A press that never moved selects the bar.
   const moveTransition = (e: React.PointerEvent, x: XBar) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    const s = useEditor.getState();
-    if (s.readOnly) return;
-    // ⌘/Ctrl/⇧-click folds the bar into the multi-selection, like any lane bar.
-    const additive = additiveClick(e);
-    let landing: { start: number; anchor: Anchor | null } | null = null;
-    startDrag(e, {
-      onMove: (dx) => {
-        const free = Math.max(-x.t.seconds + 0.1, x.t.start + dx / pps);
-        const near = anchors.reduce<{ a: Anchor; gap: number } | null>((best, a) => {
-          const gap = Math.abs(anchorBarStart(a, x.t.seconds, x.t.style) - free);
-          return !best || gap < best.gap ? { a, gap } : best;
-        }, null);
-        const snapped = near && near.gap <= XBAR_MAGNET_PX / pps ? near.a : null;
-        landing = snapped
-          ? { start: anchorBarStart(snapped, x.t.seconds, x.t.style), anchor: snapped }
-          : { start: free, anchor: null };
-        setSnapX(snapped ? snapped.at * pps : null);
-        setJointDrop(snapped ? { ...snapped, len: x.t.seconds } : null);
-        setTransitionDrag({ ...x, t: { ...x.t, start: landing.start } });
-      },
-      onUp: (_dx, _dy, moved) => {
-        setSnapX(null);
-        setJointDrop(null);
-        setTransitionDrag(null);
-        const st = useEditor.getState();
-        if (!moved || !landing) {
-          if (additive) return st.toggleSelect({ kind: "transition", id: x.t.id });
-          return st.select({ kind: "transition", id: x.t.id });
-        }
-        st.beginHistoryBatch();
-        const incumbent = landing.anchor ? barAt(landing.anchor) : null;
-        if (incumbent && incumbent.id !== x.t.id) st.removeTransition(incumbent.id);
-        st.updateTransition(x.t.id, { start: landing.start });
-        st.endHistoryBatch();
-      },
+    startLaneMove(e, "transition", x.t.id, {
+      pps, rows: () => [], homeRow: 0, onDrag: setLaneDrag, onSnap: setSnapX,
     });
   };
 
-  // Drag the loose edge to retime. A playing bar keeps the boundary end still —
-  // an entrance grows forward from its start, everything else backward from
-  // its end — so retiming never un-aligns it.
-  const trimTransition = (e: React.PointerEvent, x: XBar) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    const st0 = useEditor.getState();
-    if (st0.readOnly) return;
-    const growsForward = x.role?.kind === "in";
-    // A cross dissolve sits across its cut, so retiming holds the middle and
-    // both halves grow together; every other bar holds the boundary end.
-    const straddles = isAudioTransition(x.t.style);
-    const fixed = growsForward
-      ? x.t.start
-      : straddles
-        ? x.t.start + x.t.seconds / 2
-        : x.t.start + x.t.seconds;
-    st0.beginHistoryBatch();
-    startDrag(e, {
-      onMove: (dx) => {
-        const loose = (growsForward ? x.t.start + x.t.seconds : x.t.start) + dx / pps;
-        const reach = Math.abs(loose - fixed) * (straddles ? 2 : 1);
-        const seconds = Math.max(0.1, Math.min(TRANSITION_MAX, reach));
-        useEditor.getState().updateTransitionTransient(x.t.id, {
-          seconds,
-          start: growsForward ? fixed : fixed - (straddles ? seconds / 2 : seconds),
-        });
-      },
-      onUp: () => useEditor.getState().endHistoryBatch(),
+  const trimTransition = (e: React.PointerEvent, x: XBar, side: "l" | "r") => {
+    startLaneTrim(e, "transition", x.t.id, side, {
+      pps, onSnap: setSnapX,
     });
   };
 
@@ -1400,6 +1321,8 @@ export function Timeline() {
     t: number;
     y: number;
   } | null>(null);
+  const overlayRowAt = (clientY: number): number =>
+    resolveRow(overlayRowBoxes(), clientY, elementDrop?.row ?? null, { top: true, bottom: true });
   // The place a dragged transition would land on, marked with the footprint it
   // would take while it is in flight.
   const [jointDrop, setJointDrop] = useDropPreview<Anchor | null>(null);
@@ -1433,6 +1356,8 @@ export function Timeline() {
     previewNext.current = null;
   }, []);
   useEffect(() => cancelPreview, [cancelPreview]);
+  // An empty timeline starts incoming footage at zero.
+  const dropTimeAt = (clientX: number) => (total <= 0 ? 0 : Math.max(0, timeAt(clientX)));
   // Every drag ends here, wherever it was released: the landing previews and
   // the placement hold clear on the browser's own `dragend`, which fires for
   // a drop the timeline took, a release elsewhere, and an escape alike. An
@@ -1483,17 +1408,12 @@ export function Timeline() {
     [resolveDropTrack, audioRowAt]
   );
   // A transition bar mid-drag, drawn where the pointer has it.
-  const [transitionDrag, setTransitionDrag] = useState<XBar | null>(null);
   // A drag past the top edge opens a row there, pushing the stack down by one
   // for as long as it is aimed that way.
-  const topRowShift = laneDrag?.kind === "overlay" && laneDrag.targetRow < 0 ? TEXT_H : 0;
+  const topRowShift =
+    (laneDrag?.kind === "overlay" && laneDrag.targetRow < 0) || elementDrop?.row === -1 ? TEXT_H : 0;
   const audioTopShift =
     (laneDrag?.kind === "audio" && laneDrag.targetRow < 0) || audioDrop?.row === -1 ? AUDIO_H : 0;
-
-  // Where a dropped asset should land. An empty timeline has no arrangement to
-  // read a position against, so the drop starts the film at 0 no matter where
-  // the cursor released.
-  const dropTimeAt = (clientX: number) => (total <= 0 ? 0 : Math.max(0, timeAt(clientX)));
 
   // Scrub with auto-scroll when the pointer nears the viewport edges.
   //
@@ -1703,18 +1623,17 @@ export function Timeline() {
     t: number,
     audioRow = 0,
     place: TrackTarget = TRACK_ZERO,
-    /** The element row the pointer came down on, when it was over the band. */
-    elementLane?: number
+    elementRow = 0
   ) => {
     const s = useEditor.getState();
     const sticker = stickerOf(s.assets.find((a) => a.id === assetId));
     if (sticker) {
-      s.addSticker({
+      landOnRow("overlay", elementRow, (lane) => useEditor.getState().addSticker({
         assetId,
         ...(isLottieAsset(sticker) ? { lottie: true } : {}),
         at: t,
-        ...(elementLane !== undefined ? { lane: elementLane } : {}),
-      });
+        lane,
+      }));
       return;
     }
     if (isClipMedia(type)) {
@@ -1758,7 +1677,7 @@ export function Timeline() {
     atElement: number,
     audioRow = 0,
     place: TrackTarget = TRACK_ZERO,
-    elementLane?: number,
+    elementRow = 0,
     only?: (asset: MediaAsset) => boolean
   ) => {
     const next = runCursor(t, atElement);
@@ -1771,7 +1690,7 @@ export function Timeline() {
         if (asset.type === "font") continue;
         if (only && !only(asset)) continue;
         const sticker = !!stickerOf(asset);
-        placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place, elementLane);
+        placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place, elementRow);
       } catch (err) {
         reportSwallowed(`[cut] drop failed for ${item.name}`, err);
       }
@@ -1820,7 +1739,7 @@ export function Timeline() {
       // and OS files belong to the timeline's own drop, which stashes their
       // landing for the editor's import and clears every preview; both pass
       // through here untouched.
-      if (draggedSticker() || draggedFiles(e)) return;
+      if (hasElementDrag(e) || draggedSticker() || draggedFiles(e)) return;
       e.preventDefault();
       e.stopPropagation();
       cancelPreview();
@@ -2004,10 +1923,9 @@ export function Timeline() {
             setDropType(null);
             // An empty band has no rows to hit; the drag opens the first one,
             // where the drop will land.
-            const hit = overlayRowAt(y);
             const row =
               !element || element.kind !== "transition"
-                ? hit ?? (overlayLanes.count === 0 ? 0 : null)
+                ? overlayRowAt(y)
                 : null;
             // The pointer's own time, not `dropTimeAt`: an empty timeline pins
             // clip drops to 0, but an element rides wherever it is held.
@@ -2098,7 +2016,7 @@ export function Timeline() {
         }
         // Resolve the hovered rows before the previews (and their rows) clear.
         const audioRow = audioRowAt(e.clientY);
-        const elementLane = overlayLaneAt(e.clientY);
+        const elementRow = overlayRowAt(e.clientY);
         setElementDrop(null);
         setJointDrop(null);
         setXTileDrag(null);
@@ -2123,13 +2041,12 @@ export function Timeline() {
         const atElement = Math.max(0, timeAt(e.clientX));
         if (element) {
           e.preventDefault();
-          const aim = {
-            at: atElement,
-            ...(elementLane !== undefined ? { lane: elementLane } : {}),
-          };
-          if (element.kind === "shape") useEditor.getState().addShape(element.shape, aim);
-          else if (element.kind === "effect") useEditor.getState().addEffect(element.effect, aim);
-          else dropTransitionAt(t, element.style);
+          if (element.kind === "transition") dropTransitionAt(t, element.style);
+          else landOnRow("overlay", elementRow, (lane) => {
+            const aim = { at: atElement, lane };
+            if (element.kind === "shape") useEditor.getState().addShape(element.shape, aim);
+            else useEditor.getState().addEffect(element.effect, aim);
+          });
           return;
         }
         if (tpl && projectId) {
@@ -2143,7 +2060,7 @@ export function Timeline() {
         }
         if (carried.length > 0 && projectId) {
           e.preventDefault();
-          void placeCarriedAt(projectId, carried, t, atElement, audioRow, videoPlace, elementLane);
+          void placeCarriedAt(projectId, carried, t, atElement, audioRow, videoPlace, elementRow);
         }
       }}
     >
@@ -2352,7 +2269,7 @@ export function Timeline() {
               {Array.from(
                 {
                   length:
-                    overlayLanes.count +
+                    Math.max(overlayLanes.count, (elementDrop?.row ?? -1) + 1) +
                     (topRowShift ? 1 : 0) +
                     (laneDrag?.kind === "overlay" && laneDrag.targetRow === overlayLanes.count ? 1 : 0),
                 },
@@ -2409,7 +2326,7 @@ export function Timeline() {
                           "pointer-events-none absolute inset-x-0 rounded-[3px] border border-dashed",
                           FAMILY_STYLE[family].row
                         )}
-                        style={{ top: elementDrop.row * TEXT_H + 2, height: TEXT_H - 6 }}
+                        style={{ top: elementDrop.row * TEXT_H + 2 + topRowShift, height: TEXT_H - 6 }}
                       />
                       {/* The slot the drop takes on its row... */}
                       <div
@@ -2418,7 +2335,7 @@ export function Timeline() {
                           FAMILY_STYLE[family].slot
                         )}
                         style={{
-                          top: elementDrop.row * TEXT_H + 2,
+                          top: elementDrop.row * TEXT_H + 2 + topRowShift,
                           height: TEXT_H - 6,
                           left: elementDrop.t * pps,
                           width: Math.max(14, ELEMENT_DROP_SECONDS * pps - CLIP_GAP),
@@ -2494,14 +2411,14 @@ export function Timeline() {
               onPointerDown={deselectIfSelf}
             >
               {laneRail(TEXT_H - 4, "xrail")}
-              {(transitionDrag !== null || xTileDrag) &&
+              {xTileDrag &&
                 // While a transition is in flight, every place it could play
                 // lights up in the timeline's usual drop-zone dress: one slot
                 // per cut and open edge, each the size the bar would take
                 // there.
                 anchors.map((a) => {
-                  const style = transitionDrag?.t.style ?? xTileDrag ?? "crossfade";
-                  const len = transitionDrag ? transitionDrag.t.seconds : anchorLen(a, style);
+                  const style = xTileDrag ?? "crossfade";
+                  const len = anchorLen(a, style);
                   return (
                     <div
                       key={`xzone-${a.kind}-${a.clipId}`}
@@ -2517,7 +2434,7 @@ export function Timeline() {
               {jointDrop &&
                 (() => {
                   // The zone the drop is aimed at burns brighter than the rest.
-                  const style = transitionDrag?.t.style ?? xTileDrag ?? "crossfade";
+                  const style = xTileDrag ?? "crossfade";
                   const len = anchorLen(jointDrop, style);
                   return (
                     <div
@@ -2534,7 +2451,8 @@ export function Timeline() {
                   );
                 })()}
               {transitions.map((live) => {
-                const x = transitionDrag?.t.id === live.t.id ? transitionDrag : live;
+                const x = live;
+                const drag = laneDragFor(laneDrag, "transition", x.t.id);
                 const Icon = TRANSITION_ICONS[x.t.style];
                 const playing = !!x.role;
                 return (
@@ -2552,10 +2470,10 @@ export function Timeline() {
                       selKeys.has(`transition:${x.t.id}`) && SELECTED_SHADOW,
                       // Mid-drag it rides over the zone it would land on, so
                       // the marked room stays readable underneath.
-                      x === transitionDrag && "opacity-75"
+                      drag && "opacity-75"
                     )}
                     style={{
-                      ...barBox(x.t, x.role?.kind ?? "cut"),
+                      ...barBox(drag ? { ...x.t, start: drag.ghostX / pps } : x.t, x.role?.kind ?? "cut"),
                       top: 2,
                       height: TEXT_H - 6,
                     }}
@@ -2578,17 +2496,14 @@ export function Timeline() {
                           .updateTransition(x.t.id, { hidden: !x.t.hidden || undefined })
                       }
                     />
-                    {/* Retiming pulls the loose end: an entrance runs forward
-                        from the clip's head, everything else backward from the
-                        boundary it sits on. */}
-                    <span
-                      title="Drag to retime"
-                      className={cn(
-                        trimHandle,
-                        x.role?.kind === "in" ? "tl-trim-r right-0" : "tl-trim-l left-0"
-                      )}
-                      onPointerDown={(e) => trimTransition(e, x)}
-                    />
+                    {(["l", "r"] as const).map((side) => (
+                      <span
+                        key={side}
+                        title="Drag to trim"
+                        className={cn(trimHandle, side === "l" ? "tl-trim-l left-0" : "tl-trim-r right-0")}
+                        onPointerDown={(e) => trimTransition(e, x, side)}
+                      />
+                    ))}
                   </div>
                 );
               })}
@@ -3311,6 +3226,13 @@ function HoverLine({
  */
 /** The timeline's editing tools. Dropping `labels` leaves the icons on their
  * own — the step between a full toolbar and folding the lot into the menu. */
+function useSplitEnabled() {
+  return useEditor((s) => {
+    const selected = s.multiSelection.length ? s.multiSelection : s.selection ? [s.selection] : [];
+    return !s.readOnly && (!selected.length || selected.some((item) => item && canSplitItem(item.kind)));
+  });
+}
+
 function TimelineTools({
   labels,
   split,
@@ -3324,6 +3246,7 @@ function TimelineTools({
   deleteSelection: () => void;
   selectionCount: number;
 }) {
+  const splitEnabled = useSplitEnabled();
   const size = labels ? "sm" : "icon-sm";
   return (
     <>
@@ -3332,6 +3255,7 @@ function TimelineTools({
         size={size}
         title="Split at pointer, or at playhead (⌘B or S)"
         onClick={split}
+        disabled={!splitEnabled}
       >
         <Scissors />
         {labels && <span>Split</span>}
@@ -3350,6 +3274,7 @@ function TimelineTools({
         <Trash2 />
         {labels && <span>{selectionCount > 1 ? `Delete ${selectionCount}` : "Delete"}</span>}
       </Button>
+      <TimelineGroupActions labels={labels} />
       <SaveSelectionButton labels={labels} />
     </>
   );
@@ -3377,6 +3302,7 @@ function TimelineToolsMenu({
   deleteSelection: () => void;
   selectionCount: number;
 }) {
+  const splitEnabled = useSplitEnabled();
   const save = useSaveSelection();
   // Held open, because the zoom row is not a pick: dragging the slider has to
   // leave the menu standing, while Fit beside it closes as any command would.
@@ -3391,7 +3317,7 @@ function TimelineToolsMenu({
         <MoreHorizontal />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuItem onClick={split}>
+        <DropdownMenuItem disabled={!splitEnabled} onClick={split}>
           <Scissors /> Split
         </DropdownMenuItem>
         <DropdownMenuItem onClick={addText}>
@@ -3400,6 +3326,7 @@ function TimelineToolsMenu({
         <DropdownMenuItem disabled={selectionCount === 0} onClick={deleteSelection}>
           <Trash2 /> {selectionCount > 1 ? `Delete ${selectionCount}` : "Delete"}
         </DropdownMenuItem>
+        <TimelineGroupActions menu />
         {save.available && (
           <DropdownMenuItem disabled={save.state === "saving"} onClick={save.save}>
             {save.state === "done" ? <Check /> : <FolderPlus />}

@@ -74,9 +74,6 @@ export const INSPECTOR_TOOLS = [
       id: str("Overlay element id"),
       name: str("What the person calls this element — shown on its timeline chip and inspector title (empty string clears it, back to what it is)"),
       text: str("New text (titles)"),
-      follows_clip: bool(
-        "Whether the element rides the clip under it (on by default): true homes it to that clip, false frees it where it is"
-      ),
       start: num("Start s"),
       end: num("End s"),
       x: num("Center x 0..1"),

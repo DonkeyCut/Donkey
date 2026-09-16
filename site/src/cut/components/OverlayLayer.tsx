@@ -5,7 +5,7 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutE
 import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
-import { startSelectionDrag } from "@/cut/components/previewSelectionDrag";
+import { startSelectionDrag, togglePreviewSelection } from "@/cut/components/previewSelectionDrag";
 import { useSkim, usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
 import {
@@ -488,12 +488,7 @@ function SubtitleCaption({
       onPointerDown={(e) => {
         if (e.button !== 0) return;
         const s = useEditor.getState();
-        if (e.metaKey || e.ctrlKey) {
-          e.preventDefault();
-          e.stopPropagation();
-          s.toggleSelect({ kind: "cue", id: cue.id });
-          return;
-        }
+        if (togglePreviewSelection(e, { kind: "cue", id: cue.id })) return;
         if (armed && startSelectionDrag(e, stageWidth, stageHeight)) return;
         if (!armed && stagePress) {
           stagePress(e, () => s.select({ kind: "cue", id: cue.id }));
@@ -683,19 +678,17 @@ function OverlayItem({
   const liftChrome = !!chromeHost && selected && !editing;
   const [chromeSize, setChromeSize] = useState<{ w: number; h: number } | null>(null);
   useLayoutEffect(() => {
-    if (!liftChrome) {
-      // Cleared so the next selection starts from the in-box chrome and the
-      // portal twin never paints at a stale size.
-      setChromeSize(null);
-      return;
-    }
+    if (!liftChrome) return;
     const el = boxRef.current;
     if (!el) return;
     const read = () => setChromeSize({ w: el.offsetWidth, h: el.offsetHeight });
     read();
     const ro = new ResizeObserver(read);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      setChromeSize(null);
+    };
   }, [liftChrome]);
 
   // The box carries position, rotation, and opacity; the content wrapper
@@ -1036,12 +1029,7 @@ function OverlayItem({
   const beginMove = (e: React.PointerEvent) => {
     if (editing || e.button !== 0) return;
     const s = useEditor.getState();
-    if (e.metaKey || e.ctrlKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      s.toggleSelect({ kind: "overlay", id: o.id });
-      return;
-    }
+    if (togglePreviewSelection(e, { kind: "overlay", id: o.id })) return;
     if (armed && startSelectionDrag(e, stageWidth, stageHeight)) return;
     // Nothing moves until it is the selection: an unselected element is part
     // of the picture, so the stage pans under it and a stationary press picks

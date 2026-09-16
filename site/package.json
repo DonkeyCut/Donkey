@@ -33,6 +33,9 @@
     "eval:cut-sync": "bun run scripts/eval-cut-sync.ts",
     "eval:cut-edges": "bun run scripts/eval-cut-edges.ts",
     "eval:cut-keys": "bun run scripts/eval-cut-keys.ts",
+    "eval:cut-preview-selection": "bun run scripts/eval-cut-preview-selection.ts",
+    "eval:cut-timeline-operations": "bun run scripts/eval-cut-timeline-operations.ts",
+    "eval:cut-timeline-rows": "bun run scripts/eval-cut-timeline-rows.ts",
     "eval:cut-export": "bun run scripts/eval-cut-export.ts"
   },
   "dependencies": {

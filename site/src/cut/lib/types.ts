@@ -507,6 +507,8 @@ export function regionLabel(r: FrameRect): string {
  * The array is kept sorted by `start` (older docs stored a packed sequence;
  * loading bakes their implied starts in). */
 export interface VideoClip {
+  /** Explicit timeline group; absent means independent. */
+  groupId?: string;
   id: string;
   assetId: string;
   /** What the person calls this clip on the timeline and in the inspector;
@@ -676,6 +678,8 @@ export const transitionDefaultSeconds = (style: TransitionStyle): number =>
  * exactly where it is. `transitionBarStart` is where the window falls against
  * the boundary. */
 export interface TimelineTransition {
+  /** Explicit timeline group; absent means independent. */
+  groupId?: string;
   id: string;
   /** Bar start on the timeline, seconds; the window is [start, start+seconds]. */
   start: number;
@@ -1007,6 +1011,8 @@ export function migrateLegacyTransitions(clips: VideoClip[]): VideoClip[] {
 
 /** A clip on the free-form soundtrack track. */
 export interface AudioClip {
+  /** Explicit timeline group; absent means independent. */
+  groupId?: string;
   id: string;
   assetId: string;
   /** What the person calls this clip on the timeline and in the inspector;
@@ -1055,6 +1061,8 @@ export interface TemplateMedia {
   height?: number;
 }
 export interface TemplateLayer {
+  /** Explicit timeline group; absent means independent. */
+  groupId?: string;
   media: number; // index into `media`
   start: number;
   in: number;
@@ -1092,6 +1100,8 @@ export interface TemplateLayer {
   asClip?: boolean;
 }
 export interface TemplateAudio {
+  /** Explicit timeline group; absent means independent. */
+  groupId?: string;
   media: number;
   start: number;
   in: number;
@@ -1337,6 +1347,8 @@ export type {
 
 /** One subtitle caption, timed against the timeline (not the source files). */
 export interface SubtitleCue {
+  /** Explicit timeline group; absent means independent. */
+  groupId?: string;
   id: string;
   start: number; // timeline seconds
   end: number;

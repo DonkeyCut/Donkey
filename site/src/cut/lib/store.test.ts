@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
-import { adoptTransitionFields, assetIdsInUse, clipLen, closeMicroGaps, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, rippleInsert, separateOverlaps, serializeDoc, startTrimRipple, useEditor } from "./store";
+import { adoptTransitionFields, assetIdsInUse, clipLen, closeMicroGaps, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, rippleInsert, separateOverlaps, serializeDoc, useEditor } from "./store";
+import type React from "react";
+import { runAiTool } from "./aiTools";
+import { selectedMembers, startLaneMove } from "./laneTracks";
+import { expandTimelineGroups } from "./timelineGroups";
+import { timelineItem } from "./timelineItems";
+import { normalizeDocState } from "./store";
 import { playheadAt, setPlayhead, setSkim } from "./playhead";
 import { emptySubtitles, uploadedFontId } from "./types";
-import type { AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
+import type { Selection, AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
 
 /**
  * The lane invariant: segments never overlap, with no exceptions. Every
@@ -767,8 +773,8 @@ describe("subtitle cues", () => {
   });
 });
 
-describe("delete ripple and gaps", () => {
-  test("single-track delete ripples: later items on every track slide left", () => {
+describe("independent deletion and gaps", () => {
+  test("single-track delete keeps all other items in place", () => {
     const a = vclip({ track: 0, start: 0, out: 2 });
     const b = vclip({ track: 0, start: 2, out: 2 });
     const au = aclip({ start: 3, out: 2 });
@@ -780,12 +786,12 @@ describe("delete ripple and gaps", () => {
       selection: { kind: "clip", id: a.id },
     });
     s().deleteSelection();
-    expect(clipById(b.id).start).toBeCloseTo(0);
-    expect(audioById(au.id).start).toBeCloseTo(1);
-    expect(s().overlays[0].start).toBeCloseTo(1);
+    expect(clipById(b.id).start).toBeCloseTo(2);
+    expect(audioById(au.id).start).toBeCloseTo(3);
+    expect(s().overlays[0].start).toBeCloseTo(3);
   });
 
-  test("a ripple delete carries the transitions and drops the deleted clip's own", () => {
+  test("deleting a clip leaves independent transitions in place", () => {
     const av = asset(2);
     const a = vclip({ track: 0, start: 0, out: 2, assetId: av.id });
     const b = vclip({ track: 0, start: 2, out: 2, assetId: av.id });
@@ -795,14 +801,13 @@ describe("delete ripple and gaps", () => {
     s().setClipTransition(b.id, 0.5);
     s().select({ kind: "clip", id: a.id });
     s().deleteSelection();
-    // a's own blend goes with it; b's rides the slide and keeps playing.
-    expect(s().transitions.length).toBe(1);
-    expect(clipById(b.id).start).toBeCloseTo(0);
+    expect(s().transitions.length).toBe(2);
+    expect(clipById(b.id).start).toBeCloseTo(2);
     expect(clipById(b.id).transition).toBeCloseTo(0.5);
     expect(s().transitions[0].start).toBeCloseTo(1.5);
   });
 
-  test("a trim that pushes the run takes the blends along", () => {
+  test("a trim pushes its row and leaves independent transitions in place", () => {
     const av = asset(8);
     const a = vclip({ track: 0, start: 0, in: 0, out: 2, assetId: av.id });
     const b = vclip({ track: 0, start: 2, in: 0, out: 2, assetId: av.id });
@@ -812,8 +817,8 @@ describe("delete ripple and gaps", () => {
     s().setClipTransition(b.id, 0.5);
     s().updateClip(a.id, { out: 3 }); // a grows by 1s, pushing b and c right
     expect(clipById(b.id).start).toBeCloseTo(3);
-    expect(clipById(a.id).transition).toBeCloseTo(0.5);
-    expect(clipById(b.id).transition).toBeCloseTo(0.5);
+    expect(s().transitions.map((t) => t.start)).toEqual([1.5, 3.5]);
+    expect(parkedTransitions(s().clips, s().transitions)).toHaveLength(2);
   });
 
   test("clearing track 0 leaves the titles and captions standing", () => {
@@ -864,11 +869,9 @@ describe("delete ripple and gaps", () => {
       selection: { kind: "clip", id: b.id },
     });
     s().deleteSelection();
-    // The clip goes; the title keeps its full second and falls back to where
-    // the footage under it used to start.
     expect(s().overlays.map((o) => o.id)).toEqual([t.id]);
-    expect(s().overlays[0].start).toBeCloseTo(2);
-    expect(s().overlays[0].end).toBeCloseTo(3);
+    expect(s().overlays[0].start).toBeCloseTo(2.5);
+    expect(s().overlays[0].end).toBeCloseTo(3.5);
   });
 
   test("a soundtrack spanning the deleted clip keeps every second of it", () => {
@@ -885,10 +888,10 @@ describe("delete ripple and gaps", () => {
     expect(s().audioClips.map((x) => x.id)).toEqual([bed.id]);
     expect(audioById(bed.id).start).toBeCloseTo(0);
     expect(clipLen(audioById(bed.id))).toBeCloseTo(6);
-    expect(clipById(c.id).start).toBeCloseTo(2);
+    expect(clipById(c.id).start).toBeCloseTo(4);
   });
 
-  test("captions over the deleted footage stand, packed and in order", () => {
+  test("captions over deleted footage keep their times and words", () => {
     const a = vclip({ track: 0, start: 0, out: 2 });
     const b = vclip({ track: 0, start: 2, out: 4 });
     const q1 = cue({ start: 2.5, end: 3, words: [{ t0: 2.5, t1: 3, w: "one" }] });
@@ -901,14 +904,14 @@ describe("delete ripple and gaps", () => {
     s().deleteSelection();
     const cues = s().subtitles.cues;
     expect(cues.map((c) => c.id)).toEqual([q1.id, q2.id]);
-    expect(cues[0].start).toBeCloseTo(2);
-    expect(cues[0].end).toBeCloseTo(2.5);
-    expect(cues[0].words![0].t0).toBeCloseTo(2);
-    expect(cues[1].start).toBeCloseTo(2.5);
+    expect(cues[0].start).toBeCloseTo(2.5);
+    expect(cues[0].end).toBeCloseTo(3);
+    expect(cues[0].words![0].t0).toBeCloseTo(2.5);
+    expect(cues[1].start).toBeCloseTo(3.5);
     expectLaneSound(cues);
   });
 
-  test("two titles on one row pulled back by a ripple stay apart", () => {
+  test("two titles on one row keep their times after video deletion", () => {
     const a = vclip({ track: 0, start: 0, out: 2 });
     const b = vclip({ track: 0, start: 2, out: 4 });
     const t1 = title({ start: 2.5, end: 3 });
@@ -921,10 +924,10 @@ describe("delete ripple and gaps", () => {
     s().deleteSelection();
     expect(s().overlays.map((o) => o.id)).toEqual([t1.id, t2.id]);
     expectLaneSound(s().overlays);
-    expect(s().overlays.find((o) => o.id === t2.id)!.start).toBeCloseTo(2.5);
+    expect(s().overlays.find((o) => o.id === t2.id)!.start).toBeCloseTo(3.5);
   });
 
-  test("a grouped set crossing rows stays rigid through the ripple", () => {
+  test("an unrelated group keeps its times after video deletion", () => {
     const a = vclip({ track: 0, start: 0, out: 2 });
     const b = vclip({ track: 0, start: 2, out: 6 });
     // Lane 0 is crowded right where the group wants to land, so its member
@@ -1035,8 +1038,8 @@ describe("delete ripple and gaps", () => {
   });
 });
 
-describe("resize ripple", () => {
-  test("shrinking a clip pulls everything after it along, gaps kept", () => {
+describe("independent resize", () => {
+  test("shrinking a clip leaves other items in place", () => {
     const a = vclip({ track: 0, start: 0, out: 4 });
     const b = vclip({ track: 0, start: 4, out: 2 });
     const t = title({ start: 4.5, end: 5.5 });
@@ -1049,22 +1052,22 @@ describe("resize ripple", () => {
       subtitles: { ...emptySubtitles(), cues: [q] },
     });
     s().setClipTrim(a.id, 0, 3);
-    expect(clipById(b.id).start).toBeCloseTo(3);
-    expect(s().overlays[0].start).toBeCloseTo(3.5);
-    expect(audioById(au.id).start).toBeCloseTo(4);
-    expect(s().subtitles.cues[0].start).toBeCloseTo(3.2);
-    expect(s().subtitles.cues[0].words![0].t0).toBeCloseTo(3.2);
+    expect(clipById(b.id).start).toBeCloseTo(4);
+    expect(s().overlays[0].start).toBeCloseTo(4.5);
+    expect(audioById(au.id).start).toBeCloseTo(5);
+    expect(s().subtitles.cues[0].start).toBeCloseTo(4.2);
+    expect(s().subtitles.cues[0].words![0].t0).toBeCloseTo(4.2);
   });
 
-  test("growing a clip pushes them right the same way", () => {
+  test("growing a clip pushes overlapping neighbors on its own row", () => {
     const av = asset(8);
     const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
     const b = vclip({ track: 0, start: 5, out: 2, assetId: av.id }); // a 1s gap before b
     const t = title({ start: 5, end: 6 });
     useEditor.setState({ assets: [av], clips: [a, b], overlays: [t] });
     s().setClipTrim(a.id, 0, 6);
-    expect(clipById(b.id).start).toBeCloseTo(7); // its gap survives
-    expect(s().overlays[0].start).toBeCloseTo(7);
+    expect(clipById(b.id).start).toBeCloseTo(6);
+    expect(s().overlays[0].start).toBeCloseTo(5);
   });
 
   test("growing into an abutting neighbor carries it along, never over it", () => {
@@ -1075,32 +1078,19 @@ describe("resize ripple", () => {
     useEditor.setState({ assets: [av], clips: [a, b], overlays: [t] });
     s().setClipTrim(a.id, 0, 6);
     expect(clipById(b.id).start).toBeCloseTo(6);
-    expect(s().overlays[0].start).toBeCloseTo(6);
+    expect(s().overlays[0].start).toBeCloseTo(4);
     expectLaneSound(videoLane(0));
   });
 
-  test("the gesture's tail growth rides the abutting run too", () => {
-    // The left handle's pinned reveal and the right handle's growth both feed
-    // the engine a positive shift; the clip butted against the tail moves.
-    const a = vclip({ track: 0, start: 0, out: 4 });
-    const b = vclip({ track: 0, start: 4, out: 2 });
-    useEditor.setState({ clips: [a, b] });
-    const engine = startTrimRipple(s(), a.id, 4)!;
-    engine.move(1, [{ id: a.id, patch: { out: 5 } }]);
-    expect(clipById(b.id).start).toBeCloseTo(5);
-    expectLaneSound(videoLane(0));
-    engine.move(0, [{ id: a.id, patch: { out: 4 } }]);
-    expect(clipById(b.id).start).toBeCloseTo(4);
-    engine.settle();
-  });
 
-  test("an item standing over the shortened tail falls back to the new end", () => {
+
+  test("an item over the shortened tail keeps its time", () => {
     const a = vclip({ track: 0, start: 0, out: 4 });
     const t = title({ start: 3, end: 5 });
     useEditor.setState({ clips: [a], overlays: [t] });
     s().setClipTrim(a.id, 0, 2);
-    expect(s().overlays[0].start).toBeCloseTo(2);
-    expect(s().overlays[0].end).toBeCloseTo(4);
+    expect(s().overlays[0].start).toBeCloseTo(3);
+    expect(s().overlays[0].end).toBeCloseTo(5);
   });
 
   test("with an overlay video track a shrink keeps its own-track rules", () => {
@@ -1113,43 +1103,11 @@ describe("resize ripple", () => {
     expect(clipById(layer.id).start).toBeCloseTo(1);
   });
 
-  test("the trim gesture ripples live and a retreat flows everything back", () => {
-    const a = vclip({ track: 0, start: 0, out: 4 });
-    const b = vclip({ track: 0, start: 4, out: 2 });
-    const t = title({ start: 4.5, end: 5 });
-    useEditor.setState({ clips: [a, b], overlays: [t] });
-    const engine = startTrimRipple(s(), a.id, 4)!;
-    engine.move(-1, [{ id: a.id, patch: { out: 3 } }]);
-    expect(clipById(a.id).out).toBeCloseTo(3);
-    expect(clipById(b.id).start).toBeCloseTo(3);
-    expect(s().overlays[0].start).toBeCloseTo(3.5);
-    engine.move(0, [{ id: a.id, patch: { out: 4 } }]);
-    expect(clipById(b.id).start).toBeCloseTo(4);
-    expect(s().overlays[0].start).toBeCloseTo(4.5);
-    engine.settle();
-  });
 
-  test("settling a head trim closes the footage it removed", () => {
-    const a = vclip({ track: 0, start: 0, out: 4 });
-    const b = vclip({ track: 0, start: 4, out: 2 });
-    const t = title({ start: 5, end: 6 });
-    useEditor.setState({ clips: [a, b], overlays: [t] });
-    const engine = startTrimRipple(s(), a.id, 4)!;
-    // The left handle dragged right by 1: head trimmed, gap opened before.
-    engine.move(0, [{ id: a.id, patch: { start: 1, in: 1 } }]);
-    engine.settle({ at: 0, shift: -1 });
-    expect(clipById(a.id).start).toBeCloseTo(0);
-    expect(clipById(a.id).in).toBeCloseTo(1);
-    expect(clipById(b.id).start).toBeCloseTo(3);
-    expect(s().overlays[0].start).toBeCloseTo(4);
-  });
 
-  test("with an overlay video track the gesture engine stays off", () => {
-    const a = vclip({ track: 0, start: 0, out: 4 });
-    const layer = vclip({ track: 1, start: 0, out: 2 });
-    useEditor.setState({ clips: [a, layer] });
-    expect(startTrimRipple(s(), a.id, 4)).toBe(null);
-  });
+
+
+
 });
 
 describe("spine grounding", () => {
@@ -1489,24 +1447,17 @@ describe("bars and clip edges", () => {
     expect(clipById(a.id).transition).toBeUndefined();
   });
 
-  test("a trim carries the bar and the clip fields the export renders from", () => {
-    // The preview and the export read clip.transition, not the bar. A resize
-    // moves the clip's edge and the run behind it, so both have to land
-    // together: a bar left behind, or a field left stale, is a blend playing
-    // at a joint that no longer has one.
+  test("a trim leaves independent bars in place and refreshes render fields", () => {
     const av = asset(8);
     const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
     const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
     useEditor.setState({ assets: [av], clips: [a, b] });
     s().setClipTransition(a.id, 0.8, "wipeleft");
     s().setClipTrim(a.id, 0, 3);
-    // The pair stays in contact, so the cut moved to 3s with the bar on it.
-    expect(clipById(b.id).start).toBeCloseTo(3);
-    expect(s().transitions[0].start).toBeCloseTo(2.2);
-    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
-    // And the render fields still describe that blend.
-    expect(clipById(a.id).transition).toBeCloseTo(0.8);
-    expect(clipById(a.id).transitionStyle).toBe("wipeleft");
+    expect(clipById(b.id).start).toBeCloseTo(4);
+    expect(s().transitions[0].start).toBeCloseTo(3.2);
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([s().transitions[0]]);
+    expect(clipById(a.id).transition ?? 0).toBe(0);
   });
 
   test("a bar lining up with nothing reads as parked, and reanchorBars brings it back", () => {
@@ -1594,7 +1545,7 @@ describe("bars and clip edges", () => {
     expect(s().selection).toEqual({ kind: "cue", id: pasted.id });
   });
 
-  test("a copied bar pastes onto the cut nearest the playhead", () => {
+  test("a copied bar pastes at the requested time with its properties", () => {
     const av = asset(12);
     const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
     const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
@@ -1610,14 +1561,12 @@ describe("bars and clip edges", () => {
     setPlayhead(7.7); // in reach of the b|c cut at 8
     expect(s().paste()).toBe(true);
     expect(s().transitions.length).toBe(2);
-    // The paste plays that cut with the copied blend, fields and all.
-    expect(clipById(b.id).transition).toBeCloseTo(0.8);
-    expect(clipById(b.id).transitionStyle).toBe("wipeleft");
-    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+    expect(s().transitions[1]).toMatchObject({ start: 7.7, seconds: 0.8, style: "wipeleft" });
+    expect(parkedTransitions(s().clips, s().transitions)).toEqual([s().transitions[1]]);
     expect(s().selection).toEqual({ kind: "transition", id: s().transitions[1].id });
   });
 
-  test("a bar pasted onto an occupied cut replaces the incumbent", () => {
+  test("a pasted bar preserves existing bars", () => {
     const av = asset(12);
     const a = vclip({ track: 0, start: 0, out: 4, assetId: av.id });
     const b = vclip({ track: 0, start: 4, out: 4, assetId: av.id });
@@ -1633,11 +1582,11 @@ describe("bars and clip edges", () => {
     s().copySelection();
     setPlayhead(8.2);
     s().paste();
-    // One bar on the b|c cut: the pasted wipe; the crossfade left with it.
-    expect(s().transitions.length).toBe(2);
-    expect(clipById(b.id).transition).toBeCloseTo(0.8);
-    expect(clipById(b.id).transitionStyle).toBe("wipeleft");
-    expect(parkedTransitions(s().clips, s().transitions)).toEqual([]);
+    expect(s().transitions.length).toBe(3);
+    expect(clipById(b.id).transition).toBeCloseTo(0.4);
+    expect(clipById(b.id).transitionStyle ?? "crossfade").toBe("crossfade");
+    expect(s().transitions[2]).toMatchObject({ start: 8.2, seconds: 0.8, style: "wipeleft" });
+
   });
 
   test("a bar pasted far from any boundary parks at the playhead", () => {
@@ -1757,7 +1706,7 @@ describe("bars and clip edges", () => {
     expect(clipById(b.id).animIn).toEqual({ style: "zoom", seconds: 0.3 });
   });
 
-  test("deleting a clip takes its parked leftover bars along", () => {
+  test("deleting a clip leaves ungrouped parked bars", () => {
     const av = asset(8);
     const a = vclip({ track: 0, start: 0, out: 2, assetId: av.id });
     useEditor.setState({ assets: [av], clips: [a] });
@@ -1768,7 +1717,7 @@ describe("bars and clip edges", () => {
     s().select({ kind: "clip", id: a.id });
     s().deleteSelection();
     expect(s().clips.length).toBe(0);
-    expect(s().transitions.length).toBe(0);
+    expect(s().transitions.length).toBe(2);
   });
 
   test("a shared bar survives while one of its clips does", () => {
@@ -2192,4 +2141,249 @@ test("closing a project invalidates its pending load and releases its editor ide
     expect(s().projectId).toBeNull();
     expect(s().loaded).toBe(false);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+
+describe("explicit timeline groups", () => {
+  function setup(): NonNullable<Selection>[] {
+    const av = asset(30);
+    useEditor.setState({
+      assets: [av],
+      clips: [vclip({ id: "v", assetId: av.id, start: 2, out: 8 })],
+      audioClips: [aclip({ id: "a", assetId: av.id, start: 3 })],
+      overlays: [title({ id: "text", start: 4, end: 6 }), { id: "rect", kind: "shape", shape: "rect", x: 0.5, y: 0.5, w: 0.5, h: 0.5, fill: "#fff", start: 4, end: 6, lane: 1 }],
+      transitions: [{ id: "bar", start: 9, seconds: 1, style: "crossfade" }],
+      subtitles: { ...emptySubtitles(), cues: [cue({ id: "cue", start: 5, end: 6, words: [{ w: "hi", t0: 5, t1: 6 }] })] },
+    });
+    return [{ kind: "clip", id: "v" }, { kind: "audio", id: "a" }, { kind: "overlay", id: "text" }, { kind: "overlay", id: "rect" }, { kind: "cue", id: "cue" }, { kind: "transition", id: "bar" }];
+  }
+  function grouped() {
+    const members = setup();
+    s().setMultiSelection(members);
+    expect(s().groupSelection()).toBeTruthy();
+    return members;
+  }
+
+  test("new and loaded overlays stay independent when the underlying video moves", () => {
+    const members = setup();
+    for (const member of members) expect(timelineItem(s(), member)?.groupId).toBeUndefined();
+    // A saved attachment from an earlier build has no behavioral effect.
+    const doc = JSON.parse(JSON.stringify(serializeDoc(s())));
+    doc.overlays[0].hostClipId = "v";
+    const loaded = normalizeDocState(doc, s().assets);
+    useEditor.setState({ ...loaded, aspect: loaded.aspect ?? s().aspect });
+    s().updateClip("v", { start: 15 });
+    expect(s().overlays.map((o) => [o.start, o.end])).toEqual([[4, 6], [4, 6]]);
+  });
+
+  test("every member selects and starts a drag with the complete mixed group", () => {
+    const members = grouped();
+    for (const member of members) {
+      s().select(null);
+      const drag = selectedMembers(s(), member.kind === "clip" ? "video" : member.kind, member.id);
+      expect(drag?.members).toHaveLength(members.length);
+      s().select(member);
+      expect(s().multiSelection).toHaveLength(members.length);
+      expect(s().selection).toEqual(member);
+    }
+    s().toggleSelect(members[0]);
+    expect(s().multiSelection).toHaveLength(0);
+    s().toggleSelect(members[5]);
+    expect(s().multiSelection).toHaveLength(members.length);
+  });
+
+  test("moving a mixed group preserves offsets and caption words, with one undo", () => {
+    const members = grouped();
+    s().select(members[5]);
+    expect(s().moveTimelineSelection(10)).toBe(10);
+    expect(members.map((sel) => timelineItem(s(), sel)?.start)).toEqual([12, 13, 14, 14, 15, 19]);
+    expect(s().subtitles.cues[0].words).toEqual([{ w: "hi", t0: 15, t1: 16 }]);
+    s().undo();
+    expect(members.map((sel) => timelineItem(s(), sel)?.start)).toEqual([2, 3, 4, 4, 5, 9]);
+    s().redo();
+    expect(s().transitions[0].start).toBe(19);
+  });
+
+  test("a real pointer gesture from a video or transition moves every member once", () => {
+    const saved = new Map(["window", "document", "requestAnimationFrame", "cancelAnimationFrame"].map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+    try {
+      const events = new EventTarget();
+      Object.defineProperty(globalThis, "window", { configurable: true, value: events });
+      Object.defineProperty(globalThis, "document", { configurable: true, value: { activeElement: null } });
+      Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, value: () => 1 });
+      Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+      for (const kind of ["video", "transition"] as const) {
+        const members = grouped();
+        s().select(null);
+        const target = { getBoundingClientRect: () => ({ left: 0 }), closest: () => null };
+        const down = { button: 0, clientX: 0, clientY: 0, metaKey: false, ctrlKey: false, shiftKey: false, currentTarget: target, preventDefault() {}, stopPropagation() {} } as unknown as React.PointerEvent;
+        const ui = { pps: 10, homeRow: 0, rows: () => [], onSnap: () => {}, onDrag: () => {} };
+        startLaneMove(down, kind, kind === "transition" ? "bar" : "v", ui);
+        for (const type of ["pointermove", "pointerup"]) {
+          events.dispatchEvent(Object.assign(new Event(type), { clientX: 100, clientY: 0, metaKey: true, ctrlKey: true }));
+        }
+        expect(members.map((sel) => timelineItem(s(), sel)?.start)).toEqual([12, 13, 14, 14, 15, 19]);
+        expect(s().subtitles.cues[0].words).toEqual([{ w: "hi", t0: 15, t1: 16 }]);
+        s().undo();
+        expect(s().transitions[0].start).toBe(9);
+      }
+    } finally {
+      for (const [key, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+    }
+  });
+
+  test("chat selects, groups, moves and ungroups every timeline kind", async () => {
+    const members = setup();
+    for (const [i, member] of members.entries()) await runAiTool("select", { ...member, additive: i > 0 });
+    await runAiTool("group_items", {});
+    await runAiTool("select", members[5]);
+    expect(s().multiSelection).toHaveLength(6);
+    await runAiTool("move_timeline_selection", { delta: 10 });
+    expect(s().transitions[0].start).toBe(19);
+    await runAiTool("ungroup_items", {});
+    await runAiTool("select", members[5]);
+    expect(s().multiSelection).toHaveLength(1);
+  });
+
+  test("chat reorder carries every group member and caption words in one undo step", async () => {
+    const members = grouped();
+    useEditor.setState({ clips: [...s().clips, vclip({ id: "tail", start: 12, out: 2 })] });
+    const before = members.map((member) => timelineItem(s(), member)?.start);
+    const groupId = s().clips[0].groupId;
+    await runAiTool("move_clip", { clipId: "v", toIndex: 1 });
+    expect(members.map((member) => timelineItem(s(), member)?.start)).toEqual([14, 15, 16, 16, 17, 21]);
+    expect(s().subtitles.cues[0].words).toEqual([{ w: "hi", t0: 17, t1: 18 }]);
+    expect(clipById("tail").start).toBe(12);
+    for (const member of members) expect(timelineItem(s(), member)?.groupId).toBe(groupId);
+    s().undo();
+    expect(members.map((member) => timelineItem(s(), member)?.start)).toEqual(before);
+    expect(clipById("tail").start).toBe(12);
+    s().redo();
+    expect(s().subtitles.cues[0].start).toBe(17);
+  });
+
+  test("reordering earlier carries displaced groups and leaves independent items in place", async () => {
+    const members = grouped();
+    useEditor.setState({
+      clips: [...s().clips, vclip({ id: "tail", start: 12, out: 2 })],
+      overlays: [...s().overlays, title({ id: "independent", start: 20, end: 22 })],
+    });
+    await runAiTool("move_clip", { clipId: "tail", toIndex: 0 });
+    expect(clipById("tail").start).toBe(2);
+    expect(members.map((member) => timelineItem(s(), member)?.start)).toEqual([4, 5, 6, 6, 7, 11]);
+    expect(s().subtitles.cues[0].words).toEqual([{ w: "hi", t0: 7, t1: 8 }]);
+    expect(s().overlays.find((o) => o.id === "independent")?.start).toBe(20);
+    s().undo();
+    expect(clipById("tail").start).toBe(12);
+    expect(members.map((member) => timelineItem(s(), member)?.start)).toEqual([2, 3, 4, 4, 5, 9]);
+  });
+
+  test("reorder respects occupied member rows and keeps groups above zero", async () => {
+    useEditor.setState({
+      clips: [vclip({ id: "first", start: 0 }), vclip({ id: "moving", start: 4, groupId: "group" })],
+      subtitles: { ...emptySubtitles(), cues: [
+        cue({ id: "blocker", start: 0, end: 3 }),
+        cue({ id: "caption", start: 3, end: 5, groupId: "group", words: [{ w: "hi", t0: 3, t1: 4 }] }),
+      ] },
+    });
+    await runAiTool("move_clip", { clipId: "moving", toIndex: 0 });
+    expect(clipById("moving").start).toBe(4);
+    expect(clipById("first").start).toBe(6);
+    expect(s().subtitles.cues.map((c) => [c.start, c.end])).toEqual([[0, 3], [3, 5]]);
+    expectLaneSound(videoLane(0));
+  });
+
+  test("reorder reserves room for multiple video members in one group", async () => {
+    useEditor.setState({ clips: [
+      vclip({ id: "first", start: 0 }),
+      vclip({ id: "moving", start: 4, groupId: "group" }),
+      vclip({ id: "second-member", start: 8, groupId: "group" }),
+    ] });
+    await runAiTool("move_clip", { clipId: "moving", toIndex: 0 });
+    expect(clipById("moving").start).toBe(0);
+    expect(clipById("second-member").start).toBe(4);
+    expect(clipById("first").start).toBe(6);
+    expectLaneSound(videoLane(0));
+  });
+
+  test("reordering within a group leaves its timing intact", () => {
+    const clips = [
+      vclip({ id: "first-member", start: 4, groupId: "group" }),
+      vclip({ id: "second-member", start: 8, groupId: "group" }),
+    ];
+    useEditor.setState({ clips });
+    s().moveClip("first-member", 1);
+    expect(s().clips).toBe(clips);
+  });
+
+  test("ungroup leaves every member in place and makes each independently selectable", () => {
+    const members = grouped();
+    s().ungroupSelection();
+    for (const member of members) {
+      expect(timelineItem(s(), member)?.groupId).toBeUndefined();
+      s().select(member);
+      expect(s().multiSelection).toEqual([member]);
+    }
+    expect(members.map((sel) => timelineItem(s(), sel)?.start)).toEqual([2, 3, 4, 4, 5, 9]);
+    s().undo();
+    expect(expandTimelineGroups(s(), [members[0]])).toHaveLength(6);
+  });
+
+  test("a grouped move stops the entire set at zero and avoids occupied rows", () => {
+    const members = grouped();
+    expect(s().moveTimelineSelection(-10)).toBe(-2);
+    expect(members.map((sel) => timelineItem(s(), sel)?.start)).toEqual([0, 1, 2, 2, 3, 7]);
+    useEditor.setState({ overlays: [...s().overlays, title({ id: "other", start: 12, end: 14 })] });
+    expect(s().moveTimelineSelection(10)).toBe(12);
+    expect(s().overlays.find((o) => o.id === "other")?.start).toBe(12);
+    expect(s().overlays.find((o) => o.id === "text")?.start).toBe(14);
+  });
+
+  test("copy and paste preserve all offsets with a fresh shared group id", () => {
+    const members = grouped();
+    const originalGroup = timelineItem(s(), members[0])?.groupId;
+    expect(s().copySelection()).toBe(true);
+    setPlayhead(15);
+    expect(s().paste()).toBe(true);
+    const copies = s().multiSelection.filter((sel): sel is NonNullable<Selection> => !!sel);
+    expect(copies.map((sel) => timelineItem(s(), sel)?.start)).toEqual([15, 16, 17, 17, 18, 22]);
+    const ids = new Set(copies.map((sel) => timelineItem(s(), sel)?.groupId));
+    expect(ids.size).toBe(1);
+    expect(ids.has(originalGroup)).toBe(false);
+    expect(ids.has(undefined)).toBe(false);
+    s().select(copies[5]);
+    expect(s().multiSelection).toHaveLength(6);
+  });
+
+  test("saving and reloading preserves every group member, including transitions", () => {
+    const members = grouped();
+    const loaded = normalizeDocState(serializeDoc(s()), s().assets);
+    useEditor.setState({ ...loaded, aspect: loaded.aspect ?? s().aspect });
+    for (const member of members) expect(expandTimelineGroups(s(), [member])).toHaveLength(6);
+  });
+
+  test("templates carry all group members and remap their group together on insertion", () => {
+    grouped();
+    const template = s().selectionTemplate()!;
+    expect(template.transitions).toHaveLength(1);
+    const original = s().clips[0].groupId;
+    const assetId = s().assets[0].id;
+    useEditor.setState({ clips: [], overlays: [], audioClips: [], transitions: [], subtitles: emptySubtitles() });
+    s().insertTemplate({ ...template, id: "template", addedAt: 0 }, [assetId], 0);
+    const group = s().clips[0].groupId;
+    expect(group).toBeTruthy();
+    expect(group).not.toBe(original);
+    expect(expandTimelineGroups(s(), [{ kind: "transition", id: s().transitions[0].id }])).toHaveLength(6);
+  });
+
+  test("regrouping merges complete groups without leaving former members behind", () => {
+    const members = grouped();
+    useEditor.setState({ overlays: [...s().overlays, title({ id: "extra", start: 20, end: 22 })] });
+    s().setMultiSelection([members[0], { kind: "overlay", id: "extra" }]);
+    s().groupSelection();
+    expect(expandTimelineGroups(s(), [members[5]])).toHaveLength(7);
+  });
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { ITEM_KIND_IDS, ITEM_KINDS, type ItemKind } from "./itemKinds";
+import { timelineItem } from "./timelineItems";
 import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previewSelection";
 
 import { libraryShareTargetSchema, shareSettingsSchema, librarySharePath } from "@/cut/lib/librarySharing";
@@ -138,7 +140,7 @@ import { landReferenceAssets as landReferenceAssetsInto, openReference, referenc
 import { clampLayersToAssets, mediaTypeFits, templateFromDoc } from "./projectTemplate";
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
 import { isStylePresetTemplate } from "./stylePresets";
-import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, nextFreeStart, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame } from "./exportRender";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
@@ -1255,20 +1257,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         return { selection: null };
       }
       const id = String(input.id ?? "");
-      // A video clip on any track selects as "clip"; "overlayClip" is accepted
-      // as a legacy alias for a layer clip and "text" for an overlay element.
-      const pool =
-        kind === "clip" || kind === "overlayClip"
-          ? s.clips
-          : kind === "audio"
-            ? s.audioClips
-            : kind === "overlay" || kind === "text"
-              ? s.overlays
-              : kind === "cue" ? s.subtitles.cues : null;
-      if (!pool) throw new ToolError(`Unknown kind: ${kind}`);
-      if (!pool.some((x) => x.id === id)) throw new ToolError(`No ${kind} with id ${id}.`);
-      const selKind =
-        kind === "overlayClip" ? "clip" : kind === "text" ? "overlay" : (kind as "clip" | "audio" | "overlay" | "cue");
+      if (!ITEM_KIND_IDS.includes(kind as ItemKind)) throw new ToolError(`Unknown kind: ${kind}`);
+      const selKind = kind as ItemKind;
+      if (!timelineItem(s, { kind: selKind, id })) throw new ToolError(`No ${kind} with id ${id}.`);
       if (input.additive === true) s.toggleSelect({ kind: selKind, id });
       else s.select({ kind: selKind, id });
       return { selection: useEditor.getState().selection, multiSelection: useEditor.getState().multiSelection };
@@ -1282,13 +1273,27 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { panel };
   },
 
+  group_items: (s) => {
+    const groupId = s.groupSelection();
+    if (!groupId) throw new ToolError("Select at least two timeline items to group.");
+    return { groupId, selection: useEditor.getState().multiSelection };
+  },
+  ungroup_items: (s) => {
+    s.ungroupSelection();
+    return { selection: useEditor.getState().multiSelection };
+  },
+  move_timeline_selection: (s, input) => {
+    if (!isNum(input.delta)) throw new ToolError("delta is required.");
+    return { delta: s.moveTimelineSelection(input.delta), selection: useEditor.getState().multiSelection };
+  },
+
   split_at: (s, input) => {
-      const before = s.clips.length + s.audioClips.length;
+      const before = ITEM_KIND_IDS.reduce((n, kind) => n + ITEM_KINDS[kind].list(s).length, 0);
       s.splitAtPlayhead(isNum(input.t) ? input.t : undefined);
       const after = useEditor.getState();
-      const made = after.clips.length + after.audioClips.length - before;
+      const made = ITEM_KIND_IDS.reduce((n, kind) => n + ITEM_KINDS[kind].list(after).length, 0) - before;
       if (made === 0) throw new ToolError("Nothing to split at that time.");
-      return { split: true, ...tracksAfter() };
+      return { split: made, selection: after.multiSelection, ...tracksAfter() };
   },
 
   move_clip: (s, input) => {
@@ -1308,18 +1313,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   place_clip: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       if (!isNum(input.start)) throw new ToolError("start (seconds) is required.");
-      const len = clipLen(clip);
-      const taken = s.clips
-        .filter((c) => c.id !== clip.id && c.track === clip.track)
-        .map((c) => ({ start: c.start, end: c.start + clipLen(c) }));
-      const at = nextFreeStart(taken, Math.max(0, input.start), len);
-      // Closing a gap is this tool's main job, so the clip's blends travel
-      // with it: a bar playing its head or its cut lands on the edge's new
-      // time instead of staying behind on the row.
-      const before = s.clips;
-      s.updateClip(clip.id, { start: at });
-      useEditor.getState().sortClips();
-      useEditor.getState().reanchorBars(before);
+      s.select({ kind: "clip", id: clip.id });
+      const delta = s.moveTimelineSelection(Math.max(0, input.start) - clip.start);
+      const at = clip.start + delta;
       return {
         id: clip.id,
         start: round2(at),
@@ -1814,23 +1810,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   delete_item: (s, input) => {
-      const kind = String(input.kind) as "clip" | "overlayClip" | "audio" | "overlay" | "text";
-      const id = String(input.id ?? "");
-      const pool =
-        kind === "clip" || kind === "overlayClip"
-          ? s.clips
-          : kind === "audio"
-            ? s.audioClips
-            : s.overlays;
-      if (!pool.some((x) => x.id === id)) throw new ToolError(`No ${kind} with id ${id}.`);
-      const selKind =
-        kind === "overlayClip" ? "clip" : kind === "text" ? "overlay" : (kind as "clip" | "audio" | "overlay");
-      s.select({ kind: selKind, id });
-      s.deleteSelection();
-      return {
-        deleted: { kind: selKind, id },
-        ...(selKind === "overlay" ? {} : tracksAfter()),
-      };
+    const kind = String(input.kind) as ItemKind;
+    const id = String(input.id ?? "");
+    if (!ITEM_KIND_IDS.includes(kind)) throw new ToolError(`Unknown kind: ${kind}`);
+    if (!timelineItem(s, { kind, id })) throw new ToolError(`No ${kind} with id ${id}.`);
+    s.select({ kind, id });
+    const deleted = useEditor.getState().multiSelection;
+    s.deleteSelection();
+    return { deleted, ...tracksAfter() };
   },
 
   remove_gap: (s, input) => {
@@ -2198,7 +2185,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   update_overlay: (s, input) => {
       const o = requireItem(s.overlays, input.id, "overlay element");
       s.updateOverlay(o.id, overlayPatch(input, o.kind ?? "text"));
-      if (typeof input.follows_clip === "boolean") s.setOverlayFollows(o.id, input.follows_clip);
       const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
       return {
         id: next.id,
@@ -2206,7 +2192,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...(isTextOverlay(next) ? { text: next.text, color: next.color, size: next.size } : {}),
         start: round2(next.start),
         end: round2(next.end),
-        ...(next.hostClipId ? { host: next.hostClipId } : {}),
       };
   },
 
@@ -3914,6 +3899,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         out.timelineH = useEditor.getState().timelineH;
       }
       return out;
+  },
+
+  copy_selection: (s) => {
+    if (!s.copySelection()) throw new ToolError("Select timeline items to copy.");
+    return { copied: s.copiedItems().length };
+  },
+
+  paste_selection: (s, input) => {
+    if (input.at !== undefined && !isNum(input.at)) throw new ToolError("at must be finite timeline seconds.");
+    if (!s.paste(isNum(input.at) ? input.at : undefined)) throw new ToolError("Copy timeline items before pasting.");
+    return { selection: useEditor.getState().multiSelection };
   },
 
   undo: (s) => {

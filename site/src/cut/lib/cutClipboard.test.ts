@@ -71,6 +71,7 @@ describe("pasting into another project", () => {
     copies.length = 0;
     useEditor.setState({
       projectId: "p2",
+      readOnly: false,
       clips: [],
       transitions: [],
       audioClips: [],
@@ -81,6 +82,25 @@ describe("pasting into another project", () => {
       multiSelection: [],
     });
     setPlayhead(2);
+  });
+
+  test("a read-only destination rejects paste before transferring media", async () => {
+    useEditor.setState({ readOnly: true });
+    expect(await pasteCutPayload(payloadOf(["c0"]), { projectId: "p2", at: 2, library: EMPTY_LIBRARY })).toBe(false);
+    expect(copies).toEqual([]);
+    expect(useEditor.getState().assets).toEqual([]);
+  });
+
+  test("asset-free effects and transitions paste without opening the source project", async () => {
+    const payload: CutClipboardPayload = { v: 1, projectId: "unavailable-project", assets: [], items: [
+      { kind: "overlay", item: { id: "fx", kind: "effect", effect: "blur", start: 1, end: 3, x: 0.5, y: 0.5 } },
+      { kind: "transition", item: { id: "tr", style: "crossfade", start: 1.5, seconds: 0.4 } },
+    ] };
+    setPlayhead(99);
+    expect(await pasteCutPayload(payload, { projectId: "p2", at: 5, library: EMPTY_LIBRARY })).toBe(true);
+    expect(useEditor.getState().overlays[0]).toMatchObject({ start: 5, end: 7, effect: "blur" });
+    expect(useEditor.getState().transitions[0]).toMatchObject({ start: 5.5, seconds: 0.4, style: "crossfade" });
+    expect(copies).toEqual([]);
   });
 
   test("brings the media across once and lands the items on it", async () => {
@@ -102,7 +122,7 @@ describe("pasting into another project", () => {
     const title = s.overlays.find(isTextOverlay)!;
     expect(title.font).toBe(`asset:${s.assets.find((a) => a.type === "font")!.id}`);
     expect(s.subtitles.cues).toHaveLength(1);
-    expect(s.subtitles.cues[0]).toMatchObject({ start: 2, text: "every feature" });
+    expect(s.subtitles.cues[0]).toMatchObject({ start: 2.3, text: "every feature" });
 
     // Pasting the same copy again finds the media already here.
     copies.length = 0;

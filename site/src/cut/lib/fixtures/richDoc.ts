@@ -85,7 +85,7 @@ export function richDoc(): ProjectDoc {
     overlays: [
       {
         id: "e0", kind: "effect", effect: "vintage", amount: 0.6,
-        start: 0, end: c0Len, x: 0.5, y: 0.5, lane: 2, hostClipId: "c0",
+        start: 0, end: c0Len, x: 0.5, y: 0.5, lane: 2,
       },
       {
         id: "t0", kind: "text", text: "Everything test",

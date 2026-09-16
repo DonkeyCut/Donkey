@@ -26,18 +26,19 @@ import { retimeOf, type Retimable, type SpeedNode } from "@donkeycut/effects-kit
  *   lane — the store's `nextFreeStart` is that one primitive.
  * - Cut: the store's `splitAtPlayhead` slices whichever kind is selected.
  *
- * An adapter can vary exactly three things: `closesGap` (a video clip's
- * slot heals behind it; a sound bed or title keeps its absolute time),
- * `rowsDescend` (the video stack draws track 0 at the bottom), and
- * `multiLane` (cues never leave their language row).
+ * Adapters describe source bounds, row orientation and whether items can
+ * change rows. Selection, editing and history belong to this coordinator.
  */
 
 import type React from "react";
 import { refFromAsset, startPointerRefDrag } from "./assetRef";
 import { startDrag } from "./drag";
 import { additiveClick, snapHeldOff } from "./hostKeys";
-import { clipLen, getClipSpans, moveOverlayGroup, nextFreeStart, overlayLaneOrder, projectDuration, reanchorTransitions, startTrimRipple, useEditor } from "./store";
+import { getClipSpans, moveOverlayGroup, nextFreeStart, overlayLaneOrder, projectDuration, useEditor } from "./store";
+import { ITEM_KINDS, type ItemKind, type ItemOf } from "./itemKinds";
+import { expandTimelineGroups } from "./timelineGroups";
 import { playheadAt } from "./playhead";
+import { TRANSITION_MAX } from "./types";
 import type {
   AudioClip,
   MediaAsset,
@@ -45,6 +46,7 @@ import type {
   Selection,
   SubtitleCue,
   VideoClip,
+  TimelineTransition,
 } from "./types";
 
 type S = ReturnType<typeof useEditor.getState>;
@@ -52,7 +54,7 @@ type S = ReturnType<typeof useEditor.getState>;
 // A drag lane: one per doc structure. "video" is every video track (a
 // clip's lane is its track number); "overlay" is the title lanes, where every
 // overlay element kind rides one adapter.
-export type LaneKind = "video" | "audio" | "overlay" | "cue";
+export type LaneKind = Exclude<ItemKind, "clip"> | "video";
 
 /** The Selection kind a lane maps to: a video clip selects as `"clip"`. */
 const laneSelectionKind = (kind: LaneKind): NonNullable<Selection>["kind"] =>
@@ -175,13 +177,7 @@ interface LaneAdapter<T> {
   /** The asset's beat grid mapped through this item onto the timeline —
    * snap targets, so an edge lands on the music. Media kinds only. */
   beatTimes?(s: S, raw: T): number[];
-  /** A lifted item's slot closes behind it: while one drags, same-lane items
-   * past its old spot rest slid left by its length, so the run heals the
-   * moment the item leaves. Video tracks set this; free-form lanes (audio,
-   * titles, cues) hold every resting spot. */
-  closesGap?: boolean;
-  /** After a committed move: keep the list sorted, re-seat what rides the
-   * cuts. `before` is the state the gesture started from. */
+  /** Keep the item list sorted after a committed move or trim. */
   onMoved?(before: S): void;
   /** After a committed move, shift companions that ride along — a grouped
    * overlay's peers keep their relative timing. Same undo step. */
@@ -236,9 +232,9 @@ const videoAdapter: LaneAdapter<VideoClip> = {
   multiLane: true,
   rowsDescend: true,
   raws: (s) => s.clips,
-  view: (c) => ({ id: c.id, start: c.start, len: clipLen(c), lane: c.track }),
+  view: (c) => ({ id: c.id, start: c.start, len: ITEM_KINDS.clip.duration(c), lane: ITEM_KINDS.clip.lane(c) }),
   apply: (patches) => useEditor.getState().updateClipsTransient(patches),
-  movePatch: (c, start) => ({ id: c.id, patch: { start } }),
+  movePatch: (c, start) => ({ id: c.id, patch: ITEM_KINDS.clip.at(c, start) }),
   trimLeftPatch: (c, newStart) => ({
     id: c.id,
     patch: { start: newStart, ...headTrim(c, newStart, c.start) },
@@ -254,25 +250,18 @@ const videoAdapter: LaneAdapter<VideoClip> = {
   leftFloor: (s, c) => headFloor(c, s.assets.find((x) => x.id === c.assetId)?.duration),
   maxLen: videoMaxLen,
   lanePatch: (c, lane) => ({ id: c.id, patch: { track: lane } }),
-  closesGap: true,
   assetOf: (s, c) => s.assets.find((x) => x.id === c.assetId),
   beatTimes: mediaBeatTimes,
-  // Clips stay sorted by start, and the transition bars re-seat onto the
-  // cuts the move carried — the same settle every placement does.
-  onMoved: (before) =>
-    useEditor.setState((st) => {
-      const clips = [...st.clips].sort((a, b) => a.start - b.start);
-      return { clips, transitions: reanchorTransitions(before.clips, clips, st.transitions) };
-    }),
+  onMoved: () => useEditor.getState().sortClips(),
 };
 
 const audioAdapter: LaneAdapter<AudioClip> = {
   minLen: 0.15,
   multiLane: true,
   raws: (s) => s.audioClips,
-  view: (a) => ({ id: a.id, start: a.start, len: clipLen(a), lane: a.lane ?? 0 }),
+  view: (a) => ({ id: a.id, start: a.start, len: ITEM_KINDS.audio.duration(a), lane: ITEM_KINDS.audio.lane(a) }),
   apply: (patches) => useEditor.getState().updateAudiosTransient(patches),
-  movePatch: (a, start) => ({ id: a.id, patch: { start } }),
+  movePatch: (a, start) => ({ id: a.id, patch: ITEM_KINDS.audio.at(a, start) }),
   trimLeftPatch: (a, newStart) => ({
     id: a.id,
     patch: { start: newStart, ...headTrim(a, newStart, a.start) },
@@ -296,9 +285,9 @@ const textAdapter: LaneAdapter<Overlay> = {
   minLen: 0.2,
   multiLane: true,
   raws: (s) => s.overlays,
-  view: (o) => ({ id: o.id, start: o.start, len: o.end - o.start, lane: o.lane ?? 0 }),
+  view: (o) => ({ id: o.id, start: o.start, len: ITEM_KINDS.overlay.duration(o), lane: ITEM_KINDS.overlay.lane(o) }),
   apply: (patches) => useEditor.getState().updateOverlaysTransient(patches),
-  movePatch: (o, start) => ({ id: o.id, patch: { start, end: start + (o.end - o.start) } }),
+  movePatch: (o, start) => ({ id: o.id, patch: ITEM_KINDS.overlay.at(o, start) }),
   trimLeftPatch: (o, newStart) => ({ id: o.id, patch: { start: newStart } }),
   trimRightPatch: (o, newEnd) => ({ id: o.id, patch: { end: newEnd } }),
   leftFloor: () => 0,
@@ -313,18 +302,10 @@ const cueAdapter: LaneAdapter<SubtitleCue> = {
   // its language, and tracks are managed in the panel (capped at three).
   multiLane: false,
   raws: (s) => s.subtitles.cues,
-  view: (c) => ({ id: c.id, start: c.start, len: c.end - c.start, lane: c.lane ?? 0 }),
+  view: (c) => ({ id: c.id, start: c.start, len: ITEM_KINDS.cue.duration(c), lane: ITEM_KINDS.cue.lane(c) }),
   apply: (patches) => useEditor.getState().updateCuesTransient(patches),
-  // Retiming detaches a cue from its word timings; an unmoved patch restores
-  // the originals, so parted neighbors that flow back keep theirs.
-  movePatch: (c, start) => ({
-    id: c.id,
-    patch: {
-      start,
-      end: start + (c.end - c.start),
-      words: Math.abs(start - c.start) < 1e-6 ? c.words : undefined,
-    },
-  }),
+  // A moved cue keeps its words at the same offsets within the cue.
+  movePatch: (c, start) => ({ id: c.id, patch: ITEM_KINDS.cue.at(c, start) }),
   trimLeftPatch: (c, newStart) => ({ id: c.id, patch: { start: newStart, words: undefined } }),
   trimRightPatch: (c, newEnd) => ({ id: c.id, patch: { end: newEnd, words: undefined } }),
   leftFloor: () => 0,
@@ -332,7 +313,23 @@ const cueAdapter: LaneAdapter<SubtitleCue> = {
   onMoved: () => useEditor.getState().sortCues(),
 };
 
-type LaneRaw = VideoClip | AudioClip | Overlay | SubtitleCue;
+const transitionAdapter: LaneAdapter<TimelineTransition> = {
+  minLen: 0.1,
+  multiLane: false,
+  raws: (s) => s.transitions,
+  view: (t) => ({ id: t.id, start: t.start, len: ITEM_KINDS.transition.duration(t), lane: ITEM_KINDS.transition.lane(t) }),
+  apply: (patches) => {
+    const byId = new Map(patches.map((p) => [p.id, p.patch]));
+    useEditor.setState((s) => ({ transitions: s.transitions.map((t) => byId.has(t.id) ? { ...t, ...byId.get(t.id) } : t) }));
+  },
+  movePatch: (t, start) => ({ id: t.id, patch: ITEM_KINDS.transition.at(t, start) }),
+  trimLeftPatch: (t, start) => ({ id: t.id, patch: { start, seconds: t.start + t.seconds - start } }),
+  trimRightPatch: (t, end) => ({ id: t.id, patch: { seconds: end - t.start } }),
+  leftFloor: (_s, t) => Math.max(0, t.start + t.seconds - TRANSITION_MAX),
+  maxLen: () => TRANSITION_MAX,
+};
+
+type LaneRaw = ItemOf[ItemKind];
 // The generic parameter is erased at the registry boundary; each gesture only
 // feeds an adapter values that came out of that same adapter, so this is safe.
 const ADAPTERS: Record<LaneKind, LaneAdapter<LaneRaw>> = {
@@ -340,6 +337,7 @@ const ADAPTERS: Record<LaneKind, LaneAdapter<LaneRaw>> = {
   audio: audioAdapter as unknown as LaneAdapter<LaneRaw>,
   overlay: textAdapter as unknown as LaneAdapter<LaneRaw>,
   cue: cueAdapter as unknown as LaneAdapter<LaneRaw>,
+  transition: transitionAdapter as unknown as LaneAdapter<LaneRaw>,
 };
 
 /** Logical times an edge can snap to: the timeline start, video track 0's
@@ -541,40 +539,25 @@ interface GroupMember {
 }
 
 const memberOf = (s: S, sel: NonNullable<Selection>): GroupMember | null => {
-  if (sel.kind === "clip") {
-    const c = s.clips.find((x) => x.id === sel.id);
-    return c ? { kind: "video", raw: c, id: c.id, start: c.start, len: clipLen(c), lane: c.track } : null;
-  }
-  if (sel.kind === "audio") {
-    const a = s.audioClips.find((x) => x.id === sel.id);
-    return a ? { kind: "audio", raw: a, id: a.id, start: a.start, len: clipLen(a), lane: a.lane ?? 0 } : null;
-  }
-  if (sel.kind === "overlay") {
-    const o = s.overlays.find((x) => x.id === sel.id);
-    return o ? { kind: "overlay", raw: o, id: o.id, start: o.start, len: o.end - o.start, lane: o.lane ?? 0 } : null;
-  }
-  if (sel.kind === "cue") {
-    const c = s.subtitles.cues.find((x) => x.id === sel.id);
-    return c ? { kind: "cue", raw: c, id: c.id, start: c.start, len: c.end - c.start, lane: c.lane ?? 0 } : null;
-  }
-  return null;
+  const kind: LaneKind = sel.kind === "clip" ? "video" : sel.kind;
+  const adapter = ADAPTERS[kind];
+  const raw = adapter.raws(s).find((item) => item.id === sel.id);
+  return raw ? { kind, raw, ...adapter.view(raw) } : null;
 };
 
 /** The set a grab on `id` carries when the item sits in a multi-selection:
- * every selected lane item, and the unselected peers of any grouped overlay
- * among them, so a group never tears apart. Null when the grab is on its
- * own. */
-function selectedMembers(
+ * every selected item and every member of its explicit timeline group.
+ * Null when the grab is on its own. */
+export function selectedMembers(
   s: S,
   kind: LaneKind,
   id: string
 ): { grabbed: GroupMember; members: GroupMember[] } | null {
   const selKind = laneSelectionKind(kind);
-  if (
-    s.multiSelection.length < 2 ||
-    !s.multiSelection.some((m) => m?.kind === selKind && m.id === id)
-  )
-    return null;
+  const selected = s.multiSelection.some((m) => m?.kind === selKind && m.id === id)
+    ? s.multiSelection : [{ kind: selKind, id }];
+  const selection = expandTimelineGroups(s, selected);
+  if (selection.length < 2) return null;
   const seen = new Set<string>();
   const members: GroupMember[] = [];
   const admit = (m: GroupMember | null) => {
@@ -584,13 +567,7 @@ function selectedMembers(
     seen.add(key);
     members.push(m);
   };
-  for (const sel of s.multiSelection) if (sel) admit(memberOf(s, sel));
-  for (const m of [...members]) {
-    const gid = m.kind === "overlay" ? (m.raw as Overlay).groupId : undefined;
-    if (!gid) continue;
-    for (const peer of s.overlays.filter((o) => o.groupId === gid))
-      admit(memberOf(s, { kind: "overlay", id: peer.id }));
-  }
+  for (const sel of selection) admit(memberOf(s, sel));
   const grabbed = members.find((m) => m.kind === kind && m.id === id) ?? members.find((m) => m.id === id);
   return grabbed && members.length > 1 ? { grabbed, members } : null;
 }
@@ -617,6 +594,7 @@ function startGroupMove(
   useEditor.setState({
     selection: { kind: laneSelectionKind(grabbed.kind), id: grabbed.id },
     selectedKey: null,
+    multiSelection: members.map((m) => ({ kind: laneSelectionKind(m.kind), id: m.id })),
   });
   if (s.playing) s.setPlaying(false);
   const grabTime =
@@ -643,7 +621,7 @@ function startGroupMove(
       .map((raw) => ({ kind, raw, view: ADAPTERS[kind].view(raw) }))
       .filter((x) => !memberKeys.has(`${kind}:${x.view.id}`));
   const rest = (
-    [...restOf("video"), ...restOf("audio"), ...restOf("overlay"), ...restOf("cue")] as {
+    (Object.keys(ADAPTERS) as LaneKind[]).flatMap(restOf) as {
       kind: LaneKind;
       raw: LaneRaw;
       view: LaneItem;
@@ -914,20 +892,7 @@ export function startLaneMove(e: React.PointerEvent, kind: LaneKind, id: string,
     .raws(s)
     .filter((r) => ad.view(r).id !== id)
     .map((r) => ({ raw: r, view: ad.view(r) }));
-  // Where a neighbor rests while the drag is live. On a gap-closing lane the
-  // lifted clip's slot heals under it: same-lane neighbors past its old spot
-  // rest slid left by its length, and the parting below lays the lane out
-  // from these closed spots.
-  const restAt = (x: (typeof rest)[number]) =>
-    ad.closesGap && x.view.lane === self.lane && x.view.start > start0 + 1e-9
-      ? x.view.start - len
-      : x.view.start;
-  // The one spot on the healed home lane that overlaps nothing: past the end
-  // of the resting run. The lifted clip parks there while it hovers other
-  // tracks, so the closed gap never puts two clips on the same span.
-  const parked = rest
-    .filter((x) => x.view.lane === self.lane)
-    .reduce((m, x) => Math.max(m, restAt(x) + x.view.len), 0);
+  const restAt = (x: (typeof rest)[number]) => x.view.start;
   const usedLanes = laneOrder(kind, s, [...rest.map((x) => x.view.lane), self.lane]);
   // The edges this drag can open a new row past. From an outermost row an
   // item alone there has nothing to open on its side: the row it left
@@ -963,16 +928,9 @@ export function startLaneMove(e: React.PointerEvent, kind: LaneKind, id: string,
   // restores of previously shifted ones): dragging one cue must not rebuild
   // hundreds of unmoved neighbors on every mousemove.
   //
-  // On a gap-closing lane the lifted item rides along too (`selfStart`): the
-  // store mirrors the previewed layout every frame — the landing slot while
-  // home, the parked spot while hovering other tracks — so the doc stays
-  // overlap-free at every instant a mid-drag autosave could catch it. The
-  // ghost is what the user sees, so the transient self-moves never show.
-  let selfAt = start0;
   const shifted = new Map<string, number>();
   const applyMoves = (
-    startFor: (x: (typeof rest)[number]) => number,
-    selfStart?: number
+    startFor: (x: (typeof rest)[number]) => number
   ) => {
     const patches: Patch<LaneRaw>[] = [];
     for (const x of rest) {
@@ -984,13 +942,9 @@ export function startLaneMove(e: React.PointerEvent, kind: LaneKind, id: string,
         else shifted.delete(x.view.id);
       }
     }
-    if (ad.closesGap && selfStart !== undefined && Math.abs(selfStart - selfAt) > 1e-9) {
-      patches.push(ad.movePatch(raw0, selfStart));
-      selfAt = selfStart;
-    }
     if (patches.length) ad.apply(patches);
   };
-  const restRestore = () => applyMoves((x) => x.view.start, start0);
+  const restRestore = () => applyMoves((x) => x.view.start);
 
   startDrag(e, {
     onMove: (dx, dy, ev) => {
@@ -1042,7 +996,7 @@ export function startLaneMove(e: React.PointerEvent, kind: LaneKind, id: string,
       // The aimed row's neighbors part around the cursor. Order comes from
       // the original midpoints, so a lifted item keeps its spot until the
       // pointer truly crosses a neighbor's middle; the runs themselves sit at
-      // their resting spots (closed on gap-closing lanes).
+      // their resting spots.
       const part = partAround(
         rest.filter((x) => x.view.lane === lane),
         pointerTime,
@@ -1053,10 +1007,7 @@ export function startLaneMove(e: React.PointerEvent, kind: LaneKind, id: string,
       if (part.clamped) guide = null;
       slotStart = part.slotStart;
       ui.onSnap(guide);
-      // On a gap-closing lane the lifted item rides its slot while home and
-      // parks past the healed run while it aims at another row, so the doc
-      // never holds two items on one span.
-      applyMoves(part.at, targetRow === ui.homeRow ? slotStart : parked);
+      applyMoves(part.at);
       ui.onDrag({
         kind,
         id,
@@ -1217,34 +1168,7 @@ export function startLaneTrim(
     .raws(s)
     .map((r) => ({ raw: r, view: ad.view(r) }))
     .filter((x) => x.view.id !== id && x.view.lane === self.lane);
-  // While track 0 is the only video track, a spine trim ripples: everything
-  // past the clip's tail — clips, titles, captions, soundtrack — rides the
-  // moved edge in both directions, every gap keeping its width. With overlay
-  // video tracks present the engine is null (the delete gate) and the trim
-  // keeps its own track's push rules.
-  const ripple =
-    kind === "video" && self.lane === 0
-      ? (startTrimRipple(s, id, self.start + self.len) as {
-          move: (shift: number, clipPatches: Patch<LaneRaw>[]) => void;
-          settle: (close?: { at: number; shift: number }) => void;
-        } | null)
-      : null;
-  // The clip layout the gesture started from, so a trim with no ripple engine
-  // behind it can still map the bars onto where it left the cuts.
-  const clips0 = kind === "video" && self.lane === 0 ? s.clips : null;
-  /** Close the gesture: the ripple settles the document when there is one,
-   * and either way the transition bars re-seat onto the cuts the trim moved.
-   * A dissolve follows its cut whether or not the project has overlay tracks. */
-  const settle = (close?: { at: number; shift: number }) => {
-    if (ripple) {
-      ripple.settle(close);
-      return;
-    }
-    if (!clips0) return;
-    const st = useEditor.getState();
-    if (st.transitions.length)
-      useEditor.setState({ transitions: reanchorTransitions(clips0, st.clips, st.transitions) });
-  };
+  const settle = () => ad.onMoved?.(s);
 
   if (side === "l") {
     const start0 = self.start;
@@ -1337,16 +1261,12 @@ export function startLaneTrim(
         const end = ad.revealLeftPatch
           ? Math.max(start, floor) + len0 + (start0 - reveal)
           : start0 + len0;
-        if (ripple) {
-          ripple.move(end - (start0 + len0), patches);
-        } else {
-          const delta = Math.max(0, end - nextStart);
-          if (delta !== lastDelta) {
-            patches.push(...followers.map((f) => ad.movePatch(f.raw, f.view.start + delta)));
-            lastDelta = delta;
-          }
-          ad.apply(patches);
+        const delta = Math.max(0, end - nextStart);
+        if (delta !== lastDelta) {
+          patches.push(...followers.map((f) => ad.movePatch(f.raw, f.view.start + delta)));
+          lastDelta = delta;
         }
+        ad.apply(patches);
       },
       onUp: () => {
         ui.onSnap(null);
@@ -1354,10 +1274,7 @@ export function startLaneTrim(
         const cur = ad.raws(useEditor.getState()).find((r) => ad.view(r).id === id);
         const from = cur ? ad.view(cur).start : floor;
         if (from >= floor - 1e-4) {
-          // Settled within the room. A head trimmed to the right left its
-          // trimmed footage as a gap; the ripple closes it, pulling the clip
-          // and everything after back onto the footage that survives.
-          settle(from > start0 + 1e-4 ? { at: start0, shift: start0 - from } : undefined);
+          settle();
           return;
         }
         // Elastic spring back to the floor. `finish` lands the floor exactly,
@@ -1418,18 +1335,10 @@ export function startLaneTrim(
       // Followers respond only to travel up to the ceiling, so the overshoot
       // gives visually without shoving the run — and springing back needs no
       // re-lay, just as packed leaders hold at the floor on the left edge.
-      if (ripple) {
-        // The document rides the edge both ways, every gap keeping its width.
-        ripple.move(Math.min(end, ceil) - end0, [ad.trimRightPatch(raw0, end)]);
-      } else {
-        const delta = Math.max(0, Math.min(end, ceil) - nextStart);
-        const run =
-          delta === lastDelta
-            ? []
-            : followers.map((f) => ad.movePatch(f.raw, f.view.start + delta));
-        lastDelta = delta;
-        ad.apply([ad.trimRightPatch(raw0, end), ...run]);
-      }
+      const delta = Math.max(0, Math.min(end, ceil) - nextStart);
+      const run = delta === lastDelta ? [] : followers.map((f) => ad.movePatch(f.raw, f.view.start + delta));
+      lastDelta = delta;
+      ad.apply([ad.trimRightPatch(raw0, end), ...run]);
     },
     onUp: () => {
       ui.onSnap(null);
@@ -1498,6 +1407,7 @@ function startGroupTrim(
   useEditor.setState({
     selection: { kind: laneSelectionKind(grabbed.kind), id: grabbed.id },
     selectedKey: null,
+    multiSelection: members.map((m) => ({ kind: laneSelectionKind(m.kind), id: m.id })),
   });
   if (s.playing) s.setPlaying(false);
   s.pushHistory();
@@ -1527,7 +1437,6 @@ function startGroupTrim(
     return { at: end, lo: m.start + ad.minLen, hi: Math.min(nextStart, m.start + ad.maxLen(s, m.raw)) };
   });
   const gi = members.indexOf(grabbed);
-  const clips0 = members.some((m) => m.kind === "video") ? s.clips : null;
   const apply = (at: number[]) => {
     const buckets = new Map<LaneKind, Patch<LaneRaw>[]>();
     members.forEach((m, i) => {
@@ -1552,11 +1461,7 @@ function startGroupTrim(
     },
     onUp: () => {
       ui.onSnap(null);
-      // Transition bars re-seat onto the cuts the trim moved.
-      if (!clips0) return;
-      const st = useEditor.getState();
-      if (st.transitions.length)
-        useEditor.setState({ transitions: reanchorTransitions(clips0, st.clips, st.transitions) });
+      for (const k of new Set(members.map((m) => m.kind))) ADAPTERS[k].onMoved?.(s);
     },
   });
 }

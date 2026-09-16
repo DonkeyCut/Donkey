@@ -7,7 +7,8 @@
  */
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
-import { SELECTABLE_ITEM_KINDS } from "@/cut/lib/previewSelection";
+import { ITEM_KIND_IDS, canSplitItem } from "@/cut/lib/itemKinds";
+import { TIMELINE_ITEM_KINDS } from "@/cut/lib/timelineGroups";
 import {
   TEXT_EMPHASIS_IDS,
   TEXT_LAYOUT_IDS,
@@ -21,23 +22,38 @@ export const TIMELINE_TOOLS = [
   {
     name: "select",
     description:
-      "Select a video clip (on any track), soundtrack clip, or overlay element — title, shape, or sticker (or clear the selection). Selection appears in the timeline and preview. Use additive:true to toggle an item in the selection; move_selection moves the selected visual items together.",
+      "Select any timeline item: video, audio, an overlay element, caption cue, or transition (or clear the selection). Selection appears in the timeline and preview. Use additive:true to toggle an item in the selection; move_selection moves the selected visual items together.",
     inputSchema: obj({
-      kind: { type: "string", enum: [...SELECTABLE_ITEM_KINDS, "none"], description: "What to select — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
+      kind: { type: "string", enum: [...TIMELINE_ITEM_KINDS, "none"], description: "What to select — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
       id: str("The item id (omit for kind=none)"),
       additive: bool("Toggle this item in the existing selection"),
     }, ["kind"]),
   },
   {
+    name: "group_items",
+    description: "Group the selected timeline items, including video, audio, text, shapes, captions and transitions. Use select with additive:true to build the selection first. New items start ungrouped. Selecting any group member selects the whole group; drag a member to move the group.",
+    inputSchema: obj({}),
+  },
+  {
+    name: "ungroup_items",
+    description: "Ungroup every group represented in the current selection. Items keep their timing and become independently selectable and movable.",
+    inputSchema: obj({}),
+  },
+  {
+    name: "move_timeline_selection",
+    description: "Move selected timeline items and their group members together by delta seconds, preserving relative timing and caption word timings. Negative moves stop at the timeline start; occupied rows move the set to the next free position. Use this for a grouped selection, including captions and transitions.",
+    inputSchema: obj({ delta: num("Timeline shift in seconds") }, ["delta"]),
+  },
+  {
     name: "split_at",
     description:
-      "Split the video (or a selected soundtrack/overlay clip) at a time, like pressing S. Omit t to split at the playhead. Splits don't move times, so issue every planned split together in one round. The result carries the updated track-0 and soundtrack rows (ids, starts, lengths) — read the new ids from there.",
+      `Split selected items and group members at a time, like pressing S. Supported kinds: ${ITEM_KIND_IDS.filter(canSplitItem).join(", ")}. Transitions remain whole. With no selection, split the video on track 0. Omit t for the playhead. Times stay fixed; the result includes the new selected ids.`,
     inputSchema: obj({ t: num("Timeline seconds to cut at (optional)") }),
   },
   {
     name: "move_clip",
     description:
-      "Reorder a track-0 video clip to a new index: it lifts out (its old spot becomes a gap) and clips from the landing index shift right to make room — nothing else moves, so sound and titles stay synced. To move one clip in time, use place_clip.",
+      "Reorder a track-0 video clip to a new index: its old spot becomes a gap and clips from the landing index shift right to make room. The moved clip and displaced clips carry their group members with relative timing preserved. Occupied rows can move a group farther right. To set a timeline start, use place_clip.",
     inputSchema: obj({ clipId: str("Video clip id"), toIndex: num("Target index, 0-based") }, ["clipId", "toIndex"]),
   },
   {
@@ -60,7 +76,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "trim_clip",
     description:
-      "Set a video clip's trim points inside its source media (seconds). Changing `in` hides the leading part; `out` the trailing part. While track 0 is the only video track, a track-0 resize ripples: everything past the clip's tail — clips, titles, captions, soundtrack — rides the moved edge in both directions, and every existing gap keeps its width. With overlay video tracks present, growth pushes the track-0 run and a shrink leaves a gap.",
+      "Set a video clip's source trim points in seconds. Growth pushes overlapping neighbors on its own video track; shrinking leaves a gap. Other rows keep their timing.",
     inputSchema: obj({ clipId: str("Video clip id"), in: num("New in point (optional)"), out: num("New out point (optional)") }, ["clipId"]),
   },
   {
@@ -134,9 +150,9 @@ export const TIMELINE_TOOLS = [
   {
     name: "delete_item",
     description:
-      "Delete a video clip (any track), soundtrack clip, or overlay element (title/shape/sticker) by id. Only the listed item leaves the project — anything else laid over it survives at full length. While track 0 is the only video track, deleting a track-0 clip ripples: its footprint closes and everything after it — clips, titles, captions, soundtrack — slides left in sync, while items standing over the footprint fall back to where it started. With overlay video tracks present the delete leaves its gap in place (remove_gap closes it). Deletes on other tracks remove just that item.",
+      "Delete a timeline item and its explicit group by id. Other items keep their timing. The deleted footprint becomes a gap; remove_gap closes it.",
     inputSchema: obj({
-      kind: { type: "string", enum: ["clip", "audio", "overlay"], description: "Item kind — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
+      kind: { type: "string", enum: TIMELINE_ITEM_KINDS, description: "Item kind — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
       id: str("Item id"),
     }, ["kind", "id"]),
   },

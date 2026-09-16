@@ -13,6 +13,7 @@
 // compile until it has an entry, and `itemKinds.test.ts` walks the table so
 // every entry proves it copies and pastes.
 
+import { retimeOf } from "@donkeycut/effects-kit";
 import {
   fontAssetId,
   isStickerOverlay,
@@ -53,6 +54,15 @@ export interface ItemLists {
 export interface ItemKindDef<K extends ItemKind> {
   /** The list this kind lives in. */
   list(s: ItemLists): ItemOf[K][];
+  /** Store the list while preserving the document's other collections. */
+  withList(s: ItemLists, items: ItemOf[K][]): ItemLists;
+  /** Timeline duration and row, independent of the item's source representation. */
+  duration(item: ItemOf[K]): number;
+  lane(item: ItemOf[K]): number;
+  /** Move to a timeline start, preserving all item properties and local timing. */
+  at(item: ItemOf[K], start: number): ItemOf[K];
+  /** Split at an interior timeline time; the coordinator assigns the new id. */
+  split: ((item: ItemOf[K], at: number) => [ItemOf[K], ItemOf[K]]) | null;
   /** A copy that shares nothing with the original. */
   clone(item: ItemOf[K]): ItemOf[K];
   /** Every asset id on the item: the media it plays, the font it is set in,
@@ -67,9 +77,24 @@ export interface ItemKindDef<K extends ItemKind> {
 
 const deep = <T>(v: T): T => (v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T));
 
+function splitMedia<T extends VideoClip | AudioClip>(item: T, at: number): [T, T] {
+  const cut = retimeOf(item).srcAt(at - item.start);
+  return item.reverse
+    ? [{ ...item, in: cut }, { ...item, start: at, out: cut }]
+    : [{ ...item, out: cut }, { ...item, start: at, in: cut }];
+}
+
 export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
   clip: {
     list: (s) => s.clips,
+    withList: (s, clips) => ({ ...s, clips }),
+    duration: (c) => retimeOf(c).len,
+    lane: (c) => c.track,
+    at: (c, start) => ({ ...c, start }),
+    split: (c, at) => {
+      const [left, right] = splitMedia(c, at);
+      return [{ ...left, transition: undefined, transitionStyle: undefined, animOut: undefined }, { ...right, animIn: undefined }];
+    },
     clone: deep,
     assetIds: (c) =>
       [c.assetId, c.removal?.matte?.assetId, c.removal?.backdrop?.assetId].filter(
@@ -101,6 +126,11 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
   },
   audio: {
     list: (s) => s.audioClips,
+    withList: (s, audioClips) => ({ ...s, audioClips }),
+    duration: (a) => retimeOf(a).len,
+    lane: (a) => a.lane ?? 0,
+    at: (a, start) => ({ ...a, start }),
+    split: splitMedia,
     clone: deep,
     assetIds: (a) => (a.assetId ? [a.assetId] : []),
     remapAssets: (a, to) => ({ ...a, assetId: to(a.assetId) }),
@@ -108,6 +138,11 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
   },
   overlay: {
     list: (s) => s.overlays,
+    withList: (s, overlays) => ({ ...s, overlays }),
+    duration: (o) => o.end - o.start,
+    lane: (o) => o.lane ?? 0,
+    at: (o, start) => ({ ...o, start, end: start + o.end - o.start }),
+    split: (o, at) => [{ ...o, end: at }, { ...o, start: at }],
     clone: deep,
     assetIds: (o) => {
       if (isStickerOverlay(o)) return o.assetId ? [o.assetId] : [];
@@ -129,6 +164,21 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
   },
   cue: {
     list: (s) => s.subtitles.cues,
+    withList: (s, cues) => ({ ...s, subtitles: { ...s.subtitles, cues } }),
+    duration: (c) => c.end - c.start,
+    lane: (c) => c.lane ?? 0,
+    at: (c, start) => ({ ...c, start, end: start + c.end - c.start,
+      ...(c.words ? { words: c.words.map((w) => ({ ...w, t0: w.t0 + start - c.start, t1: w.t1 + start - c.start })) } : {}),
+    }),
+    split: (c, at) => {
+      const left = c.words?.filter((w) => w.t0 < at);
+      const right = c.words?.filter((w) => w.t0 >= at);
+      const offset = Math.round(c.text.length * ((at - c.start) / (c.end - c.start)));
+      return [
+        { ...c, end: at, text: left?.length ? left.map((w) => w.w).join(" ") : c.text.slice(0, offset).trim() || c.text, words: left?.length ? left : undefined },
+        { ...c, start: at, text: right?.length ? right.map((w) => w.w).join(" ") : c.text.slice(offset).trim() || c.text, words: right?.length ? right : undefined },
+      ];
+    },
     clone: deep,
     assetIds: () => [],
     remapAssets: (c) => c,
@@ -136,6 +186,11 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
   },
   transition: {
     list: (s) => s.transitions,
+    withList: (s, transitions) => ({ ...s, transitions }),
+    duration: (t) => t.seconds,
+    lane: () => 0,
+    at: (t, start) => ({ ...t, start }),
+    split: null,
     clone: deep,
     assetIds: () => [],
     remapAssets: (t) => t,
@@ -178,3 +233,6 @@ export function listedAssetIds(s: ItemLists): Set<string> {
 export const assertNever = (x: never): never => {
   throw new Error(`Unhandled item kind ${String(x)}`);
 };
+
+/** Explicit editing capability, shared by controls and commands. */
+export const canSplitItem = (kind: ItemKind) => ITEM_KINDS[kind].split !== null;

@@ -111,7 +111,7 @@ export function templateFromDoc(doc: ProjectDoc, opts: { items?: string[] } = {}
   for (const c of audioClips) {
     const mi = mediaFor(c.assetId);
     if (mi == null) continue;
-    audio.push({ media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, speedCurve: c.speedCurve, reverse: c.reverse, sound: c.sound, duck: c.duck, lane: c.lane });
+    audio.push({ groupId: c.groupId, media: mi, start: c.start - start0, in: c.in, out: c.out, volume: c.volume, fadeIn: c.fadeIn, fadeOut: c.fadeOut, speed: c.speed, speedCurve: c.speedCurve, reverse: c.reverse, sound: c.sound, duck: c.duck, lane: c.lane });
     itemByAudio.push(c.id);
   }
   const texts: TemplateSaveInput["texts"] = [];

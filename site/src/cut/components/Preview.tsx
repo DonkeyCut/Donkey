@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { Check, Copy, Loader2, PanelTopClose, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
-import { startSelectionDrag } from "@/cut/components/previewSelectionDrag";
+import { isPreviewSelectionModifier, startSelectionDrag, togglePreviewSelection } from "@/cut/components/previewSelectionDrag";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import {
   playheadAt,
@@ -506,7 +506,7 @@ export function Preview() {
     for (const c of s.clips) {
       if (c.hidden) continue;
       const r = rectOf(c);
-      if (isFullRect(r) && !e.metaKey && !e.ctrlKey) continue;
+      if (isFullRect(r) && !isPreviewSelectionModifier(e)) continue;
       const len = clipLen(c);
       if (t < c.start || t >= c.start + len) continue;
       const pose = clipKeyed(c) ? clipPoseAt(c, t - c.start) : null;
@@ -533,8 +533,8 @@ export function Preview() {
         onPointerDownCapture={(e) => {
           // Selection chrome can cover another item. Modifier picking follows
           // the visible elements inside the stage.
-          if (e.button === 0 && (e.metaKey || e.ctrlKey) &&
-              (e.target as HTMLElement).closest("[data-preview-clip], [data-preview-kind]") &&
+          if (e.button === 0 && isPreviewSelectionModifier(e) &&
+              (e.target as HTMLElement).closest(".stage, [data-preview-clip], [data-preview-kind]") &&
               !(e.target as HTMLElement).closest("[title], [contenteditable=true]")) {
             const element = document.elementsFromPoint(e.clientX, e.clientY)
               .map((node) => node.closest<HTMLElement>(".overlay-item[data-preview-kind], .sub-caption[data-preview-kind]"))
@@ -543,9 +543,7 @@ export function Preview() {
             const id = element?.dataset.previewId;
             const clipId = !id ? clipAtPoint(e) : null;
             if ((id && (kind === "overlay" || kind === "cue")) || clipId) {
-              e.preventDefault();
-              e.stopPropagation();
-              useEditor.getState().toggleSelect(id && (kind === "overlay" || kind === "cue")
+              togglePreviewSelection(e, id && (kind === "overlay" || kind === "cue")
                 ? { kind, id } : { kind: "clip", id: clipId! });
               return;
             }
@@ -624,8 +622,7 @@ export function Preview() {
               if (hit) {
                 const s = useEditor.getState();
                 const item = { kind: "clip" as const, id: hit };
-                if (e.metaKey || e.ctrlKey) s.toggleSelect(item);
-                else s.select(item);
+                s.select(item);
               }
             }
           }}
@@ -1006,12 +1003,7 @@ function ClipTransformGizmo({ stage, selectedClip }: { stage: Stage; selectedCli
   // partly off screen — as long as a sliver stays inside to grab.
   const onMoveBox = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
-    if (e.metaKey || e.ctrlKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      st().toggleSelect({ kind: "clip", id: clip.id });
-      return;
-    }
+    if (togglePreviewSelection(e, { kind: "clip", id: clip.id })) return;
     if (startSelectionDrag(e, stage.w, stage.h)) return;
     surfaceDrag(
       e,

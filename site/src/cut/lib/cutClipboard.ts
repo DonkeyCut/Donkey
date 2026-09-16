@@ -10,7 +10,9 @@
 // engine, the cloud), remembers where each copy came from so the next paste
 // finds it, and then lands the items on the copies.
 
-import { refFromAsset } from "./assetRef";
+import { clearCopiedFrame } from "./stageFrame";
+import { reportSwallowed } from "./report";
+import { refFromAsset, selectionRefTokens } from "./assetRef";
 import { trackEditorTool } from "./editorWork";
 import { clipboardItemAcross, clipboardItemAssetIds, type TimelineClipboardItem } from "./itemKinds";
 import type { LibraryData } from "./library";
@@ -92,6 +94,21 @@ export async function writeCutClipboard(text: string, payload: CutClipboardPaylo
   await clip.writeText(text);
 }
 
+/** Copy timeline selection to both the editor clipboard and the system clipboard. */
+export function copyTimelineSelection(): boolean {
+  const s = useEditor.getState();
+  const copied = s.copySelection();
+  const token = selectionRefTokens(s);
+  if (!copied && !token) return false;
+  if (copied) clearCopiedFrame();
+  const items = copied ? s.copiedItems() : [];
+  const payload = copied && s.projectId
+    ? { v: 1 as const, projectId: s.projectId, items, assets: payloadAssets(items, s.assets) }
+    : null;
+  void writeCutClipboard(token ?? "", payload).catch((error) => reportSwallowed("timeline clipboard write", error));
+  return true;
+}
+
 /** The items on this project's assets: what crosses, on the copies' ids. */
 const remapItems = (items: TimelineClipboardItem[], idMap: Map<string, string>): TimelineClipboardItem[] =>
   items.map((cb) => clipboardItemAcross(cb, (id) => idMap.get(id) ?? id));
@@ -110,16 +127,16 @@ export async function pasteCutPayload(
 ): Promise<boolean> {
   const { projectId, at, library } = ctx;
   const s = useEditor.getState();
-  if (s.projectId !== projectId) return false;
+  if (s.projectId !== projectId || s.readOnly) return false;
   if (payload.projectId === projectId) {
     if (payload.items.length === 0) return false;
     s.setClipboard(payload.items);
-    return s.paste();
+    return s.paste(at);
   }
   // The editor holds this project open until the copies have landed, the way
   // it waits for a chat tool; a switch that beats the hold leaves the
   // landing refused with the project it was for.
-  const landed = await trackEditorTool(async () => {
+  const landed = payload.assets.length === 0 ? [] : await trackEditorTool(async () => {
     const ref = await openReference({ kind: "project", id: payload.projectId });
     return landReferenceAssets(ref, payload.assets, projectId);
   });
@@ -135,5 +152,5 @@ export async function pasteCutPayload(
   const idMap = new Map(landed.map((l) => [l.sourceId, l.asset.id]));
   const st = useEditor.getState();
   st.setClipboard(remapItems(payload.items, idMap));
-  return st.paste();
+  return st.paste(at);
 }

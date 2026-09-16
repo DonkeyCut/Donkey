@@ -21,15 +21,15 @@ import {
   renderPreviewProxy,
   type ExportDoc,
 } from "@/cut/lib/exportClient";
-import { EMPTY_LIBRARY, fileZoneAt, hasRefDrag, parseMentions, refCandidatesOf, selectionRefTokens } from "@/cut/lib/assetRef";
+import { EMPTY_LIBRARY, fileZoneAt, hasRefDrag, parseMentions, refCandidatesOf } from "@/cut/lib/assetRef";
 import { placeRefAtPlayhead } from "@/cut/lib/refPlace";
-import { pasteCutPayload, payloadAssets, payloadFromHtml, writeCutClipboard } from "@/cut/lib/cutClipboard";
+import { copyTimelineSelection, pasteCutPayload, payloadFromHtml } from "@/cut/lib/cutClipboard";
 import { useLibrary } from "@/cut/lib/queries";
 import { copyableRefs } from "@/cut/lib/refCopy";
 import { startUpload } from "@/cut/lib/importQueue";
 import { enrichAsset, importFileToProject, isFontFile, isMediaFile, prepareImport } from "@/cut/lib/media";
 import { uploadLibraryFont } from "@/cut/lib/linkedLibrary";
-import { clearCopiedFrame, copiedFrameFile, hasCopiedFrame } from "@/cut/lib/stageFrame";
+import { copiedFrameFile, hasCopiedFrame } from "@/cut/lib/stageFrame";
 // Side-effect import: registers the brief-to-video resume subscription, so a
 // persisted run resumes on project load even when the AI panel never mounts.
 import "@/cut/lib/genScene";
@@ -1155,39 +1155,12 @@ export function Editor({
           // same keystroke. The timeline clipboard keeps its last timeline
           // copy, so ⌘V still pastes what was copied for the timeline.
           if (copyableRefs().length > 0) return;
-          const token = selectionRefTokens(s);
-          // The newer copy owns the clipboard: a copied preview frame steps
-          // aside for this one, and so does a file copied from another app —
-          // the system clipboard takes the token, or nothing at all, so a
-          // paste finds the timeline copy first.
-          const copied = s.copySelection();
-          if (copied) clearCopiedFrame();
-          if (copied || token) {
-            // The copy leaves the tab whole: the items and the assets they
-            // play, so ⌘V in another tab or another project lands them.
-            const items = copied ? s.copiedItems() : [];
-            const payload =
-              copied && s.projectId
-                ? { v: 1 as const, projectId: s.projectId, items, assets: payloadAssets(items, s.assets) }
-                : null;
-            void writeCutClipboard(token ?? "", payload).catch(() => {});
-            e.preventDefault();
-          }
+          if (copyTimelineSelection()) e.preventDefault();
         }
       } else if (mod && e.key.toLowerCase() === "g") {
-        // ⌘G groups the multi-selected elements, ⇧⌘G dissolves the primary's
-        // group — the panel's Group button is out of reach while a
-        // multi-selection keeps the inspector closed.
         e.preventDefault();
-        if (e.shiftKey) {
-          const gid =
-            s.selection?.kind === "overlay"
-              ? s.overlays.find((o) => o.id === s.selection!.id)?.groupId
-              : undefined;
-          if (gid) s.ungroupOverlays(gid);
-        } else {
-          s.groupSelectedOverlays();
-        }
+        if (e.shiftKey) s.ungroupSelection();
+        else s.groupSelection();
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
         s.setAiOpen(!s.aiOpen);

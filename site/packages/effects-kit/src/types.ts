@@ -33,11 +33,6 @@ export interface OverlayBase {
   hidden?: boolean;
   /** Group membership (select/move as one); assigned by the host's grouping. */
   groupId?: string;
-  /** The video clip whose frames this element rides: the editor keeps it over
-   * the same footage when that clip moves, retimes or splits, and leaves it
-   * where it is when the clip goes. Absent = the editor picks the clip under
-   * the element whenever it is placed; null = the element stays free. */
-  hostClipId?: string | null;
   /** Preset In / Out / Loop animation (see anim.ts); absent = static. */
   anim?: OverlayAnim;
   /** Keyframed pose track, seconds from the element's start (see keys.ts).
@@ -210,7 +205,7 @@ export function stripDefaultOverlayKinds<T extends Overlay>(overlays: T[]): T[] 
  * empty for an ungrouped element. The host supplies `newId` so id format
  * stays its business.
  */
-export function groupRemap(newId: () => string): (o: Overlay) => { groupId?: string } {
+export function groupRemap(newId: () => string): (o: { groupId?: string }) => { groupId?: string } {
   const seen = new Map<string, string>();
   return (o) => {
     if (!o.groupId) return {};

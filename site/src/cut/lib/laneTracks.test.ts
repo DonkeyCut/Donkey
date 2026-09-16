@@ -232,6 +232,49 @@ describe("commitRow on the audio lanes", () => {
   });
 });
 
+describe("element rows use the shared drop and move placement", () => {
+  const add = {
+    text: (lane: number) => s().addOverlay({ at: 4, lane }),
+    shape: (lane: number) => s().addShape("rect", { at: 4, lane }),
+    sticker: (lane: number) => s().addSticker({ assetId: "sticker", at: 4, lane }),
+    effect: (lane: number) => s().addEffect("blur", { at: 4, lane }),
+  };
+  for (const [kind, place] of Object.entries(add)) {
+    for (const row of [-1, 0, 1, 2]) {
+      test(`${kind} drops on row ${row} and undoes as one edit`, () => {
+        s().addOverlay({ at: 0, lane: 0 });
+        s().addShape("rect", { at: 0, lane: 1 });
+        const before = s().overlays;
+        landOnRow("overlay", row, place);
+        const landed = s().overlays.find((o) => o.id === s().selection?.id)!;
+        expect(landed.lane).toBe(Math.max(0, row));
+        expect(landed.start).toBe(4);
+        expect(s().overlays.find((o) => o.id === before[0].id)?.lane).toBe(row < 0 ? 1 : 0);
+        expect(s().overlays.find((o) => o.id === before[1].id)?.lane).toBe(row < 0 ? 2 : 1);
+        s().undo();
+        expect(s().overlays).toEqual(before);
+      });
+    }
+    test(`${kind} opens the first row of an empty band`, () => {
+      landOnRow("overlay", 0, place);
+      expect(s().overlays).toHaveLength(1);
+      expect(s().overlays[0].lane).toBe(0);
+    });
+    test(`${kind} can move to a fresh row at either end`, () => {
+      s().addOverlay({ at: 0, lane: 0 });
+      place(0);
+      const id = s().selection!.id;
+      s().pushHistory();
+      commitRow("overlay", id, -1);
+      expect(s().overlays.find((o) => o.id === id)?.lane).toBe(0);
+      expect(s().overlays.find((o) => o.id !== id)?.lane).toBe(1);
+      commitRow("overlay", id, 2);
+      expect(s().overlays.find((o) => o.id === id)?.lane).toBe(1);
+      expect(s().overlays.find((o) => o.id !== id)?.lane).toBe(0);
+    });
+  }
+});
+
 describe("a cross-row move keeps the lane sound", () => {
   test("landing among residents parts them and the commit takes the row", () => {
     const mover = vclip({ track: 0, start: 0, out: 2 });

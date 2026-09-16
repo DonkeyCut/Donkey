@@ -108,7 +108,7 @@ describe("copy and paste, kind by kind", () => {
       expect(s.paste()).toBe(true);
       const after = useEditor.getState();
       const list = ITEM_KINDS[kind].list(after) as { id: string }[];
-      expect(list).toHaveLength(before + 1);
+      expect(list).toHaveLength(before + s.copiedItems().filter((item) => item.kind === kind).length);
       const fresh = after.selection!;
       expect(fresh.kind).toBe(kind);
       expect(fresh.id).not.toBe(SAMPLES[kind].id);

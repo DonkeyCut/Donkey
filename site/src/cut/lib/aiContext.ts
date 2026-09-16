@@ -465,6 +465,7 @@ function describeState(
     videoTrack: spans.map((sp, index) => ({
       index,
       id: sp.clip.id,
+      ...(sp.clip.groupId ? { groupId: sp.clip.groupId } : {}),
       asset: sp.asset.name,
       ...(sp.clip.name ? { name: sp.clip.name } : {}),
       start: r(sp.start),
@@ -521,6 +522,7 @@ function describeState(
       const trackSpans = getClipSpans(s.clips, s.assets, track);
       return trackSpans.map((sp, i) => ({
         id: sp.clip.id,
+        ...(sp.clip.groupId ? { groupId: sp.clip.groupId } : {}),
         ...describeOverlayClip(sp.clip, assetById),
         ...(() => {
           const t = transitionToNext(sp, i, trackSpans);
@@ -543,6 +545,7 @@ function describeState(
           const plays = roles.get(t.id) ?? [];
           return {
             id: t.id,
+            ...(t.groupId ? { groupId: t.groupId } : {}),
             start: r(t.start),
             seconds: r(t.seconds),
             style: t.style,
@@ -592,6 +595,7 @@ function describeState(
       // for the whole transcript (e.g. "clean up all the captions").
       cues: s.subtitles.cues.slice(0, cueCap).map((c) => ({
         id: c.id,
+        ...(c.groupId ? { groupId: c.groupId } : {}),
         start: r(c.start),
         end: r(c.end),
         text: c.text,
@@ -617,12 +621,13 @@ function describeRate(c: { speed?: number; speedCurve?: SpeedNode[]; reverse?: b
 }
 
 function describeAudio(
-  a: { assetId: string; name?: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
+  a: { groupId?: string; assetId: string; name?: string; start: number; in: number; out: number; volume: number; fadeIn?: number; fadeOut?: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; sound?: ClipSound; duck?: number; lane?: number; hidden?: boolean },
   assets: Map<string, { name: string }>
 ) {
   const rt = retimeOf(a);
   const speed = rt.rate;
   return {
+    ...(a.groupId ? { groupId: a.groupId } : {}),
     asset: assets.get(a.assetId)?.name ?? a.assetId,
     ...(a.name ? { name: a.name } : {}),
     start: r(a.start),
@@ -681,6 +686,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
 function describeOverlay(o: Overlay) {
   const base = {
     kind: o.kind ?? "text",
+    ...(o.groupId ? { groupId: o.groupId } : {}),
     name: overlayName(o),
     start: r(o.start),
     end: r(o.end),
@@ -695,7 +701,6 @@ function describeOverlay(o: Overlay) {
     ...(o.mask ? { mask: o.mask } : {}),
     ...(o.lane ? { lane: o.lane } : {}),
     ...(o.hidden ? { hidden: true } : {}),
-    ...(o.hostClipId ? { host: o.hostClipId } : o.hostClipId === null ? { free: true } : {}),
   };
   if (o.kind === "shape") {
     return {
@@ -731,7 +736,6 @@ function describeOverlay(o: Overlay) {
     color: o.color,
     shadow: o.shadow,
     plate: o.plate,
-    ...(o.groupId ? { groupId: o.groupId } : {}),
     ...(o.plateRadius !== undefined && { plateRadius: r(o.plateRadius) }),
     ...(o.stretchX !== undefined ? { stretchX: r(o.stretchX) } : {}),
     ...(o.stretchY !== undefined ? { stretchY: r(o.stretchY) } : {}),
