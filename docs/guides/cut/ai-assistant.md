@@ -53,7 +53,7 @@ Which path runs is chosen by the model id alone. The picker lives in the page so
 
 ## What the model knows
 
-Every knowledge surface is defined once — the catalog file ships in the engine and is bundled into the page, so all providers read identical text.
+Every knowledge surface is defined once — the catalog file ships in the engine and is bundled into the page, so all providers read identical text. The tools and the inspector write the same document, and every setting a tool can put on a selected item has a control in that item's panel; a test holds the pairing, so a change made in chat is always visible, and undoable, by hand.
 
 | Surface | Size today | When it enters context |
 | --- | --- | --- |
@@ -148,6 +148,6 @@ The shared catalog (system prompt, tools, skills), the chat route with its provi
 
 The brief-to-video pipeline is its own subsystem: the orchestrator, coverage invariant, and role interfaces in `lib/genvideo/`, its hosted-model adapters in `lib/genvideo/adapters/`, the browser controller in `lib/genScene.ts`, and the progress card in `components/SceneCard.tsx`. Its strategy — story planning, the identity ladder, where audio goes next — is the [Brief to Video](brief-to-video.md) guide.
 
-Project commands share the editor's tool schemas and executor through `PROJECT_TOOLS` and `runProjectCommand`. The command boundary checks the active project and excludes editor-only actions. Headless callers keep the existing serialized engine session or isolated cloud worker, since the editing store belongs to that session. Deterministic editing commands call the executor directly; hosted generation keeps its credit checks.
+Project commands share the editor's tool schemas and executor through `PROJECT_TOOLS` and `runProjectCommand`. The command boundary checks the active project and excludes editor-only actions. Headless callers keep the existing serialized engine session or isolated cloud worker, since the editing store belongs to that session. Deterministic editing commands call the executor directly; hosted generation keeps its credit checks. A host with its own model — the ChatGPT app — sends a batch of these commands as a worker job; the [ChatGPT App](../chatgpt-app.md) guide covers that path.
 
 `render_preview` captures the current cut and returns a render job with its revision and playback URL. Cloud and Mac jobs include a status URL for the host to poll. A headless turn can enqueue the render and finish, freeing its worker slot for the render. A Mac session without the media runtime returns the existing detached-media error and can run the command from the editor tab.

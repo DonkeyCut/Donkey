@@ -750,8 +750,11 @@ export function SwatchScene({
   variant = "day",
 }: {
   frame: string | null;
-  variant?: "day" | "dusk";
+  /** `void` is nothing at all — the black a clip's open edge arrives from
+   * or leaves to. */
+  variant?: "day" | "dusk" | "void";
 }) {
+  if (variant === "void") return <span className="absolute inset-0 bg-black" />;
   if (frame) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- a transient data URL or filmstrip thumb; the image optimizer has no role

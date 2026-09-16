@@ -2,10 +2,11 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PenTool, Scissors, Smile, Sparkles, Trash2, Type, User, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PenTool, Scissors, Smile, Sparkles, StretchHorizontal, StretchVertical, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
+import { ClipAnimationTiles, previewBar } from "@/cut/components/TransitionsPanel";
 import {
   Select,
   SelectContent,
@@ -77,7 +78,7 @@ import {
   penClosed,
   restingMaskFrame,
 } from "@donkeycut/effects-kit";
-import { clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
+import { clipLen, clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
 import { PANEL_GLOBAL, usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
@@ -141,6 +142,9 @@ import {
   type StickerOverlay,
   type TextOverlay,
   type VideoClip,
+  ANIM_DEFAULT_SECONDS,
+  TRANSITION_MAX,
+  type AnimStyle,
 } from "@/cut/lib/types";
 import { beatsBusyFor, detectAssetBeats, subscribeBeatsBusy } from "@/cut/lib/media";
 import { reportSwallowed } from "@/cut/lib/report";
@@ -200,6 +204,7 @@ const CLIP_TABS: readonly RailTab[] = [
   { id: "color", label: "Color", Icon: Palette },
   { id: "cutout", label: "Cutout", Icon: Scissors },
   { id: "frame", label: "Frame", Icon: Frame },
+  { id: "animate", label: "Animation", Icon: Sparkles },
   { id: "audio", label: "Audio", Icon: Volume2 },
 ];
 
@@ -552,6 +557,7 @@ function ClipColumn({ clip, tab }: { clip: VideoClip; tab: string }) {
   const scroll = useRememberedScroll(clip.id, tab);
   if (tab === "color") return <ColorPanel clip={clip} />;
   if (tab === "cutout") return <RemovalPanel clip={clip} />;
+  if (tab === "animate") return <ClipAnimationPanel clip={clip} />;
   return (
     <ScrollArea key={tab} className="min-h-0 flex-1" {...scroll}>
       {tab === "frame" ? (
@@ -1794,6 +1800,8 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
  * chevron; any value in range can still be typed or dragged. */
 const LINE_HEIGHTS = [0.9, 1, 1.15, 1.25, 1.5, 1.75, 2];
 const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
+/** Glyph stretch stops, percent of the face's own width or height. */
+const STRETCHES = [50, 75, 100, 125, 150, 200];
 
 function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const update = useEditor((s) => s.updateOverlay);
@@ -1802,6 +1810,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const opacityCk = useSliderCheckpoint();
   const spacingCk = useSliderCheckpoint();
   const lineHeightCk = useSliderCheckpoint();
+  const stretchCk = useSliderCheckpoint();
   const strokeCk = useSliderCheckpoint();
   const shadowCk = useSliderCheckpoint();
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -1992,6 +2001,39 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
               }}
             />
           </Field>
+        </div>
+        {/* Glyph stretch: the face drawn wider or taller than designed, the
+            same fields the stage's corner grip and the assistant write. */}
+        <div className="mt-1 grid grid-cols-2 gap-2">
+          {(["stretchX", "stretchY"] as const).map((axis) => (
+            <Field key={axis} label={axis === "stretchX" ? "Width" : "Height"}>
+              <NumberField
+                label={axis === "stretchX" ? "Width stretch" : "Height stretch"}
+                icon={axis === "stretchX" ? <StretchHorizontal /> : <StretchVertical />}
+                value={(o[axis] ?? 1) * 100}
+                min={25}
+                max={400}
+                step={5}
+                snap={[100]}
+                presets={STRETCHES}
+                format={(v) => `${Math.round(v)}%`}
+                parse={(raw) => parseNumberInput(raw.replace(/%$/, ""))}
+                onDraft={(v) => {
+                  stretchCk.begin();
+                  useEditor.getState().updateOverlayTransient(o.id, {
+                    [axis]: Math.abs(v - 100) < 0.5 ? undefined : v / 100,
+                  });
+                }}
+                onCommit={(v) => {
+                  stretchCk.begin();
+                  useEditor.getState().updateOverlayTransient(o.id, {
+                    [axis]: Math.abs(v - 100) < 0.5 ? undefined : v / 100,
+                  });
+                  stretchCk.end();
+                }}
+              />
+            </Field>
+          ))}
         </div>
         <Row label="Color">
           <ColorField
@@ -2453,6 +2495,117 @@ function WordSettings({ overlay: o }: { overlay: Overlay }) {
 /** The slots the picker fills, in tab order. */
 type AnimSlot = "in" | "out" | "loop" | "move" | "words";
 
+/** The pill of slot tabs over an animation grid. A slot that is already set
+ * reads darker, so switching tabs is not the only way to see what an item is
+ * doing. */
+function SlotTabs<T extends string>({
+  tabs,
+  slot,
+  isSet,
+  onPick,
+}: {
+  tabs: readonly T[];
+  slot: T;
+  isSet: (id: T) => boolean;
+  onPick: (id: T) => void;
+}) {
+  return (
+    <div className="mx-3.5 flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
+      {tabs.map((id) => (
+        <button
+          key={id}
+          type="button"
+          className={cn(
+            "flex-1 rounded-md px-1.5 py-1 capitalize transition-colors",
+            slot === id ? "bg-neutral-900 text-white" : "text-muted-foreground hover:text-foreground",
+            isSet(id) && slot !== id && "text-foreground"
+          )}
+          onClick={() => onPick(id)}
+        >
+          {id}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const CLIP_ANIM_SLOTS = ["in", "out"] as const;
+
+/** The Animation view a video clip's rail opens: In and Out over the tile
+ * grid, the ramp's length on the floor. A pick lands as the bar on that edge —
+ * the timeline draws it, the Transitions tab marks it, and the assistant's
+ * set_animation writes the same one — and plays itself on the footage. */
+function ClipAnimationPanel({ clip }: { clip: VideoClip }) {
+  const [picked, setSlot] = usePanelState<"in" | "out">(clip.id, "animSlot", "in");
+  const slot = picked === "out" ? "out" : "in";
+  const tilesScroll = useRememberedScroll(clip.id, `anim:${slot}`);
+  const anim = slot === "in" ? clip.animIn : clip.animOut;
+  // The ramp's length lands once, on release: every write to the edge is a
+  // bar edit with its own undo step.
+  const [secondsDraft, setSecondsDraft] = useState<number | null>(null);
+  const len = clipLen(clip);
+  const rehearse = (seconds: number) =>
+    previewBar({ start: slot === "in" ? clip.start : clip.start + len - seconds, seconds });
+  const pick = (style: AnimStyle | null) => {
+    if (!style) {
+      if (anim) useEditor.getState().setClipAnim(clip.id, slot, null);
+      return;
+    }
+    const seconds = anim?.seconds ?? ANIM_DEFAULT_SECONDS;
+    useEditor.getState().setClipAnim(clip.id, slot, { style, seconds });
+    rehearse(seconds);
+  };
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 bg-card pb-2">
+        <div className="flex h-10 shrink-0 items-center px-3.5 text-sm font-semibold tracking-tight">
+          Animation
+        </div>
+        <SlotTabs
+          tabs={CLIP_ANIM_SLOTS}
+          slot={slot}
+          isSet={(id) => !!(id === "in" ? clip.animIn : clip.animOut)}
+          onPick={setSlot}
+        />
+      </div>
+      {/* pt-1 clears the selected tile's ring, which draws outside its box. */}
+      <ScrollArea
+        key={slot}
+        className="min-h-0 flex-1"
+        {...tilesScroll}
+        viewportClassName="overscroll-contain"
+        contentClassName="flex flex-col gap-1 px-3.5 pt-1 pb-2"
+      >
+        <ClipAnimationTiles clip={clip} which={slot} value={anim?.style} onPick={pick} />
+      </ScrollArea>
+      <div className="shrink-0 border-t border-border bg-card px-3.5 py-0.5">
+        <Row label="Duration">
+          <ValueSlider
+            label="Duration"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={secondsDraft ?? anim?.seconds ?? ANIM_DEFAULT_SECONDS}
+            min={0.1}
+            max={Math.min(TRANSITION_MAX, len)}
+            step={0.05}
+            snap={[ANIM_DEFAULT_SECONDS]}
+            format={(v) => `${v.toFixed(2)}s`}
+            parse={parseSecondsInput}
+            disabled={!anim}
+            onDraft={setSecondsDraft}
+            onCommit={(v) => {
+              setSecondsDraft(null);
+              if (!anim) return;
+              useEditor.getState().setClipAnim(clip.id, slot, { ...anim, seconds: v });
+              rehearse(v);
+            }}
+          />
+        </Row>
+      </div>
+    </div>
+  );
+}
+
 /** The animation subview an overlay panel pushes into: a tab per slot over
  * the tile grid, the active slot's own control under it. The slots pick from
  * the same grid, one at a time — the tiles are big enough to read the motion,
@@ -2543,26 +2696,12 @@ function AnimationPanel({ overlay: o }: { overlay: Overlay }) {
         <div className="flex h-10 shrink-0 items-center px-3.5 text-sm font-semibold tracking-tight">
           Animation
         </div>
-        <div className="mx-3.5 flex shrink-0 rounded-lg bg-muted p-0.5 text-[11.5px] font-medium">
-          {tabs.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className={cn(
-                "flex-1 rounded-md px-1.5 py-1 capitalize transition-colors",
-                slot === id
-                  ? "bg-neutral-900 text-white"
-                  : "text-muted-foreground hover:text-foreground",
-                // A slot that is already set reads darker, so switching tabs is
-                // not the only way to see what an element is doing.
-                (id === "move" ? !!activeMove : !!anim[id]) && slot !== id && "text-foreground"
-              )}
-              onClick={() => setSlot(id)}
-            >
-              {id}
-            </button>
-          ))}
-        </div>
+        <SlotTabs
+          tabs={tabs}
+          slot={slot}
+          isSet={(id) => (id === "move" ? !!activeMove : !!anim[id])}
+          onPick={setSlot}
+        />
       </div>
       {/* pt-1 clears the selected tile's ring, which draws outside its box.
           The bounce stops here rather than travelling to the panel behind. */}

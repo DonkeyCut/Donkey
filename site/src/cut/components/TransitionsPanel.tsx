@@ -4,17 +4,24 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { PHASE_STEP } from "@/cut/components/AnimationTiles";
 import { SwatchScene, useSwatchClock } from "@/cut/components/EffectsPanel";
 import { SectionTitle } from "@/cut/components/SectionTitle";
+import { Tile } from "@/cut/components/PanelTile";
 import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { peekEdgeFrame, requestEdgeFrame } from "@/cut/lib/media";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
 import { getClipSpans, resolveTransitions, useEditor } from "@/cut/lib/store";
 import { usePreviewTimeEvery } from "@/cut/lib/playhead";
 import {
+  ANIM_STYLE_IDS,
+  ANIM_STYLE_LABELS,
   TRANSITION_STYLE_GROUPS,
   TRANSITION_STYLE_LABELS,
+  overlayAnimStyle,
+  transitionStyleOfAnim,
+  type AnimStyle,
   type MediaAsset,
   type TimelineTransition,
   type TransitionStyle,
+  type VideoClip,
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -175,21 +182,7 @@ function TransitionTile({
 }) {
   const { picked, pick } = useAssetPick(`transition:${style}`);
   const ref = useRef<HTMLButtonElement>(null);
-  // Hovering a tile starts its handover over from the top, so the pointer
-  // never lands mid-blend waiting for the loop to come around.
-  const [runEpoch, setRunEpoch] = useState(0);
-  // A golden-ratio phase by place in the list staggers the grid's loops. The
-  // hover restart plays from the top, so it zeroes this tile's phase too.
-  const [phase, setPhase] = useState(() => (((TILE_INDEX.get(style) ?? 0) * PHASE_STEP) % 1) * X_LOOP);
-  const restart = () => {
-    setPhase(0);
-    setRunEpoch((n) => n + 1);
-  };
-  const playing = useEditor((s) => s.playing);
-  const clock = useSwatchClock(true, X_LOOP, runEpoch);
-  // At rest during playback the clock holds its still frame; the phase only
-  // shifts a running loop.
-  const t = playing ? clock : (clock + phase) % X_LOOP;
+  const { t, restart } = useHandoverClock(TILE_INDEX.get(style) ?? 0);
   // What the selection means for this tile: it wears the ring when it is the
   // live bar's style, and a click swaps that bar onto it.
   const isLive = !!live && live.style === style;
@@ -235,6 +228,109 @@ function TransitionTile({
   );
 }
 
+/** A tile's place on the handover loop. A golden-ratio phase by place in the
+ * list staggers the grid's loops; hovering a tile starts its handover over
+ * from the top, so the pointer never lands mid-blend waiting for the loop to
+ * come around. At rest during playback the clock holds its still frame; the
+ * phase only shifts a running loop. */
+function useHandoverClock(index: number): { t: number; restart: () => void } {
+  const [runEpoch, setRunEpoch] = useState(0);
+  const [phase, setPhase] = useState(() => ((index * PHASE_STEP) % 1) * X_LOOP);
+  const restart = () => {
+    setPhase(0);
+    setRunEpoch((n) => n + 1);
+  };
+  const playing = useEditor((s) => s.playing);
+  const clock = useSwatchClock(true, X_LOOP, runEpoch);
+  return { t: playing ? clock : (clock + phase) % X_LOOP, restart };
+}
+
+/**
+ * The tiles a video clip's own entrance or exit picks from — the Animation
+ * view of the clip's inspector. Each style plays on the clip's edge frame
+ * against black, the way an open edge really renders; the pick lands as the
+ * bar on that edge, the same bar a tile dragged from this tab or the
+ * assistant's set_animation writes. Upper-track clips composite through
+ * alpha, so they offer the two ramps alpha can express.
+ */
+export function ClipAnimationTiles({
+  clip,
+  which,
+  value,
+  onPick,
+}: {
+  clip: VideoClip;
+  which: "in" | "out";
+  /** The style on that edge, or undefined for none. */
+  value?: AnimStyle;
+  onPick: (style: AnimStyle | null) => void;
+}) {
+  const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
+  const frame = useCutFrame(
+    `anim-${which}`,
+    asset ? { asset, srcT: which === "in" ? clip.in : clip.out } : null
+  );
+  const ids = clip.track > 0 ? ANIM_STYLE_IDS.filter((s) => overlayAnimStyle(s) === s) : ANIM_STYLE_IDS;
+  return (
+    <div className="grid grid-cols-2 gap-2" onKeyDown={pickGridNav}>
+      <Tile selected={!value} pickId="anim:none" onClick={() => onPick(null)} label="None" className="p-1">
+        <span className="relative block aspect-square w-full overflow-hidden rounded-md bg-black">
+          <Layer frame={frame} variant="day" />
+        </span>
+      </Tile>
+      {ids.map((id, i) => (
+        <ClipAnimTile
+          key={id}
+          style={id}
+          which={which}
+          frame={frame}
+          index={i}
+          selected={value === id}
+          onPick={() => onPick(id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ClipAnimTile({
+  style,
+  which,
+  frame,
+  index,
+  selected,
+  onPick,
+}: {
+  style: AnimStyle;
+  which: "in" | "out";
+  frame: string | null;
+  index: number;
+  selected: boolean;
+  onPick: () => void;
+}) {
+  const { t, restart } = useHandoverClock(index);
+  return (
+    <Tile
+      selected={selected}
+      pickId={`anim:${style}`}
+      onClick={onPick}
+      onHover={(inside) => inside && restart()}
+      label={ANIM_STYLE_LABELS[style]}
+      className="p-1"
+    >
+      <TransitionSwatch
+        style={transitionStyleOfAnim(style)}
+        a={which === "in" ? null : frame}
+        b={which === "in" ? frame : null}
+        aVariant={which === "in" ? "void" : "day"}
+        bVariant={which === "in" ? "day" : "void"}
+        t={t}
+        className="w-full"
+      />
+    </Tile>
+  );
+}
+
 /** One full-tile layer of the handover — a shot, transformed or clipped as
  * the style's moment demands. */
 function Layer({
@@ -243,7 +339,7 @@ function Layer({
   style,
 }: {
   frame: string | null;
-  variant: "day" | "dusk";
+  variant: "day" | "dusk" | "void";
   style?: React.CSSProperties;
 }) {
   return (
@@ -260,20 +356,25 @@ function TransitionSwatch({
   style,
   a,
   b,
+  aVariant = "day",
+  bVariant = "dusk",
   t,
   className,
 }: {
   style: TransitionStyle;
   a: string | null;
   b: string | null;
+  /** The stand-in each side shows without a frame; `void` is black. */
+  aVariant?: "day" | "dusk" | "void";
+  bVariant?: "day" | "dusk" | "void";
   t: number;
   className?: string;
 }) {
   const p0 = Math.min(1, Math.max(0, (t - X_HOLD) / X_RUN));
   const p = p0 * p0 * (3 - 2 * p0);
   const pc = (n: number) => `${(n * 100).toFixed(1)}%`;
-  const A = (s?: React.CSSProperties) => <Layer frame={a} variant="day" style={s} />;
-  const B = (s?: React.CSSProperties) => <Layer frame={b} variant="dusk" style={s} />;
+  const A = (s?: React.CSSProperties) => <Layer frame={a} variant={aVariant} style={s} />;
+  const B = (s?: React.CSSProperties) => <Layer frame={b} variant={bVariant} style={s} />;
   let layers: React.ReactNode;
   switch (style) {
     case "crossfade":
@@ -428,7 +529,7 @@ const PREVIEW_LEAD = 0.4;
 const PREVIEW_TAIL = 0.35;
 
 /** Play a bar's window on the real footage: a beat ahead of it, a beat past. */
-function previewBar(t: { start: number; seconds: number }) {
+export function previewBar(t: { start: number; seconds: number }) {
   const s = useEditor.getState();
   s.previewRange(Math.max(0, t.start - PREVIEW_LEAD), t.start + t.seconds + PREVIEW_TAIL);
 }
