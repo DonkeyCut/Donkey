@@ -54,7 +54,9 @@ catalog and guides, editing, importing, undo and redo, previews, exports and job
 polling. Its schemas and widget data types share one contract. Signed media and
 download URLs travel in tool-result metadata, which reaches the widget. The
 model gets project metadata, command outcomes, render state, and an Open in
-Donkey Cut link.
+Donkey Cut link. ChatGPT's sandbox drops null-valued keys from a tool result
+before the widget sees it, so the widget contract treats a missing key and null
+alike.
 
 Cloud previews use the existing headless renderer and a captured document.
 Repeated requests for the same saved revision reuse a queued, running, or

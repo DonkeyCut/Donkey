@@ -23,7 +23,9 @@ const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https:/
 let count = 0, renewals = 0;
 window.calls = []; window.links = [];
 const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:false,export:null,job:null,results:[],changed:false,history:null,account:null});
-const result = (data, playback = null) => ({content:[{type:'text',text:'Preview'}],structuredContent:data,_meta:{playback,pollMs:1000}});
+// ChatGPT's sandbox drops null-valued keys before the widget sees a result.
+const dropNulls = (value) => Array.isArray(value) ? value.map(dropNulls) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, dropNulls(v)])) : value;
+const result = (data, playback = null) => dropNulls({content:[{type:'text',text:'Preview'}],structuredContent:data,_meta:{playback,pollMs:1000}});
 const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,result},'*');
 window.addEventListener('message', ({source,data}) => {
  if(source !== frame.contentWindow || !data.method) return;

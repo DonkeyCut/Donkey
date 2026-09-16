@@ -487,7 +487,7 @@ export function createChatgptServer(
 function describeProjectView(view: ProjectView): string {
   if (view.account) {
     const { credits, storageBytes, storageQuotaBytes, plan } = view.account;
-    const storage = storageQuotaBytes === null ? `${mb(storageBytes)} MB used` : `${mb(storageBytes)} of ${mb(storageQuotaBytes)} MB used`;
+    const storage = typeof storageQuotaBytes !== "number" ? `${mb(storageBytes)} MB used` : `${mb(storageBytes)} of ${mb(storageQuotaBytes)} MB used`;
     return `Plan: ${plan}. AI credits: $${credits}. Cloud storage: ${storage}. Editing, previews and exports spend no credits.`;
   }
   if (view.view === "projects") {
