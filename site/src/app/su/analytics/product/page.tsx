@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRight, Mail } from "lucide-react";
+import { ArrowUpRight, Check, Mail } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import {
   Area,
@@ -698,6 +698,17 @@ function ActivityGrid({
     (v) => USER_SORTS.some((option) => option.id === v),
   );
   const users = useMemo(() => rankUsers(rollup, workBits, sort), [rollup, workBits, sort]);
+  // A row marks itself processed on click and stays marked across visits, so
+  // a pass through the list can pick up where it left off.
+  const [processedIds, setProcessedIds] = useLocalPref<string[]>(
+    "su-analytics-processed-users",
+    [],
+    (v) => Array.isArray(v) && v.every((x) => typeof x === "string"),
+  );
+  const processed = useMemo(() => new Set(processedIds), [processedIds]);
+  const toggleProcessed = (id: string) =>
+    setProcessedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const processedCount = users.reduce((n, user) => n + (processed.has(user.id) ? 1 : 0), 0);
   const body = useRef<HTMLTableSectionElement>(null);
   const rows = useRowWindow(users.length, body);
   // A row's email button puts the account on the outreach list and opens the
@@ -755,6 +766,19 @@ function ActivityGrid({
           <p className="text-sm text-muted-foreground">
             One dot per user per day, last {rollup.days.length} days
             {missingDays.size > 0 && ` · ${missingDays.size} without data`}
+            {processedCount > 0 && (
+              <>
+                {" "}
+                · {processedCount} processed{" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() => setProcessedIds([])}
+                >
+                  clear
+                </button>
+              </>
+            )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -799,15 +823,36 @@ function ActivityGrid({
             )}
             {users.slice(rows.start, rows.end).map((user, offset) => {
               const index = rows.start + offset;
+              const isProcessed = processed.has(user.id);
               return (
-                <tr key={user.id} data-row="" className="group">
-                  <td className="sticky left-0 z-10 bg-card py-1 pr-12 whitespace-nowrap">
+                <tr
+                  key={user.id}
+                  data-row=""
+                  aria-selected={isProcessed}
+                  className={cn("group cursor-pointer", isProcessed && "opacity-50")}
+                  onClick={() => toggleProcessed(user.id)}
+                >
+                  <td className="sticky left-0 z-10 bg-card py-1 pr-12 pl-6 whitespace-nowrap">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "absolute inset-y-0 left-0 my-auto flex size-4 items-center justify-center rounded-full border transition-colors",
+                        isProcessed
+                          ? "border-[var(--chart-1)] bg-[var(--chart-1)] text-white"
+                          : "border-border opacity-0 group-hover:opacity-100",
+                      )}
+                    >
+                      {isProcessed && <Check className="size-3" strokeWidth={3} />}
+                    </span>
                     {/* Pinned in the cell's right padding, so showing it moves
                         nothing. */}
                     <Button
                       aria-label={`Email ${user.name}`}
                       className="absolute inset-y-0 right-2 my-auto opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                      onClick={() => emailUser(user)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        emailUser(user);
+                      }}
                       size="icon-sm"
                       variant="ghost"
                     >
