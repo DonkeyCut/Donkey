@@ -33,12 +33,13 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 
 ## Cut Surfaces
 
-Every Cut change has to hold on all four surfaces, and the plan for it says how:
+Every Cut change has to hold on every surface, and the plan for it says how:
 
 - **Three residencies.** A project lives in the **browser** (OPFS in the page), on this **Mac** (the Bun engine inside the app, with the bundled command-line tools), or in the **cloud** (Postgres doc + R2 media, the work done by the container worker). People run all three — a Mac with or without the app, any browser, a cloud project — so a change holds in each of them. Work through the backend seam in `site/src/cut/lib/backend/`. Where one residency lacks the machinery for a job, hand the job to one that has it: the browser shelf imports links through the cloud worker, and the engine falls back to the same worker when its own tools come back empty-handed.
 - **Headed and headless.** Whatever the tab can do, the Bun engine and the worker runner can do: chat tools, rendering, media reads. Headless installs browser primitives — canvas, decoders, Web Audio, fonts — behind narrow seams (`lib/raster.ts`, the frame sink in `lib/mediaRead.ts`, the font installer in `lib/fontAssets.ts`, the kit's `surface.ts`) so one implementation serves both; reach for those seams before writing a second path.
 - Allocate canvases and decode images through the raster seam. Direct `document`, `window`, `FileReader`, `createImageBitmap`, or `FontFace` use in `site/src/cut/lib/` or `packages/effects-kit/` breaks a job.
 - When a surface genuinely cannot carry a feature, give it a fallback and say so in the summary and the guide.
+- **ChatGPT is a client too.** The MCP adapter under `site/src/clients/chatgpt/` runs the same project tool catalog as headless worker jobs, so a tool or schema change has to hold there as well. `docs/guides/chatgpt-app.md` is the guide.
 - **The AI chat drives it too.** A functional change ships with its chat surface: a tool the assistant can call, and descriptions/system-prompt lines that teach the new capability. Derive tool schemas and prompt text from the same exported constants the UI uses (style id lists, model registries) so the catalog updates itself; check the tool files beside the component (`*.tools.ts`) and `site/src/cut/server/ai/catalog.ts`.
 - The chat surface is kept true, both directions. Removing or reshaping a feature means deleting its tool and its prompt/skill mentions in the same change — grep the catalog, the `*.tools.ts` files, the skills library, and `lib/aiTools.ts` for the old names, ids, and parameters. A tool that describes behavior the code no longer has, offers an option that no longer exists, or is missing a setting the UI gained is a bug: the model calls what the catalog teaches.
 
