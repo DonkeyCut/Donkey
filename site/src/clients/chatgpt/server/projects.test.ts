@@ -5,7 +5,7 @@ import { projectTools } from "@/clients/chatgpt/server/projects";
 
 const config = SETTINGS.chatgptApp.schema.parse(SETTINGS.chatgptApp.default);
 function createTestContext(scopes: string[] = ["projects:read"]) {
-  const project = { id: "mine", userId: "owner", name: "My video", version: 4 };
+  const project = { id: "mine", userId: "owner", name: "My video", version: 4, previewKey: "proxy" };
   const jobs = mock(async (args: unknown) => {
     void args;
     return null as unknown;
@@ -27,7 +27,7 @@ function createTestContext(scopes: string[] = ["projects:read"]) {
     cutMediaObject: {
       findFirst: mock(async (args: unknown) => {
         void args;
-        return null;
+        return null as unknown;
       }),
     },
   };
@@ -91,6 +91,17 @@ describe("ChatGPT cloud projects", () => {
     expect(result.view.preview?.status).toBe("expired");
     expect(result.playback).toBeNull();
     expect(result.view.project?.revision).toBe("cloud:4");
+  });
+  test("the editor's proxy is the current preview, so render plays it without queueing", async () => {
+    const { tools, db } = createTestContext(["projects:read", "previews:render"]);
+    db.cutRenderJob.findFirst.mockResolvedValue({ id: "job", state: "done", progress: 1, outputKey: "proxy", spec: { spec: {} }, updatedAt: new Date() });
+    db.cutMediaObject.findFirst.mockResolvedValue({ r2Key: "proxy" });
+    const opened = await tools.status("mine");
+    expect(opened.view.preview?.revision).toBe("cloud:4");
+    expect(opened.playback?.url).toContain("proxy");
+    const rendered = await tools.render("mine");
+    expect(rendered.view.preview?.id).toBe("job");
+    expect(rendered.playback?.url).toContain("proxy");
   });
   test("list returns only public project metadata and paging state", async () => {
     const { tools, db } = createTestContext();

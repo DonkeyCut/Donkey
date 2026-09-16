@@ -72,17 +72,21 @@ export function projectTools(
     account: null,
   });
 
-  async function getOwnedProject(projectId: string) {
+  async function getOwnedRow(projectId: string) {
     const row = await db.cutProject.findFirst({
       where: { id: projectId, userId: identity.userId },
-      select: { id: true, name: true, version: true },
+      select: { id: true, name: true, version: true, previewKey: true },
     });
     if (!row) {
       throw new ProjectToolError(
         "Project not found. Choose one of your cloud projects.",
       );
     }
-    return projectSummary(row);
+    return row;
+  }
+
+  async function getOwnedProject(projectId: string) {
+    return projectSummary(await getOwnedRow(projectId));
   }
 
   /** The project view with its undo state, as every edit tool answers. */
@@ -105,7 +109,8 @@ export function projectTools(
     projectId: string,
     jobId?: string,
   ): Promise<ProjectResult> {
-    const selectedProject = await getOwnedProject(projectId);
+    const row = await getOwnedRow(projectId);
+    const selectedProject = projectSummary(row);
     const job = await db.cutRenderJob.findFirst({
       where: {
         userId: identity.userId,
@@ -142,7 +147,12 @@ export function projectTools(
       id: job.id,
       status,
       progress: Math.max(0, Math.min(1, job.progress)),
-      revision: (job.spec as { revision?: string } | null)?.revision ?? null,
+      // The editor keeps previewKey on the proxy it rendered for the saved
+      // document, and the share page serves that pointer as current; so does
+      // this card, so a project plays the moment it opens.
+      revision:
+        (job.spec as { revision?: string } | null)?.revision ??
+        (job.outputKey && job.outputKey === row.previewKey ? selectedProject.revision : null),
     };
     if (status === "error") {
       view.preview.error = "Preview could not finish. Render a new preview.";
@@ -278,6 +288,8 @@ export function projectTools(
           "Reconnect Donkey Cut with preview rendering permission.",
         );
       }
+      const current = await getPreviewStatus(projectId);
+      if (current.playback && current.view.preview?.revision === current.view.project?.revision) return current;
       const job = await previewFromDoc(identity.userId, projectId);
       if (!job) {
         throw new ProjectToolError(

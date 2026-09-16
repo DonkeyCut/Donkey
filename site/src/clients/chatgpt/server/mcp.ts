@@ -53,6 +53,7 @@ export const SERVER_INSTRUCTIONS = [
   `Donkey Cut is an open-source video editor (Apache 2.0, ${REPOSITORY_URL}). Edit the connected account's cloud projects: import footage, inspect it, cut it, caption it, preview, undo, export.`,
   "Editing, previews and exports are free. Hosted AI (voiceover, music, images, caption rewriting, transcription past the monthly allowance) spends the account's credits. Imports and exports use the account's cloud storage.",
   "Workflow: list_projects or create_project → import_media → inspect_project → list_commands once, describe_commands for the ones you need → edit_project (batches, one undo step each) → render_preview → undo/redo → export_video.",
+  "open_project plays the project's current preview at once; call render_preview only after an edit or when the card reports no current preview.",
   "Times are seconds; ids come from inspect_project. A batch stops at its first failed command. A tool that answers with a job still running is finished by get_job_status.",
 ].join("\n");
 
@@ -174,7 +175,7 @@ export function createChatgptServer(
     {
       title: "Open a Donkey Cut preview",
       description:
-        "Show a selected cloud project and its latest available preview. The preview can be from an earlier edit; render_preview renders the current saved revision. With no projectId, show the project picker.",
+        "Show a selected cloud project with its preview playing in the card. A preview whose revision matches the project is current; one from an earlier revision, or none, needs render_preview. With no projectId, show the project picker.",
       inputSchema: z.object({ projectId: idSchema.optional() }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
@@ -189,7 +190,7 @@ export function createChatgptServer(
     {
       title: "Render a Donkey Cut preview",
       description:
-        "Render the current saved cloud project into a playable preview. Returns a job immediately; use get_preview_status to check it. Reuses a render of the same saved revision. Consumes no AI credits. Does not edit the project.",
+        "Render the current saved cloud project into a playable preview. Needed only after an edit or when open_project reports no current preview; a current one is returned as is. Returns a job immediately; use get_preview_status to check it. Consumes no AI credits. Does not edit the project.",
       inputSchema: z.object({ projectId: idSchema }),
       outputSchema: viewSchema,
       annotations: { ...readOnlyAnnotations, readOnlyHint: false },
@@ -526,7 +527,15 @@ function describeProjectView(view: ProjectView): string {
     );
   }
   if (view.preview || !lines.length) {
-    lines.push(`${project.name} (${project.revision}): ${view.preview ? `preview ${view.preview.status}` : "no preview yet"}.`);
+    const preview = view.preview;
+    lines.push(
+      `${project.name} (${project.revision}): ${
+        !preview ? "no preview yet"
+          : preview.status === "done" && preview.revision === project.revision ? "current preview playing in the card"
+          : preview.status === "done" ? `preview from earlier revision ${preview.revision ?? "unknown"}`
+          : `preview ${preview.status}`
+      }.`,
+    );
   }
   if (view.history?.undo) lines.push(`Undo would revert: ${view.history.undo}.`);
   if (view.history?.redo) lines.push(`Redo would re-apply: ${view.history.redo}.`);

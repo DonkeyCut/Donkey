@@ -60,8 +60,11 @@ Donkey Cut link. ChatGPT's sandbox drops null-valued keys from a tool result
 before the widget sees it, so the widget contract treats a missing key and null
 alike.
 
-Cloud previews use the existing headless renderer and a captured document.
-Repeated requests for the same saved revision reuse a queued, running, or
+Opening a project plays the proxy the editor already rendered for it, the
+same file the share page serves, so nobody waits on a render to watch. A
+render is for a revision with no current proxy, such as one edited from
+ChatGPT; it uses the existing headless renderer and a captured document, and
+repeated requests for the same saved revision reuse a queued, running, or
 available completed preview. A collected preview can be rendered again.
 Browser and Mac projects retain their existing render paths; they become
 accessible to ChatGPT after the user saves them to the cloud in Donkey Cut.
