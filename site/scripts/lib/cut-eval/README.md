@@ -41,6 +41,19 @@ Per-case `budget` values in `cases.ts` are checked against passing-run p50s.
 They report by default; `--enforce-budgets` turns a breach into exit 1. The run
 always exits 1 when a case has zero passing runs.
 
+## The queue triage eval
+
+`npm run eval:cut-queue -- [--runs N] [--only <case>] [--gate-model <id>]`
+checks where a message sent mid-turn goes. Each case in `queueCases.ts` is a
+running turn (its ask and the tools it has run so far, plus what other chats
+of the project are doing) and the messages the user sent while it ran, each
+with the place it must get: `fold` into the running turn, `spawn` a parallel
+thread, or `queue` in the tray. The cases run the production triage call
+against the dev server on the gate model and print one line per case; a wrong
+verdict prints the message, what it got and what it should have got. It exits
+1 when a case never passes. Add a case whenever a real message landed in the
+wrong place.
+
 ## The report
 
 A full run writes `evals/cut-chat.latest-report.json` (schema

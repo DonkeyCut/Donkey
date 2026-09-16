@@ -22,6 +22,7 @@
     "worker:build": "bun build --target=node --minify --external=pg-native --external=skia-canvas --external=mediabunny --external=@mediabunny/server --external=node-web-audio-api --loader .css:text src/cut/worker/main.ts --outfile dist/cut-worker/main.js",
     "bench:watch": "bun run scripts/bench-watch.ts",
     "eval:cut-chat": "bun run scripts/eval-cut-chat.ts",
+    "eval:cut-queue": "bun run scripts/eval-cut-queue.ts",
     "eval:chatgpt-workflow": "bun run scripts/eval-chatgpt-workflow.ts",
     "eval:cut-headless": "bun run scripts/eval-cut-headless.ts",
     "email:dev": "email dev --dir src/emails --port 3001",
