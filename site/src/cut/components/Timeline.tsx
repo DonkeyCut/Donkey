@@ -3383,7 +3383,7 @@ function SaveSelectionButton() {
   return (
     <TimelineActionButton
       label={state === "done" ? "Saved" : "Save template"}
-      tooltip="Save the selection as a reusable template (kept by reference)"
+      tooltip="Save template"
       disabled={state === "saving"}
       onClick={save}
     >
