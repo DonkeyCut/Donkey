@@ -4,6 +4,7 @@
 // compiled into the engine binary with the rest of backend/, so the router and
 // store load through a function-scoped dynamic import and nothing here touches
 // the DOM at module scope.
+import { observeOperationResponse } from "../operationFailure";
 import { registeredUrl } from "./browser/registry";
 import type { CutBackend } from "./types";
 
@@ -12,7 +13,7 @@ const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-clou
 async function browserFetch(path: string, init?: RequestInit): Promise<Response> {
   const { dispatchBrowserRoute } = await import("./browser/router");
   const owned = await dispatchBrowserRoute(path, init);
-  return owned ?? fetch(cloudPath(path), init);
+  return observeOperationResponse(owned ?? await fetch(cloudPath(path), init));
 }
 
 export const browserBackend: CutBackend = {

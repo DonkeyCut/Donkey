@@ -16,12 +16,14 @@ import {
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import {
   clearStorageQuotaWall,
+  emitStorageQuota,
   onStorageQuota,
   type StorageQuotaDetail,
 } from "@/cut/lib/storageQuota";
 import { daysUntil } from "@/cut/lib/time";
 import { track } from "@/lib/analytics";
 import { useProSubscription } from "@/queries/billing";
+import { onOperationFailure } from "@/cut/lib/operationFailure";
 import { formatBytes } from "@/lib/bytes";
 
 export function StorageUpgradeDialog() {
@@ -35,6 +37,11 @@ export function StorageUpgradeDialog() {
       }),
     []
   );
+
+  useEffect(() => onOperationFailure((failure) => {
+    if (failure.code === "storage_quota_exceeded")
+      emitStorageQuota({ ...failure, source: "quota-413" });
+  }), []);
 
   const close = () => {
     setDetail(null);

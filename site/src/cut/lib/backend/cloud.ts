@@ -3,7 +3,7 @@
 // the session). Routes mirror the engine's JSON shapes under /api/cut-cloud.
 // Media bytes ride presigned R2 URLs minted by those routes, not this
 // transport.
-import { emitStorageQuota } from "../storageQuota";
+import { observeOperationResponse, operationFailure } from "../operationFailure";
 import type { CutBackend, CutRequestInit } from "./types";
 
 const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-cloud/");
@@ -18,12 +18,26 @@ export function bindCloudSession(base: string, headers: Record<string, string>) 
 
 /** A request on the hosted site as this process's user: same-origin in the
  * page, the bound session's origin and headers in a headless process. */
+type CloudSession = { base: string; headers: Record<string, string> } | null;
+
+function requestWithSession(bound: CloudSession, path: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(bound?.headers);
+  new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
+  return fetch((bound?.base ?? "") + path, { ...init, headers }).then(observeOperationResponse);
+}
+
 export function cloudRequest(path: string, init?: RequestInit): Promise<Response> {
-  if (!session) return fetch(path, init);
-  return fetch(session.base + path, {
-    ...init,
-    headers: { ...session.headers, ...(init?.headers as Record<string, string> | undefined) },
-  });
+  return requestWithSession(session, path, init);
+}
+
+/** Capture transport credentials for work that outlives the active project. */
+export function captureCloudBackend(): CutBackend {
+  const bound = session ? { base: session.base, headers: { ...session.headers } } : null;
+  return {
+    ...cloudBackend,
+    fetch: (path, init) => cloudFetch(path, init, (url, options) => requestWithSession(bound, url, options)),
+    url: (path) => (bound?.base ?? "") + cloudPath(path),
+  };
 }
 
 // Cloud project docs are versioned for lost-write detection: GET hands the
@@ -73,15 +87,15 @@ const docGets = new Map<string, Promise<void>>();
 // /projects/:id only — /projects/folders is the folder collection, not a doc.
 const PROJECT_DOC = /^\/api\/cut\/projects\/(?!folders$)([^/?]+)$/;
 
-async function cloudFetch(path: string, options?: CutRequestInit): Promise<Response> {
+async function cloudFetch(path: string, options?: CutRequestInit, request = cloudRequest): Promise<Response> {
   const { observe, ...init } = options ?? {};
   const doc = PROJECT_DOC.exec(path);
   const method = (init?.method ?? "GET").toUpperCase();
-  if (observe || !doc || (method !== "GET" && method !== "PUT")) return cloudRequest(cloudPath(path), init);
+  if (observe || !doc || (method !== "GET" && method !== "PUT")) return request(cloudPath(path), init);
   const projectId = decodeURIComponent(doc[1]);
 
   if (method === "GET") {
-    const req = cloudRequest(cloudPath(path), init);
+    const req = request(cloudPath(path), init);
     const tracked = req.then(
       (res) => {
         if (res.ok) noteVersion(projectId, res.headers.get("x-cut-doc-version"));
@@ -96,18 +110,18 @@ async function cloudFetch(path: string, options?: CutRequestInit): Promise<Respo
   }
 
   const prev = putChains.get(projectId) ?? Promise.resolve();
-  const run = prev.then(() => putDoc(projectId, path, init));
+  const run = prev.then(() => putDoc(projectId, path, init, request));
   // The chain survives a failed link; the failure is the caller's to handle.
   putChains.set(projectId, run.catch(() => undefined));
   return run;
 }
 
-async function putDoc(projectId: string, path: string, init?: RequestInit): Promise<Response> {
+async function putDoc(projectId: string, path: string, init?: RequestInit, request = cloudRequest): Promise<Response> {
   await docGets.get(projectId);
   // A pinned base outranks the map; with neither, an unversioned PUT is the
   // first save and succeeds unconditionally.
   const v = basePins.get(projectId) ?? docVersions.get(projectId);
-  const res = await cloudRequest(cloudPath(path) + (v ? `?v=${encodeURIComponent(v)}` : ""), init);
+  const res = await request(cloudPath(path) + (v ? `?v=${encodeURIComponent(v)}` : ""), init);
   if (res.ok || res.status === 409) basePins.delete(projectId);
   if (res.status === 409) {
     const body = (await res
@@ -178,16 +192,13 @@ export async function fetchSignedMediaUrls(
   return out;
 }
 
-/** Friendly message for a presign 413 quota rejection, else null. Also raises
- * the storage-quota wall so the upgrade dialog opens wherever the rejection
- * happened — this inline string stays as the terse fallback next to it. */
+/** Pure message formatting; the host decides how a quota failure is presented. */
 export function quotaErrorMessage(
   status: number,
   body: { error?: string; bytes?: number; quotaBytes?: number } | null | undefined
 ): string | null {
-  if (status !== 413 || body?.error !== "storage_quota_exceeded") return null;
-  emitStorageQuota({ bytes: body?.bytes, quotaBytes: body?.quotaBytes, source: "quota-413" });
-  return "Cloud storage is full.";
+  const failure = operationFailure(status, body);
+  return failure?.code === "storage_quota_exceeded" ? failure.message : null;
 }
 
 export const cloudBackend: CutBackend = {

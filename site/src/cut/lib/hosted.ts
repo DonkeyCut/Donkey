@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { create } from "zustand";
 
+import { observeOperationResponse } from "./operationFailure";
 import { offloadHostedMedia } from "./hostedBlobs";
 
 // Donkey's hosted inference routes, called from the page with the user's
@@ -180,6 +181,7 @@ export const hostedPost = async (path: string, body: unknown, signal?: AbortSign
     body: payload,
     signal,
   });
+  await observeOperationResponse(res);
   await noteBalance(res);
   return res;
 };
