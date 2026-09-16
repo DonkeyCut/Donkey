@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowUpRight,
   Check,
   ChevronDown,
   GripVertical,
@@ -23,13 +24,16 @@ const queueIconButton =
 
 /** A message waiting its turn while the assistant works. Attachments are
  * captured at enqueue time, so mentions and chips ride exactly as typed.
- * Running and done rows exist only while an open edit freezes the view —
- * they render crossed out there; outside a freeze they leave the tray. */
+ * A folding row is on its way into the running turn; a spawned row runs in
+ * the thread `threadId` names and stays until opened or dismissed. Running
+ * and done rows exist only while an open edit freezes the view — they render
+ * crossed out there; outside a freeze they leave the tray. */
 export interface QueuedMessage {
   id: string;
   text: string;
   attachments: AssetRef[];
-  status: "queued" | "running" | "done";
+  status: "queued" | "folding" | "spawned" | "running" | "done";
+  threadId?: string;
 }
 
 /** The queue tray: a folder tab on top of the composer holding the messages
@@ -47,6 +51,7 @@ export function ComposerQueue({
   onEditingChange,
   onCommitEdit,
   onRemove,
+  onOpen,
   onReorder,
   onTogglePaused,
 }: {
@@ -60,14 +65,19 @@ export function ComposerQueue({
   onEditingChange: (id: string | null) => void;
   onCommitEdit: (id: string, text: string) => void;
   onRemove: (id: string) => void;
+  /** Open the thread a spawned row runs in. */
+  onOpen: (threadId: string) => void;
   /** The queued rows in the order they were dropped into. */
   onReorder: (ids: string[]) => void;
   onTogglePaused: () => void;
 }) {
   const [open, setOpen] = useState(true);
   const frozen = editingId !== null;
-  const waiting = items.filter((m) => m.status === "queued");
-  const rows = items.filter((item) => frozen || item.status === "queued");
+  const waiting = items.filter((m) => m.status === "queued" || m.status === "folding");
+  const spawned = items.filter((m) => m.status === "spawned");
+  const rows = items.filter(
+    (item) => frozen || item.status === "queued" || item.status === "folding" || item.status === "spawned",
+  );
   // Dragging renders the queue in the order it would land in, so the rows
   // shift out of the way and the hole is the drop zone.
   const rowIds = rows.map((it) => it.id);
@@ -110,7 +120,13 @@ export function ComposerQueue({
           onClick={() => setOpen(!open)}
         >
           <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
-            {waiting.length === 1 ? "1 up next" : `${waiting.length} in queue`}
+            {waiting.length === 1
+              ? "1 up next"
+              : waiting.length > 1
+                ? `${waiting.length} in queue`
+                : spawned.length === 1
+                  ? "1 in another chat"
+                  : `${spawned.length} in other chats`}
           </span>
           {paused && (
             <span className="truncate text-[11px] text-muted-foreground/60">
@@ -156,13 +172,14 @@ export function ComposerQueue({
               const isEditing = editingId === it.id;
               const shown =
                 it.status === "running" && !busy ? "done" : it.status;
-              const gone = shown !== "queued";
-              const locked = frozen && !isEditing;
+              const gone = shown === "running" || shown === "done";
+              const locked = (frozen && !isEditing) || shown === "folding";
+              const draggable = !frozen && shown === "queued";
               return (
                 <div
                   key={it.id}
                   {...drag}
-                  draggable={!frozen}
+                  draggable={draggable}
                   onDragStart={(e) => {
                     // The browser snapshots the row on a flat backdrop, which
                     // squares off its corners; hand it a styled clone so the
@@ -200,10 +217,12 @@ export function ComposerQueue({
                 >
                   {!isEditing && (
                     <span className="mt-0.5 -ml-0.5 shrink-0">
-                      {shown === "running" ? (
+                      {shown === "running" || shown === "folding" ? (
                         <Loader2 className="size-3.5 animate-spin text-muted-foreground/60" />
                       ) : shown === "done" ? (
                         <Check className="size-3.5 text-muted-foreground/60" />
+                      ) : shown === "spawned" ? (
+                        <ArrowUpRight className="size-3.5 text-muted-foreground/60" />
                       ) : (
                         <GripVertical className="size-3.5 cursor-grab text-muted-foreground/60" />
                       )}
@@ -235,14 +254,19 @@ export function ComposerQueue({
                             attachments={it.attachments}
                           />
                         </div>
-                        {it.attachments.length > 0 && (
+                        {shown === "spawned" && (
+                          <div className="mt-0.5 text-[10.5px] text-muted-foreground/60">
+                            Running in another chat
+                          </div>
+                        )}
+                        {it.attachments.some((a) => a.scope !== "entity") && (
                           <div
                             className={cn(
                               "mt-1 flex flex-wrap gap-1",
                               gone && "opacity-50",
                             )}
                           >
-                            {it.attachments.map((a) => (
+                            {it.attachments.filter((a) => a.scope !== "entity").map((a) => (
                               <RefThumb
                                 key={`${a.scope}:${a.id}`}
                                 item={a}
@@ -258,6 +282,16 @@ export function ComposerQueue({
                   </div>
                   {!isEditing && !locked && !gone && (
                     <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none">
+                      {shown === "spawned" ? (
+                        <button
+                          type="button"
+                          className={queueIconButton}
+                          title="Open that chat"
+                          onClick={() => it.threadId && onOpen(it.threadId)}
+                        >
+                          <ArrowUpRight className="size-3" />
+                        </button>
+                      ) : (
                       <button
                         type="button"
                         className={queueIconButton}
@@ -266,6 +300,7 @@ export function ComposerQueue({
                       >
                         <Pencil className="size-3" />
                       </button>
+                      )}
                       <button
                         type="button"
                         className={queueIconButton}

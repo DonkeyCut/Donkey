@@ -95,7 +95,8 @@ import {
   useSignedIn,
 } from "@/cut/lib/generate";
 import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
-import { dropPiSession, hydratePiSession, readPiSession, streamCutChat } from "@/cut/lib/pi/cutAgent";
+import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
+import { toolProgress } from "@/cut/lib/queueTriage";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import { withChatProject } from "@/cut/lib/projectChatTools";
 import { runAiTool } from "@/cut/lib/aiTools";
@@ -220,6 +221,14 @@ const RESUME_RETRY_MS = 1500;
 // How long after its last save a lost turn still resumes; an older thread is
 // one the user walked away from, and it waits for them.
 const RESUME_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** The first message of a thread the triage spawns: a queued row that can
+ * run alongside the current turn, sent the moment its session mounts. */
+interface ThreadSeed {
+  text: string;
+  attachments: AssetRef[];
+  model: string;
+}
 
 /** Attachments a restored message can still deliver: file blobs die with the
  * page that made them, and a project asset may have been deleted since. */
@@ -440,6 +449,24 @@ export function AiPanel({
       : (readActiveChat(projectId) ?? crypto.randomUUID()),
   );
   const [runningThreads, setRunningThreads] = useState<Record<string, string>>({});
+  // Threads the triage spawned for a message that could run alongside the
+  // current turn. A seed mounts its session, which sends the message on
+  // arrival and then counts as running like any other thread.
+  const [seeds, setSeeds] = useState<Record<string, ThreadSeed>>({});
+  const spawnThread = useCallback((seed: ThreadSeed) => {
+    const id = crypto.randomUUID();
+    setSeeds((all) => ({ ...all, [id]: seed }));
+    return id;
+  }, []);
+  const onSeedTaken = useCallback((id: string, turnModel: string) => {
+    setSeeds((all) => {
+      if (!all[id]) return all;
+      const rest = { ...all };
+      delete rest[id];
+      return rest;
+    });
+    setRunningThreads((threads) => (threads[id] ? threads : { ...threads, [id]: turnModel }));
+  }, []);
   const onRunningChange = useCallback((id: string, running: boolean, turnModel: string) => {
     setRunningThreads((threads) => {
       if (running) return threads[id] ? threads : { ...threads, [id]: turnModel };
@@ -463,6 +490,18 @@ export function AiPanel({
   }, [anyRunning]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [threads, setThreads] = useState<ChatThread[]>(() => readThreads(projectId));
+  // What every running thread is working on, for the triage's collision
+  // check: a seed's text until its thread saves, the stored ask after.
+  const runningAsks = useMemo<Record<string, string>>(() => {
+    const asks: Record<string, string> = {};
+    for (const id of Object.keys(runningThreads)) {
+      const ask = threads.find((t) => t.id === id)?.messages.findLast((m) => m.role === "user");
+      const text = ask?.parts.map((p) => (p.type === "text" ? p.text : "")).join("").trim();
+      if (text) asks[id] = text;
+    }
+    for (const [id, seed] of Object.entries(seeds)) asks[id] = seed.text;
+    return asks;
+  }, [runningThreads, threads, seeds]);
   const seenReplies = useSyncExternalStore(
     subscribeSeenReplies,
     () => readSeenReplies(projectId),
@@ -556,6 +595,10 @@ export function AiPanel({
     setActiveChat(t.id);
     setHistoryOpen(false);
   };
+  const openSpawned = useCallback((id: string) => {
+    setActiveChat(id);
+    setHistoryOpen(false);
+  }, []);
   // The thread on screen reads its own reply: a reply that lands while the
   // panel shows the thread with the list closed is read once the tab is in
   // front, whether that is now or when the person comes back to it.
@@ -763,7 +806,7 @@ export function AiPanel({
         </>
       )}
 
-      {chatsReady && [...new Set([sessionThread, ...Object.keys(runningThreads)])].map((id) => (
+      {chatsReady && [...new Set([sessionThread, ...Object.keys(runningThreads), ...Object.keys(seeds)])].map((id) => (
         <ChatSession
           key={id}
           projectId={projectId}
@@ -772,8 +815,13 @@ export function AiPanel({
           onRunningChange={onRunningChange}
           onDeleted={onThreadDeleted}
           info={mergedInfo}
-          model={runningThreads[id] ?? model}
+          model={runningThreads[id] ?? seeds[id]?.model ?? model}
           onModelChange={selectModel}
+          seed={seeds[id]}
+          onSeedTaken={onSeedTaken}
+          onSpawn={spawnThread}
+          onOpenThread={openSpawned}
+          runningAsks={runningAsks}
         />
       ))}
     </aside>
@@ -827,6 +875,11 @@ function ChatSession({
   info,
   model,
   onModelChange,
+  seed,
+  onSeedTaken,
+  onSpawn,
+  onOpenThread,
+  runningAsks,
 }: {
   projectId: string;
   threadId: string;
@@ -836,6 +889,14 @@ function ChatSession({
   info: ModelsInfo | null;
   model: string;
   onModelChange: (id: string) => void;
+  /** The message this thread was spawned to run; sent once on mount. */
+  seed?: ThreadSeed;
+  onSeedTaken: (id: string, model: string) => void;
+  /** Start a parallel thread on a message; returns its id. */
+  onSpawn: (seed: ThreadSeed) => string;
+  onOpenThread: (id: string) => void;
+  /** What every running thread of the project is working on, by thread id. */
+  runningAsks: Record<string, string>;
 }) {
   const [input, setInput] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -1033,6 +1094,7 @@ function ChatSession({
         if (provider(currentModel()) === "gemini") {
           setClientTools(true);
           const signal = registerBrowserTurn(options.abortSignal);
+          turnSignalRef.current = signal;
           return streamCutChat({
             threadId,
             model: currentModel(),
@@ -1390,6 +1452,93 @@ function ChatSession({
   const [queuePaused, setQueuePaused] = useState(initialQueue.length > 0);
   const [queueEditing, setQueueEditing] = useState<string | null>(null);
   const drainedRef = useRef(false);
+  // The triage reads the live queue and transcript when its call returns,
+  // long after the render that started it.
+  const queueRef = useRef(queue);
+  const messagesRef = useRef(messages);
+  const queueEditingRef = useRef(queueEditing);
+  const runningAsksRef = useRef(runningAsks);
+  useEffect(() => {
+    queueRef.current = queue;
+    messagesRef.current = messages;
+    queueEditingRef.current = queueEditing;
+    runningAsksRef.current = runningAsks;
+  }, [queue, messages, queueEditing, runningAsks]);
+  /** The ask the running turn is working on. */
+  const runningAskRef = useRef("");
+  /** The running Gemini turn's abort signal, for the work a fold does. */
+  const turnSignalRef = useRef<AbortSignal | undefined>(undefined);
+  // Where a message sent mid-turn goes. One light-model call places the rows
+  // against the running ask: a fold is steered into the running turn and
+  // joins the transcript as its own message, a spawn starts a parallel
+  // thread, and the rest wait in the tray. Each verdict is checked against
+  // the live queue before it acts, since a row can be edited, removed, or
+  // drained while the call is out. A turn on the local engine cannot take a
+  // fold, so there the row waits as before.
+  const triage = async (rows: QueuedMessage[]) => {
+    const ask = runningAskRef.current;
+    if (!ask) return;
+    const last = messagesRef.current.at(-1);
+    const progress =
+      last?.role === "assistant"
+        ? toolProgress(last.parts as unknown as { type: string; state?: string; toolName?: string }[])
+        : [];
+    const elsewhere = Object.entries(runningAsksRef.current)
+      .filter(([id]) => id !== threadId)
+      .map(([, text]) => text);
+    const waiting = queueRef.current
+      .filter((m) => m.status === "queued" && !rows.some((r) => r.id === m.id))
+      .map((m) => ({ id: m.id, text: m.text }));
+    const verdicts = await triageQueuedMessages({
+      anchor: { ask, progress, elsewhere },
+      waiting,
+      rows: rows.map((r) => ({ id: r.id, text: r.text })),
+      deps: productionDeps(projectId, turnSignalRef.current),
+    });
+    for (const row of rows) {
+      const verdict = verdicts.get(row.id);
+      const current = queueRef.current.find((m) => m.id === row.id);
+      if (
+        !current ||
+        current.status !== "queued" ||
+        current.text !== row.text ||
+        queueEditingRef.current === row.id
+      )
+        continue;
+      const live = liveRefs(row.attachments);
+      if (verdict === "spawn") {
+        const id = onSpawn({ text: row.text, attachments: live, model });
+        setQueue((q) => q.map((m) => (m.id === row.id ? { ...m, status: "spawned", threadId: id } : m)));
+      } else if (verdict === "fold" && provider(model) === "gemini" && cutChatLive(threadId)) {
+        setQueue((q) => q.map((m) => (m.id === row.id ? { ...m, status: "folding" } : m)));
+        const folded = await foldIntoCutChat({
+          threadId,
+          text: row.text,
+          attachments: live,
+          deps: productionDeps(projectId, turnSignalRef.current),
+        });
+        if (!folded) {
+          setQueue((q) => q.map((m) => (m.id === row.id ? { ...m, status: "queued" } : m)));
+          continue;
+        }
+        setQueue((q) => q.filter((m) => m.id !== row.id));
+        setMessages((msgs) => {
+          const user: UIMessage = {
+            id: crypto.randomUUID(),
+            role: "user",
+            parts: [{ type: "text", text: row.text }],
+            ...(live.length > 0 && { metadata: { attachments: live } }),
+          };
+          const tail = msgs.at(-1);
+          return tail?.role === "assistant" ? [...msgs.slice(0, -1), user, tail] : [...msgs, user];
+        });
+      }
+    }
+  };
+  const triageRef = useRef(triage);
+  useEffect(() => {
+    triageRef.current = triage;
+  });
   // Height of the floating stack above the composer (warning tabs + queue
   // tray); the messages pad their bottom by it so the newest message can
   // scroll out from behind the stack.
@@ -1427,13 +1576,13 @@ function ChatSession({
     if (busy || requests.snapshot()) {
       // A paused queue stays paused: parked rows fire only from the tray's
       // resume button, never as a side effect of submitting something new.
-      setQueue((q) => [
-        ...q,
-        { id: crypto.randomUUID(), text: body, attachments: all, status: "queued" },
-      ]);
+      // With the queue live, the triage places the row right away.
+      const row: QueuedMessage = { id: crypto.randomUUID(), text: body, attachments: all, status: "queued" };
+      setQueue((q) => [...q, row]);
       setInput("");
       setAttachments([]);
       pinnedRef.current = true;
+      if (!queuePaused) void triageRef.current([row]);
       return;
     }
     clearError();
@@ -1450,6 +1599,7 @@ function ChatSession({
       ),
     );
     pinnedRef.current = true;
+    runningAskRef.current = body;
     dispatchChat(() => sendMessage({
       text: body,
       ...(all.length > 0 && { metadata: { attachments: all } }),
@@ -1513,6 +1663,7 @@ function ChatSession({
     // reply keeps the calls that landed and nothing else.
     setMessages((current) => scrubLostTurn(current, ask.id));
     const metadata: ResumeMetadata = { resume: true, ...(live.length > 0 ? { attachments: live } : {}) };
+    runningAskRef.current = ask.parts.map((p) => (p.type === "text" ? p.text : "")).join("").trim();
     dispatchChat(() => sendMessage({ text: resumePrompt(ask), metadata }));
   }, [status, busy, requests, dispatchChat, readOnly, projectLoaded, currentAvailable, model, signedIn, info, reconnect, resumeOwed, resumeStream, setMessages, sendMessage, projectId, threadId]);
 
@@ -1555,11 +1706,32 @@ function ChatSession({
     // parked (or at file blobs that died with the last page); dropping the
     // dead refs keeps the message from claiming media it can't deliver.
     const live = liveRefs(next.attachments);
+    runningAskRef.current = next.text;
     dispatchChat(() => sendMessage({
       text: next.text,
       ...(live.length > 0 && { metadata: { attachments: live } }),
     }));
+    // The rows behind it are placed against the turn that just started:
+    // related ones fold into it, independent ones spawn, the rest wait.
+    const rest = queue.filter((m) => m.status === "queued" && m.id !== next.id && m.id !== queueEditing);
+    if (rest.length > 0) void triageRef.current(rest);
   }, [status, busy, requests, dispatchChat, queue, queuePaused, queueEditing, currentAvailable, resumeOwed, sendMessage]);
+
+  // A spawned thread sends its seed the moment it mounts and hands the seed
+  // back, so the parent counts it as running from then on.
+  const seedSent = useRef(false);
+  useEffect(() => {
+    if (!seed || seedSent.current || readOnly || busy || requests.snapshot()) return;
+    seedSent.current = true;
+    onSeedTaken(threadId, model);
+    if (!currentAvailable) return;
+    runningAskRef.current = seed.text;
+    pinnedRef.current = true;
+    dispatchChat(() => sendMessage({
+      text: seed.text,
+      ...(seed.attachments.length > 0 && { metadata: { attachments: seed.attachments } }),
+    }));
+  }, [seed, readOnly, busy, requests, currentAvailable, onSeedTaken, threadId, model, dispatchChat, sendMessage]);
 
   // Mirror the waiting rows to storage as they change; an empty queue clears
   // its slot.
@@ -1583,7 +1755,9 @@ function ChatSession({
   // The tray shows only while a row is waiting; settled running rows linger
   // in the array until the next dispatch sweeps them, and alone they are
   // nothing to show.
-  const trayVisible = queue.some((m) => m.status === "queued");
+  const trayVisible = queue.some(
+    (m) => m.status === "queued" || m.status === "folding" || m.status === "spawned",
+  );
 
   // The saved model's provider may be uninstalled — its group is hidden from
   // the picker, so fall back to the first installed provider rather than sit on
@@ -1726,7 +1900,7 @@ function ChatSession({
                 // Closing the freeze sweeps out the crossed-out rows it kept
                 // around for display.
                 if (id === null)
-                  setQueue((q) => q.filter((m) => m.status === "queued"));
+                  setQueue((q) => q.filter((m) => m.status !== "running" && m.status !== "done"));
               }}
               onCommitEdit={(id, text) =>
                 setQueue((q) =>
@@ -1736,6 +1910,10 @@ function ChatSession({
                 )
               }
               onRemove={(id) => setQueue((q) => q.filter((m) => m.id !== id))}
+              onOpen={(id) => {
+                setQueue((q) => q.filter((m) => m.threadId !== id));
+                onOpenThread(id);
+              }}
               onReorder={(ids) =>
                 setQueue((q) => {
                   // The tray only shows part of the queue, so the dropped
@@ -2296,11 +2474,14 @@ const MessageView = memo(function MessageView({
     )
       .map(normalizeRef)
       .filter((r): r is AssetRef => r !== null);
+    // Timeline entities (overlays, cues, keyframes) already read as pills in
+    // the bubble; only media gets a card above it.
+    const cards = attachments.filter((a) => a.scope !== "entity");
     return (
       <div className="ai-msg-user group mb-3 flex flex-col items-end gap-1">
-        {attachments.length > 0 && (
+        {cards.length > 0 && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
-            {attachments.map((a) => (
+            {cards.map((a) => (
               <MessageAssetCard key={`${a.scope}:${a.id}`} asset={a} />
             ))}
           </div>
