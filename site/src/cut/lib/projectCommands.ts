@@ -1,7 +1,7 @@
 import type { ProjectOperation } from "@/cut/lib/projectOperation";
 
 export const UI_TOOLS: ReadonlySet<string> = new Set([
-  "set_side_panel", "set_view", "open_export", "set_playing",
+  "set_side_panel", "set_view", "open_export", "set_playing", "queue_message",
 ]);
 
 export function assertProjectCommand(operation: ProjectOperation, activeProjectId: string | null, name: string, activeVersion?: string | null): void {

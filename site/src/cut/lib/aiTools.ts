@@ -89,6 +89,7 @@ import type { TransitionsToolName } from "@/cut/components/TransitionsPanel.tool
 import { apiFetch, apiJson, getBackend } from "./backend";
 import { refFromAsset, refFromStockVideo, type AssetRef } from "./assetRef";
 import { chatOwner, tagChatAsset } from "./chatAssets";
+import { queueMessageFromAgent } from "./chatQueue";
 import { applyOwnership, useGenerate, type VideoAttempt, type VideoGenOptions } from "./generate";
 import { useGenScene } from "./genScene";
 import { folderWithin } from "./folderTree";
@@ -2705,6 +2706,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       // No reference: text is the whole request, so the single rung runs ungated.
       return launchVideoJob(projectId, input, [{ prompt, opts: { ...baseOpts } }]);
+  },
+
+  queue_message: (_s, input) => {
+    const text = String(input.text ?? "").trim();
+    if (!text) throw new ToolError("queue_message needs the message text.");
+    queueMessageFromAgent(text);
+    return { queued: true, note: "It runs as its own turn after this one finishes." };
   },
 
   wait_for_renders: async (s) => {

@@ -97,6 +97,7 @@ import {
 import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
 import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
 import { toolProgress } from "@/cut/lib/queueTriage";
+import { registerQueueSink } from "@/cut/lib/chatQueue";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import { withChatProject } from "@/cut/lib/projectChatTools";
 import { runAiTool } from "@/cut/lib/aiTools";
@@ -1539,6 +1540,15 @@ function ChatSession({
   useEffect(() => {
     triageRef.current = triage;
   });
+  // The running agent can park a message here itself (queue_message): the
+  // row goes out as its own turn after the running one settles.
+  useEffect(
+    () =>
+      registerQueueSink(threadId, (text) =>
+        setQueue((q) => [...q, { id: crypto.randomUUID(), text, attachments: [], status: "queued" }]),
+      ),
+    [threadId],
+  );
   // Height of the floating stack above the composer (warning tabs + queue
   // tray); the messages pad their bottom by it so the newest message can
   // scroll out from behind the stack.

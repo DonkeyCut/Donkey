@@ -3,6 +3,15 @@ import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
 import { AI_TOOLS, attachedAssetsBlock, systemPrompt } from "@/cut/server/ai/catalog";
 import { isResumeMessage } from "../chatResume";
+import {
+  parseQueueTriage,
+  QUEUE_TRIAGE_SCHEMA,
+  queueTriageInput,
+  queueTriagePrompt,
+  type QueueVerdict,
+  type TriageAnchor,
+  type TriageRow,
+} from "../queueTriage";
 import { parseTurnIntent, turnIntentInput, turnIntentPrompt, type TurnIntent } from "../turnIntent";
 import { enforceContextBudget } from "./contextBudget";
 import { donkeyModel, type ChatThinkingLevel } from "./donkeyModel";
@@ -93,6 +102,137 @@ function isBudgetSteer(m: AgentMessage): boolean {
   );
 }
 
+/** A composer message folded into a running turn. It is a real ask the
+ * session keeps, and it belongs to the turn it joined: the media invariant
+ * treats the turn's first ask as the newest, so the payloads that turn is
+ * working from stay in context when the fold lands. */
+interface FoldCarrier {
+  fold?: true;
+}
+
+function isFold(m: AgentMessage): boolean {
+  return (m as FoldCarrier).fold === true;
+}
+
+// ---------------------------------------------------------------------------
+// Live turns: the thread's running agent, so a message the triage folds in
+// can be steered into it. A fold is remembered on the turn until an agent
+// injects it — the speculative run may be discarded and rerun routed, and
+// the fold has to reach the run the turn keeps — and a fold no agent took by
+// the time the turn ends is handed back, so the page can queue it instead.
+
+interface Fold {
+  message: UserMessage & WireCarrier & FoldCarrier;
+  resolve: (injected: boolean) => void;
+  /** The run that last injected it; a later run built for the same turn
+   * takes it again. */
+  takenBy: Agent | null;
+}
+
+interface LiveTurn {
+  agent: Agent | null;
+  folds: Fold[];
+}
+
+const liveTurns = new Map<string, LiveTurn>();
+
+/** Whether a turn is running on this page for the thread, so a fold can land. */
+export function cutChatLive(threadId: string): boolean {
+  return liveTurns.has(threadId);
+}
+
+/** Hand every fold the turn holds to a freshly built agent: the ones no run
+ * has injected yet, and the ones a discarded run took with it. */
+function steerFolds(turn: LiveTurn, agent: Agent): void {
+  turn.agent = agent;
+  for (const f of turn.folds) if (f.takenBy !== agent) agent.steer(f.message);
+}
+
+/** Watch the run inject folds; each resolves once, the first time a run
+ * takes it. */
+function watchFolds(turn: LiveTurn, agent: Agent): () => void {
+  return agent.subscribe((event) => {
+    if (event.type !== "message_start") return;
+    const f = turn.folds.find((x) => x.message === event.message);
+    if (!f) return;
+    if (!f.takenBy) f.resolve(true);
+    f.takenBy = agent;
+  });
+}
+
+/** Steer a composer message into the thread's running turn. Resolves true
+ * once the turn has taken the message into its context, false when the turn
+ * ended first — the message then goes out as its own turn. */
+export async function foldIntoCutChat({
+  threadId,
+  text,
+  attachments,
+  deps,
+}: {
+  threadId: string;
+  text: string;
+  attachments: unknown[];
+  deps: CutAgentDeps;
+}): Promise<boolean> {
+  if (!liveTurns.has(threadId)) return false;
+  const ask: UIMessage = {
+    id: "",
+    role: "user",
+    parts: [{ type: "text", text }],
+    ...(attachments.length > 0 && { metadata: { attachments } }),
+  };
+  const message: Fold["message"] = { ...(await buildPrompt(ask, deps)), fold: true };
+  const turn = liveTurns.get(threadId);
+  if (!turn) return false;
+  return new Promise<boolean>((resolve) => {
+    turn.folds.push({ message, resolve, takenBy: null });
+    turn.agent?.steer(message);
+  });
+}
+
+const TRIAGE_PROMPT = queueTriagePrompt();
+
+/** Where each mid-turn message goes: one light-model call over the running
+ * ask and the rows. Fails closed — every row the call cannot place stays in
+ * the queue. */
+export async function triageQueuedMessages({
+  anchor,
+  waiting,
+  rows,
+  deps,
+  abortSignal,
+}: {
+  anchor: TriageAnchor;
+  waiting: TriageRow[];
+  rows: TriageRow[];
+  deps: CutAgentDeps;
+  abortSignal?: AbortSignal;
+}): Promise<Map<string, QueueVerdict>> {
+  // Short ids on the wire; the verdict quotes them back.
+  const wire = rows.map((r, i) => ({ id: `m${i + 1}`, text: r.text }));
+  const byWire = new Map(wire.map((w, i) => [w.id, rows[i].id] as const));
+  const closed = () => new Map<string, QueueVerdict>(rows.map((r) => [r.id, "queue"]));
+  try {
+    const res = await deps.post(
+      {
+        donkeyProvider: "gemini",
+        model: deps.models.gate,
+        instructions: TRIAGE_PROMPT,
+        input: queueTriageInput(anchor, waiting, wire),
+        text: { format: { type: "json_schema", schema: QUEUE_TRIAGE_SCHEMA } },
+      },
+      abortSignal
+    );
+    if (!res.ok) return closed();
+    const body = (await res.json()) as { output_text?: string };
+    const out = closed();
+    for (const [w, v] of parseQueueTriage(body.output_text, wire)) out.set(byWire.get(w)!, v);
+    return out;
+  } catch {
+    return closed();
+  }
+}
+
 /** Every toolCall in the session answered. An aborted batch leaves calls with
  * no toolResult, and Gemini rejects a replay whose functionCalls outnumber
  * their responses — so unanswered calls get a synthetic interrupted result,
@@ -133,7 +273,7 @@ function settleDanglingToolCalls(messages: AgentMessage[]): AgentMessage[] {
 function pruneStaleMedia(messages: AgentMessage[]): AgentMessage[] {
   let lastAsk = -1;
   messages.forEach((m, i) => {
-    if ((m as Message).role === "user" && !isBudgetSteer(m)) lastAsk = i;
+    if ((m as Message).role === "user" && !isBudgetSteer(m) && !isFold(m)) lastAsk = i;
   });
   return messages.map((m, i) => {
     if (i >= lastAsk) return m;
@@ -399,6 +539,8 @@ export function streamCutChat({
       const emit = (chunk: Record<string, unknown>) =>
         controller.enqueue(chunk as unknown as UIMessageChunk);
       emit({ type: "start" });
+      const turn: LiveTurn = { agent: null, folds: [] };
+      liveTurns.set(threadId, turn);
       try {
         const gateStart = performance.now();
         const lastUser = messages.findLast((m) => m.role === "user");
@@ -498,6 +640,8 @@ export function streamCutChat({
             },
           });
           onAgent?.(agent);
+          steerFolds(turn, agent);
+          const unsubscribeFolds = watchFolds(turn, agent);
 
           const unsubscribeUi = subscribeUiChunks(agent, send);
           // Round timing for the eval: one assistant message = one LLM round.
@@ -560,6 +704,7 @@ export function streamCutChat({
             unsubscribeUi();
             unsubscribeTiming();
             unsubscribeTurns();
+            unsubscribeFolds();
           }
           return { agent, rounds, send };
         };
@@ -659,6 +804,9 @@ export function streamCutChat({
           emit({ type: "error", errorText: err instanceof Error ? err.message : String(err) });
         }
       } finally {
+        if (liveTurns.get(threadId) === turn) liveTurns.delete(threadId);
+        // A fold no run took goes back to the page, which queues it.
+        for (const f of turn.folds) if (!f.takenBy) f.resolve(false);
         emit({ type: "finish" });
         controller.close();
       }

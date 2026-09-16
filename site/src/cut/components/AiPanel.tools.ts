@@ -110,6 +110,12 @@ export const AI_PANEL_TOOLS = [
     inputSchema: obj({}),
   },
   {
+    name: "queue_message",
+    description:
+      "Put a message on the composer queue to run as its own turn after this one finishes, with a fresh view of the project. For a further message the user sent while you were working that you cannot do yet: it needs this turn's finished result (an export, a share, a thumbnail of the final cut), or a fresh look at the timeline once your cuts have landed. Pass the user's words as they wrote them; the row goes out on its own when this turn settles, and your reply says what waits. The ask you were given is never queued — do it now.",
+    inputSchema: obj({ text: str("The message, in the user's words") }, ["text"]),
+  },
+  {
     name: "import_url",
     description:
       "Read any URL — TikTok, YouTube, Instagram Reels, an X/Twitter post or Article, an ordinary web page, or a direct video/audio/image link — with the bundled downloader and import what it holds into the project. Free and local. A web page comes back as its article text plus the pictures on it; a post as its video or photos; and the source's own words (returned as sourceText) are quoted for the user beside the media automatically — don't retype them in your reply. A source that is only words returns sourceText with no assets, which is a success: read it and answer from it. This is how you look something up: point it at the page and read what comes back. When the user wants only the sound — a song, a soundtrack, a podcast — pass audio_only and the source's audio track lands as an audio asset. Media lands on a card in this chat and the user drags it to the timeline, Media, or the Library; place it yourself (add_clip) only when they asked for it in the cut. A short clip downloads in seconds; a long video can take a couple of minutes.",
