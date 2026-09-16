@@ -144,6 +144,17 @@ export function engineLog(msg: string): void {
  * whole life rather than only inside the handover, so the mixer decodes and
  * schedules one stable voice and the frame-by-frame gain is all that moves.
  */
+/**
+ * How far ahead of the playhead a clip's sound is opened, in timeline seconds.
+ *
+ * A voice opened the frame its clip begins pays the open — a container parsed,
+ * a decoder configured, a first read — while the clip is already playing, and
+ * a clip shorter than that open is gone before its sound arrives. The clips
+ * about to begin ride along with the audible ones, so the play reaches each
+ * one with its file open and its first window scheduled.
+ */
+const SOUND_LOOKAHEAD_S = 3;
+
 const voiceSpan = (sp: ClipSpan) => {
   // The handles a crossing reaches into play at the pace of the footage
   // beside them, so the voice's span widens through the clip's own map and
@@ -684,7 +695,48 @@ class Engine {
         sound: a.sound,
       });
     }
+    this.upcomingVoices(t, spans, duck, out);
     return out;
+  }
+
+  /**
+   * The clips that begin within `SOUND_LOOKAHEAD_S` of `t`, added to `out` so
+   * the mixer opens them before the playhead arrives. Each carries the gain it
+   * will have on its first frame; the frames inside the clip take over from
+   * there. A clip already voiced — the far side of a crossing — is left as it is.
+   */
+  private upcomingVoices(t: number, spans: ClipSpan[], duck: number, out: Voice[]) {
+    const s = useEditor.getState();
+    const have = new Set(out.map((v) => v.id));
+    const soon = (start: number) => start > t && start <= t + SOUND_LOOKAHEAD_S;
+    for (const spans0 of [spans, ...this.overlaySpans()]) {
+      for (const span of spans0) {
+        if (!soon(span.start) || have.has(span.clip.id)) continue;
+        if (span.clip.muted || span.clip.hidden || assetIsSilent(span.asset)) continue;
+        have.add(span.clip.id);
+        out.push({
+          id: span.clip.id,
+          ...voiceSpan(span),
+          gain: (span.clip.volume ?? 1) * duck,
+        });
+      }
+    }
+    for (const a of s.audioClips) {
+      if (!soon(a.start) || have.has(a.id) || a.hidden) continue;
+      const asset = s.assets.find((x) => x.id === a.assetId);
+      if (!asset || assetIsSilent(asset)) continue;
+      const dg = a.duck !== undefined && a.duck < 1 ? 1 : duck;
+      out.push({
+        id: a.id,
+        url: asset.url,
+        start: a.start,
+        in: a.in,
+        out: a.out,
+        retime: retimeOf(a),
+        gain: (a.fadeIn ?? 0) > 0 ? 0 : a.volume * dg,
+        sound: a.sound,
+      });
+    }
   }
 
   /** Draw track 0 at `t`: the master clip, whatever is blending into it, the

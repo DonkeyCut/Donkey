@@ -70,13 +70,19 @@ const GROUP_PULLS = 128;
  * enough that the work lands inside a frame or two. */
 const WINDOW_STRETCHED_S = 4;
 /**
- * Stretched windows kept in hand.
+ * Decoded windows kept in hand: stretched windows, and short clips read whole.
  *
  * Two dozen four-second windows of stereo at 48kHz — enough that stepping back
  * over a cut replays what it just played, and bounded because everything older
  * than that is a full decode away regardless.
  */
-const STRETCH_CACHE_BYTES = 24 * WINDOW_STRETCHED_S * 48_000 * 2 * 4;
+const WINDOW_CACHE_BYTES = 24 * WINDOW_STRETCHED_S * 48_000 * 2 * 4;
+/** A clip whose whole source span is at most this long is one read: decoded
+ * in full the first time it is heard and held, so the sound effects a cut is
+ * dotted with — a click, a whoosh, a hit, each shorter than the open a walk
+ * over its file costs — play whole on every pass, and a second pass over the
+ * same one costs no read at all. */
+const SHORT_CLIP_S = 3;
 
 /** What a set of decoded windows costs: float samples, one per channel. */
 /** A window laid through a clip's map, with the source second its first
@@ -86,7 +92,13 @@ interface FittedWindow {
   /** Seconds past where the window was asked for that its sound begins —
    * see `FittedSpan.shift`. */
   shift: number;
+  /** Seconds into the buffer the window begins: a whole short clip held from
+   * its head, joined part-way through. */
+  skip?: number;
 }
+
+/** A voice read whole — see `SHORT_CLIP_S`. */
+const isShort = (live: { in: number; out: number }): boolean => live.out - live.in <= SHORT_CLIP_S;
 
 const decodedBytes = (held: Map<string, FittedWindow>): number => {
   let n = 0;
@@ -720,6 +732,8 @@ export class PreviewMixer {
       // primer, decoded now and held for the play that follows.
       if (retimeFits(live.retime)) {
         await this.stretchedWindow(live, source);
+      } else if (isShort(live)) {
+        await this.shortWindow(live, source);
       } else {
         const walk = (live.walk ??= openAudioWalk(live.url, source, live.out));
         if (Math.abs(walk.position - source) > 0.02) walk.seek(source);
@@ -882,6 +896,7 @@ export class PreviewMixer {
       // the read ran into the end of the source; played at `from` it would
       // run early for its whole length.
       let shift = 0;
+      let skip = 0;
       try {
         // Nothing scheduled means the sound is standing still — the play just
         // began, a seek landed, a hold let go — and the picture is not
@@ -891,6 +906,10 @@ export class PreviewMixer {
           const fit = await this.stretchedWindow(live, sourceFrom);
           buffer = fit?.buffer ?? null;
           shift = Math.max(0, fit?.shift ?? 0);
+        } else if (isShort(live)) {
+          const fit = await this.shortWindow(live, sourceFrom);
+          buffer = fit?.buffer ?? null;
+          skip = fit?.skip ?? 0;
         } else {
           buffer = await this.walkGroup(live, sourceFrom, current, group);
         }
@@ -925,7 +944,7 @@ export class PreviewMixer {
       const tNow = this.at();
       if (!current() || live.scheduled !== from) return;
       const at2 = from + shift;
-      const until = at2 + buffer.duration;
+      const until = at2 + buffer.duration - skip;
       if (until <= tNow) {
         this.noteLate(live, tNow - at2);
         // The read outlived the moment it was for — a long wait on bytes, a
@@ -941,12 +960,12 @@ export class PreviewMixer {
       const at = this.anchor.ctx + (at2 - this.anchor.timeline);
       const now = this.ctx.currentTime;
       if (at >= now) {
-        node.start(at);
+        node.start(at, skip);
       } else {
         // Late: start where the clock actually is, so the sound stays lined up
         // with the picture and skips what has already gone by.
         this.noteLate(live, now - at);
-        node.start(now, now - at);
+        node.start(now, skip + (now - at));
       }
       live.windows.push({ node, until });
       live.scheduled = until;
@@ -1023,20 +1042,41 @@ export class PreviewMixer {
     if (!raw) return null;
     // The window is laid by the clip's own map from where it starts, so its
     // length is exactly the timeline the picture spends on it.
-    const buffer = this.fit(raw, rt, lo, hi);
-    // Oldest first until the cache is back inside its share. Emptying the
-    // whole cache would throw away the window the playhead is standing on along
-    // with the ones it has finished, and the next frame would pay a full decode
-    // for sound it was already holding.
-    this.decoded.set(key, buffer);
-    const cap = allowance("mixerAudio", STRETCH_CACHE_BYTES);
+    return this.keep(key, this.fit(raw, rt, lo, hi));
+  }
+
+  /**
+   * A short clip's whole sound, decoded once and held.
+   *
+   * A walk over the file costs an open before its first read answers, and a
+   * clip shorter than that open is over before its sound arrives; the clip is
+   * one read instead, and the read is kept. Joined part-way through — a play
+   * begun inside it — the window starts that far into the buffer.
+   */
+  private async shortWindow(live: LiveVoice, sourceFrom: number): Promise<FittedWindow | null> {
+    const key = `${live.url}|${live.in.toFixed(3)}|${live.out.toFixed(3)}|${live.retime.key}`;
+    const skip = Math.max(0, sourceFrom - live.in);
+    const held = this.decoded.get(key);
+    if (held) return { ...held, skip };
+    const raw = await decodeAudioSpan(live.url, live.in, live.out);
+    if (!raw) return null;
+    return { ...this.keep(key, { buffer: raw, shift: 0 }), skip };
+  }
+
+  /** Keep a decoded window, letting the oldest go until the cache is back
+   * inside its share. Emptying the whole cache would throw away the window the
+   * playhead is standing on along with the ones it has finished, and the next
+   * frame would pay a full decode for sound it was already holding. */
+  private keep(key: string, window: FittedWindow): FittedWindow {
+    this.decoded.set(key, window);
+    const cap = allowance("mixerAudio", WINDOW_CACHE_BYTES);
     let cached = decodedBytes(this.decoded);
     for (const [oldest, held] of this.decoded) {
       if (cached <= cap || this.decoded.size <= 1) break;
       cached -= held.buffer.length * held.buffer.numberOfChannels * 4;
       this.decoded.delete(oldest);
     }
-    return buffer;
+    return window;
   }
 
   /**

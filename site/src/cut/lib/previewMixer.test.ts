@@ -200,10 +200,12 @@ const assembleAudio = (
 };
 
 const reMints = { asked: 0 };
+const decodes = { asked: 0 };
 
 /** A span asked for in one go, which the link cannot answer until it has
  * delivered the file as far as the span's end. */
 const decodeAudioSpan = async (_url: string, from: number, to: number) => {
+  decodes.asked++;
   await delivered(to);
   if (wall < failUntil) throw new Error("the link dropped");
   if (from >= CLIP_S - 1e-6) return null;
@@ -268,6 +270,7 @@ function reset(file: { endEarlyAt?: number; trackEnd?: number } = {}): void {
   waiting.length = 0;
   walks.opened = 0;
   reMints.asked = 0;
+  decodes.asked = 0;
   failUntil = 0;
   hangUntil = 0;
   openCostS = 0;
@@ -459,6 +462,53 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(played.length).toBeGreaterThan(0);
     expect(Math.min(...played.map((p) => p.from))).toBeLessThan(0.4);
     expect(walks.opened).toBe(1);
+  });
+
+  test("a short sound ahead of the playhead plays whole, and again for free", async () => {
+    // The failure this is here for: a click a third of a second long was
+    // opened the frame the playhead reached it, and the walk's open outlived
+    // the clip, so the voice was released before a window was scheduled and
+    // the effect was never heard. The frame plan now hands the mixer the clips
+    // about to begin, and a short clip is one decode, kept for the next pass.
+    reset();
+    headStart = CLIP_S;
+    openCostS = 1;
+    const click = {
+      id: "click",
+      url: "click.mp3",
+      start: 5,
+      in: 0,
+      out: 0.3,
+      retime: retimeOf({ in: 0, out: 0.3, speed: 1 }),
+      gain: 1,
+    };
+    const passOver = async (mixer: InstanceType<typeof PreviewMixer>) => {
+      for (let t = 0; t < 8; ) {
+        step();
+        t = mixer.now();
+        const soon = t >= click.start - 3 && t < click.start + click.out;
+        mixer.update(t, soon ? [voice, click] : [voice]);
+        await settle();
+      }
+    };
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    await passOver(mixer);
+    const first = played.filter((p) => p.from >= 4.9 && p.from <= 5.1);
+    expect(first.length).toBe(1);
+    expect(first[0].to - first[0].from).toBeCloseTo(0.3, 2);
+    expect(decodes.asked).toBe(1);
+    // Back to the top and over it again: the click plays from what is held.
+    mixer.stop();
+    played = [];
+    ctxTime = 0;
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    await passOver(mixer);
+    mixer.dispose();
+    expect(played.filter((p) => p.from >= 4.9 && p.from <= 5.1).length).toBe(1);
+    expect(decodes.asked).toBe(1);
   });
 
   test("a seek keeps its reader and lands with its sound", async () => {
