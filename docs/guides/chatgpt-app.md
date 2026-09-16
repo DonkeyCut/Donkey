@@ -45,9 +45,11 @@ economics before it acts.
 
 The standalone widget imports `@donkeycut/artifact-player/ArtifactVideo`, the
 same player used by website previews and shared videos. The package owns video
-buffers, visibility handling, and teardown. HLS loads on demand. The widget's
-hashed assets are built by `npm run chatgpt:build`, which also runs before the
-site's development and production builds. Rebuild it after editing widget code.
+buffers, visibility handling, and teardown. HLS loads on demand. The widget is
+built by `npm run chatgpt:build`, which also runs before the site's development
+and production builds. Rebuild it after editing widget code. ChatGPT caches the
+widget HTML it reads over MCP, so the entry script and stylesheet keep stable
+names that revalidate on every load; only the chunks they import are hashed.
 
 The MCP adapter exposes project listing, creation and opening, the command
 catalog and guides, editing, importing, undo and redo, previews, exports and job

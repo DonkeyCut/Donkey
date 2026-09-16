@@ -45,6 +45,12 @@ const nextConfig: NextConfig = {
       ],
     },
     {
+      // ChatGPT caches the widget HTML, so the entry it names revalidates
+      // on every load while the hashed chunks stay immutable.
+      source: "/clients/chatgpt/main.:ext(js|css)",
+      headers: [{ key: "Cache-Control", value: "public, max-age=0, must-revalidate" }],
+    },
+    {
       source: "/_next/static/:path*",
       headers: [{ key: "X-Robots-Tag", value: "noindex" }],
     },

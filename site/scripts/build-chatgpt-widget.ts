@@ -1,7 +1,9 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-// Hashed chunks let the widget load MP4 playback without downloading the HLS decoder.
+// ChatGPT caches the widget HTML it reads over MCP, so the entry script and
+// stylesheet keep stable names and revalidate on every load; the chunks the
+// entry imports stay hashed, so MP4 playback never downloads the HLS decoder.
 const root = path.resolve(import.meta.dir, "..");
 const outdir = path.join(root, "public/clients/chatgpt");
 await rm(outdir, { recursive: true, force: true });
@@ -9,7 +11,7 @@ await mkdir(outdir, { recursive: true });
 const result = await Bun.build({
   entrypoints: [path.join(root, "src/clients/chatgpt/ui/main.tsx")],
   target: "browser", format: "esm", splitting: true, minify: true, outdir,
-  naming: { entry: "[name]-[hash].[ext]", chunk: "[name]-[hash].[ext]", asset: "[name]-[hash].[ext]" },
+  naming: { entry: "[name].[ext]", chunk: "[name]-[hash].[ext]", asset: "[name]-[hash].[ext]" },
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
 });
 if (!result.success) throw new AggregateError(result.logs, "ChatGPT widget build failed");
