@@ -89,6 +89,11 @@ export const POST = withDonkeyAuth(async (request) => {
       },
     });
   } catch (error) {
+    // A caller that went away — a stopped or superseded turn — is not a
+    // provider failure: it bills nothing and records nothing.
+    if (request.signal.aborted) {
+      return new NextResponse(null, { status: 499 });
+    }
     if (!bypassCredits) {
       await recordFailedInferenceUsage({
         clientId: client.clientId,
