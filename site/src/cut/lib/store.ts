@@ -870,8 +870,9 @@ export interface EditorState {
   setAiOpen: (v: boolean) => void;
   setInspectorOpen: (v: boolean) => void;
   setTimelineOpen: (v: boolean) => void;
-  undo: () => void;
-  redo: () => void;
+  /** Step the history; false when there is nothing to step to. */
+  undo: () => boolean;
+  redo: () => boolean;
   upsertRender: (r: RenderRecord) => void;
   removeRenders: (ids: string[]) => void;
   pushHistory: () => void;
@@ -4696,18 +4697,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     undo: () => {
       flush(); // commit any uncommitted edit before stepping back
       const prev = history.pop();
-      if (!prev) return;
+      if (!prev) return false;
       future.push(snapshot());
       restoreDoc(prev);
+      return true;
     },
 
     redo: () => {
       flush();
       const next = future.pop();
-      if (!next) return;
+      if (!next) return false;
       history.push(snapshot());
       if (history.length > HISTORY_CAP) history.shift();
       restoreDoc(next);
+      return true;
     },
   };
 });

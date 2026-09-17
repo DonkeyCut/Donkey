@@ -2,11 +2,11 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCreditBalance } from "@/lib/credits/inference";
 import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
-import { isDonkeySuperUser } from "@/lib/donkey-api-auth";
+import { isDonkeySuperUser } from "@/lib/super-user";
 import { normalizeAspect, type ProjectDoc } from "@/cut/lib/types";
-import { queueCommands, waitForJob, type CommandCall, type CommandJobResult, type JobRow } from "@/cut/server/cloud/commands";
-import { historyState, HistoryError, restoreCheckpoint } from "@/cut/server/cloud/history";
-import { queueDocExport, queueImportUrl } from "@/cut/server/cloud/jobs";
+import { ADOPT_COMMAND, type AdoptedAsset } from "@/cut/lib/commandBatch";
+import { NO_CARD_OPEN, queueCommands, waitForJob, type CommandCall, type CommandJobResult, type JobRow } from "@/cut/server/cloud/commands";
+import { needsWorker, queueDocExport, queueImportUrl } from "@/cut/server/cloud/jobs";
 import { cutLimitsFor } from "@/cut/server/cloud/limits";
 import { previewFromDoc } from "@/cut/server/cloud/previewJobs";
 import { mediaObjectUrl, mediaUrlLifetime } from "@/cut/server/cloud/mediaCdn";
@@ -23,13 +23,15 @@ export class ProjectToolError extends Error {}
 export type ProjectResult = { view: ProjectView; playback: Playback | null; download?: Download | null; editor?: Editor | null };
 
 /** A queue helper's refusal, read out of its Response as a message. */
-async function refusal(res: Response): Promise<never> {
+async function refusalText(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string; bytes?: number; quotaBytes?: number };
   if (body.error === "storage_quota_exceeded")
-    throw new ProjectToolError(
-      `The account's cloud storage is full (${mb(body.bytes ?? 0)} of ${mb(body.quotaBytes ?? 0)} MB). Delete media or exports in Donkey Cut, or upgrade the plan.`
-    );
-  throw new ProjectToolError(body.error ?? "Donkey Cut refused the request.");
+    return `The account's cloud storage is full (${mb(body.bytes ?? 0)} of ${mb(body.quotaBytes ?? 0)} MB). Delete media or exports in Donkey Cut, or upgrade the plan.`;
+  return body.error ?? "Donkey Cut refused the request.";
+}
+
+async function refusal(res: Response): Promise<never> {
+  throw new ProjectToolError(await refusalText(res));
 }
 
 const mb = (bytes: number) => Math.round(bytes / 1024 ** 2);
@@ -69,7 +71,6 @@ export function projectTools(
     job: null,
     results: [],
     changed: false,
-    history: null,
     account: null,
   });
 
@@ -90,16 +91,9 @@ export function projectTools(
     return projectSummary(await getOwnedRow(projectId));
   }
 
-  /** The project view with its undo state, as every edit tool answers. */
+  /** The project view every edit tool answers with. */
   async function projectView(projectId: string): Promise<ProjectView> {
-    const project = await getOwnedProject(projectId);
-    const version = Number(project.revision.slice("cloud:".length));
-    return {
-      ...emptyProjectView(),
-      view: "project",
-      project,
-      history: await historyState(db, identity.userId, projectId, version),
-    };
+    return { ...emptyProjectView(), view: "project", project: await getOwnedProject(projectId) };
   }
 
   function requireEdit() {
@@ -224,21 +218,101 @@ export function projectTools(
     if (row.kind === "export") return exportView(row);
     if (row.kind === "preview" && row.projectId) return getPreviewStatus(row.projectId, row.id);
     if (!row.projectId) throw new ProjectToolError("Job not found.");
+    if (row.kind === "import_url" && row.state === "done") return importView(row);
+    if (row.kind === "commands" && row.state === "dismissed") throw new ProjectToolError(NO_CARD_OPEN);
     const view = await projectView(row.projectId);
     const status = jobStatus(row);
     view.job = { id: row.id, kind: row.kind, status, progress: Math.max(0, Math.min(1, row.progress)), ...(jobError(row) ? { error: jobError(row) } : {}) };
-    if (status === "queued" || status === "running") wakeRenderWorker();
-    if (status !== "done") return { view, playback: null };
-    if (row.kind === "commands") {
+    if (row.kind !== "commands" && needsWorker(row)) wakeRenderWorker();
+    if (status === "done" && row.kind === "commands") {
       const result = row.result as CommandJobResult | null;
       view.results = result?.results ?? [];
       view.changed = result?.changed ?? false;
-    } else if (row.kind === "import_url") {
-      const result = row.result as ImportUrlResult | null;
-      view.results = [{ name: "import_media", ok: true, output: { assets: result?.assets ?? [], ...(result?.text ? { sourceText: result.text } : {}) } }];
-      view.changed = (result?.assets?.length ?? 0) > 0;
     }
     return { view, playback: null };
+  }
+
+  /** A finished import as a result: its files become assets through a batch
+   * the editor in the card runs, and the import counts as done once they have. */
+  async function importView(row: JobRow): Promise<ProjectResult> {
+    const adoption = await adoptImport(row);
+    const view = await projectView(row.projectId!);
+    view.results = [importOutcome(row, adoption)];
+    view.changed = adoption.state === "adopted" && adoption.assets.length > 0;
+    if (adoption.state === "pending") view.job = { id: row.id, kind: row.kind, status: "running", progress: 1 };
+    if (adoption.state === "failed") view.job = { id: row.id, kind: row.kind, status: "error", progress: 1, error: adoption.error };
+    return { view, playback: null };
+  }
+
+  type Adoption =
+    | { state: "adopted"; assets: AdoptedAsset[] }
+    | { state: "pending" }
+    | { state: "failed"; error: string };
+
+  /** What the import row remembers past the download: the batch adopting its
+   * files, then the assets that batch landed. */
+  type ImportRecord = ImportUrlResult & { adoptJobId?: string; assets?: AdoptedAsset[] };
+
+  const importRecord = (row: JobRow) => (row.result ?? {}) as unknown as ImportRecord;
+
+  async function rememberOnImport(row: JobRow, patch: Partial<ImportRecord>): Promise<void> {
+    await db.cutRenderJob.updateMany({
+      where: { id: row.id, userId: identity.userId },
+      data: { result: { ...importRecord(row), ...patch } as unknown as Prisma.InputJsonValue },
+    });
+  }
+
+  /** Queue the batch that adopts a finished import's files, once. A batch
+   * dismissed because no card was open is queued again on the next poll. */
+  async function adoptionBatch(row: JobRow, record: ImportRecord): Promise<{ id: string } | Response> {
+    if (record.adoptJobId) {
+      const previous = await db.cutRenderJob.findFirst({ where: { id: record.adoptJobId, userId: identity.userId }, select: { id: true, state: true } });
+      if (previous && previous.state !== "dismissed") return { id: previous.id };
+    }
+    const files = record.files ?? [];
+    const name = (row.spec as { name?: string } | null)?.name;
+    const queued = await queueCommands(identity.userId, row.projectId!, {
+      commands: [{ name: ADOPT_COMMAND, input: { files, ...(name ? { name } : {}) } }],
+      label: `Imported ${files.map((f) => f.title || f.fileName).join(", ")}`,
+    });
+    if (!(queued instanceof Response)) await rememberOnImport(row, { adoptJobId: queued.id });
+    return queued;
+  }
+
+  /** Turn a finished import's files into project assets, through a batch the
+   * editor in the card runs. Once the batch lands, the assets are written
+   * back to the import row and every poll after reads them from there. */
+  async function adoptImport(row: JobRow): Promise<Adoption> {
+    const record = importRecord(row);
+    if (record.assets) return { state: "adopted", assets: record.assets };
+    if (!record.files?.length || !row.projectId) return { state: "adopted", assets: [] };
+    const queued = await adoptionBatch(row, record);
+    if (queued instanceof Response) return { state: "failed", error: await refusalText(queued) };
+    const batch = await waitForJob(identity.userId, queued.id, config.commandWaitMs, { editorClaimMs: config.editorClaimMs });
+    if (!batch) return { state: "failed", error: "The import could not be added to the project." };
+    if (batch.state === "queued" || batch.state === "running") return { state: "pending" };
+    if (batch.state === "dismissed") return { state: "failed", error: NO_CARD_OPEN };
+    const result = batch.result as CommandJobResult | null;
+    const outcome = result?.results?.[0];
+    if (batch.state !== "done" || !outcome?.ok)
+      return { state: "failed", error: outcome?.error ?? jobError(batch) ?? "The import could not be added to the project." };
+    const assets = (outcome.output as { assets?: AdoptedAsset[] } | null)?.assets ?? [];
+    await rememberOnImport(row, { assets, ...(result?.docVersion ? { docVersion: result.docVersion } : {}) });
+    return { state: "adopted", assets };
+  }
+
+  /** An import's line in the results, from where its adoption stands. */
+  function importOutcome(row: JobRow, adoption: Adoption): ProjectView["results"][number] {
+    const text = importRecord(row).text;
+    const sourceText = text ? { sourceText: text } : {};
+    switch (adoption.state) {
+      case "adopted":
+        return { name: "import_media", ok: true, output: { jobId: row.id, assets: adoption.assets, ...sourceText } };
+      case "pending":
+        return { name: "import_media", ok: true, output: { jobId: row.id, status: "running", detail: "The files are landing in the project. Poll get_job_status." } };
+      case "failed":
+        return { name: "import_media", ok: false, error: adoption.error };
+    }
   }
 
   async function ownedJob(jobId: string): Promise<JobRow> {
@@ -247,7 +321,8 @@ export function projectTools(
     return row;
   }
 
-  /** Queue a batch and wait on it within the call's budget. */
+  /** Queue a batch for the editor in the card and wait on it within the
+   * call's budget. */
   async function runBatch(projectId: string, commands: CommandCall[], opts: { readOnly?: boolean; label?: string }): Promise<ProjectResult> {
     await getOwnedProject(projectId);
     const unknown = unknownCommandNames(commands.map((c) => c.name));
@@ -255,9 +330,16 @@ export function projectTools(
       throw new ProjectToolError(`Unknown command${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}. Call list_commands for the catalog.`);
     const queued = await queueCommands(identity.userId, projectId, { commands, ...opts });
     if (queued instanceof Response) return refusal(queued);
-    const row = await waitForJob(identity.userId, queued.id, config.commandWaitMs);
+    const row = await waitForJob(identity.userId, queued.id, config.commandWaitMs, { editorClaimMs: config.editorClaimMs });
     if (!row) throw new ProjectToolError("The job disappeared. Try again.");
     return jobView(row);
+  }
+
+  /** Undo or redo in the editor in the card: its history holds ChatGPT's
+   * batches and the user's own edits as one line. */
+  async function step(projectId: string, direction: "undo" | "redo"): Promise<ProjectResult> {
+    requireEdit();
+    return runBatch(projectId, [{ name: direction, input: {} }], { label: direction });
   }
 
   return {
@@ -329,7 +411,7 @@ export function projectTools(
         data: { userId: identity.userId, name: doc.name, doc: doc as unknown as Prisma.InputJsonValue },
         select: { id: true, name: true, version: true },
       });
-      return { view: { ...emptyProjectView(), view: "project", project: projectSummary(row), history: { undo: null, redo: null } }, playback: null };
+      return { view: { ...emptyProjectView(), view: "project", project: projectSummary(row) }, playback: null };
     },
 
     async inspect(projectId: string, commands?: CommandCall[]): Promise<ProjectResult> {
@@ -353,7 +435,7 @@ export function projectTools(
         const queued = await queueImportUrl(identity.userId, projectId, {
           url: item.url,
           audio: audioOnly,
-          adopt: item.name ? { name: item.name } : {},
+          ...(item.name ? { name: item.name } : {}),
         });
         if (queued instanceof Response) {
           if (ids.length === 0) return refusal(queued);
@@ -368,53 +450,34 @@ export function projectTools(
         if (row) rows.push(row);
       }
       const view = await projectView(projectId);
-      const pending = rows.filter((r) => r.state === "queued" || r.state === "running");
+      // Every import still downloading or still landing names its job, so
+      // none is lost once the call returns; the first is the job the view
+      // carries.
+      const pending: JobRow[] = [];
       for (const row of rows) {
-        const status = jobStatus(row);
-        if (status === "done") {
-          const result = row.result as ImportUrlResult | null;
-          view.results.push({ name: "import_media", ok: true, output: { jobId: row.id, assets: result?.assets ?? [], ...(result?.text ? { sourceText: result.text } : {}) } });
-          view.changed ||= (result?.assets?.length ?? 0) > 0;
-        } else if (status === "error") {
+        if (row.state === "done") {
+          const adoption = await adoptImport(row);
+          view.results.push(importOutcome(row, adoption));
+          if (adoption.state === "adopted" && adoption.assets.length > 0) view.changed = true;
+          if (adoption.state === "pending") pending.push(row);
+        } else if (row.state === "queued" || row.state === "running") {
+          view.results.push({ name: "import_media", ok: true, output: { jobId: row.id, status: jobStatus(row) } });
+          pending.push(row);
+        } else {
           view.results.push({ name: "import_media", ok: false, error: jobError(row) ?? "The import failed." });
         }
       }
-      // Every unfinished import names its job, so none is lost once the call
-      // returns; the first one is the job the view carries.
-      for (const row of pending)
-        view.results.push({ name: "import_media", ok: true, output: { jobId: row.id, status: jobStatus(row) } });
       if (pending.length) {
         const row = pending[0];
-        view.job = { id: row.id, kind: row.kind, status: jobStatus(row), progress: row.progress };
+        view.job = { id: row.id, kind: row.kind, status: "running", progress: Math.max(0, Math.min(1, row.progress)) };
       }
       if (ids.length < items.length)
         view.results.push({ name: "import_media", ok: false, error: `${items.length - ids.length} item(s) were not queued: the account's job cap was reached.` });
       return { view, playback: null };
     },
 
-    async undo(projectId: string): Promise<ProjectResult> {
-      requireEdit();
-      await getOwnedProject(projectId);
-      const step = await restoreCheckpoint(db, identity.userId, projectId, "undo").catch((e) => {
-        throw e instanceof HistoryError ? new ProjectToolError(e.message) : e;
-      });
-      const view = await projectView(projectId);
-      view.changed = true;
-      view.results = [{ name: "undo", ok: true, output: { undone: step.label } }];
-      return { view, playback: null };
-    },
-
-    async redo(projectId: string): Promise<ProjectResult> {
-      requireEdit();
-      await getOwnedProject(projectId);
-      const step = await restoreCheckpoint(db, identity.userId, projectId, "redo").catch((e) => {
-        throw e instanceof HistoryError ? new ProjectToolError(e.message) : e;
-      });
-      const view = await projectView(projectId);
-      view.changed = true;
-      view.results = [{ name: "redo", ok: true, output: { redone: step.label } }];
-      return { view, playback: null };
-    },
+    undo: (projectId: string) => step(projectId, "undo"),
+    redo: (projectId: string) => step(projectId, "redo"),
 
     async exportVideo(projectId: string, preset: string): Promise<ProjectResult> {
       requireEdit();

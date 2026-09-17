@@ -4,7 +4,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { cutLimitsFor, EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
-import { liveLeaseHolder } from "./lease";
 import { wakeRenderWorker } from "./wake";
 import { queuePreview } from "./previewJobs";
 import { getProject } from "./projects";
@@ -85,7 +84,7 @@ function specRefusal(spec: Record<string, unknown>): string | null {
  * that died mid-job, which the woken replacement sweeps back to queued. A
  * healthy running job needs nothing, and a browser render (running with no
  * claim) is never a worker's. */
-function needsWorker(row: JobRow): boolean {
+export function needsWorker(row: Pick<JobRow, "state" | "claimedAt" | "updatedAt">): boolean {
   if (row.state === "queued") return true;
   return (
     row.state === "running" &&
@@ -222,15 +221,13 @@ export async function queueDocExport(
 export async function queueImportUrl(
   userId: string,
   projectId: string,
-  opts: { url: string; audio?: boolean; key?: string; adopt?: { name?: string } }
+  opts: { url: string; audio?: boolean; key?: string; name?: string }
 ): Promise<{ id: string } | Response> {
   if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
   const open = await importJobFor(userId, opts.key);
   if (open) return { id: open.id };
   const capped = await renderJobCheck(userId);
   if (capped) return capped;
-  if (opts.adopt && (await liveLeaseHolder(userId, projectId)))
-    return err("An edit is still running for this project. Wait for it to finish, then import.", 409);
   // What lands counts against storage, so an account with none left gets
   // no download, and the worker downloads no more than what is left.
   const over = await quotaCheck(userId, 0);
@@ -246,7 +243,8 @@ export async function queueImportUrl(
         maxBytes,
         ...(opts.audio === true ? { audio: true } : {}),
         ...(opts.key ? { key: opts.key } : {}),
-        ...(opts.adopt ? { adopt: opts.adopt } : {}),
+        // The name the caller gave the file, for whoever adopts it.
+        ...(opts.name ? { name: opts.name } : {}),
       } as unknown as Prisma.InputJsonValue,
     },
   });

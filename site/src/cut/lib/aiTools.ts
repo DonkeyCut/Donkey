@@ -3936,12 +3936,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   undo: (s) => {
-      s.undo();
+      if (!s.undo()) throw new ToolError("Nothing to undo.");
       return { ok: true };
   },
 
   redo: (s) => {
-      s.redo();
+      if (!s.redo()) throw new ToolError("Nothing to redo.");
       return { ok: true };
   },
 

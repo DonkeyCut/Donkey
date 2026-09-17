@@ -1,4 +1,5 @@
 import type { AiToolDef } from "@/cut/lib/aiToolDef";
+import { ADOPT_COMMAND } from "@/cut/lib/commandBatch";
 import { AI_SKILL_INDEX, AI_SKILLS, PROJECT_TOOLS } from "@/cut/server/ai/catalog";
 
 // The editing commands ChatGPT can run, drawn from the editor's own tool
@@ -31,9 +32,9 @@ const HIDDEN = new Set([
 export const COMMANDS: AiToolDef[] = PROJECT_TOOLS.filter((tool) => !HIDDEN.has(tool.name));
 export const COMMAND_NAMES = COMMANDS.map((tool) => tool.name);
 
-/** What a batch may name: the catalog, plus the state read inspect_project
- * runs by default. */
-const KNOWN_COMMANDS = new Set([...COMMAND_NAMES, "get_state"]);
+/** What a batch may name: the catalog, the state read inspect_project runs
+ * by default, and the adoption an import queues after its download. */
+const KNOWN_COMMANDS = new Set([...COMMAND_NAMES, "get_state", ADOPT_COMMAND]);
 export const unknownCommandNames = (names: string[]): string[] => names.filter((name) => !KNOWN_COMMANDS.has(name));
 
 /** Commands whose output matters and whose effect is on the caller's eyes:

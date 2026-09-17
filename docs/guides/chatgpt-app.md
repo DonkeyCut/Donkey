@@ -14,28 +14,15 @@ ChatGPT tools and embedded card
               ↓
 Scoped OAuth connection
               ↓
-Cloud project, command, history and render services
+Cloud project, command and render services
               ↓
-Command batch → worker runs the editor's own tools → versioned save + checkpoint
+Command batch → the editor in the card runs it → versioned save
 Captured document → worker renderer → signed media
 ```
 
 ## Editing from ChatGPT
 
-ChatGPT reads the editor's tool catalog through `list_commands` and
-`describe_commands`, then sends a batch through `edit_project`. The batch runs as
-a job in the worker container: the project document opens into the editor store,
-each command runs through the same executor the chat assistant uses, the
-document saves through the versioned PUT, and the whole batch becomes one
-checkpoint in the project's undo history. `inspect_project` runs the same way
-without saving, so contact sheets and captured frames come back as images.
-Imports are the existing URL-import job with adoption turned on, so footage the
-user attaches in ChatGPT or links to lands as project assets; exports are the
-document export the phone uses, with the download offered on the card.
-
-Undo and redo walk the checkpoint line, which is anchored to the project's
-version: a save from the editor moves the version off the line, so ChatGPT
-never reverts an edit the user made in the app. Editing, previews and exports
+ChatGPT reads the editor's tool catalog and sends a batch through `edit_project`; the editor open in the card claims it, runs it on the document the user is looking at as one undo step, saves, and reports the result. Nothing else runs a batch: with no card open the tool answers that the project has to be opened first, and undo and redo step the card's own history, which the user's edits share. Editing, previews and exports
 spend no credits; commands that generate media spend the account's credits, and
 imports and exports use its storage allowance. The server's instructions and
 tool descriptions say so, with the repository linked, so ChatGPT explains the
@@ -163,8 +150,7 @@ exercise ChatGPT's account-linking UI or the production database.
 - `site/src/clients/chatgpt/server/` — OAuth, MCP tools, the command catalog, and the cloud-project adapter.
 - `site/src/clients/chatgpt/ui/` — standalone MCP Apps widget and host bridge.
 - `site/packages/artifact-player/` — shared website and widget playback.
-- `site/src/cut/server/cloud/commands.ts` and `history.ts` — the command job and the checkpoint history.
-- `site/src/cut/worker/commandJob.ts` — the batch runner and import adoption in the container.
+- `site/src/cut/server/cloud/commands.ts` and `site/src/cut/lib/hostCommands.ts` — the command job, and the editor in the card running it.
 - `site/src/cut/server/cloud/previewJobs.ts` — revision reuse and document-backed rendering.
 
 The protocol follows OpenAI's [authentication guidance](https://developers.openai.com/apps-sdk/build/auth)

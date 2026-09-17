@@ -8,7 +8,6 @@ import type { LibraryAsset } from "../server/library";
 import { probeDuration } from "../server/frames";
 import { download } from "../server/urlDownload";
 import { videoDimensions } from "../server/util";
-import { adoptImportedFiles } from "./commandJob";
 import { prisma, registerObject, unregisterObjects, type ClaimedJob } from "./db";
 import { deleteObjects, libraryKey, mediaKey, mimeFor, uploadFile } from "./r2";
 
@@ -17,7 +16,8 @@ import { deleteObjects, libraryKey, mediaKey, mimeFor, uploadFile } from "./r2";
 export interface ImportUrlResult {
   files: { fileName: string; title: string }[];
   text?: string;
-  /** Set when the job adopted the files into the project document itself. */
+  /** Set once the files were adopted into the project document — by the
+   * batch the ChatGPT server queues after the download. */
   assets?: { assetId: string; name: string; kind: string; duration: number }[];
   docVersion?: string;
 }
@@ -40,14 +40,11 @@ export async function runImportUrlJob(
   job: ClaimedJob,
   isCanceled: () => boolean
 ): Promise<ImportUrlResult | LibraryImportResult> {
-  const { url, target, origin, audio, maxBytes, adopt } = (job.spec ?? {}) as {
+  const { url, target, origin, audio, maxBytes } = (job.spec ?? {}) as {
     url?: string;
     target?: string;
     origin?: string;
     audio?: boolean;
-    /** Register what lands as project assets here, for a caller with no
-     * editor to do it (the ChatGPT app). */
-    adopt?: { name?: string };
     /** What is left of the account's storage when the job was queued; the
      * route always sets it. Everything that came down is measured against it
      * before any byte is uploaded — the one place every rung and every
@@ -163,11 +160,6 @@ export async function runImportUrlJob(
         assets.push(asset);
       }
       if (toLibrary) return { assets, ...(dl.text ? { text: dl.text } : {}) };
-      if (adopt && files.length > 0) {
-        // Landed in the document as well; a failure here cleans up like any other.
-        const adopted = await adoptImportedFiles(job, files, adopt.name);
-        return { files, ...adopted, ...(dl.text ? { text: dl.text } : {}) };
-      }
       return { files, ...(dl.text ? { text: dl.text } : {}) };
     } catch (err) {
       if (libraryRows.length > 0)

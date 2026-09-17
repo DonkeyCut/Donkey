@@ -1014,7 +1014,7 @@ export async function importUrlMedia(
   // rides the cloud worker and the bytes come back down.
   if (backend.kind === "browser") {
     const staged = await importUrlThroughCloud(projectId, backend, url, opts);
-    return adoptImportedFiles(projectId, backend, staged);
+    return adoptImportedFiles(projectId, staged, backend);
   }
   const res = await backend.fetch(`/api/cut/projects/${projectId}/import-url`, {
     method: "POST",
@@ -1035,15 +1035,15 @@ export async function importUrlMedia(
   if (!res.ok || (!body.files?.length && !body.text)) {
     throw new Error(body.error ?? "Could not import that URL.");
   }
-  return adoptImportedFiles(projectId, backend, body);
+  return adoptImportedFiles(projectId, body, backend);
 }
 
 /** Register the files an import landed in the project, in order, and hand back
  * what the caller places. */
-async function adoptImportedFiles(
+export async function adoptImportedFiles(
   projectId: string,
-  backend: CutBackend,
-  imported: { files?: { fileName: string; title: string }[]; text?: string }
+  imported: { files?: { fileName: string; title: string }[]; text?: string },
+  backend: CutBackend = getBackend()
 ): Promise<{ assets: MediaAsset[]; text?: string }> {
   const assets: MediaAsset[] = [];
   for (const f of imported.files ?? []) {

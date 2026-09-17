@@ -13,14 +13,12 @@ export const exportSchema = z.object({ id: z.string(), status: jobStatusSchema, 
 export const jobSchema = z.object({ id: z.string(), kind: z.string(), status: jobStatusSchema, progress: z.number(), error: z.string().optional() });
 /** One command's outcome inside a batch. */
 export const outcomeSchema = z.object({ name: z.string(), ok: z.boolean(), output: z.unknown().optional(), error: z.string().optional() });
-/** What undo and redo would each revert, by the step's label. */
-export const historySchema = z.object({ undo: z.string().nullish(), redo: z.string().nullish() });
 export const accountSchema = z.object({ credits: z.string(), storageBytes: z.number(), storageQuotaBytes: z.number().nullish(), plan: z.string() });
 export const viewSchema = z.object({
   view: z.enum(["projects", "project"]), projects: z.array(projectSchema), nextCursor: z.string().nullish(),
   project: projectSchema.nullish(), preview: previewSchema.nullish(), canRender: z.boolean(), canEdit: z.boolean(),
   export: exportSchema.nullish(), job: jobSchema.nullish(), results: z.array(outcomeSchema), changed: z.boolean(),
-  history: historySchema.nullish(), account: accountSchema.nullish(),
+  account: accountSchema.nullish(),
 });
 export const playbackSchema = z.object({ url: z.url(), expiresAt: z.number() });
 export const downloadSchema = z.object({ url: z.url(), expiresAt: z.number(), name: z.string() });

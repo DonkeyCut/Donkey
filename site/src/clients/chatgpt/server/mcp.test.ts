@@ -37,7 +37,6 @@ const data: ProjectResult = {
     job: null,
     results: [],
     changed: false,
-    history: null,
     account: null,
   },
   playback: {
@@ -334,7 +333,6 @@ test("edit results reach the model as text and structure, and captured frames be
     view: {
       ...data.view,
       changed: true,
-      history: { undo: "Vertical cut", redo: null },
       results: [
         { name: "set_aspect", ok: true, output: { aspect: "9:16" } },
         { name: "capture_frame", ok: true, output: { image: frame, at: 1.5 } },
@@ -375,7 +373,6 @@ test("edit results reach the model as text and structure, and captured frames be
     });
     const content = result.content as { type: string; text?: string; data?: string; mimeType?: string }[];
     expect(content[0].text).toContain("2 commands ran; the project was saved");
-    expect(content[0].text).toContain("Undo would revert: Vertical cut");
     expect(content[0].text).not.toContain("base64");
     expect(content[1]).toMatchObject({ type: "image", mimeType: "image/jpeg", data: "/9j/4AAQ" });
     expect(JSON.stringify(result.structuredContent)).not.toContain("base64");

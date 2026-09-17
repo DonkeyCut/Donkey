@@ -6,26 +6,15 @@ import { prisma } from "@/lib/prisma";
 import { err } from "./util";
 import { wakeRenderWorker } from "./wake";
 
-/** The job kinds that hold the lease. An import that adopts its files into
- * the document (spec.adopt) writes the document too, so it holds the lease
- * against turns and batches; adopting imports run alongside each other and
- * merge through a retry in the worker. */
+/** The job kinds that hold the lease. An import only lands files; the batch
+ * that adopts them into the document is a commands job of its own. */
 export const LEASE_KINDS = ["agent_turn", "commands"];
-
-/** A live import that will write the document, if any. */
-export async function liveAdoptingImport(userId: string, projectId: string): Promise<{ id: string } | null> {
-  const rows = await prisma.cutRenderJob.findMany({
-    where: { userId, projectId, kind: "import_url", state: { in: ["queued", "running"] } },
-    select: { id: true, spec: true },
-  });
-  return rows.find((r) => Boolean((r.spec as { adopt?: unknown } | null)?.adopt)) ?? null;
-}
 
 /** The live lease holders on a project, oldest first. A read-only command
  * batch never saves, so it holds nothing. */
-async function liveLeaseRows(userId: string, projectId: string): Promise<{ id: string }[]> {
+async function liveLeaseRows(userId: string, projectId: string, kinds: string[]): Promise<{ id: string }[]> {
   const rows = await prisma.cutRenderJob.findMany({
-    where: { userId, projectId, kind: { in: LEASE_KINDS }, state: { in: ["queued", "running"] } },
+    where: { userId, projectId, kind: { in: kinds }, state: { in: ["queued", "running"] } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: { id: true, spec: true },
   });
@@ -33,29 +22,28 @@ async function liveLeaseRows(userId: string, projectId: string): Promise<{ id: s
 }
 
 /** A live turn or batch holding the lease, if any. */
-export async function liveLeaseHolder(userId: string, projectId: string): Promise<{ id: string } | null> {
-  return (await liveLeaseRows(userId, projectId))[0] ?? null;
+export async function liveLeaseHolder(userId: string, projectId: string, kinds: string[] = LEASE_KINDS): Promise<{ id: string } | null> {
+  return (await liveLeaseRows(userId, projectId, kinds))[0] ?? null;
 }
 
-/** Create the row, then keep it only if it is the oldest live lease holder for
- * the project. Two concurrent queues both create, both re-check, and exactly
- * one — the older row — survives. Returns the 409 for the loser. */
+/** Create the row, then keep it only if no older live row of the kinds it
+ * contends with holds the lease. Two concurrent queues both create, both
+ * re-check, and exactly one — the older row — survives. Returns the 409 for
+ * the loser. Command batches contend with chat turns only: the editor in the
+ * card runs its batches one after another, so they queue behind each other. */
 export async function queueLeasedJob(
   userId: string,
   projectId: string,
   kind: (typeof LEASE_KINDS)[number],
-  spec: Prisma.InputJsonValue
+  spec: Prisma.InputJsonValue,
+  opts: { wake?: boolean; contendsWith?: string[] } = {}
 ): Promise<{ id: string } | Response> {
   const row = await prisma.cutRenderJob.create({ data: { userId, projectId, kind, spec } });
-  const oldest = await liveLeaseHolder(userId, projectId);
+  const oldest = await liveLeaseHolder(userId, projectId, opts.contendsWith ?? LEASE_KINDS);
   if (oldest && oldest.id !== row.id) {
     await prisma.cutRenderJob.delete({ where: { id: row.id } }).catch(() => {});
     return err("Another edit is already running for this project. Wait for it to finish.", 409);
   }
-  if (await liveAdoptingImport(userId, projectId)) {
-    await prisma.cutRenderJob.delete({ where: { id: row.id } }).catch(() => {});
-    return err("An import is still landing in this project. Wait for it to finish, then edit.", 409);
-  }
-  wakeRenderWorker();
+  if (opts.wake !== false) wakeRenderWorker();
   return { id: row.id };
 }

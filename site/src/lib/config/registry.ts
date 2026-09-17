@@ -41,15 +41,18 @@ export const SETTINGS = defineSettings({
       requestsPerMinute: z.number().int().min(10).max(600),
       oauthRequestsPerIpMinute: z.number().int().min(10).max(10000).default(600),
       pollMs: z.number().int().min(1000).max(30000),
-      // How long a tool call waits on the worker before handing back a job id.
+      // How long a tool call waits on the batch before handing back a job id.
       commandWaitMs: z.number().int().min(5000).max(240000).default(50000),
+      // How long a batch waits for the editor in the card to claim it before
+      // the call answers that no card has the project open.
+      editorClaimMs: z.number().int().min(500).max(30000).default(3000),
       // How long the editor stays signed in inside the ChatGPT card.
       editorSessionHours: z.number().int().min(1).max(72).default(12),
     }).strict(),
-    default: { enabled: false, issuer: "https://donkeycut.com", redirectUris: ["https://chatgpt.com/connector_platform_oauth_redirect"], accessSeconds: 3600, refreshDays: 30, requestsPerMinute: 120, oauthRequestsPerIpMinute: 600, pollMs: 2000, commandWaitMs: 50000, editorSessionHours: 12 },
+    default: { enabled: false, issuer: "https://donkeycut.com", redirectUris: ["https://chatgpt.com/connector_platform_oauth_redirect"], accessSeconds: 3600, refreshDays: 30, requestsPerMinute: 120, oauthRequestsPerIpMinute: 600, pollMs: 2000, commandWaitMs: 50000, editorClaimMs: 3000, editorSessionHours: 12 },
     public: false,
     title: "ChatGPT app",
-    description: "Account linking, allowed OAuth callbacks, token lifetimes, preview polling, how long an edit call waits on the worker, and how long the editor stays signed in inside the card. Enable after the OAuth tables are deployed.",
+    description: "Account linking, allowed OAuth callbacks, token lifetimes, preview polling, how long an edit call waits and how long the card's editor has to claim it, and how long the editor stays signed in inside the card. Enable after the OAuth tables are deployed.",
   },
   cutPreviewJobs: {
     schema: z.object({ maxAttempts: z.number().int().min(1).max(10) }).strict(),

@@ -52,8 +52,8 @@ export const REPOSITORY_URL = "https://github.com/DonkeyCut/Donkey";
 export const SERVER_INSTRUCTIONS = [
   `Donkey Cut is an open-source video editor (Apache 2.0, ${REPOSITORY_URL}). Edit the connected account's cloud projects: import footage, inspect it, cut it, caption it, preview, undo, export.`,
   "Editing, previews and exports are free. Hosted AI (voiceover, music, images, caption rewriting, transcription past the monthly allowance) spends the account's credits. Imports and exports use the account's cloud storage.",
-  "Workflow: list_projects or create_project → import_media → inspect_project → list_commands once, describe_commands for the ones you need → edit_project (batches, one undo step each) → render_preview → undo/redo → export_video.",
-  "open_project puts the full Donkey Cut editor in the card, timeline and panels included, when the connection can edit; a read-only connection sees the current preview playing. Call render_preview only after an edit or when the card reports no current preview.",
+  "Workflow: list_projects or create_project → open_project → import_media → inspect_project → list_commands once, describe_commands for the ones you need → edit_project (batches, one undo step each) → render_preview → undo/redo → export_video.",
+  "Every edit runs inside the Donkey Cut editor in the card, on the document the user is looking at: open_project puts that editor in the card, timeline and panels included, when the connection can edit, and edit_project, inspect_project, import_media, undo and redo answer that no card is open until it is. A read-only connection sees the current preview playing. Call render_preview only after an edit or when the card reports no current preview.",
   "Times are seconds; ids come from inspect_project. A batch stops at its first failed command. A tool that answers with a job still running is finished by get_job_status.",
 ].join("\n");
 
@@ -250,7 +250,7 @@ export function createChatgptServer(
         audio_only: z.boolean().optional(),
       }),
       outputSchema: viewSchema,
-      annotations: { ...editAnnotations, openWorldHint: true },
+      annotations: editAnnotations,
       _meta: { ...editMetadata, "openai/fileParams": ["files"], ...status("Importing footage", "Footage imported") },
     },
     ({ projectId, files, urls, audio_only }) =>
@@ -364,7 +364,7 @@ export function createChatgptServer(
     {
       title: "Edit a project",
       description:
-        "Run editing commands on a cloud project, in order, as one undo step. Commands come from list_commands with inputs per describe_commands; ids and times come from inspect_project. The batch stops at the first command that fails and reports every outcome. label names the step for undo. Editing is free; commands that generate media (voiceover_generate, generate_music, generate_image, captions_generate) spend the account's credits. The result's history says what undo would revert.",
+        "Run editing commands on a cloud project, in order, as one undo step in the editor open in the card. Commands come from list_commands with inputs per describe_commands; ids and times come from inspect_project. The batch stops at the first command that fails and reports every outcome. label names the step for undo. Editing is free; commands that generate media (voiceover_generate, generate_music, generate_image, captions_generate) spend the account's credits.",
       inputSchema: z.object({
         projectId: idSchema,
         commands: z.array(commandSchema).min(1).max(MAX_COMMANDS_PER_BATCH),
@@ -382,7 +382,7 @@ export function createChatgptServer(
     "undo",
     {
       title: "Undo the last edit",
-      description: "Revert the last edit_project or import_media step on a project. Steps saved from the Donkey Cut editor itself are not on this history.",
+      description: "Undo the last step in the editor open in the card, the same as ⌘Z there: edit_project batches, imports and the user's own edits share one history.",
       inputSchema: z.object({ projectId: idSchema }),
       outputSchema: viewSchema,
       annotations: editAnnotations,
@@ -395,7 +395,7 @@ export function createChatgptServer(
     "redo",
     {
       title: "Redo an undone edit",
-      description: "Re-apply the step the last undo reverted.",
+      description: "Re-apply the step the last undo reverted, in the editor open in the card.",
       inputSchema: z.object({ projectId: idSchema }),
       outputSchema: viewSchema,
       annotations: editAnnotations,
@@ -539,8 +539,6 @@ function describeProjectView(view: ProjectView): string {
       }.`,
     );
   }
-  if (view.history?.undo) lines.push(`Undo would revert: ${view.history.undo}.`);
-  if (view.history?.redo) lines.push(`Redo would re-apply: ${view.history.redo}.`);
   lines.push(`Open in Donkey Cut: ${project.url}`);
   return lines.join("\n");
 }

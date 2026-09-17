@@ -5,6 +5,11 @@
  * footage, inspect it, make a vertical cut, preview, undo, redo, export — and
  * assert every step landed in the stored document and the export downloads.
  *
+ * Every batch runs in the editor open in the ChatGPT card, so this script
+ * stands that card in: it opens the project in the same editor store the page
+ * uses, claims batches through the card's routes, runs them through the
+ * headless executors, saves through the versioned PUT and reports back.
+ *
  * Run with the site dev server up and a local worker running:
  *   bun run scripts/eval-chatgpt-workflow.ts [--base http://localhost:3000] [--keep]
  * (worker: `npm run worker:build && node dist/cut-worker/main.js` from site/;
@@ -15,6 +20,11 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { SETTINGS } from "../src/lib/config/registry";
 import { createChatgptServer, SERVER_INSTRUCTIONS } from "../src/clients/chatgpt/server/mcp";
 import type { ProjectView } from "../src/clients/chatgpt/contracts";
+import { runCommandBatch, type CommandJobSpec } from "../src/cut/lib/commandBatch";
+import { bindHeadlessSession, type HeadlessSession } from "../src/cut/lib/headless/bind";
+import { openCloudProject, pushCloudProject } from "../src/cut/lib/headless/docSession";
+import { headlessDeps } from "../src/cut/lib/pi/serverDeps";
+import { serializeDoc, useEditor } from "../src/cut/lib/store";
 import { deleteProjectCascade } from "../src/cut/server/cloud/projects";
 import { prisma } from "../src/lib/prisma";
 
@@ -67,6 +77,40 @@ async function settle(first: Called, tool: "get_job_status" | "get_export_status
   }
 }
 
+/** The card, stood in for: claim the project's batches and run them on the
+ * open document until the signal ends it. */
+async function hostCard(projectId: string, signal: AbortSignal): Promise<void> {
+  const session: HeadlessSession = { base, headers: { "x-donkey-client-id": "eval-card", "x-donkey-dev-auth-bypass": "1" } };
+  bindHeadlessSession(session);
+  const deps = headlessDeps(session);
+  const open = await openCloudProject(session, projectId);
+  const api = (path: string, body?: unknown) =>
+    fetch(`${base}${path}`, { method: "POST", headers: { ...session.headers, "Content-Type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const snapshot = () => JSON.stringify(serializeDoc(useEditor.getState()));
+  while (!signal.aborted) {
+    const res = await api(`/api/cut-cloud/projects/${projectId}/commands/claim`);
+    if (res.status !== 200) { await sleep(300); continue; }
+    const { id, spec } = (await res.json()) as { id: string; spec: CommandJobSpec };
+    let report: unknown;
+    try {
+      const before = snapshot();
+      if (!spec.readOnly) useEditor.getState().beginHistoryBatch();
+      let results;
+      try {
+        results = await runCommandBatch(projectId, spec.commands, (name, input) => deps.execTool(name, input));
+      } finally {
+        if (!spec.readOnly) useEditor.getState().endHistoryBatch();
+      }
+      const changed = !spec.readOnly && snapshot() !== before;
+      if (changed) await pushCloudProject(session, open);
+      report = { ok: true, results, changed, docVersion: changed ? open.version : null };
+    } catch (error) {
+      report = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    await api(`/api/cut-cloud/jobs/${id}/result`, report);
+  }
+}
+
 const doc = async (projectId: string) => {
   const row = await prisma.cutProject.findFirst({ where: { id: projectId, userId: USER_ID }, select: { doc: true, version: true } });
   if (!row) fail("project row is gone");
@@ -74,6 +118,8 @@ const doc = async (projectId: string) => {
 };
 
 let projectId: string | null = null;
+const card = new AbortController();
+let hosting: Promise<void> | undefined;
 try {
   // Instructions and catalog: what ChatGPT reads first.
   if (!SERVER_INSTRUCTIONS.includes("github.com/DonkeyCut/Donkey")) fail("server instructions do not link the repository");
@@ -87,12 +133,17 @@ try {
   projectId = created.view.project?.id ?? fail("create_project returned no project");
   console.log(`created ${projectId}`);
 
+  // An edit before the card is open is refused, and says so.
+  const closed = await client.callTool({ name: "edit_project", arguments: { projectId, commands: [{ name: "set_aspect", input: { aspect: "9:16" } }] } });
+  if (!closed.isError || !JSON.stringify(closed.content).includes("open_project")) fail(`an edit with no card open should ask for open_project: ${JSON.stringify(closed.content)}`);
+  console.log("no card open: the edit asks for open_project");
+  hosting = hostCard(projectId, card.signal).catch((e) => { if (!card.signal.aborted) console.error("card failed:", e); });
+
   const imported = await settle(await call("import_media", { projectId, urls: [FOOTAGE] }), "get_job_status", "import");
   const importAssets = imported.view.results.flatMap((r) => ((r.output as { assets?: { assetId: string; name: string; duration: number }[] })?.assets ?? []));
   if (!importAssets.length) fail(`import landed no asset: ${imported.text}`);
   const asset = importAssets[0];
   console.log(`imported asset ${asset.assetId} "${asset.name}" (${asset.duration}s)`);
-  if (imported.view.history?.undo !== `Imported ${asset.name}`) fail(`import is not on the undo history: ${JSON.stringify(imported.view.history)}`);
 
   const inspected = await call("inspect_project", { projectId });
   const state = inspected.view.results[0]?.output as { media?: unknown[] } | undefined;
@@ -118,7 +169,6 @@ try {
   if (after.aspect !== "9:16") fail(`aspect did not save: ${after.aspect}`);
   if (!(after.clips?.length === 1)) fail(`clip did not save: ${JSON.stringify(after.clips)}`);
   if (after.version <= before.version) fail("the edit did not bump the version");
-  if (placed.view.history?.undo !== "Vertical frame with the footage") fail(`history missing the step: ${JSON.stringify(placed.view.history)}`);
 
   // A batch stops at its first failure and reports how far it got.
   const broken = await settle(
@@ -152,14 +202,14 @@ try {
   console.log("edited: aspect, clip, trim, title and a captured frame");
 
   const undone = await call("undo", { projectId });
+  if (!undone.view.changed) fail(`undo changed nothing: ${undone.text}`);
   const reverted = await doc(projectId);
   if ((reverted.overlays ?? []).some((o) => o.text === "MADE IN CHATGPT")) fail("undo left the title in place");
-  if (undone.view.history?.redo !== "Trim and title") fail(`redo not offered: ${JSON.stringify(undone.view.history)}`);
   const redone = await call("redo", { projectId });
+  if (!redone.view.changed) fail(`redo changed nothing: ${redone.text}`);
   const restored = await doc(projectId);
   if (!(restored.overlays ?? []).some((o) => o.text === "MADE IN CHATGPT")) fail("redo did not bring the title back");
-  if (redone.view.history?.undo !== "Trim and title") fail(`undo not offered after redo: ${JSON.stringify(redone.view.history)}`);
-  console.log("undo and redo walk the history");
+  console.log("undo and redo step the card's history");
 
   const previewed = await call("render_preview", { projectId });
   if (!previewed.view.preview) fail("render_preview queued nothing");
@@ -173,6 +223,8 @@ try {
   if (!head.ok) fail(`the export download answered ${head.status}`);
   console.log(`PASS exported ${meta.download.name} (${head.headers.get("content-length")} bytes)`);
 } finally {
+  card.abort();
+  await hosting?.catch(() => {});
   await client.close().catch(() => {});
   await server.close().catch(() => {});
   if (projectId && !keep) await deleteProjectCascade(USER_ID, projectId).catch((e) => console.error("cleanup failed:", e));

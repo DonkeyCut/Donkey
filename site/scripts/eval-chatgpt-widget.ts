@@ -23,7 +23,7 @@ const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
 window.calls = []; window.links = []; window.modes = []; window.editable = false;
-const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,history:null,account:null});
+const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null});
 // ChatGPT's sandbox drops null-valued keys before the widget sees a result.
 const dropNulls = (value) => Array.isArray(value) ? value.map(dropNulls) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, dropNulls(v)])) : value;
 const result = (data, playback = null, editor = null) => dropNulls({content:[{type:'text',text:'Preview'}],structuredContent:data,_meta:{playback,editor,pollMs:1000}});

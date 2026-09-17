@@ -10,6 +10,7 @@ import { isDonkeySuperUser } from "@/lib/super-user";
 import { matchRouteTable, type RouteEntry } from "../http/match";
 import { captionsCloud } from "./captions";
 import { chatsCloud } from "./chats";
+import { commandsCloud } from "./commands";
 import { copyJobs } from "./copyQueue";
 import { runGc } from "./gc";
 import { jobsCloud } from "./jobs";
@@ -108,6 +109,12 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "DELETE", path: "/api/cut-cloud/export/:jobId", handler: (_r, u, p) => jobsCloud.exportCancel(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/export/:jobId/file", handler: (_r, u, p) => jobsCloud.exportFile(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/jobs/:jobId", handler: (_r, u, p) => jobsCloud.status(u, p.jobId) },
+  // A command batch queued for a project runs in the editor that has it open:
+  // the editor claims the oldest waiting batch, keeps it alive while it runs,
+  // and reports the outcome.
+  { method: "POST", path: "/api/cut-cloud/projects/:id/commands/claim", handler: (_r, u, p) => commandsCloud.claim(u, p.id) },
+  { method: "POST", path: "/api/cut-cloud/jobs/:jobId/heartbeat", handler: (r, u, p) => commandsCloud.heartbeat(u, p.jobId, r) },
+  { method: "POST", path: "/api/cut-cloud/jobs/:jobId/result", handler: (r, u, p) => commandsCloud.result(u, p.jobId, r) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/turns", handler: (r, u, p) => turnsCloud.queue(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/scene-lease", handler: (r, u, p) => cloudSceneLease(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/turns/:jobId/cancel", handler: (_r, u, p) => turnsCloud.cancel(u, p.jobId) },

@@ -39,9 +39,10 @@ export function wakeRenderWorker(): void {
 // an idle box. A burst that arrives inside the wake window is picked up by the
 // next status poll's wake, which counts again.
 async function wake(secret: string): Promise<void> {
+  // Command batches run in the editor inside the ChatGPT card, never here.
   const [queued, running] = await Promise.all([
-    prisma.cutRenderJob.count({ where: { state: "queued" } }),
-    prisma.cutRenderJob.count({ where: { state: "running" } }),
+    prisma.cutRenderJob.count({ where: { state: "queued", kind: { not: "commands" } } }),
+    prisma.cutRenderJob.count({ where: { state: "running", kind: { not: "commands" } } }),
   ]);
   const res = await fetch(CUT_WORKER_WAKE_URL, {
     method: "POST",
