@@ -1161,16 +1161,34 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       const floor = cutJudge().fillerCut;
       const toSource = clip ? (t: number) => round2(retimeOf(clip).srcAt(clamp(t - clip.start, 0, Infinity))) : null;
-      const fillers = words
-        .filter((w) => (answers[w.key]?.noul ?? 0) >= floor)
-        .map((w) => ({
-          cue_id: w.cueId,
-          word: w.w,
-          start: round2(w.t0),
-          end: round2(w.t1),
-          ...(w.estimated ? { estimated: true } : {}),
-          ...(toSource ? { source: { start: toSource(w.t0), end: toSource(w.t1) } } : {}),
-        }));
+      // Neighbouring filler words are one span: "you know" is a single cut,
+      // and every span the caller gets is a cut it can make in one call.
+      const kept = words.filter((w) => (answers[w.key]?.noul ?? 0) >= floor);
+      const spans: { cueId: string; words: string[]; t0: number; t1: number; estimated: boolean }[] = [];
+      let prev: (typeof kept)[number] | null = null;
+      for (const w of kept) {
+        const last = spans[spans.length - 1];
+        const runsOn =
+          prev !== null &&
+          last !== undefined &&
+          ((prev.cueId === w.cueId && prev.i === w.i - 1) || w.t0 - prev.t1 <= WORD_GAP);
+        if (last && runsOn) {
+          last.words.push(w.w);
+          last.t1 = w.t1;
+          last.estimated = last.estimated || w.estimated;
+        } else {
+          spans.push({ cueId: w.cueId, words: [w.w], t0: w.t0, t1: w.t1, estimated: w.estimated });
+        }
+        prev = w;
+      }
+      const fillers = spans.map((sp) => ({
+        cue_id: sp.cueId,
+        text: sp.words.join(" "),
+        start: round2(sp.t0),
+        end: round2(sp.t1),
+        ...(sp.estimated ? { estimated: true } : {}),
+        ...(toSource ? { source: { start: toSource(sp.t0), end: toSource(sp.t1) } } : {}),
+      }));
       return {
         fillers,
         count: fillers.length,
@@ -4363,6 +4381,8 @@ async function rankStock<T extends { id: string; kind: string; category: string;
     .map((x) => x.c);
 }
 
+/** Filler words this close together are cut as one span. */
+const WORD_GAP = 0.12;
 const STOCK_JUDGE_CHUNK = 50;
 const FILLER_JUDGE_CHUNK = 60;
 

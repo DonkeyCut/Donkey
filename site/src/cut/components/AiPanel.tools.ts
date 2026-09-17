@@ -71,7 +71,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "find_filler",
     description:
-      "Find the filler words in a subtitle track's transcript — um, uh, a stranded 'like' or 'you know', stutters, repeated words — each judged in its sentence. Returns [{cue_id, word, start, end}] in TIMELINE seconds (the cues' own word timings), plus each word's source times when clip_id is passed, so you can cut the speech with split_at / delete_item / trim_clip or tidy the captions with update_cue. Needs a transcribed track (subtitles_generate) first. Words marked estimated sit in cues that lost their word timings.",
+      "Find the filler words in a subtitle track's transcript — um, uh, a stranded 'like' or 'you know', stutters, repeated words — each judged in its sentence. Returns [{cue_id, text, start, end}] in TIMELINE seconds, neighbouring filler words merged into one span so each entry is one cut, (the cues' own word timings), plus each word's source times when clip_id is passed, so you can cut the speech with split_at / delete_item / trim_clip or tidy the captions with update_cue. Needs a transcribed track (subtitles_generate) first. Words marked estimated sit in cues that lost their word timings.",
     inputSchema: obj({
       track: num("Subtitle track, 0-based (default: the active one)"),
       clip_id: str("Video clip id — scopes to its timeline span and maps each word to source seconds"),

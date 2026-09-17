@@ -229,11 +229,21 @@ export const FILLER_CUES = [
  * find_filler's result: the ums and the stranded "you know". */
 export const FILLER_WORDS = (() => {
   const picks = new Set(["um,", "uh,", "you", "know,"]);
-  return FILLER_CUES.flatMap((c) =>
-    c.words
-      .filter((w) => picks.has(w.w.toLowerCase()))
-      .map((w) => ({ cue_id: c.id, word: w.w, start: w.t0, end: w.t1 }))
-  );
+  const out: { cue_id: string; text: string; start: number; end: number }[] = [];
+  for (const c of FILLER_CUES) {
+    c.words.forEach((w, i) => {
+      if (!picks.has(w.w.toLowerCase())) return;
+      const last = out[out.length - 1];
+      const runsOn = last && last.cue_id === c.id && picks.has((c.words[i - 1]?.w ?? "").toLowerCase());
+      if (last && runsOn) {
+        last.text += ` ${w.w}`;
+        last.end = w.t1;
+      } else {
+        out.push({ cue_id: c.id, text: w.w, start: w.t0, end: w.t1 });
+      }
+    });
+  }
+  return out;
 })();
 
 export const FILLER_STATE = {
