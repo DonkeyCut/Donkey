@@ -348,13 +348,14 @@ export function createChatgptServer(
       title: "Read an editing guide",
       description: "Read one guide from list_skills.",
       inputSchema: z.object({ name: z.string().min(1).max(64) }),
+      outputSchema: z.object({ name: z.string(), guide: z.string() }),
       annotations: readOnlyAnnotations,
       _meta: { ...readMetadata, ...status("Reading the guide", "Guide read") },
     },
     ({ name }) => {
       const doc = readSkill(name);
       if (!doc) return { isError: true, content: [{ type: "text" as const, text: `No such guide. Available: ${SKILL_INDEX.join(", ")}` }] };
-      return { content: [{ type: "text" as const, text: doc }] };
+      return { content: [{ type: "text" as const, text: doc }], structuredContent: { name, guide: doc } };
     },
   );
 
