@@ -4,6 +4,8 @@ import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { bytesFromBase64 } from "./bytes";
 import { NO_CREDITS_MESSAGE } from "./credits";
 import { hostedPost } from "./hosted";
+import { cutJudge } from "./chatRuntime";
+import { askJudge, choice } from "./judge";
 import { importFileToProject } from "./media";
 import { mediaSlug, type MediaAsset } from "./types";
 import {
@@ -17,6 +19,37 @@ import {
 // The voice catalog lives in the dependency-light `voices` module (shared with
 // the build script); re-exported here so existing importers keep working.
 export { DEFAULT_VOICE, resolveVoice, SPEECH_VOICES, type SpeechVoice };
+
+const VOICE_QUESTION = choice(
+  "`wanted` describes the voice the user asked for in a video editor's voiceover. Which of these voices matches the description best?",
+  Object.fromEntries(
+    SPEECH_VOICES.map((v) => [v.id, `${v.name}: ${v.style}, ${v.gender === "f" ? "a woman" : "a man"}`]),
+  ) as Record<string, string>,
+);
+
+/** A voice ask resolved to a model id: an id or display name matches as
+ * `resolveVoice` does; a description ("a warm older man") is judged against
+ * the catalog, and one the judge cannot commit to takes the default. */
+export async function resolveVoiceAsk(wanted?: string): Promise<string> {
+  const w = wanted?.trim();
+  if (!w) return DEFAULT_VOICE;
+  const named = resolveVoice(w);
+  if (named !== DEFAULT_VOICE || w.toLowerCase() === DEFAULT_VOICE.toLowerCase()) return named;
+  if (SPEECH_VOICES.some((v) => v.name.toLowerCase() === w.toLowerCase())) return named;
+  try {
+    const { answers } = await askJudge(
+      (payload, signal) => hostedPost("/api/inference/judge", payload, signal),
+      { wanted: w.slice(0, 500) },
+      { voice: VOICE_QUESTION },
+    );
+    const pick = answers.voice;
+    return pick.confidence >= cutJudge().voicePick && SPEECH_VOICES.some((v) => v.id === pick.choice)
+      ? pick.choice
+      : DEFAULT_VOICE;
+  } catch {
+    return DEFAULT_VOICE;
+  }
+}
 
 // Client side of AI voiceovers: Gemini speech generation on Donkey's hosted
 // inference routes, with the user's Donkey sign-in and credits (same-origin on
@@ -366,7 +399,7 @@ export async function renderSpeechClip(
   const lines = raw.map((l, i) => ({ text: plan.texts[i] ?? l.text, at: l.at }));
 
   const offset = Math.min(...lines.map((s) => s.at));
-  const voice = resolveVoice(opts.voice);
+  const voice = await resolveVoiceAsk(opts.voice);
 
   // A small pool: readouts can be dozens of lines, one hosted call each.
   const clips: PcmClip[] = new Array(lines.length);

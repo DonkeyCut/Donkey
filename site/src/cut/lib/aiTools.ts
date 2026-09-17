@@ -183,7 +183,10 @@ import { queueWatchSweep, withSweepPaused } from "./watch/sweep";
 import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
-import { resolveVoice, synthesizeSpeech, SPEECH_VOICES } from "./tts";
+import { resolveVoiceAsk, synthesizeSpeech, SPEECH_VOICES } from "./tts";
+import { hostedPost } from "./hosted";
+import { cutJudge } from "./chatRuntime";
+import { askJudgeChunked, noul } from "./judge";
 import { clampVideoDuration, defaultVideoAspects, videoResolutionOf } from "./videoModels";
 import { DUCK_DEFAULT, generateSubtitlesReadout } from "./voiceover";
 import {
@@ -2903,8 +2906,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { note: res.message };
   },
 
-  stock_search: (s, input) => {
-      const q = String(input.query ?? "").trim().toLowerCase();
+  stock_search: async (s, input) => {
+      const q = String(input.query ?? "").trim();
       const kindIn =
         input.kind === "video" ||
         input.kind === "image" ||
@@ -2961,13 +2964,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           });
         }
       }
-      const words = q.split(/\s+/).filter(Boolean);
-      const matches = hits.filter((h) => {
-        const hay = [h.id, h.category, h.prompt, h.persona ?? "", ...h.tags]
-          .join(" ")
-          .toLowerCase();
-        return words.every((w) => hay.includes(w));
-      });
+      // A query ranks every candidate by a judged fit; no query browses the
+      // catalog in manifest order.
+      const matches = q ? await rankStock(q, hits) : hits;
       const trim = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
       return {
         results: matches.slice(0, 12).map((h) => ({
@@ -3841,7 +3840,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const lane = targetSubtitleTrack(input);
       if (!laneCues(useEditor.getState().subtitles, lane).some((c) => c.text.trim()))
         throw new ToolError("No subtitles on that track — generate subtitles first.");
-      const voice = resolveVoice(typeof input.voice === "string" ? input.voice : undefined);
+      const voice = await resolveVoiceAsk(typeof input.voice === "string" ? input.voice : undefined);
       // The shared readout also re-times the cues to the generated voice's
       // pace, keeping the word highlighter in step.
       const out = await generateSubtitlesReadout(voice, {
@@ -4234,6 +4233,56 @@ class ToolError extends Error {}
  * decodes, the transcription mixdown. A page has those primitives and a
  * headless process installs them; a process that installed neither refuses
  * these with a typed error rather than a stray "document is not defined". */
+/** The stock candidates an editor searching for `query` would want, best
+ * first: one judged fit per candidate, in chunks, kept above the setting's
+ * floor. */
+async function rankStock<T extends { id: string; kind: string; category: string; prompt: string; persona?: string; tags: string[] }>(
+  query: string,
+  candidates: T[],
+): Promise<T[]> {
+  if (candidates.length === 0) return [];
+  const post = (payload: Record<string, unknown>, signal?: AbortSignal) =>
+    hostedPost("/api/inference/judge", payload, signal);
+  const byKey = new Map<string, T>(candidates.map((c, i) => [`fit::${i}`, c]));
+  const questions = Object.fromEntries(
+    candidates.map((_, i) => [
+      `fit::${i}`,
+      noul(`Would an editor searching the stock catalog for \`query\` want candidate ${i} in \`candidates\`?`, {
+        true: "The candidate is what the search describes, or serves its purpose well.",
+        false: "The candidate is unrelated to the search, or only shares a word with it.",
+      }),
+    ]),
+  );
+  const state = (keys: string[]) => ({
+    query,
+    candidates: keys.map((k) => {
+      const c = byKey.get(k)!;
+      return {
+        i: Number(k.slice("fit::".length)),
+        kind: c.kind,
+        category: c.category,
+        prompt: c.prompt.slice(0, 240),
+        ...(c.persona ? { persona: c.persona.slice(0, 160) } : {}),
+        tags: c.tags.slice(0, 8),
+      };
+    }),
+  });
+  let answers: Record<string, { type: string; noul?: number }>;
+  try {
+    answers = (await askJudgeChunked(post, state, questions, STOCK_JUDGE_CHUNK)) as Record<string, { type: string; noul?: number }>;
+  } catch (e) {
+    throw new ToolError(`Stock search is unavailable: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const floor = cutJudge().stockFit;
+  return candidates
+    .map((c, i) => ({ c, p: answers[`fit::${i}`]?.noul ?? 0 }))
+    .filter((x) => x.p >= floor)
+    .sort((a, b) => b.p - a.p)
+    .map((x) => x.c);
+}
+
+const STOCK_JUDGE_CHUNK = 50;
+
 export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "convert_media",
   "watch_video",
@@ -4298,7 +4347,7 @@ async function synthesizeVoiceover(
 ) {
   const projectId = useEditor.getState().projectId;
   if (!projectId) throw new ToolError("No project open.");
-  const voice = resolveVoice(typeof input.voice === "string" ? input.voice : undefined);
+  const voice = await resolveVoiceAsk(typeof input.voice === "string" ? input.voice : undefined);
   const direction =
     typeof input.direction === "string" && input.direction.trim()
       ? input.direction.trim()
