@@ -53,7 +53,7 @@ export const SERVER_INSTRUCTIONS = [
   `Donkey Cut is an open-source video editor (Apache 2.0, ${REPOSITORY_URL}). Edit the connected account's cloud projects: import footage, inspect it, cut it, caption it, preview, undo, export.`,
   "Editing, previews and exports are free. Hosted AI (voiceover, music, images, caption rewriting, transcription past the monthly allowance) spends the account's credits. Imports and exports use the account's cloud storage.",
   "Workflow: list_projects or create_project → import_media → inspect_project → list_commands once, describe_commands for the ones you need → edit_project (batches, one undo step each) → render_preview → undo/redo → export_video.",
-  "open_project plays the project's current preview at once; call render_preview only after an edit or when the card reports no current preview.",
+  "open_project puts the full Donkey Cut editor in the card, timeline and panels included, when the connection can edit; a read-only connection sees the current preview playing. Call render_preview only after an edit or when the card reports no current preview.",
   "Times are seconds; ids come from inspect_project. A batch stops at its first failed command. A tool that answers with a job still running is finished by get_job_status.",
 ].join("\n");
 
@@ -91,7 +91,7 @@ function liftMedia(view: ProjectView): MediaBlock[] {
   return blocks;
 }
 
-type Identity = { userId: string; scopes: string[] };
+type Identity = { userId: string; scopes: string[]; grantId: string };
 export function createChatgptServer(
   identity: Identity,
   config: ChatgptConfig,
@@ -130,13 +130,13 @@ export function createChatgptServer(
   });
   const runTool = async (run: () => Promise<ProjectResult>) => {
     try {
-      const { view, playback, download } = await run();
+      const { view, playback, download, editor } = await run();
       const media = liftMedia(view);
-      const text = describeProjectView(view);
+      const text = describeProjectView(view) + (editor ? "\nThe Donkey Cut editor is open in the card." : "");
       return {
         content: [{ type: "text" as const, text }, ...media],
         structuredContent: view,
-        _meta: { playback, download: download ?? null, pollMs: config.pollMs },
+        _meta: { playback, download: download ?? null, editor: editor ?? null, pollMs: config.pollMs },
       };
     } catch (error) {
       if (!(error instanceof ProjectToolError)) {
@@ -173,16 +173,16 @@ export function createChatgptServer(
   server.registerTool(
     "open_project",
     {
-      title: "Open a Donkey Cut preview",
+      title: "Open a Donkey Cut project",
       description:
-        "Show a selected cloud project with its preview playing in the card. A preview whose revision matches the project is current; one from an earlier revision, or none, needs render_preview. With no projectId, show the project picker.",
+        "Open a selected cloud project in the card. When the connection can edit, the card holds the full Donkey Cut editor, timeline, media panel, inspector and preview, signed in on its own. A read-only connection sees the preview playing; a preview whose revision matches the project is current, and one from an earlier revision, or none, needs render_preview. With no projectId, show the project picker.",
       inputSchema: z.object({ projectId: idSchema.optional() }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
       _meta: { ...readMetadata, ui: { resourceUri: WIDGET_URI } },
     },
     ({ projectId }) =>
-      runTool(() => (projectId ? projects.status(projectId) : projects.list())),
+      runTool(() => (projectId ? projects.open(projectId) : projects.list())),
   );
 
   server.registerTool(
@@ -473,6 +473,7 @@ export function createChatgptServer(
               csp: {
                 connectDomains: ["https://media.donkeycut.com"],
                 resourceDomains: [config.issuer, "https://media.donkeycut.com"],
+                frameDomains: [config.issuer],
               },
             },
             "openai/widgetDescription":

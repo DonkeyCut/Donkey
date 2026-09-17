@@ -36,7 +36,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const config = SETTINGS.chatgptApp.schema.parse({ ...SETTINGS.chatgptApp.default, enabled: true, commandWaitMs: 120_000 });
 const server = createChatgptServer(
-  { userId: USER_ID, scopes: ["projects:read", "previews:render", "projects:write"] },
+  { userId: USER_ID, scopes: ["projects:read", "previews:render", "projects:write"], grantId: "eval" },
   config
 );
 const client = new Client({ name: "eval", version: "1" });

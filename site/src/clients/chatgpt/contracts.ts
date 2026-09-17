@@ -24,6 +24,9 @@ export const viewSchema = z.object({
 });
 export const playbackSchema = z.object({ url: z.url(), expiresAt: z.number() });
 export const downloadSchema = z.object({ url: z.url(), expiresAt: z.number(), name: z.string() });
+/** A one-use link the card frames to sign the editor in; spent once loaded. */
+export const editorSchema = z.object({ url: z.url(), expiresAt: z.number() });
 export type ProjectView = z.infer<typeof viewSchema>;
 export type Playback = z.infer<typeof playbackSchema>;
 export type Download = z.infer<typeof downloadSchema>;
+export type Editor = z.infer<typeof editorSchema>;

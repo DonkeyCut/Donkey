@@ -3,12 +3,16 @@ import { useProjectApp } from "./useProjectApp";
 import "./preview.css";
 
 export function PreviewApp() {
-  const { ready, view, playback, download, error, busy, visible, run, playbackFailed, openDonkey, openDownload } = useProjectApp();
+  const { ready, view, playback, download, editor, error, busy, visible, run, playbackFailed, openDonkey, openDownload } = useProjectApp();
   const project = view?.project;
   const preview = view?.preview;
   const rendering = preview?.status === "queued" || preview?.status === "running";
   const exp = view?.export;
   const exporting = exp?.status === "queued" || exp?.status === "running";
+  // The editor is the card: its own chrome carries every control.
+  if (editor && project) return <main className="editing">
+    <iframe className="editor" src={editor.url} title={`Editing ${project.name}`} allow="fullscreen; clipboard-read; clipboard-write" />
+  </main>;
   return <main aria-busy={busy}>
     <header><span className="brand">Donkey Cut</span><span>Cloud projects</span></header>
     {error && <p role="alert" className="error">{error}</p>}

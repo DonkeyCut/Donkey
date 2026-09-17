@@ -74,6 +74,16 @@ host bridge. It has no account cookie or OAuth token. Preview rendering uses
 no Donkey Cut AI credits. Derived previews remain exempt from storage quota;
 retained media uses the account's existing storage allowance.
 
+Opening a project from a connection that can edit puts the whole editor in
+the card: the widget frames `donkeycut.com` through a one-use, one-minute
+link the tool mints on the connection, and that link redeems for a
+partitioned session cookie scoped to the frame, so the editor is signed in
+there and nowhere else. Revoking the
+connection ends those sessions. A browser without partitioned cookies shows
+an Open in Donkey Cut link inside the frame. Public submission has to justify
+`frameDomains`; the justification is that the frame is the app's own editor
+on its own domain.
+
 ## Account linking
 
 Donkey Cut is the OAuth authorization server and MCP resource server. The account
@@ -139,7 +149,8 @@ the submission portal when that challenge is issued.
 
 Run the client tests with `bun test src/clients/chatgpt`. The browser fixture
 `bun run scripts/eval-chatgpt-widget.ts` checks selection, repeated polling,
-playback, URL recovery, hidden playback, and teardown against a mock host. With
+playback, URL recovery, hidden playback, the editor frame, and teardown
+against a mock host. With
 the dev server and a local worker up, `bun run scripts/eval-chatgpt-workflow.ts`
 drives the whole editing workflow through the MCP tools in process: create,
 import, inspect, edit, preview, undo, redo, export.

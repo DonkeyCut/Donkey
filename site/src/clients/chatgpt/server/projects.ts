@@ -13,13 +13,14 @@ import { mediaObjectUrl, mediaUrlLifetime } from "@/cut/server/cloud/mediaCdn";
 import { usageBytes } from "@/cut/server/cloud/usage";
 import { wakeRenderWorker } from "@/cut/server/cloud/wake";
 import type { ImportUrlResult } from "@/cut/worker/importUrlJob";
-import type { Download, Playback, ProjectView } from "@/clients/chatgpt/contracts";
+import type { Download, Editor, Playback, ProjectView } from "@/clients/chatgpt/contracts";
+import { createEditorCode } from "@/clients/chatgpt/server/oauthTokens";
 import type { ChatgptConfig } from "@/clients/chatgpt/server/config";
 import { READ_COMMANDS, unknownCommandNames } from "@/clients/chatgpt/server/catalog";
 
-type Identity = { userId: string; scopes: string[] };
+type Identity = { userId: string; scopes: string[]; grantId: string };
 export class ProjectToolError extends Error {}
-export type ProjectResult = { view: ProjectView; playback: Playback | null; download?: Download | null };
+export type ProjectResult = { view: ProjectView; playback: Playback | null; download?: Download | null; editor?: Editor | null };
 
 /** A queue helper's refusal, read out of its Response as a message. */
 async function refusal(res: Response): Promise<never> {
@@ -282,6 +283,15 @@ export function projectTools(
       };
     },
     status: getPreviewStatus,
+    /** The project as the card shows it: the full editor, signed in through a
+     * one-use link, when the connection can edit; its preview otherwise. */
+    async open(projectId: string): Promise<ProjectResult> {
+      const current = await getPreviewStatus(projectId);
+      if (!canEdit) return current;
+      const code = await createEditorCode(identity.grantId, db);
+      const url = `${config.issuer}/api/chatgpt/embed?code=${code}&project=${encodeURIComponent(projectId)}`;
+      return { ...current, editor: { url, expiresAt: Date.now() + 60_000 } };
+    },
     async render(projectId: string): Promise<ProjectResult> {
       if (!canRender) {
         throw new ProjectToolError(

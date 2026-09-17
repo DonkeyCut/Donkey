@@ -24,6 +24,9 @@ function createTestContext(scopes: string[] = ["projects:read"]) {
       }),
     },
     cutRenderJob: { findFirst: jobs },
+    chatgptToken: {
+      create: mock(async (args: { data: { hash: string; grantId: string; kind: string } }) => args.data),
+    },
     cutMediaObject: {
       findFirst: mock(async (args: unknown) => {
         void args;
@@ -34,7 +37,7 @@ function createTestContext(scopes: string[] = ["projects:read"]) {
   return {
     db,
     tools: projectTools(
-      { userId: "owner", scopes },
+      { userId: "owner", scopes, grantId: "grant" },
       config,
       db as unknown as typeof prisma,
     ),
@@ -102,6 +105,16 @@ describe("ChatGPT cloud projects", () => {
     const rendered = await tools.render("mine");
     expect(rendered.view.preview?.id).toBe("job");
     expect(rendered.playback?.url).toContain("proxy");
+  });
+  test("opening a project with write scope carries a one-use editor link; read scope gets the preview", async () => {
+    const readOnly = createTestContext();
+    expect((await readOnly.tools.open("mine")).editor).toBeUndefined();
+    expect(readOnly.db.chatgptToken.create).not.toHaveBeenCalled();
+    const { tools, db } = createTestContext(["projects:read", "projects:write"]);
+    const result = await tools.open("mine");
+    expect(/^https:\/\/donkeycut\.com\/api\/chatgpt\/embed\?code=[A-Za-z0-9_-]{43}&project=mine$/.test(result.editor?.url ?? "")).toBe(true);
+    expect(db.chatgptToken.create.mock.calls[0][0].data).toMatchObject({ grantId: "grant", kind: "embed" });
+    expect(result.view.project?.id).toBe("mine");
   });
   test("list returns only public project metadata and paging state", async () => {
     const { tools, db } = createTestContext();

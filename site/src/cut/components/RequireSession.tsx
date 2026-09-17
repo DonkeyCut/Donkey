@@ -1,7 +1,7 @@
 "use client";
 import { bindChatRuntime } from "@/cut/lib/chatRuntime";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import {
@@ -25,6 +25,14 @@ export function RequireSession({ children }: { children: ReactNode }) {
 
   const signedOut = !isPending && !session;
   const userId = session?.user.id;
+
+  // Framed by the ChatGPT card, the page carries its own partitioned session;
+  // a browser that dropped it gets a link out, since sign-in cannot run in a
+  // frame.
+  const embedded = useMemo(
+    () => typeof window !== "undefined" && window.self !== window.top && new URLSearchParams(window.location.search).get("embed") === "chatgpt",
+    [],
+  );
 
   useAppLoaded("cut", session?.user);
 
@@ -56,11 +64,32 @@ export function RequireSession({ children }: { children: ReactNode }) {
   }, [userId]);
 
   useEffect(() => {
-    if (!signedOut) return;
+    if (!signedOut || embedded) return;
     forgetRememberedEngineUser();
     const here = window.location.pathname + window.location.search;
     window.location.replace(authHrefFor("/sign-in", here));
-  }, [signedOut]);
+  }, [signedOut, embedded]);
 
+  if (signedOut && embedded) return <EmbeddedSignInFallback />;
   return <>{children}</>;
+}
+
+function EmbeddedSignInFallback() {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-background p-6 text-center">
+      <div className="max-w-sm space-y-3">
+        <p className="text-sm text-muted-foreground">
+          This browser keeps the editor signed out inside ChatGPT.
+        </p>
+        <a
+          className="inline-block rounded-md border px-3 py-2 text-sm"
+          href={window.location.pathname}
+          target="_blank"
+          rel="noopener"
+        >
+          Open in Donkey Cut
+        </a>
+      </div>
+    </div>
+  );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "@modelcontextprotocol/ext-apps";
-import { downloadSchema, playbackSchema, viewSchema, type Download, type Playback, type ProjectView } from "../contracts";
+import { downloadSchema, editorSchema, playbackSchema, viewSchema, type Download, type Editor, type Playback, type ProjectView } from "../contracts";
 
 type ToolResult = { isError?: boolean; structuredContent?: unknown; _meta?: Record<string, unknown>; content?: unknown[] };
 
@@ -12,6 +12,7 @@ export function useProjectApp() {
   const [view, setView] = useState<ProjectView | null>(null);
   const [playback, setPlayback] = useState<Playback | null>(null);
   const [download, setDownload] = useState<Download | null>(null);
+  const [editor, setEditor] = useState<Editor | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState(!document.hidden);
@@ -29,6 +30,10 @@ export function useProjectApp() {
     setView(parsed.data);
     setPlayback(media.success ? media.data : null);
     setDownload(file.success ? file.data : null);
+    // A one-use link that has already had its minute is a spent one: a card
+    // rehydrated later shows the preview, and Edit here mints a fresh link.
+    const embed = editorSchema.safeParse(result._meta?.editor);
+    if (embed.success && embed.data.expiresAt > Date.now()) setEditor(embed.data);
     setError(null);
   }, []);
 
@@ -76,26 +81,26 @@ export function useProjectApp() {
   const jobId = view?.preview?.id;
   const status = view?.preview?.status;
   useEffect(() => {
-    if (!ready || !visible || busy || error || !projectId || !jobId) return;
+    if (!ready || !visible || busy || error || editor || !projectId || !jobId) return;
     const waiting = status === "queued" || status === "running";
     if (!waiting && !playback) return;
     const delay = waiting ? pollMs : Math.max(1000, playback!.expiresAt - Date.now() - 60000);
     const timeout = window.setTimeout(() => { void run("get_preview_status", { projectId, jobId }, false); }, delay);
     return () => window.clearTimeout(timeout);
-  }, [ready, visible, busy, error, projectId, jobId, status, playback, pollMs, run, view]);
+  }, [ready, visible, busy, error, editor, projectId, jobId, status, playback, pollMs, run, view]);
 
   // An export in flight polls the same way; a finished one renews its
   // download link before it expires.
   const exportId = view?.export?.id;
   const exportStatus = view?.export?.status;
   useEffect(() => {
-    if (!ready || !visible || busy || error || !exportId) return;
+    if (!ready || !visible || busy || error || editor || !exportId) return;
     const waiting = exportStatus === "queued" || exportStatus === "running";
     if (!waiting && !download) return;
     const delay = waiting ? pollMs : Math.max(1000, download!.expiresAt - Date.now() - 60000);
     const timeout = window.setTimeout(() => { void run("get_export_status", { jobId: exportId }, false); }, delay);
     return () => window.clearTimeout(timeout);
-  }, [ready, visible, busy, error, exportId, exportStatus, download, pollMs, run, view]);
+  }, [ready, visible, busy, error, editor, exportId, exportStatus, download, pollMs, run, view]);
 
   const playbackFailed = useCallback(() => {
     if (!projectId || !jobId) return;
@@ -111,5 +116,13 @@ export function useProjectApp() {
   };
   const openDonkey = () => { if (view?.project) void openLink(view.project.url, "Could not open Donkey Cut."); };
   const openDownload = () => { if (download) void openLink(download.url, "Could not open the download."); };
-  return { ready, view, playback, download, error, busy, visible, run, playbackFailed, openDonkey, openDownload };
+
+  // The editor wants the whole window; the host grants what it supports.
+  const requestMode = useCallback(async (mode: "fullscreen") => {
+    const app = appRef.current;
+    if (!app || !app.getHostContext()?.availableDisplayModes?.includes(mode)) return;
+    try { await app.requestDisplayMode({ mode }); } catch { /* the inline card still works */ }
+  }, []);
+  useEffect(() => { if (editor) void requestMode("fullscreen"); }, [editor, requestMode]);
+  return { ready, view, playback, download, editor, error, busy, visible, run, playbackFailed, openDonkey, openDownload };
 }

@@ -53,6 +53,7 @@ const fakeProjects = (overrides: Partial<Projects> = {}): Projects => {
     list: answer,
     status: answer,
     render: answer,
+    open: answer,
     create: answer,
     inspect: answer,
     edit: answer,
@@ -70,7 +71,7 @@ const fakeProjects = (overrides: Partial<Projects> = {}): Projects => {
 describe("ChatGPT MCP protocol", () => {
   test("tools validate inputs, expose their safety annotations, and keep signed URLs out of model content", async () => {
     const server = createChatgptServer(
-      { userId: "owner", scopes: ["projects:read", "previews:render"] },
+      { userId: "owner", scopes: ["projects:read", "previews:render"], grantId: "grant" },
       config,
       fakeProjects(),
     );
@@ -138,6 +139,7 @@ describe("ChatGPT MCP protocol", () => {
         ui: {
           csp: {
             resourceDomains: [config.issuer, "https://media.donkeycut.com"],
+            frameDomains: [config.issuer],
           },
         },
       });
@@ -150,7 +152,7 @@ describe("ChatGPT MCP protocol", () => {
 
 test("render scope requests a reconnect through the MCP authentication challenge", async () => {
   const server = createChatgptServer(
-    { userId: "owner", scopes: ["projects:read"] },
+    { userId: "owner", scopes: ["projects:read"], grantId: "grant" },
     config,
     fakeProjects({
       render: async () => {
@@ -191,7 +193,7 @@ const http = async (
   headers: Record<string, string> = {},
 ) => {
   const handler = chatgptHttpHandler(
-    { userId: "owner", scopes: ["projects:read"] },
+    { userId: "owner", scopes: ["projects:read"], grantId: "grant" },
     config,
     projects,
   );
@@ -342,7 +344,7 @@ test("edit results reach the model as text and structure, and captured frames be
   };
   let received: unknown = null;
   const server = createChatgptServer(
-    { userId: "owner", scopes: ["projects:read", "projects:write"] },
+    { userId: "owner", scopes: ["projects:read", "projects:write"], grantId: "grant" },
     config,
     fakeProjects({
       edit: async (_projectId, commands, label) => {
