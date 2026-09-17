@@ -628,6 +628,7 @@ export function streamCutChat({
           withTools,
           send,
           executionGate,
+          cancelled,
           onAgent,
         }: {
           roundModel: string;
@@ -636,6 +637,8 @@ export function streamCutChat({
           send: (chunk: Record<string, unknown>) => void;
           /** Awaited before any tool executes; false ends the batch unrun. */
           executionGate?: () => Promise<boolean>;
+          /** True once the run has been abandoned, so it never goes out. */
+          cancelled?: () => boolean;
           onAgent?: (agent: Agent) => void;
         }) => {
           // The scene-plan money gate, enforced structurally: a plan created
@@ -805,7 +808,9 @@ export function streamCutChat({
             const prompt = { ...(await promptPromise) };
             // A signal that aborted during the gate/prompt awaits fired before
             // the listener existed; nothing has run, so the turn just ends.
-            if (!abortSignal?.aborted) {
+            // A verdict that landed during those same awaits abandoned this
+            // run before it had an agent to abort, so it never goes out.
+            if (!abortSignal?.aborted && !cancelled?.()) {
               await agent.prompt(prompt);
               await agent.waitForIdle();
             }
@@ -874,6 +879,10 @@ export function streamCutChat({
             else if (mode === "buffering") buffer.push(chunk);
           };
           let speculating: Agent | null = null;
+          // The verdict usually lands while the run is still awaiting its
+          // route, before there is an agent to abort, so the discard is a
+          // flag the run reads as well as an abort it may not receive.
+          let discarded = false;
           const watcher = verdictPromise.then(({ route }) => {
             if (route.intent === "simple") {
               mode = "live";
@@ -881,6 +890,7 @@ export function streamCutChat({
               return true;
             }
             mode = "discarded";
+            discarded = true;
             buffer.length = 0;
             speculating?.abort();
             return false;
@@ -890,8 +900,10 @@ export function streamCutChat({
             withTools: true,
             send,
             executionGate: async () => (await verdictPromise).route.intent === "simple",
+            cancelled: () => discarded,
             onAgent: (a) => {
               speculating = a;
+              if (discarded) a.abort();
             },
           });
           if (await watcher) {
