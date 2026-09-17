@@ -38,6 +38,11 @@ export async function askJudge<Q extends Record<string, JudgeQuestion>>(
   return (await res.json()) as JudgeResult<Q>;
 }
 
+/** Requests in flight at once. A sweep over a whole catalog is thousands of
+ * questions, and one attempt's timeout fails the sweep, so the fan-out stays
+ * narrow enough that a slow connection keeps up. */
+const CHUNK_CONCURRENCY = 6;
+
 /** Split a per-item question map into requests of at most `size` questions,
  * ask them in parallel, and merge the answers back under their keys. */
 export async function askJudgeChunked<Q extends Record<string, JudgeQuestion>>(
@@ -50,11 +55,17 @@ export async function askJudgeChunked<Q extends Record<string, JudgeQuestion>>(
   const keys = Object.keys(questions) as (keyof Q & string)[];
   const chunks: (keyof Q & string)[][] = [];
   for (let i = 0; i < keys.length; i += size) chunks.push(keys.slice(i, i + size));
-  const results = await Promise.all(
-    chunks.map((chunk) => {
+  const results: JudgeResult<Q>["answers"][] = new Array(chunks.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < chunks.length; i = next++) {
+      const chunk = chunks[i];
       const subset = Object.fromEntries(chunk.map((k) => [k, questions[k]])) as unknown as Q;
-      return askJudge(post, state(chunk), subset, signal);
-    }),
+      results[i] = (await askJudge(post, state(chunk), subset, signal)).answers;
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(CHUNK_CONCURRENCY, chunks.length) }, worker),
   );
-  return Object.assign({}, ...results.map((r) => r.answers)) as JudgeResult<Q>["answers"];
+  return Object.assign({}, ...results) as JudgeResult<Q>["answers"];
 }
