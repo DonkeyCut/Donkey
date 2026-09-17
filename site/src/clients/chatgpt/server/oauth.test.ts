@@ -13,7 +13,10 @@ import {
 import {
   accessIdentity,
   createCode,
+  createEditorCode,
   exchangeToken,
+  recordEditorSession,
+  redeemEditorCode,
   revokeToken,
 } from "@/clients/chatgpt/server/oauthTokens";
 
@@ -100,15 +103,34 @@ function createTestContext() {
         Object.assign(token, data);
         return { count: 1 };
       },
+      findMany: async ({ where }: { where: { grantId: { in: string[] }; kind: string } }) =>
+        [...tokens.values()].filter((token) => where.grantId.in.includes(token.grantId) && token.kind === where.kind),
+      deleteMany: async ({ where }: { where: { grantId: { in: string[] }; kind: string } }) => {
+        let count = 0;
+        for (const [hash, token] of tokens) {
+          if (where.grantId.in.includes(token.grantId) && token.kind === where.kind) { tokens.delete(hash); count++; }
+        }
+        return { count };
+      },
       createMany: async ({ data }: { data: Omit<Token, "consumedAt">[] }) => {
         for (const row of data) {
           tokens.set(row.hash, { ...row, consumedAt: null });
         }
       },
+      create: async ({ data }: { data: Omit<Token, "consumedAt"> }) => {
+        tokens.set(data.hash, { ...data, consumedAt: null });
+      },
     },
   };
+  const sessions = new Set<string>(["stray"]);
   const db = {
     ...tx,
+    session: {
+      deleteMany: async ({ where }: { where: { id: { in: string[] } } }) => {
+        for (const id of where.id.in) sessions.delete(id);
+        return { count: where.id.in.length };
+      },
+    },
     $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx),
   } as unknown as typeof prisma;
   const exchange = (
@@ -121,7 +143,7 @@ function createTestContext() {
     redirect_uri: input.redirect_uri,
     code_verifier: verifier,
   });
-  return { db, grants, tokens, exchange };
+  return { db, grants, tokens, sessions, exchange };
 }
 
 describe("ChatGPT OAuth boundary", () => {
@@ -175,8 +197,33 @@ describe("ChatGPT OAuth boundary", () => {
     expect(await accessIdentity(result!.access_token, config, db)).toEqual({
       userId: "owner",
       scopes: input.scope.split(" "),
+      grantId: "grant-0",
     });
     expect(await accessIdentity(result!.refresh_token, config, db)).toBeNull();
+  });
+  test("an editor code is one use, needs write scope, and revoking the connection ends its session", async () => {
+    const { db, tokens, sessions, exchange } = createTestContext();
+    const code = await createCode("owner", { ...input, scope: "projects:read projects:write" }, config, db);
+    const pair = (await exchangeToken(exchange(code), config, db))!;
+    const identity = (await accessIdentity(pair.access_token, config, db))!;
+    const editor = await createEditorCode(identity.grantId, db);
+    expect(tokens.has(editor)).toBe(false);
+    expect(await redeemEditorCode("nope", config, db)).toBeNull();
+    expect(await redeemEditorCode(editor, config, db)).toEqual({ userId: "owner", grantId: identity.grantId });
+    expect(await redeemEditorCode(editor, config, db)).toBeNull();
+    await recordEditorSession(identity.grantId, { id: "sess", expiresAt: new Date(Date.now() + 60_000) }, db);
+    sessions.add("sess");
+    await revokeToken(pair.access_token, config, db);
+    expect(sessions.has("sess")).toBe(false);
+    expect(sessions.has("stray")).toBe(true);
+    expect([...tokens.values()].some((token) => token.kind === "session")).toBe(false);
+
+    const readOnly = createTestContext();
+    const readCode = await createCode("owner", { ...input, scope: "projects:read" }, config, readOnly.db);
+    const readPair = (await exchangeToken({ ...readOnly.exchange(readCode) }, config, readOnly.db))!;
+    const readIdentity = (await accessIdentity(readPair.access_token, config, readOnly.db))!;
+    const readEditor = await createEditorCode(readIdentity.grantId, readOnly.db);
+    expect(await redeemEditorCode(readEditor, config, readOnly.db)).toBeNull();
   });
   test("code replay revokes tokens already issued by that code", async () => {
     const { db, exchange } = createTestContext();

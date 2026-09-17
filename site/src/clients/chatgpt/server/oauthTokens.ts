@@ -188,7 +188,7 @@ export async function accessIdentity(
     return null;
   }
 
-  return { userId: grant.userId, scopes: grant.scope.split(" ") };
+  return { userId: grant.userId, scopes: grant.scope.split(" "), grantId: grant.id };
 }
 
 export async function revokeToken(
@@ -209,5 +209,90 @@ export async function revokeToken(
   await db.chatgptGrant.update({
     where: { id: token.grantId },
     data: { revokedAt: new Date() },
+  });
+  await revokeEditorSessions([token.grantId], db);
+}
+
+const EDITOR_CODE_SECONDS = 60;
+const SESSION_REF = "session:";
+
+/** A one-use code the card's frame redeems for an editor session. */
+export async function createEditorCode(grantId: string, db = prisma) {
+  const code = newToken();
+  await db.chatgptToken.create({
+    data: {
+      hash: tokenHash(code),
+      grantId,
+      kind: "embed",
+      expiresAt: new Date(Date.now() + EDITOR_CODE_SECONDS * 1000),
+    },
+  });
+  return code;
+}
+
+export async function redeemEditorCode(
+  code: string,
+  config: ChatgptConfig,
+  db = prisma,
+) {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(code)) {
+    return null;
+  }
+  const hash = tokenHash(code);
+  const token = await db.chatgptToken.findUnique({
+    where: { hash },
+    include: { grant: true },
+  });
+  if (!token || token.kind !== "embed" || token.consumedAt || token.expiresAt <= new Date()) {
+    return null;
+  }
+  const grant = token.grant;
+  if (grant.revokedAt || grant.expiresAt <= new Date()) {
+    return null;
+  }
+  if (grant.clientId !== CLIENT_ID || grant.resource !== resourceUrl(config)) {
+    return null;
+  }
+  if (!grant.scope.split(" ").includes("projects:write")) {
+    return null;
+  }
+  // One redemption: the request that marks the row first is the one it serves.
+  const claimed = await db.chatgptToken.updateMany({
+    where: { hash, consumedAt: null },
+    data: { consumedAt: new Date() },
+  });
+  if (claimed.count !== 1) {
+    return null;
+  }
+  return { userId: grant.userId, grantId: grant.id };
+}
+
+/** The editor session a code produced, kept so revoking the connection ends it. */
+export async function recordEditorSession(
+  grantId: string,
+  session: { id: string; expiresAt: Date },
+  db = prisma,
+) {
+  await db.chatgptToken.create({
+    data: { hash: `${SESSION_REF}${session.id}`, grantId, kind: "session", expiresAt: session.expiresAt },
+  });
+}
+
+export async function revokeEditorSessions(grantIds: string[], db = prisma) {
+  if (!grantIds.length) {
+    return;
+  }
+  const rows = await db.chatgptToken.findMany({
+    where: { grantId: { in: grantIds }, kind: "session" },
+    select: { hash: true },
+  });
+  if (!rows.length) {
+    return;
+  }
+  await db.session.deleteMany({
+    where: { id: { in: rows.map((row) => row.hash.slice(SESSION_REF.length)) } },
+  });
+  await db.chatgptToken.deleteMany({
+    where: { grantId: { in: grantIds }, kind: "session" },
   });
 }
