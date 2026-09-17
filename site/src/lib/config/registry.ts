@@ -99,8 +99,7 @@ export const SETTINGS = defineSettings({
         // Preload the skill the judge picks for the turn; off leaves the model
         // to read skills on its own.
         skillSuggestion: z.boolean(),
-        // Mean of the "does this turn want a skill" questions below which no
-        // skill is attached.
+        // The reference-need probability below which no skill is attached.
         skillGate: z.number().min(0).max(1),
         // The winning skill's own fit below which it is dropped.
         skillFits: z.number().min(0).max(1),
