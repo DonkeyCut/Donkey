@@ -344,9 +344,8 @@ function consentPage(nonce: string, authorization: Authorization) {
     <title>Connect to ChatGPT</title>
     <style>
       body { font: 17px system-ui; max-width: 460px; margin: 12vh auto; padding: 24px; color: #202020; background: #faf9f7; }
-      .app { display: flex; align-items: center; gap: 12px; font-weight: 600; margin-bottom: 28px; }
-      .app img { width: 44px; height: 44px; }
-      h1 { font-size: 30px; margin: 0 0 12px; }
+      h1 { display: flex; align-items: center; gap: 14px; font-size: 34px; margin: 0 0 20px; }
+      h1 img { width: 56px; height: 56px; }
       p { line-height: 1.6; margin: 0 0 24px; }
       button { font: inherit; padding: 12px 20px; border-radius: 10px; border: 1px solid #ccc; cursor: pointer; }
       button[value=allow] { background: #202020; color: white; }
@@ -354,9 +353,8 @@ function consentPage(nonce: string, authorization: Authorization) {
     </style>
   </head>
   <body>
-    <div class="app"><img src="/donkey-logo.svg" alt="">Donkey Cut</div>
-    <h1>Connect to ChatGPT</h1>
-    <p>ChatGPT can ${access} your projects.</p>
+    <h1><img src="/donkey-logo.svg" alt="">Donkey Cut</h1>
+    <p>Connect to ChatGPT. ChatGPT can ${access} your projects.</p>
     <form method="post" action="${OAUTH_PATH}/authorize">
       <input type="hidden" name="nonce" value="${escapedNonce}">
       <button name="decision" value="allow">Connect</button>
