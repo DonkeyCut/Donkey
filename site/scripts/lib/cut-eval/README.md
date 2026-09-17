@@ -52,6 +52,14 @@ verdict prints the message, what it got and what it should have got. It exits
 1 when a case never passes. Add a case whenever a real message landed in the
 wrong place.
 
+## The routing eval
+
+`npm run eval:cut-routing -- [--only <substring>] [--no-sweep] [--filler]`
+checks what the turn judge decides for the labelled asks in
+`routingCases.ts`: the skill it attaches, the tool areas it declares, and the
+gate side. Every ask is judged once and the route recomposed under a grid of
+thresholds, so the sweep that sets the registry defaults costs no extra calls.
+
 ## The report
 
 A full run writes `evals/cut-chat.latest-report.json` (schema
