@@ -105,9 +105,6 @@ export interface MixSpec {
   items: MixItem[];
   /** Audio effect elements over the finished mix, in timeline order. */
   effects?: MixEffect[];
-  /** Whole-project audio fades, seconds. */
-  fadeIn?: number;
-  fadeOut?: number;
 }
 
 export interface MixOptions {
@@ -330,20 +327,6 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
   const bus = ctx.createGain();
   ducked.connect(bus);
 
-  // The project fade is the last thing on the way out, matching the export's
-  // fade on the final mix.
-  const master = ctx.createGain();
-  const fadeIn = Math.max(0, spec.fadeIn ?? 0);
-  const fadeOut = Math.max(0, spec.fadeOut ?? 0);
-  master.gain.value = 1;
-  if (fadeIn > 0) {
-    master.gain.setValueAtTime(0, 0);
-    master.gain.linearRampToValueAtTime(1, fadeIn);
-  }
-  if (fadeOut > 0 && spec.duration > fadeOut) {
-    master.gain.setValueAtTime(1, spec.duration - fadeOut);
-    master.gain.linearRampToValueAtTime(0, spec.duration);
-  }
   // The effects run in series off the bus, each crossed in over its own
   // window: inside it the treated signal is heard, outside it the untouched
   // one, with the edges ramping so the switch cannot click.
@@ -375,8 +358,7 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
     dry.connect(out);
     treated = out;
   }
-  treated.connect(master);
-  master.connect(ctx.destination);
+  treated.connect(ctx.destination);
 
   /**
    * Fit a span to the time its clip occupies, keeping its pitch.

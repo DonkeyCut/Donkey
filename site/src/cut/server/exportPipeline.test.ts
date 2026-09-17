@@ -331,7 +331,6 @@ describe("export filtergraph timebases", () => {
       ],
       audio: [{ file: "music.mp3", in: 0, out: 5, start: 0, volume: 0.8, fadeIn: 0.2 }],
       captions: [{ file: "cap1.png", start: 0, end: 2 }],
-      fadeIn: 0.5,
     });
     expect(g.join(";")).toContain("xfade=");
     expect(xfadeMismatches(g)).toEqual([]);

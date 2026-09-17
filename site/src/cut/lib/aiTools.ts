@@ -823,8 +823,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   capture_frame: async (s, input) => {
       // Composited through the render path, so the frame carries what the
       // finished file would carry — clips, transitions, effects, elements,
-      // captions, the project fade — rather than the preview's video layer
-      // with its DOM elements floating above it.
+      // captions — the preview's video layer alone leaves its DOM elements
+      // floating above it.
       const total = totalDuration(s.clips);
       const at = clamp(isNum(input.t) ? input.t : playheadAt(), 0, Math.max(0, total - 0.001));
       const frame = frameOf(s.aspect);
@@ -837,8 +837,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           audioClips: s.audioClips,
           overlays: s.overlays,
           subtitles: s.subtitles,
-          fadeIn: s.fadeIn,
-          fadeOut: s.fadeOut,
           background: s.background,
         },
         at,
@@ -3158,7 +3156,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         if (frame && t.project) {
           st.setAspect(t.project.aspect);
           st.setBackground(t.project.background);
-          st.setProjectFade({ fadeIn: t.project.fadeIn, fadeOut: t.project.fadeOut });
         }
         if (captionLook && captions && Object.keys(captions).length > 0) st.setSubtitlesView(captions);
         st.insertTemplate({ ...clamped, cues, id: "", addedAt: 0 }, assetIds, playheadAt());
@@ -4210,17 +4207,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         guides: after.guides,
         ...(after.guides.includes("custom") ? { customLines: after.guideLines } : {}),
       };
-  },
-
-  set_project_fade: (s, input) => {
-      if (!isNum(input.fadeIn) && !isNum(input.fadeOut))
-        throw new ToolError("Pass fadeIn and/or fadeOut seconds (0 clears).");
-      s.setProjectFade({
-        ...(isNum(input.fadeIn) ? { fadeIn: input.fadeIn } : {}),
-        ...(isNum(input.fadeOut) ? { fadeOut: input.fadeOut } : {}),
-      });
-      const after = useEditor.getState();
-      return { fadeIn: after.fadeIn, fadeOut: after.fadeOut };
   },
 
   set_background: (s, input) => {

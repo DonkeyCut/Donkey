@@ -75,8 +75,6 @@ try {
     audioClips: doc.audioClips,
     overlays: doc.overlays,
     subtitles: doc.subtitles,
-    fadeIn: doc.fadeIn,
-    fadeOut: doc.fadeOut,
   };
   const settings = presetSettings(EXPORT_PRESETS[2], doc.aspect);
   const jobId = await createExportJob(projectId, exportDoc, settings);

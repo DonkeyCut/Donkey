@@ -288,8 +288,6 @@ export function describeDoc(doc: ProjectDoc, opts?: { fullCues?: boolean; chatId
       subtitleLane: 0,
       subtitleStatus: state.subtitles.cues.length > 0 ? "ready" : "idle",
       aspect: state.aspect ?? "9:16",
-      fadeIn: state.fadeIn,
-      fadeOut: state.fadeOut,
       background: state.background,
       guides: sanitizeGuides(doc.guides),
       guideLines: sanitizeGuideLines(doc.guideLines),
@@ -316,8 +314,6 @@ interface DescribedState {
   subtitleLane: number;
   subtitleStatus: string;
   aspect: Aspect;
-  fadeIn: number;
-  fadeOut: number;
   background: string;
   guides: GuideId[];
   guideLines: GuideLines;
@@ -382,8 +378,6 @@ function describeState(
       duration: r(duration),
       aspect: s.aspect,
       frame: `${frameOf(s.aspect).w}x${frameOf(s.aspect).h}`,
-      ...(s.fadeIn > 0 ? { fadeIn: r(s.fadeIn) } : {}),
-      ...(s.fadeOut > 0 ? { fadeOut: r(s.fadeOut) } : {}),
       background: s.background,
       // Every guide preset's safe area for this frame, whether or not it
       // shows, so placement can respect a platform's UI without a guide on:

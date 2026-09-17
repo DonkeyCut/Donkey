@@ -12,7 +12,7 @@ import {
 import { headSrc, matteLumaToAlpha, retimeOf, smoothsAt, srcSpan } from "@donkeycut/effects-kit";
 import { blendInto, SYNTH_EDGE, synthWeight } from "@/cut/lib/frameSynth";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
-import { assetIsSilent, clipCovers, projectFadeSeconds, rectOf } from "@/cut/lib/types";
+import { assetIsSilent, clipCovers, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
@@ -612,18 +612,6 @@ class Engine {
     );
   }
 
-  /** Whole-video fade gain at `t`: ramps 0→1 over the project fade-in and 1→0
-   * over the fade-out at the end of the cut. */
-  private projectFadeGain(t: number, total: number) {
-    const s = useEditor.getState();
-    const fadeIn = projectFadeSeconds(s.fadeIn, total);
-    const fadeOut = projectFadeSeconds(s.fadeOut, total);
-    let g = 1;
-    if (fadeIn > 0 && t < fadeIn) g = Math.min(g, Math.max(0, t / fadeIn));
-    if (fadeOut > 0 && t > total - fadeOut) g = Math.min(g, Math.max(0, (total - t) / fadeOut));
-    return Math.min(1, g);
-  }
-
   /**
    * Everything audible at `t`, with the gain the frame plan gives it.
    *
@@ -959,7 +947,6 @@ class Engine {
       this.stalledAt = 0;
       if (s.buffering) useEditor.setState({ buffering: false });
     }
-    const fadeGain = this.projectFadeGain(t, total);
     if (pendingMaster) {
       this.dirty = true;
     } else {
@@ -970,7 +957,6 @@ class Engine {
       // publishes the matte the DOM's front subject-masked elements read.
       this.comp.subjectMatteProvider = (at) => this.behind.clipMatteOf(this.canvas, at);
       this.behind.draw(this.canvas, s.overlays, s.assets, t);
-      this.comp.drawProjectFade(fadeGain);
       // A paused draw is the picture standing still, which is when a
       // readback of it costs nothing anyone is watching; a play's first
       // frame is read back once the play stops and the frame is redrawn.
@@ -984,7 +970,6 @@ class Engine {
     this.phase("warm");
 
     if (playing) {
-      this.mixer.setMasterGain(fadeGain);
       // The audio effect elements over this moment, each at the level its
       // window puts it at; the mixer carries them over the whole mix.
       this.mixer.setEffects(

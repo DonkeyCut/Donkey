@@ -281,8 +281,8 @@ export class PreviewMixer {
       this.ctx = new AudioContext();
       this.master = this.ctx.createGain();
       this.master.connect(this.ctx.destination);
-      // Voices meet on the bus, the effect chains treat what is on it, and the
-      // project fade rides the sum — the order the export's ffmpeg graph has.
+      // Voices meet on the bus and the effect chains treat what is on it —
+      // the order the export's ffmpeg graph has.
       this.bus = this.ctx.createGain();
       this.bus.connect(this.master);
     }
@@ -504,11 +504,6 @@ export class PreviewMixer {
     this.anchor = null;
     this.holding = false;
     for (const live of this.voices.values()) this.stopWindows(live);
-  }
-
-  /** The whole-project fade, over the finished mix. */
-  setMasterGain(g: number): void {
-    if (this.master) this.master.gain.value = Math.max(0, Math.min(1, g));
   }
 
   /**

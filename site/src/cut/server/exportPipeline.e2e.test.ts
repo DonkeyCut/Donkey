@@ -104,8 +104,6 @@ describe("export pipeline end to end", () => {
           crf: 30,
           preset: "ultrafast",
           duration: 6.1,
-          fadeIn: 0.3,
-          fadeOut: 0.3,
           background: "#102030",
           clips: [
             {

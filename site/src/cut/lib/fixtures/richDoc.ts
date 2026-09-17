@@ -20,8 +20,6 @@ export function richDoc(): ProjectDoc {
     updatedAt: now,
     aspect: "16:9",
     background: "#102030",
-    fadeIn: 0.3,
-    fadeOut: 0.4,
     assets: [
       {
         id: "v0",

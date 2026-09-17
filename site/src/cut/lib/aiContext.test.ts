@@ -29,7 +29,7 @@ describe("describeDoc", () => {
     });
     expect(read.videoTrack[1]).toMatchObject({ id: "c1", colorGrade: { brightness: 5 }, animOut: { style: "zoom", seconds: 0.5 } });
     expect(read.subtitles).toMatchObject({ style: "bubble", size: 60, wordsPerCue: 3, wordHighlight: true, accentColor: "#FF3366" });
-    expect(read.project).toMatchObject({ id: "rich", name: "Rich edit", aspect: "16:9", background: "#102030", fadeIn: 0.3, fadeOut: 0.4 });
+    expect(read.project).toMatchObject({ id: "rich", name: "Rich edit", aspect: "16:9", background: "#102030" });
   });
 
   test("carries no live-only fields", () => {

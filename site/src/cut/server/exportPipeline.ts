@@ -6,7 +6,7 @@ import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoColorIn
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
-import { CLIP_MAX_ZOOM, projectFadeSeconds, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
+import { CLIP_MAX_ZOOM, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
 import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ClipSound, type OverlayKey, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
@@ -77,10 +77,6 @@ export interface ExportSpec {
    * captions and elements sit where the timeline has them. */
   range?: ExportRange;
   duration: number;
-  /** Whole-video fades, seconds: in from black / out to black, applied to the
-   * final composite and mix after all overlays and soundtrack. */
-  fadeIn?: number;
-  fadeOut?: number;
   /** The frame's own color (hex): what letterboxes a fitted clip, what a gap
    * on track 0 plays, and what a cut of nothing but elements composites over.
    * Absent = black. */
@@ -2354,24 +2350,6 @@ export async function runExport(
       );
       aLabel = `afx${k}`;
     });
-
-  // Whole-video fades on the final composite and mix, so titles, captions,
-  // overlays, and soundtrack all fade together.
-  const fadeIn = projectFadeSeconds(spec.fadeIn, spec.duration);
-  const fadeOut = projectFadeSeconds(spec.fadeOut, spec.duration);
-  if (fadeIn > 0.01 || fadeOut > 0.01) {
-    const win = (f: string) =>
-      [
-        ...(fadeIn > 0.01 ? [`${f}=t=in:st=0:d=${num(fadeIn)}`] : []),
-        ...(fadeOut > 0.01
-          ? [`${f}=t=out:st=${num(Math.max(0, spec.duration - fadeOut))}:d=${num(fadeOut)}`]
-          : []),
-      ].join(",");
-    filters.push(`[${vLabel}]${win("fade")}[vfinal]`);
-    vLabel = "vfinal";
-    filters.push(`[${aLabel}]${win("afade")}[afinal]`);
-    aLabel = "afinal";
-  }
 
   // A range is cut from the finished composite, so it carries what the
   // timeline shows there — fades, captions, and elements in place.

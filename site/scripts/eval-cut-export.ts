@@ -278,8 +278,6 @@ function fixtureDoc(url: (file: string) => string, clipS = CLIP_S) {
   const doc = {
     aspect: "16:9",
     background: "#102030",
-    fadeIn: 0.3,
-    fadeOut: 0.3,
     assets: [
       asset("v0", "clip-0.mp4", "video", clipS),
       asset("v1", "clip-1.mp4", "video", clipS),

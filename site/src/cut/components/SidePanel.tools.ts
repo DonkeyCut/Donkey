@@ -1,7 +1,7 @@
 /**
  * The assistant's side-panel tools — opening and collapsing the tabs, the
- * Media panel's filing and trash, and the Details tab's publish metadata and
- * project fade — kept beside the side panel that hosts those views
+ * Media panel's filing and trash, and the Details tab's publish metadata —
+ * kept beside the side panel that hosts those views
  * (`MediaPanel` and `PublishPanel` live inside it). The catalog spreads this
  * list into the model's toolset and `aiTools.ts` keys its handlers on
  * `SidePanelToolName`.
@@ -80,12 +80,6 @@ export const SIDE_PANEL_TOOLS = [
       soundTitle: str("Sound title"),
       handle: str("Creator handle without @"),
     }),
-  },
-  {
-    name: "set_project_fade",
-    description:
-      "Set the whole video's fade in from black and/or fade out to black, in seconds (0 clears, max 2). Applied to the final picture and mix at the start/end of the cut, independent of which clip sits there.",
-    inputSchema: obj({ fadeIn: num("Fade-in seconds (omit to keep)"), fadeOut: num("Fade-out seconds (omit to keep)") }),
   },
   {
     name: "set_background",

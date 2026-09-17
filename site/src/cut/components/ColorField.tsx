@@ -195,7 +195,7 @@ export function ColorField({
 }
 
 /** Saturation/value pad, hue rail, hex entry, and the eyedropper. */
-function ColorPicker({
+export function ColorPicker({
   value,
   onBegin,
   onLive,

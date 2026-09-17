@@ -44,7 +44,7 @@ import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
 import { renderElementPng } from "./textRender";
-import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, projectFadeSeconds, rectOf, removalActive } from "./types";
+import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc } from "./renderSnapshot";
 import type { ExportSettings } from "./exportClient";
@@ -881,8 +881,6 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
     items,
     // Audio effect elements treat the finished mix over their own windows.
     effects: audioFxSpans(doc.overlays, duration),
-    fadeIn: projectFadeSeconds(doc.fadeIn, duration),
-    fadeOut: projectFadeSeconds(doc.fadeOut, duration),
   };
 }
 
@@ -890,16 +888,6 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
  * uses to decide which spans it decodes. */
 export function mixHasSound(spec: MixSpec): boolean {
   return spec.clips.some((c) => c.file && !c.muted) || spec.items.some((i) => !i.muted);
-}
-
-/** Whole-video fade gain at `t`, the picture's side of the project fade. */
-function projectFadeGain(doc: ExportDoc, t: number, total: number): number {
-  const fadeIn = projectFadeSeconds(doc.fadeIn, total);
-  const fadeOut = projectFadeSeconds(doc.fadeOut, total);
-  let g = 1;
-  if (fadeIn > 0 && t < fadeIn) g = Math.min(g, Math.max(0, t / fadeIn));
-  if (fadeOut > 0 && t > total - fadeOut) g = Math.min(g, Math.max(0, (total - t) / fadeOut));
-  return Math.min(1, g);
 }
 
 /**
@@ -1469,7 +1457,6 @@ export class FramePainter {
     }
     await drawStamps(canvas, this.stacked.slice(drawn), stamps, t, this.behind);
     stamps.retire(t);
-    comp.drawProjectFade(projectFadeGain(doc, t, this.duration));
   }
 
   dispose(): void {

@@ -155,7 +155,6 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       stubs: {
         add_clip: { id: "c-new", kind: "image", index: 1, start: 12.5, len: 8 },
         set_transition: { ok: true },
-        set_project_fade: { ok: true },
         add_title: { ok: true },
       },
     },

@@ -259,13 +259,6 @@ export class FrameCompositor {
     this.fillVeil("0,0,0", amount, rect);
   }
 
-  /** The picture side of the project fade: a black veil over the whole frame —
-   * everything drawn this tick, on every track, at any time — matching the
-   * export's fade on the final composite. */
-  drawProjectFade(gain: number) {
-    this.fillBlackVeil(1 - gain);
-  }
-
   /**
    * The clip's picture with its color grade and look grading applied, or the
    * raw image when there is nothing to apply. Mirrors the export's chain order

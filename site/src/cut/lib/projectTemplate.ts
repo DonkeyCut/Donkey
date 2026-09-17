@@ -168,8 +168,6 @@ export function templateFromDoc(doc: ProjectDoc, opts: { items?: string[] } = {}
       project: {
         aspect: state.aspect ?? "9:16",
         background: state.background,
-        fadeIn: state.fadeIn,
-        fadeOut: state.fadeOut,
       },
     },
     assetByMedia,

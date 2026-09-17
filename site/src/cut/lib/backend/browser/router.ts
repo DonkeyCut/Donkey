@@ -97,8 +97,6 @@ async function putProject(req: Request, id: string): Promise<Response> {
       aspect: normalizeAspect(body.aspect) ?? existing.aspect,
       guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
       guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
-      fadeIn: typeof body.fadeIn === "number" ? body.fadeIn : existing.fadeIn,
-      fadeOut: typeof body.fadeOut === "number" ? body.fadeOut : existing.fadeOut,
       background: typeof body.background === "string" ? body.background : existing.background,
       subtitles:
         body.subtitles && typeof body.subtitles === "object" ? body.subtitles : existing.subtitles,

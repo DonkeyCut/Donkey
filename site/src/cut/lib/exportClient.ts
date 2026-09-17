@@ -1298,8 +1298,6 @@ export async function buildExportPayload(
       target,
       ...settings,
       duration,
-      fadeIn: doc.fadeIn ?? 0,
-      fadeOut: doc.fadeOut ?? 0,
       background: projectBackground(doc.background),
       clips,
       audio,
@@ -1988,8 +1986,6 @@ export function docFirstSeconds(doc: ExportDoc, seconds: number): ExportDoc {
         .filter(starts)
         .map((c) => (c.end <= seconds ? c : { ...c, end: seconds })),
     },
-    // A fade-out belongs to the end of the project, which the card cuts away.
-    fadeOut: 0,
   };
 }
 

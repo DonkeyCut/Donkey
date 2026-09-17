@@ -692,14 +692,6 @@ export interface TimelineTransition {
   hidden?: boolean;
 }
 
-/** Effective whole-video fade length: the stored seconds, capped at half the
- * project so a fade-in and fade-out never overlap. The one clamp preview and
- * export both apply, so a short project fades identically in the editor and the
- * rendered file. */
-export function projectFadeSeconds(fade: number | undefined, duration: number): number {
-  return Math.max(0, Math.min(fade ?? 0, duration / 2));
-}
-
 /** The frame color a project takes when it has not chosen one. Black is what
  * every cut rendered before the field existed, so an old document opens
  * looking exactly as it did. */
@@ -1156,7 +1148,7 @@ export interface LibraryTemplate {
    * alone, and a replicate applies it. */
   captions?: CaptionLook;
   /** The frame the source was cut for, for a whole-project template. */
-  project?: { aspect: Aspect; background: string; fadeIn: number; fadeOut: number };
+  project?: { aspect: Aspect; background: string };
   /** A saved sound treatment: a template carrying only this is a sound
    * preset (see soundPresets.ts), listed in the audio inspector and kept
    * off the template shelf. */
@@ -1542,11 +1534,6 @@ export interface ProjectDoc {
   guides?: GuideId[];
   /** The custom guide lines, frame fractions per axis; absent = none. */
   guideLines?: GuideLines;
-  /** Whole-video fades, seconds: in from black at the start, out to black at
-   * the end. Applied to the final picture and mix (titles, captions, and
-   * soundtrack fade together), so they survive clip reordering. */
-  fadeIn?: number;
-  fadeOut?: number;
   /** The color of the frame itself, behind everything: what a text-and-graphics
    * cut plays over, what letterboxes a fitted clip, and what fills a gap in the
    * timeline. Hex; absent = `DEFAULT_BACKGROUND`. */

@@ -382,8 +382,6 @@ export const REFERENCE_PROJECT = {
       duration: 14,
       aspect: "9:16",
       frame: "1080x1920",
-      fadeIn: 0.3,
-      fadeOut: 0.5,
       background: "#101010",
     },
     media: [

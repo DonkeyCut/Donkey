@@ -11,10 +11,6 @@ export type ExportDoc = {
   audioClips: AudioClip[];
   overlays: Overlay[];
   subtitles: SubtitlesBlock;
-  /** Whole-video fades (seconds): in from black / out to black on the final
-   * composite. */
-  fadeIn?: number;
-  fadeOut?: number;
   /** The frame's own color behind every clip and element (hex); absent = black. */
   background?: string;
 };
@@ -33,7 +29,6 @@ export function captureRenderSnapshot(operation: ProjectOperation, doc: ExportDo
 export function renderDoc(doc: ExportDoc): ExportDoc {
   return {
     aspect: doc.aspect, assets: doc.assets, clips: doc.clips, audioClips: doc.audioClips,
-    overlays: doc.overlays, subtitles: doc.subtitles, fadeIn: doc.fadeIn,
-    fadeOut: doc.fadeOut, background: doc.background,
+    overlays: doc.overlays, subtitles: doc.subtitles, background: doc.background,
   };
 }

@@ -17,6 +17,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -38,6 +42,7 @@ import { useEnvironment } from "@/cut/lib/environment";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
+import { COLOR_PRESETS, ColorPicker } from "@/cut/components/ColorField";
 import { CreditsPill } from "./CreditsPill";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
 import { ShareDialog } from "./ShareDialog";
@@ -77,6 +82,7 @@ export function TopBar({
   const hasPicture = useEditor((s) => projectDuration(s) > 0);
   const aspect = useEditor((s) => s.aspect);
   const projectName = useEditor((s) => s.projectName);
+  const background = useEditor((s) => s.background);
   const saveState = useEditor((s) => s.saveState);
   const aiOpen = useEditor((s) => s.aiOpen);
   const [editing, setEditing] = useState(false);
@@ -550,6 +556,33 @@ export function TopBar({
               // half-typed side is never settled out from under the user.
               onBlur={(e) => {
                 if (!e.currentTarget.contains(e.relatedTarget as Node)) endEditing();
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <span className="size-4 shrink-0 rounded-[4px] ring-1 ring-border" style={{ background }} />
+                  <span className="flex-1">Background</span>
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-56">
+                  {COLOR_PRESETS.map((c) => (
+                    <DropdownMenuItem key={c.hex} onClick={() => { useEditor.getState().pushHistory(); useEditor.getState().setBackground(c.hex); }}>
+                      <span className="size-4 shrink-0 rounded-[4px] ring-1 ring-border" style={{ background: c.hex }} />
+                      <span className="flex-1">{c.name}</span>
+                      {background.toUpperCase() === c.hex && <Check className="size-3.5 text-muted-foreground" />}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  {/* Any other color: the picker lives in the menu, and its
+                      keystrokes stay out of the menu's typeahead. */}
+                  <div className="p-1.5" onKeyDown={(e) => e.stopPropagation()}>
+                    <ColorPicker
+                      value={background}
+                      onBegin={() => useEditor.getState().pushHistory()}
+                      onLive={(hex) => useEditor.getState().setBackground(hex)}
+                      onCommit={(hex) => useEditor.getState().setBackground(hex)}
+                    />
+                  </div>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitCustom();

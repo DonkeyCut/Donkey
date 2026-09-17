@@ -164,8 +164,6 @@ export function ExportDialog() {
         audioClips: s.audioClips,
         overlays: s.overlays,
         subtitles: s.subtitles,
-        fadeIn: s.fadeIn,
-        fadeOut: s.fadeOut,
         background: s.background,
       },
       settings
@@ -189,8 +187,6 @@ export function ExportDialog() {
         audioClips: s.audioClips,
         overlays: s.overlays,
         subtitles: s.subtitles,
-        fadeIn: s.fadeIn,
-        fadeOut: s.fadeOut,
         background: s.background,
       },
       settings,

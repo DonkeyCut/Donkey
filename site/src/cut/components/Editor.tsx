@@ -456,8 +456,6 @@ export function Editor({
       overlays: unknown;
       subtitles: unknown;
       aspect: string;
-      fadeIn: number;
-      fadeOut: number;
       background: string;
     } | null = null;
     const unsub = useEditor.subscribe((s) => {
@@ -470,8 +468,6 @@ export function Editor({
           s.overlays !== last.overlays ||
           s.subtitles !== last.subtitles ||
           s.aspect !== last.aspect ||
-          s.fadeIn !== last.fadeIn ||
-          s.fadeOut !== last.fadeOut ||
           s.background !== last.background);
       last = {
         assets: s.assets,
@@ -480,8 +476,6 @@ export function Editor({
         overlays: s.overlays,
         subtitles: s.subtitles,
         aspect: s.aspect,
-        fadeIn: s.fadeIn,
-        fadeOut: s.fadeOut,
         background: s.background,
       };
       if (!changed) return; // first tick just primes the baseline
@@ -641,8 +635,6 @@ export function Editor({
         s.aspect !== last.aspect ||
         s.guides !== last.guides ||
         s.guideLines !== last.guideLines ||
-        s.fadeIn !== (last.fadeIn ?? 0) ||
-        s.fadeOut !== (last.fadeOut ?? 0) ||
         s.background !== last.background ||
         s.publish.caption !== last.publish?.caption ||
         s.publish.tags !== last.publish?.tags ||

@@ -42,7 +42,7 @@ describe("templateFromDoc", () => {
     expect(t.texts).toHaveLength(4);
     expect(t.cues).toHaveLength(2);
     expect(t.captions).toEqual({ showOnVideo: true, style: "bubble", size: 60, wordsPerCue: 3, wordHighlight: true, accentColor: "#FF3366", x: 0.5, y: 0.85 });
-    expect(t.project).toEqual({ aspect: "16:9", background: "#102030", fadeIn: 0.3, fadeOut: 0.4 });
+    expect(t.project).toEqual({ aspect: "16:9", background: "#102030" });
     expect(t.duration).toBeCloseTo(RICH_CLIP_S / 1.25 + RICH_CLIP_S, 5);
   });
 

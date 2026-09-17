@@ -403,10 +403,6 @@ export interface EditorState {
   guideLines: GuideLines;
   /** Guides stay chosen but draw nothing (⌘;). Not a doc field. */
   guidesHidden: boolean;
-  /** Whole-video fades, seconds (0 = off): in from black at the start, out to
-   * black at the end of the cut. Applied to the final picture and mix. */
-  fadeIn: number;
-  fadeOut: number;
   /** The frame's own color, behind every clip and element. A cut made of
    * nothing but titles and shapes plays over it, a fitted clip letterboxes
    * into it, and a gap on track 0 shows it. */
@@ -508,11 +504,8 @@ export interface EditorState {
   addGuideLine: (axis: "v" | "h") => void;
   moveGuideLine: (axis: "v" | "h", index: number, at: number) => void;
   removeGuideLine: (axis: "v" | "h", index: number) => void;
-  /** Set the whole-video fade in/out (seconds; 0 clears). Like the aspect,
-   * project-level settings sit outside the undo history. */
-  setProjectFade: (patch: { fadeIn?: number; fadeOut?: number }) => void;
   /** Set the frame color. Project-level, so it sits outside undo like the
-   * aspect and the fades. */
+   * aspect. */
   setBackground: (hex: string) => void;
   addAsset: (asset: MediaAsset) => void;
   updateAsset: (id: string, patch: Partial<MediaAsset>) => void;
@@ -1308,8 +1301,6 @@ const DOC_KEYS = [
   "aspect",
   "guides",
   "guideLines",
-  "fadeIn",
-  "fadeOut",
   "background",
   "publish",
   "notes",
@@ -1692,8 +1683,6 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         guides: [],
         guidesHidden: false,
         guideLines: EMPTY_GUIDE_LINES,
-        fadeIn: 0,
-        fadeOut: 0,
         background: DEFAULT_BACKGROUND,
         selection: null,
         multiSelection: [],
@@ -1746,8 +1735,6 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     guides: [],
     guidesHidden: false,
     guideLines: EMPTY_GUIDE_LINES,
-    fadeIn: 0,
-    fadeOut: 0,
     background: DEFAULT_BACKGROUND,
     selection: null,
     multiSelection: [],
@@ -2068,8 +2055,6 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           guides: sanitizeGuides(doc.guides),
           guidesHidden: false,
           guideLines: sanitizeGuideLines(doc.guideLines),
-          fadeIn: state.fadeIn,
-          fadeOut: state.fadeOut,
           background: state.background,
           // View state lives in IndexedDB; doc.ui covers projects saved
           // before the move.
@@ -2338,15 +2323,6 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         guideLines: { ...s.guideLines, [axis]: s.guideLines[axis].filter((_, i) => i !== index) },
       }));
     },
-    setProjectFade: (patch) => {
-      const clamp = (v: number | undefined) =>
-        v === undefined ? undefined : Math.max(0, Math.min(TRANSITION_MAX, v));
-      set((s) => ({
-        fadeIn: clamp(patch.fadeIn) ?? s.fadeIn,
-        fadeOut: clamp(patch.fadeOut) ?? s.fadeOut,
-      }));
-    },
-
     setBackground: (hex) => set({ background: projectBackground(hex) }),
 
     addAsset: (asset) =>
@@ -4861,8 +4837,6 @@ export function serializeDoc(s: {
   aspect: Aspect;
   guides: GuideId[];
   guideLines: GuideLines;
-  fadeIn: number;
-  fadeOut: number;
   background: string;
   publish: { caption: string; tags: string; soundTitle: string; handle: string };
   notes: { text: string; publishedAt: string; links: string[] };
@@ -4885,8 +4859,6 @@ export function serializeDoc(s: {
     aspect: s.aspect,
     guides: s.guides,
     guideLines: s.guideLines,
-    fadeIn: s.fadeIn,
-    fadeOut: s.fadeOut,
     background: s.background,
     subtitles: s.subtitles,
     publish: { ...s.publish },
@@ -5482,8 +5454,6 @@ export function normalizeDocState(
   overlays: Overlay[];
   subtitles: SubtitlesBlock;
   aspect: Aspect | null;
-  fadeIn: number;
-  fadeOut: number;
   background: string;
 } {
   const docClips = doc.clips ?? [];
@@ -5550,8 +5520,6 @@ export function normalizeDocState(
     overlays: withLooks.overlays,
     subtitles: { ...subtitles, cues: merged.cues },
     aspect: normalizeAspect(doc.aspect) ?? null,
-    fadeIn: doc.fadeIn ?? 0,
-    fadeOut: doc.fadeOut ?? 0,
     background: projectBackground(doc.background),
   };
 }
