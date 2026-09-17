@@ -43,7 +43,11 @@ export async function resolveVoiceAsk(wanted?: string): Promise<string> {
       { voice: VOICE_QUESTION },
     );
     const pick = answers.voice;
-    return pick.confidence >= cutJudge().voicePick && SPEECH_VOICES.some((v) => v.id === pick.choice)
+    // The winner's own probability, not the spread of the distribution: over
+    // twenty voices every plausible match takes a share, so a correct pick
+    // reads as low confidence.
+    const p = pick.probabilities[pick.choice] ?? 0;
+    return p >= cutJudge().voicePick && SPEECH_VOICES.some((v) => v.id === pick.choice)
       ? pick.choice
       : DEFAULT_VOICE;
   } catch {

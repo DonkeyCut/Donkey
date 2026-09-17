@@ -19,16 +19,16 @@ export const PROVIDER_FAILURE_QUESTION = choice(
   },
 );
 
-/** The class a judgment cannot commit to. */
-const CONFIDENCE_FLOOR = 0.5;
+/** The probability the named class has to carry to be acted on. */
+const COMMIT_FLOOR = 0.5;
 
-/** Classify a failure's cause from the judge's answer; below the confidence
- * floor it reads as "other". */
+/** Classify a failure's cause from the judge's answer. The class commits on
+ * its own probability; a winner the judgment spreads thin reads as "other". */
 export function providerFailureClass(answer: {
   choice: ProviderFailureClass;
-  confidence: number;
+  probabilities: Record<string, number>;
 }): ProviderFailureClass {
-  return answer.confidence >= CONFIDENCE_FLOOR ? answer.choice : "other";
+  return (answer.probabilities[answer.choice] ?? 0) >= COMMIT_FLOOR ? answer.choice : "other";
 }
 
 /** The failure class of a provider error, judged through the hosted judge.
