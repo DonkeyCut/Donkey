@@ -69,6 +69,13 @@ class decides whether the render ladder may drop to its text-only rung and
 whether a music prompt is worth rewriting, so a case is added whenever a new
 error reached us and was read wrong.
 
+## Nightly
+
+`.github/workflows/nightly-evals.yml` runs the evals a GitHub runner can carry,
+grouped by what each needs: a process, a browser, a dev server. The evals that
+ask a live model are run by hand, because a runner has no key, no database of
+its own and no budget to spend.
+
 ## The report
 
 A full run writes `evals/cut-chat.latest-report.json` (schema
