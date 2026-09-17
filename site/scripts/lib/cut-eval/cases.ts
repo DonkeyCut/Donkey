@@ -13,6 +13,7 @@ import { gradePresetsInCategory } from "@donkeycut/effects-kit";
 import {
   AUDIO_STATE,
   CLIP_REFS,
+  EDITOR_STATE,
   CROSSFADED_STATE,
   FILLER_STATE,
   makeSceneSim,
@@ -152,8 +153,36 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       ],
       reply: /photo|movie|timeline|cut/i,
       requiredTools: ["add_clip"],
+      // Each photo lands as its own clip and the snapshot grows with it. A
+      // stub that returned the same clip twice, under a get_state that never
+      // showed either, read as calls that did nothing, and the turn retried
+      // them a dozen times.
+      simulate: () => {
+        const placed: Record<string, unknown>[] = [];
+        return (name) => {
+          if (name === "add_clip") {
+            const i = placed.length;
+            const clip = {
+              index: 1 + i,
+              id: `c-new${1 + i}`,
+              asset: PHOTO_ASSETS[Math.min(i, PHOTO_ASSETS.length - 1)].name,
+              start: 12.5 + i * 8,
+              len: 8,
+              in: 0,
+              out: 8,
+              muted: false,
+              framing: "fit",
+              speed: 1,
+            };
+            placed.push(clip);
+            return { ...clip, kind: "image" };
+          }
+          if (name === "get_state" && placed.length > 0)
+            return { ...EDITOR_STATE, videoTrack: [...EDITOR_STATE.videoTrack, ...placed] };
+          return undefined;
+        };
+      },
       stubs: {
-        add_clip: { id: "c-new", kind: "image", index: 1, start: 12.5, len: 8 },
         set_transition: { ok: true },
         add_title: { ok: true },
       },
