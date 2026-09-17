@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, CloudUpload, Loader2, Maximize2, Mic, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, CloudUpload, ExternalLink, Loader2, Maximize2, Mic, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +39,7 @@ import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { useEnvironment } from "@/cut/lib/environment";
-import { requestHostFullscreen, useHostDisplayMode } from "@/cut/lib/hostBridge";
+import { openThroughHost, projectPageUrl, requestHostFullscreen, useHostDisplayMode } from "@/cut/lib/hostBridge";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
 import { COLOR_PRESETS, ColorPicker } from "@/cut/components/ColorField";
@@ -54,6 +54,22 @@ function AspectIcon({ aspect, className }: { aspect: Aspect; className?: string 
   const o = aspectOrientation(aspect);
   const Icon = o === "square" ? Square : o === "landscape" ? Monitor : Smartphone;
   return <Icon className={className} />;
+}
+
+/**
+ * A toolbar action's name, in the app's own tooltip. The trigger is a wrapper
+ * rather than the button, so a disabled button — which swallows pointer events
+ * — still has its reason shown on hover.
+ */
+function ActionTip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger render={<span className="inline-flex" />}>{children}</TooltipTrigger>
+        <TooltipContent side="bottom">{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 export function TopBar({
@@ -337,7 +353,11 @@ export function TopBar({
 
   // One set of actions rendered both ways: labelled, and icon-only when the
   // bar tightens. Chat keeps its label in both — it is the primary control.
-  const actionButtons = (compact: boolean) => (
+  // The card is a narrow surface with its own chrome around it, so its actions
+  // are icons whatever the width; the tooltip carries the name.
+  const actionButtons = (compact: boolean) => {
+    const icons = compact || chatgpt;
+    return (
     <>
       {(cutMode === "cloud" || cutMode === "browser") && !chatgpt && (
         // Shares are served from the cloud, so for a browser project the
@@ -376,43 +396,58 @@ export function TopBar({
           </Tooltip>
         </TooltipProvider>
       )}
-      <Button
-        variant="ghost"
-        size={compact ? "icon-sm" : "sm"}
-        aria-label="Export"
-        // A render reads the saved document, which an import still uploading
-        // (or one that failed) is deliberately absent from — exporting now
-        // would quietly leave it out of the video.
-        disabled={!hasPicture || cloudUploading || failedImports > 0}
-        title={
+      <ActionTip
+        label={
           failedImports > 0
             ? "Retry the failed imports first"
             : cloudUploading
               ? finishingLabel
-              : compact
-                ? "Export"
-                : undefined
+              : "Export"
         }
-        onClick={() => {
-          const s = useEditor.getState();
-          s.setPlaying(false);
-          s.setExportOpen(true);
-        }}
       >
-        <Upload data-icon={compact ? undefined : "inline-start"} />
-        {!compact && "Export"}
-      </Button>
-      {chatgpt && hostMode !== "fullscreen" && (
         <Button
           variant="ghost"
-          size={compact ? "icon-sm" : "sm"}
-          aria-label="Fullscreen"
-          title={compact ? "Fullscreen" : undefined}
-          onClick={requestHostFullscreen}
+          size={icons ? "icon-sm" : "sm"}
+          aria-label="Export"
+          // A render reads the saved document, which an import still uploading
+          // (or one that failed) is deliberately absent from — exporting now
+          // would quietly leave it out of the video.
+          disabled={!hasPicture || cloudUploading || failedImports > 0}
+          onClick={() => {
+            const s = useEditor.getState();
+            s.setPlaying(false);
+            s.setExportOpen(true);
+          }}
         >
-          <Maximize2 data-icon={compact ? undefined : "inline-start"} />
-          {!compact && "Fullscreen"}
+          <Upload data-icon={icons ? undefined : "inline-start"} />
+          {!icons && "Export"}
         </Button>
+      </ActionTip>
+      {chatgpt && (
+        <ActionTip label="Open in Donkey Cut">
+          <Button
+            variant="ghost"
+            size={icons ? "icon-sm" : "sm"}
+            aria-label="Open in Donkey Cut"
+            onClick={() => openThroughHost(projectPageUrl())}
+          >
+            <ExternalLink data-icon={icons ? undefined : "inline-start"} />
+            {!icons && "Open"}
+          </Button>
+        </ActionTip>
+      )}
+      {chatgpt && hostMode !== "fullscreen" && (
+        <ActionTip label="Fullscreen">
+          <Button
+            variant="ghost"
+            size={icons ? "icon-sm" : "sm"}
+            aria-label="Fullscreen"
+            onClick={requestHostFullscreen}
+          >
+            <Maximize2 data-icon={icons ? undefined : "inline-start"} />
+            {!icons && "Fullscreen"}
+          </Button>
+        </ActionTip>
       )}
       {!chatgpt && <Button
         variant={aiOpen ? "default" : "outline"}
@@ -430,6 +465,21 @@ export function TopBar({
         {!aiOpen && <ChatStatusBadge status={chatStatus} />}
       </Button>}
     </>
+    );
+  };
+
+  // ChatGPT draws its own Donkey Cut header above the frame, so the card's bar
+  // carries the project name alone.
+  const logo = chatgpt ? null : (
+    <span className="grid size-[22px] shrink-0 place-items-center">
+      <img
+        src="/donkey-logo.svg"
+        alt="Donkey"
+        width={22}
+        height={22}
+        className="block h-full w-full object-contain"
+      />
+    </span>
   );
 
   return (
@@ -448,15 +498,7 @@ export function TopBar({
         >
           <ChevronLeft />
         </Button>}
-        <span className="grid size-[22px] shrink-0 place-items-center">
-          <img
-            src="/donkey-logo.svg"
-            alt="Donkey"
-            width={22}
-            height={22}
-            className="block h-full w-full object-contain"
-          />
-        </span>
+        {logo}
         {editing ? (
           <input
             autoFocus

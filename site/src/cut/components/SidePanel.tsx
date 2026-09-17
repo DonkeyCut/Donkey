@@ -378,7 +378,13 @@ export function SidePanel({
             <button
               className={tileClass}
               aria-pressed={tab === id}
-              onClick={() => setTab(tab === id ? null : id)}
+              onClick={() => {
+                // In the card the panel and the inspector share the room next
+                // to the preview, so opening one closes the other. The clip
+                // stays where it is; clicking it again brings its panel back.
+                if (chatgpt && tab !== id) useEditor.getState().select(null);
+                setTab(tab === id ? null : id);
+              }}
               onDragOver={(e) => {
                 if (!acceptsDrop(id, e)) return;
                 e.preventDefault();

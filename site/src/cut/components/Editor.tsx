@@ -197,6 +197,13 @@ export function Editor({
     if (s.multiSelection.filter((m) => m && m.kind !== "cue" && m.kind !== "transition").length >= 2) return true;
     return s.selection.kind !== "cue" && s.selection.kind !== "transition";
   });
+  // A card is the width of a chat message: the files panel, the preview and
+  // the inspector do not fit side by side, and the row would spill past the
+  // frame's edge with nothing to scroll it back. Selecting something gives the
+  // inspector that room, and the rail brings the panel back.
+  useEffect(() => {
+    if (chatgpt && hasInspector) requestSidePanel(null);
+  }, [chatgpt, hasInspector]);
   const [importing, setImporting] = useState(0);
   // Files being probed and named, plus the ones already placed whose bytes are
   // still going out — both are work the save indicator reports. A library file
