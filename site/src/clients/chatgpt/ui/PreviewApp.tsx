@@ -13,8 +13,7 @@ export function PreviewApp() {
   // The editor is the card: its own chrome carries every control. Inline, one
   // control asks the host for the whole window.
   if (editor && project) return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"}>
-    {!fullscreen && <button className="fullscreen" onClick={() => void requestFullscreen()} aria-label="Fullscreen">⤢</button>}
-    <EditorFrame url={editor.url} name={project.name} inset={hostInset} />
+    <EditorFrame url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onFullscreen={requestFullscreen} />
   </main>;
   return <main aria-busy={busy}>
     <header><span className="brand">Donkey Cut</span><span>Cloud projects</span></header>
@@ -53,16 +52,19 @@ export function PreviewApp() {
   </main>;
 }
 
-/** The editor, framed. It learns how tall the host's bottom overlay is when
- * it loads, whenever that changes, and whenever it asks. */
-function EditorFrame({ url, name, inset }: { url: string; name: string; inset: number }) {
+/** The editor, framed. It learns the host's display mode and how tall the
+ * bottom overlay is when it loads, whenever that changes, and whenever it
+ * asks; its own toolbar asks for fullscreen. */
+function EditorFrame({ url, name, inset, fullscreen, onFullscreen }: { url: string; name: string; inset: number; fullscreen: boolean; onFullscreen: () => void }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const origin = new URL(url).origin;
-  const tell = () => frame.current?.contentWindow?.postMessage({ type: "donkeycut:host-inset", insetBottom: inset }, origin);
-  useEffect(tell, [inset, origin]);
+  const tell = () => frame.current?.contentWindow?.postMessage({ type: "donkeycut:host", insetBottom: inset, displayMode: fullscreen ? "fullscreen" : "inline" }, origin);
+  useEffect(tell, [inset, fullscreen, origin]);
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.origin === origin && event.source === frame.current?.contentWindow && event.data?.type === "donkeycut:host-inset?") tell();
+      if (event.origin !== origin || event.source !== frame.current?.contentWindow) return;
+      if (event.data?.type === "donkeycut:host?") tell();
+      if (event.data?.type === "donkeycut:fullscreen") onFullscreen();
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);

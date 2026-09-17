@@ -1,7 +1,9 @@
 "use client";
 
 import { chatRuntime } from "@/cut/lib/chatRuntime";
-import { useHostInset } from "@/cut/lib/hostInset";
+import { useHostBridge } from "@/cut/lib/hostBridge";
+import { useCutMode } from "@/cut/lib/backend/hooks";
+import { useHostCommands } from "@/cut/lib/hostCommands";
 import { useEnvironment } from "@/cut/lib/environment";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -64,7 +66,7 @@ import {
   shortcutDecline,
   shortcutReached,
 } from "@/cut/lib/shortcutGate";
-import { docAudioClips, docClips, docOverlays, projectDuration, serializeDoc, storedAssets, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
+import { docAudioClips, docClips, docOverlays, projectDuration, serializeDoc, storedAssets, timelineHMax, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
 import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { landOnRow } from "@/cut/lib/laneTracks";
 import { playheadAt, previewAt, skimAt } from "@/cut/lib/playhead";
@@ -167,8 +169,23 @@ export function Editor({
   const aiOpen = useEditor((s) => s.aiOpen);
   const timelineOpen = useEditor((s) => s.timelineOpen);
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
-  useHostInset();
+  useHostBridge();
+  // The timeline's height is bounded by the window, and the window changes
+  // size under it: a browser resize, or the ChatGPT card leaving fullscreen.
+  // The clamp is for this window only, so the height the user chose stays
+  // saved and comes back when the window grows again.
+  useEffect(() => {
+    const clamp = () => {
+      const max = timelineHMax();
+      if (useEditor.getState().timelineH > max) useEditor.setState({ timelineH: max });
+    };
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, []);
   const { chatgpt } = useEnvironment();
+  const cutMode = useCutMode();
+  // ChatGPT's edits run in this editor while it is the card.
+  useHostCommands(projectId, chatgpt && cutMode === "cloud");
   // The inspector only earns its column when the selection has a panel to
   // show; otherwise (nothing selected, a subtitle cue, a transition bar — the
   // Transitions tab is its panel) it is an empty white panel, so collapse it

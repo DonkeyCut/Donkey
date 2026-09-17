@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, ChevronLeft, CloudUpload, Loader2, Mic, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, CloudUpload, Loader2, Maximize2, Mic, Monitor, MoreHorizontal, Ratio, Share2, Smartphone, Sparkles, Square, Upload, Video } from "lucide-react";
 import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,10 +39,11 @@ import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { useEnvironment } from "@/cut/lib/environment";
+import { requestHostFullscreen, useHostDisplayMode } from "@/cut/lib/hostBridge";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
-import { cn } from "@/lib/utils";
 import { COLOR_PRESETS, ColorPicker } from "@/cut/components/ColorField";
+import { cn } from "@/lib/utils";
 import { CreditsPill } from "./CreditsPill";
 import { RecordDialog, type RecordMode } from "./RecordDialog";
 import { ShareDialog } from "./ShareDialog";
@@ -81,14 +82,15 @@ export function TopBar({
   // titles and shapes over the background frame exports like any other.
   const hasPicture = useEditor((s) => projectDuration(s) > 0);
   const aspect = useEditor((s) => s.aspect);
-  const projectName = useEditor((s) => s.projectName);
   const background = useEditor((s) => s.background);
+  const projectName = useEditor((s) => s.projectName);
   const saveState = useEditor((s) => s.saveState);
   const aiOpen = useEditor((s) => s.aiOpen);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
   const { chatgpt } = useEnvironment();
+  const hostMode = useHostDisplayMode();
   // The right-hand actions step down as the bar tightens: full labels →
   // icon-only Share/Cloud/Export → everything in a … menu. The credits and
   // storage pills never fold. Which step fits is measured against hidden copies of the
@@ -337,7 +339,7 @@ export function TopBar({
   // bar tightens. Chat keeps its label in both — it is the primary control.
   const actionButtons = (compact: boolean) => (
     <>
-      {(cutMode === "cloud" || cutMode === "browser") && (
+      {(cutMode === "cloud" || cutMode === "browser") && !chatgpt && (
         // Shares are served from the cloud, so for a browser project the
         // Share button leads to the move that makes sharing possible.
         <Button
@@ -400,6 +402,18 @@ export function TopBar({
         <Upload data-icon={compact ? undefined : "inline-start"} />
         {!compact && "Export"}
       </Button>
+      {chatgpt && hostMode !== "fullscreen" && (
+        <Button
+          variant="ghost"
+          size={compact ? "icon-sm" : "sm"}
+          aria-label="Fullscreen"
+          title={compact ? "Fullscreen" : undefined}
+          onClick={requestHostFullscreen}
+        >
+          <Maximize2 data-icon={compact ? undefined : "inline-start"} />
+          {!compact && "Fullscreen"}
+        </Button>
+      )}
       {!chatgpt && <Button
         variant={aiOpen ? "default" : "outline"}
         size="sm"
@@ -542,20 +556,6 @@ export function TopBar({
                 </span>
                 {showCustomEditor && <Check className="size-3.5 text-muted-foreground" />}
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          );
-          return showCustomEditor ? (
-            <div
-              className={cn(
-                "aspect-switch flex items-center gap-1 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-xs",
-                customInvalid ? "border-destructive text-destructive" : "border-border"
-              )}
-              title={customInvalid ? "Up to an 8:1 shape" : undefined}
-              // The session ends when focus leaves the pill entirely. Moving
-              // between the two fields (or to the chevron) stays inside it, so a
-              // half-typed side is never settled out from under the user.
-              onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) endEditing();
               <DropdownMenuSeparator />
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
@@ -583,6 +583,20 @@ export function TopBar({
                   </div>
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
+            </DropdownMenuContent>
+          );
+          return showCustomEditor ? (
+            <div
+              className={cn(
+                "aspect-switch flex items-center gap-1 rounded-full border bg-card px-3 py-1.5 text-xs font-medium shadow-xs",
+                customInvalid ? "border-destructive text-destructive" : "border-border"
+              )}
+              title={customInvalid ? "Up to an 8:1 shape" : undefined}
+              // The session ends when focus leaves the pill entirely. Moving
+              // between the two fields (or to the chevron) stays inside it, so a
+              // half-typed side is never settled out from under the user.
+              onBlur={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) endEditing();
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") commitCustom();
@@ -702,7 +716,7 @@ export function TopBar({
                 {!aiOpen && <ChatStatusBadge status={chatStatus} />}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
-                {cutMode === "cloud" && (
+                {cutMode === "cloud" && !chatgpt && (
                   <DropdownMenuItem onClick={() => setShareOpen(true)}>
                     <Share2 /> Share
                   </DropdownMenuItem>

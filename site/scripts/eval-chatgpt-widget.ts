@@ -14,7 +14,7 @@ const server = Bun.serve({ port: 0, fetch(request) {
   const url = new URL(request.url);
   if (url.pathname === "/widget") return new Response(widgetHtml(url.origin), { headers: { "Content-Type": "text/html" } });
   if (url.pathname === "/preview.mp4") return new Response(Bun.file(video));
-  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host-inset') document.getElementById('inset').textContent = String(e.data.insetBottom); }); parent.postMessage({ type: 'donkeycut:host-inset?' }, '*');</script>`, { headers: { "Content-Type": "text/html" } });
+  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><p id="mode"></p><button id="full" onclick="parent.postMessage({ type: 'donkeycut:fullscreen' }, '*')">Fullscreen</button><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host') { document.getElementById('inset').textContent = String(e.data.insetBottom); document.getElementById('mode').textContent = e.data.displayMode; } }); parent.postMessage({ type: 'donkeycut:host?' }, '*');</script>`, { headers: { "Content-Type": "text/html" } });
   if (url.pathname.startsWith("/clients/chatgpt/")) return new Response(Bun.file(path.join(root, "public/clients/chatgpt", path.basename(url.pathname))));
   return new Response(hostHtml, { headers: { "Content-Type": "text/html" } });
 } });
@@ -79,10 +79,11 @@ try {
   await app.getByRole("button", { name: "Launch film" }).click();
   await app.frameLocator("iframe.editor").locator("#editor").waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen"], "the editor asks for the whole window on open");
-  assert.equal(await app.locator("button").count(), 1, "inline, the editor card keeps one control: fullscreen");
+  assert.equal(await app.locator("button").count(), 0, "the editor card has no controls of its own");
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^0$/ }).waitFor();
-  await app.getByRole("button", { name: "Fullscreen" }).click();
-  await app.locator("button.fullscreen").waitFor({ state: "detached" });
+  await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();
+  await app.frameLocator("iframe.editor").getByRole("button", { name: "Fullscreen" }).click();
+  await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^fullscreen$/ }).waitFor();
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^120$/ }).waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen", "fullscreen"], "the button asks again and the granted mode hides it");
   await page.screenshot({ path: "/tmp/donkey-chatgpt-widget-editor.png" });

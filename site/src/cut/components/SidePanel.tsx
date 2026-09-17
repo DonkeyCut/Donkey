@@ -769,7 +769,6 @@ function ProjectFilesPanel({
   importing: boolean;
 }) {
   const caps = useCutCaps();
-  const { chatgpt } = useEnvironment();
   // Only user-imported media lives here; anything Cut created (recordings, AI
   // generations, voiceovers, freeze frames, stock adds) is tagged with an
   // `origin` and stays where it was made.
@@ -1180,7 +1179,7 @@ function ProjectFilesPanel({
                       >
                         <FolderOpen />
                       </Button>
-                    ) : chatgpt ? null : (
+                    ) : (
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -1379,7 +1378,6 @@ function AssetCard({
   onDragLanded?: () => void;
 }) {
   const caps = useCutCaps();
-  const { chatgpt } = useEnvironment();
   const [saved, setSaved] = useState(false);
   // Number of timeline items that would be cascade-deleted; null = no prompt.
   const [confirmUses, setConfirmUses] = useState<number | null>(null);
@@ -1540,12 +1538,12 @@ function AssetCard({
                 <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
                   <FolderPlus /> Save to library
                 </DropdownMenuItem>
-                {!chatgpt && <DropdownMenuItem
+                <DropdownMenuItem
                   onClick={() => downloadMedia(projectId, asset)}
                   disabled={!!asset.upload}
                 >
                   <Download /> Download
-                </DropdownMenuItem>}
+                </DropdownMenuItem>
                 {caps.revealInFinder && (
                   <DropdownMenuItem
                     onClick={() => void revealMedia(projectId, asset.fileName).catch(() => {})}
