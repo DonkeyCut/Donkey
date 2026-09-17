@@ -1171,7 +1171,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const runsOn =
           prev !== null &&
           last !== undefined &&
-          ((prev.cueId === w.cueId && prev.i === w.i - 1) || w.t0 - prev.t1 <= WORD_GAP);
+          prev.cueId === w.cueId &&
+          (prev.i === w.i - 1 || w.t0 - prev.t1 <= WORD_GAP);
         if (last && runsOn) {
           last.words.push(w.w);
           last.t1 = w.t1;
