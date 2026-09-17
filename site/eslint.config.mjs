@@ -60,6 +60,10 @@ const eslintConfig = defineConfig([
               ],
               message: "Name a model role (geminiModelRoleNames); the responses route resolves the id.",
             },
+            {
+              name: "@/lib/inference/typesafe-models",
+              message: "The judge route pins the model; post to /api/inference/judge.",
+            },
           ],
         },
       ],

@@ -93,6 +93,50 @@ export const SETTINGS = defineSettings({
     title: "Chat continuity",
     description: "Project and conversation refresh cadence, scene ownership expiry, and saved engine transcript size.",
   },
+  cutJudge: {
+    schema: z
+      .object({
+        // Preload the skill the judge picks for the turn; off leaves the model
+        // to read skills on its own.
+        skillSuggestion: z.boolean(),
+        // Mean of the "does this turn want a skill" questions below which no
+        // skill is attached.
+        skillGate: z.number().min(0).max(1),
+        // The winning skill's own fit below which it is dropped.
+        skillFits: z.number().min(0).max(1),
+        // Declare only the tool areas the judge routes to; off declares the
+        // whole catalog on every turn.
+        toolRouting: z.boolean(),
+        // An area's probability at or above which its tools are declared.
+        toolArea: z.number().min(0).max(1),
+        // How long the first model round waits for the judge before going out
+        // with the full catalog and no skill.
+        judgeWaitMs: z.number().int().min(0).max(2000),
+        // A stock candidate's fit below which it is left out of a search.
+        stockFit: z.number().min(0).max(1),
+        // A transcript word's disfluency probability at or above which
+        // find_filler reports it.
+        fillerCut: z.number().min(0).max(1),
+        // The confidence below which a described voice falls back to the default.
+        voicePick: z.number().min(0).max(1),
+      })
+      .strict(),
+    default: {
+      skillSuggestion: true,
+      skillGate: 0.4,
+      skillFits: 0.3,
+      toolRouting: true,
+      toolArea: 0.2,
+      judgeWaitMs: 400,
+      stockFit: 0.5,
+      fillerCut: 0.5,
+      voicePick: 0.4,
+    },
+    public: true,
+    title: "Chat judgments",
+    description:
+      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), rank stock, find filler words, and resolve described voices.",
+  },
   experimentResults: {
     schema: z
       .object({

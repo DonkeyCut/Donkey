@@ -6,6 +6,7 @@ import {
   elevenLabsModels,
   type ElevenLabsRunModel,
 } from "@/lib/inference/elevenlabs-models";
+import { typesafeModels, typesafeProviderId } from "@/lib/inference/typesafe-models";
 import {
   geminiModels,
   geminiMusicModels,
@@ -72,7 +73,28 @@ export function providerCreditPricing(
   if (normalizedProvider === "fal") {
     return falMatteCreditPricing(normalizedModel);
   }
+  // The judge id is hardcoded (typesafe-models.ts); a judgment bills its input
+  // tokens, and the answers are free.
+  if (normalizedProvider === typesafeProviderId) {
+    return typesafeCreditPricing(normalizedModel);
+  }
 
+  return undefined;
+}
+
+// TypeSafe System One (Jev): $0.042 per 1M input tokens, output free
+// (2026-09). A request for `jev-latest` reports the dated id it ran on, so
+// the family prefix matches both.
+const typesafeJudgePricing = textAudioTokenPricing({
+  input: "0.042",
+  cachedInput: "0.042",
+  output: "0",
+});
+
+function typesafeCreditPricing(model: string): ProviderCreditPricing | undefined {
+  if (model === typesafeModels.jev || modelMatches(model, "jev")) {
+    return typesafeJudgePricing;
+  }
   return undefined;
 }
 
