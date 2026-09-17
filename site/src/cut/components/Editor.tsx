@@ -1,6 +1,8 @@
 "use client";
 
 import { chatRuntime } from "@/cut/lib/chatRuntime";
+import { useHostInset } from "@/cut/lib/hostInset";
+import { useEnvironment } from "@/cut/lib/environment";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Clapperboard, Laptop, Loader2, X } from "lucide-react";
@@ -165,6 +167,8 @@ export function Editor({
   const aiOpen = useEditor((s) => s.aiOpen);
   const timelineOpen = useEditor((s) => s.timelineOpen);
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
+  useHostInset();
+  const { chatgpt } = useEnvironment();
   // The inspector only earns its column when the selection has a panel to
   // show; otherwise (nothing selected, a subtitle cue, a transition bar — the
   // Transitions tab is its panel) it is an empty white panel, so collapse it
@@ -1264,7 +1268,7 @@ export function Editor({
           </div>
         )}
       </div>
-      {(!viewer || sharedFeatures?.chat) && (
+      {(!viewer || sharedFeatures?.chat) && !chatgpt && (
         <AiPanel
           key={projectId}
           projectId={projectId}

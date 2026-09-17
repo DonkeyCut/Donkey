@@ -754,7 +754,8 @@ function ShowTimelineButton() {
       title="Show timeline"
       aria-label="Show timeline"
       onClick={() => useEditor.getState().setTimelineOpen(true)}
-      className="absolute right-3 bottom-3 z-20 grid size-8 place-items-center rounded-full border bg-background/95 text-foreground shadow-md backdrop-blur hover:bg-accent"
+      style={{ bottom: "calc(0.75rem + var(--host-inset-bottom, 0px))" }}
+      className="absolute right-3 z-20 grid size-8 place-items-center rounded-full border bg-background/95 text-foreground shadow-md backdrop-blur hover:bg-accent"
     >
       <PanelTopClose className="size-4" />
     </button>

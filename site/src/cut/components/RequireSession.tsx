@@ -1,7 +1,8 @@
 "use client";
 import { bindChatRuntime } from "@/cut/lib/chatRuntime";
 
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useEnvironment } from "@/cut/lib/environment";
 
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import {
@@ -29,10 +30,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
   // Framed by the ChatGPT card, the page carries its own partitioned session;
   // a browser that dropped it gets a link out, since sign-in cannot run in a
   // frame.
-  const embedded = useMemo(
-    () => typeof window !== "undefined" && window.self !== window.top && new URLSearchParams(window.location.search).get("embed") === "chatgpt",
-    [],
-  );
+  const { chatgpt: embedded } = useEnvironment();
 
   useAppLoaded("cut", session?.user);
 

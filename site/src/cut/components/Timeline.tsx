@@ -2202,8 +2202,8 @@ export function Timeline() {
         >
           <div
             ref={innerRef}
-            className="tl-content relative flex-1 pb-2"
-            style={{ width: contentW, marginLeft: PAD_SIDE }}
+            className="tl-content relative flex-1"
+            style={{ width: contentW, marginLeft: PAD_SIDE, paddingBottom: "calc(0.5rem + var(--host-inset-bottom, 0px))" }}
             onPointerDown={deselectIfSelf}
           >
           {/* An empty project reads as a stack of resting tracks: the same

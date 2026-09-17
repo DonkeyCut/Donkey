@@ -113,6 +113,7 @@ import {
 import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
 import { useEditor } from "@/cut/lib/store";
+import { useEnvironment } from "@/cut/lib/environment";
 import { formatTime } from "@/cut/lib/time";
 import { useLocalPref } from "@/cut/lib/uiState";
 import type { MediaAsset, SidePanelTab } from "@/cut/lib/types";
@@ -181,7 +182,12 @@ export function SidePanel({
   // withholds sits locked, and hovering it says why. The Library is the
   // viewer's own cross-project shelf and never appears there.
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
+  const { chatgpt } = useEnvironment();
+  // Inside ChatGPT the card shows no credits, so the tabs that spend them
+  // stay out of the rail.
+  const spends = (id: Tab) => id === "video" || id === "image" || id === "audio" || id === "subtitles";
   const offered = (id: Tab): boolean =>
+    (!chatgpt || !spends(id)) && (
     !sharedFeatures ||
     (id === "media"
       ? sharedFeatures.media
@@ -191,7 +197,7 @@ export function SidePanel({
           ? sharedFeatures.subtitles
           : id === "publish"
             ? sharedFeatures.details
-            : false);
+            : false));
   const visibleTabs = TABS.filter(({ id }) => offered(id));
   // `null` collapses the panel: clicking the active tab unselects it, leaving
   // just the icon rail so the video canvas takes the freed width.
@@ -766,6 +772,7 @@ function ProjectFilesPanel({
   importing: boolean;
 }) {
   const caps = useCutCaps();
+  const { chatgpt } = useEnvironment();
   // Only user-imported media lives here; anything Cut created (recordings, AI
   // generations, voiceovers, freeze frames, stock adds) is tagged with an
   // `origin` and stays where it was made.
@@ -1176,7 +1183,7 @@ function ProjectFilesPanel({
                       >
                         <FolderOpen />
                       </Button>
-                    ) : (
+                    ) : chatgpt ? null : (
                       <Button
                         variant="ghost"
                         size="icon-xs"
@@ -1375,6 +1382,7 @@ function AssetCard({
   onDragLanded?: () => void;
 }) {
   const caps = useCutCaps();
+  const { chatgpt } = useEnvironment();
   const [saved, setSaved] = useState(false);
   // Number of timeline items that would be cascade-deleted; null = no prompt.
   const [confirmUses, setConfirmUses] = useState<number | null>(null);
@@ -1535,12 +1543,12 @@ function AssetCard({
                 <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
                   <FolderPlus /> Save to library
                 </DropdownMenuItem>
-                <DropdownMenuItem
+                {!chatgpt && <DropdownMenuItem
                   onClick={() => downloadMedia(projectId, asset)}
                   disabled={!!asset.upload}
                 >
                   <Download /> Download
-                </DropdownMenuItem>
+                </DropdownMenuItem>}
                 {caps.revealInFinder && (
                   <DropdownMenuItem
                     onClick={() => void revealMedia(projectId, asset.fileName).catch(() => {})}

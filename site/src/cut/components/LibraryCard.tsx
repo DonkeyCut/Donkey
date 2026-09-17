@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useEnvironment } from "@/cut/lib/environment";
 import { Download, Ellipsis, ExternalLink, Film, Image as ImageIcon, Music, Plus, Share2, Trash2, Type } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -70,6 +71,7 @@ export function LibraryCard({
   onShare?: () => void;
   onDragStartExtra?: (e: React.DragEvent) => void;
 }) {
+  const { chatgpt } = useEnvironment();
   // ⌘C over the card copies its mention token. A card inside the current
   // selection carries the whole set, the same rule its drag follows. A font is
   // used from the font menu, so it names nothing a prompt can point a tool
@@ -381,7 +383,7 @@ export function LibraryCard({
                 onClick={(e) => e.stopPropagation()}
               >
                 {onShare && <DropdownMenuItem disabled={offline} onClick={onShare}><Share2 /> Share</DropdownMenuItem>}
-                {sharedMedia ? (
+                {chatgpt ? null : sharedMedia ? (
                   <DropdownMenuItem render={<a href={sharedMedia.downloadHref} />}>
                     <Download /> Download
                   </DropdownMenuItem>

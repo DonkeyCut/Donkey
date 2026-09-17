@@ -34,6 +34,7 @@ import { retryUpload } from "@/cut/lib/importQueue";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { projectDuration, useEditor } from "@/cut/lib/store";
+import { useEnvironment } from "@/cut/lib/environment";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { ASPECT_PRESETS, aspectLabel, aspectOrientation, normalizeAspect, parseRatio, type Aspect } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
@@ -81,6 +82,7 @@ export function TopBar({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [recordMode, setRecordMode] = useState<RecordMode | null>(null);
+  const { chatgpt } = useEnvironment();
   // The right-hand actions step down as the bar tightens: full labels →
   // icon-only Share/Cloud/Export → everything in a … menu. The credits and
   // storage pills never fold. Which step fits is measured against hidden copies of the
@@ -392,7 +394,7 @@ export function TopBar({
         <Upload data-icon={compact ? undefined : "inline-start"} />
         {!compact && "Export"}
       </Button>
-      <Button
+      {!chatgpt && <Button
         variant={aiOpen ? "default" : "outline"}
         size="sm"
         className="ai-toggle relative"
@@ -406,7 +408,7 @@ export function TopBar({
       >
         <Sparkles data-icon="inline-start" /> Chat
         {!aiOpen && <ChatStatusBadge status={chatStatus} />}
-      </Button>
+      </Button>}
     </>
   );
 
@@ -417,7 +419,7 @@ export function TopBar({
     // toward whichever side has slack instead of colliding with the rail.
     <header ref={headerRef} className="relative flex items-center border-b border-border bg-card">
       <div ref={leftRef} className="flex shrink-0 items-center gap-1 pl-2">
-        <Button
+        {!chatgpt && <Button
           variant="ghost"
           size="icon-sm"
           aria-label={`Back to ${back.tab}`}
@@ -425,7 +427,7 @@ export function TopBar({
           render={<Link href={back.href} />}
         >
           <ChevronLeft />
-        </Button>
+        </Button>}
         <span className="grid size-[22px] shrink-0 place-items-center">
           <img
             src="/donkey-logo.svg"
@@ -603,7 +605,7 @@ export function TopBar({
             </DropdownMenu>
           );
         })()}
-        <DropdownMenu>
+        {!chatgpt && <DropdownMenu>
           <DropdownMenuTrigger className="record-switch flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:text-foreground">
             <span className="size-2 rounded-full bg-red-500" aria-hidden />
             Record
@@ -617,7 +619,7 @@ export function TopBar({
               <Mic /> Record audio
             </DropdownMenuItem>
           </DropdownMenuContent>
-        </DropdownMenu>
+        </DropdownMenu>}
       </div>
       {recordMode && (
         <RecordDialog
@@ -633,8 +635,8 @@ export function TopBar({
           button. */}
       <div className="flex shrink-0 items-center gap-2 pr-3">
         <div ref={pillRef} className="flex items-center gap-2">
-          <SubscribeBonusPill />
-          <CreditsPill />
+          {!chatgpt && <SubscribeBonusPill />}
+          {!chatgpt && <CreditsPill />}
           <StoragePill />
         </div>
         <div className="relative flex items-center">
@@ -687,7 +689,7 @@ export function TopBar({
                 >
                   <Upload /> {cloudUploading ? finishingLabel : "Export"}
                 </DropdownMenuItem>
-                <DropdownMenuItem
+                {!chatgpt && <DropdownMenuItem
                   onClick={() => {
                     const s = useEditor.getState();
                     s.setAiOpen(!s.aiOpen);
@@ -696,7 +698,7 @@ export function TopBar({
                   <Sparkles />
                   <span className="relative flex-1">Chat{!aiOpen && <ChatStatusBadge status={chatStatus} />}</span>
                   {aiOpen && <Check className="size-3.5 text-muted-foreground" />}
-                </DropdownMenuItem>
+                </DropdownMenuItem>}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
