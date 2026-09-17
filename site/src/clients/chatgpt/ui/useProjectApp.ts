@@ -15,6 +15,8 @@ export function useProjectApp() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [hostInset, setHostInset] = useState(0);
+  const [editorRequest, setEditorRequest] = useState<string | null>(null);
+  const requested = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState(!document.hidden);
@@ -32,10 +34,12 @@ export function useProjectApp() {
     setView(parsed.data);
     setPlayback(media.success ? media.data : null);
     setDownload(file.success ? file.data : null);
-    // A one-use link that has already had its minute is a spent one: a card
-    // rehydrated later shows the preview, and Edit here mints a fresh link.
+    // A one-use link that has already had its minute is spent: a card
+    // rehydrated later asks the server for a fresh one, once.
     const embed = editorSchema.safeParse(result._meta?.editor);
-    if (embed.success && embed.data.expiresAt > Date.now()) setEditor(embed.data);
+    const fresh = embed.success && embed.data.expiresAt > Date.now();
+    if (fresh) setEditor(embed.data);
+    setEditorRequest(fresh || !parsed.data.canEdit || !parsed.data.project ? null : parsed.data.project.id);
     setError(null);
   }, []);
 
@@ -131,6 +135,12 @@ export function useProjectApp() {
   };
   const openDonkey = () => { if (view?.project) void openLink(view.project.url, "Could not open Donkey Cut."); };
   const openDownload = () => { if (download) void openLink(download.url, "Could not open the download."); };
+
+  useEffect(() => {
+    if (!ready || !editorRequest || editor || requested.current === editorRequest) return;
+    requested.current = editorRequest;
+    void run("open_project", { projectId: editorRequest }, false);
+  }, [ready, editorRequest, editor, run]);
 
   // The editor wants the whole window; the host grants what it supports.
   const requestFullscreen = useCallback(async () => {

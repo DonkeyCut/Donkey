@@ -283,14 +283,14 @@ export function projectTools(
       };
     },
     status: getPreviewStatus,
-    /** The project as the card shows it: the full editor, signed in through a
-     * one-use link, when the connection can edit; its preview otherwise. */
-    async open(projectId: string): Promise<ProjectResult> {
-      const current = await getPreviewStatus(projectId);
-      if (!canEdit) return current;
+    /** A project card is the full editor, signed in through a one-use link,
+     * whenever the connection can edit; a read-only one shows the preview. */
+    async withEditor(result: ProjectResult): Promise<ProjectResult> {
+      const projectId = result.view.project?.id;
+      if (!canEdit || !projectId || result.editor) return result;
       const code = await createEditorCode(identity.grantId, db);
       const url = `${config.issuer}/api/chatgpt/embed?code=${code}&project=${encodeURIComponent(projectId)}`;
-      return { ...current, editor: { url, expiresAt: Date.now() + 60_000 } };
+      return { ...result, editor: { url, expiresAt: Date.now() + 60_000 } };
     },
     async render(projectId: string): Promise<ProjectResult> {
       if (!canRender) {

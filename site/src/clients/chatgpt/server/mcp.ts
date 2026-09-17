@@ -130,7 +130,7 @@ export function createChatgptServer(
   });
   const runTool = async (run: () => Promise<ProjectResult>) => {
     try {
-      const { view, playback, download, editor } = await run();
+      const { view, playback, download, editor } = await projects.withEditor(await run());
       const media = liftMedia(view);
       const text = describeProjectView(view) + (editor ? "\nThe Donkey Cut editor is open in the card." : "");
       return {
@@ -182,7 +182,7 @@ export function createChatgptServer(
       _meta: { ...readMetadata, ui: { resourceUri: WIDGET_URI } },
     },
     ({ projectId }) =>
-      runTool(() => (projectId ? projects.open(projectId) : projects.list())),
+      runTool(() => (projectId ? projects.status(projectId) : projects.list())),
   );
 
   server.registerTool(

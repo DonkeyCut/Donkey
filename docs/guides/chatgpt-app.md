@@ -74,11 +74,11 @@ host bridge. It has no account cookie or OAuth token. Preview rendering uses
 no Donkey Cut AI credits. Derived previews remain exempt from storage quota;
 retained media uses the account's existing storage allowance.
 
-Opening a project from a connection that can edit puts the whole editor in
-the card: the widget frames `donkeycut.com` through a one-use, one-minute
-link the tool mints on the connection, and that link redeems for a
-partitioned session cookie scoped to the frame, so the editor is signed in
-there and nowhere else. Revoking the
+Every project card from a connection that can edit is the whole editor: the
+widget frames `donkeycut.com` through a one-use, one-minute link each tool
+result mints on the connection, a card that wakes up with a spent link asks
+for a fresh one, and the link redeems for a partitioned session cookie
+scoped to the frame, so the editor is signed in there and nowhere else. Revoking the
 connection ends those sessions. A browser without partitioned cookies shows
 an Open in Donkey Cut link inside the frame. Public submission has to justify
 `frameDomains`; the justification is that the frame is the app's own editor

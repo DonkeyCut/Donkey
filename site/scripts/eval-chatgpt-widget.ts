@@ -31,7 +31,7 @@ const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,
 window.addEventListener('message', ({source,data}) => {
  if(source !== frame.contentWindow || !data.method) return;
  if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
- if(data.method === 'ui/notifications/initialized') frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:result(view(false))},'*');
+ if(data.method === 'ui/notifications/initialized') frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:window.editable ? result(view(true),null,{url:location.origin+'/embed?code=spent&project=project',expiresAt:Date.now()-1}) : result(view(false))},'*');
  if(data.method === 'tools/call') {
   const name = data.params.name; window.calls.push(name);
   if(name === 'list_projects') reply(data.id,result(view(false)));
@@ -86,6 +86,12 @@ try {
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^120$/ }).waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen", "fullscreen"], "the button asks again and the granted mode hides it");
   await page.screenshot({ path: "/tmp/donkey-chatgpt-widget-editor.png" });
+  // A card rehydrated with a spent link asks for a fresh one instead of showing the preview.
+  await page.evaluate(() => { (window as unknown as { calls: string[] }).calls = []; });
+  await frame.evaluate(() => { location.reload(); });
+  await app.frameLocator("iframe.editor").locator("#editor").waitFor();
+  const rehydrated = await page.evaluate(() => (window as unknown as { calls: string[] }).calls);
+  assert.deepEqual(rehydrated, ["open_project"], "the rehydrated card mints one fresh link");
   assert.deepEqual(errors, []);
   console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, decoder teardown, lazy HLS.");
 } finally {

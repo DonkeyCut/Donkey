@@ -106,12 +106,13 @@ describe("ChatGPT cloud projects", () => {
     expect(rendered.view.preview?.id).toBe("job");
     expect(rendered.playback?.url).toContain("proxy");
   });
-  test("opening a project with write scope carries a one-use editor link; read scope gets the preview", async () => {
+  test("a project card with write scope carries a one-use editor link; read scope and the list get none", async () => {
     const readOnly = createTestContext();
-    expect((await readOnly.tools.open("mine")).editor).toBeUndefined();
+    expect((await readOnly.tools.withEditor(await readOnly.tools.status("mine"))).editor).toBeUndefined();
     expect(readOnly.db.chatgptToken.create).not.toHaveBeenCalled();
     const { tools, db } = createTestContext(["projects:read", "projects:write"]);
-    const result = await tools.open("mine");
+    expect((await tools.withEditor(await tools.list())).editor).toBeUndefined();
+    const result = await tools.withEditor(await tools.status("mine"));
     expect(/^https:\/\/donkeycut\.com\/api\/chatgpt\/embed\?code=[A-Za-z0-9_-]{43}&project=mine$/.test(result.editor?.url ?? "")).toBe(true);
     expect(db.chatgptToken.create.mock.calls[0][0].data).toMatchObject({ grantId: "grant", kind: "embed" });
     expect(result.view.project?.id).toBe("mine");

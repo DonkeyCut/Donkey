@@ -53,7 +53,7 @@ const fakeProjects = (overrides: Partial<Projects> = {}): Projects => {
     list: answer,
     status: answer,
     render: answer,
-    open: answer,
+    withEditor: async (result: ProjectResult) => result,
     create: answer,
     inspect: answer,
     edit: answer,
