@@ -23,6 +23,8 @@ import {
   stringValue,
 } from "@/lib/inference/adapters/gemini-client";
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
+import { typesafeJudge } from "@/lib/inference/adapters/typesafe";
+import { noul } from "@/lib/inference/judge";
 import { toJsonValue } from "@/lib/inference/json";
 import type { JsonValue } from "@/lib/inference/providers";
 import { prisma } from "@/lib/prisma";
@@ -68,9 +70,10 @@ interface AssetMetaWithTitle {
   duration?: number;
 }
 
-const prompt = (heard: boolean, seen: boolean, duration: number) =>
+const prompt = (heard: boolean, seen: boolean, duration: number, correction?: string) =>
   [
     "Name this video clip the way its owner would in a camera roll.",
+    correction ? `A previous attempt failed this rule: ${correction}` : "",
     heard
       ? "The audio is the opening of the clip; take the subject from what is actually said."
       : "",
@@ -108,6 +111,32 @@ function parseTitle(raw: string): string | null {
   if (!parsed || typeof parsed !== "object") return null;
   const title = (parsed as Record<string, unknown>).title;
   return typeof title === "string" ? clean(title) : null;
+}
+
+const BANNED_WORD = /\b(video|clip|recording)\b/i;
+
+const TITLE_QUESTIONS = {
+  names_subject: noul(
+    "Does `title` name what the clip is about — its subject — as opposed to only the place, room, or setting it was shot in?",
+    { true: "The subject is named: a person, an activity, a thing, an event.", false: "Only a setting or a location, or nothing concrete." },
+  ),
+  has_date_or_time: noul("Does `title` contain a date, a time of day, a day of the week, or a year?"),
+};
+
+/** The rule a title breaks, judged; null when it passes. A word ban is
+ * checked in code; the semantic rules go to the judge, and a judge that
+ * cannot answer passes the title, since titles are on the house. */
+async function titleFailure(title: string): Promise<string | null> {
+  if (BANNED_WORD.test(title)) return 'the words "video", "clip", and "recording" are banned';
+  const judge = typesafeJudge();
+  try {
+    const { answers } = await judge.askJudge({ state: { title }, questions: TITLE_QUESTIONS });
+    if (answers.has_date_or_time.noul >= 0.5) return "no date or time in the title";
+    if (answers.names_subject.noul < 0.5) return "name the subject, not the setting";
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** One line, no wrapping quotes, no trailing punctuation, cut at a word
@@ -178,58 +207,70 @@ export const clipTitleCloud = {
         },
       });
     }
-    parts.push({ text: prompt(!!audio, !!frame, meta.duration ?? 0) });
+    const client = defaultGeminiClientFactory(clientConfig.options);
+    /** One titling call; a Response is a failure to return as is. */
+    const name = async (correction?: string): Promise<string | null | Response> => {
+      let raw: unknown;
+      try {
+        raw = await client.models.generateContent({
+          model: MODEL,
+          contents: [{ role: "user", parts: [...parts, { text: prompt(!!audio, !!frame, meta.duration ?? 0, correction) }] }],
+          // JSON mode without a schema — constrained decoding degrades output.
+          config: { responseMimeType: "application/json" },
+        });
+      } catch (error) {
+        await recordFailedInferenceUsage({
+          billingMode: "included",
+          clientId: null,
+          errorCode: "provider_error",
+          model: MODEL,
+          provider: PROVIDER,
+          requestKind: REQUEST_KIND,
+          route: ROUTE,
+          userId,
+        });
+        const credit = creditErrorResponse(error);
+        if (credit) return credit;
+        const mapped = geminiApiError("The titling model is unavailable.", error);
+        return err(mapped.message, mapped.statusCode ?? 502);
+      }
 
-    let raw: unknown;
-    try {
-      const client = defaultGeminiClientFactory(clientConfig.options);
-      raw = await client.models.generateContent({
-        model: MODEL,
-        contents: [{ role: "user", parts }],
-        // JSON mode without a schema — constrained decoding degrades output.
-        config: { responseMimeType: "application/json" },
-      });
-    } catch (error) {
-      await recordFailedInferenceUsage({
-        billingMode: "included",
-        clientId: null,
-        errorCode: "provider_error",
-        model: MODEL,
-        provider: PROVIDER,
-        requestKind: REQUEST_KIND,
-        route: ROUTE,
-        userId,
-      });
-      const credit = creditErrorResponse(error);
-      if (credit) return credit;
-      const mapped = geminiApiError("The titling model is unavailable.", error);
-      return err(mapped.message, mapped.statusCode ?? 502);
-    }
+      const usage = (raw as { usageMetadata?: unknown }).usageMetadata;
+      try {
+        await recordInferenceUsage({
+          billingMode: "included",
+          clientId: null,
+          model: MODEL,
+          provider: PROVIDER,
+          requestKind: REQUEST_KIND,
+          route: ROUTE,
+          status: "succeeded",
+          usage: toJsonValue(usage ?? null),
+          userId,
+        });
+      } catch (error) {
+        const credit = creditErrorResponse(error);
+        if (credit) return credit;
+        throw error;
+      }
 
-    const usage = (raw as { usageMetadata?: unknown }).usageMetadata;
-    try {
-      await recordInferenceUsage({
-        billingMode: "included",
-        clientId: null,
-        model: MODEL,
-        provider: PROVIDER,
-        requestKind: REQUEST_KIND,
-        route: ROUTE,
-        status: "succeeded",
-        usage: toJsonValue(usage ?? null),
-        userId,
-      });
-    } catch (error) {
-      const credit = creditErrorResponse(error);
-      if (credit) return credit;
-      throw error;
-    }
+      const text = geminiCandidateParts(geminiCandidates(raw as JsonValue)[0])
+        .map((p) => stringValue(p.text) ?? "")
+        .join("");
+      return parseTitle(text);
+    };
 
-    const text = geminiCandidateParts(geminiCandidates(raw as JsonValue)[0])
-      .map((p) => stringValue(p.text) ?? "")
-      .join("");
-    const title = parseTitle(text);
+    let title = await name();
+    if (title instanceof Response) return title;
     if (!title) return err("The titling model returned an unreadable response.", 502);
+    // A title that breaks a rule gets one more try with the rule spelled out;
+    // whatever comes back then ships.
+    const failure = await titleFailure(title);
+    if (failure) {
+      const retried = await name(failure);
+      if (retried instanceof Response) return retried;
+      if (retried) title = retried;
+    }
 
     // Written under the row's own meta so the name outlives this tab and
     // reaches the phone's next listing.
