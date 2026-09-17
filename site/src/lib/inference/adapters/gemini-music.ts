@@ -1,3 +1,5 @@
+import { typesafeJudge } from "@/lib/inference/adapters/typesafe";
+import { PROVIDER_FAILURE_QUESTION, providerFailureClass } from "@/cut/lib/providerFailure";
 import { GoogleGenAI } from "@google/genai";
 import type { GoogleGenAIOptions, Interactions } from "@google/genai";
 
@@ -149,13 +151,13 @@ export function createGeminiMusicAssetProvider(
       // Rather than fail, have a model rewrite the ask into a description of the
       // SOUND (traits, not names — an LLM does it, never string matching) and try
       // once more. This mirrors the video pipeline's "describe by traits" rule.
-      if (!isContentBlock(error)) throw geminiApiError("Music generation failed.", error);
+      if (!(await isContentBlock(error))) throw geminiApiError("Music generation failed.", error);
       const rewritten = await rewritePrompt(client, prompt);
       if (!rewritten) throw promptBlockedError();
       try {
         interaction = await client.interactions.create({ model, input: rewritten });
       } catch (retryError) {
-        if (isContentBlock(retryError)) throw promptBlockedError();
+        if (await isContentBlock(retryError)) throw promptBlockedError();
         throw geminiApiError("Music generation failed.", retryError);
       }
     }
@@ -244,11 +246,20 @@ function isRunning(interaction: Interaction): boolean {
   return interaction.status === "in_progress" || interaction.status === "requires_action";
 }
 
-// Lyria's policy rejection, by the provider's own error text (a technical field,
-// not user input) — a named artist/song/brand, or other blocked content.
-function isContentBlock(error: unknown): boolean {
+// Lyria's policy rejection — a named artist/song/brand, or other blocked
+// content — judged from the provider's own error text. A failure the judge
+// cannot classify reads as an ordinary error.
+async function isContentBlock(error: unknown): Promise<boolean> {
   const message = error instanceof Error ? error.message : String(error);
-  return /prohibited|sensitive word|content.?block|use policy|rephras|blocked|safety/i.test(message);
+  try {
+    const { answers } = await typesafeJudge().askJudge({
+      state: { error: message.slice(0, 2000) },
+      questions: { cause: PROVIDER_FAILURE_QUESTION },
+    });
+    return providerFailureClass(answers.cause) === "content_refused";
+  } catch {
+    return false;
+  }
 }
 
 function promptBlockedError(): InferenceProviderError {

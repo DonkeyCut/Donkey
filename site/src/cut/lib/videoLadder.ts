@@ -18,7 +18,7 @@ export interface VideoAttempt {
    * reserve a rung for specific failures, e.g. text-only only after the
    * provider refused the image anchor. Skipped rungs cost nothing and keep
    * the prior error. */
-  gate?: (lastError: string | null) => boolean;
+  gate?: (lastError: string | null) => boolean | Promise<boolean>;
 }
 
 /** Walk the rungs: run each in order, return on the first that lands. A rung
@@ -36,7 +36,7 @@ export async function walkLadder(
   let lastError = "Video generation failed.";
   let anyFailed = false;
   for (const [rung, attempt] of attempts.entries()) {
-    if (attempt.gate && !attempt.gate(anyFailed ? lastError : null)) continue;
+    if (attempt.gate && !(await attempt.gate(anyFailed ? lastError : null))) continue;
     try {
       await run(attempt, rung);
       return { ok: true, error: "", rung };

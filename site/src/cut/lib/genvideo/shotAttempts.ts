@@ -8,6 +8,7 @@
  * or a credit spent.
  */
 
+import { classifyProviderFailure } from "../providerFailure";
 import type { AssetRef } from "../assetRef";
 import type { VideoAttempt } from "../videoLadder";
 import type { VideoGenOptions } from "../generate";
@@ -18,11 +19,9 @@ import type { RefAsset } from "./types";
  * itself — a safety policy on what the picture shows, an unreadable format —
  * rather than the render going wrong. Keyed on the provider's refusal, never
  * on what or who the content depicts. */
-export function anchorRefused(err: string | null): boolean {
-  // "returned no video" is a completed render whose OUTPUT was filtered — for
-  // an image-anchored rung that's the safety policy refusing the content it
-  // rendered, the same dead end as refusing the anchor itself.
-  return err !== null && /input image|image format|person\/face|17301594|returned no video/i.test(err);
+export async function anchorRefused(err: string | null): Promise<boolean> {
+  if (err === null) return false;
+  return (await classifyProviderFailure(err)) === "content_refused";
 }
 
 export interface ShotAttemptArgs {
