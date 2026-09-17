@@ -16,7 +16,7 @@ import {
 import { exportsDir, projectDir, writeFileAt, readFileAt, saveExport } from "./backend/browser/opfs";
 import { holdRegistered, registerBlobFile, releaseRegistered, resolveRegisteredBlob } from "./backend/browser/registry";
 import { captureCloudBackend } from "./backend/cloud";
-import { downloadFromUrl } from "./download";
+import { downloadFile, downloadFromUrl } from "./download";
 import { bitrateFor, canRenderInBrowser, renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { renderRemovalPieces } from "./removalVideo";
@@ -1437,12 +1437,7 @@ export async function pollExport(
 
 /** Trigger a browser download of a finished export by job id. */
 export function downloadExport(jobId: string, outName: string, backend: CutBackend = getBackend()) {
-  const a = document.createElement("a");
-  a.href = backend.url(`/api/cut/export/${jobId}/file`);
-  a.download = outName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  downloadFile(backend.url(`/api/cut/export/${jobId}/file`), outName);
 }
 
 /** The engine on this Mac ships inside the app, so it can be older than the
