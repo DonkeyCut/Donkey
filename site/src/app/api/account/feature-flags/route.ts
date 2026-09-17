@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
 import {
-  isDonkeySuperUser,
   withDonkeyAuth,
   type DonkeyAuthenticatedRequest,
 } from "@/lib/donkey-api-auth";
+import { isDonkeySuperUser } from "@/lib/super-user";
 import { featureFlagsFor } from "@/lib/feature-flags";
 import { accountFlags } from "@/lib/feature-flags-server";
 import { prisma } from "@/lib/prisma";

@@ -3,6 +3,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { isDonkeySuperUser } from "@/lib/super-user";
 import { prisma } from "@/lib/prisma";
 
 export type DonkeyAuthContext = {
@@ -291,17 +292,4 @@ export function withSuperUser<
   options: Omit<DonkeyAuthOptions, "role"> = {},
 ) {
   return withDonkeyAuth(handler, { ...options, role: "SUPER_USER" });
-}
-
-export async function isDonkeySuperUser(userId: string) {
-  const user = await prisma.user.findUnique({
-    select: {
-      superUser: true,
-    },
-    where: {
-      id: userId,
-    },
-  });
-
-  return user?.superUser === true;
 }

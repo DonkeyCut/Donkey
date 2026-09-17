@@ -1,5 +1,5 @@
 import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
-import { isDonkeySuperUser } from "@/lib/donkey-api-auth";
+import { isDonkeySuperUser } from "@/lib/super-user";
 import { prisma } from "@/lib/prisma";
 
 // Cut web mode's cost ceilings by account tier. Storage bounds R2; the daily

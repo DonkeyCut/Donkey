@@ -1,5 +1,5 @@
 import { ACCOUNT_FEATURE_FLAGS, featureFlagsFor } from "@/lib/feature-flags";
-import { isDonkeySuperUser } from "@/lib/donkey-api-auth";
+import { isDonkeySuperUser } from "@/lib/super-user";
 import { prisma } from "@/lib/prisma";
 
 /** Whether an account flag is on for a user: the account's own row, or the

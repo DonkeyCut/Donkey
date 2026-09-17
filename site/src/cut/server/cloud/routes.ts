@@ -5,7 +5,8 @@ import { librarySharing } from "@/cut/server/cloud/librarySharing";
 // cloud-only presign/job routes. Auth happens in the Next catch-all
 // (withDonkeyAuth); every handler receives the session's userId and scopes
 // every query by it.
-import { type DonkeyAuthenticatedRequest, isDonkeySuperUser } from "@/lib/donkey-api-auth";
+import { type DonkeyAuthenticatedRequest } from "@/lib/donkey-api-auth";
+import { isDonkeySuperUser } from "@/lib/super-user";
 import { matchRouteTable, type RouteEntry } from "../http/match";
 import { captionsCloud } from "./captions";
 import { chatsCloud } from "./chats";
