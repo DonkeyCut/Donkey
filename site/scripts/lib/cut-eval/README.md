@@ -60,6 +60,15 @@ checks what the turn judge decides for the labelled asks in
 gate side. Every ask is judged once and the route recomposed under a grid of
 thresholds, so the sweep that sets the registry defaults costs no extra calls.
 
+## The provider-failure eval
+
+`npm run eval:cut-judge -- [--only <substring>]`
+checks what a hosted provider's error text means — the content declined, a
+transient failure, anything else — against errors real providers returned. The
+class decides whether the render ladder may drop to its text-only rung and
+whether a music prompt is worth rewriting, so a case is added whenever a new
+error reached us and was read wrong.
+
 ## The report
 
 A full run writes `evals/cut-chat.latest-report.json` (schema
