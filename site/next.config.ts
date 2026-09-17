@@ -35,6 +35,15 @@ const nextConfig: NextConfig = {
   // Build assets are fetched by search crawlers to render pages, which puts
   // every chunk, stylesheet and font in Search Console as a candidate page.
   // The header lets them be fetched and keeps them out of the index.
+  // ChatGPT links the card's title to the widget domain; that lands in the app.
+  redirects: async () => [
+    {
+      source: "/:path*",
+      has: [{ type: "host", value: "chatgpt.donkeycut.com" }],
+      destination: "https://donkeycut.com/app",
+      permanent: false,
+    },
+  ],
   headers: async () => [
     {
       source: "/clients/chatgpt/:path*",
