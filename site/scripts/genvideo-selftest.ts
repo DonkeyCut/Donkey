@@ -6,6 +6,19 @@
  *   node_modules/.bin/bun run scripts/genvideo-selftest.ts
  */
 
+import { mock } from "bun:test";
+import type { ProviderFailureClass } from "../src/cut/lib/providerFailure";
+
+// The refusal gate asks the judge what a provider's error means, and this
+// self-test spends nothing and touches no network. The judge's answer is
+// supplied here, so the checks below prove what the ladder does with each
+// class. The reading of the error text is a model behavior, measured against
+// real provider errors by `eval:cut-judge`.
+let failureClass: ProviderFailureClass = "other";
+mock.module("../src/cut/lib/providerFailure", () => ({
+  classifyProviderFailure: async () => failureClass,
+}));
+
 import type { AssetRef } from "../src/cut/lib/assetRef";
 import { assertCoverage, MAX_SHOT_SEC, MIN_SHOT_SEC, repairCoverage } from "../src/cut/lib/genvideo/coverage";
 import { FakeEditor, type PlacedClip } from "../src/cut/lib/genvideo/editor";
@@ -356,12 +369,14 @@ async function run(): Promise<void> {
     check("every rung keeps the shared base", full.every((r) => r.opts?.aspect === "9:16"));
     const gate = full[2].gate;
     check("cast text rung is gated", typeof gate === "function");
-    check("the gate stays closed with no failure and on ordinary failures",
-      gate?.(null) === false && gate?.("The video render is taking too long — try again.") === false && gate?.("fake video failed") === false);
-    check("a person-policy refusal opens the gate",
-      gate?.("The input image contains content that has been blocked by your current safety settings for person/face generation. Support codes: 17301594") === true);
-    check("a format refusal opens the gate", gate?.("Unsupported image format. Expected JPEG or PNG.") === true);
-    check("a filtered (empty) render opens the gate", gate?.("Omni returned no video for this request.") === true);
+    const gateOn = async (cls: ProviderFailureClass) => {
+      failureClass = cls;
+      return gate?.("the provider's error text");
+    };
+    check("the gate stays closed with no failure", (await gateOn("content_refused")) !== undefined && (await gate?.(null)) === false);
+    check("a refusal of the content opens the gate", (await gateOn("content_refused")) === true);
+    check("a transient failure keeps the gate closed", (await gateOn("transient_failure")) === false);
+    check("any other failure keeps the gate closed", (await gateOn("other")) === false);
     const castless = buildShotAttempts({
       prompt: "an aquarium bubbles.", refs: [{ mediaId: "loc1", kind: "image", purpose: "location", name: "living room" }],
       base, keyframe: kf, anchors: [], ridingIds: new Set(),
@@ -388,8 +403,10 @@ async function run(): Promise<void> {
       );
       return { ran, out };
     };
-    const refused = await runRungs("The input image contains content that has been blocked for person/face generation. 17301594");
+    failureClass = "content_refused";
+    const refused = await runRungs("the anchor image was refused");
     check("an anchor refusal unlocks the gated rung", refused.out.ok && refused.ran.join(",") === "0,1");
+    failureClass = "transient_failure";
     const ordinary = await runRungs("a transient render error");
     check("an ordinary failure keeps the gated rung closed (error surfaces)", !ordinary.out.ok && ordinary.ran.join(",") === "0" && ordinary.out.error === "a transient render error");
     const broke = await runRungs("No credits left", false);
