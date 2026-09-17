@@ -153,6 +153,12 @@ import { SubtitlesPanel } from "./SubtitlesPanel";
 
 type Tab = SidePanelTab;
 
+/** The rail's three runs: file tabs, AI-generate tabs, finishing tabs. */
+const railGroup = (id: Tab): "files" | "gen" | "finish" =>
+  id === "video" || id === "image" || id === "audio" ? "gen"
+  : id === "subtitles" || id === "publish" ? "finish"
+  : "files";
+
 const TABS: { id: Tab; label: string; icon: typeof Film }[] = [
   { id: "media", label: "Media", icon: Clapperboard },
   { id: "elements", label: "Elements", icon: Shapes },
@@ -181,10 +187,10 @@ export function SidePanel({
   const sharedFeatures = useEditor((s) => s.sharedFeatures);
   const { chatgpt } = useEnvironment();
   // Inside ChatGPT the card shows no credits, so the tabs that spend them
-  // stay out of the rail.
+  // leave the rail altogether.
   const spends = (id: Tab) => id === "video" || id === "image" || id === "audio" || id === "subtitles";
+  const railTabs = chatgpt ? TABS.filter(({ id }) => !spends(id)) : TABS;
   const offered = (id: Tab): boolean =>
-    (!chatgpt || !spends(id)) && (
     !sharedFeatures ||
     (id === "media"
       ? sharedFeatures.media
@@ -194,8 +200,8 @@ export function SidePanel({
           ? sharedFeatures.subtitles
           : id === "publish"
             ? sharedFeatures.details
-            : false));
-  const visibleTabs = TABS.filter(({ id }) => offered(id));
+            : false);
+  const visibleTabs = railTabs.filter(({ id }) => offered(id));
   // `null` collapses the panel: clicking the active tab unselects it, leaving
   // just the icon rail so the video canvas takes the freed width.
   const [tabPref, setTab] = useLocalPref<Tab | null>("cut-side-tab", "media", (v) =>
@@ -316,7 +322,7 @@ export function SidePanel({
         )}
         contentClassName="flex flex-col items-center gap-1 py-3"
       >
-        {TABS.map(({ id, label, icon: Icon }, tabIndex) => {
+        {railTabs.map(({ id, label, icon: Icon }, tabIndex) => {
           const locked = !offered(id);
           // The open tab never badges — its completions are already on screen.
           const unseenCount = isGenTab(id) && id !== tab ? unseen[id].length : 0;
@@ -400,7 +406,7 @@ export function SidePanel({
           return (
             <Fragment key={id}>
               {/* Soft breaks between the file tabs, the AI-generate tabs, and the finishing tabs. */}
-              {(id === "video" || id === "subtitles") && tabIndex > 0 && (
+              {tabIndex > 0 && railGroup(id) !== railGroup(railTabs[tabIndex - 1].id) && (
                 <div aria-hidden className="my-1 h-px w-8 shrink-0 bg-border" />
               )}
               {id === "media" && !locked ? (
