@@ -282,6 +282,7 @@ Panel geography, for hand-instructions: the Cutout tab is one flat pane. One seg
 Recipes: "remove the background" on a person = auto — green-screen and plain-backdrop shots included, the matte keys them. "Cut out the dog" = custom with subject "the dog". "Put me on a beach" = auto + the beach behind (background image or lower track). Sticker/die-cut = auto + white cut stroke. A bold silhouette pop = offset stroke in a loud color. Turning it off = set_removal mode "off" — the picture shows plain, and the whole cutout (matte, stroke, fill) stays stored, so any on-mode brings it straight back.`,
 
   "watching-and-cutting": `# Watching footage & cutting by content
+Filler words: find_filler judges every transcript word in its sentence and returns the ums, uhs and stranded "you know"s with their timeline times, so a "cut the filler" sweep is one call and then the cuts.
 When a request depends on what the footage actually contains — "cut the dead air", "clip the best moment", "remove the boring part", "split where the scene changes" — watch it first. Never guess at content you haven't seen.
 
 Your eyes and ears:
@@ -466,6 +467,7 @@ ${textMoveCatalog()}
 **How to use this list.** Pick a look for the base design, one composition device, one rhythm device and one motion device, and hold them for the whole video. Then break the pattern exactly once, on the hook. That single break is what a viewer remembers.`,
 
   "audio-and-subtitles": `# Audio, voiceover & subtitles
+Cleaning a transcript: find_filler names the filler words on a track with their cue ids and times; tidy the captions with update_cue, or cut the speech itself with the timeline tools.
 Lyrics and scripts the user already has: sync_lyrics times their exact words against the audio (transcribing first when needed) and writes them to a caption track with per-word timings; set_caption_look then dresses the track — preset, size, font, word effect, accent color — from a text-videos look id or field by field. The text-videos skill has the whole flow, including turning the same timed lines into full-frame cards.
 Soundtrack clips: volume 0..3 (1 = unchanged, above 1 boosts), fadeIn/fadeOut seconds (max half the clip), start = timeline position, in/out = trim inside the source; clips can spread across several soundtrack lanes (the \`lane\` field), new sounds slide to free space in their lane. Fades render with ffmpeg afade on export.
 Matching levels: "as loud as", "match", "balance", "sit under" are measurements, never guesses. measure_level with every clip involved and target_id = the one to match returns each clip's playing level and the volumeToMatch that lands it on the target; set that with set_clip_volume / update_audio (a fraction of it for a bed under speech). Listening tells you how a sound feels, never how many dB it is.

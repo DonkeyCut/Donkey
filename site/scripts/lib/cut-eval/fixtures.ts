@@ -22,6 +22,7 @@ export const SAFE_TOOLS = new Set([
   "capture_frame",
   "watch_video",
   "detect_silence",
+  "find_filler",
   "detect_beats",
   "listen_audio",
   "measure_level",
@@ -204,13 +205,36 @@ export const VOICE_REF = {
 
 /** The base snapshot with a spoken transcript on track 0 — filler words at
  * known cue timings, so "cut the filler" has real ranges to act on. */
+const timed = (id: string, start: number, end: number, text: string) => {
+  const parts = text.split(/\s+/).filter(Boolean);
+  const step = (end - start) / parts.length;
+  return {
+    id,
+    start,
+    end,
+    text,
+    words: parts.map((w, i) => ({ w, t0: Math.round((start + step * i) * 100) / 100, t1: Math.round((start + step * (i + 1)) * 100) / 100 })),
+  };
+};
+
 export const FILLER_CUES = [
-  { id: "cue1", start: 0, end: 1.8, text: "Um, so today we're" },
-  { id: "cue2", start: 1.8, end: 4.2, text: "at the beach with the dogs" },
-  { id: "cue3", start: 4.2, end: 5.6, text: "and, uh, you know," },
-  { id: "cue4", start: 5.6, end: 9, text: "they absolutely love the water" },
-  { id: "cue5", start: 9, end: 12.5, text: "so let's watch them play" },
+  timed("cue1", 0, 1.8, "Um, so today we're"),
+  timed("cue2", 1.8, 4.2, "at the beach with the dogs"),
+  timed("cue3", 4.2, 5.6, "and, uh, you know,"),
+  timed("cue4", 5.6, 9, "they absolutely love the water"),
+  timed("cue5", 9, 12.5, "so let's watch them play"),
 ];
+
+/** The filler words a judge finds in FILLER_CUES, served to the eval as
+ * find_filler's result: the ums and the stranded "you know". */
+export const FILLER_WORDS = (() => {
+  const picks = new Set(["um,", "uh,", "you", "know,"]);
+  return FILLER_CUES.flatMap((c) =>
+    c.words
+      .filter((w) => picks.has(w.w.toLowerCase()))
+      .map((w) => ({ cue_id: c.id, word: w.w, start: w.t0, end: w.t1 }))
+  );
+})();
 
 export const FILLER_STATE = {
   ...EDITOR_STATE,
@@ -726,6 +750,7 @@ export function serveSafeTool(name: string, state: unknown): unknown {
   if (name === "library_list") return { folders: [], assets: [], templates: [] };
   if (name === "notes_list") return { notes: [], folders: [], labels: [] };
   if (name === "detect_silence") return { silences: [] };
+  if (name === "find_filler") return { fillers: FILLER_WORDS, count: FILLER_WORDS.length, track: 0 };
   if (name === "measure_level") return { targetId: "", clips: [] };
   if (name === "detect_beats") return { bpm: 0, beats: [] };
   return { ok: true };

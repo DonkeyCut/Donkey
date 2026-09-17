@@ -58,7 +58,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "detect_silence",
     description:
-      "Find silent stretches in a source's audio — dead air, long pauses, gaps between takes. Returns [{start,end,duration}] in SOURCE seconds, plus each one's timeline times when clip_id is passed. Cheap and image-free; pair it with the transcript's cue timings to find filler, then cut with split_at / trim_clip / delete_item — place speech cuts inside these spans (cue timings drift from the audio), and read the watching-and-cutting skill for the pacing rules.",
+      "Find silent stretches in a source's audio — dead air, long pauses, gaps between takes. Returns [{start,end,duration}] in SOURCE seconds, plus each one's timeline times when clip_id is passed. Cheap and image-free; find_filler finds the filler words, then cut with split_at / trim_clip / delete_item — place speech cuts inside these spans (cue timings drift from the audio), and read the watching-and-cutting skill for the pacing rules.",
     inputSchema: obj({
       clip_id: str("Clip id — video, overlay, or soundtrack; scopes to its trimmed range and maps results to timeline seconds"),
       asset_id: str("Project asset id (video or audio)"),
@@ -66,6 +66,15 @@ export const AI_PANEL_TOOLS = [
       to: num("Source end s (default: the clip's out, else the source's end)"),
       threshold_db: num("Loudness below this counts as silence, dBFS (default -30)"),
       min_silence: num("Shortest silent stretch to report, seconds (default 0.35)"),
+    }),
+  },
+  {
+    name: "find_filler",
+    description:
+      "Find the filler words in a subtitle track's transcript — um, uh, a stranded 'like' or 'you know', stutters, repeated words — each judged in its sentence. Returns [{cue_id, word, start, end}] in TIMELINE seconds (the cues' own word timings), plus each word's source times when clip_id is passed, so you can cut the speech with split_at / delete_item / trim_clip or tidy the captions with update_cue. Needs a transcribed track (subtitles_generate) first. Words marked estimated sit in cues that lost their word timings.",
+    inputSchema: obj({
+      track: num("Subtitle track, 0-based (default: the active one)"),
+      clip_id: str("Video clip id — scopes to its timeline span and maps each word to source seconds"),
     }),
   },
   {

@@ -549,6 +549,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       bucket: "multi-tool",
       input: () => [userTurn("cut the filler words out of my video", { state: FILLER_STATE })],
       reply: /filler|um|uh|cut|remove|trim/i,
+      requiredTools: ["find_filler"],
       anyTools: ["split_at", "delete_item", "trim_clip"],
       state: FILLER_STATE,
       simulate: () => makeTimelineSim(FILLER_STATE),

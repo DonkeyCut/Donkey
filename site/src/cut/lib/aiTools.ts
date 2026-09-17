@@ -1101,6 +1101,88 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
   },
 
+  find_filler: async (s, input) => {
+      const lane = targetSubtitleTrack(input);
+      const cues = laneCues(s.subtitles, lane).filter((c) => c.text.trim());
+      if (cues.length === 0) throw new ToolError(`Subtitle track ${lane} has no cues — transcribe first.`);
+      const clipId = typeof input.clip_id === "string" ? input.clip_id : undefined;
+      const clip = clipId ? s.clips.find((c) => c.id === clipId) : undefined;
+      if (clipId && !clip) throw new ToolError(`No clip ${clipId}.`);
+      // Every word with its timeline span: the transcriber's own timings, or an
+      // even split of the cue when a hand edit dropped them.
+      const words = cues.flatMap((c) => {
+        const timed = c.words && c.words.length > 0;
+        return cueWords([c]).map((w, i) => ({
+          key: `word::${c.id}::${i}`,
+          cueId: c.id,
+          i,
+          w: w.w,
+          t0: w.t0,
+          t1: w.t1,
+          estimated: !timed,
+        }));
+      });
+      if (clip) {
+        const inRange = words.filter((w) => w.t1 > clip.start && w.t0 < clip.start + retimeOf(clip).tAt(clip.out));
+        words.splice(0, words.length, ...inRange);
+      }
+      if (words.length === 0) throw new ToolError("No transcript words in that range.");
+      const questions = Object.fromEntries(
+        words.map((w) => [
+          w.key,
+          noul(
+            `In \`cues\`, is word ${w.i} of cue "${w.cueId}" a disfluency or false start a careful editor would cut out of the speech — an um, uh, er, hmm; a stranded "like", "you know", "I mean", "sort of"; a stutter or an immediately repeated word — judged in the sentence it sits in?`,
+            {
+              true: "The word carries no meaning in its sentence and the speech reads cleaner without it.",
+              false: "The word is part of what is being said, including a \"like\" or \"so\" doing real work in the sentence.",
+            },
+          ),
+        ]),
+      );
+      const state = (keys: string[]) => {
+        const wanted = new Set(keys);
+        return {
+          cues: cues
+            .map((c) => ({
+              id: c.id,
+              text: c.text,
+              words: words.filter((w) => w.cueId === c.id).map((w) => ({ i: w.i, w: w.w, judged: wanted.has(w.key) })),
+            }))
+            .filter((c) => c.words.some((w) => w.judged)),
+        };
+      };
+      const post = (payload: Record<string, unknown>, signal?: AbortSignal) =>
+        hostedPost("/api/inference/judge", payload, signal);
+      let answers: Record<string, { type: string; noul?: number }>;
+      try {
+        answers = (await askJudgeChunked(post, state, questions, FILLER_JUDGE_CHUNK)) as Record<string, { type: string; noul?: number }>;
+      } catch (e) {
+        throw new ToolError(`Filler detection is unavailable: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      const floor = cutJudge().fillerCut;
+      const toSource = clip ? (t: number) => round2(retimeOf(clip).srcAt(clamp(t - clip.start, 0, Infinity))) : null;
+      const fillers = words
+        .filter((w) => (answers[w.key]?.noul ?? 0) >= floor)
+        .map((w) => ({
+          cue_id: w.cueId,
+          word: w.w,
+          start: round2(w.t0),
+          end: round2(w.t1),
+          ...(w.estimated ? { estimated: true } : {}),
+          ...(toSource ? { source: { start: toSource(w.t0), end: toSource(w.t1) } } : {}),
+        }));
+      return {
+        fillers,
+        count: fillers.length,
+        track: lane,
+        ...(clip ? { clip: { id: clip.id, timelineStart: round2(clip.start), in: round2(clip.in), out: round2(clip.out) } } : {}),
+        ...(fillers.some((f) => f.estimated)
+          ? { note: "Words marked estimated sit in cues with no word timings; their spans split the cue evenly, so confirm them with listen_audio before a tight cut." }
+          : {}),
+        ...(fillers.length === 0 ? { note: "No filler words on this track." } : {}),
+      };
+  },
+
   detect_beats: async (s, input) => {
       const { asset, clip, speed, from, to } = resolveWatchRange(s, input);
       if (assetIsSilent(asset)) throw new ToolError(`"${asset.name}" carries no audio.`);
@@ -4282,6 +4364,7 @@ async function rankStock<T extends { id: string; kind: string; category: string;
 }
 
 const STOCK_JUDGE_CHUNK = 50;
+const FILLER_JUDGE_CHUNK = 60;
 
 export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "convert_media",
