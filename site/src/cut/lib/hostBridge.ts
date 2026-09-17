@@ -10,6 +10,11 @@ import { editorHost } from "@/cut/lib/environment";
  * last rows above that band through `--host-inset-bottom`, and asks the card
  * for fullscreen from its own toolbar. Outside the card nothing is sent and
  * the variable stays unset.
+ *
+ * The frame also asks the card for the two things a sandboxed frame cannot do
+ * itself: open a page in a tab of its own, and save a file. ChatGPT sandboxes
+ * the card without `allow-downloads`, and a popup opened from inside inherits
+ * that sandbox, so the host has to carry both.
  */
 export type HostDisplayMode = "inline" | "fullscreen";
 
@@ -26,6 +31,40 @@ export function useHostDisplayMode() {
 export function requestHostFullscreen() {
   if (editorHost() !== "chatgpt") return;
   window.parent.postMessage({ type: "donkeycut:fullscreen" }, "*");
+}
+
+/**
+ * Open a page in a tab the host owns. Answers whether the host took it, so a
+ * caller on the web falls through to its own navigation.
+ */
+export function openThroughHost(url: string): boolean {
+  if (editorHost() !== "chatgpt") return false;
+  window.parent.postMessage(
+    { type: "donkeycut:open", url: new URL(url, window.location.href).toString() },
+    "*"
+  );
+  return true;
+}
+
+/** Open a page in a new tab: through the host inside the card, where the
+ * sandbox blocks a popup, and straight from the page everywhere else. */
+export function openExternal(url: string) {
+  if (openThroughHost(url)) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** Save text made in the frame — a captions file — through the host. */
+export function saveThroughHost(text: string, name: string, mimeType: string): boolean {
+  if (editorHost() !== "chatgpt") return false;
+  window.parent.postMessage({ type: "donkeycut:save", text, name, mimeType }, "*");
+  return true;
+}
+
+/** The project on donkeycut.com: this page without the frame's embed flag. */
+export function projectPageUrl(): string {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("embed");
+  return url.toString();
 }
 
 export function useHostBridge() {

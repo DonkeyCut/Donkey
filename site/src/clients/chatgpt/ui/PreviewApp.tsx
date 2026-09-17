@@ -4,7 +4,7 @@ import { useProjectApp } from "./useProjectApp";
 import "./preview.css";
 
 export function PreviewApp() {
-  const { ready, view, playback, download, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openDownload, requestFullscreen } = useProjectApp();
+  const { ready, view, playback, download, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openDownload, openFromFrame, saveFromFrame, requestFullscreen } = useProjectApp();
   const project = view?.project;
   const preview = view?.preview;
   const rendering = preview?.status === "queued" || preview?.status === "running";
@@ -13,7 +13,7 @@ export function PreviewApp() {
   // The editor is the card: its own chrome carries every control. Inline, one
   // control asks the host for the whole window.
   if (editor && project) return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"}>
-    <EditorFrame url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onFullscreen={requestFullscreen} />
+    <EditorFrame url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} />
   </main>;
   return <main aria-busy={busy}>
     <header><span className="brand">Donkey Cut</span><span>Cloud projects</span></header>
@@ -54,8 +54,9 @@ export function PreviewApp() {
 
 /** The editor, framed. It learns the host's display mode and how tall the
  * bottom overlay is when it loads, whenever that changes, and whenever it
- * asks; its own toolbar asks for fullscreen. */
-function EditorFrame({ url, name, inset, fullscreen, onFullscreen }: { url: string; name: string; inset: number; fullscreen: boolean; onFullscreen: () => void }) {
+ * asks; its own toolbar asks for fullscreen, for a tab on donkeycut.com, and
+ * for the saves the sandbox blocks inside the frame. */
+function EditorFrame({ url, name, inset, fullscreen, onFullscreen, onOpen, onSave }: { url: string; name: string; inset: number; fullscreen: boolean; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const origin = new URL(url).origin;
   const tell = () => frame.current?.contentWindow?.postMessage({ type: "donkeycut:host", insetBottom: inset, displayMode: fullscreen ? "fullscreen" : "inline" }, origin);
@@ -65,6 +66,17 @@ function EditorFrame({ url, name, inset, fullscreen, onFullscreen }: { url: stri
       if (event.origin !== origin || event.source !== frame.current?.contentWindow) return;
       if (event.data?.type === "donkeycut:host?") tell();
       if (event.data?.type === "donkeycut:fullscreen") onFullscreen();
+      // The frame is the editor on this origin, so what it asks to open is
+      // the editor's own link — a project page, an export, the post a clip
+      // came from. Only the scheme is worth checking.
+      if (event.data?.type === "donkeycut:open" && typeof event.data.url === "string") {
+        const target = URL.parse(event.data.url);
+        if (target?.protocol === "https:" || target?.protocol === "http:") onOpen(target.toString());
+      }
+      if (event.data?.type === "donkeycut:save" && typeof event.data.text === "string") {
+        const { text, name: file, mimeType } = event.data as { text: string; name?: unknown; mimeType?: unknown };
+        if (typeof file === "string" && typeof mimeType === "string") onSave(text, file, mimeType);
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);

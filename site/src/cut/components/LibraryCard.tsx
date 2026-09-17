@@ -14,6 +14,7 @@ import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { setLibraryDragData } from "@/cut/lib/assetDrag";
 import { refFromLibrary } from "@/cut/lib/assetRef";
+import { openExternal } from "@/cut/lib/hostBridge";
 import { fileKind } from "@/cut/lib/media";
 import { libraryMediaUrl, libraryPosterUrl, downloadLibraryAsset, type LibraryAsset } from "@/cut/lib/library";
 import { lightboxItemFromLibrary, type LightboxItem } from "@/cut/lib/lightbox";
@@ -393,11 +394,7 @@ export function LibraryCard({
                 {a.source?.url && (
                   // An imported clip keeps the link it came from, so the post it was
                   // cut out of is one click away.
-                  <DropdownMenuItem
-                    onClick={() =>
-                      window.open(a.source!.url, "_blank", "noopener,noreferrer")
-                    }
-                  >
+                  <DropdownMenuItem onClick={() => openExternal(a.source!.url)}>
                     <ExternalLink /> Open original
                   </DropdownMenuItem>
                 )}

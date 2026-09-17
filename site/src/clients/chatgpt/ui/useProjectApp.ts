@@ -135,6 +135,23 @@ export function useProjectApp() {
   };
   const openDonkey = () => { if (view?.project) void openLink(view.project.url, "Could not open Donkey Cut."); };
   const openDownload = () => { if (download) void openLink(download.url, "Could not open the download."); };
+  /** The framed editor asking for a tab: opening the project on donkeycut.com,
+   * and saving an export, which the card's sandbox blocks in the frame. */
+  const openFromFrame = useCallback((url: string) => {
+    void openLink(url, "Could not open Donkey Cut.");
+  }, []);
+  /** A captions file made inside the frame: its bytes go with the request, so
+   * the host needs nothing from this origin to save it. */
+  const saveFromFrame = useCallback(async (text: string, name: string, mimeType: string) => {
+    const app = appRef.current;
+    if (!app) return;
+    try {
+      const result = await app.downloadFile({
+        contents: [{ type: "resource", resource: { uri: `file:///${name}`, mimeType, text } }],
+      });
+      if (result.isError) setError(`Could not save ${name}.`);
+    } catch { setError(`Could not save ${name}.`); }
+  }, []);
 
   useEffect(() => {
     if (!ready || !editorRequest || editor || requested.current === editorRequest) return;
@@ -154,5 +171,5 @@ export function useProjectApp() {
     } catch { /* the inline card still works */ }
   }, []);
   useEffect(() => { if (editor) void requestFullscreen(); }, [editor, requestFullscreen]);
-  return { ready, view, playback, download, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openDownload, requestFullscreen };
+  return { ready, view, playback, download, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openDownload, openFromFrame, saveFromFrame, requestFullscreen };
 }

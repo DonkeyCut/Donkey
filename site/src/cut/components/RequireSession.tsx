@@ -3,6 +3,7 @@ import { bindChatRuntime } from "@/cut/lib/chatRuntime";
 
 import { useEffect, type ReactNode } from "react";
 import { useEnvironment } from "@/cut/lib/environment";
+import { openExternal, projectPageUrl } from "@/cut/lib/hostBridge";
 
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import {
@@ -79,14 +80,13 @@ function EmbeddedSignInFallback() {
         <p className="text-sm text-muted-foreground">
           This browser keeps the editor signed out inside ChatGPT.
         </p>
-        <a
+        <button
+          type="button"
           className="inline-block rounded-md border px-3 py-2 text-sm"
-          href={window.location.pathname}
-          target="_blank"
-          rel="noopener"
+          onClick={() => openExternal(projectPageUrl())}
         >
           Open in Donkey Cut
-        </a>
+        </button>
       </div>
     </div>
   );
