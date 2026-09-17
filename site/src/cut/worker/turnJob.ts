@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 import { getGlobalSetting } from "@/lib/config/effective";
+import { bindCutJudge } from "@/cut/lib/chatRuntime";
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { openCloudProject, pushCloudProject } from "../lib/headless/docSession";
 import { dropPiSession, streamCutChat } from "../lib/pi/cutAgent";
@@ -103,7 +104,11 @@ export async function runTurnJob(
   const doc = await openCloudProject(session, job.projectId);
 
   const deps = headlessDeps(session);
-  deps.judgeSettings = await getGlobalSetting("cutJudge");
+  // The same thresholds the tab binds from account config, so a judged tool
+  // behaves the same way in a job.
+  const judgeSettings = await getGlobalSetting("cutJudge");
+  bindCutJudge(judgeSettings);
+  deps.judgeSettings = judgeSettings;
   const toolCalls: string[] = [];
   const exec = deps.execTool;
   deps.execTool = async (name, args) => {
