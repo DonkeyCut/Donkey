@@ -12,13 +12,9 @@
 
 import type { UIMessage } from "ai";
 import { AI_SKILLS } from "../../../src/cut/server/ai/catalog";
-import {
-  geminiModelRoleNames,
-  geminiModelRoles,
-  resolveGeminiModel,
-} from "../../../src/lib/inference/gemini-models";
+import { geminiModelRoleNames, resolveGeminiModel } from "../../../src/lib/inference/gemini-models";
 import { streamCutChat, dropPiSession, type CutAgentDeps } from "../../../src/cut/lib/pi/cutAgent";
-import type { TurnIntent } from "../../../src/cut/lib/turnIntent";
+import type { TurnIntent } from "../../../src/cut/lib/turnJudge";
 import { EDITOR_STATE, SAFE_TOOLS, serveSafeTool } from "./fixtures";
 import { judgeReply, replyShapeNotes } from "./graders";
 import type { EvalCase } from "./cases";
@@ -30,10 +26,10 @@ export interface RunConfig {
   simpleModel: string;
   /** Model a complex-verdict (or fail-open) turn's rounds run on. */
   complexModel: string;
-  /** Model the gate/router call runs on. */
-  gateModel: string;
-  /** Model the voice/taste judge runs on; null skips the judge. */
-  judgeModel: string | null;
+  /** Whether the reply judge scores each turn (report-only). */
+  judge: boolean;
+  /** Threshold overrides for the turn judge; unset runs the registry defaults. */
+  judgeSettings?: CutAgentDeps["judgeSettings"];
 }
 
 /** Production's config: the three-way gate routes between the two chat roles,
@@ -42,8 +38,7 @@ export const defaultRunConfig = (base: string): RunConfig => ({
   base,
   simpleModel: geminiModelRoleNames.chatSimple,
   complexModel: geminiModelRoleNames.chat,
-  gateModel: geminiModelRoleNames.fastDecision,
-  judgeModel: geminiModelRoles.fastDecision,
+  judge: true,
 });
 
 export interface RoundTiming {
@@ -84,6 +79,8 @@ export interface TraceEntry {
   /** Turn start → this call being served. */
   atMs: number;
   execMs: number;
+  /** The call's arguments, for a trace print. */
+  args: Record<string, unknown>;
 }
 
 export interface CaseResult {
@@ -95,6 +92,12 @@ export interface CaseResult {
   /** The judge's complaint (or transport note). Report-only: never flips pass. */
   judgeNote: string | null;
   intent: TurnIntent;
+  /** The skill the judge attached, the areas it declared, and how many
+   * tools that came to; request_tools calls widened the catalog (a miss). */
+  skill: string | null;
+  areas: string[];
+  declaredTools: number;
+  routingMisses: string[];
   /** The model the rounds ran on — differs per turn under a router config. */
   roundModel: string;
   timings: RunTimings;
@@ -123,9 +126,10 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
   let streamError: string | null = null;
   let extensions = 0;
 
-  const deps: CutAgentDeps = {
-    post: (payload, signal) =>
-      fetch(`${cfg.base}/api/inference/responses`, {
+  const devPost =
+    (path: string) =>
+    (payload: Record<string, unknown>, signal?: AbortSignal) =>
+      fetch(`${cfg.base}${path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -134,14 +138,20 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
         },
         body: JSON.stringify(payload),
         signal,
-      }),
+      });
+  let route: { skill: string | null; areas: string[]; declaredTools: number } | null = null;
+  const routingMisses: string[] = [];
+  const deps: CutAgentDeps = {
+    post: devPost("/api/inference/responses"),
+    judge: devPost("/api/inference/judge"),
+    judgeSettings: cfg.judgeSettings,
     execTool: async (name, args) => {
       const atMs = performance.now() - turnStart;
       const e0 = performance.now();
       const record = (execMs: number) => {
         toolMs += execMs;
         const round = Math.max(0, rounds.length - 1);
-        trace.push({ name, round, atMs, execMs });
+        trace.push({ name, round, atMs, execMs, args });
         rounds[round]?.calls.push({ name, execMs });
       };
       try {
@@ -165,17 +175,19 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
         record(performance.now() - e0);
       }
     },
-    models: { simple: cfg.simpleModel, complex: cfg.complexModel, gate: cfg.gateModel },
+    models: { simple: cfg.simpleModel, complex: cfg.complexModel },
     buildContext: () => lastUser?.__state ?? c.state ?? EDITOR_STATE,
     resolveRefs: async () => lastUser?.__wireParts ?? [],
     debris: () => c.debris ?? [],
     limits: c.limits,
     hooks: {
-      onGate: (i, ms, skipped) => {
+      onGate: (i, ms, skipped, r) => {
         intent = i;
         gateMs = ms;
         gateSkipped = skipped;
+        route = { skill: r.skill, areas: r.areas, declaredTools: r.declaredTools };
       },
+      onRequestTools: (areas) => routingMisses.push(...areas),
       onRound: (ms, firstDeltaMs) => {
         modelMs += ms;
         rounds.push({ roundMs: ms, firstDeltaMs, calls: [] });
@@ -252,10 +264,9 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
 
   let judgeNote: string | null = null;
   let judgeMs: number | undefined;
-  if (cfg.judgeModel && reply) {
+  if (cfg.judge && reply) {
     const verdict = await judgeReply({
       base: cfg.base,
-      model: cfg.judgeModel,
       userAsk: askText,
       reply,
       didWork: mutated,
@@ -284,6 +295,10 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     notes,
     judgeNote,
     intent,
+    skill: route?.skill ?? null,
+    areas: route?.areas ?? [],
+    declaredTools: route?.declaredTools ?? 0,
+    routingMisses,
     roundModel: resolveGeminiModel(intent === "simple" ? cfg.simpleModel : cfg.complexModel),
     timings,
   };

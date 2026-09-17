@@ -49,7 +49,6 @@ import {
 import { engineReady } from "@/cut/lib/api";
 import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
-import { buildAiContext } from "@/cut/lib/aiContext";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
 import { useRefCopy } from "@/cut/lib/refCopy";
 import { registerChatIntake } from "@/cut/lib/chatIntake";
@@ -95,7 +94,7 @@ import {
   useSignedIn,
 } from "@/cut/lib/generate";
 import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
-import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
+import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, judgeEngineSkill, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
 import { toolProgress } from "@/cut/lib/queueTriage";
 import { registerQueueSink } from "@/cut/lib/chatQueue";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
@@ -1065,7 +1064,13 @@ function ChatSession({
         // localBackend (read after the origin resolves), which carries the
         // account scope the engine requires on every data route.
         prepareSendMessagesRequest: async ({ messages }) => {
-          await engineReady();
+          // The judge picks the turn's skill here, since the engine never
+          // calls hosted models; the engine carries it on its prompt.
+          const deps = productionDeps(projectId);
+          const [skill] = await Promise.all([
+            judgeEngineSkill(messages, deps.buildContext(), deps),
+            engineReady(),
+          ]);
           return {
             api: localBackend.url("/api/cut/ai/chat"),
             body: {
@@ -1073,7 +1078,8 @@ function ChatSession({
               runtime: chatRuntime(),
               messages,
               model: currentModel(),
-              context: buildAiContext(),
+              context: deps.buildContext(),
+              skill,
               providerSession: sessionFor(currentModel()),
             },
           };

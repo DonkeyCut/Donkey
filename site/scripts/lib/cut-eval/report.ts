@@ -19,6 +19,10 @@ export interface Agg {
 export interface RunReport {
   pass: boolean;
   intent: string;
+  skill?: string | null;
+  areas?: string[];
+  declaredTools?: number;
+  routingMisses?: string[];
   /** The model the rounds ran on — differs per turn under a router config. */
   roundModel?: string;
   notes: string[];
@@ -61,7 +65,6 @@ export interface BucketSummary {
 export interface ConfigReport {
   label: string;
   chatModel: string;
-  gateModel: string;
   buckets: Partial<Record<Bucket, BucketSummary>>;
   cases: CaseReport[];
 }
@@ -98,6 +101,10 @@ export function toRunReport(result: CaseResult | null, error?: string): RunRepor
   return {
     pass: result.pass,
     intent: result.intent,
+    skill: result.skill,
+    areas: result.areas,
+    declaredTools: result.declaredTools,
+    routingMisses: result.routingMisses,
     roundModel: result.roundModel,
     notes: result.notes,
     judgeNote: result.judgeNote,

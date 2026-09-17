@@ -529,6 +529,8 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       state: CROSSFADED_STATE,
       simulate: () => (name, args) => {
         if (name === "set_transition") return { id: "c1", transition: 0, style: "crossfade" };
+        // Clearing the bar is the other way to get rid of a crossfade.
+        if (name === "remove_transition") return { removed: args.transitionId ?? "tr-1" };
         if (name !== "set_animation") return undefined;
         if (args.clipId !== "c2" || args.which !== "in")
           throw new Error(`set_animation ${args.clipId}/${args.which} — expected c2 "in"`);
@@ -743,12 +745,14 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       // asked for lands as nodes over the clip's footage.
       name: "speed-ramp-from-description",
       bucket: "single-tool",
+      // A clean timeline: the debris cases own the parked bars, and a turn
+      // that can see them is right to tidy them.
       input: () => [
-        userTurn("ease the san francisco clip into slow motion at the end", { state: PARKED_STATE }),
+        userTurn("ease the san francisco clip into slow motion at the end", { state: STYLED_STATE }),
       ],
       reply: /slow|ramp|curve|ease/i,
       requiredTools: ["set_speed_curve"],
-      state: PARKED_STATE,
+      state: STYLED_STATE,
       simulate: () => (name, args) => {
         if (name === "set_speed_curve") {
           return {
@@ -758,7 +762,8 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
               { at: 6, speed: 0.4 },
             ],
             speed: 0.7,
-            len: 8.6,
+            lenBefore: 3.7,
+            lenAfter: 3.7,
           };
         }
         return undefined;

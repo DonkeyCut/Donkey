@@ -1,60 +1,80 @@
 import { describe, expect, test } from "bun:test";
-import { parseQueueTriage, queueTriageInput, toolProgress } from "./queueTriage";
+import { placeQueuedRows, queueTriageQuestions, queueTriageState, toolProgress, type QueueTriageAnswers } from "./queueTriage";
 
 const rows = [
   { id: "m1", text: "also make the title blue" },
   { id: "m2", text: "then export it" },
 ];
 
-describe("parseQueueTriage", () => {
+const place = (choice: "fold" | "spawn" | "queue", p = 0.9) => ({
+  type: "choice" as const,
+  choice,
+  probabilities: { fold: choice === "fold" ? p : (1 - p) / 2, spawn: choice === "spawn" ? p : (1 - p) / 2, queue: choice === "queue" ? p : (1 - p) / 2 },
+  confidence: p,
+});
+const collides = (p: number) => ({ type: "noul" as const, noul: p });
+
+describe("placeQueuedRows", () => {
   test("reads one verdict per row", () => {
-    const out = parseQueueTriage(
-      JSON.stringify({ verdicts: [{ id: "m1", verdict: "fold" }, { id: "m2", verdict: "queue" }] }),
+    const out = placeQueuedRows(
+      { "place::m1": place("fold"), "collides::m1": collides(0.1), "place::m2": place("queue"), "collides::m2": collides(0.1) } as QueueTriageAnswers,
       rows
     );
     expect(out.get("m1")).toBe("fold");
     expect(out.get("m2")).toBe("queue");
   });
 
-  test("a row the reply skips, misnames, or answers with another word stays queued", () => {
-    const out = parseQueueTriage(
-      JSON.stringify({ verdicts: [{ id: "m9", verdict: "spawn" }, { id: "m2", verdict: "later" }] }),
+  test("a collision forbids a spawn; a fold on colliding work stands", () => {
+    const out = placeQueuedRows(
+      { "place::m1": place("spawn"), "collides::m1": collides(0.8), "place::m2": place("fold"), "collides::m2": collides(0.8) } as QueueTriageAnswers,
       rows
     );
     expect(out.get("m1")).toBe("queue");
-    expect(out.get("m2")).toBe("queue");
+    expect(out.get("m2")).toBe("fold");
   });
 
-  test("a garbled or empty reply queues every row", () => {
-    expect([...parseQueueTriage("fold", rows).values()]).toEqual(["queue", "queue"]);
-    expect([...parseQueueTriage(undefined, rows).values()]).toEqual(["queue", "queue"]);
-    expect([...parseQueueTriage("{}", rows).values()]).toEqual(["queue", "queue"]);
+  test("an uncertain placement queues", () => {
+    const out = placeQueuedRows({ "place::m1": place("spawn", 0.3), "collides::m1": collides(0) } as QueueTriageAnswers, rows);
+    expect(out.get("m1")).toBe("queue");
+  });
+
+  test("a row the answers skip, and a failed call, queue", () => {
+    expect([...placeQueuedRows({ "place::m2": place("fold") } as QueueTriageAnswers, rows).values()]).toEqual(["queue", "fold"]);
+    expect([...placeQueuedRows(null, rows).values()]).toEqual(["queue", "queue"]);
   });
 });
 
-describe("queueTriageInput", () => {
+describe("queueTriageQuestions", () => {
+  test("asks a placement and a collision per row, keyed by the row's id", () => {
+    const q = queueTriageQuestions(rows);
+    expect(Object.keys(q)).toEqual(["place::m1", "collides::m1", "place::m2", "collides::m2"]);
+    expect(q["place::m1"].type).toBe("choice");
+    expect(q["collides::m2"].type).toBe("noul");
+  });
+});
+
+describe("queueTriageState", () => {
   test("lays out the running ask, its progress, other chats, the waiting rows and the rows to place", () => {
-    const [turn] = queueTriageInput(
+    const state = queueTriageState(
       { ask: "cut the silences", progress: ["detect_silence", "split_clip (running)"], elsewhere: ["add captions"] },
       [{ id: "w1", text: "what's the total length?" }],
       rows
-    );
-    const text = (turn.content as { text: string }[])[0].text;
-    expect(text).toContain("Running ask:\ncut the silences");
-    expect(text).toContain("Tools run so far: detect_silence, split_clip (running)");
-    expect(text).toContain("Running in other chats:\n- add captions");
-    expect(text).toContain("Already waiting in the queue:\n- what's the total length?");
-    expect(text).toContain("[m1] also make the title blue\n[m2] then export it");
+    ) as Record<string, unknown>;
+    expect(state.running).toEqual({
+      ask: "cut the silences",
+      toolsRunSoFar: ["detect_silence", "split_clip (running)"],
+      inOtherChats: ["add captions"],
+    });
+    expect(state.alreadyWaiting).toEqual(["what's the total length?"]);
+    expect(state.messages).toEqual([
+      { id: "m1", text: "also make the title blue" },
+      { id: "m2", text: "then export it" },
+    ]);
   });
 
   test("caps a pasted wall of text", () => {
-    const [turn] = queueTriageInput(
-      { ask: "x".repeat(5000), progress: [], elsewhere: [] },
-      [],
-      [{ id: "m1", text: "y".repeat(5000) }]
-    );
-    const text = (turn.content as { text: string }[])[0].text;
-    expect(text.length).toBeLessThan(4400);
+    const state = queueTriageState({ ask: "x".repeat(5000), progress: [], elsewhere: [] }, [], [{ id: "m1", text: "y".repeat(5000) }]);
+    expect(JSON.stringify(state).length).toBeLessThan(4400);
   });
 });
 

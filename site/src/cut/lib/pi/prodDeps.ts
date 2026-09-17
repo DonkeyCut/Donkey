@@ -1,7 +1,7 @@
 "use client";
 
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
-import { AI_SKILL_INDEX, AI_SKILLS } from "@/cut/server/ai/catalog";
+import { AI_SKILL_INDEX, readSkill } from "@/cut/server/ai/catalog";
 import { buildAiContext } from "../aiContext";
 import { runAiTool } from "../aiTools";
 import { runProjectChatTool, withChatProject } from "../projectChatTools";
@@ -23,10 +23,11 @@ export function productionDeps(projectId?: string, signal?: AbortSignal): CutAge
   const context = buildAiContext();
   return {
     post: (payload, signal) => hostedPost("/api/inference/responses", payload, signal),
+    judge: (payload, signal) => hostedPost("/api/inference/judge", payload, signal),
     execTool: async (name, args) => {
       if (name === "list_skills") return { skills: AI_SKILL_INDEX };
       if (name === "read_skill") {
-        const doc = AI_SKILLS[String(args.name ?? "")];
+        const doc = readSkill(String(args.name ?? ""));
         if (!doc) throw new Error(`No such skill. Available: ${AI_SKILL_INDEX.join(", ")}`);
         return doc;
       }
@@ -35,7 +36,6 @@ export function productionDeps(projectId?: string, signal?: AbortSignal): CutAge
     models: {
       simple: geminiModelRoleNames.chatSimple,
       complex: geminiModelRoleNames.chat,
-      gate: geminiModelRoleNames.fastDecision,
     },
     buildContext: () => context,
     resolveRefs: async (meta) => {

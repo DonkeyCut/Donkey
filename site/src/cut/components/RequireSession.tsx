@@ -1,5 +1,5 @@
 "use client";
-import { bindChatRuntime } from "@/cut/lib/chatRuntime";
+import { bindChatRuntime, bindCutJudge } from "@/cut/lib/chatRuntime";
 
 import { useEffect, type ReactNode } from "react";
 import { useEnvironment } from "@/cut/lib/environment";
@@ -42,6 +42,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!userId || !config.data) return;
     bindChatRuntime(config.data.settings.chatRuntime);
+    bindCutJudge(config.data.settings.cutJudge);
     reportExposures(config.data);
   }, [userId, config.data]);
 

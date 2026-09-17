@@ -10,6 +10,7 @@ const READ_ONLY = new Set([
   "get_state",
   "list_skills",
   "read_skill",
+  "request_tools",
   "capture_frame",
   "watch_video",
   "note_source",

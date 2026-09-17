@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai";
+import { getGlobalSetting } from "@/lib/config/effective";
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { openCloudProject, pushCloudProject } from "../lib/headless/docSession";
 import { dropPiSession, streamCutChat } from "../lib/pi/cutAgent";
@@ -102,6 +103,7 @@ export async function runTurnJob(
   const doc = await openCloudProject(session, job.projectId);
 
   const deps = headlessDeps(session);
+  deps.judgeSettings = await getGlobalSetting("cutJudge");
   const toolCalls: string[] = [];
   const exec = deps.execTool;
   deps.execTool = async (name, args) => {

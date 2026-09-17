@@ -1,6 +1,6 @@
 import type { AiToolDef } from "@/cut/lib/aiToolDef";
 import { ADOPT_COMMAND } from "@/cut/lib/commandBatch";
-import { AI_SKILL_INDEX, AI_SKILLS, PROJECT_TOOLS } from "@/cut/server/ai/catalog";
+import { AI_SKILL_INDEX, PROJECT_TOOLS, readSkill } from "@/cut/server/ai/catalog";
 
 // The editing commands ChatGPT can run, drawn from the editor's own tool
 // catalog so a command the assistant gains is a command ChatGPT gains. A few
@@ -76,4 +76,4 @@ export function describeCommands(names: string[]): { found: AiToolDef[]; unknown
 }
 
 export const SKILL_INDEX = AI_SKILL_INDEX;
-export const readSkill = (name: string): string | undefined => AI_SKILLS[name];
+export { readSkill };

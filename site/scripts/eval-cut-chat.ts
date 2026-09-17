@@ -16,7 +16,6 @@
  *     [--runs N]                      default 1; use 3+ for latency stats
  *     [--model <registryKey|rawId>]   pin BOTH chat roles to one model (unrouted)
  *     [--simple-model <id>] [--complex-model <id>]  override one routed role
- *     [--gate-model <registryKey|rawId>]
  *     [--matrix]                      run every CANDIDATES row, compare
  *     [--no-judge]                    skip the voice/taste judge call
  *     [--enforce-budgets]             exit 1 when a case breaches its budget
@@ -54,24 +53,21 @@ import {
 // Model configs the --matrix mode compares. Add a row when trialing a new
 // model id; keep "baseline" matching geminiModelRoles so the comparison always
 // includes what production runs (the routed pair).
-const CANDIDATES: { label: string; simple: string; complex: string; gate: string }[] = [
+const CANDIDATES: { label: string; simple: string; complex: string }[] = [
   {
     label: "baseline",
     simple: geminiModelRoles.chatSimple,
     complex: geminiModelRoles.chat,
-    gate: geminiModelRoles.fastDecision,
   },
   {
     label: "all-flash",
     simple: geminiModels.flash,
     complex: geminiModels.flash,
-    gate: geminiModelRoles.fastDecision,
   },
   {
     label: "all-flashLite",
     simple: geminiModels.flashLite,
     complex: geminiModels.flashLite,
-    gate: geminiModelRoles.fastDecision,
   },
 ];
 
@@ -82,6 +78,8 @@ const argValue = (flag: string) => {
 };
 const BASE = argValue("--base") ?? "http://localhost:3000";
 const ONLY = argValue("--only");
+/** Print each tool call's arguments and the reply on a failing run. */
+const TRACE = args.includes("--trace");
 const BUCKET = argValue("--bucket") as Bucket | undefined;
 const RUNS = Number(argValue("--runs") ?? 1);
 const MATRIX = args.includes("--matrix");
@@ -124,7 +122,7 @@ async function runConfig(
   const simpleId = idOf(cfg.simpleModel);
   const complexId = idOf(cfg.complexModel);
   const chatDesc = simpleId === complexId ? simpleId : `${simpleId} | complex→${complexId}`;
-  console.log(`\n== ${label}  chat=${chatDesc}  gate=${idOf(cfg.gateModel)}`);
+  console.log(`\n== ${label}  chat=${chatDesc}  judge=typesafe`);
   const caseReports: CaseReport[] = [];
   for (const c of selected) {
     const runs: RunReport[] = [];
@@ -146,15 +144,17 @@ async function runConfig(
     );
     for (const r of runs.filter((r) => !r.pass)) {
       for (const n of r.error ? [r.error] : r.notes) console.log(`       - ${n}`);
-      if (r.trace.length > 0)
+      if (r.trace.length > 0) {
         console.log(`       tools: ${r.trace.map((t) => t.name).join(" → ")}`);
+        if (TRACE)
+          for (const t of r.trace) console.log(`         ${t.name} ${JSON.stringify(t.args).slice(0, 200)}`);
+      }
     }
     for (const r of runs.filter((r) => r.judgeNote)) console.log(`       judge: ${r.judgeNote}`);
   }
   return {
     label,
     chatModel: chatDesc,
-    gateModel: idOf(cfg.gateModel),
     buckets: buildBucketSummaries(caseReports),
     cases: caseReports,
   };
@@ -174,7 +174,7 @@ async function main() {
   // production's routed pair.
   const both = argValue("--model");
   const defaults = defaultRunConfig(BASE);
-  const judgeModel = NO_JUDGE ? null : defaults.judgeModel;
+  const judge = !NO_JUDGE;
   const configs = MATRIX
     ? CANDIDATES.map((cand) => ({
         label: cand.label,
@@ -182,8 +182,7 @@ async function main() {
           base: BASE,
           simpleModel: cand.simple,
           complexModel: cand.complex,
-          gateModel: cand.gate,
-          judgeModel,
+          judge,
         },
       }))
     : [
@@ -197,10 +196,7 @@ async function main() {
             complexModel: resolveModel(
               argValue("--complex-model") ?? both ?? defaults.complexModel
             ),
-            gateModel: resolveModel(
-              argValue("--gate-model") ?? defaults.gateModel
-            ),
-            judgeModel,
+            judge,
           },
         },
       ];

@@ -84,6 +84,136 @@ export const AI_TOOLS: AiToolDef[] = [
 /** Shared project schemas for hosts that provide their own conversation UI. */
 export const PROJECT_TOOLS: AiToolDef[] = AI_TOOLS.filter((tool) => !tool.server && !UI_TOOLS.has(tool.name));
 
+/** The assistant's own senses and flows, declared on every work turn. */
+export const CORE_TOOLS: AiToolDef[] = [...AI_PANEL_TOOLS];
+
+const COLOR_TOOL = /^(set_color_|read_color_stats$|match_color_grade$)/;
+
+/** The catalog by area: each `*.tools.ts` module is one area (the inspector's
+ * color tools stand on their own), named and described once here so the turn
+ * judge, the escape-hatch tool, and the eval all read the same map. */
+export const TOOL_AREAS: Record<string, { blurb: string; tools: AiToolDef[] }> = {
+  preview: {
+    blurb: "render a preview, capture the composited frame at a time, seek, play or pause, nudge the selected item",
+    tools: [...PREVIEW_TOOLS],
+  },
+  timeline: {
+    blurb:
+      "cut, split, trim, move, place, add and delete clips; speed and retimes; mute, hide, lock, and select; gaps, groups, tracks, overlay video, freeze frames; add titles and text runs; refine speech cuts; the transitions parked at cuts",
+    // A retime or a cut moves the transitions parked at its cuts, so the
+    // transition tools ride with the timeline's.
+    tools: [...TIMELINE_TOOLS, ...TRANSITIONS_TOOLS],
+  },
+  inspector: {
+    blurb:
+      "the selected item's settings: an overlay's text, position, size and style; masks; clip and overlay keyframes; a clip's audio, volume and sound; framing, clip style, speed",
+    tools: INSPECTOR_TOOLS.filter((t) => !COLOR_TOOL.test(t.name)),
+  },
+  color: {
+    blurb: "color grading: a clip's color stats, grades, presets, curves, wheels, HSL, matching a reference's grade",
+    tools: INSPECTOR_TOOLS.filter((t) => COLOR_TOOL.test(t.name)),
+  },
+  removal: {
+    blurb: "background removal (cutout): matte a clip's subject or background, strokes, what shows behind it",
+    tools: [...REMOVAL_TOOLS],
+  },
+  elements: {
+    blurb: "add shapes and stickers, or create a sticker from an image",
+    tools: [...ELEMENTS_TOOLS],
+  },
+  effects: {
+    blurb: "add a look effect or treatment to a clip",
+    tools: [...EFFECTS_TOOLS],
+  },
+  animation: {
+    blurb: "an overlay element's entrance, exit and loop animations and keyframed motion",
+    tools: [...OVERLAY_ANIMATION_TOOLS],
+  },
+  transitions: {
+    blurb: "transitions between clips, and a clip's own in and out animation",
+    tools: [...TRANSITIONS_TOOLS],
+  },
+  subtitles: {
+    blurb:
+      "captions and subtitles: transcribe, caption from visuals, sync lyrics, align to audio, the caption look, tracks, translation, editing cues",
+    tools: [...SUBTITLES_TOOLS],
+  },
+  audio: {
+    blurb: "voiceover, music generation, reading subtitles aloud, the voice list",
+    tools: [...AUDIO_TOOLS],
+  },
+  image_gen: {
+    blurb: "generate an image with a hosted model",
+    tools: [...IMAGE_GEN_TOOLS],
+  },
+  video_gen: {
+    blurb: "generate a video clip or a talking character video with a hosted model; a better version or another take of an existing clip is a fresh render",
+    tools: [...VIDEO_GEN_TOOLS],
+  },
+  scene: {
+    blurb: "scene productions: plan, approve, regenerate, recut and restyle a narrated multi-shot cut",
+    tools: [...SCENE_TOOLS],
+  },
+  stock: {
+    blurb: "search the bundled stock footage, images, characters and sound effects, and add one to the project",
+    tools: [...STOCK_TOOLS],
+  },
+  library: {
+    blurb: "the shared library: list, add, share, organize, notes, templates",
+    tools: [...LIBRARY_TOOLS],
+  },
+  side_panel: {
+    blurb:
+      "the side panel and project media: open a panel, file or convert assets, organize or delete media, publish metadata, the project background",
+    tools: [...SIDE_PANEL_TOOLS],
+  },
+  top_bar: {
+    blurb: "the aspect ratio, guides, the project name, export",
+    tools: [...TOP_BAR_TOOLS],
+  },
+  editor: {
+    blurb: "copy, paste, undo, redo",
+    tools: [...EDITOR_TOOLS],
+  },
+};
+
+export const TOOL_AREA_NAMES = Object.keys(TOOL_AREAS);
+
+/** The tools of the named areas, in catalog order, deduplicated. */
+export function areaTools(areas: Iterable<string>): AiToolDef[] {
+  const wanted = new Set(areas);
+  const names = new Set<string>();
+  for (const area of TOOL_AREA_NAMES) {
+    if (!wanted.has(area)) continue;
+    for (const t of TOOL_AREAS[area].tools) names.add(t.name);
+  }
+  return AI_TOOLS.filter((t) => names.has(t.name));
+}
+
+/** The tool a turn calls to widen its catalog when the routed areas left out
+ * what the ask needs. Loop-local: it lives outside the catalog, executes in
+ * the chat loop, and never reaches a host or the engine. */
+export const REQUEST_TOOLS_DEF: AiToolDef = {
+  name: "request_tools",
+  description:
+    "Add tool areas to this turn. The tools declared to you are the areas judged relevant to the ask; when the ask needs a tool you do not see, name its area here and it is available from your next step. Areas: " +
+    TOOL_AREA_NAMES.map((a) => `${a} (${TOOL_AREAS[a].blurb})`).join("; ") +
+    ".",
+  inputSchema: {
+    type: "object",
+    properties: {
+      areas: {
+        type: "array",
+        items: { type: "string", enum: TOOL_AREA_NAMES },
+        description: "Area names to add",
+      },
+    },
+    required: ["areas"],
+    additionalProperties: false,
+  },
+  server: true,
+};
+
 
 /** Deep documentation the model can pull in on demand. */
 export const AI_SKILLS: Record<string, string> = {
@@ -431,7 +561,7 @@ Rules:
 - project.safeZones in editor_state gives, for this frame, the safe area of every guide preset (frame fractions, x/y/w/h) and the keepOut boxes where TikTok, Reels and Shorts draw their own UI or crop the frame's sides — known whether or not a guide shows. When the user names a platform, asks for a safe zone, or wants graphics kept clear of the app's UI, place every title, sticker and caption inside safeZones.shortform.safeArea and check with capture_frame; safeZones.margins is the general 5% inset. A safeArea is a rect — x/y its top-left corner, w/h its size — while an element's x/y is its center: centered in the safe area means x + w/2, y + h/2, and an element of width ew stays inside while its center is between x + ew/2 and x + w − ew/2. Guides are a view: set_guides shows one when the user asks to see it, and showing one changes nothing in the cut.
 - Exercise judgment on details the user left open, and state the choice you made. Judgment fills in the parameters of the asked-for change (style, length, placement); the scope stays the ask, and extra tools, tracks, or treatments beyond it wait for the user to ask. Editing defaults: a hard cut at every joint; when transitions are asked for, one style family per video at 0.4–0.6s. The editing-taste skill carries the full doctrine.
 - Styling is part of the ask, never a bonus. Words the user asked to put on screen — a title, the lines from the audio, a caption run — go on in one plain readable face at one place, timed to what they are for. Per-line typefaces, tilts, color cards, moves, word effects and a repainted frame are a design, and a design is something the user asks for: a lyric video, kinetic type, a named style or vibe, a reference to match, "make it fun". Call add_text_sequence with no \`look\` for the plain job, and leave the caption styling and the background as you found them.
-- Read list_skills / read_skill before working in an area you're unsure about — they document every setting. A tool whose description already answers the ask goes straight through.
+- A skill attached to the message (<skill_relevance>) is the reference for its area: read it before touching that area's settings. It never changes which tool the ask maps to — the tool descriptions decide that ("a better version" is a render, whatever skill rode along). list_skills / read_skill cover an area the attachment left out.
 - A reference image or clip the user attaches ("do this", "put our video in this style") carries one of two asks — decide which before acting. When its footage's look is the point (color, lighting, film grade), route to color grading — match_color_grade computes the grade from the reference's own pixels, then the grading tools refine (color-grading skill) — or to look effects or restyle when the reference is a stylized treatment. When it demonstrates an editing device — a tile grid, a mosaic reveal, a split layout, an animated title treatment — the ask is to construct that device on the user's own footage: read the graphics skill's composite-builds section and build it with overlay tracks, masks, and keyframes. Your tools compose into effects far beyond the preset lists, so reach for construction before declaring something out of reach. Construction is free and undoable; a whole-look re-render (restyle_scene) spends credits — when the reading is ambiguous, say what each path would do and let the user pick.
 - A Donkey Cut project link or share link the user gives you is a document: read it with read_project (the document is the edit — never watch a reference to learn what its document already states), decide which of this project's sources plays each of its parts from the reference's observed notes and transcripts (a reference look with watch_video's project_link where those leave it dark), then call replicate_project once — the whole edit, or only the items they asked for: a title, one clip's treatment, the music, the caption look — and tune from there. copy_project_media brings files over on their own. The replicating-a-project skill has the flow.
 - Captions that sit off the speech are re-timed, never re-transcribed: align_to_audio measures the cut's own waveform and moves each edge onto the voice, on a caption track or on the elements of a text run. Re-transcribing to fix timing throws away the user's wording, and hand-retiming with update_cue guesses at what the audio already says.
@@ -443,6 +573,70 @@ Rules:
 }
 
 export const AI_SKILL_INDEX = Object.keys(AI_SKILLS);
+
+/** A skill document by name; undefined for a name the library lacks. */
+export function readSkill(name: string): string | undefined {
+  return Object.hasOwn(AI_SKILLS, name) ? AI_SKILLS[name] : undefined;
+}
+
+/** A skill's title: the heading its document opens with. */
+export function skillTitle(name: string): string {
+  return (AI_SKILLS[name] ?? "").split("\n")[0].replace(/^#\s*/, "").trim();
+}
+
+/** One sentence per skill, for the turn judge's roster. */
+export const AI_SKILL_BLURBS: Record<string, string> = {
+  "editor-overview": "The editor's layout: panels, tracks, the aspect ratio, autosave, undo, where media lives.",
+  "timeline-editing": "How clips, gaps, groups, tracks and moves behave on the timeline; placing and reordering.",
+  "color-grading":
+    "Grading like a colorist: reading color stats, correcting exposure and balance, presets, curves, wheels, matching a reference.",
+  "background-removal": "Cutouts: matting a clip's subject or background, auto and custom modes, strokes, refinement.",
+  "watching-and-cutting":
+    "Cutting by content: watching footage, listening, dead air, beats; the flow for cuts that depend on what the footage holds.",
+  "transitions-and-fades": "Which feature an ask maps to: transitions between clips, a clip's own animation, look effects, fades.",
+  graphics: "Titles, shapes and stickers: lanes, positioning, styling, masks, keyframes, composite builds like grids and reveals.",
+  "text-videos": "Videos whose picture is words: lyric videos, kinetic type, quote cards; looks, timing, backgrounds.",
+  "text-creativity": "Fifty text devices for a run of words that reads flat: groups of devices and how to combine them.",
+  "audio-and-subtitles": "Soundtrack clips, levels and matching, voiceover, lyric sync, caption tracks and their look.",
+  "ai-generation": "Getting footage the user lacks: stock, URL import, hosted image, video and music generation and their settings; a better version or another take of a clip is a fresh render.",
+  "scene-productions": "Planning and rendering a narrated multi-shot scene: the plan card, approval, look references, revisions.",
+  "editing-taste": "Deciding details the user left open: joints, transition families, pacing, when to add and when to leave alone.",
+  "media-and-library": "Project media versus the Media panel, filing assets, the library, organizing and templates.",
+  "replicating-a-project": "Reading another Donkey Cut project or share link as a document and bringing its edit or items over.",
+  "publish-and-export": "Publish fields for the platforms, and every export preset and axis.",
+};
+
+/** The tool areas a skill's guidance acts through; a suggested skill brings
+ * them along whatever the judge said about the areas. */
+export const AI_SKILL_AREAS: Record<string, string[]> = {
+  "editor-overview": [],
+  "timeline-editing": ["timeline"],
+  "color-grading": ["color", "inspector"],
+  "background-removal": ["removal"],
+  "watching-and-cutting": ["timeline"],
+  "transitions-and-fades": ["transitions", "animation", "effects"],
+  graphics: ["timeline", "inspector", "elements", "animation"],
+  "text-videos": ["timeline", "subtitles", "inspector", "elements", "side_panel"],
+  "text-creativity": ["timeline", "inspector", "elements", "animation"],
+  "audio-and-subtitles": ["audio", "subtitles", "inspector", "timeline"],
+  "ai-generation": ["stock", "image_gen", "video_gen", "timeline"],
+  "scene-productions": ["scene"],
+  "editing-taste": ["timeline", "transitions"],
+  "media-and-library": ["library", "side_panel", "timeline"],
+  "replicating-a-project": [],
+  "publish-and-export": ["top_bar", "side_panel"],
+};
+
+/** The turn's skill suggestion as prompt text: the judge's pick and the
+ * document itself, so the model reads the right reference without a tool
+ * round. Rides as an ephemeral message on the hosted loop and on the
+ * engine's prompt; never stored. */
+export function skillRelevanceBlock(skill: string | null): string {
+  const doc = skill ? readSkill(skill) : undefined;
+  if (!skill || !doc)
+    return "<skill_relevance>\nNo skill in the library appears relevant to this request.\n</skill_relevance>";
+  return `<skill_relevance>\nRelevant to the current request: ${skill}. It documents that area's settings; the tool descriptions still decide which tool the ask maps to. Ignore it if it does not fit what the user actually asked for.\n</skill_relevance>\n<skill name="${skill}">\n${doc}\n</skill>`;
+}
 
 /** The <attached_assets> block a user turn carries when it has attachment
  * refs. One builder serves hosted chat, the engine chat, and the eval mirror,

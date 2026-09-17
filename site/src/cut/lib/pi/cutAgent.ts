@@ -1,31 +1,50 @@
 import type { UIMessage, UIMessageChunk } from "ai";
 import { Agent, type AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message, UserMessage } from "@earendil-works/pi-ai";
-import { AI_TOOLS, attachedAssetsBlock, systemPrompt } from "@/cut/server/ai/catalog";
-import { isResumeMessage } from "../chatResume";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
-  parseQueueTriage,
-  QUEUE_TRIAGE_SCHEMA,
-  queueTriageInput,
-  queueTriagePrompt,
+  areaTools,
+  attachedAssetsBlock,
+  CORE_TOOLS,
+  REQUEST_TOOLS_DEF,
+  skillRelevanceBlock,
+  systemPrompt,
+  TOOL_AREA_NAMES,
+} from "@/cut/server/ai/catalog";
+import { isResumeMessage } from "../chatResume";
+import { cutJudge } from "../chatRuntime";
+import { askJudge } from "../judge";
+import {
+  placeQueuedRows,
+  queueTriageQuestions,
+  queueTriageState,
+  type QueueTriageAnswers,
   type QueueVerdict,
   type TriageAnchor,
   type TriageRow,
 } from "../queueTriage";
-import { parseTurnIntent, turnIntentInput, turnIntentPrompt, type TurnIntent } from "../turnIntent";
+import {
+  judgeTurnState,
+  routeTurn,
+  TURN_JUDGE_QUESTIONS,
+  type CutJudgeSettings,
+  type TurnIntent,
+  type TurnJudgeAnswers,
+  type TurnRoute,
+} from "../turnJudge";
 import { enforceContextBudget } from "./contextBudget";
 import { donkeyModel, type ChatThinkingLevel } from "./donkeyModel";
 import { ledgerText, recordCall, type LedgerRecord } from "./mutationLedger";
 import { makeDonkeyStream, type DonkeyToolDetails, type PostFn, type WireCarrier, type WirePart } from "./donkeyStream";
-import { toAgentTools, type ExecTool } from "./tools";
+import { toAgentTools, toToolResult, type ExecTool } from "./tools";
 import { subscribeUiChunks } from "./uiChunks";
 
-// The chat turn runner on the pi agent harness. Each turn: the intent gate
-// classifies the newest message (chat verdicts withhold every tool, simple
-// verdicts downgrade the model and narrow the tool catalog to the areas the
-// verdict names), the Agent loops model calls and tool
-// executions against the live editor store, and the events stream out as the
-// UIMessageChunks AiPanel already consumes. The thread's LLM context is pi's
+// The chat turn runner on the pi agent harness. Each turn: one typed judgment
+// routes the newest message (a chat verdict withholds every tool, a simple
+// verdict keeps the light model; the turn declares the tool areas the judge
+// picked and carries the skill document it picked), the Agent loops model
+// calls and tool executions against the live editor store, and the events
+// stream out as the UIMessageChunks AiPanel already consumes. The thread's LLM context is pi's
 // own message list, kept per thread in the session registry — past tool calls
 // replay as structured toolCall/toolResult messages, so no bookkeeping rides
 // as prose the model could mimic.
@@ -39,8 +58,15 @@ const MAX_EXTENSIONS = 3;
 
 export interface CutAgentDeps {
   post: PostFn;
+  /** The judge route: typed questions over a state, answered as
+   * probabilities. Routes the turn and triages the queue. */
+  judge: PostFn;
+  /** The judgment thresholds. The page binds them from the account config;
+   * the worker reads them from the global settings; unset falls back to the
+   * bound value (the registry default when nothing bound one). */
+  judgeSettings?: CutJudgeSettings;
   execTool: ExecTool;
-  models: { simple: string; complex: string; gate: string };
+  models: { simple: string; complex: string };
   /** The fresh editor snapshot for the newest message. */
   buildContext: () => unknown;
   /** Attachment metadata resolved into wire media parts for the newest
@@ -58,7 +84,11 @@ export interface CutAgentDeps {
   /** Timing instrumentation: the eval asserts on it, production logs it at
    * debug level. */
   hooks?: {
-    onGate?: (intent: TurnIntent, ms: number, skipped: boolean) => void;
+    /** The turn's route landed: the verdict, the judge's wall time, whether
+     * the intent was decided on sight, and what the turn declares. */
+    onGate?: (intent: TurnIntent, ms: number, skipped: boolean, route: TurnRoute & { declaredTools: number }) => void;
+    /** The model widened its catalog mid-turn: a routing miss. */
+    onRequestTools?: (areas: string[]) => void;
     /** One LLM round settled: wall time, and time to its first visible delta. */
     onRound?: (ms: number, firstDeltaMs: number | null) => void;
     /** The round budget auto-extended (n = extensions so far). */
@@ -190,11 +220,9 @@ export async function foldIntoCutChat({
   });
 }
 
-const TRIAGE_PROMPT = queueTriagePrompt();
-
-/** Where each mid-turn message goes: one light-model call over the running
- * ask and the rows. Fails closed — every row the call cannot place stays in
- * the queue. */
+/** Where each mid-turn message goes: one judgment over the running ask and
+ * the rows. Fails closed — every row the call cannot place stays in the
+ * queue. */
 export async function triageQueuedMessages({
   anchor,
   waiting,
@@ -211,26 +239,21 @@ export async function triageQueuedMessages({
   // Short ids on the wire; the verdict quotes them back.
   const wire = rows.map((r, i) => ({ id: `m${i + 1}`, text: r.text }));
   const byWire = new Map(wire.map((w, i) => [w.id, rows[i].id] as const));
-  const closed = () => new Map<string, QueueVerdict>(rows.map((r) => [r.id, "queue"]));
+  let answers: QueueTriageAnswers | null = null;
   try {
-    const res = await deps.post(
-      {
-        donkeyProvider: "gemini",
-        model: deps.models.gate,
-        instructions: TRIAGE_PROMPT,
-        input: queueTriageInput(anchor, waiting, wire),
-        text: { format: { type: "json_schema", schema: QUEUE_TRIAGE_SCHEMA } },
-      },
+    const result = await askJudge(
+      deps.judge,
+      queueTriageState(anchor, waiting, wire),
+      queueTriageQuestions(wire),
       abortSignal
     );
-    if (!res.ok) return closed();
-    const body = (await res.json()) as { output_text?: string };
-    const out = closed();
-    for (const [w, v] of parseQueueTriage(body.output_text, wire)) out.set(byWire.get(w)!, v);
-    return out;
+    answers = result.answers as QueueTriageAnswers;
   } catch {
-    return closed();
+    answers = null;
   }
+  const out = new Map<string, QueueVerdict>();
+  for (const [w, v] of placeQueuedRows(answers, wire)) out.set(byWire.get(w)!, v);
+  return out;
 }
 
 /** Every toolCall in the session answered. An aborted batch leaves calls with
@@ -449,11 +472,10 @@ function sessionFor(threadId: string, history: UIMessage[]): AgentMessage[] {
   return [...stored, ...legacySession(history.slice(firstMissing))];
 }
 
-const GATE_PROMPT = turnIntentPrompt();
-
-/** A message that runs routed from the start, with no gate call and no
- * speculative round: one carrying attachments, or the continuation of a turn
- * the page lost, which picks up whatever tools that turn was using. */
+/** A message that runs on the full model from the start, with no speculative
+ * round: one carrying attachments, or the continuation of a turn the page
+ * lost, which picks up whatever tools that turn was using. The judge still
+ * picks its skill and areas. */
 function complexOnSight(lastUser: UIMessage | undefined): boolean {
   if (!lastUser) return false;
   if (isResumeMessage(lastUser)) return true;
@@ -461,39 +483,73 @@ function complexOnSight(lastUser: UIMessage | undefined): boolean {
   return Array.isArray(attached) && attached.length > 0;
 }
 
-/** The turn's gate and router (ported from the legacy loop): judge the newest
- * message; "chat" withholds every tool, "simple" downgrades the model. A
- * message complex on sight skips the call. Fails open. */
-async function classifyTurnIntent(
+export interface TurnVerdict {
+  route: TurnRoute;
+  /** The intent was decided on sight (attachments, a resumed turn). */
+  skipped: boolean;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** The turn's route: one judge call over the newest message, the recent
+ * turns, and the editor slice, composed under the thresholds. A message
+ * complex on sight keeps its intent and takes the skill and areas. Fails
+ * open — a call that fails runs the full model with every area and no
+ * skill. */
+export async function judgeTurn(
   messages: UIMessage[],
+  context: unknown,
   deps: CutAgentDeps,
   abortSignal?: AbortSignal
-): Promise<{ intent: TurnIntent; skipped: boolean }> {
+): Promise<TurnVerdict> {
+  const settings = deps.judgeSettings ?? cutJudge();
   const lastUser = messages.findLast((m) => m.role === "user");
-  if (complexOnSight(lastUser)) return { intent: "complex", skipped: true };
-  const turns = messages.map((m) => ({
-    role: m.role === "user" ? ("user" as const) : ("assistant" as const),
-    text: m.parts
-      .map((p) => (p.type === "text" ? p.text : ""))
-      .join("")
-      .trim(),
-  }));
+  const onSight = complexOnSight(lastUser);
+  if (onSight && !settings.skillSuggestion && !settings.toolRouting)
+    return { route: routeTurn(null, settings), skipped: true };
+  let route: TurnRoute;
   try {
-    const res = await deps.post(
-      {
-        donkeyProvider: "gemini",
-        model: deps.models.gate,
-        instructions: GATE_PROMPT,
-        input: turnIntentInput(turns),
-      },
+    const { answers } = await askJudge(
+      deps.judge,
+      judgeTurnState(messages, context),
+      TURN_JUDGE_QUESTIONS,
       abortSignal
     );
-    if (!res.ok) return { intent: "complex", skipped: false };
-    const body = (await res.json()) as { output_text?: string };
-    return { intent: parseTurnIntent(body.output_text), skipped: false };
+    route = routeTurn(answers as unknown as TurnJudgeAnswers, settings);
   } catch {
-    return { intent: "complex", skipped: false };
+    route = routeTurn(null, settings);
   }
+  if (onSight) route.intent = "complex";
+  return { route, skipped: onSight };
+}
+
+/** The skill the judge attaches to a turn the engine's own chat runs: the
+ * page judges before the send and the engine carries the block on its
+ * prompt. Null when no skill fits; undefined when the judge could not be
+ * asked. */
+export async function judgeEngineSkill(
+  messages: UIMessage[],
+  context: unknown,
+  deps: CutAgentDeps
+): Promise<string | null | undefined> {
+  const settings = deps.judgeSettings ?? cutJudge();
+  if (!settings.skillSuggestion) return undefined;
+  try {
+    const { answers } = await askJudge(deps.judge, judgeTurnState(messages, context), TURN_JUDGE_QUESTIONS);
+    return routeTurn(answers as unknown as TurnJudgeAnswers, settings).skill;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The declared catalog for a run: the core on every work turn, the routed
+ * areas' tools, and the escape hatch whenever something was left out. */
+function toolsFor(areas: readonly string[], execTool: ExecTool, requestTools: AgentTool): AgentTool[] {
+  const full = areas.length === TOOL_AREA_NAMES.length;
+  return [
+    ...toAgentTools([...CORE_TOOLS, ...areaTools(areas)], execTool),
+    ...(full ? [] : [requestTools]),
+  ];
 }
 
 /** The newest composer message as the agent's prompt: text plus the
@@ -501,7 +557,8 @@ async function classifyTurnIntent(
  * payloads as wire parts. */
 async function buildPrompt(
   lastUser: UIMessage | undefined,
-  deps: CutAgentDeps
+  deps: CutAgentDeps,
+  context: unknown = deps.buildContext()
 ): Promise<UserMessage & WireCarrier> {
   let text = (lastUser?.parts ?? [])
     .map((p) => (p.type === "text" ? p.text : ""))
@@ -515,7 +572,7 @@ async function buildPrompt(
       wireParts.push(...(await deps.resolveRefs(meta)));
     } catch {}
   }
-  text += `\n\n<editor_state>\n${JSON.stringify(deps.buildContext())}\n</editor_state>`;
+  text += `\n\n<editor_state>\n${JSON.stringify(context)}\n</editor_state>`;
   return { role: "user", content: [{ type: "text", text }], timestamp: Date.now(), wireParts };
 }
 
@@ -544,11 +601,19 @@ export function streamCutChat({
       try {
         const gateStart = performance.now();
         const lastUser = messages.findLast((m) => m.role === "user");
-        const promptPromise = buildPrompt(lastUser, deps);
-        const verdictPromise = classifyTurnIntent(messages, deps, abortSignal);
-        void verdictPromise.then(({ intent, skipped }) =>
-          deps.hooks?.onGate?.(intent, performance.now() - gateStart, skipped)
-        );
+        const context = deps.buildContext();
+        const promptPromise = buildPrompt(lastUser, deps, context);
+        const settings = deps.judgeSettings ?? cutJudge();
+        const verdictPromise = judgeTurn(messages, context, deps, abortSignal);
+        // The route once it has landed, read by every round after.
+        let settled: TurnRoute | null = null;
+        void verdictPromise.then(({ route, skipped }) => {
+          settled = route;
+          deps.hooks?.onGate?.(route.intent, performance.now() - gateStart, skipped, {
+            ...route,
+            declaredTools: route.intent === "chat" ? 0 : CORE_TOOLS.length + areaTools(route.areas).length,
+          });
+        });
 
         const roundBudget = deps.limits?.roundBudget ?? ROUND_BUDGET;
         const maxExtensions = deps.limits?.maxExtensions ?? MAX_EXTENSIONS;
@@ -581,12 +646,53 @@ export function streamCutChat({
           // Everything this turn ran, harvested off the tool results in code.
           const records: LedgerRecord[] = [];
 
+          // The catalog this run declares. The speculative run waits a bounded
+          // moment for the route; a route that has landed narrows the tools
+          // to its areas, and one still in flight leaves the full catalog on
+          // this run (the model already sees those tools, so the run never
+          // narrows afterwards). The escape hatch widens between rounds.
+          const routed =
+            settled ?? (await Promise.race([verdictPromise.then((v) => v.route), sleep(settings.judgeWaitMs).then(() => null)]));
+          const declared = new Set<string>(routed?.areas ?? TOOL_AREA_NAMES);
+          let widened: string[] | null = null;
+          const requestTools: AgentTool = {
+            name: REQUEST_TOOLS_DEF.name,
+            label: REQUEST_TOOLS_DEF.name,
+            description: REQUEST_TOOLS_DEF.description,
+            parameters: REQUEST_TOOLS_DEF.inputSchema as never,
+            execute: async (_id, params) => {
+              const asked = ((params as { areas?: unknown }).areas ?? []) as unknown[];
+              const added = asked.filter((a): a is string => typeof a === "string" && TOOL_AREA_NAMES.includes(a) && !declared.has(a));
+              for (const a of added) declared.add(a);
+              if (added.length > 0) {
+                widened = [...(widened ?? []), ...added];
+                deps.hooks?.onRequestTools?.(added);
+              }
+              const tools = areaTools(added).map((t) => t.name);
+              return toToolResult(REQUEST_TOOLS_DEF.name, {
+                added,
+                tools,
+                note: added.length > 0 ? "Available from your next step." : "Nothing to add: those areas are already declared.",
+              });
+            },
+          };
+          const tools = withTools ? toolsFor([...declared], deps.execTool, requestTools) : [];
+
           const agent = new Agent({
             initialState: {
               systemPrompt: systemPrompt(),
               model: donkeyModel(roundModel, thinkingLevel),
               messages: sessionFor(threadId, messages.filter((m) => m !== lastUser)),
-              tools: withTools ? toAgentTools(AI_TOOLS, deps.execTool) : [],
+              tools,
+            },
+            // A widened catalog reaches the next round through the loop's own
+            // context, and the agent's state, so a follow-up sees it too.
+            prepareNextTurnWithContext: (ctx) => {
+              if (!widened) return undefined;
+              widened = null;
+              const next = toolsFor([...declared], deps.execTool, requestTools);
+              agent.state.tools = next;
+              return { context: { ...ctx.context, tools: next } };
             },
             streamFn: makeDonkeyStream({
               post: deps.post,
@@ -598,9 +704,13 @@ export function streamCutChat({
               // The turn ledger rides every call as an ephemeral tail message —
               // the reply-writing call always sees the current record, and the
               // stored session never carries it.
+              // The skill the judge attached rides the same way, from the
+              // first round it is known for.
+              const skill = withTools && settings.skillSuggestion && settled ? skillRelevanceBlock(settled.skill) : null;
               const ledger = ledgerText(records, deps.debris?.() ?? []);
-              if (!ledger) return out;
-              return [...out, { role: "user", content: ledger, timestamp: 0 }];
+              const tail = [skill, ledger].filter((t): t is string => !!t).join("\n\n");
+              if (!tail) return out;
+              return [...out, { role: "user", content: tail, timestamp: 0 }];
             },
             toolExecution: "sequential",
             beforeToolCall: async ({ toolCall }) => {
@@ -746,8 +856,9 @@ export function streamCutChat({
           }
         };
 
-        // Speculative first round: the turn goes out immediately on the light
-        // model with the full catalog while the gate classifies in parallel.
+        // Speculative first round: the turn goes out on the light model while
+        // the judge routes in parallel, waiting on it only a bounded moment for
+        // the narrowed catalog.
         // Tool execution waits on the verdict and UI chunks buffer until it
         // lands, so a chat or complex verdict aborts the run with nothing
         // shown and nothing executed, and the turn restarts routed — while a
@@ -763,8 +874,8 @@ export function streamCutChat({
             else if (mode === "buffering") buffer.push(chunk);
           };
           let speculating: Agent | null = null;
-          const watcher = verdictPromise.then(({ intent }) => {
-            if (intent === "simple") {
+          const watcher = verdictPromise.then(({ route }) => {
+            if (route.intent === "simple") {
               mode = "live";
               for (const c of buffer.splice(0)) emit(c);
               return true;
@@ -778,7 +889,7 @@ export function streamCutChat({
             roundModel: deps.models.simple,
             withTools: true,
             send,
-            executionGate: async () => (await verdictPromise).intent === "simple",
+            executionGate: async () => (await verdictPromise).route.intent === "simple",
             onAgent: (a) => {
               speculating = a;
             },
@@ -789,7 +900,7 @@ export function streamCutChat({
           }
         }
         if (!kept && !abortSignal?.aborted) {
-          const { intent } = await verdictPromise;
+          const { intent } = (await verdictPromise).route;
           finalize(
             await runAgentTurn({
               roundModel: intent === "simple" ? deps.models.simple : model,

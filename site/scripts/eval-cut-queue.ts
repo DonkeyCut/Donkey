@@ -18,7 +18,6 @@
  *     [--base http://localhost:3000]
  *     [--only <case>[,<case>…]]
  *     [--runs N]                      default 1; 3+ shows a flaky verdict
- *     [--gate-model <registryKey|rawId>]
  *     [--no-live]                     skip the live fold turn
  *
  * Auth is the dev bypass header (scripts only — never the app), so runs are
@@ -27,7 +26,7 @@
 
 import type { UIMessage } from "ai";
 import type { Message } from "@earendil-works/pi-ai";
-import { geminiModelRoleNames, geminiModels, resolveGeminiModel } from "../src/lib/inference/gemini-models";
+import { geminiModelRoleNames } from "../src/lib/inference/gemini-models";
 import {
   dropPiSession,
   foldIntoCutChat,
@@ -49,17 +48,13 @@ const BASE = argValue("--base") ?? "http://localhost:3000";
 const ONLY = argValue("--only")?.split(",").map((s) => s.trim());
 const RUNS = Number(argValue("--runs") ?? 1);
 const LIVE = !args.includes("--no-live");
-const GATE = (() => {
-  const v = argValue("--gate-model");
-  if (!v) return geminiModelRoleNames.fastDecision;
-  return (geminiModels as Record<string, string>)[v] ?? v;
-})();
 
 /** The eval's deps: the dev server as the inference proxy. The triage uses
- * the post function and the gate model alone. */
-const deps: CutAgentDeps = {
-  post: (payload, signal) =>
-    fetch(`${BASE}/api/inference/responses`, {
+ * the judge post alone. */
+const devPost =
+  (path: string) =>
+  (payload: Record<string, unknown>, signal?: AbortSignal) =>
+    fetch(`${BASE}${path}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -68,9 +63,12 @@ const deps: CutAgentDeps = {
       },
       body: JSON.stringify(payload),
       signal,
-    }),
+    });
+const deps: CutAgentDeps = {
+  post: devPost("/api/inference/responses"),
+  judge: devPost("/api/inference/judge"),
   execTool: async () => ({}),
-  models: { simple: GATE, complex: GATE, gate: GATE },
+  models: { simple: geminiModelRoleNames.chatSimple, complex: geminiModelRoleNames.chat },
   buildContext: () => ({}),
   resolveRefs: async () => [],
 };
@@ -112,7 +110,6 @@ async function runLiveFold(): Promise<string[]> {
     models: {
       simple: geminiModelRoleNames.chatSimple,
       complex: geminiModelRoleNames.chat,
-      gate: geminiModelRoleNames.fastDecision,
     },
     buildContext: () => EDITOR_STATE,
     execTool: async (name, args) => {
@@ -175,7 +172,6 @@ async function runLiveQueueBack(): Promise<string[]> {
     models: {
       simple: geminiModelRoleNames.chatSimple,
       complex: geminiModelRoleNames.chat,
-      gate: geminiModelRoleNames.fastDecision,
     },
     buildContext: () => AUDIO_STATE,
     execTool: async (name, args) => {
@@ -226,7 +222,7 @@ async function runLiveQueueBack(): Promise<string[]> {
 async function main() {
   const selected = queueCases.filter((c) => !ONLY || ONLY.includes(c.name));
   if (selected.length === 0 && !LIVE) throw new Error(`No case named "${ONLY?.join(", ")}".`);
-  console.log(`== queue triage  gate=${resolveGeminiModel(GATE)}  runs=${RUNS}`);
+  console.log(`== queue triage  judge=typesafe  runs=${RUNS}`);
   let failed = 0;
   const times: number[] = [];
   for (const c of selected) {

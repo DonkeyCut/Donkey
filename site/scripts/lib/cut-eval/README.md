@@ -5,7 +5,7 @@ One command measures the chat assistant's behavior and speed together:
 ```
 npm run eval:cut-chat -- [--runs N] [--only <case>] [--bucket chat|single-tool|multi-tool]
                          [--model <id>] [--simple-model <id>] [--complex-model <id>]
-                         [--gate-model <id>] [--matrix] [--enforce-budgets] [--out <path>]
+                         [--matrix] [--enforce-budgets] [--out <path>]
 ```
 
 It replays real composer turns against the live chat model through the dev
@@ -24,13 +24,11 @@ alongside so a fast-but-wrong config stays visible.
 
 Every case carries a bucket: `chat` turns (greetings, questions — the gated
 fast path), `single-tool` edits (one decisive call), and `multi-tool` edits
-(composed cuts). The eval runs the gate before round 1; production overlaps it
-with input assembly, which is negligible, so this is the same critical path
-the user perceives.
+(composed cuts).
 
-The default config is production's: the gate's three-way verdict (chat /
-simple / complex) withholds tools on chat turns and routes simple turns to the
-light chat model. `--model` pins both roles to one model for an unrouted
+The default config is production's: the turn judge's verdict (chat / simple /
+complex) withholds tools on chat turns, routes simple turns to the light chat
+model, and declares only the routed tool areas. `--model` pins both roles to one model for an unrouted
 comparison; each run's report records the model every turn actually ran on
 (`roundModel`). `--matrix` runs every row of `CANDIDATES` in
 `eval-cut-chat.ts` and prints a comparison table. Model flags and candidate
@@ -43,13 +41,13 @@ always exits 1 when a case has zero passing runs.
 
 ## The queue triage eval
 
-`npm run eval:cut-queue -- [--runs N] [--only <case>] [--gate-model <id>]`
+`npm run eval:cut-queue -- [--runs N] [--only <case>]`
 checks where a message sent mid-turn goes. Each case in `queueCases.ts` is a
 running turn (its ask and the tools it has run so far, plus what other chats
 of the project are doing) and the messages the user sent while it ran, each
 with the place it must get: `fold` into the running turn, `spawn` a parallel
 thread, or `queue` in the tray. The cases run the production triage call
-against the dev server on the gate model and print one line per case; a wrong
+against the dev server's judge route and print one line per case; a wrong
 verdict prints the message, what it got and what it should have got. It exits
 1 when a case never passes. Add a case whenever a real message landed in the
 wrong place.
