@@ -31,21 +31,24 @@ const MAX_FRAMES = 8;
 const SECONDS_PER_FRAME = 1;
 
 const REVIEW_INSTRUCTIONS = `You are a film editor reviewing one rendered take against its shot plan.
-Reply with JSON only: {"ok": boolean, "note": string, "offModel": boolean, "medium": string, "frameMedium": string, "fromSec": number}
+Answer every field of the schema from what you SEE; the editor decides the verdict from your fields.
+- showsPlannedAction: the take shows the planned action and its subject — the right person doing the right thing in the right place; forgive small details.
+- characterOnModel: every cast member shown matches their design sheet (below); true when no sheet is shown.
+- techniqueMatchesFrame: the take's rendering technique — lineweight, shading, palette, texture — matches the approved opening frame (below); true when no frame is shown.
+- hasRenderedText, isSplitScreen, hasEditingArtifacts, isSideways: the automatic-fail flaws below, each answered on its own.
 - medium classifies the TAKE's rendering medium from its frames alone: "hand-drawn-2d" (ink or drawn outlines, flat or cel shading, painted texture), "3d-cgi" (specular highlights, smooth volumetric shading, ambient occlusion, plastic-like surfaces, camera depth of field), "live-action", "stop-motion", or "other". frameMedium is the same classification for the approved opening frame ("" when none is shown). Classify each independently from what you SEE.
 Rules:
-- ok is whether the take shows the planned action and its subject. Judge content — the right person doing the right thing in the right place — and forgive small details.
-- When a cast member's design sheet is shown, the take's character must read as that exact design: the same face shape, eye style, hair silhouette, and body proportions — and the sheet's outfit, except attire the planned action itself changes (a uniform, swimwear, a costume): then the new clothes are the plan's and only the character must match. A character who reads as a DIFFERENT design — rounder or sharper features, different hair, a redesigned face — is an automatic fail even if the clothing colors match: set offModel true and name the drift ("the boy is a round-faced toddler design, not the sheet's spiky-haired 8-year-old").
-- Judge the MEDIUM strictly against the plan's look: a take in the wrong medium — live-action or photorealistic footage when the look is animated or illustrated, or the reverse — is an automatic fail with offModel true; note it as direction for the retake ("render as hand-drawn 2D animation, not live-action"). 3D CGI when the look is hand-drawn 2D is the wrong medium.
-- When the shot's approved opening frame is shown, the take must also match its rendering technique — lineweight, shading, palette, texture. A take whose technique visibly differs from that frame is an automatic fail with offModel true; name the difference as retake direction ("match the opening frame's flat pastel rendering, not cel-shaded anime"). Within the right medium and technique, forgive stylistic detail. offModel is true ONLY for these wrong-world flaws — a wrong character design, medium, or technique; it is false for every other flaw (weak action, on-screen text, framing, editing artifacts).
-- Any rendered text is an automatic fail: captions, subtitles, speech bubbles, titles, watermarks, or readable signs — note it as "remove every trace of on-screen text". A split screen, stacked panels, or a storyboard collage is also an automatic fail: the take must be one single continuous shot.
-- Baked-in editing effects are an automatic fail: transition frames, fades to black or white, motion-blur smears, borders, black bars boxing the picture (letterboxing or pillarboxing), or blurred letterbox bands — the picture must fill the frame edge to edge; the editor adds transitions later.
-- A sideways take is an automatic fail: the composition must be upright for its frame — level horizon, people and gravity pointing down. A scene rendered rotated 90° to fit (walls or a pool running vertically, a subject lying sideways) fails; note it as "compose the scene upright for the vertical frame".
-- note, when ok is false, is one short sentence naming what is wrong, written as direction for the retake ("the boy is reading, the plan wants him swimming").
+- When a cast member's design sheet is shown, the take's character must read as that exact design: the same face shape, eye style, hair silhouette, and body proportions — and the sheet's outfit, except attire the planned action itself changes (a uniform, swimwear, a costume): then the new clothes are the plan's and only the character must match. A character who reads as a DIFFERENT design — rounder or sharper features, different hair, a redesigned face — is off model even if the clothing colors match: characterOnModel false, and name the drift in note ("the boy is a round-faced toddler design, not the sheet's spiky-haired 8-year-old").
+- Judge the MEDIUM strictly against the plan's look: a take in the wrong medium — live-action or photorealistic footage when the look is animated or illustrated, or the reverse — is wrong; note it as direction for the retake ("render as hand-drawn 2D animation, not live-action"). 3D CGI when the look is hand-drawn 2D is the wrong medium.
+- When the shot's approved opening frame is shown, the take must also match its rendering technique — lineweight, shading, palette, texture. A take whose technique visibly differs from that frame is techniqueMatchesFrame false; name the difference as retake direction ("match the opening frame's flat pastel rendering, not cel-shaded anime"). Within the right medium and technique, forgive stylistic detail.
+- hasRenderedText: any rendered text — captions, subtitles, speech bubbles, titles, watermarks, or readable signs — note it as "remove every trace of on-screen text". isSplitScreen: a split screen, stacked panels, or a storyboard collage; the take must be one single continuous shot.
+- hasEditingArtifacts: baked-in editing effects — transition frames, fades to black or white, motion-blur smears, borders, black bars boxing the picture (letterboxing or pillarboxing), or blurred letterbox bands — the picture must fill the frame edge to edge; the editor adds transitions later.
+- isSideways: the composition must be upright for its frame — level horizon, people and gravity pointing down. A scene rendered rotated 90° to fit (walls or a pool running vertically, a subject lying sideways) is sideways; note it as "compose the scene upright for the vertical frame".
+- note is one short sentence naming what is wrong with the take, written as direction for the retake ("the boy is reading, the plan wants him swimming"); empty when nothing is wrong.
 - fromSec is where the needed window should start inside the take so its best moment lands in the window; 0 when the opening works. Stay within the take.`;
 
 const IDENTITY_INSTRUCTIONS = `You compare character designs for a production.
-Reply with JSON only: {"sameDesign": boolean, "drift": string}
+Answer the schema's two fields: sameDesign, and drift (the retake direction when false, empty when true).
 The first image is the canonical design sheet. The frames after it show a character in a rendered shot — possibly at a distance, in motion, or seen from behind. Judge STRUCTURE, not rendering detail: head and hair silhouette, face shape and eye style when visible, body proportions, and the outfit with its exact colors — except attire the stated shot plan changes (a uniform, swimwear, a costume): that outfit is the plan's, not drift, so judge everything but the clothes. Distance or motion blur losing fine detail is fine; a DIFFERENT design is not — a rounder or simplified head, different hair silhouette, or a redesigned face means sameDesign false, as does a changed outfit the plan did not call for. Seen only from behind or far away, judge silhouette (and outfit, when the plan keeps it) — and silhouette includes head shape: a round or bean-shaped head where the sheet has an angular or spiky-haired one is a DIFFERENT design at any distance. drift, when false, is one short retake direction naming the difference ("a bean-headed chibi with dot eyes — match the sheet's spiky-haired detailed anime boy").`;
 
 const STORYBOARD_INSTRUCTIONS = `You are a director reviewing a storyboard before it goes to camera. The images are the ordered opening frames of consecutive shots in ONE continuous short video; judge them as a sequence that must tell the logline's story.
@@ -63,6 +66,137 @@ Rules:
 - The frame must look drawn by the same artist as the benchmark: the same medium, line weight, shading system, finish, and palette. A recurring garment or prop keeps its exact color — a shirt that reads as a different yellow than the benchmark's fails — except attire the frame's stated subject changes (a uniform, swimwear, a costume): then the new clothes are correct and only the artist's technique must match. Judge the rendering, not the composition: a different subject, pose, camera, or setting is expected and fine.
 - Any split screen, stacked panels, storyboard collage, visible seam between two pictures, on-screen text, letterboxing or black bars, or sideways composition is an automatic fail.
 - note, when ok is false, is one short retake direction naming the difference ("thicker outlines and a warmer, deeper yellow tee — match the benchmark's flat pastel shading").`;
+
+const MEDIA = ["hand-drawn-2d", "3d-cgi", "live-action", "stop-motion", "other"] as const;
+
+/** The reviewer's fields, one per rule. The verdict is computed from them in
+ * code, so a holistic "ok" can never paper over a rule. */
+const REVIEW_SCHEMA = {
+  type: "object",
+  properties: {
+    showsPlannedAction: { type: "boolean" },
+    characterOnModel: { type: "boolean" },
+    techniqueMatchesFrame: { type: "boolean" },
+    hasRenderedText: { type: "boolean" },
+    isSplitScreen: { type: "boolean" },
+    hasEditingArtifacts: { type: "boolean" },
+    isSideways: { type: "boolean" },
+    medium: { type: "string", enum: [...MEDIA] },
+    frameMedium: { type: "string", enum: [...MEDIA, ""] },
+    note: { type: "string" },
+    fromSec: { type: "number" },
+  },
+  required: [
+    "showsPlannedAction",
+    "characterOnModel",
+    "techniqueMatchesFrame",
+    "hasRenderedText",
+    "isSplitScreen",
+    "hasEditingArtifacts",
+    "isSideways",
+    "medium",
+    "frameMedium",
+    "note",
+    "fromSec",
+  ],
+} as const;
+
+const IDENTITY_SCHEMA = {
+  type: "object",
+  properties: { sameDesign: { type: "boolean" }, drift: { type: "string" } },
+  required: ["sameDesign", "drift"],
+} as const;
+
+interface ReviewFields {
+  showsPlannedAction: boolean;
+  characterOnModel: boolean;
+  techniqueMatchesFrame: boolean;
+  hasRenderedText: boolean;
+  isSplitScreen: boolean;
+  hasEditingArtifacts: boolean;
+  isSideways: boolean;
+  medium: string;
+  frameMedium: string;
+  note: string;
+  fromSec: number;
+}
+
+const BOOL_FIELDS: (keyof ReviewFields)[] = [
+  "showsPlannedAction",
+  "characterOnModel",
+  "techniqueMatchesFrame",
+  "hasRenderedText",
+  "isSplitScreen",
+  "hasEditingArtifacts",
+  "isSideways",
+];
+
+/** The reviewer's reply as its fields, or null when any is missing or the
+ * wrong shape. */
+function readReviewFields(text: string | undefined): ReviewFields | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text ?? "");
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object") return null;
+  const r = parsed as Record<string, unknown>;
+  for (const k of BOOL_FIELDS) if (typeof r[k] !== "boolean") return null;
+  if (typeof r.medium !== "string" || typeof r.frameMedium !== "string" || typeof r.note !== "string") return null;
+  if (typeof r.fromSec !== "number" || !Number.isFinite(r.fromSec)) return null;
+  return r as unknown as ReviewFields;
+}
+
+/** The verdict the fields add up to. `offModel` names the wrong-world flaws
+ * — a character off its sheet, the wrong medium or technique — which never
+ * place; every other flaw is a retake. */
+export function reviewVerdictFrom(
+  fields: ReviewFields | null,
+  keyframeShown: boolean,
+  clipSec: number,
+  slotSec: number,
+): ReviewVerdict {
+  if (!fields) return { ok: false, note: "review unreadable" };
+  const medium = fields.medium.trim();
+  const frameMedium = fields.frameMedium.trim();
+  const known = (m: string) => m !== "" && m !== "other" && (MEDIA as readonly string[]).includes(m);
+  if (keyframeShown && known(medium) && known(frameMedium) && medium !== frameMedium) {
+    return {
+      ok: false,
+      offModel: true,
+      note: `render as ${frameMedium} matching the opening frame's artwork, not ${medium}`,
+    };
+  }
+  const offModel = !fields.characterOnModel || (keyframeShown && !fields.techniqueMatchesFrame);
+  const flawed =
+    !fields.showsPlannedAction ||
+    fields.hasRenderedText ||
+    fields.isSplitScreen ||
+    fields.hasEditingArtifacts ||
+    fields.isSideways ||
+    offModel;
+  const note = fields.note.trim();
+  if (flawed) {
+    return {
+      ok: false,
+      note:
+        note ||
+        (fields.hasRenderedText
+          ? "remove every trace of on-screen text"
+          : fields.isSplitScreen
+            ? "one single continuous shot, no split screen or panels"
+            : fields.hasEditingArtifacts
+              ? "no baked-in transitions, fades, borders, or bars; fill the frame edge to edge"
+              : fields.isSideways
+                ? "compose the scene upright for the frame"
+                : "the take does not show the planned action"),
+      ...(offModel ? { offModel: true } : {}),
+    };
+  }
+  const fromSec = Math.min(Math.max(0, fields.fromSec), Math.max(0, clipSec - slotSec));
+  return { ok: true, ...(fromSec > 0 ? { fromSec } : {}) };
+}
 
 function frameTimes(clipSec: number): number[] {
   const count = Math.min(MAX_FRAMES, Math.max(3, Math.round(clipSec / SECONDS_PER_FRAME)));
@@ -222,37 +356,20 @@ The timeline slot needs ${input.slotSec.toFixed(1)}s of this take.`,
         donkeyProvider: "gemini",
         model: geminiModelRoleNames.review,
         instructions: REVIEW_INSTRUCTIONS,
-        response_format: { type: "json_object" },
+        text: { format: { type: "json_schema", schema: REVIEW_SCHEMA } },
         input: [{ role: "user", content }],
       });
       if (!res.ok) throw new Error("The review model is unavailable.");
       const body = (await res.json()) as { output_text?: string };
-      const parsed = JSON.parse(body.output_text ?? "{}") as Record<string, unknown>;
-      // The wrong-world check is deterministic: the judge CLASSIFIES what it
-      // sees — an easier ask than remembering to fail — and code compares. A
-      // take whose medium differs from the approved opening frame's never
-      // passes, whatever the holistic `ok` said (a 3D-CGI take of a 2D
-      // production has slipped a judge's overall judgment before).
-      const MEDIA = ["hand-drawn-2d", "3d-cgi", "live-action", "stop-motion"];
-      const medium = typeof parsed.medium === "string" ? parsed.medium.trim() : "";
-      const frameMedium = typeof parsed.frameMedium === "string" ? parsed.frameMedium.trim() : "";
-      if (keyframeShown && MEDIA.includes(medium) && MEDIA.includes(frameMedium) && medium !== frameMedium) {
-        return {
-          ok: false,
-          offModel: true,
-          note: `render as ${frameMedium} matching the opening frame's artwork, not ${medium}`,
-        };
-      }
-      const ok = parsed.ok !== false;
-      const note = typeof parsed.note === "string" ? parsed.note.trim() : "";
-      const offModel = !ok && parsed.offModel === true;
-      const rawFrom = typeof parsed.fromSec === "number" && Number.isFinite(parsed.fromSec) ? parsed.fromSec : 0;
-      const fromSec = Math.min(Math.max(0, rawFrom), Math.max(0, clipSec - input.slotSec));
+      // The reviewer CLASSIFIES what it sees, one field per rule — an easier
+      // ask than remembering to fail — and code adds the fields up. A reply
+      // missing a field is no pass: it fails the take with the reason.
+      const verdict = reviewVerdictFrom(readReviewFields(body.output_text), keyframeShown, clipSec, input.slotSec);
       // Identity gets its own focused comparison — one sheet, a few frames,
       // one question. Buried inside the multi-rule review above, a wrong
       // design has slipped a holistic "ok" before; a dedicated call is the
       // same judge doing a far easier task.
-      if (ok && input.castSheets?.length) {
+      if (verdict.ok && input.castSheets?.length) {
         for (const sheet of input.castSheets) {
           const img = await sheetImage(sheet.mediaId);
           if (!img) continue;
@@ -278,13 +395,22 @@ The canonical design sheet for "${sheet.name}":`,
             donkeyProvider: "gemini",
             model: geminiModelRoleNames.review,
             instructions: IDENTITY_INSTRUCTIONS,
-            response_format: { type: "json_object" },
+            text: { format: { type: "json_schema", schema: IDENTITY_SCHEMA } },
             input: [{ role: "user", content: idContent }],
           });
-          if (!idRes.ok) break; // best-effort: the main verdict stands
+          if (!idRes.ok) throw new Error("The review model is unavailable.");
           const idBody = (await idRes.json()) as { output_text?: string };
-          const idParsed = JSON.parse(idBody.output_text ?? "{}") as Record<string, unknown>;
-          if (idParsed.sameDesign === false) {
+          let idParsed: Record<string, unknown> | null = null;
+          try {
+            const p = JSON.parse(idBody.output_text ?? "") as unknown;
+            idParsed = p && typeof p === "object" ? (p as Record<string, unknown>) : null;
+          } catch {
+            idParsed = null;
+          }
+          // An unreadable identity check is no pass either.
+          if (!idParsed || typeof idParsed.sameDesign !== "boolean")
+            return { ok: false, note: "identity review unreadable" };
+          if (!idParsed.sameDesign) {
             const drift =
               typeof idParsed.drift === "string" && idParsed.drift.trim()
                 ? idParsed.drift.trim()
@@ -293,12 +419,7 @@ The canonical design sheet for "${sheet.name}":`,
           }
         }
       }
-      return {
-        ok,
-        ...(note ? { note } : {}),
-        ...(offModel ? { offModel } : {}),
-        ...(fromSec > 0 ? { fromSec } : {}),
-      };
+      return verdict;
     },
   };
 }
