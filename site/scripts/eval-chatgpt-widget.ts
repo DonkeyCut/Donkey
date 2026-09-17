@@ -14,7 +14,7 @@ const server = Bun.serve({ port: 0, fetch(request) {
   const url = new URL(request.url);
   if (url.pathname === "/widget") return new Response(widgetHtml(url.origin), { headers: { "Content-Type": "text/html" } });
   if (url.pathname === "/preview.mp4") return new Response(Bun.file(video));
-  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p>`, { headers: { "Content-Type": "text/html" } });
+  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host-inset') document.getElementById('inset').textContent = String(e.data.insetBottom); }); parent.postMessage({ type: 'donkeycut:host-inset?' }, '*');</script>`, { headers: { "Content-Type": "text/html" } });
   if (url.pathname.startsWith("/clients/chatgpt/")) return new Response(Bun.file(path.join(root, "public/clients/chatgpt", path.basename(url.pathname))));
   return new Response(hostHtml, { headers: { "Content-Type": "text/html" } });
 } });
@@ -30,7 +30,7 @@ const result = (data, playback = null, editor = null) => dropNulls({content:[{ty
 const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,result},'*');
 window.addEventListener('message', ({source,data}) => {
  if(source !== frame.contentWindow || !data.method) return;
- if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{}},hostContext:{theme:'light',availableDisplayModes:['inline','fullscreen']}});
+ if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
  if(data.method === 'ui/notifications/initialized') frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:result(view(false))},'*');
  if(data.method === 'tools/call') {
   const name = data.params.name; window.calls.push(name);
@@ -43,7 +43,7 @@ window.addEventListener('message', ({source,data}) => {
   }
  }
  if(data.method === 'ui/open-link') { window.links.push(data.params.url); reply(data.id,{}); }
- if(data.method === 'ui/request-display-mode') { window.modes.push(data.params.mode); reply(data.id,{mode:data.params.mode}); }
+ if(data.method === 'ui/request-display-mode') { window.modes.push(data.params.mode); reply(data.id,{mode:window.modes.length > 1 ? data.params.mode : 'inline'}); }
 });
 </script></body></html>`;
 const browser = await chromium.launch({ headless: true });
@@ -78,8 +78,13 @@ try {
   await page.evaluate(() => { (window as unknown as { editable: boolean }).editable = true; });
   await app.getByRole("button", { name: "Launch film" }).click();
   await app.frameLocator("iframe.editor").locator("#editor").waitFor();
-  assert.equal(await app.locator("button").count(), 0, "the editor card has no buttons of its own");
-  assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen"], "the editor asks for the whole window");
+  assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen"], "the editor asks for the whole window on open");
+  assert.equal(await app.locator("button").count(), 1, "inline, the editor card keeps one control: fullscreen");
+  await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^0$/ }).waitFor();
+  await app.getByRole("button", { name: "Fullscreen" }).click();
+  await app.locator("button.fullscreen").waitFor({ state: "detached" });
+  await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^120$/ }).waitFor();
+  assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen", "fullscreen"], "the button asks again and the granted mode hides it");
   await page.screenshot({ path: "/tmp/donkey-chatgpt-widget-editor.png" });
   assert.deepEqual(errors, []);
   console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, decoder teardown, lazy HLS.");

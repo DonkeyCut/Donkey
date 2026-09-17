@@ -1,17 +1,20 @@
 import { ArtifactVideo } from "@donkeycut/artifact-player/ArtifactVideo";
+import { useEffect, useRef } from "react";
 import { useProjectApp } from "./useProjectApp";
 import "./preview.css";
 
 export function PreviewApp() {
-  const { ready, view, playback, download, editor, error, busy, visible, run, playbackFailed, openDonkey, openDownload } = useProjectApp();
+  const { ready, view, playback, download, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openDownload, requestFullscreen } = useProjectApp();
   const project = view?.project;
   const preview = view?.preview;
   const rendering = preview?.status === "queued" || preview?.status === "running";
   const exp = view?.export;
   const exporting = exp?.status === "queued" || exp?.status === "running";
-  // The editor is the card: its own chrome carries every control.
-  if (editor && project) return <main className="editing">
-    <iframe className="editor" src={editor.url} title={`Editing ${project.name}`} allow="fullscreen; clipboard-read; clipboard-write" />
+  // The editor is the card: its own chrome carries every control. Inline, one
+  // control asks the host for the whole window.
+  if (editor && project) return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"}>
+    {!fullscreen && <button className="fullscreen" onClick={() => void requestFullscreen()} aria-label="Fullscreen">⤢</button>}
+    <EditorFrame url={editor.url} name={project.name} inset={hostInset} />
   </main>;
   return <main aria-busy={busy}>
     <header><span className="brand">Donkey Cut</span><span>Cloud projects</span></header>
@@ -51,4 +54,21 @@ export function PreviewApp() {
       </nav>
     </>}
   </main>;
+}
+
+/** The editor, framed. It learns how tall the host's bottom overlay is when
+ * it loads, whenever that changes, and whenever it asks. */
+function EditorFrame({ url, name, inset }: { url: string; name: string; inset: number }) {
+  const frame = useRef<HTMLIFrameElement>(null);
+  const origin = new URL(url).origin;
+  const tell = () => frame.current?.contentWindow?.postMessage({ type: "donkeycut:host-inset", insetBottom: inset }, origin);
+  useEffect(tell, [inset, origin]);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin === origin && event.source === frame.current?.contentWindow && event.data?.type === "donkeycut:host-inset?") tell();
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  });
+  return <iframe ref={frame} className="editor" src={url} onLoad={tell} title={`Editing ${name}`} allow="fullscreen; clipboard-read; clipboard-write" />;
 }

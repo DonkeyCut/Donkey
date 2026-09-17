@@ -13,6 +13,8 @@ export function useProjectApp() {
   const [playback, setPlayback] = useState<Playback | null>(null);
   const [download, setDownload] = useState<Download | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [hostInset, setHostInset] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState(!document.hidden);
@@ -48,10 +50,23 @@ export function useProjectApp() {
       setBusy(false);
       try { receive(result); } catch (e) { setError((e as Error).message); }
     };
-    app.onhostcontextchanged = ({ theme }) => { if (theme) document.documentElement.dataset.theme = theme; };
+    // ChatGPT overlays its composer on the bottom of a fullscreen card and
+    // reports the covered band as a safe-area inset; the editor frame gets
+    // the number and keeps its own bottom controls above the band.
+    const applyContext = (context: ReturnType<App["getHostContext"]>) => {
+      if (!context) return;
+      if (context.theme) document.documentElement.dataset.theme = context.theme;
+      const full = context.displayMode === "fullscreen";
+      if (context.displayMode) setFullscreen(full);
+      // Measured from ChatGPT's desktop fullscreen when the host reports no inset.
+      setHostInset(full ? (context.safeAreaInsets?.bottom ?? 120) : 0);
+    };
+    app.onhostcontextchanged = (context) => { applyContext({ ...app.getHostContext(), ...context }); };
     void app.connect().then(() => {
       if (!live) return;
-      document.documentElement.dataset.theme = app.getHostContext()?.theme ?? "light";
+      const context = app.getHostContext();
+      console.debug("[donkeycut] host context", context);
+      applyContext(context ?? { theme: "light" });
       setReady(true);
     }).catch(() => { if (live) setError("Connect this preview from ChatGPT to continue."); });
     const visibility = () => setVisible(!document.hidden);
@@ -118,11 +133,16 @@ export function useProjectApp() {
   const openDownload = () => { if (download) void openLink(download.url, "Could not open the download."); };
 
   // The editor wants the whole window; the host grants what it supports.
-  const requestMode = useCallback(async (mode: "fullscreen") => {
+  const requestFullscreen = useCallback(async () => {
     const app = appRef.current;
-    if (!app || !app.getHostContext()?.availableDisplayModes?.includes(mode)) return;
-    try { await app.requestDisplayMode({ mode }); } catch { /* the inline card still works */ }
+    if (!app) return;
+    try {
+      const result = await app.requestDisplayMode({ mode: "fullscreen" });
+      const full = result.mode === "fullscreen";
+      setFullscreen(full);
+      setHostInset(full ? (app.getHostContext()?.safeAreaInsets?.bottom ?? 120) : 0);
+    } catch { /* the inline card still works */ }
   }, []);
-  useEffect(() => { if (editor) void requestMode("fullscreen"); }, [editor, requestMode]);
-  return { ready, view, playback, download, editor, error, busy, visible, run, playbackFailed, openDonkey, openDownload };
+  useEffect(() => { if (editor) void requestFullscreen(); }, [editor, requestFullscreen]);
+  return { ready, view, playback, download, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openDownload, requestFullscreen };
 }
