@@ -19,7 +19,7 @@
     "prisma:prod": "dotenv -e .env -- prisma db push",
     "engine:dev": "bun run src/cut/engine/main.ts",
     "engine:build": "bash scripts/build-cut-engine.sh",
-    "worker:build": "bun build --target=node --minify --external=pg-native --external=skia-canvas --external=mediabunny --external=@mediabunny/server --external=node-web-audio-api --loader .css:text src/cut/worker/main.ts --outfile dist/cut-worker/main.js",
+    "worker:build": "NODE_ENV=production bun build --target=node --minify --external=pg-native --external=skia-canvas --external=mediabunny --external=@mediabunny/server --external=node-web-audio-api --loader .css:text src/cut/worker/main.ts --outfile dist/cut-worker/main.js && bun scripts/check-worker-bundle.ts",
     "bench:watch": "bun run scripts/bench-watch.ts",
     "eval:cut-chat": "bun run scripts/eval-cut-chat.ts",
     "eval:cut-queue": "bun run scripts/eval-cut-queue.ts",

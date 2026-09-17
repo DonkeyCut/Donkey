@@ -54,6 +54,11 @@ export async function fetchWithRetry(
     }
     await wait(BACKOFF_BASE_MS * 2 ** (attempt - 1));
   }
-  const detail = last instanceof Error ? last.message : String(last);
+  // Node's fetch says only "fetch failed"; the network error underneath
+  // (DNS, refused, reset, certificate) rides on `cause`, with its code.
+  const inner = last instanceof Error && last.cause instanceof Error ? last.cause : null;
+  const code = (inner as { code?: string } | null)?.code;
+  const cause = inner ? `: ${inner.message}${code && !inner.message.includes(code) ? ` [${code}]` : ""}` : "";
+  const detail = last instanceof Error ? `${last.message}${cause}` : String(last);
   throw new Error(`Could not ${what} — the service did not answer (${detail}).`);
 }

@@ -28,7 +28,11 @@
       // 12 GiB for every second a replica is up, which is why a wake starts
       // only the replicas the queue needs. Cloudflare validation: >= 3 GiB
       // memory per vCPU, disk <= 2x memory.
-      "instance_type": { "vcpu": 4, "memory_mib": 12288, "disk_mb": 20000 }
+      "instance_type": { "vcpu": 4, "memory_mib": 12288, "disk_mb": 20000 },
+      // Every replica exits within a minute of an empty queue, so a deploy
+      // replaces them all at once; a staged rollout only keeps old code
+      // claiming jobs for longer.
+      "rollout_step_percentage": 100
     }
   ],
   "durable_objects": {
