@@ -303,6 +303,18 @@ describe("export filtergraph timebases", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 
+  test("a block's card is read from the job's own directory, not the project's media", async () => {
+    const runs = await runsFor({
+      clips: [clip("a.mp4"), clip("block_1.png", { image: true, staged: true, out: 3 })],
+    });
+    const graph = runs.find((a) => a.includes("-filter_complex"))!;
+    const inputs = graph.slice(0, graph.indexOf("-filter_complex"));
+    // The block travels with the job; the footage beside it still resolves
+    // through the project's media folder.
+    expect(inputs).toContain("/tmp/graph-test/block_1.png");
+    expect(inputs).toContain("/media/a.mp4");
+  });
+
   test("cross zoom, edge animations, speed, stills, gaps, overlays, and sound", async () => {
     const g = await graphFor({
       clips: [

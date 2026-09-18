@@ -191,6 +191,24 @@ export const track0Clips = (clips: VideoClip[]) => clips.filter((c) => c.track =
 /** Every video clip not on track 0 — the composited layers. */
 export const overlayLayers = (clips: VideoClip[]) => clips.filter((c) => c.track !== 0);
 
+/** The block a time falls inside on track 0, if any. Footage released on one
+ * takes its place instead of squeezing in beside it, which is how a blocked-out
+ * cut gets filled in. */
+export function blockClipAt(
+  clips: VideoClip[],
+  assets: MediaAsset[],
+  t: number
+): VideoClip | null {
+  // A drag calls this once per frame, so it walks the row and looks up one
+  // asset — the clip the pointer is over — instead of building a set over
+  // every asset in the project.
+  for (const c of clips) {
+    if (c.track !== 0 || t < c.start || t >= c.start + clipLen(c)) continue;
+    return assets.find((a) => a.id === c.assetId)?.block !== undefined ? c : null;
+  }
+  return null;
+}
+
 /** Ground a clip stack: the lowest occupied row becomes track 0. Deleting or
  * dragging away the last track-0 clip re-grounds the rows above it, so the
  * spine — the sequence that carries transitions, fades, and ripple — always
@@ -526,12 +544,22 @@ export interface EditorState {
   removeAsset: (id: string) => void;
   /** Add a video clip from an asset onto video track 0 — at `start` (sliding
    * to the track's next free slot), or appended at the end when omitted. */
-  addClipFromAsset: (assetId: string, start?: number) => void;
+  addClipFromAsset: (assetId: string, start?: number) => string | null;
+  /** Swap what a video clip plays, keeping its place and its length: the
+   * slot a block holds becomes the person's own footage,
+   * trimmed from the source's head to the block's length (a shorter source
+   * makes the clip its own length). The block it replaced is dropped with it
+   * when nothing else plays it. */
+  replaceClipAsset: (clipId: string, assetId: string) => void;
   /** Add a soundtrack clip from an audio asset at `start` (default: the
    * playhead). `opts.duck` marks it a voiceover that lowers everything else
    * to that gain while it plays; `opts.lane` picks the audio track it lands
    * on (default: the first one). */
   addAudioFromAsset: (assetId: string, start?: number, opts?: { duck?: number; lane?: number }) => void;
+  /** Swap a soundtrack clip's source, keeping its slot: the clip stays where
+   * it starts and plays the new sound from its head, up to the slot's length
+   * or all the source has. */
+  replaceAudioAsset: (clipId: string, assetId: string) => void;
   /** The panel “+” add, and every paste: the asset lands at `at` — by default
    * the preview time (the skimmer while one is live, the playhead otherwise) —
    * on the lowest video track or audio lane with room for its whole length
@@ -2493,7 +2521,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     addClipFromAsset: (assetId, start) => {
       const asset = get().assets.find((a) => a.id === assetId);
-      if (!asset || (asset.type !== "video" && asset.type !== "image")) return;
+      if (!asset || (asset.type !== "video" && asset.type !== "image")) return null;
       push();
       const out = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
       const len = Math.max(MIN_LEN, out);
@@ -2516,6 +2544,62 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       set((s) => ({
         clips: [...s.clips, clip].sort((a, b) => a.start - b.start),
         ...sole({ kind: "clip", id: clip.id }),
+      }));
+      return clip.id;
+    },
+
+    replaceClipAsset: (clipId, assetId) => {
+      const clip = get().clips.find((c) => c.id === clipId);
+      const asset = get().assets.find((a) => a.id === assetId);
+      if (!clip || !asset || (asset.type !== "video" && asset.type !== "image")) return;
+      if (clip.assetId === assetId) return;
+      const was = get().assets.find((a) => a.id === clip.assetId);
+      // The slot the clip holds is what the new source fills.
+      const slot = clipLen(clip);
+      // Never past the end of what now plays there: a source shorter than the
+      // slot plays all it has.
+      const out =
+        asset.type === "image" ? Math.max(MIN_LEN, slot) : Math.min(asset.duration, Math.max(MIN_LEN, slot));
+      get().beginHistoryBatch();
+      set((s) => ({
+        clips: s.clips.map((c) =>
+          c.id === clipId
+            ? {
+                ...c,
+                assetId,
+                in: 0,
+                out,
+                speed: undefined,
+                speedCurve: undefined,
+                reverse: undefined,
+                // Coverage painted frame by frame for the old picture, and a
+                // key pulled off its pixels, mean nothing to the new one. A
+                // subject matte is computed from whatever plays, so it stays.
+                ...(clip.mask && clip.mask.kind !== "subject" ? { mask: undefined } : {}),
+                removal: undefined,
+              }
+            : c
+        ),
+      }));
+      // A block exists for the footage that replaces it; once nothing plays
+      // it, it goes with it.
+      if (was?.block !== undefined && !get().clips.some((c) => c.assetId === was.id))
+        get().removeAsset(was.id);
+      get().endHistoryBatch();
+    },
+
+    replaceAudioAsset: (clipId, assetId) => {
+      const clip = get().audioClips.find((a) => a.id === clipId);
+      const asset = get().assets.find((a) => a.id === assetId);
+      if (!clip || !asset || asset.type !== "audio" || clip.assetId === assetId) return;
+      const slot = clip.out - clip.in;
+      push();
+      set((s) => ({
+        audioClips: s.audioClips.map((a) =>
+          a.id === clipId
+            ? { ...a, assetId, in: 0, out: Math.max(MIN_LEN, Math.min(asset.duration, slot)) }
+            : a
+        ),
       }));
     },
 
@@ -4807,7 +4891,7 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom }) => ({
+    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block, reference }) => ({
       id,
       fileName,
       name,
@@ -4824,6 +4908,8 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(beats !== undefined ? { beats } : {}),
       ...(sceneCuts !== undefined ? { sceneCuts } : {}),
       ...(copiedFrom !== undefined ? { copiedFrom } : {}),
+      ...(block !== undefined ? { block } : {}),
+      ...(reference !== undefined ? { reference } : {}),
     }));
 }
 

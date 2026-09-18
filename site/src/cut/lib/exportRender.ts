@@ -29,6 +29,7 @@ import {
   type AudioCodec,
   type VideoCodec,
 } from "mediabunny";
+import { drawBlock } from "./blockSource";
 import { audioFxSpans } from "./audioEffects";
 import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
@@ -354,6 +355,13 @@ export class ClipReader {
    * with no decodable video). */
   private open(): Promise<ClipSink | null> {
     return (this.opened ??= (async () => {
+      if (this.asset.block) {
+        // Nothing to fetch: the block paints itself at the source size the
+        // render asks for, once, and that painting is the frame.
+        const canvas = drawBlock(this.asset, this.asset.width ?? 1080, this.asset.height ?? 1920);
+        this.still = { kind: "ready", image: canvas, width: canvas.width, height: canvas.height };
+        return null;
+      }
       if (this.asset.type === "image") {
         const blob = await (await fetch(this.url())).blob();
         const bitmap = await createImageBitmap(blob);

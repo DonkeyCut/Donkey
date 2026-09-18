@@ -140,6 +140,10 @@ export interface ExportSpec {
     hidden?: boolean;
     /** A still image: looped for the clip's length instead of trimmed. */
     image?: boolean;
+    /** The picture travels with the job rather than living in the project's
+     * media: a block, painted client-side, staged in `tmpDir` by base name
+     * like the overlay pictures. */
+    staged?: boolean;
     /** Manual color adjustments, baked into this clip's segment. */
     grade?: ColorGrade;
     /** Client-painted grayscale coverage trimming this clip's picture (white
@@ -926,7 +930,12 @@ export async function runExport(
     if (!c.image || !c.file) continue;
     const dur = spanLen(c);
     imageClipInput.set(j, nInputs++);
-    inputs.push("-loop", "1", "-t", num(dur), "-framerate", String(fps), "-i", await resolveMedia(io.stat, mediaPathFor, c.file));
+    inputs.push(
+      "-loop", "1", "-t", num(dur), "-framerate", String(fps), "-i",
+      c.staged
+        ? path.join(job.tmpDir, path.basename(c.file))
+        : await resolveMedia(io.stat, mediaPathFor, c.file)
+    );
   }
   const imageOverlayInput = new Map<(typeof overlayVideos)[number], number>();
   for (const oc of overlayVideos) {

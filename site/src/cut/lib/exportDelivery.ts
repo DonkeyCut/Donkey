@@ -98,13 +98,17 @@ export function videoBitrateFor(s: {
 /** Every media file a render spec plays — clips, picture-in-picture video,
  * sound — by name, once each. */
 export function specMediaFiles(spec: {
-  clips?: { file?: string }[];
+  clips?: { file?: string; staged?: boolean }[];
   overlayVideos?: { file?: string }[];
   audio?: { file?: string }[];
 }): string[] {
   const names = new Set<string>();
   for (const c of [...(spec.clips ?? []), ...(spec.overlayVideos ?? []), ...(spec.audio ?? [])]) {
-    if (c?.file) names.add(c.file);
+    // A staged picture is painted by the client and travels with the job, so
+    // it is not one of the project's media files: looking for it in the
+    // project's folder finds nothing, and staging it there puts it where the
+    // render does not read.
+    if (c?.file && !("staged" in c && c.staged)) names.add(c.file);
   }
   return [...names];
 }

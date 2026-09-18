@@ -198,7 +198,18 @@ export interface StoredAsset {
    * drop, or upload), so it belongs in the Media panel. Any value marks media
    * Cut created or fetched — it lives where it was made (the timeline, a
    * generation panel, or an AI chat card) and is kept out of the Media panel. */
-  origin?: "voiceover" | "generated" | "recording" | "stock" | "freeze" | "chat" | "sticker" | "matte";
+  origin?:
+    | "voiceover"
+    | "generated"
+    | "recording"
+    | "stock"
+    | "freeze"
+    | "chat"
+    | "sticker"
+    | "matte"
+    // A shot with nothing in it yet, holding its place on a blocked-out cut
+    // until the person's own footage takes it.
+    | "block";
   /** BCP-47 of the audio's spoken language, when known (stamped on voiceovers
    * at synthesis) — what transcription should run its recognizer in. */
   language?: string;
@@ -216,6 +227,16 @@ export interface StoredAsset {
    * replicate out of another project. A second copy of the same source finds
    * this one and lands nothing twice. */
   copiedFrom?: { projectId: string; assetId: string };
+  /** A shot with nothing in it yet: this source owns no file and draws
+   * itself — a filled rect carrying the label of what belongs there. See
+   * blockSource.ts. Replacing it with real footage is an ordinary item
+   * replace; the clip keeps its place and its length. */
+  block?: { label: string; color?: string };
+  /** The source a blocked-out cut was copied from. Set when a blockout
+   * names it, and it keeps the assistant's own tools from putting
+   * the thing being copied into the copy: the blocks hold those slots until
+   * the person's footage arrives. The person's own drag is never refused. */
+  reference?: true;
 }
 
 /** A folder in the Media panel's Project Files view — a flat, project-local

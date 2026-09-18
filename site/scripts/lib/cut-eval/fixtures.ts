@@ -276,6 +276,26 @@ export const TWEET_ASSET = {
   origin: "chat",
 };
 
+/** A reference someone brought into an empty project and asked for "one like
+ * this": one long imported video, nothing on the timeline yet. The live case
+ * this mirrors ended with 25 titles floating over an empty track 0 and
+ * two-thirds of the source never watched. */
+export const REFERENCE_ASSET = {
+  id: "a-ref1",
+  name: "4.6 Years Until I Never Work Again",
+  type: "video",
+  duration: 71.6,
+  origin: "chat",
+};
+export const REFERENCE_STATE = {
+  ...EDITOR_STATE,
+  project: { ...EDITOR_STATE.project, name: "Marina", duration: 0 },
+  media: [REFERENCE_ASSET],
+  videoTrack: [],
+  soundtrack: [],
+  overlays: [],
+};
+
 export const TWEET_STATE = {
   ...EDITOR_STATE,
   media: [...EDITOR_STATE.media, TWEET_ASSET],

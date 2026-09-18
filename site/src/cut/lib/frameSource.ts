@@ -36,6 +36,7 @@ import {
 } from "./mediaRead";
 import { allowance, canvasBytes, decodedFrameBytes, holdMemory } from "./memoryBudget";
 import { meterPull, meterSource, meterWalk } from "./perfTrace";
+import { drawBlock } from "./blockSource";
 import type { MediaAsset } from "./types";
 
 /** Dev-only: pool lifecycle events, into the same log the engine writes.
@@ -1181,6 +1182,17 @@ export class ClipFrameSource {
     if (this.opening) return this.opening;
     this.opening = (async () => {
       try {
+        // A block owns no file: it paints itself at the height this source
+        // reads at, and the painting is the still from then on.
+        if (this.asset.block) {
+          const w = Math.round(this.height * ((this.asset.width ?? 1080) / (this.asset.height ?? 1920)));
+          const canvas = drawBlock(this.asset, w, this.height);
+          if (this.closed) return;
+          this.still = { image: canvas, width: canvas.width, height: canvas.height, timestamp: 0 };
+          this.attempts = 0;
+          this.onFrame();
+          return;
+        }
         const res = await fetch(this.asset.url, { mode: "cors" });
         const bitmap = await createImageBitmap(await res.blob());
         if (this.closed) return bitmap.close();

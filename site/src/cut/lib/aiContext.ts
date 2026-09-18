@@ -412,7 +412,7 @@ function describeState(
       s.mediaFolders.length > 0 ? s.mediaFolders.map((f) => ({ id: f.id, name: f.name })) : null,
     // Every project asset visible to this chat, timeline-placed or not (media
     // another chat still owns is filtered out above). `origin` marks Cut-made
-    // media (generated/voiceover/recording/stock/freeze); no origin = a user
+    // media (generated/voiceover/recording/stock/freeze/block); no origin = a user
     // import shown in the Media panel.
     media: shownAssets.map((a) => ({
       id: a.id,

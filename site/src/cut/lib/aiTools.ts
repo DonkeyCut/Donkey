@@ -185,6 +185,7 @@ import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
 import { resolveVoiceAsk, synthesizeSpeech, SPEECH_VOICES } from "./tts";
 import { hostedPost } from "./hosted";
+import { blockAsset } from "./blockSource";
 import { cutJudge } from "./chatRuntime";
 import { askJudgeChunked, noul } from "./judge";
 import { SWEEP_CHUNK, sweepPicks, sweepQuestions, sweepState, type SweepCandidate } from "./sweepSelect";
@@ -380,6 +381,11 @@ function statsReport(stats: ColorStats) {
  * enough to ride a turn. */
 const CAPTURE_LONG_SIDE = 640;
 
+/** The most shots one blockout lays down. Every block in a call lands as one
+ * undo step, and a whole feature's worth of them in a single step is not
+ * something anyone can step back through; a caller with more comes back. */
+const MAX_BLOCKS = 40;
+
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
@@ -440,6 +446,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (!assetId) throw new ToolError("Pass asset_id.");
     const stickerAsset = s.assets.find((a) => a.id === assetId);
     if (stickerAsset?.type !== "image") throw new ToolError(`No image asset with id ${assetId}.`);
+    refuseReference(stickerAsset);
     if (isNum(input.start)) s.seek(input.start);
     s.addSticker({ assetId, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}), ...aimedLane(input) });
     const sel = useEditor.getState().selection;
@@ -1477,6 +1484,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   add_clip: (s, input) => {
+      // A run of blocks is the same placement with nothing to play yet: the
+      // shots of a cut that has been laid out before its footage exists.
+      if (Array.isArray(input.blocks)) return placeBlocks(s, input.blocks, input);
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       return placeAssetOnTimeline(asset, input);
   },
@@ -1485,6 +1495,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       if (asset.type !== "video" && asset.type !== "image")
         throw new ToolError("Only video or image assets can sit on a video track.");
+      refuseReference(asset);
       const start = isNum(input.start) ? Math.max(0, input.start) : playheadAt();
       // Tracks stack bottom-up from track 0; overlays live on 1+. A stale
       // negative (the old behind-track model) clamps to the first layer.
@@ -2588,6 +2599,61 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         );
       s.updateClip(clip.id, { removal: { ...removal, backdrop: { kind: "image", assetId } } });
       return { id: clip.id, background: { kind, assetId } };
+  },
+
+  replace_item: (s, input) => {
+    const id = typeof input.id === "string" ? input.id : "";
+    const asset = requireItem(s.assets, input.asset_id, "project asset");
+    refuseReference(asset);
+    const clip = s.clips.find((c) => c.id === id);
+    if (clip) {
+      if (asset.type !== "video" && asset.type !== "image")
+        throw new ToolError(`"${asset.name}" is ${asset.type} — a video clip plays video or a still.`);
+      const before = clipLen(clip);
+      s.replaceClipAsset(clip.id, asset.id);
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id);
+      if (!next || next.assetId !== asset.id) throw new ToolError("That clip could not take this source.");
+      return {
+        id: next.id,
+        kind: "clip",
+        assetId: asset.id,
+        name: asset.name,
+        start: round2(next.start),
+        lenBefore: round2(before),
+        lenAfter: round2(clipLen(next)),
+        ...tracksAfter(),
+      };
+    }
+    const audio = s.audioClips.find((a) => a.id === id);
+    if (audio) {
+      if (asset.type !== "audio")
+        throw new ToolError(`"${asset.name}" is ${asset.type} — a soundtrack clip plays audio.`);
+      const before = audio.out - audio.in;
+      s.replaceAudioAsset(audio.id, asset.id);
+      const next = useEditor.getState().audioClips.find((a) => a.id === id);
+      if (!next || next.assetId !== asset.id) throw new ToolError("That clip could not take this source.");
+      return {
+        id: next.id,
+        kind: "audio",
+        assetId: asset.id,
+        name: asset.name,
+        start: round2(next.start),
+        lenBefore: round2(before),
+        lenAfter: round2(next.out - next.in),
+      };
+    }
+    const overlay = s.overlays.find((o) => o.id === id);
+    if (overlay && overlay.kind === "sticker") {
+      if (asset.type !== "image")
+        throw new ToolError(`"${asset.name}" is ${asset.type} — a sticker shows a still.`);
+      // A Lottie document animates and a still does not; the flag is read off
+      // the source, so it moves with it or the export plays the wrong one.
+      s.updateOverlay(overlay.id, { assetId: asset.id, lottie: isLottieAsset(asset) || undefined });
+      return { id: overlay.id, kind: "sticker", assetId: asset.id, name: asset.name };
+    }
+    throw new ToolError(
+      `Nothing with id "${id}" carries a source. Clips, soundtrack clips and stickers do; text and shapes are edited with update_overlay.`
+    );
   },
 
   freeze_frame: async (s, input) => {
@@ -5149,7 +5215,77 @@ function audioLaneInput(value: unknown): number {
   return value;
 }
 
+/** Lay out shots that have no footage yet: one block per shot on track 0,
+ * each the length that shot runs, in one undo step. The blocks own no files,
+ * so this writes nothing to storage — and each one is an ordinary clip, so it
+ * trims, moves, takes a transition, and is replaced when the footage lands. */
+function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) {
+  const shots = raw
+    .filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null)
+    .map((x) => ({
+      seconds: isNum(x.seconds) ? clamp(x.seconds, 0.2, 600) : 0,
+      label: typeof x.label === "string" ? x.label.trim() : "",
+    }))
+    .filter((x) => x.seconds > 0);
+  if (shots.length === 0)
+    throw new ToolError("Pass blocks: [{seconds, label}] — one entry per shot, in order.");
+  if (shots.length > MAX_BLOCKS)
+    throw new ToolError(
+      `That is ${shots.length} shots — ${MAX_BLOCKS} is the most one call lays down. Lay the first stretch and call again for the rest.`
+    );
+  const reference =
+    typeof input.reference_asset_id === "string" && input.reference_asset_id
+      ? requireItem(s.assets, input.reference_asset_id, "project asset")
+      : null;
+  const frame = frameOf(s.aspect);
+  const made: { clipId: string; assetId: string; start: number; seconds: number; label: string }[] = [];
+  let at = isNum(input.start) ? Math.max(0, input.start) : undefined;
+  useEditor.getState().beginHistoryBatch();
+  try {
+    // What the shots are copied from does not play in the copy.
+    if (reference) useEditor.getState().updateAsset(reference.id, { reference: true });
+    for (const [i, shot] of shots.entries()) {
+      const asset = blockAsset(shot, i, frame);
+      const cur = useEditor.getState();
+      cur.addAsset(asset);
+      // One at a time, each sized before the next goes down, so every block
+      // appends against a row whose end is already true and no two intersect.
+      const clipId = cur.addClipFromAsset(asset.id, at);
+      if (!clipId) continue;
+      useEditor.getState().updateClip(clipId, { out: shot.seconds });
+      const placed = useEditor.getState().clips.find((c) => c.id === clipId);
+      if (!placed) continue;
+      at = undefined; // the rest follow the row
+      made.push({
+        clipId: placed.id,
+        assetId: asset.id,
+        start: round2(placed.start),
+        seconds: round2(shot.seconds),
+        label: asset.block?.label ?? "",
+      });
+    }
+  } finally {
+    useEditor.getState().endHistoryBatch();
+  }
+  return {
+    placed: made,
+    ...tracksAfter(),
+    note: "Each block holds its shot's place on track 0. A block is filled by dropping footage on it — the footage takes its place and its length — or with replace_item; titles, sound and transitions go on top of the skeleton now.",
+  };
+}
+
+/** A reference is what the cut is copied from, so it never plays in it: the
+ * blocks standing in for its shots are waiting on the person's own footage.
+ * Their hands can still place it — this holds the assistant's tools. */
+function refuseReference(asset: MediaAsset): void {
+  if (!asset.reference) return;
+  throw new ToolError(
+    `"${asset.name}" is the reference this cut is blocked out from, so it does not go in the cut. Fill a block with the person's own footage (replace_item), or leave it standing.`
+  );
+}
+
 function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>) {
+  refuseReference(asset);
   const s = useEditor.getState();
   const start = isNum(input.start) ? Math.max(0, input.start) : undefined;
   if (asset.type === "audio") {

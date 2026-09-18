@@ -55,7 +55,7 @@ import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockAud
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
 import { waveGain } from "@/cut/lib/waveform";
 import { canSplitItem } from "@/cut/lib/itemKinds";
-import { track0Clips, laneGapAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, maxClipFade, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
+import { track0Clips, laneGapAt, blockClipAt, sameLane, type LaneRef, clipLen, clipSpeed, getClipSpans, maxClipFade, overlayLaneOrder, overlayLayers, projectDuration, resolveTransitions, rippleInsert, useEditor } from "@/cut/lib/store";
 import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
@@ -63,6 +63,7 @@ import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { BLOCK_COLOR } from "@/cut/lib/blockSource";
 import { assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
@@ -810,12 +811,26 @@ export function Timeline() {
   // takes the drop as an insert at the pointer — its later clips ripple right —
   // so the slot previews the ripple landing the drop will actually take.
   const previewCross = useCallback(
-    (target: TrackTarget | null, start = 0, len = 0, ghost?: DropGhost) => {
+    (target: TrackTarget | null, start = 0, len = 0, ghost?: DropGhost, carried = 0) => {
       // The drag let go of the placement system (it is home, or it ended): the
       // next resolve starts from the geometry alone.
       if (target === null) {
         heldRow.current = null;
         return setOverlayDrop(null);
+      }
+      // One piece of media over a block fills it, so the ghost takes the
+      // block's own span.
+      if (carried === 1 && target.kind === "track" && target.track === 0) {
+        const cur = useEditor.getState();
+        const block = blockClipAt(cur.clips, cur.assets, Math.max(0, start));
+        if (block)
+          return setOverlayDrop({
+            target,
+            t: block.start,
+            len: clipLen(block),
+            shifts: [],
+            ghost,
+          });
       }
       const landing =
         target.kind === "track"
@@ -1681,6 +1696,9 @@ export function Timeline() {
     only?: (asset: MediaAsset) => boolean
   ) => {
     const next = runCursor(t, atElement);
+    // One clip released on a block fills it: the footage takes the block's
+    // place and its length, and the block goes with it.
+    const block = blockUnder(items, t, place);
     for (const item of items) {
       try {
         const asset = await item.land(projectId);
@@ -1690,6 +1708,10 @@ export function Timeline() {
         if (asset.type === "font") continue;
         if (only && !only(asset)) continue;
         const sticker = !!stickerOf(asset);
+        if (block && !sticker && isClipMedia(asset.type)) {
+          useEditor.getState().replaceClipAsset(block.id, asset.id);
+          continue;
+        }
         placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place, elementRow);
       } catch (err) {
         reportSwallowed(`[cut] drop failed for ${item.name}`, err);
@@ -1700,6 +1722,18 @@ export function Timeline() {
   /** What a video row takes: the clips, and none of the sound or elements a
    * mixed selection may also be carrying. */
   const clipsOnly = (asset: MediaAsset) => isClipMedia(asset.type) && !stickerOf(asset);
+
+  /** The block a single carried clip would fill at this point.
+   * A run of several clips inserts as a run — one block holds one shot. */
+  const blockUnder = (items: { kind?: string }[], t: number, place: TrackTarget) => {
+    // Only the clips count: one video dragged alongside its music is still one
+    // shot, and both drop handlers have to agree on that or the same gesture
+    // fills the block from one row and inserts beside it from another.
+    if (items.filter((i) => isClipMedia(i.kind)).length !== 1 || place.kind !== "track" || place.track !== 0)
+      return null;
+    const cur = useEditor.getState();
+    return blockClipAt(cur.clips, cur.assets, t);
+  };
 
   // The video the drag carries — project media, a library clip, a stock clip
   // or an image (which lands as a still) — with the ghost its landing
@@ -1723,10 +1757,13 @@ export function Timeline() {
       e.dataTransfer.dropEffect = "copy";
       const x = e.clientX;
       const y = e.clientY;
+      // Read off the event now: the preview runs a frame later, with the
+      // event long gone.
+      const clips = carriedMedia(e).filter((item) => isClipMedia(item.kind)).length;
       schedulePreview(() => {
         setAssetDrop(null);
         setDropType("video"); // keep the insertion zones lit however the drag entered
-        previewCross(resolveDropTrack(y), Math.max(0, timeAt(x)), vid.duration, vid.ghost);
+        previewCross(resolveDropTrack(y), Math.max(0, timeAt(x)), vid.duration, vid.ghost, clips);
       });
     },
     onDragLeave: (e: React.DragEvent) => {
@@ -1987,10 +2024,17 @@ export function Timeline() {
             return;
           }
           setOverlayDrop(null);
+          // Over a block the drop fills it, so the ghost takes the block's
+          // own span — its start, its length, nothing rippling.
+          const cur = useEditor.getState();
+          const block = blockUnder(carried, Math.max(0, timeAt(x)), place);
+          if (block) {
+            setAssetDrop({ t: block.start, len: clipLen(block), ghost, shifts: [] });
+            return;
+          }
           // Preview the true landing spot: a drop at the pointer inserts here,
           // rippling later clips right, so the ghost sits where the segment will
           // actually land — a box under the pointer that lands minutes away lies.
-          const cur = useEditor.getState();
           const { start, shifts } = rippleInsert(track0Clips(cur.clips), dropTimeAt(x), duration);
           setAssetDrop({ t: start, len: duration, ghost, shifts });
         });
@@ -3754,7 +3798,7 @@ function ClipView({
       }}
     >
       <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: FILM_H }}>
-        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} hidden={offscreen} />
+        <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} hidden={offscreen} block={asset?.block} />
       </div>
       {hasWave && (
         <div
@@ -4602,9 +4646,14 @@ function Filmstrip({
   grade,
   failed,
   hidden,
+  block,
 }: {
   frames: { src: string; left: number; width: number }[];
   grade?: ColorGrade;
+  /** The clip is a shot with nothing in it yet: the strip is a flat slab in
+   * the block's own color, and the clip's label above it says what belongs
+   * there. Nothing is loading, so nothing pulses. */
+  block?: { label: string; color?: string };
   /** The strip's last generation attempt failed: hold a still placeholder.
    * An endless pulse reads as loading forever, and animating a clip-width
    * element burns paint time for the life of the timeline. */
@@ -4620,6 +4669,14 @@ function Filmstrip({
   // No thumbs yet — the media is still streaming into the browser store. A
   // placeholder slab fills the box until the strip can draw real frames.
   if (!frames.length) {
+    if (block) {
+      return (
+        <div
+          className="tl-filmstrip-block pointer-events-none absolute inset-0"
+          style={{ background: block.color || BLOCK_COLOR }}
+        />
+      );
+    }
     if (failed) {
       return (
         <div className="tl-filmstrip-failed pointer-events-none absolute inset-0 bg-[var(--skeleton)]" />

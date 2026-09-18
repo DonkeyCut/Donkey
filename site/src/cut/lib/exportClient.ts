@@ -20,6 +20,7 @@ import { downloadFile, downloadFromUrl } from "./download";
 import { bitrateFor, canRenderInBrowser, renderProjectToMp4 } from "./exportRender";
 import { putSigned } from "./media";
 import { renderRemovalPieces } from "./removalVideo";
+import { drawBlock } from "./blockSource";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipLen, clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
@@ -40,6 +41,7 @@ import type {
 
 import {
   deliveryContainer,
+  deliverySpan,
   EXPORT_CONTAINERS,
   exportBaseName,
   specMediaFiles,
@@ -873,7 +875,20 @@ export async function buildExportPayload(
     kf: posed(sp.clip).kf,
     border: undefined as string | undefined,
     removal: undefined as { rgb: string; alpha: string } | undefined,
+    staged: undefined as boolean | undefined,
   }));
+  // A block owns no file: its card is painted here at the output size and
+  // travels with the job, so this render draws what the preview draws.
+  for (let i = 0; i < spans.length; i++) {
+    if (!spans[i].asset.block) continue;
+    const name = `block_${i}.png`;
+    pngs.push({
+      name,
+      blob: await rasterCanvasToPng(drawBlock(spans[i].asset, settings.width, settings.height)),
+    });
+    clipEntries[i].file = name;
+    clipEntries[i].staged = true;
+  }
   // Track-0 segments render at the full output frame (regioned clips pad out
   // to it), so their masks paint full-frame. A subject mask rides the shared
   // matte; painted pictures still travel beside it when the pose track keys
@@ -1518,7 +1533,16 @@ export async function runBrowserExport(
   const claim = await backend.fetch("/api/cut/export/client/presign", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ projectId, outName: exportOutName(settings) }),
+    // The size this render is heading for — the number the dialog showed —
+    // travels with the claim, so an account with no room for the file is told
+    // now rather than after the encode.
+    body: JSON.stringify({
+      projectId,
+      outName: exportOutName(settings),
+      bytes: Math.round(
+        estimateExportBytes(settings, deliverySpan(settings.range, projectDuration(doc)))
+      ),
+    }),
   });
   const claimed = await apiJson<{ jobId?: string; url?: string; outName?: string; type?: string }>(claim);
   if (!claim.ok || !claimed.jobId || !claimed.url) {
@@ -1559,7 +1583,9 @@ export async function runBrowserExport(
       body: JSON.stringify({ jobId }),
     });
     const body = await apiJson<{ id?: string }>(done);
-    if (!done.ok || !body.id) throw new Error(body.error ?? "Could not save the export.");
+    if (!done.ok || !body.id) {
+      throw cloudRefusal(done, body) ?? new Error(body.error ?? "Could not save the export.");
+    }
     return body.id;
   } catch (err) {
     // A render that stopped — cancelled, failed, or refused — gives back the

@@ -36,6 +36,8 @@ import {
   assistantTurn,
   plainUserTurn,
   userTurn,
+  REFERENCE_ASSET,
+  REFERENCE_STATE,
 } from "./fixtures";
 
 export type Bucket = "instant" | "chat" | "single-tool" | "multi-tool";
@@ -69,6 +71,10 @@ export interface EvalCase {
   limits?: { roundBudget?: number; maxExtensions?: number };
   /** Auto-continue extensions the turn must land in. */
   extensions?: { min?: number; max?: number };
+  /** How often the quality gate must send this turn back to work: a turn that
+   * half-watches a source and describes the whole of it has a floor, and an
+   * ordinary finished turn has a ceiling of 0. */
+  qualityGate?: { min?: number; max?: number };
   /** Debris lines the turn ledger reports (the live editor computes these from
    * the store; the eval injects them). */
   debris?: string[];
@@ -812,6 +818,106 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           };
         }
         return undefined;
+      },
+    },
+    {
+      // The live case: someone imports a 71.6s reference and asks for one like
+      // it. The turn that shipped watched 20s of it, built titles over an
+      // EMPTY track 0, and signed off — so the person had text floating over
+      // nothing. Seeing all of it and blocking its cuts out as placeholders is
+      // the job; the quality gate is what stops the turn closing short.
+      name: "replicate-a-video-blocks-out-the-cuts",
+      bucket: "multi-tool",
+      input: () => [
+        userTurn("remake this video for me — I'll put my own footage in after", {
+          state: REFERENCE_STATE,
+        }),
+      ],
+      reply: /shot|block|placeholder|drop|footage/i,
+      requiredTools: ["watch_video", "note_source", "add_clip"],
+      state: REFERENCE_STATE,
+      simulate: () => {
+        const duration = REFERENCE_ASSET.duration;
+        // Each pass covers the next stretch from where the caller asked, so
+        // the coverage the model reads is real and moves.
+        let coveredTo = 0;
+        let blockedOut = 0;
+        let blockedEarly = false;
+        let placedReference = false;
+        const sim = (name: string, args: Record<string, unknown>) => {
+          if (name === "watch_video") {
+            const from = typeof args.from === "number" ? args.from : 0;
+            const to = Math.min(duration, Math.max(from, coveredTo) + 24);
+            coveredTo = Math.max(coveredTo, to);
+            const cuts: number[] = [];
+            for (let t = Math.ceil(from / 2) * 2; t < to; t += 2) cuts.push(Number(t.toFixed(2)));
+            return {
+              images: [],
+              sheetFrames: [],
+              distinctFrames: cuts.length,
+              sceneChanges: cuts,
+              coveredTo: to,
+              truncated: to < duration,
+              unwatchedSeconds: Number(Math.max(0, duration - coveredTo).toFixed(2)),
+              recorded: [],
+              unnoted: coveredTo < duration ? [{ from: coveredTo, to: duration }] : [],
+              source: { assetId: REFERENCE_ASSET.id, name: REFERENCE_ASSET.name, duration },
+              note: "Eval: yellow Archivo-Black hook titles over a talking head, cuts every ~2s.",
+            };
+          }
+          if (name === "note_source") return { source: { assetId: REFERENCE_ASSET.id }, unnoted: [] };
+          if (name === "add_clip") {
+            // Placing the reference itself is the mistake this case watches
+            // for; a run of blocks is the shape it wants.
+            if (args.asset_id === REFERENCE_ASSET.id) {
+              placedReference = true;
+              throw new Error(
+                "the reference is not footage for this cut — its shots are blocks until the person supplies their own"
+              );
+            }
+            const shots = Array.isArray(args.blocks) ? args.blocks : [];
+            if (shots.length === 0) return { id: "c-new" };
+            if (coveredTo < duration - 0.5) blockedEarly = true;
+            blockedOut += shots.reduce(
+              (sum: number, shot: unknown) =>
+                sum + (typeof (shot as { seconds?: unknown })?.seconds === "number" ? (shot as { seconds: number }).seconds : 0),
+              0
+            );
+            return {
+              placed: shots.map((_: unknown, i: number) => ({
+                clipId: `ph${i + 1}`,
+                assetId: `a-ph${i + 1}`,
+              })),
+              note: "Eval: the blocks are on track 0.",
+            };
+          }
+          return undefined;
+        };
+        sim.verify = () => {
+          const out: string[] = [];
+          if (coveredTo < duration - 0.5)
+            out.push(`watched only ${coveredTo.toFixed(1)}s of a ${duration}s source`);
+          if (blockedEarly) out.push("blocked the cut out before the source was watched through");
+          if (blockedOut > 0 && blockedOut < duration * 0.6)
+            out.push(`blocked out ${blockedOut.toFixed(1)}s of a ${duration}s reference`);
+          // The same shots laid twice make a cut twice as long as the thing
+          // it copies — what a turn sent back to look does if it starts over.
+          if (blockedOut > duration * 1.25)
+            out.push(`blocked out ${blockedOut.toFixed(1)}s over a ${duration}s reference`);
+          if (placedReference) out.push("put the reference itself on the timeline");
+          return out;
+        };
+        return sim;
+      },
+      // Rebuilding the reference's graphics is the job, so the element tools
+      // serve; only the shape of the rebuild is under test.
+      stubs: {
+        add_title: { id: "o1" },
+        add_text_sequence: { made: [{ id: "o2" }] },
+        add_shape: { id: "o3" },
+        set_overlay_animation: { id: "o1" },
+        update_overlay: { id: "o1" },
+        set_background: { background: { kind: "color", color: "#000000" } },
       },
     },
     {
