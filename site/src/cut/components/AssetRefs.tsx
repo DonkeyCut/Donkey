@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Check, Copy, FileText, X } from "lucide-react";
+import { Check, Clock, Copy, FileText, X } from "lucide-react";
 import {
   highlightMentions,
   liveRefUrl,
@@ -19,7 +19,16 @@ import { useInView } from "@/cut/hooks/useInView";
 import { revealRef } from "@/cut/lib/refReveal";
 import { formatTime } from "@/cut/lib/time";
 import { clipLen, getClipSpans, useEditor } from "@/cut/lib/store";
-import { playheadAt } from "@/cut/lib/playhead";
+import { playheadAt, previewAt, usePreviewTimeEvery } from "@/cut/lib/playhead";
+import {
+  formatMark,
+  markAt,
+  parseMark,
+  PLAYHEAD_HANDLE,
+  PLAYHEAD_NAME,
+  splitTimes,
+  type TimeMark,
+} from "@/cut/lib/timeMark";
 import { AudioPillSurface } from "@/cut/components/AudioPanel";
 import { entityGlyph } from "@/cut/components/entityIcons";
 import {
@@ -345,6 +354,38 @@ export function RefTokenChip({
   );
 }
 
+/**
+ * An inline `@1:34` moment token: a place in the cut the message points at.
+ * Clicking it takes the playhead there. Written messages hold the moment they
+ * ran against; a message still waiting in the queue holds the moment it will
+ * run against, re-read as the cut moves under it.
+ */
+export function TimeTokenChip({
+  text,
+  at,
+  onDark,
+}: {
+  text: string;
+  at: number;
+  onDark?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "ref-token inline-flex items-center gap-0.5 rounded-md px-1 align-middle font-mono text-[11px] transition-colors",
+        onDark
+          ? "bg-white/15 text-[#8ec7ff] hover:bg-white/25"
+          : "bg-[#0a84ff]/10 text-[#0a84ff] hover:bg-[#0a84ff]/20"
+      )}
+      onClick={() => useEditor.getState().seek(at)}
+    >
+      <Clock className="size-2.5 shrink-0" />
+      {text.slice(1)}
+    </button>
+  );
+}
+
 /** Message text with its resolved `@` mentions drawn as token chips. One
  * renderer for every place a written message is shown — the chat thread and
  * the queue tray above the composer — so a message reads the same before it
@@ -362,8 +403,13 @@ export function MentionedText({
   onDark?: boolean;
 }) {
   const candidates = useRefCandidates();
+  // Mentions first, then the moments inside what is left over: an asset's
+  // name never looks like a time, so the two passes never fight over a token.
   const parts = useMemo(
-    () => splitMentions(text, [...attachments, ...candidates]),
+    () =>
+      splitMentions(text, [...attachments, ...candidates]).flatMap<
+        string | AssetRef | { text: string; at: number }
+      >((p) => (typeof p === "string" ? splitTimes(p) : [p])),
     [text, attachments, candidates]
   );
   return (
@@ -371,6 +417,8 @@ export function MentionedText({
       {parts.map((p, i) =>
         typeof p === "string" ? (
           <span key={i}>{p}</span>
+        ) : "at" in p ? (
+          <TimeTokenChip key={i} text={p.text} at={p.at} onDark={onDark} />
         ) : (
           <RefTokenChip key={i} item={p} onDark={onDark} />
         )
@@ -939,6 +987,18 @@ function mentionAtCaret(value: string, caret: number): { start: number; query: s
   return { start: at, query };
 }
 
+/** The preview's moment on the `@` menu's playhead row. Mounted only while
+ * the menu is open, and reading the clock a few times a second: the composer
+ * itself never re-renders on the playhead. */
+function PlayheadRowTime() {
+  const at = usePreviewTimeEvery(10) / 10;
+  return (
+    <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground tabular-nums">
+      {formatMark(at)}
+    </span>
+  );
+}
+
 /** One resolved mention in the composer mirror. Entity pills paint over the
  * raw token with the entity's icon (or the sticker's own art) and name — the
  * token glyphs underneath keep their exact layout, so the textarea's caret
@@ -1100,6 +1160,7 @@ export function MentionTextarea({
   onUpsertRef,
   onPasteFiles,
   onRemoveLastRef,
+  onInsertTime,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -1130,6 +1191,11 @@ export function MentionTextarea({
   /** Backspace with the caret at the very start (nothing selected, nothing to
    * delete leftward) removes the newest attachment chip instead. */
   onRemoveLastRef?: () => void;
+  /** Take a moment in the cut the user picked off the `@` menu. Providing it
+   * puts the playhead at the top of that menu, so `@here` writes the time the
+   * preview is sitting on; the mark comes with it so the caller can re-read
+   * the moment if the cut moves before the message goes out. */
+  onInsertTime?: (mark: TimeMark) => void;
 }) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -1183,16 +1249,29 @@ export function MentionTextarea({
 
   // Mirror segments with their character offsets, so a pill can tell when
   // the caret sits inside its token.
+  // Moments pill only where they mean something — the surface that takes them.
+  const takesTime = !!onInsertTime;
   const mirrorSegs = useMemo(
     () =>
-      highlightMentions(value, pool).reduce<
-        { text: string; ref: AssetRef | null; start: number }[]
-      >((acc, seg) => {
-        const prev = acc[acc.length - 1];
-        acc.push({ ...seg, start: prev ? prev.start + prev.text.length : 0 });
-        return acc;
-      }, []),
-    [value, pool]
+      highlightMentions(value, pool)
+        // Moments live in the runs no mention claimed.
+        .flatMap((seg) =>
+          seg.ref || !takesTime
+            ? [seg]
+            : splitTimes(seg.text).map((part) =>
+                typeof part === "string"
+                  ? { text: part, ref: null, time: false }
+                  : { text: part.text, ref: null, time: true }
+              )
+        )
+        .reduce<
+          { text: string; ref: AssetRef | null; time?: boolean; start: number }[]
+        >((acc, seg) => {
+          const prev = acc[acc.length - 1];
+          acc.push({ ...seg, start: prev ? prev.start + prev.text.length : 0 });
+          return acc;
+        }, []),
+    [value, pool, takesTime]
   );
 
   // A pill cover is one box, so its token must move between lines whole —
@@ -1218,15 +1297,19 @@ export function MentionTextarea({
   }, [mirrorSegs, value, onChange]);
 
   const mention = useMemo(() => mentionAtCaret(value, caret), [value, caret]);
+  // A caret strictly inside an intact, resolved token is a click on the pill —
+  // the mention is complete, and offering lookalike suggestions for its
+  // half-read query would misdirect it.
+  const inResolved = useMemo(
+    () =>
+      mirrorSegs.some(
+        (seg) =>
+          (seg.ref || seg.time) && caret > seg.start && caret < seg.start + seg.text.length
+      ),
+    [mirrorSegs, caret]
+  );
   const matches = useMemo(() => {
-    if (!mention || dismissed === mention.start) return [];
-    // A caret strictly inside an intact, resolved token is a click on the
-    // pill — the mention is complete, and offering lookalike suggestions for
-    // its half-read query would misdirect it.
-    const inResolved = mirrorSegs.some(
-      (seg) => seg.ref && caret > seg.start && caret < seg.start + seg.text.length
-    );
-    if (inResolved) return [];
+    if (!mention || dismissed === mention.start || inResolved) return [];
     const q = mention.query.toLowerCase();
     // Best match first, not list order: a typed handle prefix ("c" → c1, c2)
     // beats a name prefix, which beats a substring hit anywhere in the name —
@@ -1248,14 +1331,24 @@ export function MentionTextarea({
       .sort((a, b) => a.r - b.r)
       .slice(0, 8)
       .map((x) => x.c);
-  }, [mention, dismissed, candidates, mirrorSegs, caret]);
-  const open = matches.length > 0;
+  }, [mention, dismissed, inResolved, candidates]);
+  // The playhead leads the menu wherever moments are taken: a bare `@`, or a
+  // query that starts the row's handle or name. Matched the way a candidate
+  // is, so `@here` and `@play` both land on it.
+  const timeRow =
+    !!onInsertTime &&
+    !!mention &&
+    dismissed !== mention.start &&
+    !inResolved &&
+    [PLAYHEAD_HANDLE, PLAYHEAD_NAME].some((n) => n.startsWith(mention.query.toLowerCase()));
+  const rowCount = matches.length + (timeRow ? 1 : 0);
+  const open = rowCount > 0;
   // Each keystroke re-ranks the list, so a highlight chosen under a previous
   // query derives back to the best (first) match instead of holding a stale
   // arrow/hover position.
   const sel = selState.q === mention?.query ? selState.i : 0;
   const setSel = (i: number) => setSelState({ q: mention?.query, i });
-  const selIndex = Math.min(sel, matches.length - 1);
+  const selIndex = Math.min(sel, rowCount - 1);
 
   const syncCaret = () => {
     const el = taRef.current;
@@ -1335,9 +1428,9 @@ export function MentionTextarea({
     });
   };
 
-  const pick = (ref: AssetRef) => {
+  /** Write `token` over the mention being typed and leave the caret after it. */
+  const writeToken = (token: string) => {
     if (!mention) return;
-    const token = refToken(ref) + " ";
     const next = value.slice(0, mention.start) + token + value.slice(caret);
     const newCaret = mention.start + token.length;
     onChange(next);
@@ -1349,6 +1442,28 @@ export function MentionTextarea({
       el.setSelectionRange(newCaret, newCaret);
       setCaret(newCaret);
     });
+  };
+
+  const pick = (ref: AssetRef) => writeToken(refToken(ref) + " ");
+
+  /** Write the preview's moment as a token, and hand the caller the mark that
+   * holds what it points at, so the time can be re-read if the cut moves. */
+  const pickTime = () => {
+    if (!onInsertTime) return;
+    const { clips, audioClips } = useEditor.getState();
+    const mark = markAt(previewAt(), { clips, audioClips });
+    onInsertTime(mark);
+    writeToken(mark.token + " ");
+  };
+
+  /** Take the menu row at `i`: the playhead leads the list when it is shown. */
+  const pickRow = (i: number) => {
+    if (timeRow && i === 0) {
+      pickTime();
+      return;
+    }
+    const ref = matches[timeRow ? i - 1 : i];
+    if (ref) pick(ref);
   };
 
   // Auto-grow: reset to natural height, then match the content. The caller's
@@ -1370,26 +1485,50 @@ export function MentionTextarea({
             menuSide === "top" ? "bottom-full mb-1" : "top-full mt-1"
           )}
         >
-          {matches.map((c, i) => (
+          {timeRow && (
             <button
-              key={`${c.scope}:${c.id}`}
               type="button"
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left",
-                i === selIndex ? "bg-muted" : "hover:bg-muted/60"
+                selIndex === 0 ? "bg-muted" : "hover:bg-muted/60"
               )}
-              onMouseEnter={() => setSel(i)}
-              // mousedown, not click: keep focus (and the mention state) in the textarea.
+              onMouseEnter={() => setSel(0)}
               onMouseDown={(e) => {
                 e.preventDefault();
-                pick(c);
+                pickTime();
               }}
             >
-              <RefThumb item={c} className="size-8" />
-              {c.handle && <RefHandleBadge handle={c.handle} className="shrink-0" />}
-              <span className="min-w-0 flex-1 truncate text-[11.5px]">{c.name}</span>
+              <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border bg-muted text-[#0a84ff]">
+                <Clock className="size-4" />
+              </span>
+              <RefHandleBadge handle={PLAYHEAD_HANDLE} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-[11.5px]">{PLAYHEAD_NAME}</span>
+              <PlayheadRowTime />
             </button>
-          ))}
+          )}
+          {matches.map((c, i) => {
+            const row = timeRow ? i + 1 : i;
+            return (
+              <button
+                key={`${c.scope}:${c.id}`}
+                type="button"
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left",
+                  row === selIndex ? "bg-muted" : "hover:bg-muted/60"
+                )}
+                onMouseEnter={() => setSel(row)}
+                // mousedown, not click: keep focus (and the mention state) in the textarea.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(c);
+                }}
+              >
+                <RefThumb item={c} className="size-8" />
+                {c.handle && <RefHandleBadge handle={c.handle} className="shrink-0" />}
+                <span className="min-w-0 flex-1 truncate text-[11.5px]">{c.name}</span>
+              </button>
+            );
+          })}
         </div>
       )}
       <textarea
@@ -1517,14 +1656,12 @@ export function MentionTextarea({
           if (open) {
             if (e.key === "ArrowDown" || e.key === "ArrowUp") {
               e.preventDefault();
-              setSel(
-                (selIndex + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length
-              );
+              setSel((selIndex + (e.key === "ArrowDown" ? 1 : rowCount - 1)) % rowCount);
               return;
             }
             if (e.key === "Enter" || e.key === "Tab") {
               e.preventDefault();
-              pick(matches[selIndex]);
+              pickRow(selIndex);
               return;
             }
             if (e.key === "Escape") {
@@ -1561,14 +1698,33 @@ export function MentionTextarea({
         )}
       >
         {mirrorSegs.map((seg, i) => {
+          // A moment pills over its own glyphs — the raw token keeps its
+          // exact layout, so the caret math never drifts — and takes a click
+          // to put the playhead back where the token points.
+          if (seg.time)
+            return (
+              <span
+                key={i}
+                className="pointer-events-auto cursor-pointer rounded-[4px] bg-[#0a84ff]/12 hover:bg-[#0a84ff]/25"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const at = parseMark(seg.text.slice(1));
+                  if (at !== null) useEditor.getState().seek(at);
+                }}
+              >
+                {seg.text}
+              </span>
+            );
           if (!seg.ref) return <span key={i}>{seg.text}</span>;
           // A side facing another pill across a single space keeps its bleed
           // off — two bleeds would swallow the only gap between the pills.
+          // A moment counts as a pill here too.
           const facing = (gap: number, other: number) =>
             !!mirrorSegs[gap] &&
             !mirrorSegs[gap].ref &&
+            !mirrorSegs[gap].time &&
             /^\s$/.test(mirrorSegs[gap].text) &&
-            !!mirrorSegs[other]?.ref;
+            !!(mirrorSegs[other]?.ref || mirrorSegs[other]?.time);
           const end = seg.start + seg.text.length;
           // Raw text shows only while a range endpoint rests strictly inside
           // the token; entity endpoints normalize to the token edges, so an

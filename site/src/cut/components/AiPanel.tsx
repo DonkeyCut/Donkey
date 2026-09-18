@@ -97,6 +97,7 @@ import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
 import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, judgeEngineSkill, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
 import { dueForRetriage, toolProgress } from "@/cut/lib/queueTriage";
 import { registerQueueSink } from "@/cut/lib/chatQueue";
+import { syncTimes, type TimeMark } from "@/cut/lib/timeMark";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import { withChatProject } from "@/cut/lib/projectChatTools";
 import { runAiTool } from "@/cut/lib/aiTools";
@@ -239,6 +240,14 @@ function liveRefs(refs: AssetRef[]): AssetRef[] {
       (a.scope !== "project" ||
         useEditor.getState().assets.some((x) => x.id === a.id)),
   );
+}
+
+/** A waiting row's text with its `@1:34` moments read against the cut as it
+ * stands this instant — what a dispatch sends, whichever render it fires on. */
+function dueText(m: QueuedMessage): string {
+  if (!m.times?.length) return m.text;
+  const { clips, audioClips } = useEditor.getState();
+  return syncTimes(m.text, m.times, { clips, audioClips }).text;
 }
 
 function readThreads(projectId: string): ChatThread[] {
@@ -391,6 +400,11 @@ function readStoredQueue(
       .map((m) => ({
         ...m,
         attachments: Array.isArray(m.attachments) ? m.attachments : [],
+        // A stored mark with no token or no time would format as nonsense;
+        // the row's written time stands on its own without it.
+        times: (Array.isArray(m.times) ? m.times : []).filter(
+          (t) => typeof t?.token === "string" && Number.isFinite(t?.at),
+        ),
       }));
   } catch {
     return [];
@@ -926,6 +940,10 @@ function ChatSession({
     micWasActive.current = mic.state !== "idle";
   }, [mic.state]);
   const [attachments, setAttachments] = useState<AssetRef[]>([]);
+  // Moments the composer's `@` tokens point at, in the order they were
+  // written. They ride with the message so the time can be re-read against
+  // the cut the message actually runs on.
+  const [times, setTimes] = useState<TimeMark[]>([]);
   const candidates = useRefCandidates(visible);
   // Any OS file drag over the window hints the composer as a drop target;
   // hovering it (dropActive below) strengthens the ring and shows the label.
@@ -1533,14 +1551,15 @@ function ChatSession({
       )
         continue;
       const live = liveRefs(row.attachments);
+      const text = dueText(current);
       if (verdict === "spawn") {
-        const id = onSpawn({ text: row.text, attachments: live, model });
+        const id = onSpawn({ text, attachments: live, model });
         setQueue((q) => q.map((m) => (m.id === row.id ? { ...m, status: "spawned", threadId: id } : m)));
       } else if (verdict === "fold" && provider(model) === "gemini" && cutChatLive(threadId)) {
         setQueue((q) => q.map((m) => (m.id === row.id ? { ...m, status: "folding" } : m)));
         const folded = await foldIntoCutChat({
           threadId,
-          text: row.text,
+          text,
           attachments: live,
           deps: productionDeps(projectId, turnSignalRef.current),
         });
@@ -1553,7 +1572,7 @@ function ChatSession({
           const user: UIMessage = {
             id: crypto.randomUUID(),
             role: "user",
-            parts: [{ type: "text", text: row.text }],
+            parts: [{ type: "text", text }],
             ...(live.length > 0 && { metadata: { attachments: live } }),
           };
           const tail = msgs.at(-1);
@@ -1607,6 +1626,27 @@ function ChatSession({
       ),
     [threadId],
   );
+  // A waiting row keeps pointing at the same moment of the video while the
+  // running turn edits the cut under it. Each row's marks are re-read against
+  // the live clips and its `@1:34` tokens rewritten, so the tray shows — and
+  // the dispatch sends — the time that moment sits at now. The row being
+  // edited is left alone; its text belongs to the editor until it commits.
+  const docClips = useEditor((s) => s.clips);
+  const docAudio = useEditor((s) => s.audioClips);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the rows react to the cut moving; the write is skipped unless a token's time actually changed
+    setQueue((q) => {
+      let moved = false;
+      const next = q.map((m) => {
+        if (!m.times?.length || m.status !== "queued" || m.id === queueEditing) return m;
+        const synced = syncTimes(m.text, m.times, { clips: docClips, audioClips: docAudio });
+        if (synced.text === m.text) return m;
+        moved = true;
+        return { ...m, text: synced.text, times: synced.marks };
+      });
+      return moved ? next : q;
+    });
+  }, [docClips, docAudio, queueEditing]);
   // Height of the floating stack above the composer (warning tabs + queue
   // tray); the messages pad their bottom by it so the newest message can
   // scroll out from behind the stack.
@@ -1632,7 +1672,14 @@ function ChatSession({
     // Inline @mentions attach their assets alongside the dropped chips. The
     // message keeps the raw tokens — they render as interactive chips and the
     // model reads the handle↔asset mapping from <attached_assets>.
-    const body = text.trim();
+    // Moments are re-read here too: the cut can have moved since the token was
+    // written, and a token typed by hand picks up its mark now.
+    const doc = useEditor.getState();
+    const synced = syncTimes(text.trim(), times, {
+      clips: doc.clips,
+      audioClips: doc.audioClips,
+    });
+    const body = synced.text;
     const { refs: all } = collectRefs(body, attachments, candidates);
     if (!body && all.length === 0) return;
     // An unavailable provider surfaces as an error in the thread at send time
@@ -1645,10 +1692,17 @@ function ChatSession({
       // A paused queue stays paused: parked rows fire only from the tray's
       // resume button, never as a side effect of submitting something new.
       // With the queue live, the triage places the row right away.
-      const row: QueuedMessage = { id: crypto.randomUUID(), text: body, attachments: all, status: "queued" };
+      const row: QueuedMessage = {
+        id: crypto.randomUUID(),
+        text: body,
+        attachments: all,
+        status: "queued",
+        ...(synced.marks.length > 0 && { times: synced.marks }),
+      };
       setQueue((q) => [...q, row]);
       setInput("");
       setAttachments([]);
+      setTimes([]);
       pinnedRef.current = true;
       if (!queuePaused) void triageRef.current([row]);
       return;
@@ -1674,6 +1728,7 @@ function ChatSession({
     }));
     setInput("");
     setAttachments([]);
+    setTimes([]);
   };
 
   // A turn the page lost picks itself back up. With an engine journal the
@@ -1774,9 +1829,10 @@ function ChatSession({
     // parked (or at file blobs that died with the last page); dropping the
     // dead refs keeps the message from claiming media it can't deliver.
     const live = liveRefs(next.attachments);
-    runningAskRef.current = next.text;
+    const text = dueText(next);
+    runningAskRef.current = text;
     dispatchChat(() => sendMessage({
-      text: next.text,
+      text,
       ...(live.length > 0 && { metadata: { attachments: live } }),
     }));
     // The rows behind it are placed against the turn that just started:
@@ -1972,9 +2028,16 @@ function ChatSession({
               }}
               onCommitEdit={(id, text) =>
                 setQueue((q) =>
-                  q.map((m) =>
-                    m.id === id ? { ...m, text: text.trim() || m.text } : m,
-                  ),
+                  q.map((m) => {
+                    if (m.id !== id) return m;
+                    // A rewrite can drop a moment or type a new one; re-read
+                    // the row's marks off the text it now carries.
+                    const synced = syncTimes(text.trim() || m.text, m.times ?? [], {
+                      clips: docClips,
+                      audioClips: docAudio,
+                    });
+                    return { ...m, text: synced.text, times: synced.marks };
+                  }),
                 )
               }
               onRemove={(id) => setQueue((q) => q.filter((m) => m.id !== id))}
@@ -2061,6 +2124,7 @@ function ChatSession({
                   onUpsertRef={(ref) => setAttachments((p) => upsertRef(p, ref))}
                   onPasteFiles={attachFiles}
                   onRemoveLastRef={() => setAttachments((p) => p.slice(0, -1))}
+                  onInsertTime={(mark) => setTimes((p) => [...p, mark])}
                 />
                 <div className="flex items-center gap-1 px-1.5 pb-1.5">
                   <ModelSelector

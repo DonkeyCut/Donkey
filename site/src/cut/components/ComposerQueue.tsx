@@ -17,6 +17,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useDragSort } from "@/components/Sortable";
 import { MentionedText, RefThumb } from "./AssetRefs";
 import type { AssetRef } from "@/cut/lib/assetRef";
+import type { TimeMark } from "@/cut/lib/timeMark";
 
 /** Small icon control on a tray row or the tray header. */
 const queueIconButton =
@@ -34,6 +35,10 @@ export interface QueuedMessage {
   attachments: AssetRef[];
   status: "queued" | "folding" | "spawned" | "running" | "done";
   threadId?: string;
+  /** What the row's `@1:34` moments point at. A waiting row's times are
+   * re-read as the running turn moves the cut, so the text always names the
+   * moment the row will actually run against. */
+  times?: TimeMark[];
 }
 
 /** The queue tray: a folder tab on top of the composer holding the messages
