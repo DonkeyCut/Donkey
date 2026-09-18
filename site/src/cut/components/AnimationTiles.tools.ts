@@ -1,8 +1,8 @@
 /**
- * The assistant's overlay-animation tools — the preset In/Out/Loop ramps the
- * `AnimationTiles` grid picks from, and the keyframed pose track that lives
- * under those presets in the inspector. The catalog spreads this list into
- * the model's toolset and `aiTools.ts` keys its handlers on
+ * The assistant's overlay-animation tools — the keyframed pose track that
+ * carries motion precisely, and the preset In/Out/Loop ramps the
+ * `AnimationTiles` grid picks from, which compose over it. The catalog spreads
+ * this list into the model's toolset and `aiTools.ts` keys its handlers on
  * `OverlayAnimationToolName`, so the style ids the model can pass are exactly
  * the ones the tiles render and a removed or renamed tool breaks the build
  * until every side catches up.
@@ -36,7 +36,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_animation",
     description:
-      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; typewriter animates titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; use set_overlay_keyframes when no named move fits, and both compose together. Word effects — words_style, titles only — play the line word by word, timed against the cut's transcript when there is one and spread across the element's own span when there is not: an emphasis travels along a line that is fully up, and a build assembles the line as it is spoken. It is the slot for "make each word pop as I say it" and for "have the words appear one by one".`,
+      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; typewriter animates titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; set_overlay_keyframes is the precise way to move an element and the default reach, so name a move when it is exactly what you mean — the two compose together. Word effects — words_style, titles only — play the line word by word, timed against the cut's transcript when there is one and spread across the element's own span when there is not: an emphasis travels along a line that is fully up, and a build assembles the line as it is spoken. It is the slot for "make each word pop as I say it" and for "have the words appear one by one".`,
     inputSchema: obj({
       id: str("Overlay element id"),
       move: {
@@ -82,7 +82,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_keyframes",
     description:
-      "Give an overlay element a keyframed pose track, for motion no named move covers (a specific path across the frame, a timing tied to the footage). Each key is a whole pose at a time measured in seconds from the element's own start; the pose moves linearly between keys and holds outside them. Omitted fields on a key take the element's current value. Pass an empty list to clear the track and return the element to its resting pose. Preset In/Out/Loop animation still composes on top, so a keyframed title can also fade in.",
+      "Give an overlay element a keyframed pose track — the default way to animate one, because a key names the exact pose at the exact second where a preset ramp approximates it. Each key is a whole pose at a time measured in seconds from the element's own start; the pose moves linearly between keys and holds outside them. Omitted fields on a key take the element's current value. Pass an empty list to clear the track and return the element to its resting pose. Preset In/Out/Loop animation still composes on top, so a keyframed title can also fade in.",
     inputSchema: obj(
       {
         id: str("Overlay element id"),
