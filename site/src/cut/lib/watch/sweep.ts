@@ -12,6 +12,7 @@ import { engineTranscribeSamples } from "../localStt";
 import { sampleWatchFrames } from "../media";
 import { runTranscription, useEditor } from "../store";
 import { trackLocale } from "../subtitles";
+import { speechOnsets } from "./fuse";
 import { mergeSpeech, mergeWatch, nextUncoveredSpan } from "./merge";
 
 /** Background watch sweep: after the assistant's first look at (or listen to)
@@ -207,6 +208,9 @@ async function run(): Promise<void> {
           to: span.to,
           metadataOnly: true,
           shouldPause: decodersBusy,
+          // The transcript is already in by now (speech runs first), so the
+          // map is drawn on the source's own lines rather than a blind grid.
+          at: speechOnsets(asset.speech?.segments ?? [], span.from, span.to),
         });
         if (r.coveredTo > span.from) {
           const cur = useEditor.getState().assets.find((a) => a.id === id);

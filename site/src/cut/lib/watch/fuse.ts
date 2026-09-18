@@ -69,3 +69,37 @@ export function renderFusedTimeline(spans: FusedSpan[]): string {
   }
   return lines.join("\n");
 }
+
+/** A cue lands and the picture under it changes with it: the caption swaps,
+ * the speaker starts, the graphic cuts in. These are the moments a watch aims
+ * its frames at, just after each cue starts so the new state is up and still.
+ * A source nobody has transcribed offers none and sweeps on the steady floor
+ * alone. */
+export const CUE_LEAD_S = 0.2;
+
+export function speechOnsets(
+  cues: { start: number; end: number; text: string }[],
+  from = 0,
+  to = Infinity
+): number[] {
+  return cues
+    .filter((c) => c.text.trim().length > 0)
+    .map((c) => c.start + CUE_LEAD_S)
+    .filter((t) => t >= from && t < to);
+}
+
+/** The speech that covers a stretch of a source: the project's own caption
+ * cues where they reach it, the source's transcript everywhere else. A lane
+ * holding cues for one clip leaves every other clip to its own transcript,
+ * which is what a watch aims its frames at and fuses its timeline from. */
+export function speechOver(
+  cues: { start: number; end: number; text: string }[],
+  transcript: { start: number; end: number; text: string }[],
+  from: number,
+  to: number
+): { start: number; end: number; text: string }[] {
+  const within = (list: { start: number; end: number; text: string }[]) =>
+    list.filter((c) => c.end > from && c.start < to);
+  const mapped = within(cues);
+  return mapped.length > 0 ? mapped : within(transcript);
+}

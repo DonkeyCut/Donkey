@@ -256,8 +256,8 @@ function readThreads(projectId: string): ChatThread[] {
 }
 
 /** Persisted copies drop frame payloads (data URLs) from tool outputs — one
- * watch_video result carries ~1MB of contact sheets and localStorage holds a
- * few MB per origin. The live thread keeps its images; replayed turns only
+ * watch_video result carries a few MB of frames and localStorage holds a few
+ * MB per origin in total. The live thread keeps its images; replayed turns only
  * ever reuse text parts, so nothing downstream misses them. */
 function slimForStorage(list: ChatThread[]): ChatThread[] {
   const bulky = (v: unknown) =>

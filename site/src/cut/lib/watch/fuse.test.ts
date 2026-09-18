@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { fuseTimeline, renderFusedTimeline } from "./fuse";
+import { fuseTimeline, renderFusedTimeline, speechOnsets, speechOver } from "./fuse";
 
 const cue = (start: number, end: number, text: string) => ({ start, end, text });
 
@@ -60,5 +60,40 @@ describe("renderFusedTimeline", () => {
 
   test("spans with nothing to say render nothing", () => {
     expect(renderFusedTimeline(fuseTimeline([], [], { from: 0, to: 8 }))).toBe("");
+  });
+});
+
+describe("speechOnsets", () => {
+  test("each line earns a look just after it lands", () => {
+    // Just after: the new state is up and has stopped moving.
+    expect(speechOnsets([cue(0, 2, "having to"), cue(2, 4, "say it twice")])).toEqual([0.2, 2.2]);
+  });
+
+  test("a silent cue and anything outside the span aim at nothing", () => {
+    const cues = [cue(0, 2, "  "), cue(4, 6, "in"), cue(20, 22, "out")];
+    expect(speechOnsets(cues, 3, 10)).toEqual([4.2]);
+  });
+});
+
+describe("speechOver", () => {
+  const transcript = [cue(0, 2, "from the source"), cue(4, 6, "and on")];
+
+  test("the project's cues win where they reach the stretch", () => {
+    const cues = [cue(0, 2, "from the lane")];
+    expect(speechOver(cues, transcript, 0, 6)[0].text).toBe("from the lane");
+  });
+
+  test("a lane whose cues belong to another clip falls back to the transcript", () => {
+    // The caption lane holds cues for a different clip, so mapping them
+    // through this one's retime lands them all outside its source range.
+    const elsewhere = [cue(300, 302, "another clip's line")];
+    expect(speechOver(elsewhere, transcript, 0, 6).map((c) => c.text)).toEqual([
+      "from the source",
+      "and on",
+    ]);
+  });
+
+  test("a stretch nothing covers comes back empty", () => {
+    expect(speechOver([], transcript, 100, 120)).toEqual([]);
   });
 });

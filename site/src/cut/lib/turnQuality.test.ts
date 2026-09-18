@@ -16,10 +16,17 @@ const settings = SETTINGS.cutJudge.default;
 const source = (over: Partial<WatchedSource> = {}): WatchedSource => ({
   name: "reference.mp4",
   duration: 71.6,
+  kind: "video",
+  sound: "yes",
   passes: 1,
   coveredTo: 20,
   unwatched: 51.6,
   unnoted: [{ from: 20, to: 71.6 }],
+  unread: 71.6,
+  unreadFrom: 0,
+  unheard: 0,
+  unheardFrom: null,
+  spoken: "",
   observed: [{ from: 0, to: 20, text: "hook titles over a talking head" }],
   cuts: 12,
   ...over });
@@ -37,6 +44,8 @@ function answers(over: {
   finished?: number;
   seen?: number;
   honest?: number;
+  hears?: number;
+  captionsSpeak?: number;
   closeness?: "shape" | "normal" | "exact";
 }): QualityAnswers {
   const closeness = over.closeness ?? "normal";
@@ -44,6 +53,8 @@ function answers(over: {
     finished: { type: "noul", noul: over.finished ?? 0.9 },
     seen: { type: "noul", noul: over.seen ?? 0.9 },
     honest: { type: "noul", noul: over.honest ?? 0.9 },
+    hears: { type: "noul", noul: over.hears ?? 0.1 },
+    captionsSpeak: { type: "noul", noul: over.captionsSpeak ?? 0.1 },
     closeness: {
       type: "choice",
       choice: closeness,
@@ -83,6 +94,173 @@ describe("qualityVerdict", () => {
   test("looking comes before building when both are short", () => {
     const verdict = qualityVerdict(answers({ finished: 0.1, seen: 0.1 }), work(), settings);
     expect(verdict?.step).toBe("watch");
+  });
+
+  test("an ask about how it sounds holds on seconds nobody played", () => {
+    const unplayed = work({
+      request: "cut this to the beat",
+      sources: [source({ coveredTo: 71.6, unwatched: 0, unnoted: [], unread: 0, unheard: 71.6, unheardFrom: 0 })] });
+    const verdict = qualityVerdict(answers({ honest: 0.1, hears: 0.9 }), unplayed, settings);
+    expect(verdict?.step).toBe("watch");
+    expect(verdict?.steer).toContain("listen_audio from=0");
+    expect(verdict?.steer).toContain("71.6s");
+  });
+
+  test("a picture ask never holds on unplayed seconds", () => {
+    const unplayed = work({
+      sources: [source({ coveredTo: 71.6, unwatched: 0, unnoted: [], unread: 0, unheard: 71.6, unheardFrom: 0 })] });
+    expect(qualityVerdict(answers({ honest: 0.1, hears: 0.1 }), unplayed, settings)).toBeNull();
+  });
+
+  test("a listen records what the source has left unheard", () => {
+    const looks = new Map<string, WatchedSource>();
+    recordLook(looks, "listen_audio", {
+      source: { assetId: "a1", name: "track.mp3", duration: 200 },
+      from: 0, coveredTo: 120, unheardSeconds: 80, unheardFrom: 120 });
+    expect(looks.get("a1")!.unheard).toBe(80);
+    expect(looks.get("a1")!.unheardFrom).toBe(120);
+  });
+
+  test("an exact ask holds on footage surveyed but never read", () => {
+    // Every second has been looked at — as contact-sheet thumbnails, where a
+    // caption is a few pixels tall. For an ask to reproduce the source, that
+    // is a measured gap, the same as seconds nobody opened.
+    const surveyed = work({ sources: [source({ coveredTo: 71.6, unwatched: 0, unnoted: [] })] });
+    const verdict = qualityVerdict(answers({ honest: 0.1, closeness: "exact" }), surveyed, settings);
+    expect(verdict?.step).toBe("watch");
+    expect(verdict?.steer).toContain("detail=original");
+    expect(verdict?.steer).toContain("71.6s");
+    // The instruction names where to start, so following it ends the hold.
+    expect(verdict?.steer).toContain("from=0");
+  });
+
+  test("a caption track that speaks is read for treatment, not for words", () => {
+    // The text on screen is the narration, so the transcript already holds
+    // every word of it. The close read that remains is about how they are
+    // set, and the steer says so instead of asking for all 71.6s back.
+    const surveyed = work({
+      sources: [source({ coveredTo: 71.6, unwatched: 0, unnoted: [], spoken: '[0s-2s] "having to"' })],
+    });
+    const verdict = qualityVerdict(
+      answers({ honest: 0.1, closeness: "exact", captionsSpeak: 0.9 }),
+      surveyed,
+      settings,
+    );
+    expect(verdict?.step).toBe("watch");
+    expect(verdict?.steer).toContain("detail=original");
+    expect(verdict?.steer).toContain("the transcript already holds the words");
+  });
+
+  test("a sample of a spoken caption track is enough to close an exact turn", () => {
+    // Treatment reads as a sample, not as coverage: once enough of it has
+    // been read closely, the rest comes off the transcript.
+    const sampled = work({
+      sources: [
+        source({
+          coveredTo: 71.6,
+          unwatched: 0,
+          unnoted: [],
+          unread: 71.6 - settings.qualityTreatmentSeconds,
+          unreadFrom: 10,
+        }),
+      ],
+    });
+    expect(
+      qualityVerdict(
+        answers({ honest: 0.1, closeness: "exact", captionsSpeak: 0.9 }),
+        sampled,
+        settings,
+      ),
+    ).toBeNull();
+    // Text of its own still owes the full read-through.
+    expect(
+      qualityVerdict(
+        answers({ honest: 0.1, closeness: "exact", captionsSpeak: 0.1 }),
+        sampled,
+        settings,
+      )?.steer,
+    ).toContain("until unreadSeconds is 0");
+  });
+
+  test("a source read closely end to end closes an exact turn", () => {
+    // The measure rides the asset, so a source read in an earlier turn is not
+    // charged for again.
+    const read = work({
+      sources: [
+        source({ coveredTo: 71.6, unwatched: 0, unnoted: [], unread: 0, unreadFrom: null }),
+      ] });
+    expect(qualityVerdict(answers({ honest: 0.1, closeness: "exact" }), read, settings)).toBeNull();
+  });
+
+  test("a normal ask never holds on detail", () => {
+    const surveyed = work({ sources: [source({ coveredTo: 71.6, unwatched: 0, unnoted: [] })] });
+    expect(qualityVerdict(answers({ honest: 0.1, closeness: "normal" }), surveyed, settings)).toBeNull();
+  });
+
+  test("a steer never names a tool the source refuses", () => {
+    // The music the turn listened to has no picture. Steering watch_video at
+    // it spends the round on "that is audio — listen_audio hears it".
+    const music = work({
+      request: "cut this to the beat",
+      sources: [
+        source({
+          name: "track.mp3",
+          kind: "audio",
+          sound: "yes",
+          duration: 200,
+          coveredTo: 0,
+          unwatched: 200,
+          unread: 200,
+          unreadFrom: 0,
+          unheard: 0,
+          unheardFrom: null,
+          unnoted: [],
+        }),
+      ],
+    });
+    expect(qualityVerdict(answers({ finished: 0.1, closeness: "exact" }), music, settings)).toBeNull();
+  });
+
+  test("silent footage is never sent to be listened to", () => {
+    // A generated b-roll clip with no audio track: listen_audio throws on it,
+    // so an ask about the sound looks elsewhere.
+    const silent = work({
+      request: "cut this to the music",
+      sources: [
+        source({
+          kind: "video",
+          sound: "none",
+          coveredTo: 71.6,
+          unwatched: 0,
+          unnoted: [],
+          unread: 0,
+          unreadFrom: null,
+          unheard: 71.6,
+          unheardFrom: 0,
+        }),
+      ],
+    });
+    expect(qualityVerdict(answers({ honest: 0.1, hears: 0.9 }), silent, settings)).toBeNull();
+  });
+
+  test("a gap too small to reach closes the turn", () => {
+    // 98.6s of a 100s track played, the rest a sliver the coverage maths does
+    // not report. With nowhere to send the next pass, a hold would replay the
+    // whole source for seconds nobody can reach.
+    const sliver = work({
+      sources: [
+        source({
+          coveredTo: 71.6,
+          unwatched: 0,
+          unnoted: [],
+          unread: 1.4,
+          unreadFrom: null,
+          unheard: 1.4,
+          unheardFrom: null,
+        }),
+      ],
+    });
+    expect(qualityVerdict(answers({ honest: 0.1, hears: 0.9, closeness: "exact" }), sliver, settings)).toBeNull();
   });
 
   test("a doubt with nothing measurable behind it lets the turn close", () => {
@@ -139,6 +317,18 @@ describe("qualityState", () => {
 });
 
 describe("recordLook", () => {
+  test("a pass carries the source's own unread measure, not this turn's", () => {
+    const looks = new Map<string, WatchedSource>();
+    const src = { assetId: "a1", name: "reference.mp4", duration: 71.6 };
+    recordLook(looks, "watch_video", {
+      source: src, from: 0, coveredTo: 24, detail: "scan", unreadSeconds: 71.6, unreadFrom: 0 });
+    expect(looks.get("a1")!.unread).toBe(71.6);
+    recordLook(looks, "watch_video", {
+      source: src, from: 0, coveredTo: 12, detail: "original", unreadSeconds: 59.6, unreadFrom: 12 });
+    expect(looks.get("a1")!.unread).toBe(59.6);
+    expect(looks.get("a1")!.unreadFrom).toBe(12);
+  });
+
   test("a watch pass records coverage, cuts and the notes already written", () => {
     const looks = new Map<string, WatchedSource>();
     recordLook(looks, "watch_video", {
@@ -189,6 +379,8 @@ describe("QUALITY_QUESTIONS", () => {
       "finished",
       "seen",
       "honest",
+      "hears",
+      "captionsSpeak",
       "closeness",
     ]);
   });

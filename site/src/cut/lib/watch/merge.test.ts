@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { mergeSpeech, mergeWatch, mergeWatchNotes, nextUncoveredSpan, uncoveredSeconds, unnotedSpans } from "./merge";
+import { mergeHeard, mergeSpeech, mergeWatch, mergeWatchNotes, nextUncoveredSpan, uncoveredSeconds, unnotedSpans } from "./merge";
 import type { AssetWatch } from "../types";
 
 const frame = (t: number, via: AssetWatch["frames"][number]["via"] = "global") => ({ t, via });
@@ -168,5 +168,86 @@ describe("uncoveredSeconds", () => {
 
   test("nothing watched is the whole source", () => {
     expect(uncoveredSeconds(undefined, 64.1)).toBe(64.1);
+  });
+});
+
+describe("close reads", () => {
+  test("a close pass records its span; a scan leaves the record alone", () => {
+    const scan = mergeWatch(undefined, { from: 0, to: 30, frames: [], sceneChanges: [] });
+    expect(scan.read).toBeUndefined();
+    const read = mergeWatch(scan, {
+      from: 0, to: 12, frames: [], sceneChanges: [], readClosely: true });
+    expect(read.read).toEqual([{ from: 0, to: 12 }]);
+    // A record written before the ladder carries nothing read, never an error.
+    const later = mergeWatch(read, { from: 12, to: 30, frames: [], sceneChanges: [] });
+    expect(later.read).toEqual([{ from: 0, to: 12 }]);
+  });
+
+  test("close spans union the way coverage does", () => {
+    let w = mergeWatch(undefined, {
+      from: 0, to: 10, frames: [], sceneChanges: [], readClosely: true });
+    w = mergeWatch(w, { from: 10, to: 20, frames: [], sceneChanges: [], readClosely: true });
+    w = mergeWatch(w, { from: 40, to: 50, frames: [], sceneChanges: [], readClosely: true });
+    expect(w.read).toEqual([{ from: 0, to: 20 }, { from: 40, to: 50 }]);
+  });
+});
+
+describe("mergeHeard", () => {
+  test("listened spans union, and coverage reads them like any range", () => {
+    let w = mergeHeard(undefined, { from: 0, to: 120 });
+    expect(w.heard).toEqual([{ from: 0, to: 120 }]);
+    w = mergeHeard(w, { from: 120, to: 200 });
+    expect(w.heard).toEqual([{ from: 0, to: 200 }]);
+    expect(uncoveredSeconds({ ranges: w.heard ?? [] }, 300)).toBe(100);
+    expect(nextUncoveredSpan({ ranges: w.heard ?? [] }, 300)).toEqual({ from: 200, to: 300 });
+  });
+
+  test("listening leaves the frames and notes of a watch alone", () => {
+    const watched = mergeWatchNotes(
+      mergeWatch(undefined, { from: 0, to: 30, frames: [frame(1)], sceneChanges: [1] }),
+      [{ from: 0, to: 30, text: "the hook" }]
+    );
+    const both = mergeHeard(watched, { from: 0, to: 30 });
+    expect(both.frames).toEqual(watched.frames);
+    expect(both.notes).toEqual(watched.notes);
+    expect(both.heard).toEqual([{ from: 0, to: 30 }]);
+  });
+});
+
+describe("one record, three senses", () => {
+  // Every merge carries forward what the other passes measured. Rebuilding
+  // the record from the fields one pass owns erases the rest of it, and the
+  // tools that write it run in whatever order the work takes.
+  const full = mergeHeard(
+    mergeWatchNotes(
+      mergeWatch(undefined, { from: 0, to: 12, frames: [], sceneChanges: [], readClosely: true }),
+      [{ from: 0, to: 12, text: "titles over a talking head" }],
+    ),
+    { from: 0, to: 30 },
+  );
+
+  test("the close read, the notes and the listen all survive each other", () => {
+    expect(full.read).toEqual([{ from: 0, to: 12 }]);
+    expect(full.heard).toEqual([{ from: 0, to: 30 }]);
+    expect(full.notes?.length).toBe(1);
+  });
+
+  test("writing a note keeps what was read closely and what was played", () => {
+    const after = mergeWatchNotes(full, [{ from: 12, to: 20, text: "the next stretch" }]);
+    expect(after.read).toEqual([{ from: 0, to: 12 }]);
+    expect(after.heard).toEqual([{ from: 0, to: 30 }]);
+  });
+
+  test("the background sweep's coverage merge keeps them too", () => {
+    const after = mergeWatch(full, { from: 20, to: 40, frames: [], sceneChanges: [] });
+    expect(after.read).toEqual([{ from: 0, to: 12 }]);
+    expect(after.heard).toEqual([{ from: 0, to: 30 }]);
+    expect(after.notes?.length).toBe(1);
+  });
+
+  test("a listen keeps the close read and the notes", () => {
+    const after = mergeHeard(full, { from: 30, to: 50 });
+    expect(after.read).toEqual([{ from: 0, to: 12 }]);
+    expect(after.notes?.length).toBe(1);
   });
 });

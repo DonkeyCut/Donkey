@@ -133,11 +133,26 @@ export function nearestAspect<T extends string>(aspect: Aspect, supported: reado
 /** Asset fields persisted in project.json. */
 /** Why watch_video kept a frame: "first" opens the range, "global" is a
  * whole-frame change (a hard cut), "action" is hard local motion (a small
- * subject), "settled" is new settled detail (text, ink, UI). */
-export type WatchKeepReason = "first" | "global" | "action" | "settled";
+ * subject), "text" is type landing, swapping or leaving, "settled" is other
+ * new settled detail (ink, UI). */
+export type WatchKeepReason = "first" | "global" | "action" | "text" | "settled";
 
-/** What the assistant has seen of a source: watch_video's kept frames and
- * detected cuts, merged across the watched spans. Times are source seconds.
+/** How much of each kept frame watch_video hands back, from the tiled
+ * thumbnails that answer "what happens here" up to the frames themselves.
+ * Every step trades frames for pixels at roughly even cost: the geometry is
+ * in media.ts, the notes below are what the tool catalog and the schema both
+ * describe it with. */
+export const WATCH_DETAILS = ["scan", "read", "original"] as const;
+export type WatchDetail = (typeof WATCH_DETAILS)[number];
+export const WATCH_DETAIL_NOTES: Record<WatchDetail, string> = {
+  scan: "36 frames as 3×3 contact sheets — coverage: what happens, where the cuts fall, how long a stretch runs",
+  read: "16 frames as 2×2 sheets at half again the cell size — on-screen text, UI, anything whose words matter",
+  original: "6 frames at the source's own resolution, untiled and unstamped — type, weight, spacing, colour and edges exactly as the source has them",
+};
+
+/** What the assistant has taken in from a source: watch_video's kept frames
+ * and detected cuts, the spans it read closely or listened to, and what it
+ * wrote down, merged across the spans. Times are source seconds.
  * Media files are immutable per fileName, so this never goes stale; it lives
  * on the asset, so it saves with the project and dies with the asset. */
 export interface AssetWatch {
@@ -147,6 +162,15 @@ export interface AssetWatch {
   frames: { t: number; via: WatchKeepReason }[];
   /** Hard-cut moments among the kept frames. */
   sceneChanges: number[];
+  /** Spans looked at closely enough to read type — the detail ladder's `read`
+   * and `original`. A scan says where the cuts fall; only these say what the
+   * words on screen are, and an ask to reproduce a source turns on the words.
+   * Absent on records written before the ladder: nothing was read closely. */
+  read?: { from: number; to: number }[];
+  /** Spans played to the assistant by listen_audio. A source's transcript
+   * holds its words; this holds where anyone heard it — the tone, the music,
+   * the timing and the room, which no transcript carries. */
+  heard?: { from: number; to: number }[];
   /** What the assistant read off the source, in its own words, against the
    * span it read it from. Contact sheets leave the conversation as it grows;
    * these stay, so a source longer than one look can be decided from the

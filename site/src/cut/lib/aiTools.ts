@@ -15,7 +15,8 @@ import { requestSharing } from "@/cut/lib/sharingClient";
 import { copyLibraryForSharing } from "@/cut/lib/libraryShareCopy";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 
-import { GUIDE_IDS, guideFits, guidePreset, isGuideId, sanitizeGuideLines, type GuideId } from "./guides";
+import { GUIDE_IDS, guideFits, guidePreset, isGuideId, safeAreaOf, sanitizeGuideLines, type GuideId } from "./guides";
+import { textSpots } from "./textPlace";
 import {
   ALL_EFFECT_IDS,
   autoGradeFromImageData,
@@ -125,6 +126,7 @@ import {
   renderAudioSpanWav,
   sampleWatchFrames,
   scanSourceSpeech,
+  watchGeometry,
 } from "./media";
 import { convertAssetToMp4 } from "./mediaConvert";
 import { isLottieAsset } from "./lottieAssets";
@@ -136,7 +138,13 @@ import {
   matteBakesAvailable,
   useMatteBakes,
 } from "./removal/bakeJobs";
-import { blobToInlineAudio, refToInlineAudio, visualRefs, type InlineImage } from "./refMedia";
+import {
+  blobToInlineAudio,
+  MAX_AUDIO_BYTES,
+  refToInlineAudio,
+  visualRefs,
+  type InlineImage,
+} from "./refMedia";
 import { characterPrompt, stockAspectDims, stockTitle } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
@@ -155,8 +163,15 @@ import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from 
 import { buildAiContext, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
-import { fuseTimeline, renderFusedTimeline } from "./watch/fuse";
-import { mergeWatch, mergeWatchNotes, uncoveredSeconds, unnotedSpans } from "./watch/merge";
+import { fuseTimeline, renderFusedTimeline, speechOnsets, speechOver } from "./watch/fuse";
+import {
+  mergeHeard,
+  mergeWatch,
+  mergeWatchNotes,
+  nextUncoveredSpan,
+  uncoveredSeconds,
+  unnotedSpans,
+} from "./watch/merge";
 import { syncLines } from "./lyricSync";
 import { transcriptWords as cueWords, wordTimesFor } from "./textWords";
 import {
@@ -233,6 +248,9 @@ import {
   type TransitionStyle,
   type VideoClip,
   uploadedFontId,
+  WATCH_DETAIL_NOTES,
+  WATCH_DETAILS,
+  type WatchDetail,
 } from "./types";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -877,8 +895,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError(`"${asset.name}" is audio — listen_audio hears it, detect_silence finds its dead air.`);
       // One path for both backends: the browser decodes the source (the same
       // URL the preview plays) and the shared selector keeps distinct frames.
+      const detail: WatchDetail = WATCH_DETAILS.includes(input.detail as WatchDetail)
+        ? (input.detail as WatchDetail)
+        : "scan";
       if (asset.type === "image") {
-        const body = await makeStillFrame(asset.url).catch((e) => {
+        const body = await makeStillFrame(asset.url, detail).catch((e) => {
           throw new ToolError(e instanceof Error ? e.message : "Could not read the image.");
         });
         return {
@@ -887,6 +908,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           note: "A still image — one frame, no time axis.",
         };
       }
+      // Where the frames go: the steady sweep, plus a candidate on each line
+      // the source speaks. What it says and what it shows move together.
+      const aimed = speechOnsets(
+        sourceSpeech(s, asset, reference ? null : clip, from, to ?? asset.duration),
+        from,
+        to ?? asset.duration,
+      );
       // The sweep yields its decoders to this call for its whole duration.
       // The budget keeps the call inside the tool bridge's 120s deadline: a
       // slow decode salvages what it covered (truncated + coveredTo) rather
@@ -896,6 +924,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           from,
           ...(to !== undefined ? { to } : {}),
           ...(isNum(input.interval_seconds) ? { interval: input.interval_seconds } : {}),
+          detail,
+          at: aimed,
           budgetMs: 90_000,
         })
       ).catch((e) => {
@@ -917,6 +947,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               to: body.coveredTo,
               frames: body.frames.map((f) => ({ t: f.t, via: f.via })),
               sceneChanges: body.sceneChanges,
+              readClosely: detail !== "scan",
             }),
           });
         }
@@ -929,29 +960,27 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // source — metadata only, merged in as segments land.
         queueWatchSweep(asset.id);
       }
-      const unwatched = uncoveredSeconds(
-        reference ? asset.watch : useEditor.getState().assets.find((x) => x.id === asset.id)?.watch,
-        asset.duration
-      );
+      const seen = reference
+        ? asset.watch
+        : useEditor.getState().assets.find((x) => x.id === asset.id)?.watch;
+      const unwatched = uncoveredSeconds(seen, asset.duration);
+      // Seen and read are separate measures: a stretch surveyed at scan is
+      // covered, and its words are still unknown.
+      const closeRanges = { ranges: seen?.read ?? [] };
+      const unread = uncoveredSeconds(closeRanges, asset.duration);
+      const nextUnread = nextUncoveredSpan(closeRanges, asset.duration);
       // Tile the kept frames 3×3 and stamp each cell's source time.
-      const sheets = await composeSheets(body.frames).catch(() => null);
+      const sheets = await composeSheets(body.frames, detail).catch(() => null);
       const keptTimes = body.frames.map((f) => f.t);
       // Kept frames woven into the speech on one clock, so the model reads
-      // precomputed frame↔speech alignment. Project captions win (cue times
-      // are timeline seconds, mapped to source through the clip); with none,
-      // the asset's own transcript serves — it is already source time, so it
-      // fuses for asset-only watches too.
-      let speech: { start: number; end: number; text: string }[] = [];
-      if (clip && !reference) {
-        speech = laneCues(s.subtitles, s.subtitleLane)
-          .map((c) => ({
-            start: retimeOf(clip).srcAt(c.start - clip.start),
-            end: retimeOf(clip).srcAt(c.end - clip.start),
-            text: c.text,
-          }))
-          .filter((c) => c.end > from && c.start < body.coveredTo);
-      }
-      if (speech.length === 0) speech = (liveAsset ?? asset).speech?.segments ?? [];
+      // precomputed frame↔speech alignment instead of matching by eye.
+      const speech = sourceSpeech(
+        s,
+        liveAsset ?? asset,
+        reference ? null : clip,
+        from,
+        body.coveredTo,
+      );
       let timelineText: string | undefined;
       if (speech.length > 0) {
         timelineText = renderFusedTimeline(
@@ -961,13 +990,38 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Each cell's time plus why the selector kept it — "global" a hard cut,
       // "action" local motion, "settled" new settled detail (text, ink, UI).
       const cellInfo = body.frames.map((f) => ({ t: round2(f.t), via: f.via }));
+      // Where a card could sit over what was just watched: the quiet parts of
+      // the picture, inside whatever the project's guides keep clear. The
+      // watch already measured the busy ones to choose these frames.
+      const showing = s.guides.filter((g) => guideFits(g, s.aspect));
+      const safe = safeAreaOf(showing.length > 0 ? showing : ["margins"], s.aspect);
+      const spots = safe && !reference ? textSpots(body.edges, safe) : [];
       const perSheet = sheets ? sheets.map((sh) => sh.frames.length) : [cellInfo.length];
       let cellAt = 0;
+      // How to read the images, and what the rest of the ladder is for. The
+      // frames are the same moments at every detail; only the pixels differ,
+      // and small type is unreadable until they are spent on it.
+      const tiled =
+        watchGeometry(detail).grid > 1
+          ? `Cells read left→right then top→bottom; each stamp is SOURCE seconds${reference ? " of the reference's file" : ""}. `
+          : `One frame per image, in sheetFrames order — SOURCE seconds${reference ? " of the reference's file" : ""}, no burned stamp. `;
+      const ladder =
+        detail === "original"
+          ? "These are the source's own pixels: quote on-screen text exactly and name the type, weight, spacing and colours you can see. "
+          : `Detail is "${detail}" (${WATCH_DETAIL_NOTES[detail]}). If type, UI or fine treatment is too small to read here, re-watch that stretch with detail "${detail === "scan" ? "read" : "original"}" — the same moments with more pixels on each, fewer per call — rather than guessing at what it says. `;
       return {
         images: sheets ? sheets.map((sh) => sh.image) : body.frames.map((f) => f.image),
         sheetFrames: perSheet.map((n) => cellInfo.slice(cellAt, (cellAt += n))),
         distinctFrames: body.frames.length,
         candidates: body.candidates,
+        // The span this pass covered and how closely it looked at it. A
+        // stretch seen only at "scan" has been surveyed, not read.
+        detail,
+        from: round2(from),
+        // Seconds no pass has read at a detail that carries type, and where
+        // the next close pass would start.
+        unreadSeconds: unread,
+        ...(nextUnread ? { unreadFrom: round2(nextUnread.from) } : {}),
         sceneChanges: body.sceneChanges.map(round2),
         coveredTo: round2(body.coveredTo),
         truncated: body.truncated,
@@ -986,7 +1040,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           from: round2(g.from),
           to: round2(g.to),
         })),
-        source: { assetId: asset.id, name: asset.name, duration: round2(asset.duration) },
+        source: sourceRef(asset),
         ...(reference
           ? { reference: { projectId: reference.ref.projectId, name: reference.ref.doc.name ?? "" } }
           : {}),
@@ -1016,12 +1070,18 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             }
           : {}),
         ...(timelineText ? { timeline: timelineText } : {}),
+        // Frame fractions, quietest first: where a title or caption can go
+        // over this stretch without covering the picture or the platform's UI.
+        ...(spots.length > 0 ? { textFits: spots } : {}),
         note: reference
-          ? "Cells read left→right then top→bottom; each stamp is SOURCE seconds of the reference's file. This is a look at a reference project for deciding which of this project's sources plays its part — nothing is written to the reference and no note is owed." +
+          ? tiled +
+            "This is a look at a reference project for deciding which of this project's sources plays its part — nothing is written to the reference and no note is owed. " +
+            ladder +
             (sheets ? "" : " (Sheets unavailable — each image is one frame; sheetFrames lists the times.)")
-          : "Cells read left→right then top→bottom; each stamp is SOURCE seconds. " +
-          "Cells are distinct moments (near-duplicates removed), so gaps between stamps mean nothing changed there. " +
-          "sheetFrames says why each cell was kept: global = hard cut, action = local motion, settled = new settled detail (text/UI)." +
+          : tiled +
+          "Frames are distinct moments (near-duplicates removed), so gaps between stamps mean nothing changed there. " +
+          "sheetFrames says why each was kept: global = hard cut, action = local motion, text = type landing or swapping, settled = other new settled detail. " +
+          ladder +
           (unwatched > 0.5
             ? ` You have seen ${round2(from)}-${round2(body.coveredTo)}s of a ${round2(asset.duration)}s source; ` +
               `${unwatched}s of it has NOT been looked at (this call's range plus anything else already watched)` +
@@ -1052,7 +1112,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (owed && spanIsNoted(cur?.watch, owed)) unwritten.delete(asset.id);
       const unnoted = unnotedSpans(cur?.watch, asset.duration);
       return {
-        source: { assetId: asset.id, name: asset.name, duration: round2(asset.duration) },
+        source: sourceRef(asset),
         notes: (cur?.watch?.notes ?? []).map((n) => ({
           from: round2(n.from),
           to: round2(n.to),
@@ -1091,7 +1151,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             ? { timeline: { start: toTimeline(x.start), end: toTimeline(x.end) } }
             : {}),
         })),
-        source: { assetId: asset.id, name: asset.name, duration: round2(asset.duration) },
+        source: sourceRef(asset),
         ...(clip
           ? {
               clip: {
@@ -1242,7 +1302,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               },
             }
           : {}),
-        source: { assetId: asset.id, name: asset.name, duration: round2(asset.duration) },
+        source: sourceRef(asset),
         note:
           grid.beats.length === 0
             ? "No steady pulse heard — the source reads as speech or ambience. The user can place beats by hand (⌥-click the clip bar)."
@@ -1330,25 +1390,39 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // range, gets its audio track pulled off by the engine first — so the
       // muxed video never travels and a long source still fits the inline cap.
       const wholeAudio = asset.type === "audio" && !clip && !isNum(input.from) && !isNum(input.to);
-      const inline = wholeAudio
-        ? await refToInlineAudio(refFromAsset(asset))
-        : await listenToSource(projectId, asset, from, to);
+      const whole = wholeAudio ? await refToInlineAudio(refFromAsset(asset)) : null;
+      // A whole audio file that clears the cap falls through to the same
+      // fitting path a range takes, so length truncates instead of refusing.
+      const heard = whole
+        ? { inline: whole, to: asset.duration }
+        : await listenSpan(projectId, asset, from, to);
       // Listening shows interest in the source's sound — queue the background
       // sweep so its transcript (and, for video, its visual map) fills in.
       queueWatchSweep(asset.id);
-      if (!inline)
-        throw new ToolError(
-          "That stretch is too long to listen to inline (≈12MB cap) — pass a narrower from/to."
-        );
+      const live = useEditor.getState().assets.find((x) => x.id === asset.id);
+      if (live && heard.to > from)
+        s.updateAsset(asset.id, { watch: mergeHeard(live.watch, { from, to: heard.to }) });
+      const listened = {
+        ranges: useEditor.getState().assets.find((x) => x.id === asset.id)?.watch?.heard ?? [],
+      };
+      const unheard = uncoveredSeconds(listened, asset.duration);
+      const nextUnheard = nextUncoveredSpan(listened, asset.duration);
       // The `audio` data URL leaves the JSON in the chat transport and rides
       // to the model as an input_audio part, the way attachments do.
       return {
         name: asset.name,
+        source: sourceRef(asset),
         duration: round2(asset.duration),
         ...(clip ? { clipId: clip.id } : {}),
-        ...(from > 0 ? { from: round2(from) } : {}),
-        ...(to !== undefined ? { to: round2(to) } : {}),
-        audio: `data:${inline.mimeType};base64,${inline.data}`,
+        from: round2(from),
+        // Where this play stopped, and how much of the source nobody has
+        // heard — the sound's answer to coveredTo and unwatchedSeconds. The
+        // cap is bytes, so the seconds that fit depend on the source.
+        coveredTo: round2(heard.to),
+        truncated: heard.to < (to ?? asset.duration) - 0.05,
+        unheardSeconds: unheard,
+        ...(nextUnheard ? { unheardFrom: round2(nextUnheard.from) } : {}),
+        audio: `data:${heard.inline.mimeType};base64,${heard.inline.data}`,
       };
   },
 
@@ -4865,6 +4939,54 @@ function resolveWatchRange(
   return { projectId, asset, clip, speed, from, to };
 }
 
+/** What a source can still be asked for, from what is already known. A steer
+ * that names a tool the source refuses spends a round on an error: an image
+ * has no sound, a music asset has no picture, and a video's sound is proven by
+ * its transcript or by having been played. */
+function soundOf(asset: MediaAsset): "yes" | "none" | "unknown" {
+  if (asset.type === "image") return "none";
+  if (asset.type === "audio") return "yes";
+  if (asset.watch?.heard?.length) return "yes";
+  if (asset.speech) return asset.speech.noSpeech ? "none" : "yes";
+  return "unknown";
+}
+
+/** How every source-reading tool names the source it read. `type` and `sound`
+ * say which tools it can answer at all, so nothing downstream asks a music
+ * file for its picture or a silent take for its sound. */
+function sourceRef(asset: MediaAsset) {
+  return {
+    assetId: asset.id,
+    name: asset.name,
+    duration: round2(asset.duration),
+    type: asset.type,
+    sound: soundOf(asset),
+  };
+}
+
+/** What is said over a stretch of a source, on the source's own clock.
+ * Project captions win where they cover it — their cue times are timeline
+ * seconds, mapped back through the clip's retime — and the asset's own
+ * transcript, already source time, covers the rest. The range decides: a
+ * caption lane holding cues for one clip leaves every other clip to its
+ * source's transcript. */
+function sourceSpeech(
+  s: ReturnType<typeof useEditor.getState>,
+  asset: MediaAsset,
+  clip: { id: string; start: number; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean; smoothSlow?: boolean } | null,
+  from: number,
+  to: number,
+): { start: number; end: number; text: string }[] {
+  const cues = clip
+    ? laneCues(s.subtitles, s.subtitleLane).map((c) => ({
+        start: retimeOf(clip).srcAt(c.start - clip.start),
+        end: retimeOf(clip).srcAt(c.end - clip.start),
+        text: c.text,
+      }))
+    : [];
+  return speechOver(cues, asset.speech?.segments ?? [], from, to);
+}
+
 /** A reference link the model typed into a tool argument, opened. Every
  * failure is the reader's own plain reason. */
 async function openReferenceLink(raw: unknown): Promise<ReferenceProject> {
@@ -5000,18 +5122,16 @@ async function fetchSilences(
 /** Pull a source's audio track off (video and audio alike) and inline it for
  * the model; null when the range clears the inline cap. Local: the engine
  * extracts mono AAC. Cloud: the browser renders the span to 16 kHz mono WAV. */
-async function listenToSource(
+async function audioSpanBlob(
   projectId: string,
   asset: MediaAsset,
   from: number,
   to: number | undefined,
-): Promise<InlineImage | null> {
-  if (getBackend().kind !== "local") {
-    const wav = await renderAudioSpanWav(asset.url, from, to).catch((e) => {
+): Promise<Blob> {
+  if (getBackend().kind !== "local")
+    return renderAudioSpanWav(asset.url, from, to).catch((e) => {
       throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
     });
-    return blobToInlineAudio(wav);
-  }
   const res = await apiFetch(`/api/cut/projects/${projectId}/audio`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -5021,7 +5141,40 @@ async function listenToSource(
     const body = await apiJson<{ error?: string }>(res).catch(() => ({ error: undefined }));
     throw new ToolError(body.error ?? "Could not read the audio.");
   }
-  return blobToInlineAudio(await res.blob());
+  return res.blob();
+}
+
+/** Bound the work per call the way a watch does; the caller listens on from
+ * coveredTo. */
+const LISTEN_MAX_S = 600;
+
+/**
+ * A span's sound, shrunk to whatever the model can take at once. The two
+ * backends encode differently — the browser renders 16kHz mono WAV, the engine
+ * hands back AAC — so the seconds that fit the inline cap differ by an order
+ * of magnitude and neither is knowable up front. The bytes that come back say
+ * what a second of THIS source costs, which is what the retry sizes itself
+ * from. A stretch too long comes back as its opening, with the span it
+ * actually covered, rather than as a refusal the caller has to guess past.
+ */
+async function listenSpan(
+  projectId: string,
+  asset: MediaAsset,
+  from: number,
+  to: number | undefined,
+): Promise<{ inline: InlineImage; to: number }> {
+  const end = Math.min(to ?? from + LISTEN_MAX_S, from + LISTEN_MAX_S);
+  let span = end - from;
+  for (let attempt = 0; attempt < 3 && span > 0.5; attempt++) {
+    const blob = await audioSpanBlob(projectId, asset, from, round2(from + span));
+    const inline = await blobToInlineAudio(blob);
+    if (inline) return { inline, to: round2(from + span) };
+    const perSecond = blob.size / span;
+    // Leave room for the base64 inflation the cap already accounts for.
+    const fits = (MAX_AUDIO_BYTES * 0.9) / perSecond;
+    span = Math.min(span * 0.9, fits);
+  }
+  throw new ToolError("Could not read a stretch of that audio short enough to listen to.");
 }
 
 /** One line per timeline item for a sweep to judge: what it is, when it

@@ -1,20 +1,21 @@
 import {
   diffCellPct,
+  edgeNewCells,
   frameSig,
-  type FrameSig,
   hardCellCount,
   settledCellScores,
 } from "./signatures";
 import type {
   FrameDecision,
   FrameSelector,
+  FrameSig,
   RgbFrame,
   SelectionResult,
   SelectorOptions,
   Verdict,
 } from "./types";
 
-/** The default watch selector: three change detectors vote on each candidate
+/** The default watch selector: four change detectors vote on each candidate
  * against a sliding window of the last kept frames. The window (rather than
  * only the previous frame) keeps A-B-A alternation out — a shot the model has
  * already seen stays out even when a different frame sat in between.
@@ -24,13 +25,20 @@ import type {
  *  - action: a few 32-grid cells changing hard mark a frame as new no matter
  *    the percentage — a small subject can never move 8% of the pixels, so the
  *    one second that matters would otherwise dedup away.
+ *  - text: cells whose EDGE ENERGY holds a new settled state against every
+ *    kept frame in the window. Type is edges, so this channel reads a caption
+ *    by its strokes rather than by its colour — white-on-cream and
+ *    black-on-white swaps land the same, and both are invisible to the
+ *    channels above (the cell average barely stirs). The settle test against
+ *    the next candidate is what separates a held line from a moving mouth,
+ *    so it needs no static-scene gate: it runs while the speaker talks.
  *  - settled: on a static scene, pixels that differ strongly from every kept
  *    frame in the window (shift-tolerant, so grain and jitter re-match) and
- *    have stopped changing toward the next frame. Sees caption swaps, thin
- *    ink, and local UI updates that measure 0.0% on the global channel. A
- *    cooldown raises its bar after each keep so sustained "settling" motion
- *    can't take a frame every time; a stricter second tolerance must fire in
- *    the same cell so soft-contrast drift (smoke, fades) stays out.
+ *    have stopped changing toward the next frame. Sees thin ink and local UI
+ *    updates that measure 0.0% on the global channel. A cooldown raises its
+ *    bar after each keep so sustained "settling" motion can't take a frame
+ *    every time; a stricter second tolerance must fire in the same cell so
+ *    soft-contrast drift (smoke, fades) stays out.
  *
  * Memory holds the window plus a one-frame lookahead, never the whole stream. */
 
@@ -45,6 +53,19 @@ export const DEDUP_TUNING = {
   ACTION_HARD_TOL: 45,
   /** Action channel: hard cells needed to keep. */
   ACTION_HARD_CELLS: 3,
+  /** Text channel: edge-energy change for a 24-grid cell to count as new. */
+  TEXT_TOL: 6,
+  /** Text channel: adjacent new cells in one row for the run to count as a
+   * line of type, and new cells needed overall to keep. */
+  TEXT_RUN: 3,
+  TEXT_CELLS: 3,
+  /** Text channel: share of the grid the new cells may cover. Type is local;
+   * a fade, a wash or a pan moves most of the frame, and that belongs to the
+   * global channel rather than to this one. */
+  TEXT_MAX_SHARE: 0.15,
+  /** Cooldown: each text keep raises the bar additively; it decays per frame. */
+  TEXT_COOLDOWN_ADD: 1.5,
+  TEXT_COOLDOWN_DECAY: 0.6,
   /** Settled channel runs only when the global diff vs the previous candidate
    * sits under this (the scene is otherwise static), or on the final frame —
    * a state that appears at the end has nothing after it to prove it settled. */
@@ -74,8 +95,34 @@ export function createDedupSelector(
   let pending: FrameSig | null = null;
   let prevG16: Float32Array | null = null; // previous candidate, kept or dropped
   let cooldown = 1;
+  let textCooldown = 1;
   let count = 0;
   let finished = false;
+
+  /** Cells holding a new settled edge state, in a horizontal run wide enough
+   * to be a line of type and local enough not to be the light changing. The
+   * settle test needs a frame after this one, so the channel never runs on the
+   * last candidate of a pass: there, a state that has not been proved still is
+   * indistinguishable from motion caught mid-stride, and the settled channel
+   * is what judges it. */
+  function isTypeChange(
+    sig: FrameSig,
+    kept: FrameSig[],
+    next: FrameSig,
+    tuning: typeof DEDUP_TUNING
+  ): boolean {
+    const cells = edgeNewCells(
+      sig.e24,
+      kept.map((k) => k.e24),
+      next.e24,
+      tuning.TEXT_TOL * textCooldown,
+      tuning.TEXT_RUN
+    );
+    return (
+      cells.length >= tuning.TEXT_CELLS &&
+      cells.length <= tuning.TEXT_MAX_SHARE * sig.e24.length
+    );
+  }
 
   function judge(sig: FrameSig, next: FrameSig | null): void {
     const index = decisions.length;
@@ -100,6 +147,9 @@ export function createDedupSelector(
         )
       ) {
         verdict = "keep-action";
+      } else if (next !== null && isTypeChange(sig, window, next, T)) {
+        verdict = "keep-text";
+        textCooldown += T.TEXT_COOLDOWN_ADD;
       } else {
         const motion = prevG16 === null ? 100 : diffCellPct(sig.g16, prevG16, T.GLOBAL_TOL);
         if (motion < T.SETTLED_STATIC_MAX || next === null) {
@@ -131,6 +181,7 @@ export function createDedupSelector(
 
     prevG16 = sig.g16;
     cooldown = Math.max(1, cooldown * T.SETTLED_COOLDOWN_DECAY);
+    textCooldown = Math.max(1, textCooldown * T.TEXT_COOLDOWN_DECAY);
     if (verdict !== "drop") {
       keptIdx.push(index);
       window.push(sig);
@@ -142,9 +193,9 @@ export function createDedupSelector(
   }
 
   return {
-    push(frame: RgbFrame) {
+    push(frame: RgbFrame | FrameSig) {
       if (finished) throw new Error("Selector already finished.");
-      const sig = frameSig(frame);
+      const sig = "e24" in frame ? frame : frameSig(frame);
       count++;
       if (pending) judge(pending, sig);
       pending = sig;

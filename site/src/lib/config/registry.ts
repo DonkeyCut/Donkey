@@ -154,6 +154,16 @@ export const SETTINGS = defineSettings({
         qualityFinished: z.number().min(0).max(1),
         qualitySeen: z.number().min(0).max(1),
         qualityHonest: z.number().min(0).max(1),
+        // The probability above which the ask is taken to turn on how the
+        // source sounds, which makes unplayed seconds a gap worth a round.
+        qualityHears: z.number().min(0).max(1),
+        // The probability above which on-screen text is taken to be the
+        // source's own narration, which puts its words in the transcript and
+        // leaves only their treatment to be read off the frames.
+        qualityCaptionsSpeak: z.number().min(0).max(1),
+        // Seconds of close reading that settle how a spoken caption track is
+        // set, once the words are known from the transcript.
+        qualityTreatmentSeconds: z.number().min(0).max(120),
         // How many times one turn may be sent back to work by the gate.
         qualityRounds: z.number().int().min(0).max(6),
       })
@@ -185,6 +195,9 @@ export const SETTINGS = defineSettings({
       qualityFinished: 0.5,
       qualitySeen: 0.5,
       qualityHonest: 0.5,
+      qualityHears: 0.6,
+      qualityCaptionsSpeak: 0.7,
+      qualityTreatmentSeconds: 8,
       qualityRounds: 3,
     },
     public: true,

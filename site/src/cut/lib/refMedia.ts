@@ -158,7 +158,7 @@ export async function videoSafeInline(img: InlineImage): Promise<InlineImage> {
 
 // Keeps the inline payload well under the Gemini per-request inline-data cap
 // (base64 inflates by 4/3); larger audio degrades to a name-only marker.
-const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
+export const MAX_AUDIO_BYTES = 12 * 1024 * 1024;
 
 /** A ref's bytes, naming what failed and where when they don't arrive. A bare
  * fetch rejection is the string "Failed to fetch" and nothing else — no asset,

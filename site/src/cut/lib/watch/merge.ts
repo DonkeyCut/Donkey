@@ -100,6 +100,8 @@ export function mergeWatch(
     to: number;
     frames: { t: number; via: WatchKeepReason }[];
     sceneChanges: number[];
+    /** The pass read the span at a detail that carries type. */
+    readClosely?: boolean;
   }
 ): AssetWatch {
   const from = round2(Math.min(add.from, add.to));
@@ -121,15 +123,51 @@ export function mergeWatch(
     if (last && rg.from <= last.to + EPS) last.to = Math.max(last.to, rg.to);
     else ranges.push({ from: rg.from, to: rg.to });
   }
-  // Notes survive a re-watch: they are what someone read off the source, not
-  // a product of this pass.
-  return { ranges, frames, sceneChanges, ...(prev?.notes?.length ? { notes: prev.notes } : {}) };
+  const read: AssetWatch["read"] = [];
+  const closeSpans = [...(prev?.read ?? [])];
+  if (add.readClosely && to > from) closeSpans.push({ from, to });
+  for (const rg of closeSpans.sort((a, b) => a.from - b.from)) {
+    const last = read[read.length - 1];
+    if (last && rg.from <= last.to + EPS) last.to = Math.max(last.to, rg.to);
+    else read.push({ from: rg.from, to: rg.to });
+  }
+  // Every merge carries the record forward and overwrites only what it
+  // measures. Notes survive a re-watch — they are what someone read off the
+  // source — and so does every other measure a different pass owns.
+  return {
+    ...prev,
+    ranges,
+    frames,
+    sceneChanges,
+    ...(read.length ? { read } : {}),
+  };
 }
 
 /** Fold written observations into an asset's watch record. A new note owns
  * its span: stored notes that fall inside it drop, so re-reading a stretch
  * closely supersedes the coarse pass that first described it. Everything
  * else stays, sorted by time. */
+/** Fold a listened span into the record, the way coverage folds a watched
+ * one. Listening leaves no frames and no cuts, so it has its own small merge
+ * rather than a mode on mergeWatch. */
+export function mergeHeard(
+  prev: AssetWatch | undefined,
+  span: { from: number; to: number }
+): AssetWatch {
+  const base: AssetWatch = prev ?? { ranges: [], frames: [], sceneChanges: [] };
+  const from = round2(Math.min(span.from, span.to));
+  const to = round2(Math.max(span.from, span.to));
+  const heard: { from: number; to: number }[] = [];
+  const spans = [...(prev?.heard ?? [])];
+  if (to > from) spans.push({ from, to });
+  for (const rg of spans.sort((a, b) => a.from - b.from)) {
+    const last = heard[heard.length - 1];
+    if (last && rg.from <= last.to + EPS) last.to = Math.max(last.to, rg.to);
+    else heard.push({ from: rg.from, to: rg.to });
+  }
+  return { ...base, ...(heard.length ? { heard } : {}) };
+}
+
 export function mergeWatchNotes(
   prev: AssetWatch | undefined,
   add: { from: number; to: number; text: string }[]
@@ -156,6 +194,7 @@ export function mergeWatchNotes(
     .concat(incoming)
     .sort((a, b) => a.from - b.from || a.to - b.to);
   return {
+    ...prev,
     ranges: prev?.ranges ?? [],
     frames: prev?.frames ?? [],
     sceneChanges: prev?.sceneChanges ?? [],

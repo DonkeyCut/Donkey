@@ -51,7 +51,7 @@ import {
 import { pickThumbTimes, type ThumbProbe } from "./filmstrip";
 import { reportSwallowed } from "./report";
 import { assetIdsInUse, useEditor } from "./store";
-import type { AssetBeats, AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchKeepReason } from "./types";
+import type { AssetBeats, AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchDetail, WatchKeepReason } from "./types";
 import { contentRect, IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
 import { createDedupSelector, DEDUP_TUNING } from "./watch/dedupSelector";
 import { diffCellPct, frameSig } from "./watch/signatures";
@@ -1315,19 +1315,87 @@ export async function renderAudioSpanWav(
 // composeSheets. One sampler serves the local and cloud backends alike — the
 // browser decodes the source (local media rides the engine's media URL, cloud
 // media the CDN) and the shared selector keeps the frames that differ.
-const SHEET_GRID = 3; // cells per row and column
-const SHEET_CELL = 480; // cell long side, px
 const SHEET_GAP = 4; // tile margin and padding, px
-const SHEET_MAX = 4; // sheets per call
-const SHEET_QUALITY = 0.8; // jpeg encode
 const CANDIDATE_CAP = 150; // decodes per call — the densest sweep
+const SELECT_CELL = 480; // what the selector decodes at when the frames are bigger
 const REFINE_TARGET_S = 0.35; // localize each hard cut to about this window
 const REFINE_MAX_PROBES = 48; // extra seeks the refinement pass may spend per call
+const AIMED_SHARE = 0.5; // most of the cap aimed moments may take from the floor
+const MERGE_EPS = 0.15; // two candidate times this close are one decode
+
+/** The candidate list: the moments a caller knows matter, plus a steady floor
+ * across everything else. The floor is built at whatever density the room
+ * left allows, so aiming widens the sweep instead of cutting it short — every
+ * second in [from, to] still sits between two candidates. */
+function candidateTimes(
+  from: number,
+  to: number,
+  interval: number,
+  at: number[]
+): number[] {
+  const inRange = at.filter((t) => t >= from && t < to).sort((a, b) => a - b);
+  // More lines than the share allows are thinned across the whole span. Taking
+  // the first of them would aim the head of a densely spoken stretch and leave
+  // its tail sampled thinner than the floor alone would have.
+  const cap = Math.floor(CANDIDATE_CAP * AIMED_SHARE);
+  const every = Math.max(1, Math.ceil(inRange.length / cap));
+  const aimed: number[] = [];
+  for (let i = 0; i < inRange.length; i += every) {
+    const t = inRange[i];
+    if (aimed.length === 0 || t - aimed[aimed.length - 1] >= MERGE_EPS) aimed.push(round2(t));
+  }
+  const room = Math.max(1, CANDIDATE_CAP - aimed.length);
+  const step = Math.max(interval, (to - from) / room);
+  const floor: number[] = [];
+  for (let t = from; t < to && floor.length < room; t += step) floor.push(round2(t));
+  const times: number[] = [];
+  for (const t of [...aimed, ...floor].sort((a, b) => a - b))
+    if (times.length === 0 || t - times[times.length - 1] >= MERGE_EPS) times.push(t);
+  return times;
+}
+
+/** How much of each kept frame reaches the model, from the tiled thumbnails
+ * that answer "what happens here" up to the frames themselves.
+ *
+ * Every step trades frames for pixels at roughly even cost, because a sheet
+ * is billed by its area: a 9:16 source gives cells of 405×720, 608×1080 and
+ * 1080×1920, where a 46px caption lands at about 13px, 20px and full size.
+ * Small type is the reason the ladder exists — a mosaic cell throws away the
+ * weight, spacing and edge treatment that reading text or matching a look
+ * depends on, and nothing downstream can put them back.
+ *
+ * `cell` is the cell's long side in px. */
+const WATCH_DETAIL: Record<
+  WatchDetail,
+  { cell: number; grid: number; sheets: number; quality: number; rewalk: boolean }
+> = {
+  /** Coverage: what happens, where the cuts fall, how long a stretch runs. */
+  scan: { cell: 720, grid: 3, sheets: 4, quality: 0.8, rewalk: false },
+  /** Reading: on-screen text, UI, anything whose words matter. */
+  read: { cell: 1080, grid: 2, sheets: 4, quality: 0.86, rewalk: false },
+  /** Matching: type, colour, edges and grain as the source has them. The
+   * frames are big enough that decoding every candidate at this size would
+   * cost far more than the handful that are kept, so this step selects small
+   * and walks the kept times a second time. */
+  original: { cell: 1920, grid: 1, sheets: 6, quality: 0.92, rewalk: true },
+};
+
+/** Frames one call returns at this detail, and the geometry behind them.
+ * A cell the source is already smaller than hands back the source's own
+ * pixels, which is what "original" is for a phone or 1080p source; a 4K or
+ * larger one meets the ceiling, because six 4K frames are several times the
+ * whole per-call media budget on their own. */
+export const watchGeometry = (detail: WatchDetail = "scan") => {
+  const g = WATCH_DETAIL[detail] ?? WATCH_DETAIL.scan;
+  return { ...g, maxFrames: g.grid * g.grid * g.sheets };
+};
 
 /** The watch sample: kept frames, ascending source time, each carrying why
  * the selector kept it (WatchKeepReason in types.ts). */
 export interface WatchFrames {
   frames: { t: number; image: string; via: WatchKeepReason }[];
+  /** Per kept frame, the TEXT_GRID² edge energies the selector measured. */
+  edges: Float32Array[];
   candidates: number;
   sceneChanges: number[];
   coveredTo: number;
@@ -1336,17 +1404,26 @@ export interface WatchFrames {
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-// Round the cell's short side to even, so encoded dimensions stay codec-safe.
-const cellDims = (w: number, h: number): [number, number] =>
-  w >= h
-    ? [SHEET_CELL, Math.max(2, 2 * Math.round((SHEET_CELL * h) / w / 2))]
-    : [Math.max(2, 2 * Math.round((SHEET_CELL * w) / h / 2)), SHEET_CELL];
+// A cell the source is already smaller than passes the frame through at its
+// own size — a watch never invents detail by upscaling, and the even-rounding
+// below would resample an odd-sized frame to no purpose. A sized cell rounds
+// its short side to even, so encoded dimensions stay codec-safe.
+const cellDims = (w: number, h: number, cell: number): [number, number] => {
+  if (cell <= 0 || cell >= Math.max(w, h)) return [Math.max(1, w), Math.max(1, h)];
+  return w >= h
+    ? [cell, Math.max(2, 2 * Math.round((cell * h) / w / 2))]
+    : [Math.max(2, 2 * Math.round((cell * w) / h / 2)), cell];
+};
 
-/** Watch a still image: one downscaled frame, no time axis. */
-export async function makeStillFrame(sourceUrl: string): Promise<WatchFrames> {
+/** Watch a still image: one frame at the asked-for detail, no time axis. */
+export async function makeStillFrame(
+  sourceUrl: string,
+  detail: WatchDetail = "scan"
+): Promise<WatchFrames> {
   const img = await decodeRasterImageUrl(sourceUrl);
   if (!img || img.width === 0 || img.height === 0) throw new Error("Could not read the image.");
-  const [w, h] = cellDims(img.width, img.height);
+  const g = watchGeometry(detail);
+  const [w, h] = cellDims(img.width, img.height, g.cell);
   const canvas = createRasterCanvas(w, h);
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
   if (!ctx) throw new Error("Could not read the image.");
@@ -1354,11 +1431,12 @@ export async function makeStillFrame(sourceUrl: string): Promise<WatchFrames> {
   ctx.drawImage(img.source, 0, 0, w, h);
   // A picture read through an element (a host that sends no CORS header)
   // taints the canvas, and the encode is where that surfaces.
-  const image = await rasterCanvasToDataUrl(canvas, "image/jpeg", SHEET_QUALITY).catch(() => {
+  const image = await rasterCanvasToDataUrl(canvas, "image/jpeg", g.quality).catch(() => {
     throw new Error("Could not read the image.");
   });
   return {
     frames: [{ t: 0, image, via: "first" }],
+    edges: [],
     candidates: 1,
     sceneChanges: [],
     coveredTo: 0,
@@ -1366,8 +1444,9 @@ export async function makeStillFrame(sourceUrl: string): Promise<WatchFrames> {
   };
 }
 
-/** Watch a video source: decode candidates on a dense steady floor, then let
- * the shared selector keep the frames that actually differ. sceneChanges are
+/** Watch a video source: decode candidates on a dense steady floor plus any
+ * moments `at` aims at, then let the shared selector keep the frames that
+ * actually differ. sceneChanges are
  * hard-cut times: each "global" keep says a cut lies inside the grid step
  * before it, and a short bisection pass narrows that window to about
  * REFINE_TARGET_S — the reported time is where the new shot is first seen.
@@ -1393,6 +1472,12 @@ export async function sampleWatchFrames(
     metadataOnly?: boolean;
     shouldPause?: () => boolean;
     budgetMs?: number;
+    detail?: WatchDetail;
+    /** Moments worth a decode on top of the steady floor. What is on screen
+     * changes when what is heard changes — a cue lands, a line starts, a beat
+     * hits — so a source whose audio has already been read is sampled on its
+     * own clock instead of hoping an even sweep lands on each state. */
+    at?: number[];
   }
 ): Promise<WatchFrames> {
   const input = openMedia(sourceUrl);
@@ -1406,21 +1491,25 @@ export async function sampleWatchFrames(
     if (!(wanted > from)) throw new Error("from/to describe an empty range.");
     const to = Math.min(wanted, from + 600); // bound the work per call; callers resume from coveredTo
     const interval = clamp(opts.interval ?? 1, 0.5, 30);
-    // The candidate floor: as asked, widened only when the range would blow
-    // the per-call decode budget.
-    const step = Math.max(interval, (to - from) / CANDIDATE_CAP);
-    const times: number[] = [];
-    for (let t = from; t < to && times.length < CANDIDATE_CAP; t += step)
-      times.push(round2(t));
+    const times = candidateTimes(from, to, interval, opts.at ?? []);
 
-    const [cw, ch] = cellDims(await track.getDisplayWidth(), await track.getDisplayHeight());
-    const maxFrames = SHEET_MAX * SHEET_GRID * SHEET_GRID;
+    const geom = watchGeometry(opts.detail);
+    const srcW = await track.getDisplayWidth();
+    const srcH = await track.getDisplayHeight();
+    const twoPass = !opts.metadataOnly && geom.rewalk;
+    // Selection reads a 192² signature whatever the detail, so a pass that
+    // returns no pictures — or that walks the kept times again for big ones —
+    // decodes candidates at the cheap size.
+    const selectOnly = opts.metadataOnly || twoPass;
+    const [cw, ch] = cellDims(srcW, srcH, selectOnly ? SELECT_CELL : geom.cell);
+    const maxFrames = geom.maxFrames;
     // Cell canvases are held only until the selector rules on them (decisions
     // run one frame behind), so memory stays near the kept set, never the
     // candidate sweep.
     const held = new Map<number, RasterSurface>();
     const candTimes: number[] = [];
     const candG16: Float32Array[] = []; // per-candidate coarse grid, for cut refinement
+    const candE24: Float32Array[] = []; // per-candidate edge energy, for where a card can sit
     let keptCount = 0;
     const selector = createDedupSelector({
       maxFrames,
@@ -1465,7 +1554,7 @@ export async function sampleWatchFrames(
         }
         const next = await cells.next();
         if (next.done || !next.value) continue; // a moment the decoder had no frame for
-        if (!opts.metadataOnly) {
+        if (!opts.metadataOnly && !twoPass) {
           const copy = createRasterCanvas(cw, ch);
           const cctx = copy.getContext("2d") as CanvasRenderingContext2D | null;
           if (!cctx) throw new Error("Could not sample the video.");
@@ -1481,8 +1570,12 @@ export async function sampleWatchFrames(
           channels: 4 as const,
           data: sigCtx.getImageData(0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE).data,
         };
-        candG16.push(frameSig(rgb).g16);
-        selector.push(rgb);
+        // One signature serves both the cut-refinement pass and the
+        // selector; measuring the same frame twice is the whole cost again.
+        const candSig = frameSig(rgb);
+        candG16.push(candSig.g16);
+        candE24.push(candSig.e24);
+        selector.push(candSig);
       }
     } finally {
       await cells.return();
@@ -1492,22 +1585,59 @@ export async function sampleWatchFrames(
     // unreadable. Say so — never record an unseen span as watched.
     if (candTimes.length === 0 && !paused) throw new Error("Could not sample the video.");
     // finish() judges the one pending frame, which can nudge past the cap.
-    const keptIdx = selection.kept.slice(0, maxFrames);
+    const keptAll = selection.kept.slice(0, maxFrames);
+    let keptIdx = keptAll;
+    // The big frames: one more ordered walk over the kept times, each encoded
+    // as it arrives so one of them is live at a time. A walk that runs out of
+    // budget delivers what it reached and the kept set shrinks to match, so
+    // coveredTo below still describes frames that exist.
+    const encoded = new Map<number, string>();
+    if (twoPass && keptAll.length > 0) {
+      const [nw, nh] = cellDims(srcW, srcH, geom.cell);
+      const shot = createRasterCanvas(nw, nh);
+      const shotCtx = shot.getContext("2d") as CanvasRenderingContext2D | null;
+      if (!shotCtx) throw new Error("Could not sample the video.");
+      const walk = frameSink(track, { width: nw, height: nh, fit: "fill" }).canvasesAtTimestamps(
+        keptAll.map((i) => candTimes[i])
+      );
+      try {
+        for (const idx of keptAll) {
+          if (outOfTime() || opts.shouldPause?.()) break;
+          const frame = await walk.next();
+          if (frame.done) break;
+          if (!frame.value) continue;
+          shotCtx.drawImage(frame.value.canvas as CanvasImageSource, 0, 0, nw, nh);
+          encoded.set(idx, await rasterCanvasToDataUrl(shot, "image/jpeg", geom.quality));
+        }
+      } finally {
+        await walk.return();
+      }
+      keptIdx = keptAll.filter((idx) => encoded.has(idx));
+      // A walk that reached nothing saw nothing. Saying so sends the caller
+      // somewhere new; an empty pass reported as a success sends it here again.
+      if (keptIdx.length === 0 && !paused) throw new Error("Could not sample the video.");
+    }
     const frames: WatchFrames["frames"] = [];
     for (const idx of keptIdx) {
-      const canvas = held.get(idx);
-      if (!opts.metadataOnly && !canvas) continue;
+      const canvas = twoPass ? null : held.get(idx);
+      if (!opts.metadataOnly && !twoPass && !canvas) continue;
       const verdict = selection.decisions[idx].verdict;
       frames.push({
         t: candTimes[idx],
-        image: canvas ? await rasterCanvasToDataUrl(canvas, "image/jpeg", SHEET_QUALITY) : "",
+        image: twoPass
+          ? encoded.get(idx)!
+          : canvas
+            ? await rasterCanvasToDataUrl(canvas, "image/jpeg", geom.quality)
+            : "",
         via: verdict === "keep-global" ? "global"
           : verdict === "keep-action" ? "action"
+          : verdict === "keep-text" ? "text"
           : verdict === "keep-settled" ? "settled"
           : "first",
       });
     }
     held.clear();
+    encoded.clear();
 
     // A "global" keep only says the cut lies in the grid step before it.
     // Bisect that step with a few extra decodes so each reported cut time
@@ -1540,30 +1670,45 @@ export async function sampleWatchFrames(
     // An interrupted or capped scan only covered what it decoded and kept;
     // the caller merges that much and comes back for the rest.
     const lastKeptT = keptIdx.length > 0 ? candTimes[keptIdx[keptIdx.length - 1]] : from;
-    const coveredTo = paused
-      ? (candTimes[candTimes.length - 1] ?? from)
-      : capped
-        ? lastKeptT
-        : to;
+    // A walk that delivered fewer frames than the selector kept stopped early,
+    // so the range only reaches the last frame that exists.
+    const shortWalk = twoPass && keptIdx.length < keptAll.length;
+    const coveredTo = shortWalk
+      ? lastKeptT
+      : paused
+        ? (candTimes[candTimes.length - 1] ?? from)
+        : capped
+          ? lastKeptT
+          : to;
     return {
       frames,
       candidates: selection.candidateCount,
       sceneChanges,
       coveredTo,
+      // What each kept frame holds where, already measured for selection: the
+      // busy cells are where the picture's detail and its own type live, so a
+      // card placed over the quiet ones covers nothing.
+      edges: keptIdx.map((i) => candE24[i]).filter((g): g is Float32Array => !!g),
       // The per-call span bound is itself truncation — the caller asked for more.
-      truncated: paused || capped || to < wanted,
+      truncated: paused || capped || shortWalk || to < wanted,
     };
   } finally {
     input.dispose();
   }
 }
 
-/** Tile kept frames into 3×3 contact sheets and stamp each cell's source
- * time. The last sheet may run short; its frames list only the real cells. */
+/** Tile kept frames into contact sheets and stamp each cell's source time, at
+ * the detail's grid. The last sheet may run short; its frames list only the
+ * real cells. At "original" there is no grid and no stamp — the frames go as
+ * they are, because a burned-in label is a graphic the source does not have,
+ * and that detail exists for reading the ones it does. */
 export async function composeSheets(
-  cells: { t: number; image: string }[]
+  cells: { t: number; image: string }[],
+  detail: WatchDetail = "scan"
 ): Promise<{ image: string; frames: { t: number }[] }[]> {
   if (cells.length === 0) return [];
+  const { grid, quality } = watchGeometry(detail);
+  if (grid <= 1) return cells.map((c) => ({ image: c.image, frames: [{ t: c.t }] }));
   const images = await Promise.all(
     cells.map(async (c) => {
       const img = await decodeRasterImageUrl(c.image);
@@ -1573,9 +1718,9 @@ export async function composeSheets(
   );
   const cw = images[0].width;
   const ch = images[0].height;
-  const perSheet = SHEET_GRID * SHEET_GRID;
-  const sheetW = 2 * SHEET_GAP + SHEET_GRID * cw + (SHEET_GRID - 1) * SHEET_GAP;
-  const sheetH = 2 * SHEET_GAP + SHEET_GRID * ch + (SHEET_GRID - 1) * SHEET_GAP;
+  const perSheet = grid * grid;
+  const sheetW = 2 * SHEET_GAP + grid * cw + (grid - 1) * SHEET_GAP;
+  const sheetH = 2 * SHEET_GAP + grid * ch + (grid - 1) * SHEET_GAP;
   const size = Math.max(13, Math.round(ch / 12));
   const sheets: { image: string; frames: { t: number }[] }[] = [];
   for (let s = 0; s < cells.length; s += perSheet) {
@@ -1589,8 +1734,8 @@ export async function composeSheets(
     ctx.font = `bold ${size}px ui-monospace, monospace`;
     ctx.textBaseline = "bottom";
     batch.forEach((c, j) => {
-      const x = SHEET_GAP + (j % SHEET_GRID) * (cw + SHEET_GAP);
-      const y = SHEET_GAP + Math.floor(j / SHEET_GRID) * (ch + SHEET_GAP);
+      const x = SHEET_GAP + (j % grid) * (cw + SHEET_GAP);
+      const y = SHEET_GAP + Math.floor(j / grid) * (ch + SHEET_GAP);
       ctx.drawImage(images[s + j].source, x, y, cw, ch);
       const label = `${round2(c.t)}s`;
       const w = ctx.measureText(label).width;
@@ -1600,7 +1745,7 @@ export async function composeSheets(
       ctx.fillText(label, x + 9, y + ch - 6);
     });
     sheets.push({
-      image: await rasterCanvasToDataUrl(canvas, "image/jpeg", SHEET_QUALITY),
+      image: await rasterCanvasToDataUrl(canvas, "image/jpeg", quality),
       frames: batch.map((c) => ({ t: c.t })),
     });
   }
