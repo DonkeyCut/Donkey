@@ -18,6 +18,8 @@ import {
 import type { ExportDoc } from "./renderSnapshot";
 import { canRenderInBrowser } from "./exportRender";
 import { useGenNotify } from "./genNotify";
+import { STORAGE_FULL } from "./operationFailure";
+import { emitStorageQuota } from "./storageQuota";
 
 // Exports are tracked app-wide, not per-open-project. The engine holds every
 // export job in one process-global registry, so this store is a thin reflection
@@ -318,16 +320,30 @@ export const useExports = create<ExportsState>((set, get) => ({
         cloudRetryAt = 0;
       }
     }
+    // A failed or skipped feed keeps its previous rows; only a fresh answer
+    // replaces that backend's slice.
+    const slice = (kind: CutMode, fresh: ExportJob[] | null) =>
+      fresh ?? get().jobs.filter((j) => j.residency === kind);
+    const jobs = [
+      ...slice("local", localRows),
+      ...slice("cloud", cloudRows),
+      ...slice("browser", browserRows),
+    ];
+    // A render the machine refused for space never answered a request with a
+    // 413 — it failed hours later, in a queue. The wall it would have raised
+    // is raised here instead, once per job: the row stays in the feed for a
+    // day, and a user who has closed the dialog is done being told.
+    // The set follows the feed: an id whose row has aged out is forgotten.
+    for (const id of walledJobs) if (!jobs.some((j) => j.id === id)) walledJobs.delete(id);
+    for (const job of jobs) {
+      if (job.status !== "error" || job.error !== STORAGE_FULL || walledJobs.has(job.id)) continue;
+      // Marked only once it lands. Before the dialog mounts, and while a wall
+      // is already standing, the emit tells nobody — and a job marked then
+      // would never raise its wall at all.
+      if (!emitStorageQuota({ source: "render" })) break;
+      walledJobs.add(job.id);
+    }
     set((s) => {
-      // A failed or skipped feed keeps its previous rows; only a fresh answer
-      // replaces that backend's slice.
-      const slice = (kind: CutMode, fresh: ExportJob[] | null) =>
-        fresh ?? s.jobs.filter((j) => j.residency === kind);
-      const jobs = [
-        ...slice("local", localRows),
-        ...slice("cloud", cloudRows),
-        ...slice("browser", browserRows),
-      ];
       // Polls land in the middle of drags. The same rows again hand back the
       // state as it was, so nothing that reads the feed re-renders; a fresh
       // array for an unchanged list re-rendered the dock and the Media tab on
@@ -448,6 +464,10 @@ export function useWatchExportLands(projectId: string) {
 const ACTIVE_MS = 700;
 const IDLE_MIN_MS = 3000;
 const IDLE_MAX_MS = 30_000;
+
+// Jobs whose storage failure has already raised the wall, so a day of polling
+// the same errored row asks once.
+const walledJobs = new Set<string>();
 
 // The cloud feed drops out while the browser is offline and backs off while the
 // server is unreachable; coming back online resets both and polls right away.

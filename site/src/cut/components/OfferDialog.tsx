@@ -20,6 +20,9 @@ export const OFFER_BANNERS = {
 } as const;
 export type OfferBanner = keyof typeof OFFER_BANNERS;
 
+const isOfferBanner = (value: unknown): value is OfferBanner =>
+  typeof value === "string" && value in OFFER_BANNERS;
+
 /** A day as the card names it: "September 30". */
 export function offerDay(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "long" });
@@ -103,7 +106,9 @@ export function OfferDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  banner: OfferBanner;
+  // A named picture, or a banner of the caller's own for a card that is not
+  // selling credit.
+  banner: OfferBanner | React.ReactNode;
   // The last moment the offer can be taken up; a countdown sits over the
   // picture while there is one.
   closesAt?: string | null;
@@ -124,14 +129,18 @@ export function OfferDialog({
         className="top-[18%] translate-y-0 gap-0 overflow-hidden rounded-lg bg-background p-0 sm:max-w-sm"
       >
         <div className="relative">
-          <Image
-            src={OFFER_BANNERS[banner]}
-            alt=""
-            className="aspect-[8/3] w-full object-cover"
-            width={1584}
-            height={672}
-            priority
-          />
+          {isOfferBanner(banner) ? (
+            <Image
+              src={OFFER_BANNERS[banner]}
+              alt=""
+              className="aspect-[8/3] w-full object-cover"
+              width={1584}
+              height={672}
+              priority
+            />
+          ) : (
+            banner
+          )}
           {closesAt ? <Countdown closesAt={closesAt} /> : null}
         </div>
         <div className="flex flex-col gap-5 p-6">

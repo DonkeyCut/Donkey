@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { CloudDocSnapshot } from "../lib/headless/docSession";
@@ -6,8 +6,9 @@ import { buildDocExportSpec, isDocExportPreset } from "../lib/headless/docExport
 import { runExport, type ExportSpec, type RenderHandle } from "../server/exportPipeline";
 import { storeCardArtifacts } from "./cardJob";
 import { prisma, registerObject, type ClaimedJob } from "./db";
-import { downloadToFile, exportKey, mediaKey, mimeFor, uploadFile } from "./r2";
+import { deleteObjects, downloadToFile, exportKey, mediaKey, mimeFor, uploadFile } from "./r2";
 import { overlayKey } from "../server/cloud/r2";
+import { STORAGE_FULL } from "../lib/operationFailure";
 import { specMediaFiles } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
 
@@ -32,6 +33,10 @@ export interface ExportJobSpec {
    * granting Subtitles is refused the render rather than served cue text it
    * cannot strip out of the pixels. */
   burnedSubtitles?: boolean;
+  /** The most bytes this render's output may land, stamped by the queueing
+   * route from what the account's storage quota leaves. A render that outgrows
+   * it fails here rather than uploading past the cap. */
+  maxBytes?: number;
 }
 
 /** The job's overlay-PNG R2 keys, restricted to the job owner's own overlay
@@ -182,16 +187,31 @@ export async function runExportJob(
     const key = preview
       ? `cut/${job.userId}/projects/${projectId}/previews/${job.id}.mp4`
       : exportKey(job.userId, projectId, outName);
+    // A retained output is charged to the account, so it is held to the room
+    // the account had when the render was queued. The file is still on the
+    // worker's disk here: nothing goes up, and nothing is charged.
+    if (!preview && typeof stored.maxBytes === "number") {
+      const size = (await stat(handle.outPath)).size;
+      if (size > stored.maxBytes) throw new Error(STORAGE_FULL);
+    }
     const bytes = await uploadFile(key, handle.outPath, mime);
-    await registerObject({
-      userId: job.userId,
-      projectId,
-      r2Key: key,
-      fileName: outName,
-      mime,
-      bytes,
-      kind: preview ? "preview" : "export",
-    });
+    try {
+      await registerObject({
+        userId: job.userId,
+        projectId,
+        r2Key: key,
+        fileName: outName,
+        mime,
+        bytes,
+        kind: preview ? "preview" : "export",
+      });
+    } catch (err) {
+      // The file is up and no row owns it. The sweep walks rows, so nothing
+      // would ever find these bytes again — and a storage wall that leaves the
+      // bytes behind walls the account in tighter with every retry.
+      await deleteObjects([key]).catch(() => {});
+      throw err;
+    }
     if (preview) {
       await prisma.$transaction(async (tx) => {
         const project = await tx.cutProject.findUnique({ where: { id: projectId }, select: { previewKey: true } });

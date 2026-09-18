@@ -1,5 +1,7 @@
 import { adjustStorageBytes } from "../server/cloud/storageCounter";
 import { artifactLifecycle, artifactUsageBytes } from "../lib/artifactPolicy";
+import { cutLimitsFor, quotaMarginFor, storageCeiling } from "../server/cloud/limits";
+import { STORAGE_FULL } from "../lib/operationFailure";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
 import { resolveSettings } from "@/lib/config/resolve";
@@ -58,6 +60,19 @@ export async function registerObject(opts: {
     const quotaExempt = artifactLifecycle(opts.kind) !== "retained";
     const priorBytes = prior ? artifactUsageBytes(prior.bytes, prior.uploadState === "complete", prior.quotaExempt) : BigInt(0);
     const delta = artifactUsageBytes(BigInt(opts.bytes), true, quotaExempt) - priorBytes;
+    // The wall every stored artifact meets, wherever it came from: a job that
+    // grew past what its account can hold is failed here, at the moment the
+    // bytes would be charged, instead of landing a row nothing can undo.
+    if (delta > BigInt(0)) {
+      const ceiling = storageCeiling(await cutLimitsFor(opts.userId), quotaMarginFor(opts.kind));
+      if (ceiling !== null) {
+        const usage = await tx.cutStorageUsage.findUnique({
+          where: { userId: opts.userId },
+          select: { bytes: true },
+        });
+        if ((usage?.bytes ?? BigInt(0)) + delta > BigInt(ceiling)) throw new Error(STORAGE_FULL);
+      }
+    }
     const row = await tx.cutMediaObject.upsert({
       where: { r2Key: opts.r2Key },
       create: { ...opts, bytes: BigInt(opts.bytes), quotaExempt, uploadState: "complete" },

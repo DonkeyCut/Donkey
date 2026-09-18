@@ -31,7 +31,7 @@ export type AnalyticsEvents = {
   cut_storage_pill_clicked: void;
   // The top bar's credits pill.
   cut_credits_pill_clicked: { dollars: number };
-  cut_storage_upgrade_shown: { source: "quota-413" | "pill" };
+  cut_storage_upgrade_shown: { source: "quota-413" | "render" | "pill" };
   cut_grace_banner_shown: void;
   // First exposure to an experiment variant; the same value rides every
   // later event as a super property ($feature/<experiment>).

@@ -32,6 +32,19 @@ export const FREE_STORAGE_BYTES = 250 * 1024 ** 2;
  * or for Pro. */
 export const EXPORT_QUOTA_MARGIN = 1.2;
 
+/** The bytes an account may hold at most — the wall every stored artifact is
+ * weighed against at the moment it is charged. Null when the account is
+ * unquotaed. `margin` widens it the same way `quotaCheck` does. */
+export function storageCeiling(limits: CutLimits, margin = 1): number | null {
+  return limits.storageBytes === null ? null : Math.floor(limits.storageBytes * margin);
+}
+
+/** The headroom a kind is charged against: an export renders into the margin
+ * because it takes work out of the account; everything else meets the quota. */
+export function quotaMarginFor(kind: string): number {
+  return kind === "export" ? EXPORT_QUOTA_MARGIN : 1;
+}
+
 const FREE: CutLimits = {
   storageBytes: FREE_STORAGE_BYTES,
   renderJobsPerDay: 10,

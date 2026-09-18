@@ -3,8 +3,11 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma as actualPrisma } from "@/lib/prisma";
 
 const originalPrisma = actualPrisma;
+// The account the charge point weighs every object against: free tier, no Pro.
 const prisma = {
   settingOverride: { findUnique: mock(async () => ({ value: { maxAttempts: 3 } })) },
+  user: { findUnique: mock(async () => ({ superUser: false })) },
+  proSubscription: { findUnique: mock(async () => null) },
   $transaction: mock(async (
   run: (tx: Prisma.TransactionClient) => Promise<unknown>,
   options: { isolationLevel: string },
@@ -14,6 +17,8 @@ const prisma = {
 }) };
 mock.module("@/lib/prisma", () => ({ prisma }));
 const { registerObject, unregisterObjects } = await import("./db");
+const { FREE_STORAGE_BYTES } = await import("../server/cloud/limits");
+const { STORAGE_FULL } = await import("../lib/operationFailure");
 afterAll(() => { mock.module("@/lib/prisma", () => ({ prisma: originalPrisma })); });
 
 const conflict = () => new Prisma.PrismaClientKnownRequestError("Write conflict", {
@@ -49,6 +54,7 @@ function harness(failures = 1, error: Error = conflict()) {
         deleteMany: async () => { pending = null; return { count: 1 }; },
       },
       cutStorageUsage: {
+        findUnique: async () => ({ userId: "user", bytes: pendingUsage }),
         upsert: async () => ({ userId: "user", bytes: pendingUsage }),
         updateMany: async ({ where, data }: {
           where: { bytes: bigint }; data: { bytes: { increment: bigint } };
@@ -99,4 +105,30 @@ test("other failures propagate without retrying", async () => {
   const h = harness(1, error);
   await expect(registerObject(input)).rejects.toBe(error);
   expect(h.state().attempts).toBe(1);
+});
+
+test("an object that would break the account's storage ceiling is refused, uncharged", async () => {
+  const h = harness(0);
+  await expect(registerObject({ ...input, bytes: FREE_STORAGE_BYTES * 2 })).rejects.toThrow(STORAGE_FULL);
+  expect(h.state()).toMatchObject({ usage: BigInt(140), stored: { bytes: BigInt(40) } });
+});
+
+test("an export renders into the margin past the account's quota", async () => {
+  const h = harness(0);
+  expect(await registerObject({ ...input, bytes: Math.floor(FREE_STORAGE_BYTES * 1.1) })).toBe("object");
+  expect(h.state().stored).toMatchObject({ bytes: BigInt(Math.floor(FREE_STORAGE_BYTES * 1.1)) });
+});
+
+test("the margin is the export's alone: the same bytes coming in meet the quota", async () => {
+  const h = harness(0);
+  await expect(
+    registerObject({ ...input, kind: "media", bytes: Math.floor(FREE_STORAGE_BYTES * 1.1) })
+  ).rejects.toThrow(STORAGE_FULL);
+  expect(h.state()).toMatchObject({ usage: BigInt(140), stored: { bytes: BigInt(40) } });
+});
+
+test("a re-registration that shrinks the object is charged its delta", async () => {
+  const h = harness(0);
+  expect(await registerObject({ ...input, bytes: 10 })).toBe("object");
+  expect(h.state()).toMatchObject({ usage: BigInt(110), stored: { bytes: BigInt(10) } });
 });

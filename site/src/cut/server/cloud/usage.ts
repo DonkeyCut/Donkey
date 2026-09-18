@@ -36,6 +36,16 @@ export async function addUsage(tx: Prisma.TransactionClient, userId: string, del
   await adjustStorageBytes(tx, userId, BigInt(Math.round(delta)));
 }
 
+/** The most bytes a render's output may land, after what is stored and what
+ * in-flight claims hold. Null when the account is unquotaed. `margin` widens
+ * the ceiling the same way `quotaCheck` does. */
+export async function outputByteCeiling(userId: string, margin = 1): Promise<number | null> {
+  const limits = await cutLimitsFor(userId);
+  if (limits.storageBytes === null) return null;
+  const [stored, reserved] = await Promise.all([usageBytes(userId), reservedBytes(userId)]);
+  return Math.max(0, Math.floor(limits.storageBytes * margin) - stored - reserved);
+}
+
 /** 413 when `incoming` more bytes would break the account's storage quota,
  * else null. Stored bytes and in-flight claims both count. Superusers are
  * unquotaed. `margin` widens the ceiling for a write

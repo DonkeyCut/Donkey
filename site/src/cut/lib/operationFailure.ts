@@ -6,12 +6,17 @@ export type OperationFailure = {
   quotaBytes?: number;
 };
 
+/** What a storage refusal reads as, wherever it is raised: a rejected upload,
+ * a render refused its space, a render that outgrew it mid-encode. One string,
+ * so every surface matches the dialog it opens. */
+export const STORAGE_FULL = "Cloud storage is full.";
+
 export function operationFailure(status: number, body: unknown): OperationFailure | null {
   const data = body && typeof body === "object" ? body as Record<string, unknown> : {};
   if (status === 401) return { code: "authentication_required", message: "Sign in to continue." };
   if (status === 413 && data.error === "storage_quota_exceeded") {
     return {
-      code: "storage_quota_exceeded", message: "Cloud storage is full.",
+      code: "storage_quota_exceeded", message: STORAGE_FULL,
       ...(typeof data.bytes === "number" ? { bytes: data.bytes } : {}),
       ...(typeof data.quotaBytes === "number" ? { quotaBytes: data.quotaBytes } : {}),
     };

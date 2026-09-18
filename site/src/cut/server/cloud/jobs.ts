@@ -3,7 +3,7 @@
 // shapes byte-match the engine's export routes (http/export.ts + server/jobs.ts).
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { cutLimitsFor, EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
+import { EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
 import { queuePreview } from "./previewJobs";
 import { getProject } from "./projects";
@@ -11,7 +11,7 @@ import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./medi
 import { del, head, overlayKey, overlayPrefix, presignPut, projectExportKey } from "./r2";
 import { contentTypeFor } from "../serveFile";
 import { containerOfName, deliveryContainer, exportBaseName, specMediaFiles, type ExportContainer } from "../../lib/exportDelivery";
-import { addUsage, quotaCheck, reservedBytes, usageBytes } from "./usage";
+import { addUsage, outputByteCeiling, quotaCheck } from "./usage";
 import { caught, err, redirect } from "./util";
 
 /** How long finished jobs stay in the export-jobs feed — the engine's registry
@@ -119,10 +119,15 @@ async function importJobFor(userId: string, key: string | undefined): Promise<{ 
 /** The most bytes an import may bring in: what is left of the account's
  * storage, under the hard ceiling. */
 async function importByteCeiling(userId: string): Promise<number> {
-  const limits = await cutLimitsFor(userId);
-  if (limits.storageBytes === null) return IMPORT_MAX_BYTES;
-  const [stored, reserved] = await Promise.all([usageBytes(userId), reservedBytes(userId)]);
-  return Math.max(0, Math.min(IMPORT_MAX_BYTES, limits.storageBytes - stored - reserved));
+  const left = await outputByteCeiling(userId);
+  return left === null ? IMPORT_MAX_BYTES : Math.min(IMPORT_MAX_BYTES, left);
+}
+
+/** The most bytes an export's output may land, for the worker to hold its own
+ * render to. A render that outgrows it is refused before it is uploaded, so an
+ * account cannot pass the gate small and land large. */
+async function exportByteCeiling(userId: string): Promise<number | null> {
+  return outputByteCeiling(userId, EXPORT_QUOTA_MARGIN);
 }
 
 /** Drop the file a browser render uploaded for a row that never registered
@@ -223,13 +228,19 @@ export async function queueDocExport(
   if (capped) return capped;
   const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
   if (over) return over;
+  // What the render may land. The worker holds its own output to it, so a
+  // queued export cannot pass this gate and then write past the account's cap.
+  const maxBytes = await exportByteCeiling(userId);
   const outName = await exportName(userId, projectId, project.name, undefined);
   const row = await prisma.cutRenderJob.create({
     data: {
       userId,
       projectId,
       kind: "export",
-      spec: { fromDoc: { preset, snapshot: { doc: project.doc, version: String(project.version) } } } as unknown as Prisma.InputJsonValue,
+      spec: {
+        fromDoc: { preset, snapshot: { doc: project.doc, version: String(project.version) } },
+        ...(maxBytes === null ? {} : { maxBytes }),
+      } as unknown as Prisma.InputJsonValue,
       outName,
     },
   });
@@ -383,11 +394,13 @@ export const jobsCloud = {
       if (refused) return err(refused, 400);
       // Retained exports pass storage and render gates. Derived playback
       // artifacts use a bounded queue and expire through garbage collection.
+      let maxBytes: number | null = null;
       if (target === "export") {
         const capped = await renderJobCheck(userId);
         if (capped) return capped;
         const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
         if (over) return over;
+        maxBytes = await exportByteCeiling(userId);
       }
       const jobSpec = {
         ...(body.revision ? { revision: body.revision } : {}),
@@ -395,6 +408,7 @@ export const jobsCloud = {
         overlays: body.overlays ?? [],
         ...(borrowed ? { mediaFrom: "overlays" } : {}),
         ...(target === "hls" ? { burnedSubtitles: body.burnedSubtitles === true } : {}),
+        ...(maxBytes === null ? {} : { maxBytes }),
       } as unknown as Prisma.InputJsonValue;
 
       if (target === "preview") {
@@ -526,13 +540,18 @@ export const jobsCloud = {
    */
   async exportClientPresign(userId: string, req: Request) {
     try {
-      const body = (await req.json()) as { projectId?: string; outName?: string };
+      const body = (await req.json()) as { projectId?: string; outName?: string; bytes?: number };
       const projectId = body.projectId;
       if (!projectId) return err("projectId is required.", 400);
       if (!(await getProject(userId, projectId))) return err("Project not found.", 400);
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
-      const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
+      // The size the render is heading for, from the same model the export
+      // dialog showed. A render an account has no room for is refused here,
+      // before minutes of encoding; what actually lands is weighed again at
+      // completion, because an encoder spends what the footage needs.
+      const estimate = Number.isFinite(body.bytes) && body.bytes! > 0 ? Math.round(body.bytes!) : 0;
+      const over = await quotaCheck(userId, estimate, EXPORT_QUOTA_MARGIN);
       if (over) return over;
       // The name is claimed by writing the row, not just by reading the rows
       // that exist. `exportName` dedupes against stored objects and jobs, so a
@@ -598,6 +617,19 @@ export const jobsCloud = {
       const object = await head(key);
       if (!object) return err("The export was not uploaded.", 400);
       const bytes = object.bytes;
+      // The account is charged what landed, so the quota is checked against it.
+      // A file past the ceiling is dropped rather than charged: the row would
+      // otherwise put the account over its cap for good, and the bytes it holds
+      // are the ones nothing else can free.
+      const over = await quotaCheck(userId, bytes, EXPORT_QUOTA_MARGIN);
+      if (over) {
+        await dropUnregisteredExport(userId, row);
+        await prisma.cutRenderJob.updateMany({
+          where: { id: row.id, state: { in: ["running", "queued"] } },
+          data: { state: "dismissed" },
+        });
+        return over;
+      }
       await prisma.$transaction(async (tx) => {
         await tx.cutMediaObject.create({
           data: {
