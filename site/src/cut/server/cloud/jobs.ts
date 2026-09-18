@@ -127,7 +127,10 @@ async function importByteCeiling(userId: string): Promise<number> {
 
 /** Drop the file a browser render uploaded for a row that never registered
  * it: the bytes have no media row, so nothing else would ever find them. */
-async function dropUnregisteredExport(userId: string, row: JobRow): Promise<void> {
+async function dropUnregisteredExport(
+  userId: string,
+  row: Pick<JobRow, "projectId" | "outName">
+): Promise<void> {
   if (!row.projectId || !row.outName) return;
   const key = projectExportKey(userId, row.projectId, row.outName);
   const registered = await prisma.cutMediaObject.findUnique({
@@ -139,13 +142,33 @@ async function dropUnregisteredExport(userId: string, row: JobRow): Promise<void
 
 /** Engine job status ("queued" | "running" | "done" | "error") from a row's
  * state; a canceled row reads as the engine's canceled-export error. */
-function engineStatus(row: JobRow): { status: string; error?: string } {
+function engineStatus(row: Pick<JobRow, "state" | "error">): { status: string; error?: string } {
   if (row.state === "canceled") return { status: "error", error: row.error ?? "Export canceled." };
   return { status: row.state, error: row.error ?? undefined };
 }
 
-async function findJob(userId: string, id: string): Promise<JobRow | null> {
-  return prisma.cutRenderJob.findFirst({ where: { id, userId } });
+/** Everything the job routes read except the two big JSON columns. The spec
+ * holds the whole document a render was cut from and the result is the payload
+ * of a finished job; a status poll runs every couple of seconds and wants
+ * neither, so they are fetched on their own once a job has settled. */
+const jobRowSelect = {
+  id: true,
+  projectId: true,
+  kind: true,
+  state: true,
+  progress: true,
+  outputKey: true,
+  outName: true,
+  error: true,
+  claimedAt: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+type LeanJobRow = Omit<JobRow, "result" | "spec">;
+
+async function findJob(userId: string, id: string): Promise<LeanJobRow | null> {
+  return prisma.cutRenderJob.findFirst({ where: { id, userId }, select: jobRowSelect });
 }
 
 /** Engine-style export name: the base with the container's extension and a
@@ -451,15 +474,23 @@ export const jobsCloud = {
     if (!row) return err("Unknown export.", 404);
     if (needsWorker(row)) wakeRenderWorker();
     const { status, error } = engineStatus(row);
+    const finished = row.state === "done" && row.outputKey;
+    // The artifact names the revision the render was cut from, which only the
+    // spec knows. One read, on the poll that ends the wait.
+    const spec = finished
+      ? ((
+          await prisma.cutRenderJob.findUnique({ where: { id: row.id }, select: { spec: true } })
+        )?.spec as { revision?: string } | null)
+      : null;
     return Response.json({
       status,
       progress: row.progress,
       error,
       outName: row.outName || undefined,
-      artifact: row.state === "done" && row.outputKey ? {
+      artifact: finished ? {
         id: row.id, projectId: row.projectId, kind: row.kind,
-        url: mediaObjectUrl(row.outputKey), expiresIn: mediaUrlLifetime(),
-        revision: (row.spec as { revision?: string } | null)?.revision ?? null,
+        url: mediaObjectUrl(row.outputKey!), expiresIn: mediaUrlLifetime(),
+        revision: spec?.revision ?? null,
       } : null,
     });
   },
@@ -640,27 +671,10 @@ export const jobsCloud = {
   /** The exports-dock feed: every export job for this account, start order —
    * same view the engine's listAllJobs builds (previews stay internal). */
   async exportFeed(userId: string) {
-    // A browser render lives in a tab, and a tab can close mid-render. Nothing
-    // claims those rows, so nothing else would ever release them, and each one
-    // left behind holds a name and a render slot for good. Any that have been
-    // running longer than a render plausibly takes are swept here, on the poll
-    // that would have displayed them: the row is dismissed (kept for the day's
-    // count) and a file the tab uploaded without registering goes.
-    const stale = await prisma.cutRenderJob.findMany({
-      where: {
-        userId,
-        kind: "export",
-        state: "running",
-        claimedAt: null,
-        updatedAt: { lt: new Date(Date.now() - CLIENT_RENDER_WINDOW_MS) },
-      },
-    });
-    for (const row of stale) {
-      await dropUnregisteredExport(userId, row).catch(() => {});
-      await prisma.cutRenderJob
-        .updateMany({ where: { id: row.id, state: "running" }, data: { state: "dismissed" } })
-        .catch(() => {});
-    }
+    // Every open tab polls this for as long as the app is up, so it reads the
+    // rows once and only the columns the cards show. The render spec stays
+    // where it is: it carries the whole document a render was cut from, and
+    // nothing here reads it.
     const rows = await prisma.cutRenderJob.findMany({
       where: {
         userId,
@@ -672,15 +686,47 @@ export const jobsCloud = {
         ],
       },
       orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        projectId: true,
+        state: true,
+        progress: true,
+        outName: true,
+        error: true,
+        claimedAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
-    const projectIds = [...new Set(rows.map((r) => r.projectId).filter((p): p is string => !!p))];
-    const projects = await prisma.cutProject.findMany({
-      where: { userId, id: { in: projectIds } },
-      select: { id: true, name: true },
-    });
+    // A browser render lives in a tab, and a tab can close mid-render. Nothing
+    // claims those rows, so nothing else would ever release them, and each one
+    // left behind holds a name and a render slot for good. Any that have been
+    // running longer than a render plausibly takes are swept here, on the poll
+    // that would have displayed them: the row is dismissed (kept for the day's
+    // count) and a file the tab uploaded without registering goes. They are
+    // already in hand — a still-running row is in the feed by definition.
+    const staleBefore = Date.now() - CLIENT_RENDER_WINDOW_MS;
+    const stale = rows.filter(
+      (r) => r.state === "running" && r.claimedAt === null && r.updatedAt.getTime() < staleBefore
+    );
+    for (const row of stale) {
+      await dropUnregisteredExport(userId, row).catch(() => {});
+      await prisma.cutRenderJob
+        .updateMany({ where: { id: row.id, state: "running" }, data: { state: "dismissed" } })
+        .catch(() => {});
+    }
+    const swept = new Set(stale.map((r) => r.id));
+    const live = rows.filter((r) => !swept.has(r.id));
+    const projectIds = [...new Set(live.map((r) => r.projectId).filter((p): p is string => !!p))];
+    const projects = projectIds.length
+      ? await prisma.cutProject.findMany({
+          where: { userId, id: { in: projectIds } },
+          select: { id: true, name: true },
+        })
+      : [];
     const names = new Map(projects.map((p) => [p.id, p.name]));
     return Response.json(
-      rows.map((r) => {
+      live.map((r) => {
         const { status, error } = engineStatus(r);
         return {
           id: r.id,
@@ -795,12 +841,17 @@ export const jobsCloud = {
     const row = await findJob(userId, jobId);
     if (!row) return err("Unknown job.", 404);
     if (needsWorker(row)) wakeRenderWorker();
+    const result =
+      row.state === "done"
+        ? (await prisma.cutRenderJob.findUnique({ where: { id: row.id }, select: { result: true } }))
+            ?.result
+        : null;
     return Response.json({
       id: row.id,
       kind: row.kind,
       state: row.state,
       progress: row.progress,
-      result: row.result ?? undefined,
+      result: result ?? undefined,
       error: row.error ?? undefined,
     });
   },
