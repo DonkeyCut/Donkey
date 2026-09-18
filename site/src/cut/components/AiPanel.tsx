@@ -97,7 +97,8 @@ import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
 import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, judgeEngineSkill, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
 import { dueForRetriage, toolProgress } from "@/cut/lib/queueTriage";
 import { registerQueueSink } from "@/cut/lib/chatQueue";
-import { syncTimes, type TimeMark } from "@/cut/lib/timeMark";
+import { previewAt } from "@/cut/lib/playhead";
+import { resolvePlayheadTokens, syncTimes, type TimeMark } from "@/cut/lib/timeMark";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import { withChatProject } from "@/cut/lib/projectChatTools";
 import { runAiTool } from "@/cut/lib/aiTools";
@@ -1675,10 +1676,15 @@ function ChatSession({
     // Moments are re-read here too: the cut can have moved since the token was
     // written, and a token typed by hand picks up its mark now.
     const doc = useEditor.getState();
-    const synced = syncTimes(text.trim(), times, {
-      clips: doc.clips,
-      audioClips: doc.audioClips,
-    });
+    const cut = { clips: doc.clips, audioClips: doc.audioClips };
+    // A `@here` still standing in the text — typed and sent in one breath,
+    // never completed by a following character — takes the moment now.
+    const written = resolvePlayheadTokens(text.trim(), previewAt(), cut);
+    const synced = syncTimes(
+      written?.text ?? text.trim(),
+      [...times, ...(written?.marks ?? [])],
+      cut,
+    );
     const body = synced.text;
     const { refs: all } = collectRefs(body, attachments, candidates);
     if (!body && all.length === 0) return;

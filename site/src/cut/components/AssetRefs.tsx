@@ -24,6 +24,7 @@ import {
   formatMark,
   markAt,
   parseMark,
+  resolvePlayheadTokens,
   PLAYHEAD_HANDLE,
   PLAYHEAD_NAME,
   splitTimes,
@@ -1545,9 +1546,27 @@ export function MentionTextarea({
         value={value}
         onChange={(e) => {
           setDismissed(null);
-          onChange(e.target.value);
-          setCaret(e.target.selectionStart ?? 0);
-          setSelEnd(e.target.selectionEnd ?? e.target.selectionStart ?? 0);
+          const v = e.target.value;
+          const c = e.target.selectionStart ?? v.length;
+          // `@here` typed straight through becomes the moment the word names —
+          // the menu is one way to take it, the word itself is the other.
+          if (onInsertTime) {
+            const { clips, audioClips } = useEditor.getState();
+            const written = resolvePlayheadTokens(v, previewAt(), { clips, audioClips }, c);
+            if (written) {
+              for (const mark of written.marks) onInsertTime(mark);
+              onChange(written.text);
+              setCaret(written.caret);
+              setSelEnd(written.caret);
+              requestAnimationFrame(() =>
+                taRef.current?.setSelectionRange(written.caret, written.caret)
+              );
+              return;
+            }
+          }
+          onChange(v);
+          setCaret(c);
+          setSelEnd(e.target.selectionEnd ?? c);
         }}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}

@@ -36,6 +36,42 @@ export const TIME_TOKEN_RE = /@(\d{1,3}:[0-5]\d(?::[0-5]\d)?(?:\.\d{1,2})?)(?![\
 export const PLAYHEAD_HANDLE = "here";
 export const PLAYHEAD_NAME = "playhead";
 
+/** A written-out `@here` / `@playhead`, once something follows it. */
+const PLAYHEAD_TOKEN_RE = new RegExp(
+  `(^|[\\s([])@(${PLAYHEAD_HANDLE}|${PLAYHEAD_NAME})(?![\\w-])`,
+  "gi"
+);
+
+/**
+ * Swap every finished `@here` for the moment it names, so the word becomes the
+ * time whether the user took it off the menu or typed straight through it.
+ * `caret` is where they are: a token ending right there is still being typed
+ * and is left alone until the next character lands. Null when nothing changed.
+ */
+export function resolvePlayheadTokens(
+  text: string,
+  at: number,
+  s: TimeMarkState,
+  caret?: number
+): { text: string; marks: TimeMark[]; caret: number } | null {
+  const marks: TimeMark[] = [];
+  let out = "";
+  let last = 0;
+  let shift = 0;
+  for (const m of text.matchAll(PLAYHEAD_TOKEN_RE)) {
+    const start = m.index + (m[1] ?? "").length;
+    const end = start + 1 + m[2].length;
+    if (end === caret) continue;
+    const mark = markAt(at, s);
+    marks.push(mark);
+    out += text.slice(last, start) + mark.token;
+    if (caret !== undefined && end <= caret) shift += mark.token.length - (end - start);
+    last = end;
+  }
+  if (marks.length === 0) return null;
+  return { text: out + text.slice(last), marks, caret: (caret ?? 0) + shift };
+}
+
 /** How far outside a clip's trim a source second may sit and still count as
  * inside it — a rounding tolerance, not a reach. */
 const TRIM_EPS = 1e-6;

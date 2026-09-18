@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { retimeOf } from "@donkeycut/effects-kit";
-import { formatMark, markAt, markTime, parseMark, splitTimes, syncTimes } from "./timeMark";
+import {
+  formatMark,
+  markAt,
+  markTime,
+  parseMark,
+  resolvePlayheadTokens,
+  splitTimes,
+  syncTimes,
+} from "./timeMark";
 import { splitTimelineItems } from "./timelineItems";
 import type { AudioClip, VideoClip } from "./types";
 
@@ -195,6 +203,49 @@ describe("a project with no picture", () => {
   test("but the picture wins wherever there is one", () => {
     const mark = markAt(12, { ...cut(), audioClips: [sound("vo", 0)] });
     expect(mark.clipId).toBe("b");
+  });
+});
+
+describe("the word becomes the time", () => {
+  test("once a character follows it", () => {
+    const s = cut();
+    const typed = "@here hi";
+    const done = resolvePlayheadTokens(typed, 12, s, typed.length);
+    expect(done?.text).toBe("@0:12 hi");
+    expect(done?.marks[0].clipId).toBe("b");
+    // The caret sat at the end, and moves with the text under it.
+    expect(done?.caret).toBe("@0:12 hi".length);
+  });
+
+  test("and the caret keeps its place when the time is wider than the word", () => {
+    const typed = "@here hi";
+    const done = resolvePlayheadTokens(typed, 3723, { clips: [] }, typed.length);
+    expect(done?.text).toBe("@1:02:03 hi");
+    expect(done?.caret).toBe("@1:02:03 hi".length);
+  });
+
+  test("but not while it is still being typed", () => {
+    expect(resolvePlayheadTokens("@here", 12, cut(), 5)).toBe(null);
+    expect(resolvePlayheadTokens("@her", 12, cut(), 4)).toBe(null);
+    // Sent as it stands, with no caret in play, it resolves.
+    expect(resolvePlayheadTokens("@here", 12, cut())?.text).toBe("@0:12");
+  });
+
+  test("by either name, anywhere in the line, and never mid-word", () => {
+    expect(resolvePlayheadTokens("cut @playhead now", 12, cut(), 0)?.text).toBe("cut @0:12 now");
+    expect(resolvePlayheadTokens("zoom @Here, then out", 12, cut(), 0)?.text).toBe(
+      "zoom @0:12, then out",
+    );
+    expect(resolvePlayheadTokens("@heron.mp4 is loud", 12, cut(), 0)).toBe(null);
+    expect(resolvePlayheadTokens("email me@here.com", 12, cut(), 0)).toBe(null);
+  });
+
+  test("twice in one line, with the caret landing past both", () => {
+    const typed = "@here and @here x";
+    const done = resolvePlayheadTokens(typed, 12, cut(), typed.length);
+    expect(done?.text).toBe("@0:12 and @0:12 x");
+    expect(done?.marks).toHaveLength(2);
+    expect(done?.caret).toBe("@0:12 and @0:12 x".length);
   });
 });
 
