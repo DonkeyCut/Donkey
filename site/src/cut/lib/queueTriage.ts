@@ -49,6 +49,29 @@ const PLACE_CRITERIA = {
     "It waits for the running ask to finish and for a fresh view of the project: it needs the finished result (export, render, share, publish, a thumbnail or summary of the final cut), or it is sequenced after the running work (\"then…\", \"after that…\", \"once it's done…\"). Anything unclear.",
 } as const;
 
+/** Whether a running turn should place its waiting rows again.
+ *
+ * A row is placed when it is sent, against the tools the turn had run by
+ * then. The turn keeps working, so that reading goes stale: a row that read
+ * "unclear, hold it" becomes a plain fold once the work it was waiting on
+ * lands. Re-placing costs one judgment, so it waits for the cadence and never
+ * overlaps a call already out.
+ */
+export function dueForRetriage(opts: {
+  /** Rows still waiting in the tray. */
+  waiting: number;
+  /** The setting's cadence; 0 places rows once, at send. */
+  cadenceMs: number;
+  /** A triage call is already out. */
+  inFlight: boolean;
+  /** When the last triage went out, on the same clock as `now`. */
+  lastAt: number;
+  now: number;
+}): boolean {
+  if (opts.waiting === 0 || opts.cadenceMs <= 0 || opts.inFlight) return false;
+  return opts.now - opts.lastAt >= opts.cadenceMs;
+}
+
 /** One placement and one collision question per row. */
 export function queueTriageQuestions(rows: TriageRow[]) {
   const out: Record<string, ReturnType<typeof choice<typeof PLACE_CRITERIA>> | ReturnType<typeof noul>> = {};

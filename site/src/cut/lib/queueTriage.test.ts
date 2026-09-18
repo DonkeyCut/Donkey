@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { placeQueuedRows, queueTriageQuestions, queueTriageState, toolProgress, type QueueTriageAnswers } from "./queueTriage";
+import { dueForRetriage, placeQueuedRows, queueTriageQuestions, queueTriageState, toolProgress, type QueueTriageAnswers } from "./queueTriage";
 
 const rows = [
   { id: "m1", text: "also make the title blue" },
@@ -88,5 +88,29 @@ describe("toolProgress", () => {
         { type: "tool-add_text", state: "output-error" },
       ])
     ).toEqual(["detect_silence", "split_clip (running)", "add_text"]);
+  });
+});
+
+describe("dueForRetriage", () => {
+  const base = { waiting: 1, cadenceMs: 4000, inFlight: false, lastAt: 0, now: 4000 };
+
+  test("places the tray again once the cadence has passed", () => {
+    expect(dueForRetriage(base)).toBe(true);
+  });
+
+  test("holds until the cadence has passed", () => {
+    expect(dueForRetriage({ ...base, now: 3999 })).toBe(false);
+  });
+
+  test("never overlaps a call already out", () => {
+    expect(dueForRetriage({ ...base, inFlight: true })).toBe(false);
+  });
+
+  test("does nothing with an empty tray", () => {
+    expect(dueForRetriage({ ...base, waiting: 0 })).toBe(false);
+  });
+
+  test("a zero cadence places each row once, at send", () => {
+    expect(dueForRetriage({ ...base, cadenceMs: 0, now: 1e9 })).toBe(false);
   });
 });

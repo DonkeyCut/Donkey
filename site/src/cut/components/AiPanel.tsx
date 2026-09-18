@@ -2,7 +2,7 @@
 
 import type { ChatStatus } from "./ChatStatusBadge";
 
-import { chatRuntime } from "@/cut/lib/chatRuntime";
+import { chatRuntime, cutJudge } from "@/cut/lib/chatRuntime";
 import { ChatRequests } from "@/cut/lib/chatRequests";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useChat } from "@ai-sdk/react";
@@ -95,7 +95,7 @@ import {
 } from "@/cut/lib/generate";
 import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
 import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, judgeEngineSkill, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
-import { toolProgress } from "@/cut/lib/queueTriage";
+import { dueForRetriage, toolProgress } from "@/cut/lib/queueTriage";
 import { registerQueueSink } from "@/cut/lib/chatQueue";
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import { withChatProject } from "@/cut/lib/projectChatTools";
@@ -1475,6 +1475,12 @@ function ChatSession({
   const runningAskRef = useRef("");
   /** The running Gemini turn's abort signal, for the work a fold does. */
   const turnSignalRef = useRef<AbortSignal | undefined>(undefined);
+  /** How many triage calls are out, and when the last one went, so the
+   * re-placement cadence counts from every caller's call. A count rather
+   * than a flag: the send path and the cadence both call, and the first to
+   * finish must not clear the other's. */
+  const triagingRef = useRef(0);
+  const triagedAtRef = useRef(0);
   // Where a message sent mid-turn goes. One light-model call places the rows
   // against the running ask: a fold is steered into the running turn and
   // joins the transcript as its own message, a spawn starts a parallel
@@ -1485,6 +1491,15 @@ function ChatSession({
   const triage = async (rows: QueuedMessage[]) => {
     const ask = runningAskRef.current;
     if (!ask) return;
+    triagingRef.current += 1;
+    triagedAtRef.current = Date.now();
+    try {
+      await placeRows(rows, ask);
+    } finally {
+      triagingRef.current -= 1;
+    }
+  };
+  const placeRows = async (rows: QueuedMessage[], ask: string) => {
     const last = messagesRef.current.at(-1);
     const progress =
       last?.role === "assistant"
@@ -1546,6 +1561,38 @@ function ChatSession({
   useEffect(() => {
     triageRef.current = triage;
   });
+  // A row is placed against the tools the turn had run when it was sent, and
+  // the turn keeps working — so that reading goes stale. A row that read
+  // "unclear, hold it" is a plain fold once the work it was waiting on lands.
+  // The tray is therefore placed again on a cadence for as long as the turn
+  // runs, which is the difference between a refinement joining the live turn
+  // and landing a minute later. A turn can sit inside one long tool call
+  // with nothing about it changing, so the timer re-arms itself rather than
+  // waiting on a render. The judgment is a few hundred tokens and a quarter
+  // second; the cadence and the in-flight count keep it to one call at a time.
+  useEffect(() => {
+    if (!busy || queuePaused || readOnly) return;
+    const { queueRetriageMs } = cutJudge();
+    if (queueRetriageMs <= 0) return;
+    const rows = () => queueRef.current.filter((m) => m.status === "queued" && m.id !== queueEditingRef.current);
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const waiting = rows();
+      if (
+        dueForRetriage({
+          waiting: waiting.length,
+          cadenceMs: queueRetriageMs,
+          inFlight: triagingRef.current > 0,
+          lastAt: triagedAtRef.current,
+          now: Date.now(),
+        })
+      )
+        void triageRef.current(waiting);
+      timer = setTimeout(tick, queueRetriageMs);
+    };
+    timer = setTimeout(tick, Math.max(0, triagedAtRef.current + queueRetriageMs - Date.now()));
+    return () => clearTimeout(timer);
+  }, [busy, queuePaused, readOnly]);
   // The running agent can park a message here itself (queue_message): the
   // row goes out as its own turn after the running one settles.
   useEffect(

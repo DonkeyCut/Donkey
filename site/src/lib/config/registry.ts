@@ -120,6 +120,9 @@ export const SETTINGS = defineSettings({
         fillerCut: z.number().min(0).max(1),
         // The confidence below which a described voice falls back to the default.
         voicePick: z.number().min(0).max(1),
+        // How often a running turn re-places the messages waiting in the tray
+        // against the work it has done since; 0 places them once, at send.
+        queueRetriageMs: z.number().int().min(0).max(60000),
         // Run a turn the judgment settles to one known action with no model
         // round at all; off sends every turn through the chat loop.
         instantAction: z.boolean(),
@@ -155,6 +158,7 @@ export const SETTINGS = defineSettings({
       stockFit: 0.5,
       fillerCut: 0.5,
       voicePick: 0.4,
+      queueRetriageMs: 4000,
       instantAction: true,
       instantFloor: 0.5,
       instantTarget: 0.5,
@@ -171,7 +175,7 @@ export const SETTINGS = defineSettings({
     public: true,
     title: "Chat judgments",
     description:
-      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), run a one-action turn with no model round, pick the items a sweep touches, rank stock, find filler words, and resolve described voices.",
+      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), run a one-action turn with no model round, re-place the messages waiting in the tray, pick the items a sweep touches, rank stock, find filler words, and resolve described voices.",
   },
   experimentResults: {
     schema: z
