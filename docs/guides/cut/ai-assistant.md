@@ -74,6 +74,8 @@ The snapshot is a compact JSON picture of everything user-visible: project meta,
 
 Decisions that gate, route, or pick (the turn route, queue triage, stock ranking, filler words, a described voice, a provider's failure class) are typed judgments from the judge route, thresholded in code. Reasoning and generation stay on the chat model.
 
+The judgment that routes a turn also asks whether the whole turn is one known editor action, and fills that action's arguments in the same request. When it settles — mute this clip, make it 16:9, slow that one down — the editor runs the tool and writes the line with no model round at all, and the edit lands in about a third of a second instead of three. It settles only when the action and every argument clear their floors and four guards hold: the ask names no exact figure, touches no second item, leaves no second edit undone, and wants no shot made again. Anything short resolves to nothing and the ordinary loop runs, which is why a miss costs nothing. Claude and Codex run the user's own CLI, so their turns always take the model round.
+
 Deciding what the user wants is prompt text, executed by the model. The prompt orders the calls it must make each turn:
 
 1. **Deliverable first.** "Write me a caption / a script / a prompt" asks for words — the answer goes in chat and the project stays untouched until the user says "do it". A request to change the project gets acted on directly with tools.

@@ -109,8 +109,10 @@ export const SETTINGS = defineSettings({
         // An area's probability at or above which its tools are declared.
         toolArea: z.number().min(0).max(1),
         // How long the first model round waits for the judge before going out
-        // with the full catalog and no skill.
-        judgeWaitMs: z.number().int().min(0).max(2000),
+        // with the full catalog and no skill. Set above the judgment's slowest
+        // turns: a round that goes out early is the one a chat or complex
+        // verdict then throws away.
+        judgeWaitMs: z.number().int().min(0).max(4000),
         // A stock candidate's fit below which it is left out of a search.
         stockFit: z.number().min(0).max(1),
         // A transcript word's disfluency probability at or above which
@@ -118,6 +120,27 @@ export const SETTINGS = defineSettings({
         fillerCut: z.number().min(0).max(1),
         // The confidence below which a described voice falls back to the default.
         voicePick: z.number().min(0).max(1),
+        // Run a turn the judgment settles to one known action with no model
+        // round at all; off sends every turn through the chat loop.
+        instantAction: z.boolean(),
+        // The chosen action's own probability below which the turn takes the
+        // loop instead. The floors below do the same for each argument.
+        instantFloor: z.number().min(0).max(1),
+        instantTarget: z.number().min(0).max(1),
+        instantEnum: z.number().min(0).max(1),
+        // A style, look or direction the request left open: several good
+        // answers split the probability, so the winner clears less.
+        instantPick: z.number().min(0).max(1),
+        instantLevel: z.number().min(0).max(1),
+        // A yes/no argument has to be this decisive in one direction.
+        instantBool: z.number().min(0.5).max(1),
+        // An ask that names an exact figure, acts on more than one item,
+        // leaves a second edit undone, or wants the shot itself remade goes
+        // to the model at or above these.
+        instantExact: z.number().min(0).max(1),
+        instantMulti: z.number().min(0).max(1),
+        instantLeftover: z.number().min(0).max(1),
+        instantRemake: z.number().min(0).max(1),
         // A candidate's fit below which a described sweep leaves it out.
         sweepFit: z.number().min(0).max(1),
       })
@@ -128,16 +151,27 @@ export const SETTINGS = defineSettings({
       skillFits: 0.3,
       toolRouting: true,
       toolArea: 0.2,
-      judgeWaitMs: 400,
+      judgeWaitMs: 1000,
       stockFit: 0.5,
       fillerCut: 0.5,
       voicePick: 0.4,
+      instantAction: true,
+      instantFloor: 0.5,
+      instantTarget: 0.5,
+      instantEnum: 0.5,
+      instantPick: 0.15,
+      instantLevel: 0.3,
+      instantBool: 0.7,
+      instantExact: 0.4,
+      instantMulti: 0.4,
+      instantLeftover: 0.5,
+      instantRemake: 0.3,
       sweepFit: 0.5,
     },
     public: true,
     title: "Chat judgments",
     description:
-      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), pick the items a sweep touches, rank stock, find filler words, and resolve described voices.",
+      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), run a one-action turn with no model round, pick the items a sweep touches, rank stock, find filler words, and resolve described voices.",
   },
   experimentResults: {
     schema: z

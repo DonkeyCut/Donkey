@@ -22,6 +22,7 @@
     "worker:build": "NODE_ENV=production bun build --target=node --minify --external=pg-native --external=skia-canvas --external=mediabunny --external=@mediabunny/server --external=node-web-audio-api --loader .css:text src/cut/worker/main.ts --outfile dist/cut-worker/main.js && bun scripts/check-worker-bundle.ts",
     "bench:watch": "bun run scripts/bench-watch.ts",
     "eval:cut-chat": "bun run scripts/eval-cut-chat.ts",
+    "eval:cut-instant": "bun run scripts/eval-cut-instant.ts",
     "eval:cut-queue": "bun run scripts/eval-cut-queue.ts",
     "eval:cut-judge": "bun run scripts/eval-cut-judge.ts",
     "eval:chatgpt-oauth": "bun run scripts/eval-chatgpt-oauth.ts",

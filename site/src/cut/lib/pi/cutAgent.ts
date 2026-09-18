@@ -13,6 +13,14 @@ import {
 } from "@/cut/server/ai/catalog";
 import { isResumeMessage } from "../chatResume";
 import { cutJudge } from "../chatRuntime";
+import {
+  instantAction,
+  instantQuestions,
+  instantSnapshot,
+  instantState,
+  type InstantAnswers,
+  type ResolvedAction,
+} from "../instantAction";
 import { askJudge } from "../judge";
 import {
   placeQueuedRows,
@@ -87,6 +95,9 @@ export interface CutAgentDeps {
     /** The turn's route landed: the verdict, the judge's wall time, whether
      * the intent was decided on sight, and what the turn declares. */
     onGate?: (intent: TurnIntent, ms: number, skipped: boolean, route: TurnRoute & { declaredTools: number }) => void;
+    /** The same judgment settled the turn to one action, run with no model
+     * round; null when it did not and the loop runs. */
+    onInstant?: (action: ResolvedAction | null, ms: number) => void;
     /** The model widened its catalog mid-turn: a routing miss. */
     onRequestTools?: (areas: string[]) => void;
     /** One LLM round settled: wall time, and time to its first visible delta. */
@@ -491,36 +502,45 @@ export interface TurnVerdict {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** The turn's route: one judge call over the newest message, the recent
- * turns, and the editor slice, composed under the thresholds. A message
- * complex on sight keeps its intent and takes the skill and areas. Fails
- * open — a call that fails runs the full model with every area and no
- * skill. */
-export async function judgeTurn(
+/** The turn's route and the one action it could run without a model, judged
+ * together. Both read the same state, and questions in one request are
+ * answered in parallel, so the instant path costs the turn no wall time of
+ * its own and no second round trip. Fails open: anything that throws — the
+ * call, the snapshot, the composition — runs the full model with every area,
+ * no skill and no instant action. */
+export async function judgeTurnAndAction(
   messages: UIMessage[],
   context: unknown,
   deps: CutAgentDeps,
   abortSignal?: AbortSignal
-): Promise<TurnVerdict> {
+): Promise<{ verdict: TurnVerdict; instant: ResolvedAction | null }> {
   const settings = deps.judgeSettings ?? cutJudge();
   const lastUser = messages.findLast((m) => m.role === "user");
   const onSight = complexOnSight(lastUser);
   if (onSight && !settings.skillSuggestion && !settings.toolRouting)
-    return { route: routeTurn(null, settings), skipped: true };
+    return { verdict: { route: routeTurn(null, settings), skipped: true }, instant: null };
+
   let route: TurnRoute;
+  let instant: ResolvedAction | null = null;
   try {
+    // An attachment or a resumed turn is never one known action on its own.
+    const snap = instantSnapshot(context);
+    const instantQs = onSight || !settings.instantAction ? {} : instantQuestions(snap);
     const { answers } = await askJudge(
       deps.judge,
-      judgeTurnState(messages, context),
-      TURN_JUDGE_QUESTIONS,
+      instantState(messages, context),
+      { ...TURN_JUDGE_QUESTIONS, ...instantQs },
       abortSignal
     );
     route = routeTurn(answers as unknown as TurnJudgeAnswers, settings);
+    if (Object.keys(instantQs).length > 0)
+      instant = instantAction(answers as unknown as InstantAnswers, snap, settings);
   } catch {
     route = routeTurn(null, settings);
+    instant = null;
   }
   if (onSight) route.intent = "complex";
-  return { route, skipped: onSight };
+  return { verdict: { route, skipped: onSight }, instant };
 }
 
 /** The skill the judge attaches to a turn the engine's own chat runs: the
@@ -576,6 +596,85 @@ async function buildPrompt(
   return { role: "user", content: [{ type: "text", text }], timestamp: Date.now(), wireParts };
 }
 
+/** The usage a synthesized assistant message carries: none, because no model
+ * ran. Same template the legacy-thread converter uses. */
+const NO_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+} as const;
+
+/** Run the action the judgment settled on, stream it as the chunks a
+ * single-tool turn emits, and leave the thread's context holding the ask,
+ * the call, its result and the line — the four messages a model round would
+ * have written. False when the tool threw, and the caller runs the loop. */
+async function runInstantAction(
+  action: ResolvedAction,
+  ctx: {
+    threadId: string;
+    messages: UIMessage[];
+    lastUser: UIMessage | undefined;
+    prompt: UserMessage & WireCarrier;
+    deps: CutAgentDeps;
+    emit: (chunk: Record<string, unknown>) => void;
+  }
+): Promise<boolean> {
+  const { threadId, messages, lastUser, prompt, deps, emit } = ctx;
+  const toolCallId = crypto.randomUUID();
+  let output: unknown;
+  try {
+    output = await deps.execTool(action.tool, action.args);
+  } catch {
+    return false;
+  }
+  const result = toToolResult(action.tool, output);
+  emit({ type: "tool-input-available", toolCallId, toolName: action.tool, input: action.args });
+  emit({ type: "tool-output-available", toolCallId, output: result.details?.response ?? null });
+  emit({ type: "text-start", id: "t1" });
+  emit({ type: "text-delta", id: "t1", delta: action.say });
+  emit({ type: "text-end", id: "t1" });
+
+  const now = Date.now();
+  const session: AgentMessage[] = [
+    ...sessionFor(threadId, messages.filter((m) => m !== lastUser)),
+    prompt as AgentMessage,
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: toolCallId, name: action.tool, arguments: action.args }],
+      api: "donkey-responses",
+      provider: "donkey",
+      model: "",
+      usage: NO_USAGE,
+      stopReason: "toolUse",
+      timestamp: now,
+    } as AgentMessage,
+    {
+      role: "toolResult",
+      toolCallId,
+      toolName: action.tool,
+      content: result.content,
+      details: result.details,
+      isError: false,
+      timestamp: now,
+    } as AgentMessage,
+    {
+      role: "assistant",
+      content: [{ type: "text", text: action.say }],
+      api: "donkey-responses",
+      provider: "donkey",
+      model: "",
+      usage: NO_USAGE,
+      stopReason: "stop",
+      timestamp: now,
+    } as AgentMessage,
+  ];
+  keepSession(threadId, sanitizeSession(session));
+  return true;
+}
+
 /** One chat turn on the pi harness, streamed as UI chunks. Same contract as
  * the legacy streamGeminiChat, plus the thread id that keys the session. */
 export function streamCutChat({
@@ -604,16 +703,25 @@ export function streamCutChat({
         const context = deps.buildContext();
         const promptPromise = buildPrompt(lastUser, deps, context);
         const settings = deps.judgeSettings ?? cutJudge();
-        const verdictPromise = judgeTurn(messages, context, deps, abortSignal);
+        // One judgment settles both: how the turn is routed, and whether it
+        // is a single known action the editor can carry out on its own.
+        const decision = judgeTurnAndAction(messages, context, deps, abortSignal);
+        const verdictPromise = decision.then((d) => d.verdict);
         // The route once it has landed, read by every round after.
         let settled: TurnRoute | null = null;
-        void verdictPromise.then(({ route, skipped }) => {
-          settled = route;
-          deps.hooks?.onGate?.(route.intent, performance.now() - gateStart, skipped, {
-            ...route,
-            declaredTools: route.intent === "chat" ? 0 : CORE_TOOLS.length + areaTools(route.areas).length,
-          });
-        });
+        void decision
+          .then(({ verdict: { route, skipped }, instant }) => {
+            settled = route;
+            const ms = performance.now() - gateStart;
+            deps.hooks?.onGate?.(route.intent, ms, skipped, {
+              ...route,
+              declaredTools: route.intent === "chat" ? 0 : CORE_TOOLS.length + areaTools(route.areas).length,
+            });
+            deps.hooks?.onInstant?.(instant, ms);
+          })
+          // This branch only reports. The turn reads the decision through
+          // its own awaits, inside the try that answers the user.
+          .catch(() => {});
 
         const roundBudget = deps.limits?.roundBudget ?? ROUND_BUDGET;
         const maxExtensions = deps.limits?.maxExtensions ?? MAX_EXTENSIONS;
@@ -883,8 +991,8 @@ export function streamCutChat({
           // route, before there is an agent to abort, so the discard is a
           // flag the run reads as well as an abort it may not receive.
           let discarded = false;
-          const watcher = verdictPromise.then(({ route }) => {
-            if (route.intent === "simple") {
+          const watcher = decision.then(({ verdict: { route }, instant }) => {
+            if (!instant && route.intent === "simple") {
               mode = "live";
               for (const c of buffer.splice(0)) emit(c);
               return true;
@@ -899,7 +1007,10 @@ export function streamCutChat({
             roundModel: deps.models.simple,
             withTools: true,
             send,
-            executionGate: async () => (await verdictPromise).route.intent === "simple",
+            executionGate: async () => {
+              const d = await decision;
+              return !d.instant && d.verdict.route.intent === "simple";
+            },
             cancelled: () => discarded,
             onAgent: (a) => {
               speculating = a;
@@ -910,6 +1021,24 @@ export function streamCutChat({
             finalize(run);
             kept = true;
           }
+        }
+        // The instant path: the judgment settled the turn to one action, so
+        // the editor runs it and writes the line, with no model round at all.
+        // The chunks are the ones a single-tool turn emits, in the same
+        // order, so the chip, the timing readout and the transcript are
+        // identical. A tool that throws is discarded whole — the loop runs
+        // instead and the model reports the failure properly.
+        const instant = (await decision).instant;
+        if (!kept && instant && !abortSignal?.aborted) {
+          const done = await runInstantAction(instant, {
+            threadId,
+            messages,
+            lastUser,
+            prompt: await promptPromise,
+            deps,
+            emit,
+          });
+          kept = done;
         }
         if (!kept && !abortSignal?.aborted) {
           const { intent } = (await verdictPromise).route;
