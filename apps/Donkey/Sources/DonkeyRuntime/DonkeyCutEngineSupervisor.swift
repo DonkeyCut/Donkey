@@ -27,6 +27,10 @@ public final class DonkeyCutEngineSupervisor: @unchecked Sendable {
     /// and a release engine coexist instead of killing each other; the release build omits the
     /// key and takes the default, which matches the hosted client's target (DEFAULT_ENGINE_PORT
     /// in site/src/cut/lib/ports.ts).
+    /// The port this build's engine is on, for anything in the app that has to
+    /// reach it — the phone link forwards a paired phone's clips to it.
+    public static var enginePort: Int { port }
+
     private static let port: Int = {
         let raw = Bundle.main.object(forInfoDictionaryKey: "DonkeyCutEnginePort")
         if let n = raw as? Int { return n }

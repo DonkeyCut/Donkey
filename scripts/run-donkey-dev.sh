@@ -344,6 +344,12 @@ write_info_plist() {
   <string>Donkey may search Desktop files only when you ask it to find or open a local item.</string>
   <key>NSDocumentsFolderUsageDescription</key>
   <string>Donkey may search Documents files only when you ask it to find or open a local item.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Donkey receives video from your iPhone over the local network.</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_donkeycut._tcp</string>
+  </array>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Donkey may search Downloads files only when you ask it to find or open a local item.</string>
   <key>NSAppleMusicUsageDescription</key>

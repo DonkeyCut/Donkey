@@ -531,6 +531,15 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
        TCC-protected; without this string the write is denied and the app is killed. -->
   <key>NSDesktopFolderUsageDescription</key>
   <string>Donkey saves your screen recordings to the Desktop.</string>
+  <!-- The phone link (PhoneLinkListener) advertises a Bonjour service on peer-to-peer Wi-Fi so an
+       iPhone in the field can hand its clips to this Mac. Without these two keys macOS denies the
+       listener and the phone never sees the Mac. -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Donkey receives video from your iPhone over the local network.</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_donkeycut._tcp</string>
+  </array>
 $SPARKLE_PLIST_KEYS
 </dict>
 </plist>

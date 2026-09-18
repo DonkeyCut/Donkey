@@ -19,6 +19,9 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The QuickTime-style screen recorder: a menu bar toggle, a center-bottom control bar, and the
     /// region/window pickers.
     private var screenRecordingController: ScreenRecordingController?
+    /// Takes clips off a paired iPhone over peer-to-peer Wi-Fi and hands them to the engine, so a
+    /// phone shooting in the field reaches the open editor with no network of any kind.
+    private var phoneLinkListener: PhoneLinkListener?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Build the recorder before the status item so its menu can drive the "Record Screen" item.
@@ -36,6 +39,17 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             cutEngineSupervisor.setSessionActive(false)
         }
         cutEngineSupervisor.start()
+
+        // The link forwards to that engine, so it follows the same console rule:
+        // off console it advertises nothing, because the engine on the port
+        // belongs to whichever session owns the screen.
+        let phoneLinkListener = PhoneLinkListener(enginePort: DonkeyCutEngineSupervisor.enginePort)
+        self.phoneLinkListener = phoneLinkListener
+        if !Self.sessionIsOnConsole {
+            phoneLinkListener.setSessionActive(false)
+        }
+        phoneLinkListener.start()
+
         observeSessionSwitches()
     }
 
@@ -44,6 +58,7 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        phoneLinkListener?.stop()
         cutEngineSupervisor?.stop()
     }
 
@@ -64,14 +79,20 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.cutEngineSupervisor?.setSessionActive(true) }
+            MainActor.assumeIsolated {
+                self?.cutEngineSupervisor?.setSessionActive(true)
+                self?.phoneLinkListener?.setSessionActive(true)
+            }
         }
         center.addObserver(
             forName: NSWorkspace.sessionDidResignActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.cutEngineSupervisor?.setSessionActive(false) }
+            MainActor.assumeIsolated {
+                self?.cutEngineSupervisor?.setSessionActive(false)
+                self?.phoneLinkListener?.setSessionActive(false)
+            }
         }
     }
 
