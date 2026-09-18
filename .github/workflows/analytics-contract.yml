@@ -1,9 +1,9 @@
 name: Analytics Contract
 
-# The phone decodes the analytics rollup the site's nightly pipeline writes.
-# The site test regenerates the rollup from the pipeline and fails when the
-# checked-in fixture is behind it; the DonkeyKit tests decode that fixture.
-# Together they fail any change that moves the rollup's shape without the
+# The phone decodes the analytics summary the site folds out of its nightly
+# rollup. The site test rebuilds that summary from the pipeline and fails when
+# the checked-in fixture is behind it; the DonkeyKit tests decode that fixture.
+# Together they fail any change that moves the summary's shape without the
 # phone's model moving with it.
 #
 # The fixture's bytes follow whatever the pipeline imports (the referral

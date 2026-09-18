@@ -1,26 +1,25 @@
 import Foundation
 
-/// The nightly analytics rollup as /api/analytics/rollup serves it, pared to
-/// the fields the phone renders.
-nonisolated public struct AnalyticsRollup: Decodable, Sendable {
-    nonisolated public struct MissingEntry: Decodable, Sendable {
+/// The analytics summary as /api/analytics/summary serves it, pared to the
+/// fields the phone renders. The server folds the nightly rollup into this —
+/// one point per day plus the headline numbers — so the phone reads tens of
+/// kilobytes whatever the account table does, and no one's email or balance
+/// rides along.
+nonisolated public struct AnalyticsSummaryDocument: Decodable, Sendable {
+    nonisolated public struct Day: Decodable, Sendable {
         public var day: String
+        /// Nil on a day the pipeline never extracted: unknown, not zero.
+        public var active: Int?
+        public var working: Int?
+        public var signups: Int
+        public var totalRegistered: Int
 
-        public init(day: String) {
+        public init(day: String, active: Int?, working: Int?, signups: Int, totalRegistered: Int) {
             self.day = day
-        }
-    }
-
-    nonisolated public struct User: Decodable, Sendable {
-        public var registeredAt: String
-        public var balanceMicros: String
-        /// One source bitmask per entry of `days`.
-        public var activity: [Int]
-
-        public init(registeredAt: String, balanceMicros: String, activity: [Int]) {
-            self.registeredAt = registeredAt
-            self.balanceMicros = balanceMicros
-            self.activity = activity
+            self.active = active
+            self.working = working
+            self.signups = signups
+            self.totalRegistered = totalRegistered
         }
     }
 
@@ -72,38 +71,53 @@ nonisolated public struct AnalyticsRollup: Decodable, Sendable {
     }
 
     public var generatedAt: String
-    /// Oldest → newest; every user's activity array aligns with this.
-    public var days: [String]
-    /// Bit order of the activity masks.
-    public var sources: [String]
+    /// One entry per day of the activity window, oldest → newest.
+    public var series: [Day]
+    public var registered: Int
+    public var signups7d: Int
+    public var signupsWindow: Int
+    public var activeYesterday: Int?
+    public var active7d: Int?
+    public var activePrior7d: Int?
+    /// Credit held across every account, micros as a decimal string.
+    public var balanceMicros: String
     /// Days the consolidation could not read; their counts are unknown.
-    public var missing: [MissingEntry]
-    /// Absent from rollups written before billing shipped.
+    public var missing: [String]
+    /// Absent from summaries of rollups written before billing shipped.
     public var billing: Billing?
-    public var users: [User]
 
     public init(
         generatedAt: String,
-        days: [String],
-        sources: [String],
-        missing: [MissingEntry],
-        billing: Billing?,
-        users: [User]
+        series: [Day],
+        registered: Int,
+        signups7d: Int,
+        signupsWindow: Int,
+        activeYesterday: Int?,
+        active7d: Int?,
+        activePrior7d: Int?,
+        balanceMicros: String,
+        missing: [String],
+        billing: Billing?
     ) {
         self.generatedAt = generatedAt
-        self.days = days
-        self.sources = sources
+        self.series = series
+        self.registered = registered
+        self.signups7d = signups7d
+        self.signupsWindow = signupsWindow
+        self.activeYesterday = activeYesterday
+        self.active7d = active7d
+        self.activePrior7d = activePrior7d
+        self.balanceMicros = balanceMicros
         self.missing = missing
         self.billing = billing
-        self.users = users
     }
 
     /// Decodes the API's JSON. A body this build cannot read fails as
     /// `AnalyticsError.unreadable` naming the field, so the screen says
     /// which part of the contract moved.
-    public static func decode(_ data: Data) throws -> AnalyticsRollup {
+    public static func decode(_ data: Data) throws -> AnalyticsSummaryDocument {
         do {
-            return try JSONDecoder().decode(AnalyticsRollup.self, from: data)
+            return try JSONDecoder().decode(AnalyticsSummaryDocument.self, from: data)
         } catch let error as DecodingError {
             throw AnalyticsError.unreadable(mismatch(error))
         } catch {
@@ -111,48 +125,139 @@ nonisolated public struct AnalyticsRollup: Decodable, Sendable {
         }
     }
 
-    /// "billing.canceling is not an array", "users[0].activity is missing".
+    /// "billing.canceling is not an array", "series[0].signups is missing".
     static func mismatch(_ error: DecodingError) -> String {
-        func path(_ context: DecodingError.Context) -> String {
-            let joined = context.codingPath.reduce(into: "") { text, key in
-                if let index = key.intValue {
-                    text += "[\(index)]"
-                } else {
-                    text += text.isEmpty ? key.stringValue : ".\(key.stringValue)"
-                }
-            }
-            return joined.isEmpty ? "the rollup" : joined
+        analyticsMismatch(error, whole: "the summary")
+    }
+}
+
+/// One page of accounts as /api/analytics/users answers it: the server ranks
+/// the whole window and hands back a page plus the cursor for the next one.
+/// The web dashboard reads the same endpoint the same way.
+nonisolated public struct AnalyticsUsersPage: Decodable, Sendable {
+    nonisolated public struct Person: Decodable, Sendable, Identifiable {
+        public var id: String
+        public var email: String
+        public var name: String
+        public var registeredAt: String
+        public var balanceMicros: String
+        /// All-time paid charges; absent for accounts that never paid.
+        public var fundedMicros: String?
+        public var superUser: Bool?
+        public var activeDays: Int
+
+        public init(
+            id: String,
+            email: String,
+            name: String,
+            registeredAt: String,
+            balanceMicros: String,
+            fundedMicros: String? = nil,
+            superUser: Bool? = nil,
+            activeDays: Int
+        ) {
+            self.id = id
+            self.email = email
+            self.name = name
+            self.registeredAt = registeredAt
+            self.balanceMicros = balanceMicros
+            self.fundedMicros = fundedMicros
+            self.superUser = superUser
+            self.activeDays = activeDays
         }
-        func name(_ type: Any.Type) -> String {
-            switch type {
-            case is String.Type: return "a string"
-            case is Bool.Type: return "a boolean"
-            case is Int.Type, is Double.Type, is Float.Type, is Int64.Type, is UInt.Type: return "a number"
-            default:
-                let text = String(describing: type)
-                if text.hasPrefix("Array<") { return "an array" }
-                if text.hasPrefix("Dictionary<") { return "an object" }
-                return text
-            }
+    }
+
+    /// The orders the API ranks by. They come off the wire so the phone offers
+    /// exactly what the server sorts by, and the web's chips read the same list.
+    nonisolated public struct Sort: Decodable, Sendable, Identifiable, Equatable {
+        public var id: String
+        public var label: String
+
+        public init(id: String, label: String) {
+            self.id = id
+            self.label = label
         }
-        switch error {
-        case .typeMismatch(let type, let context):
-            return "\(path(context)) is not \(name(type))"
-        case .valueNotFound(let type, let context):
-            return "\(path(context)) is null, expected \(name(type))"
-        case .keyNotFound(let key, let context):
-            let parent = path(context)
-            return parent == "the rollup" ? "\(key.stringValue) is missing" : "\(parent).\(key.stringValue) is missing"
-        case .dataCorrupted(let context):
-            return context.debugDescription
-        @unknown default:
-            return String(describing: error)
+    }
+
+    /// The rollup these ranks came from. A page stamped with a different one
+    /// belongs to a different order.
+    public var generatedAt: String
+    public var users: [Person]
+    public var total: Int
+    /// The offset of the next page, or nil at the end of the list.
+    public var nextCursor: Int?
+    public var sorts: [Sort]
+    public var pageSize: Int
+
+    public init(
+        generatedAt: String,
+        users: [Person],
+        total: Int,
+        nextCursor: Int?,
+        sorts: [Sort],
+        pageSize: Int
+    ) {
+        self.generatedAt = generatedAt
+        self.users = users
+        self.total = total
+        self.nextCursor = nextCursor
+        self.sorts = sorts
+        self.pageSize = pageSize
+    }
+
+    public static func decode(_ data: Data) throws -> AnalyticsUsersPage {
+        do {
+            return try JSONDecoder().decode(AnalyticsUsersPage.self, from: data)
+        } catch let error as DecodingError {
+            throw AnalyticsError.unreadable(analyticsMismatch(error, whole: "the page"))
+        } catch {
+            throw AnalyticsError.unreadable(error.localizedDescription)
         }
     }
 }
 
-/// The rollup reduced to what the dashboard draws: one point per day plus the
-/// headline numbers. Pure derivation, mirrored from the web dashboard.
+/// Names the field a decoder tripped on, so a screen can say which part of the
+/// contract moved: "billing.canceling is not an array", "users[0].email is
+/// missing".
+nonisolated func analyticsMismatch(_ error: DecodingError, whole: String) -> String {
+    func path(_ context: DecodingError.Context) -> String {
+        let joined = context.codingPath.reduce(into: "") { text, key in
+            if let index = key.intValue {
+                text += "[\(index)]"
+            } else {
+                text += text.isEmpty ? key.stringValue : ".\(key.stringValue)"
+            }
+        }
+        return joined.isEmpty ? whole : joined
+    }
+    func name(_ type: Any.Type) -> String {
+        switch type {
+        case is String.Type: return "a string"
+        case is Bool.Type: return "a boolean"
+        case is Int.Type, is Double.Type, is Float.Type, is Int64.Type, is UInt.Type: return "a number"
+        default:
+            let text = String(describing: type)
+            if text.hasPrefix("Array<") { return "an array" }
+            if text.hasPrefix("Dictionary<") { return "an object" }
+            return text
+        }
+    }
+    switch error {
+    case .typeMismatch(let type, let context):
+        return "\(path(context)) is not \(name(type))"
+    case .valueNotFound(let type, let context):
+        return "\(path(context)) is null, expected \(name(type))"
+    case .keyNotFound(let key, let context):
+        let parent = path(context)
+        return parent == whole ? "\(key.stringValue) is missing" : "\(parent).\(key.stringValue) is missing"
+    case .dataCorrupted(let context):
+        return context.debugDescription
+    @unknown default:
+        return String(describing: error)
+    }
+}
+
+/// The summary in the shapes the charts draw: days as dates, money as dollars.
 nonisolated public struct AnalyticsSummary: Sendable, Equatable {
     nonisolated public struct DayPoint: Sendable, Equatable, Identifiable {
         public var day: Date
@@ -212,51 +317,18 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
     public var missingDayCount: Int
     public var generatedAt: Date?
 
-    public init(rollup: AnalyticsRollup) {
-        // Any source bit marks a day active; the DB sources mark it working.
-        let workBits = rollup.sources.enumerated().reduce(0) { mask, entry in
-            entry.element == "posthog" ? mask : mask | (1 << entry.offset)
+    public init(document: AnalyticsSummaryDocument) {
+        points = document.series.map { day in
+            DayPoint(
+                day: Self.date(fromDay: day.day),
+                active: day.active,
+                working: day.working,
+                signups: day.signups,
+                totalRegistered: day.totalRegistered
+            )
         }
-        let missingDays = Set(rollup.missing.map(\.day))
-
-        var signupsByDay: [String: Int] = [:]
-        for user in rollup.users {
-            signupsByDay[String(user.registeredAt.prefix(10)), default: 0] += 1
-        }
-
-        // Cumulative registrations start from everyone who signed up before
-        // the window, so the total line carries the real base.
-        let firstDay = rollup.days.first ?? ""
-        var totalRegistered = rollup.users.filter { String($0.registeredAt.prefix(10)) < firstDay }.count
-
-        var points: [DayPoint] = []
-        for (i, day) in rollup.days.enumerated() {
-            let signups = signupsByDay[day] ?? 0
-            totalRegistered += signups
-            var active: Int?
-            var working: Int?
-            if !missingDays.contains(day) {
-                var visited = 0
-                var worked = 0
-                for user in rollup.users {
-                    let mask = i < user.activity.count ? user.activity[i] : 0
-                    if mask != 0 { visited += 1 }
-                    if mask & workBits != 0 { worked += 1 }
-                }
-                active = visited
-                working = worked
-            }
-            points.append(DayPoint(
-                day: Self.date(fromDay: day),
-                active: active,
-                working: working,
-                signups: signups,
-                totalRegistered: totalRegistered
-            ))
-        }
-
         // Money rides the billing window, which runs through today.
-        let revenue = rollup.billing.map { billing in
+        let revenue = document.billing.map { billing in
             zip(billing.days, billing.revenue).map { day, entry in
                 RevenuePoint(
                     day: Self.date(fromDay: day),
@@ -265,48 +337,33 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
                 )
             }
         } ?? []
-
-        // Counts users active on any known day in the range; nil when the
-        // whole range went unextracted.
-        let activeInRange = { (from: Int, to: Int) -> Int? in
-            let known = (max(0, from)..<max(0, to)).filter { !missingDays.contains(rollup.days[$0]) }
-            guard !known.isEmpty else { return nil }
-            return rollup.users.filter { user in
-                known.contains { ($0 < user.activity.count ? user.activity[$0] : 0) != 0 }
-            }.count
-        }
-
-        let len = rollup.days.count
-        let active7d = activeInRange(len - 7, len)
-        let activePrior7d = activeInRange(len - 14, len - 7)
-
-        self.points = points
         self.revenue = revenue
-        registered = rollup.users.count
-        signups7d = rollup.days.suffix(7).reduce(0) { $0 + (signupsByDay[$1] ?? 0) }
-        signupsWindow = points.reduce(0) { $0 + $1.signups }
-        activeYesterday = points.last?.active ?? nil
-        self.active7d = active7d
-        weekDeltaPercent = if let active7d, let activePrior7d, activePrior7d > 0 {
-            Double(active7d - activePrior7d) / Double(activePrior7d) * 100
+        registered = document.registered
+        signups7d = document.signups7d
+        signupsWindow = document.signupsWindow
+        activeYesterday = document.activeYesterday
+        active7d = document.active7d
+        weekDeltaPercent = if let active7d = document.active7d,
+            let prior = document.activePrior7d, prior > 0 {
+            Double(active7d - prior) / Double(prior) * 100
         } else {
             nil
         }
-        balanceDollars = rollup.users.reduce(0) { $0 + Self.dollars(fromMicros: $1.balanceMicros) }
-        subscribers = rollup.billing?.subscribers
-        canceling = rollup.billing?.canceling.count
-        funded = rollup.billing?.funded
-        fundedDollars = rollup.billing.map { Self.dollars(fromMicros: $0.fundedMicros) }
-        revenueDollars = rollup.billing.map { _ in revenue.reduce(0) { $0 + $1.revenueDollars } }
-        missingDayCount = missingDays.count
-        generatedAt = Self.timestamp(from: rollup.generatedAt)
+        balanceDollars = Self.dollars(fromMicros: document.balanceMicros)
+        subscribers = document.billing?.subscribers
+        canceling = document.billing?.canceling.count
+        funded = document.billing?.funded
+        fundedDollars = document.billing.map { Self.dollars(fromMicros: $0.fundedMicros) }
+        revenueDollars = document.billing.map { _ in revenue.reduce(0) { $0 + $1.revenueDollars } }
+        missingDayCount = document.missing.count
+        generatedAt = Self.timestamp(from: document.generatedAt)
     }
 
     private static func dollars(fromMicros micros: String) -> Double {
         (Double(micros) ?? 0) / 1_000_000
     }
 
-    /// "YYYY-MM-DD" as midnight UTC, matching the rollup's day keys.
+    /// "YYYY-MM-DD" as midnight UTC, matching the summary's day keys.
     private static func date(fromDay day: String) -> Date {
         let parts = day.split(separator: "-").compactMap { Int($0) }
         var components = DateComponents()
@@ -322,7 +379,7 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
         return calendar
     }()
 
-    /// The rollup stamps milliseconds (JS toISOString).
+    /// The summary stamps milliseconds (JS toISOString).
     private static func timestamp(from string: String) -> Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -334,14 +391,15 @@ nonisolated public struct AnalyticsSummary: Sendable, Equatable {
 nonisolated public enum AnalyticsError: Error, Equatable {
     /// The nightly job hasn't written a rollup yet.
     case noRollup
-    /// The answer came back, and it was not a rollup this build can read;
+    /// The answer came back, and it was not a summary this build can read;
     /// the text names the field that moved.
     case unreadable(String)
 }
 
 /// What the app target's CutCloudClient does for the analytics dashboard.
 public protocol AnalyticsServicing: AnyObject {
-    func fetchAnalyticsRollup() async throws -> AnalyticsRollup
+    func fetchAnalyticsSummary() async throws -> AnalyticsSummaryDocument
+    func fetchAnalyticsUsers(sort: String, cursor: Int) async throws -> AnalyticsUsersPage
 }
 
 @Observable
@@ -357,13 +415,82 @@ public final class AnalyticsModel {
 
     public private(set) var state: State = .loading
 
+    /// The accounts list, in the order the API ranked them. It arrives a page
+    /// at a time — the phone asks for the first page and follows the cursor,
+    /// exactly as the web dashboard does — so neither client ever holds the
+    /// whole account table.
+    public private(set) var people: [AnalyticsUsersPage.Person] = []
+    /// The orders the API offers, as it named them.
+    public private(set) var sorts: [AnalyticsUsersPage.Sort] = []
+    public private(set) var sort = "active"
+    public private(set) var peopleTotal = 0
+    public private(set) var isLoadingPeople = false
+    /// Set when a page failed; the list keeps whatever already loaded.
+    public private(set) var peopleError: String?
+    /// The offset of the next page, or nil at the end of the list.
+    private var nextCursor: Int? = 0
+    /// The rollup the loaded pages were ranked against.
+    private var peopleStamp: String?
+
     private let service: any AnalyticsServicing
 
     public init(service: any AnalyticsServicing) {
         self.service = service
     }
 
-    /// Fetches the rollup. A refresh over loaded data keeps the charts up
+    /// Whether another page exists to ask for.
+    public var hasMorePeople: Bool { nextCursor != nil }
+
+    /// Loads the next page, if there is one and none is in flight. The list
+    /// view calls this as its last row comes into view.
+    public func loadMorePeople() async {
+        guard !isLoadingPeople, let cursor = nextCursor else { return }
+        await loadPeople(cursor: cursor)
+    }
+
+    /// Switches the order. Ranks are per order, so the list starts over.
+    public func choosePeople(sort: String) async {
+        guard sort != self.sort else { return }
+        self.sort = sort
+        resetPeople()
+        await loadPeople(cursor: 0)
+    }
+
+    private func resetPeople() {
+        people = []
+        peopleTotal = 0
+        nextCursor = 0
+        peopleStamp = nil
+        peopleError = nil
+    }
+
+    private func loadPeople(cursor: Int) async {
+        isLoadingPeople = true
+        defer { isLoadingPeople = false }
+        do {
+            let page = try await service.fetchAnalyticsUsers(sort: sort, cursor: cursor)
+            // A nightly run landing while the list is open reorders the ranks,
+            // so pages from the older order are dropped rather than stitched
+            // onto the new one.
+            if let stamp = peopleStamp, stamp != page.generatedAt, cursor > 0 {
+                resetPeople()
+                await loadPeople(cursor: 0)
+                return
+            }
+            peopleStamp = page.generatedAt
+            people = cursor == 0 ? page.users : people + page.users
+            peopleTotal = page.total
+            nextCursor = page.nextCursor
+            if !page.sorts.isEmpty { sorts = page.sorts }
+            peopleError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            peopleError = Self.reason(for: error)
+        }
+    }
+
+    /// Fetches the summary. A refresh over loaded data keeps the charts up
     /// while it runs and on failure; a retry over a failure spins, so the tap
     /// shows something happening. A first load surfaces the error, saying
     /// which one it was — a failure that only reads "try again" tells nobody
@@ -373,8 +500,12 @@ public final class AnalyticsModel {
     public func refresh() async {
         if case .failed = state { state = .loading }
         do {
-            let rollup = try await service.fetchAnalyticsRollup()
-            state = .loaded(AnalyticsSummary(rollup: rollup))
+            let document = try await service.fetchAnalyticsSummary()
+            state = .loaded(AnalyticsSummary(document: document))
+            // The numbers and the list come from the same rollup, so a refresh
+            // takes the list back to its first page.
+            resetPeople()
+            await loadPeople(cursor: 0)
         } catch AnalyticsError.noRollup {
             state = .empty
         } catch is CancellationError {
@@ -394,9 +525,9 @@ public final class AnalyticsModel {
         case CloudSyncError.unreachable(let reach, let code):
             "\(reach.sentence) (\(code))"
         case AnalyticsError.unreadable(let detail):
-            "The rollup came back in a shape this build doesn't read: \(detail)."
+            "The summary came back in a shape this build doesn't read: \(detail)."
         default:
-            "The rollup didn't load. Try again."
+            "The summary didn't load. Try again."
         }
     }
 }

@@ -1,17 +1,22 @@
-// The rollup the phone's model is tested against. It is the real consolidation
-// (buildRollup) run over a small fixed record, so the JSON says exactly what
-// the nightly job writes today.
+// The summary the phone's model is tested against. It is the real
+// consolidation (buildRollup) run over a small fixed record, folded by the
+// same summarizeRollup the API answers with, so the JSON says exactly what
+// /api/analytics/summary serves today.
 //
 // The checked-in copy lives with the DonkeyKit tests; `npm run
-// analytics:rollup-fixture` rewrites it. rollup-fixture.test.ts fails while
+// analytics:summary-fixture` rewrites it. summary-fixture.test.ts fails while
 // the copy is behind this code, and the DonkeyKit tests decode the copy, so a
-// change to the rollup's shape reaches the phone in the same change.
+// change to the summary's shape reaches the phone in the same change.
 import { buildRollup } from "./pipeline";
+import { rankUsers, USER_SORTS, USERS_PAGE_SIZE, type AnalyticsUsersPage } from "./rank";
+import { summarizeRollup, type AnalyticsSummary } from "./summarize";
 import type { AnalyticsRollup, AnalyticsSnapshotFile } from "./schema";
 import type { AnalyticsDayFiles } from "./pipeline";
 
-export const ROLLUP_FIXTURE_PATH =
-  "apps/ios/DonkeyKit/Tests/DonkeyKitModelsTests/Fixtures/analytics-rollup.json";
+export const SUMMARY_FIXTURE_PATH =
+  "apps/ios/DonkeyKit/Tests/DonkeyKitModelsTests/Fixtures/analytics-summary.json";
+export const USERS_FIXTURE_PATH =
+  "apps/ios/DonkeyKit/Tests/DonkeyKitModelsTests/Fixtures/analytics-users.json";
 
 // Three closed days of activity, and a billing window that runs one day
 // further, to today: the two windows never line up by index.
@@ -95,6 +100,29 @@ export function buildRollupFixture(): Promise<AnalyticsRollup> {
   });
 }
 
-export async function rollupFixtureJson(): Promise<string> {
-  return `${JSON.stringify(await buildRollupFixture(), null, 2)}\n`;
+export async function buildSummaryFixture(): Promise<AnalyticsSummary> {
+  return summarizeRollup(await buildRollupFixture());
+}
+
+export async function summaryFixtureJson(): Promise<string> {
+  return `${JSON.stringify(await buildSummaryFixture(), null, 2)}\n`;
+}
+
+/** The first page of accounts, exactly as the users route answers it. */
+export async function buildUsersFixture(): Promise<AnalyticsUsersPage> {
+  const rollup = await buildRollupFixture();
+  const ranked = rankUsers(rollup, "active");
+  const end = USERS_PAGE_SIZE;
+  return {
+    generatedAt: rollup.generatedAt,
+    nextCursor: end >= ranked.length ? null : end,
+    pageSize: USERS_PAGE_SIZE,
+    sorts: USER_SORTS,
+    total: ranked.length,
+    users: ranked.slice(0, end),
+  };
+}
+
+export async function usersFixtureJson(): Promise<string> {
+  return `${JSON.stringify(await buildUsersFixture(), null, 2)}\n`;
 }

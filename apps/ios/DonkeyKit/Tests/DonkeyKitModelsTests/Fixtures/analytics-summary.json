@@ -1,4 +1,8 @@
 {
+  "active7d": 3,
+  "activePrior7d": null,
+  "activeYesterday": 3,
+  "balanceMicros": "3500000",
   "billing": {
     "canceling": [
       {
@@ -119,13 +123,7 @@
   ],
   "generatedAt": "2026-09-02T04:00:00.000Z",
   "missing": [
-    {
-      "day": "2026-08-31",
-      "sources": [
-        "db",
-        "posthog"
-      ]
-    }
+    "2026-08-31"
   ],
   "referrals": {
     "days": [
@@ -173,6 +171,32 @@
       "other"
     ]
   },
+  "registered": 3,
+  "series": [
+    {
+      "active": 2,
+      "day": "2026-08-30",
+      "signups": 0,
+      "totalRegistered": 2,
+      "working": 2
+    },
+    {
+      "active": null,
+      "day": "2026-08-31",
+      "signups": 1,
+      "totalRegistered": 3,
+      "working": null
+    },
+    {
+      "active": 3,
+      "day": "2026-09-01",
+      "signups": 0,
+      "totalRegistered": 3,
+      "working": 1
+    }
+  ],
+  "signups7d": 1,
+  "signupsWindow": 1,
   "sources": [
     "inference",
     "renders",
@@ -181,53 +205,6 @@
     "templates",
     "creditLedger",
     "posthog"
-  ],
-  "users": [
-    {
-      "activity": [
-        0,
-        0,
-        64
-      ],
-      "balanceMicros": "0",
-      "email": "n@x.test",
-      "fundedMicros": "5000000",
-      "id": "u_new",
-      "name": "New Person",
-      "registeredAt": "2026-08-31T12:00:00.000Z",
-      "storageBytes": "0",
-      "storageQuotaBytes": 262144000
-    },
-    {
-      "activity": [
-        65,
-        0,
-        64
-      ],
-      "balanceMicros": "3000000",
-      "email": "p@x.test",
-      "fundedMicros": "20000000",
-      "id": "u_pro",
-      "name": "Pro Person",
-      "registeredAt": "2026-08-01T10:00:00.000Z",
-      "storageBytes": "1048576",
-      "storageQuotaBytes": 107374182400
-    },
-    {
-      "activity": [
-        2,
-        0,
-        2
-      ],
-      "balanceMicros": "500000",
-      "email": "s@x.test",
-      "id": "u_su",
-      "name": "Super Person",
-      "registeredAt": "2026-07-01T00:00:00.000Z",
-      "storageBytes": "0",
-      "storageQuotaBytes": null,
-      "superUser": true
-    }
   ],
   "version": 1
 }

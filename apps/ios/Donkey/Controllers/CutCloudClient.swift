@@ -708,17 +708,35 @@ extension CutCloudClient: CloudProjectsServicing {
 // MARK: - Analytics
 
 extension CutCloudClient: AnalyticsServicing {
-    /// The nightly analytics rollup. The API serves it to super users only,
-    /// so a regular account reads as unauthorized here.
-    func fetchAnalyticsRollup() async throws -> AnalyticsRollup {
-        let (data, http) = try await perform(try request("GET", "/api/analytics/rollup"))
+    /// The nightly rollup folded to the numbers the charts draw. The API
+    /// serves it to super users only, so a regular account reads as
+    /// unauthorized here.
+    func fetchAnalyticsSummary() async throws -> AnalyticsSummaryDocument {
+        let (data, http) = try await perform(try request("GET", "/api/analytics/summary"))
         switch http.statusCode {
         case 200..<300: break
         case 404: throw AnalyticsError.noRollup
         case 401, 403: throw CloudSyncError.unauthorized
         default: throw CloudSyncError.refused("The server answered \(http.statusCode).")
         }
-        return try AnalyticsRollup.decode(data)
+        return try AnalyticsSummaryDocument.decode(data)
+    }
+
+    /// One page of accounts in the API's rank order. The page size is the
+    /// server's; this follows the cursor it hands back.
+    func fetchAnalyticsUsers(sort: String, cursor: Int) async throws -> AnalyticsUsersPage {
+        let (data, http) = try await perform(try request(
+            "GET",
+            "/api/analytics/users",
+            query: [URLQueryItem(name: "sort", value: sort), URLQueryItem(name: "cursor", value: String(cursor))]
+        ))
+        switch http.statusCode {
+        case 200..<300: break
+        case 404: throw AnalyticsError.noRollup
+        case 401, 403: throw CloudSyncError.unauthorized
+        default: throw CloudSyncError.refused("The server answered \(http.statusCode).")
+        }
+        return try AnalyticsUsersPage.decode(data)
     }
 }
 

@@ -1,0 +1,80 @@
+{
+  "generatedAt": "2026-09-02T04:00:00.000Z",
+  "nextCursor": null,
+  "pageSize": 50,
+  "sorts": [
+    {
+      "id": "active",
+      "label": "Most active"
+    },
+    {
+      "id": "recent",
+      "label": "Recently active"
+    },
+    {
+      "id": "joined",
+      "label": "Newest"
+    },
+    {
+      "id": "paid",
+      "label": "Top paid"
+    }
+  ],
+  "total": 3,
+  "users": [
+    {
+      "activity": [
+        65,
+        0,
+        64
+      ],
+      "balanceMicros": "3000000",
+      "email": "p@x.test",
+      "fundedMicros": "20000000",
+      "id": "u_pro",
+      "name": "Pro Person",
+      "registeredAt": "2026-08-01T10:00:00.000Z",
+      "storageBytes": "1048576",
+      "storageQuotaBytes": 107374182400,
+      "activeDays": 2,
+      "lastActive": 2,
+      "score": 1.2557236642639067
+    },
+    {
+      "activity": [
+        0,
+        0,
+        64
+      ],
+      "balanceMicros": "0",
+      "email": "n@x.test",
+      "fundedMicros": "5000000",
+      "id": "u_new",
+      "name": "New Person",
+      "registeredAt": "2026-08-31T12:00:00.000Z",
+      "storageBytes": "0",
+      "storageQuotaBytes": 262144000,
+      "activeDays": 1,
+      "lastActive": 2,
+      "score": 0.35
+    },
+    {
+      "activity": [
+        2,
+        0,
+        2
+      ],
+      "balanceMicros": "500000",
+      "email": "s@x.test",
+      "id": "u_su",
+      "name": "Super Person",
+      "registeredAt": "2026-07-01T00:00:00.000Z",
+      "storageBytes": "0",
+      "storageQuotaBytes": null,
+      "superUser": true,
+      "activeDays": 2,
+      "lastActive": 2,
+      "score": 1.9057236642639066
+    }
+  ]
+}

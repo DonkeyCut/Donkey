@@ -223,14 +223,16 @@ platform has to be installed in Xcode (Settings → Components, or
 
 ### The analytics contract
 
-The Analytics screen decodes the rollup the site's nightly pipeline writes,
-and the two sides are held together by one fixture. The site builds it by
-running the real consolidation over a small fixed record, so the JSON is what
-the server serves today; the checked-in copy lives with the DonkeyKit tests,
-and the site's tests fail while that copy is behind the pipeline. The DonkeyKit
-tests decode the copy through the phone's model. Changing what the rollup
-carries means regenerating the fixture from `site/` with
-`npm run analytics:rollup-fixture` and running the DonkeyKit tests; the
+The Analytics screen reads what the web dashboard reads: the summary the site
+folds out of its nightly rollup — one point per day and the headline numbers,
+no account rows — and the accounts a page at a time, following the cursor the
+API hands back. Two fixtures hold the sides together: the site builds them by
+running the real consolidation over a small fixed record and folding it the way
+the API does, so the JSON is what the server serves today; the checked-in copies live
+with the DonkeyKit tests, and the site's tests fail while one is behind the
+pipeline. The DonkeyKit tests decode them through the phone's model. Changing
+what either carries means regenerating them from `site/` with
+`npm run analytics:summary-fixture` and running the DonkeyKit tests; the
 Analytics Contract workflow runs both on every change to either side, and the
 TestFlight script runs the DonkeyKit tests before it archives.
 

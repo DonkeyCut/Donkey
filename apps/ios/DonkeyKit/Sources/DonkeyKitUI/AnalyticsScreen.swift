@@ -34,7 +34,7 @@ public struct AnalyticsScreen: View {
                         Task { await analytics.refresh() }
                     }
                 case .loaded(let summary):
-                    SummaryList(summary: summary)
+                    SummaryList(analytics: analytics, summary: summary)
                         .refreshable { await analytics.refresh() }
                 }
             }
@@ -52,6 +52,7 @@ public struct AnalyticsScreen: View {
 }
 
 private struct SummaryList: View {
+    var analytics: AnalyticsModel
     let summary: AnalyticsSummary
 
     var body: some View {
@@ -99,6 +100,9 @@ private struct SummaryList: View {
                     ActiveChart(points: summary.points)
                 }
 
+                Divider()
+                PeopleSection(analytics: analytics)
+
                 if let generatedAt = summary.generatedAt {
                     Text("From the nightly rollup generated \(generatedAt.formatted(date: .abbreviated, time: .shortened)).")
                         .font(.caption)
@@ -145,6 +149,124 @@ private struct StatGrid: View {
                 sub: summary.funded.map { "by \($0.formatted()) people" } ?? "not in this rollup"
             )
         }
+    }
+}
+
+/// The accounts the API ranks, a page at a time. The rows arrive as the list
+/// reaches them: the last row asks for the next page, the same cursor the web
+/// grid follows.
+private struct PeopleSection: View {
+    var analytics: AnalyticsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("People")
+                    .font(.headline)
+                Spacer()
+                if !analytics.sorts.isEmpty {
+                    Menu {
+                        ForEach(analytics.sorts) { sort in
+                            Button(sort.label) {
+                                Task { await analytics.choosePeople(sort: sort.id) }
+                            }
+                        }
+                    } label: {
+                        Text(selectedLabel)
+                            .font(.footnote.weight(.medium))
+                    }
+                }
+            }
+            Text(caption)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(analytics.people) { person in
+                    PersonRow(person: person)
+                        .task {
+                            if person.id == analytics.people.last?.id {
+                                await analytics.loadMorePeople()
+                            }
+                        }
+                }
+                if let peopleError = analytics.peopleError {
+                    Text(peopleError)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 12)
+                } else if analytics.isLoadingPeople {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+            }
+            .padding(.top, 8)
+        }
+        .padding(.vertical, 20)
+        .task { await analytics.loadMorePeople() }
+    }
+
+    private var selectedLabel: String {
+        analytics.sorts.first { $0.id == analytics.sort }?.label ?? "Sort"
+    }
+
+    private var caption: String {
+        guard analytics.peopleTotal > 0 else { return "Accounts in rank order" }
+        return "\(analytics.people.count.formatted()) of \(analytics.peopleTotal.formatted()) accounts"
+    }
+}
+
+private struct PersonRow: View {
+    let person: AnalyticsUsersPage.Person
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(person.email)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                if person.superUser == true {
+                    Text("su")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                }
+            }
+            Text(sub)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+    }
+
+    private var sub: String {
+        var parts = [
+            person.activeDays == 0
+                ? "no activity"
+                : "\(person.activeDays) active \(person.activeDays == 1 ? "day" : "days")",
+            "joined \(joined)",
+            usd(person.balanceMicros),
+        ]
+        if let funded = person.fundedMicros {
+            parts.append("paid \(usd(funded))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func usd(_ micros: String) -> String {
+        dollars((Double(micros) ?? 0) / 1_000_000)
+    }
+
+    private var joined: String {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = iso.date(from: person.registeredAt) ?? ISO8601DateFormatter().date(from: person.registeredAt)
+        return date?.formatted(.dateTime.month(.abbreviated).day()) ?? String(person.registeredAt.prefix(10))
     }
 }
 
