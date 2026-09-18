@@ -4090,6 +4090,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   set_speed: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
+      refuseStillRetime(s, clip);
       const reverse = typeof input.reverse === "boolean" ? input.reverse : undefined;
       const smooth = typeof input.smooth === "boolean" ? input.smooth : undefined;
       if (!isNum(input.speed) && reverse === undefined && smooth === undefined)
@@ -4112,6 +4113,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   set_speed_curve: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
+      refuseStillRetime(s, clip);
       const before = clipLen(clip);
       if (typeof input.preset === "string") {
         if (Array.isArray(input.nodes) && input.nodes.length > 0)
@@ -5062,6 +5064,16 @@ function requireItem<T extends { id: string }>(pool: T[], id: unknown, label: st
   const item = pool.find((x) => x.id === String(id ?? ""));
   if (!item) throw new ToolError(`No ${label} with id ${String(id)}. Call get_state for current ids.`);
   return item;
+}
+
+/** A still holds one frame for as long as its clip runs, so a rate over it
+ * means nothing — what a "faster" or "shorter" ask wants there is a trim. */
+function refuseStillRetime(s: Editor, clip: VideoClip): void {
+  const asset = s.assets.find((a) => a.id === clip.assetId);
+  if (asset?.type !== "image") return;
+  throw new ToolError(
+    `"${asset.name}" is a still — it has no motion to retime. Change how long it holds with trim_clip.`
+  );
 }
 
 /** Resolve a subtitle-track tool param (default: the active track), make it

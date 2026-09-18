@@ -61,3 +61,14 @@ test("a call naming no target is refused, and naming both is too", async () => {
     /not both/,
   );
 });
+
+test("a still refuses a rate and names the tool that shortens it", async () => {
+  useEditor.setState({
+    clips: [],
+    assets: [{ id: "p1", fileName: "one.jpg", name: "One", type: "image", duration: 0, url: "" }],
+  });
+  await runAiTool("add_clip", { asset_id: "p1" });
+  const id = useEditor.getState().clips[0].id;
+  await expect(runAiTool("set_speed", { clipId: id, speed: 2 })).rejects.toThrow(/still[\s\S]*trim_clip/);
+  await expect(runAiTool("set_speed_curve", { clipId: id, preset: "drift" })).rejects.toThrow(/still/);
+});
