@@ -27,7 +27,7 @@ import {
   MASK_RADIUS_MAX,
   PEN_MIN_POINTS,
 } from "@donkeycut/effects-kit";
-import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 /** Per-field slider hints; ranges interpolate the exported constants so the
  * schema can never drift from the model the renderer clamps to. */
@@ -180,6 +180,7 @@ export const INSPECTOR_TOOLS = [
       "Update a soundtrack clip: volume (0..3), fadeIn/fadeOut seconds, start position, lane, in/out trim, speed, reverse, hidden, or duck. Audio overlaps across lanes; clips on the same lane slide to its next free slot. To put music under narration, move music to lane 1 and start 0 in the same call, with narration on lane 0. `duck` is voiceover ducking — while this clip plays, ALL other audio drops to that gain (0..1); pass 1 to clear ducking.",
     inputSchema: obj({
       id: str("Soundtrack clip id"),
+      ids: ids("id"),
       lane: { type: "integer", minimum: 0, description: "Audio lane, 0-based. Separate lanes play together." },
       volume: num("0..3 (1 = unchanged, above 1 boosts)"),
       fadeIn: num("Fade-in seconds"),
@@ -196,7 +197,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_clip_volume",
     description: "Set the gain on a video clip's own audio (soundtrack clips use update_audio).",
-    inputSchema: obj({ clipId: str("Video clip id"), volume: num("0..3 (1 = unchanged, up to 3 boosts the clip's own sound)") }, ["clipId", "volume"]),
+    inputSchema: obj({ clipId: str("Video clip id"), ids: ids("clipId"), volume: num("0..3 (1 = unchanged, up to 3 boosts the clip's own sound)") }, ["volume"]),
   },
   {
     name: "set_clip_sound",
@@ -256,6 +257,7 @@ export const INSPECTOR_TOOLS = [
       "Set how a video clip meets its box (the project frame, or its region): 'fit' letterboxes the whole picture (default), 'fill' scales it to cover the box and crops the overflow. zoom pushes further in from there, 1..4. Whenever the picture overflows, panX/panY (-1..1, 0=centered) choose what stays visible — e.g. panY=-1 keeps the top. flipH mirrors the picture left for right (a front-camera take that reads backward, text and all, wants flipH true), flipV top for bottom. Only the fields you pass change; the rest of the clip's framing stays. Landscape footage in a vertical project usually wants fill plus a pan that holds the subject.",
     inputSchema: obj({
       clipId: str("Video clip id"),
+      ids: ids("clipId"),
       mode: { type: "string", enum: ["fit", "fill"], description: "Framing mode" },
       zoom: num("Zoom past the fitted size, 1 (none) .. 4"),
       panX: num("Crop pan -1 (left) .. 1 (right), when the picture overflows"),
@@ -285,7 +287,7 @@ export const INSPECTOR_TOOLS = [
     name: "set_speed",
     description:
       "Set a video clip's playback speed, one rate across the whole clip, and/or play it backward. Faster shortens the clip on the timeline; slower stretches it. Later clips, titles, captions, and soundtrack shift to stay in sync. A clip carrying a speed curve loses it when speed is passed: the rate becomes uniform again (set_speed_curve is the tool for a rate that changes through the footage). `reverse: true` plays the clip's trim backward, picture and sound, at its rate — the clip keeps its length and its curve, and its head now shows source `out`; `reverse: false` turns it forward again. `smooth: true` smooths the clip's slow motion: wherever its rate is under 1×, the frames between source frames are synthesized (the export estimates the motion between them) so the slow stretch moves without stepping; at 1× and above nothing changes. Turn it on for real slow motion from ordinary footage; `smooth: false` shows the source frames as they are.",
-    inputSchema: obj({ clipId: str("Video clip id"), speed: num("Playback rate (1 = normal, no upper limit)"), reverse: bool("Play the footage backward (true) or forward (false)"), smooth: bool("Smooth slow motion: synthesize the frames between source frames wherever the rate is under 1×") }, ["clipId"]),
+    inputSchema: obj({ clipId: str("Video clip id"), ids: ids("clipId"), speed: num("Playback rate (1 = normal, no upper limit)"), reverse: bool("Play the footage backward (true) or forward (false)"), smooth: bool("Smooth slow motion: synthesize the frames between source frames wherever the rate is under 1×") }),
   },
   {
     name: "set_speed_curve",
@@ -334,6 +336,7 @@ export const INSPECTOR_TOOLS = [
       `Apply a named color preset to a video clip, layered under its manual grade. Presets by category — ${gradePresetCatalogText()}. amount 0..1 scales the preset toward neutral (default 1); protect_skin keeps its color shifts off skin tones. Pass preset "none" to clear. Preview, tiles, and export all render the same result.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
+      ids: ids("clipId"),
       preset: {
         type: "string",
         enum: [...GRADE_PRESET_IDS, "none"],

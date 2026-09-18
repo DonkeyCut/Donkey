@@ -24,6 +24,15 @@ export const obj = (
   additionalProperties: false,
 });
 
+/** The list form of a one-item tool: the same write over every id, in one
+ * call and one undo step. What a sweep applies after `select_items` finds
+ * the items. */
+export const ids = (one: string) => ({
+  type: "array",
+  items: { type: "string" },
+  description: `Several ids to change the same way, in place of ${one} — one call, one undo step (select_items finds them)`,
+});
+
 export const num = (description: string) => ({ type: "number", description });
 export const str = (description: string) => ({ type: "string", description });
 export const bool = (description: string) => ({ type: "boolean", description });

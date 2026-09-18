@@ -28,6 +28,7 @@ const READ_ONLY = new Set([
   "wait_for_renders",
   "seek",
   "select",
+  "select_items",
   "set_playing",
   "set_view",
 ]);
@@ -61,7 +62,26 @@ const ID_FIELDS = [
   "transitionIds",
   "cueIds",
   "assetIds",
+  // The ids a sweep's fan-out landed, as it reports them.
+  "ids",
 ];
+
+/** What a fan-out could not land, read off its aggregate result. A sweep
+ * that half worked returns a value rather than throwing, so the ledger reads
+ * the shortfall out of the result to keep the reply honest about it. */
+function partialFailure(response: unknown): string | undefined {
+  if (!response || typeof response !== "object" || Array.isArray(response)) return undefined;
+  const failed = (response as { failed?: unknown }).failed;
+  if (!Array.isArray(failed) || failed.length === 0) return undefined;
+  const say = failed
+    .slice(0, 4)
+    .map((f) => {
+      const r = (f ?? {}) as { id?: unknown; error?: unknown };
+      return `${typeof r.id === "string" ? r.id : "an item"}: ${typeof r.error === "string" ? r.error : "failed"}`;
+    })
+    .join("; ");
+  return `${failed.length} of the ids did not land — ${say}${failed.length > 4 ? "; …" : ""}`;
+}
 
 export function harvestIds(response: unknown): string[] {
   if (!response || typeof response !== "object" || Array.isArray(response)) return [];
@@ -82,7 +102,15 @@ export function recordCall(
   error: string | undefined
 ): void {
   if (!isMutatingTool(name)) return;
-  records.push({ name, ids: error ? [] : harvestIds(response), error });
+  if (error) {
+    records.push({ name, ids: [], error });
+    return;
+  }
+  records.push({ name, ids: harvestIds(response) });
+  // A sweep that landed some ids and lost others records both: the ones it
+  // changed, and a failure line naming what it did not.
+  const partial = partialFailure(response);
+  if (partial) records.push({ name, ids: [], error: partial });
 }
 
 /** The ledger as one context message body, or null when the turn has run no

@@ -6,7 +6,7 @@
  * and `aiTools.ts` keys its handlers on `TimelineToolName`.
  */
 
-import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { ITEM_KIND_IDS, canSplitItem } from "@/cut/lib/itemKinds";
 import { TIMELINE_ITEM_KINDS } from "@/cut/lib/timelineGroups";
 import {
@@ -103,7 +103,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "set_clip_muted",
     description: "Mute or unmute a video clip's own audio.",
-    inputSchema: obj({ clipId: str("Video clip id"), muted: bool("true to mute") }, ["clipId", "muted"]),
+    inputSchema: obj({ clipId: str("Video clip id"), ids: ids("clipId"), muted: bool("true to mute") }, ["muted"]),
   },
   {
     name: "rename_item",
@@ -115,7 +115,7 @@ export const TIMELINE_TOOLS = [
     name: "set_clip_hidden",
     description:
       "Hide or show a video clip on any track. A hidden clip stays on the timeline (grayed) but is excluded from playback and export — its span plays black and silent on track 0; an overlay layer just disappears.",
-    inputSchema: obj({ clipId: str("Video clip id"), hidden: bool("true to hide") }, ["clipId", "hidden"]),
+    inputSchema: obj({ clipId: str("Video clip id"), ids: ids("clipId"), hidden: bool("true to hide") }, ["hidden"]),
   },
   {
     name: "set_track_hidden",
@@ -154,7 +154,8 @@ export const TIMELINE_TOOLS = [
     inputSchema: obj({
       kind: { type: "string", enum: TIMELINE_ITEM_KINDS, description: "Item kind — 'clip' is any video clip, whatever track; 'overlay' is any title-lane element" },
       id: str("Item id"),
-    }, ["kind", "id"]),
+      ids: ids("id"),
+    }, ["kind"]),
   },
   {
     name: "remove_gap",
@@ -309,6 +310,23 @@ export const TIMELINE_TOOLS = [
         "Bake the whole picture as the preview shows it — titles, captions and effects burned into the still (default false: the video frame alone)"
       ),
     }),
+  },
+  {
+    name: "select_items",
+    description:
+      'Find every item a description covers, in one call: "the clips with no one talking", "the titles that are all caps", "the short ones at the end". Each item on the track is judged against the description at once and the matches come back as ids — this is how a sweep is done, instead of reading the state and deciding one item at a time. Then land the change on all of them with a single call: set_clip_muted, set_clip_hidden, set_clip_volume, set_color_preset, set_speed, set_framing, set_transition, delete_item, update_cue, delete_cue, update_audio and update_overlay all take `ids` in place of their one-item argument, and the whole write is one undo step. Describe what the items have in common, not what to do with them. It judges what the timeline already says about each item — its name, timing, text, and settings — so anything that needs the footage watched or the audio heard is measured first (watch_video, detect_silence, measure_level) and the finding is done here.',
+    inputSchema: obj(
+      {
+        kind: {
+          type: "string",
+          enum: [...TIMELINE_ITEM_KINDS],
+          description: "Which row of the timeline to look through",
+        },
+        describe: str("What the wanted items have in common, in plain words"),
+        limit: num("At most this many ids, best fit first (default: every match)"),
+      },
+      ["kind", "describe"]
+    ),
   },
   {
     name: "set_view",

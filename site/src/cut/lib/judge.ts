@@ -2,7 +2,15 @@ import type { PostFn } from "./pi/donkeyStream";
 import type { Entry, JudgeQuestion, JudgeResult } from "@/lib/inference/judge";
 
 export { choice, noul, score } from "@/lib/inference/judge";
-export type { ChoiceAnswer, Entry, JudgeQuestion, JudgeResult, NoulAnswer, ScoreAnswer } from "@/lib/inference/judge";
+export type {
+  ChoiceAnswer,
+  Entry,
+  JudgeQuestion,
+  JudgeResult,
+  NoulAnswer,
+  NoulQuestion,
+  ScoreAnswer,
+} from "@/lib/inference/judge";
 
 // The page's and the worker's side of a judgment: post the state and the
 // questions to the judge route through the bound transport (session and

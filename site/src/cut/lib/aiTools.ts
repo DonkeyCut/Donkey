@@ -187,6 +187,7 @@ import { resolveVoiceAsk, synthesizeSpeech, SPEECH_VOICES } from "./tts";
 import { hostedPost } from "./hosted";
 import { cutJudge } from "./chatRuntime";
 import { askJudgeChunked, noul } from "./judge";
+import { SWEEP_CHUNK, sweepPicks, sweepQuestions, sweepState, type SweepCandidate } from "./sweepSelect";
 import { clampVideoDuration, defaultVideoAspects, videoResolutionOf } from "./videoModels";
 import { DUCK_DEFAULT, generateSubtitlesReadout } from "./voiceover";
 import {
@@ -1385,6 +1386,41 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError(`Unknown panel: ${panel}`);
       requestSidePanel(panel === "none" ? null : (panel as SidePanelTab));
       return { panel };
+  },
+
+  select_items: async (s, input) => {
+    const kind = String(input.kind) as ItemKind;
+    if (!ITEM_KIND_IDS.includes(kind)) throw new ToolError(`Unknown kind: ${kind}`);
+    const describe = String(input.describe ?? "").trim();
+    if (!describe) throw new ToolError("describe is required — say what the wanted items have in common.");
+    const items = sweepCandidates(s, kind);
+    if (items.length === 0) throw new ToolError(`Nothing of kind "${kind}" on the timeline.`);
+    const post = (payload: Record<string, unknown>, signal?: AbortSignal) =>
+      hostedPost("/api/inference/judge", payload, signal);
+    let answers: Record<string, { type: string; noul?: number }>;
+    try {
+      answers = (await askJudgeChunked(
+        post,
+        (keys) => sweepState(describe, items, keys),
+        sweepQuestions(describe, items),
+        SWEEP_CHUNK
+      )) as Record<string, { type: string; noul?: number }>;
+    } catch (e) {
+      throw new ToolError(`Finding items is unavailable: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const hits = sweepPicks(
+      answers as Record<string, { type: "noul"; noul: number } | undefined>,
+      items,
+      cutJudge().sweepFit
+    ).sort((a, b) => b.fit - a.fit);
+    const kept = isNum(input.limit) ? hits.slice(0, Math.max(1, Math.floor(input.limit))) : hits;
+    return {
+      kind,
+      searched: items.length,
+      // The tools that take `ids` land one change on all of them at once.
+      ids: kept.map((c) => c.id),
+      matched: kept.map((c) => ({ id: c.id, is: c.label })),
+    };
   },
 
   group_items: (s) => {
@@ -4419,7 +4455,51 @@ async function dispatchTool(s: Editor, name: string, input: Record<string, unkno
   const key = name === "update_title" ? "update_overlay" : name;
   const run = (toolRuns as Partial<Record<string, ToolRun>>)[key];
   if (!run) throw new ToolError(`Unknown tool: ${name}`);
-  return run(s, input, operation);
+  const field = SWEEP_TARGETS[key];
+  const ids = field ? sweepIds(key, field, input) : null;
+  if (!ids) return run(s, input, operation);
+
+  // A sweep's apply: the same write over every id, as one undo step, with
+  // the live state re-read each time because a write can move or remove the
+  // items after it. A failure on one item is reported and the rest still land.
+  const rest = Object.fromEntries(Object.entries(input).filter(([k]) => k !== "ids"));
+  s.beginHistoryBatch();
+  const landed: string[] = [];
+  const ran: unknown[] = [];
+  const failed: { id: string; error: string }[] = [];
+  try {
+    for (const id of ids) {
+      try {
+        ran.push(await run(useEditor.getState(), { ...rest, [field]: id }, operation));
+        landed.push(id);
+      } catch (e) {
+        failed.push({ id, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+  } finally {
+    s.endHistoryBatch();
+  }
+  if (ran.length === 0)
+    throw new ToolError(`None of those ${ids.length} landed: ${failed.map((f) => f.error).join("; ")}`);
+  // `ids` and `failed` sit at the top level: the turn ledger reads both, so
+  // the closing reply is grounded in what actually changed.
+  return { ran: ran.length, ids: landed, results: ran, ...(failed.length > 0 ? { failed } : {}) };
+}
+
+/** The ids a fan-out writes, or null for a one-item call. Every sweepable
+ * tool takes one target or a list, and a call carrying neither reaches no
+ * item at all, so it is refused here rather than in each handler. */
+function sweepIds(name: string, field: string, input: Record<string, unknown>): string[] | null {
+  const list = Array.isArray(input.ids)
+    ? input.ids.filter((x): x is string => typeof x === "string" && x.length > 0)
+    : null;
+  const one = typeof input[field] === "string" && (input[field] as string).length > 0;
+  if (list && list.length > 0) {
+    if (one) throw new ToolError(`${name} takes ${field} or ids, not both.`);
+    return list;
+  }
+  if (!one) throw new ToolError(`${name} needs ${field}, or ids for several at once (select_items finds them).`);
+  return null;
 }
 
 /** Used inside the existing serialized engine session or isolated cloud worker.
@@ -4875,6 +4955,82 @@ async function listenToSource(
   }
   return blobToInlineAudio(await res.blob());
 }
+
+/** One line per timeline item for a sweep to judge: what it is, when it
+ * plays, and the settings already on it. This is everything the finding
+ * reads, so an ask about what the footage shows or the audio holds is
+ * measured first and the measurement goes in the description. */
+function sweepCandidates(s: Editor, kind: ItemKind): SweepCandidate[] {
+  const assetName = (id: string) => s.assets.find((a) => a.id === id)?.name ?? "media";
+  const span = (start: number, len: number) => `starts ${round2(start)}s, ${round2(len)}s long`;
+  if (kind === "clip")
+    return s.clips.map((c) => ({
+      id: c.id,
+      label: [
+        `"${c.name || assetName(c.assetId)}"`,
+        `video track ${c.track}`,
+        span(c.start, retimeOf(c).len),
+        c.muted ? "muted" : "",
+        c.hidden ? "hidden" : "",
+        c.speed && c.speed !== 1 ? `${round2(c.speed)}× speed` : "",
+        c.reverse ? "reversed" : "",
+        c.grade?.preset ? `${c.grade.preset.id} look` : "",
+        c.removal && !c.removal.off ? "cut out of its background" : "",
+      ]
+        .filter(Boolean)
+        .join(", "),
+    }));
+  if (kind === "audio")
+    return s.audioClips.map((a) => ({
+      id: a.id,
+      label: [
+        `"${a.name || assetName(a.assetId)}"`,
+        span(a.start, retimeOf(a).len),
+        a.volume !== undefined && a.volume !== 1 ? `${Math.round(a.volume * 100)}% volume` : "",
+        a.duck !== undefined ? "ducks under speech" : "",
+        a.hidden ? "hidden" : "",
+      ]
+        .filter(Boolean)
+        .join(", "),
+    }));
+  if (kind === "overlay")
+    return s.overlays.map((o) => ({
+      id: o.id,
+      label: [
+        isTextOverlay(o) ? `text "${o.text}"` : `${o.kind ?? "element"} "${o.name ?? o.kind ?? "element"}"`,
+        `${round2(o.start)}s to ${round2(o.end)}s`,
+        o.hidden ? "hidden" : "",
+      ]
+        .filter(Boolean)
+        .join(", "),
+    }));
+  if (kind === "cue")
+    return s.subtitles.cues.map((c) => ({
+      id: c.id,
+      label: `caption "${c.text}", ${round2(c.start)}s to ${round2(c.end)}s`,
+    }));
+  return s.transitions.map((t) => ({
+    id: t.id,
+    label: `${t.style} transition, ${round2(t.seconds)}s at ${round2(t.start)}s${t.hidden ? ", switched off" : ""}`,
+  }));
+}
+
+/** The one-item argument each tool a sweep lands on takes, so `ids` runs the
+ * same write over a list of them. One entry point: the dispatcher fans the
+ * call out, and every handler stays a single-item write. */
+const SWEEP_TARGETS: Readonly<Record<string, string>> = {
+  set_clip_muted: "clipId",
+  set_clip_hidden: "clipId",
+  set_clip_volume: "clipId",
+  set_color_preset: "clipId",
+  set_speed: "clipId",
+  set_framing: "clipId",
+  set_transition: "clipId",
+  delete_item: "id",
+  update_cue: "id",
+  delete_cue: "id",
+  update_audio: "id",
+};
 
 /** The clip a sound tool names — a video clip or a soundtrack clip, whichever
  * carries the id — with its current treatment and the store write that

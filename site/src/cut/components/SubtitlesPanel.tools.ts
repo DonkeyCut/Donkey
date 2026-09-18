@@ -6,7 +6,7 @@
  * handlers on `SubtitlesToolName`.
  */
 
-import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import {
   DEFAULT_WORDS_PER_CUE,
   MAX_WORDS_PER_CUE,
@@ -146,12 +146,12 @@ export const SUBTITLES_TOOLS = [
   {
     name: "update_cue",
     description: "Edit a subtitle cue's text or retime it (start/end seconds).",
-    inputSchema: obj({ id: str("Cue id"), text: str("New text"), start: num("Start s"), end: num("End s") }, ["id"]),
+    inputSchema: obj({ id: str("Cue id"), ids: ids("id"), text: str("New text"), start: num("Start s"), end: num("End s") }),
   },
   {
     name: "delete_cue",
     description: "Delete a subtitle cue.",
-    inputSchema: obj({ id: str("Cue id") }, ["id"]),
+    inputSchema: obj({ id: str("Cue id"), ids: ids("id") }),
   },
   {
     name: "merge_cue",

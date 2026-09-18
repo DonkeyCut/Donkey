@@ -118,6 +118,8 @@ export const SETTINGS = defineSettings({
         fillerCut: z.number().min(0).max(1),
         // The confidence below which a described voice falls back to the default.
         voicePick: z.number().min(0).max(1),
+        // A candidate's fit below which a described sweep leaves it out.
+        sweepFit: z.number().min(0).max(1),
       })
       .strict(),
     default: {
@@ -130,11 +132,12 @@ export const SETTINGS = defineSettings({
       stockFit: 0.5,
       fillerCut: 0.5,
       voicePick: 0.4,
+      sweepFit: 0.5,
     },
     public: true,
     title: "Chat judgments",
     description:
-      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), rank stock, find filler words, and resolve described voices.",
+      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), pick the items a sweep touches, rank stock, find filler words, and resolve described voices.",
   },
   experimentResults: {
     schema: z
