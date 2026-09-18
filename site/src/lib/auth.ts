@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
+import { nextCookies } from "better-auth/next-js";
 import { bearer } from "better-auth/plugins";
 
 import { AUTH_COOKIE_DOMAIN, DONKEYCUT_CANONICAL, SU_ORIGIN } from "@/cut/lib/hosts";
@@ -42,7 +43,13 @@ export const auth = betterAuth({
   secret: process.env.BETTER_AUTH_SECRET,
   // Sessions last a year, and the rolling expiry is refreshed daily on use, so an active user
   // effectively never has to sign in again.
+  //
+  // The signed cookie carries the session and its user for five minutes, so the
+  // editor's polling surfaces — the exports dock, the storage meter, the credit
+  // pill — stop paying a session read and a user read for every request they
+  // make. A revoked session or a changed flag takes up to that long to bite.
   session: {
+    cookieCache: { enabled: true, maxAge: 5 * 60 },
     expiresIn: 60 * 60 * 24 * 365,
     updateAge: 60 * 60 * 24,
   },
@@ -92,5 +99,11 @@ export const auth = betterAuth({
   },
   // The iOS app holds its session as a bearer token (`set-auth-token`
   // response header, then `Authorization: Bearer` on every call).
-  plugins: [bearer()],
+  //
+  // nextCookies writes better-auth's own cookies through Next's cookie helper,
+  // so a session read inside one of our route handlers can refresh the cached
+  // session cookie. Without it the cache would only ever be written by the auth
+  // routes and would lapse five minutes after a page load. It goes last: the
+  // hook has to see what every plugin before it wants to set.
+  plugins: [bearer(), nextCookies()],
 });
