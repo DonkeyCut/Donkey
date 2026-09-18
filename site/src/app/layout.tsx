@@ -27,8 +27,15 @@ export const metadata: Metadata = {
   // favicon.ico and apple-icon.png sitting in app/ — resolve per request, which
   // makes the metadata of every page in the app request-dependent and holds
   // back its static shell.
+  //
+  // Every icon here is the black and white mark, and the 192px PNG is the size
+  // Google's favicon crawler asks for, so the icon it picks for a search result
+  // is the one we ship. The blue rounded-square icon belongs to the Mac app.
   icons: {
-    icon: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico", sizes: "16x16 32x32 48x48" },
+      { url: "/icon.png", type: "image/png", sizes: "192x192" },
+    ],
     apple: "/apple-icon.png",
   },
 };
