@@ -24,6 +24,11 @@ import {
 import { resizePreviewSurface, setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey, type MaskPoint } from "@donkeycut/effects-kit";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { MaskGizmoCore, OverlayChromeHost, OverlayLayer, StagePress } from "./OverlayLayer";
 import { GuideHandles, GuideOverlay } from "./GuideOverlay";
@@ -693,22 +698,17 @@ export function Preview() {
           if (!held) pokeHud();
         }}
       />
-      {frameMenu && (
-        <div
-          className="fixed inset-0 z-50"
-          onPointerDown={() => setFrameMenu(null)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setFrameMenu(null);
-          }}
-        >
-          <div
-            className="absolute min-w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-            style={{ left: frameMenu.x, top: frameMenu.y }}
-            onPointerDown={(e) => e.stopPropagation()}
+      {/* The right-click menu on the stage, anchored to the pointer: the
+          dropdown keeps itself inside the window however small it is. */}
+      <DropdownMenu open={frameMenu !== null} onOpenChange={(o) => !o && setFrameMenu(null)}>
+        {frameMenu && (
+          <DropdownMenuContent
+            className="min-w-44"
+            sideOffset={0}
+            anchor={{ getBoundingClientRect: () => new DOMRect(frameMenu.x, frameMenu.y, 0, 0) }}
           >
-            <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-60"
+            <DropdownMenuItem
+              closeOnClick={false}
               disabled={copyState === "working"}
               onClick={() => {
                 setCopyState("working");
@@ -735,10 +735,10 @@ export function Preview() {
                   : copyState === "failed"
                     ? "Couldn't copy the frame"
                     : "Copy frame"}
-            </button>
-          </div>
-        </div>
-      )}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        )}
+      </DropdownMenu>
       <ShowTimelineButton />
     </section>
   );

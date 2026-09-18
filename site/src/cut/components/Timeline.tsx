@@ -3012,59 +3012,41 @@ export function Timeline() {
       {fileDropHint && (
         <div className="pointer-events-none absolute inset-x-0 top-11 bottom-0 z-40 bg-[#0a84ff]/5 ring-2 ring-[#0a84ff]/30 ring-inset" />
       )}
-      {gapMenu && (
-        <div
-          className="fixed inset-0 z-50"
-          onPointerDown={() => setGapMenu(null)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setGapMenu(null);
-          }}
-        >
-          <div
-            className="absolute min-w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-            style={{ left: gapMenu.x, top: gapMenu.y }}
-            onPointerDown={(e) => e.stopPropagation()}
+      <DropdownMenu open={gapMenu !== null} onOpenChange={(o) => !o && setGapMenu(null)}>
+        {gapMenu && (
+          <DropdownMenuContent
+            className="min-w-44"
+            sideOffset={0}
+            anchor={{ getBoundingClientRect: () => new DOMRect(gapMenu.x, gapMenu.y, 0, 0) }}
           >
-            <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+            <DropdownMenuItem
               onClick={() => {
                 useEditor.getState().removeLaneGap(gapMenu.lane, gapMenu.gap.start);
                 setGapMenu(null);
               }}
             >
               <Scissors className="size-3.5 text-muted-foreground" /> Remove empty space
-            </button>
-          </div>
-        </div>
-      )}
-      {barMenu &&
-        (() => {
-          // The same menu over either kind of bar: an element on the title
-          // rows, or a transition on its own row.
-          const o = barMenu.transition
-            ? (transitions.find((x) => x.t.id === barMenu.id)?.t ?? null)
-            : (overlays.find((x) => x.id === barMenu.id) ?? null);
-          if (!o) return null;
-          const item =
-            "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground";
-          return (
-            <div
-              className="fixed inset-0 z-50"
-              onPointerDown={() => setBarMenu(null)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setBarMenu(null);
-              }}
-            >
-              <div
-                className="absolute min-w-44 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
-                style={{ left: barMenu.x, top: barMenu.y }}
-                onPointerDown={(e) => e.stopPropagation()}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        )}
+      </DropdownMenu>
+      <DropdownMenu open={barMenu !== null} onOpenChange={(o) => !o && setBarMenu(null)}>
+        {barMenu &&
+          (() => {
+            // The same menu over either kind of bar: an element on the title
+            // rows, or a transition on its own row.
+            const o = barMenu.transition
+              ? (transitions.find((x) => x.t.id === barMenu.id)?.t ?? null)
+              : (overlays.find((x) => x.id === barMenu.id) ?? null);
+            if (!o) return null;
+            return (
+              <DropdownMenuContent
+                className="min-w-44"
+                sideOffset={0}
+                anchor={{ getBoundingClientRect: () => new DOMRect(barMenu.x, barMenu.y, 0, 0) }}
               >
                 {barMenu.key !== undefined && (
-                  <button
-                    className={item}
+                  <DropdownMenuItem
                     onClick={() => {
                       const s = useEditor.getState();
                       s.pushHistory();
@@ -3073,10 +3055,9 @@ export function Timeline() {
                     }}
                   >
                     <Diamond className="size-3.5 text-muted-foreground" /> Remove keyframe
-                  </button>
+                  </DropdownMenuItem>
                 )}
-                <button
-                  className={item}
+                <DropdownMenuItem
                   onClick={() => {
                     const s = useEditor.getState();
                     const hidden = !o.hidden || undefined;
@@ -3094,11 +3075,11 @@ export function Timeline() {
                       <EyeOff className="size-3.5 text-muted-foreground" /> Hide
                     </>
                   )}
-                </button>
-              </div>
-            </div>
-          );
-        })()}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            );
+          })()}
+      </DropdownMenu>
       {frameMenu && (
         <div
           className="fixed inset-0 z-50"
@@ -3108,23 +3089,9 @@ export function Timeline() {
             setFrameMenu(null);
           }}
         >
-          {/* A snug bubble beside the held marker line, speech-balloon style:
-              its tapered tip sits on the side edge facing the line, apex
-              touching it at the grab point. The bubble hangs to the line's
-              right and flips left when the window edge is close. */}
-          {(() => {
-            const flip = frameMenu.x + 240 > window.innerWidth;
-            return (
-              <div
-                className={cn("absolute -translate-y-1/2", flip ? "pr-[6px]" : "pl-[6px]")}
-                style={{
-                  top: frameMenu.y,
-                  ...(flip
-                    ? { right: window.innerWidth - frameMenu.x }
-                    : { left: frameMenu.x }),
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
-              >
+          <FrameBubble x={frameMenu.x} y={frameMenu.y}>
+            {(flip) => (
+              <>
                 <div className="rounded-lg border bg-popover p-1 text-popover-foreground shadow-md">
                   <button
                     className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm whitespace-nowrap hover:bg-accent hover:text-accent-foreground"
@@ -3155,18 +3122,68 @@ export function Timeline() {
                     its border along the notch, leaving one seamless outline. */}
                 <div
                   className={cn(
-                    "pointer-events-none absolute top-1/2 size-2.5 -translate-y-1/2 rotate-45 bg-popover",
+                    "pointer-events-none absolute size-2.5 -translate-y-1/2 rotate-45 bg-popover",
                     flip
                       ? "right-[2px] rounded-tr-[2px] border-t border-r"
                       : "left-[2px] rounded-bl-[2px] border-b border-l"
                   )}
+                  style={{ top: "var(--bubble-tip)" }}
                 />
-              </div>
-            );
-          })()}
+              </>
+            )}
+          </FrameBubble>
         </div>
       )}
     </footer>
+  );
+}
+
+/**
+ * A snug bubble beside the held marker line, speech-balloon style: its tapered
+ * tip sits on the side edge facing the line, apex touching it at the grab
+ * point. The bubble hangs to the line's right and flips left near the window
+ * edge; it slides along the line to stay inside a short window, and the tip
+ * stays on the grab point as it slides.
+ */
+function FrameBubble({
+  x,
+  y,
+  children,
+}: {
+  x: number;
+  y: number;
+  children: (flip: boolean) => React.ReactNode;
+}) {
+  const el = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState({ top: y, flip: false, tip: "50%" });
+  useLayoutEffect(() => {
+    const node = el.current;
+    if (!node) return;
+    const pad = 8;
+    const h = node.offsetHeight;
+    const w = node.offsetWidth;
+    const top = Math.min(Math.max(y, pad + h / 2), window.innerHeight - pad - h / 2);
+    setPlace({
+      top,
+      flip: x + w + pad > window.innerWidth,
+      // Where the tip meets the line, measured inside a bubble that may have
+      // slid away from it.
+      tip: `${Math.min(Math.max(y - (top - h / 2), 10), h - 10)}px`,
+    });
+  }, [x, y]);
+  return (
+    <div
+      ref={el}
+      className={cn("absolute -translate-y-1/2", place.flip ? "pr-[6px]" : "pl-[6px]")}
+      style={{
+        top: place.top,
+        ["--bubble-tip" as string]: place.tip,
+        ...(place.flip ? { right: window.innerWidth - x } : { left: x }),
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {children(place.flip)}
+    </div>
   );
 }
 
