@@ -68,6 +68,11 @@ const formatDollars = (value: number) =>
   `${value < 0 ? "-" : ""}$${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 const formatMicros = (micros: bigint | string) => formatDollars(dollars(micros));
 
+// A processed row reads as picked by a wash of the accent color behind the
+// whole row; the sticky name cell paints the same color so it matches across
+// the freeze line.
+const PROCESSED_ROW = "bg-[color-mix(in_oklab,var(--chart-1)_10%,var(--card))]";
+
 function formatGb(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
@@ -708,6 +713,8 @@ function ActivityGrid({
   const processed = useMemo(() => new Set(processedIds), [processedIds]);
   const toggleProcessed = (id: string) =>
     setProcessedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  const markProcessed = (id: string) =>
+    setProcessedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
   const processedCount = users.reduce((n, user) => n + (processed.has(user.id) ? 1 : 0), 0);
   const body = useRef<HTMLTableSectionElement>(null);
   const rows = useRowWindow(users.length, body);
@@ -718,7 +725,10 @@ function ActivityGrid({
   const outreach = useOutreachAction();
   const [sendTarget, setSendTarget] = useState<OutreachRow | null>(null);
   const [opening, setOpening] = useState<{ name: string; email: string } | null>(null);
-  const emailUser = (user: { name: string; email: string }) => {
+  // Emailing an account is processing it, so the row highlights on the click
+  // and stays highlighted once the note is out.
+  const emailUser = (user: { id: string; name: string; email: string }) => {
+    markProcessed(user.id);
     setOpening({ name: user.name, email: user.email });
     outreach.mutate(
       { action: "add", email: user.email },
@@ -829,10 +839,22 @@ function ActivityGrid({
                   key={user.id}
                   data-row=""
                   aria-selected={isProcessed}
-                  className={cn("group cursor-pointer", isProcessed && "opacity-50")}
+                  className={cn(
+                    "group cursor-pointer transition-colors",
+                    isProcessed
+                      ? PROCESSED_ROW
+                      : "hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))]",
+                  )}
                   onClick={() => toggleProcessed(user.id)}
                 >
-                  <td className="sticky left-0 z-10 bg-card py-1 pr-12 pl-6 whitespace-nowrap">
+                  <td
+                    className={cn(
+                      "sticky left-0 z-10 py-1 pr-12 pl-6 whitespace-nowrap transition-colors",
+                      isProcessed
+                        ? PROCESSED_ROW
+                        : "bg-card group-hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--card))]",
+                    )}
+                  >
                     <span
                       aria-hidden
                       className={cn(
