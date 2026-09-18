@@ -1000,6 +1000,58 @@ function PlayheadRowTime() {
   );
 }
 
+/** A moment in the composer mirror. The raw token keeps its glyphs and its
+ * exact layout underneath — the caret math depends on it — and an opaque cover
+ * draws the time smaller over the top, so the pill reads the way a chip does
+ * in the thread. The cover is the same string at 0.85em, which is narrower
+ * than what it covers whatever the time says, so it never truncates. It steps
+ * aside while the caret is inside the token (the user is editing it) and when
+ * the token wraps across lines. */
+function MomentPill({
+  text,
+  editing,
+  caretAtStart,
+  onSeek,
+}: {
+  text: string;
+  editing: boolean;
+  caretAtStart: boolean;
+  onSeek: () => void;
+}) {
+  const spanRef = useRef<HTMLSpanElement>(null);
+  const [wrapped, setWrapped] = useState(false);
+  useLayoutEffect(() => {
+    setWrapped((spanRef.current?.getClientRects().length ?? 1) > 1);
+  });
+  const covered = !editing && !wrapped;
+  return (
+    <span
+      ref={spanRef}
+      className={cn(
+        "rounded-[4px] bg-[#0a84ff]/12",
+        covered && "relative",
+        "pointer-events-auto cursor-pointer hover:bg-[#0a84ff]/25"
+      )}
+      // mousedown, not click: preventDefault keeps focus in the textarea.
+      onMouseDown={(e) => {
+        e.preventDefault();
+        onSeek();
+      }}
+    >
+      {text}
+      {covered && (
+        <span className="pointer-events-none absolute inset-x-0 -inset-y-[0.1em] flex items-center justify-center overflow-hidden rounded-[4px] bg-background">
+          <span className="absolute inset-0 rounded-[4px] bg-[#0a84ff]/12" />
+          <span className="relative text-[0.85em] text-[#0a84ff] tabular-nums">{text}</span>
+        </span>
+      )}
+      {covered && caretAtStart && (
+        <span className="pointer-events-none absolute -inset-y-[0.1em] -left-px w-[1.5px] animate-[mention-caret_1.1s_steps(1)_infinite] bg-foreground" />
+      )}
+    </span>
+  );
+}
+
 /** One resolved mention in the composer mirror. Entity pills paint over the
  * raw token with the entity's icon (or the sticker's own art) and name — the
  * token glyphs underneath keep their exact layout, so the textarea's caret
@@ -1717,23 +1769,21 @@ export function MentionTextarea({
         )}
       >
         {mirrorSegs.map((seg, i) => {
-          // A moment pills over its own glyphs — the raw token keeps its
-          // exact layout, so the caret math never drifts — and takes a click
-          // to put the playhead back where the token points.
-          if (seg.time)
+          if (seg.time) {
+            const end = seg.start + seg.text.length;
             return (
-              <span
+              <MomentPill
                 key={i}
-                className="pointer-events-auto cursor-pointer rounded-[4px] bg-[#0a84ff]/12 hover:bg-[#0a84ff]/25"
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                text={seg.text}
+                editing={focused && caret > seg.start && caret < end}
+                caretAtStart={focused && caret === seg.start && selEnd === seg.start}
+                onSeek={() => {
                   const at = parseMark(seg.text.slice(1));
                   if (at !== null) useEditor.getState().seek(at);
                 }}
-              >
-                {seg.text}
-              </span>
+              />
             );
+          }
           if (!seg.ref) return <span key={i}>{seg.text}</span>;
           // A side facing another pill across a single space keeps its bleed
           // off — two bleeds would swallow the only gap between the pills.
