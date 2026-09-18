@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowUpRight, Check, Mail } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
@@ -23,12 +23,9 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart";
-import type {
-  AnalyticsBilling,
-  AnalyticsReferrals,
-  AnalyticsRollup,
-  AnalyticsRollupUser,
-} from "@/lib/analytics/schema";
+import type { AnalyticsBilling, AnalyticsReferrals } from "@/lib/analytics/schema";
+import { USER_SORTS, type RankedUser, type UserSort } from "@/lib/analytics/rank";
+import { workBitsOf, type AnalyticsSummary } from "@/lib/analytics/summarize";
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
@@ -37,14 +34,16 @@ import { OutreachComposeDialog } from "@/app/su/outreach/ComposeDialog";
 import { Button } from "@/components/ui/button";
 import { SuStandIn } from "@/app/su/SuStandIn";
 import { useRowWindow } from "@/app/su/analytics/rowWindow";
-import { useAnalyticsRollup } from "@/queries/analytics";
+import { useAnalyticsSummary, useAnalyticsUsers } from "@/queries/analytics";
 import { ApiError } from "@/queries/apiClient";
 import { useOutreachAction, type OutreachRow } from "@/queries/outreach";
 
-// Everything here renders the nightly rollup (analytics/rollup.json via
-// /api/analytics/rollup) — stale until the next job run by design. "Active" is
-// any source bit for the day; "working" narrows to the DB event sources, i.e.
-// the user did something beyond opening the app.
+// Everything here renders the nightly rollup — stale until the next job run by
+// design. The charts read the folded numbers (/api/analytics/summary) and the
+// grid pages through the accounts (/api/analytics/users), so the page never
+// holds the whole account table. "Active" is any source bit for the day;
+// "working" narrows to the DB event sources, i.e. the user did something
+// beyond opening the app.
 
 // Formatting a day goes through the locale machinery, which is slow enough
 // that a label per grid cell held the page for over a second. The rollup
@@ -85,102 +84,6 @@ function storageTone(bytes: number, quotaBytes: number | null | undefined): stri
   if (ratio >= 1) return "text-red-600 dark:text-red-500";
   if (ratio >= 0.8) return "text-orange-600 dark:text-orange-400";
   return "";
-}
-
-// Activity is null for a day the pipeline never extracted: the masks are
-// empty because there was nothing to read, which is not the same as a day
-// nobody worked. Those days leave a gap in the charts and an unknown dot in
-// the grid. Signups come from the user snapshot, so they are always known.
-type DayPoint = {
-  day: string;
-  active: number | null;
-  working: number | null;
-  signups: number;
-  totalRegistered: number;
-};
-
-type RollupView = {
-  series: DayPoint[];
-  workBits: number;
-  missingDays: Set<string>;
-  registered: number;
-  signups7d: number;
-  signupsWindow: number;
-  activeYesterday: number | null;
-  active7d: number | null;
-  activePrior7d: number | null;
-  totalBalanceMicros: bigint;
-};
-
-function deriveView(rollup: AnalyticsRollup): RollupView {
-  const workBits = rollup.sources.reduce(
-    (mask, source, i) => (source === "posthog" ? mask : mask | (1 << i)),
-    0,
-  );
-
-  const signupsByDay = new Map<string, number>();
-  for (const user of rollup.users) {
-    const day = user.registeredAt.slice(0, 10);
-    signupsByDay.set(day, (signupsByDay.get(day) ?? 0) + 1);
-  }
-
-  // Cumulative registrations start from everyone who signed up before the
-  // window, so the total line carries the real base, not zero.
-  const firstDay = rollup.days[0] ?? "";
-  let totalRegistered = rollup.users.filter(
-    (user) => user.registeredAt.slice(0, 10) < firstDay,
-  ).length;
-
-  // Any day the consolidation could not read a source for is undercounted at
-  // best, and indistinguishable from a quiet day — so it reports as unknown
-  // rather than as a number the reader would trust.
-  const missingDays = new Set(rollup.missing.map((entry) => entry.day));
-
-  const series = rollup.days.map((day, i) => {
-    const signups = signupsByDay.get(day) ?? 0;
-    totalRegistered += signups;
-    if (missingDays.has(day)) {
-      return { active: null, day, signups, totalRegistered, working: null };
-    }
-    let active = 0;
-    let working = 0;
-    for (const user of rollup.users) {
-      const mask = user.activity[i] ?? 0;
-      if (mask !== 0) active++;
-      if ((mask & workBits) !== 0) working++;
-    }
-    return { active, day, signups, totalRegistered, working };
-  });
-
-  // Null when the whole range went unextracted; otherwise it counts over the
-  // days there is data for, so one missing day doesn't drag the number down.
-  const activeInRange = (from: number, to: number): number | null => {
-    const known: number[] = [];
-    for (let i = Math.max(0, from); i < to; i++) {
-      if (!missingDays.has(rollup.days[i])) known.push(i);
-    }
-    if (known.length === 0) return null;
-    let count = 0;
-    for (const user of rollup.users) {
-      if (known.some((i) => (user.activity[i] ?? 0) !== 0)) count++;
-    }
-    return count;
-  };
-
-  const len = rollup.days.length;
-  const last7 = rollup.days.slice(-7);
-  return {
-    active7d: activeInRange(len - 7, len),
-    activePrior7d: activeInRange(len - 14, len - 7),
-    activeYesterday: series[len - 1]?.active ?? null,
-    missingDays,
-    registered: rollup.users.length,
-    series,
-    signups7d: last7.reduce((sum, day) => sum + (signupsByDay.get(day) ?? 0), 0),
-    signupsWindow: series.reduce((sum, point) => sum + point.signups, 0),
-    totalBalanceMicros: rollup.users.reduce((sum, u) => sum + BigInt(u.balanceMicros), BigInt(0)),
-    workBits,
-  };
 }
 
 // One chart point per day, twice over: `series` holds the per-source answer
@@ -637,63 +540,16 @@ function ActivityDot({
   );
 }
 
-// Ranking weight decays with age — a working day two weeks back counts half
-// of yesterday's — so the list leads with who is active now. A day the user
-// only visited counts a fraction of one they worked.
-const HALF_LIFE_DAYS = 14;
-const VISIT_WEIGHT = 0.35;
-
-const USER_SORTS = [
-  { id: "active", label: "Most active" },
-  { id: "recent", label: "Recently active" },
-  { id: "joined", label: "Newest" },
-  { id: "paid", label: "Top paid" },
-] as const;
-type UserSort = (typeof USER_SORTS)[number]["id"];
-
-type RankedUser = AnalyticsRollupUser & {
-  score: number;
-  activeDays: number;
-  /** Index into rollup.days of the last day with any activity; -1 for never. */
-  lastActive: number;
-};
-
-function rankUsers(rollup: AnalyticsRollup, workBits: number, sort: UserSort): RankedUser[] {
-  const len = rollup.days.length;
-  const ranked = rollup.users.map((user) => {
-    let score = 0;
-    let activeDays = 0;
-    let lastActive = -1;
-    for (let i = 0; i < len; i++) {
-      const mask = user.activity[i] ?? 0;
-      if (mask === 0) continue;
-      activeDays++;
-      lastActive = i;
-      score +=
-        ((mask & workBits) !== 0 ? 1 : VISIT_WEIGHT) * 0.5 ** ((len - 1 - i) / HALF_LIFE_DAYS);
-    }
-    return { ...user, activeDays, lastActive, score };
-  });
-  const funded = (user: RankedUser) => Number(user.fundedMicros ?? "0");
-  const by: Record<UserSort, (a: RankedUser, b: RankedUser) => number> = {
-    active: (a, b) => b.score - a.score,
-    joined: (a, b) => (a.registeredAt < b.registeredAt ? 1 : -1),
-    paid: (a, b) => funded(b) - funded(a) || b.score - a.score,
-    recent: (a, b) => b.lastActive - a.lastActive || b.score - a.score,
-  };
-  // Our own accounts sink to the bottom under every sort: they are active
-  // every day and would otherwise own the top of the list.
-  return ranked.sort(
-    (a, b) => Number(a.superUser === true) - Number(b.superUser === true) || by[sort](a, b),
-  );
-}
+// How close to the end of the loaded rows the window may come before the next
+// page is asked for, so scrolling meets rows that are already there.
+const LOAD_AHEAD_ROWS = 20;
 
 function ActivityGrid({
-  rollup,
+  summary,
   workBits,
   missingDays,
 }: {
-  rollup: AnalyticsRollup;
+  summary: AnalyticsSummary;
   workBits: number;
   missingDays: Set<string>;
 }) {
@@ -702,7 +558,14 @@ function ActivityGrid({
     "active",
     (v) => USER_SORTS.some((option) => option.id === v),
   );
-  const users = useMemo(() => rankUsers(rollup, workBits, sort), [rollup, workBits, sort]);
+  // Ranked on the server, a page at a time: the browser holds the rows it has
+  // scrolled to, never every account.
+  const paged = useAnalyticsUsers(sort, summary.generatedAt);
+  const users: RankedUser[] = useMemo(
+    () => paged.data?.pages.flatMap((page) => page.users) ?? [],
+    [paged.data],
+  );
+  const total = paged.data?.pages[0]?.total ?? 0;
   // A row marks itself processed on click and stays marked across visits, so
   // a pass through the list can pick up where it left off.
   const [processedIds, setProcessedIds] = useLocalPref<string[]>(
@@ -715,9 +578,16 @@ function ActivityGrid({
     setProcessedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const markProcessed = (id: string) =>
     setProcessedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-  const processedCount = users.reduce((n, user) => n + (processed.has(user.id) ? 1 : 0), 0);
+  const processedCount = processedIds.length;
   const body = useRef<HTMLTableSectionElement>(null);
   const rows = useRowWindow(users.length, body);
+  // Scrolling near the end of what is loaded pulls the next page.
+  const { fetchNextPage, hasNextPage, isFetchingNextPage } = paged;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage && rows.end >= users.length - LOAD_AHEAD_ROWS) {
+      void fetchNextPage();
+    }
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, rows.end, users.length]);
   // A row's email button puts the account on the outreach list and opens the
   // same note the Outreach tab writes, so a busy user gets a word or a deal
   // from here.
@@ -746,8 +616,8 @@ function ActivityGrid({
   // before any horizontal scroll; each column keeps its index into the
   // activity masks.
   const columns = useMemo(
-    () => rollup.days.map((day, i) => ({ day, i, unknown: missingDays.has(day) })).reverse(),
-    [rollup.days, missingDays],
+    () => summary.days.map((day, i) => ({ day, i, unknown: missingDays.has(day) })).reverse(),
+    [summary.days, missingDays],
   );
   const columnCount = columns.length + 1;
 
@@ -765,7 +635,7 @@ function ActivityGrid({
       ? `${user.email} — ${when}: no data`
       : mask === 0
         ? `${user.email} — ${when}: inactive`
-        : `${user.email} — ${when}: ${rollup.sources.filter((_, i) => (mask & (1 << i)) !== 0).join(", ")}`;
+        : `${user.email} — ${when}: ${summary.sources.filter((_, i) => (mask & (1 << i)) !== 0).join(", ")}`;
   };
 
   return (
@@ -774,8 +644,9 @@ function ActivityGrid({
         <div>
           <p className="font-medium">User activity</p>
           <p className="text-sm text-muted-foreground">
-            One dot per user per day, last {rollup.days.length} days
+            One dot per user per day, last {summary.days.length} days
             {missingDays.size > 0 && ` · ${missingDays.size} without data`}
+            {total > 0 && ` · ${users.length.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} accounts loaded`}
             {processedCount > 0 && (
               <>
                 {" "}
@@ -893,7 +764,7 @@ function ActivityGrid({
                     <span className="block text-xs text-muted-foreground">
                       {user.activeDays === 0
                         ? "no activity"
-                        : `${user.activeDays} active ${user.activeDays === 1 ? "day" : "days"} · last ${formatDay(rollup.days[user.lastActive])}`}{" "}
+                        : `${user.activeDays} active ${user.activeDays === 1 ? "day" : "days"} · last ${formatDay(summary.days[user.lastActive])}`}{" "}
                       · joined {formatDay(user.registeredAt.slice(0, 10))} ·{" "}
                       {formatMicros(user.balanceMicros)}
                       {user.fundedMicros !== undefined && (
@@ -934,6 +805,16 @@ function ActivityGrid({
                 <td colSpan={columnCount} className="p-0" style={{ height: rows.below }} />
               </tr>
             )}
+            {(paged.isPending || paged.isFetchingNextPage || paged.isError) && (
+              <tr>
+                <td
+                  className="sticky left-0 z-10 bg-card py-2 pl-6 text-sm text-muted-foreground"
+                  colSpan={columnCount}
+                >
+                  {paged.isError ? "Couldn\u2019t load accounts." : "Loading accounts\u2026"}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -968,16 +849,12 @@ function ActivityGrid({
 }
 
 export default function SuAnalyticsPage() {
-  const rollup = useAnalyticsRollup();
-  const view = useMemo(
-    () => (rollup.data ? deriveView(rollup.data) : null),
-    [rollup.data],
-  );
+  const summaryQuery = useAnalyticsSummary();
   const referrals = useMemo(
-    () => (rollup.data?.referrals ? deriveReferrals(rollup.data.referrals) : null),
-    [rollup.data],
+    () => (summaryQuery.data?.referrals ? deriveReferrals(summaryQuery.data.referrals) : null),
+    [summaryQuery.data],
   );
-  const billingSection = rollup.data?.billing;
+  const billingSection = summaryQuery.data?.billing;
   const revenue = useMemo(
     () => (billingSection && "days" in billingSection ? deriveRevenue(billingSection) : null),
     [billingSection],
@@ -993,10 +870,10 @@ export default function SuAnalyticsPage() {
   const tiles = useReorder("su-analytics-tile-order", TILE_IDS);
   const cards = useReorder("su-analytics-card-order", CARD_IDS);
 
-  if (rollup.isPending) return <SuStandIn />;
+  if (summaryQuery.isPending) return <SuStandIn />;
 
-  if (rollup.error || !view || !rollup.data) {
-    const noData = rollup.error instanceof ApiError && rollup.error.status === 404;
+  if (summaryQuery.error || !summaryQuery.data) {
+    const noData = summaryQuery.error instanceof ApiError && summaryQuery.error.status === 404;
     return (
       <div className="rounded-xl border bg-card p-5 text-sm text-muted-foreground">
         {noData
@@ -1006,16 +883,18 @@ export default function SuAnalyticsPage() {
     );
   }
 
-  const data = rollup.data;
+  const summary = summaryQuery.data;
+  const missingDays = new Set(summary.missing);
+  const workBits = workBitsOf(summary.sources);
   const deltaPct =
-    view.active7d !== null && view.activePrior7d !== null && view.activePrior7d > 0
-      ? `${(((view.active7d - view.activePrior7d) / view.activePrior7d) * 100).toFixed(1)}%`
+    summary.active7d !== null && summary.activePrior7d !== null && summary.activePrior7d > 0
+      ? `${(((summary.active7d - summary.activePrior7d) / summary.activePrior7d) * 100).toFixed(1)}%`
       : null;
   const count = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US"));
-  const lastDay = data.days[data.days.length - 1];
+  const lastDay = summary.days[summary.days.length - 1];
   // Billing is absent from rollups written before it shipped (or before it
   // took this shape); the next run fills it in.
-  const billing = data.billing && "days" in data.billing ? data.billing : undefined;
+  const billing = summary.billing && "days" in summary.billing ? summary.billing : undefined;
   const churnBase = billing ? billing.subscribers + billing.churned : 0;
   const staleBilling = "not in this rollup yet — run analytics";
   const links = billing ? stripeLinks(billing.dashboardUrl) : undefined;
@@ -1025,27 +904,27 @@ export default function SuAnalyticsPage() {
     registered: (
       <StatTile
         label="Registered users"
-        value={view.registered.toLocaleString("en-US")}
-        sub={`+${view.signups7d} in the last 7 days`}
+        value={summary.registered.toLocaleString("en-US")}
+        sub={`+${summary.signups7d} in the last 7 days`}
       />
     ),
     activeYesterday: (
       <StatTile
         label="Active yesterday"
-        value={count(view.activeYesterday)}
+        value={count(summary.activeYesterday)}
         sub={
-          view.activeYesterday === null
+          summary.activeYesterday === null
             ? `no extract for ${formatDay(lastDay)} yet`
-            : `of ${view.registered.toLocaleString("en-US")} registered`
+            : `of ${summary.registered.toLocaleString("en-US")} registered`
         }
       />
     ),
     active7d: (
       <StatTile
         label="Active last 7 days"
-        value={count(view.active7d)}
+        value={count(summary.active7d)}
         sub={
-          view.active7d === null ? (
+          summary.active7d === null ? (
             "no extracts for the last 7 days"
           ) : deltaPct === null ? (
             "no prior-week baseline"
@@ -1069,7 +948,7 @@ export default function SuAnalyticsPage() {
     balance: (
       <StatTile
         label="Outstanding balance"
-        value={formatMicros(view.totalBalanceMicros)}
+        value={formatMicros(summary.balanceMicros)}
         sub="credits across all accounts"
       />
     ),
@@ -1154,13 +1033,13 @@ export default function SuAnalyticsPage() {
       <ChartCard
         title="Active users"
         subtitle={
-          view.missingDays.size > 0
-            ? `Daily actives, last 60 days · ${view.missingDays.size} days without data are left blank`
+          missingDays.size > 0
+            ? `Daily actives, last 60 days · ${missingDays.size} days without data are left blank`
             : "Daily actives, last 60 days"
         }
       >
         <ChartContainer className="w-full" config={activesConfig}>
-          <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
+          <AreaChart accessibilityLayer data={summary.series} margin={{ left: -16 }}>
             <CartesianGrid vertical={false} />
             <XAxis
               axisLine={false}
@@ -1207,10 +1086,10 @@ export default function SuAnalyticsPage() {
     signups: (
       <ChartCard
         title="Signups"
-        subtitle={`New registrations per day · ${view.signupsWindow.toLocaleString("en-US")} in the last 60 days`}
+        subtitle={`New registrations per day · ${summary.signupsWindow.toLocaleString("en-US")} in the last 60 days`}
       >
         <ChartContainer className="w-full" config={signupsConfig}>
-          <BarChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
+          <BarChart accessibilityLayer data={summary.series} margin={{ left: -16 }}>
             <CartesianGrid vertical={false} />
             <XAxis
               axisLine={false}
@@ -1235,7 +1114,7 @@ export default function SuAnalyticsPage() {
     totalRegistered: (
       <ChartCard title="Total registered" subtitle="Cumulative registrations, last 60 days">
         <ChartContainer className="max-h-56 w-full" config={totalRegisteredConfig}>
-          <AreaChart accessibilityLayer data={view.series} margin={{ left: -16 }}>
+          <AreaChart accessibilityLayer data={summary.series} margin={{ left: -16 }}>
             <CartesianGrid vertical={false} />
             <XAxis
               axisLine={false}
@@ -1537,11 +1416,11 @@ export default function SuAnalyticsPage() {
           ))}
       </div>
 
-      <ActivityGrid missingDays={view.missingDays} rollup={data} workBits={view.workBits} />
+      <ActivityGrid missingDays={missingDays} summary={summary} workBits={workBits} />
 
       <p className="text-xs text-muted-foreground">
         From the nightly rollup generated{" "}
-        {new Date(data.generatedAt).toLocaleString("en-US", { timeZoneName: "short" })}.
+        {new Date(summary.generatedAt).toLocaleString("en-US", { timeZoneName: "short" })}.
       </p>
     </div>
   );

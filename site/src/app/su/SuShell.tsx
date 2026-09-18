@@ -7,7 +7,7 @@ import { SuCrumbProvider } from "@/app/su/SuCrumb";
 import { SuHeader } from "@/app/su/SuHeader";
 import { SuSidebar } from "@/app/su/SuSidebar";
 import { SidebarProvider, useSidebar } from "@/components/ui/sidebar";
-import { useWarmAnalyticsRollup } from "@/queries/analytics";
+import { useWarmAnalyticsSummary } from "@/queries/analytics";
 
 // The section's two-pane shell. It mounts only for a super user: the proxy
 // (src/proxy.ts) has already checked the session and the role before the
@@ -17,7 +17,7 @@ import { useWarmAnalyticsRollup } from "@/queries/analytics";
 // and the rail share one open state: on a phone the rail is a sheet the
 // header opens, on a wider screen it is the fixed left column.
 export function SuShell({ children }: { children: ReactNode }) {
-  useWarmAnalyticsRollup();
+  useWarmAnalyticsSummary();
   // The section paints the white product surface. `app-surface` is what
   // repoints the --background token for the whole document (see globals.css),
   // so it belongs on the outermost element here.

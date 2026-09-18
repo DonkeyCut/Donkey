@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { formatBytes } from "@/lib/bytes";
 import { formatUsdPlain } from "@/lib/credits/format-usd";
-import { useAnalyticsRollup } from "@/queries/analytics";
+import { useAnalyticsSummary, useAnalyticsUser } from "@/queries/analytics";
 import { type OutreachRow } from "@/queries/outreach";
 import { useUserHistory, type UserHistory, type UserHistoryEmail } from "@/queries/userHistory";
 
@@ -137,11 +137,12 @@ const TONE: Record<Event["tone"], string> = {
 
 export function UserHistoryPanel({ target }: { target: OutreachRow }) {
   const history = useUserHistory(target.userId);
-  const rollup = useAnalyticsRollup();
-  const rolled = rollup.data?.users.find((user) => user.id === target.userId);
-  // The rollup's billing events name the payer by email; the window's charges
-  // for this person are the ones with theirs.
-  const charges = (rollup.data?.billing?.events ?? []).filter(
+  // This one account's row out of the nightly rollup, and the billing events
+  // the summary carries. The rollup's events name the payer by email; the
+  // window's charges for this person are the ones with theirs.
+  const rolled = useAnalyticsUser(target.userId).data;
+  const summary = useAnalyticsSummary();
+  const charges = (summary.data?.billing?.events ?? []).filter(
     (event) => event.email === target.email && event.kind !== "canceled" && event.amountMicros !== null,
   );
   // The moment the panel opened; offers and grants are read against it.

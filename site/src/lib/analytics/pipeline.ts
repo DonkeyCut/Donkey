@@ -20,6 +20,11 @@ import {
   analyticsPosthogDayFileSchema,
   analyticsRollupSchema,
   analyticsSnapshotFileSchema,
+  DAYS_PREFIX,
+  dayDbKey,
+  dayPosthogKey,
+  ROLLUP_KEY,
+  SNAPSHOT_KEY,
   type AnalyticsDbDayFile,
   type AnalyticsPosthogDayFile,
   type AnalyticsRollup,
@@ -33,13 +38,6 @@ import { zeroCreditMicros } from "@/lib/credits/amounts";
 import { lapsedCreditByUser } from "@/lib/credits/inference";
 import { REFERRAL_SOURCES } from "@/lib/onboarding/sequence";
 import { prisma } from "@/lib/prisma";
-
-const ANALYTICS_PREFIX = "analytics/";
-const DAYS_PREFIX = `${ANALYTICS_PREFIX}days/`;
-export const dayDbKey = (day: string) => `${DAYS_PREFIX}${day}/db.json`;
-export const dayPosthogKey = (day: string) => `${DAYS_PREFIX}${day}/posthog.json`;
-export const SNAPSHOT_KEY = `${ANALYTICS_PREFIX}snapshot.json`;
-export const ROLLUP_KEY = `${ANALYTICS_PREFIX}rollup.json`;
 
 const WINDOW_DAYS = 60;
 // Backfill after an outage converges over nights instead of one heavy run.
@@ -336,7 +334,7 @@ async function consolidate(
 // day at a time, so a 60-day window holds one day's ids at once; nothing here
 // touches storage or the clock. Every rollup in storage came out of this
 // function, so the fixture the phone's model is tested against comes out of
-// it too (rollup-fixture.ts): a change to what the dashboard is served
+// it too (summary-fixture.ts): a change to what the dashboard is served
 // reaches that test in the same change.
 export async function buildRollup(input: {
   snapshot: AnalyticsSnapshotFile;

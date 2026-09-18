@@ -5,6 +5,16 @@ import { z } from "zod";
 
 export const ANALYTICS_ROLLUP_VERSION = 1;
 
+// Where the pipeline's files live in R2. Here rather than beside the pipeline
+// so a reader of one file — the rollup route — names it without loading the
+// extraction code.
+const ANALYTICS_PREFIX = "analytics/";
+export const DAYS_PREFIX = `${ANALYTICS_PREFIX}days/`;
+export const dayDbKey = (day: string) => `${DAYS_PREFIX}${day}/db.json`;
+export const dayPosthogKey = (day: string) => `${DAYS_PREFIX}${day}/posthog.json`;
+export const SNAPSHOT_KEY = `${ANALYTICS_PREFIX}snapshot.json`;
+export const ROLLUP_KEY = `${ANALYTICS_PREFIX}rollup.json`;
+
 // Bit order for the per-day activity masks. Append-only: a new source takes
 // the next bit so already-written rollups keep decoding.
 export const ANALYTICS_DB_SOURCES = [

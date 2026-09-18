@@ -5,8 +5,13 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { dayDbKey, extractCreditActivity, ROLLUP_KEY } from "../src/lib/analytics/pipeline";
-import { analyticsDbDayFileSchema, analyticsRollupSchema } from "../src/lib/analytics/schema";
+import { extractCreditActivity } from "../src/lib/analytics/pipeline";
+import {
+  analyticsDbDayFileSchema,
+  analyticsRollupSchema,
+  dayDbKey,
+  ROLLUP_KEY,
+} from "../src/lib/analytics/schema";
 import { prisma } from "../src/lib/prisma";
 
 const apply = process.argv.includes("--apply");
