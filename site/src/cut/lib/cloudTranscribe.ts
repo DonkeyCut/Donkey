@@ -13,6 +13,7 @@
 
 import { renderMix as mixAudio } from "./audioMix";
 import { apiFetch } from "./backend";
+import { cloudBackend } from "./backend/cloud";
 import { mediaUrl, type SubtitleCue } from "./types";
 
 /** Mirror of the engine's TranscribeSpec (server/transcribe.ts) minus projectId. */
@@ -126,18 +127,24 @@ export class HostedTranscribeError extends Error {
 export const isFreeTranscriptionExhausted = (e: unknown): boolean =>
   e instanceof HostedTranscribeError && e.code === FREE_EXHAUSTED_CODE;
 
+/** The transport a run posts its chunks on. Defaults to the active backend;
+ * mic dictation names the hosted one, because the take it is falling back with
+ * is the one the engine could not take. */
+type ChunkTransport = (path: string, init?: RequestInit) => Promise<Response>;
+
 async function postChunk(
   samples: Float32Array,
   offset: number,
   locale: string | undefined,
-  freeOnly: boolean
+  freeOnly: boolean,
+  request: ChunkTransport
 ): Promise<WireCue[]> {
   const form = new FormData();
   form.append("audio", new File([encodeWav(samples)], "chunk.wav", { type: "audio/wav" }));
   form.append("offset", String(round(offset)));
   if (locale) form.append("locale", locale);
   if (freeOnly) form.append("freeOnly", "1");
-  const res = await apiFetch("/api/cut/transcribe", { method: "POST", body: form });
+  const res = await request("/api/cut/transcribe", { method: "POST", body: form });
   const body = (await res.json().catch(() => null)) as
     | { cues?: WireCue[]; error?: string; message?: string }
     | null;
@@ -166,7 +173,7 @@ export async function transcribeSamples(
   samples: Float32Array,
   locale: string | undefined,
   isStale?: () => boolean,
-  opts?: { freeOnly?: boolean }
+  opts?: { freeOnly?: boolean; request?: ChunkTransport }
 ): Promise<SubtitleCue[] | null> {
   const duration = samples.length / RATE;
   const step = (CHUNK_SECONDS - OVERLAP_SECONDS) * RATE;
@@ -188,7 +195,13 @@ export async function transcribeSamples(
       const i = next++;
       if (i >= chunks.length || failed !== undefined || isStale?.()) return;
       try {
-        results[i] = await postChunk(chunks[i].slice, chunks[i].offset, locale, opts?.freeOnly ?? false);
+        results[i] = await postChunk(
+          chunks[i].slice,
+          chunks[i].offset,
+          locale,
+          opts?.freeOnly ?? false,
+          opts?.request ?? apiFetch
+        );
       } catch (error) {
         failed = error;
         return;
@@ -231,7 +244,9 @@ export async function transcribeSamples(
 }
 
 /** Transcribe a finished mic recording: decode it, downmix/resample to the
- * wire format, run the chunk pipeline, and join the cue texts. */
+ * wire format, run the chunk pipeline, and join the cue texts. It posts to the
+ * hosted route whatever backend the project lives on — the dictation reaches
+ * here when this Mac's engine is not the one transcribing. */
 export async function cloudTranscribeRecording(blob: Blob, locale?: string): Promise<string> {
   const bytes = await blob.arrayBuffer();
   // Decode at the device rate, then resample/downmix through an offline
@@ -252,7 +267,7 @@ export async function cloudTranscribeRecording(blob: Blob, locale?: string): Pro
   src.connect(ctx.destination);
   src.start();
   const mono = (await ctx.startRendering()).getChannelData(0);
-  const cues = await transcribeSamples(mono, locale);
+  const cues = await transcribeSamples(mono, locale, undefined, { request: cloudBackend.fetch });
   return (cues ?? [])
     .map((c) => c.text)
     .join(" ")
