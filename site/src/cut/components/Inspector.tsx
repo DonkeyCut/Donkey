@@ -182,8 +182,17 @@ export function Inspector() {
     selection?.kind === "overlay" ? s.overlays.find((o) => o.id === selection.id) : undefined
   );
 
+  // The panel floats over the editor: the preview runs the full width of the
+  // row and passes under it. While the timeline is folded away its own button
+  // holds this corner, so the panel stops above it.
+  const timelineOpen = useEditor((s) => s.timelineOpen);
   return (
-    <aside data-field-panel="" className="relative flex min-h-0 bg-muted/40">
+    <aside
+      className={cn(
+        "pointer-events-none absolute inset-y-0 right-0 z-30 flex items-start gap-2 p-3",
+        !timelineOpen && "pb-14"
+      )}
+    >
       {/* Keyed on what is selected: picking something else builds a fresh
           column, so it opens on that thing's own fields. */}
       <InspectorColumn
@@ -282,7 +291,10 @@ function InspectorColumn({
         onToggle={() => setOpen(!open)}
       />
       {open && (
-        <div className="flex min-h-0 w-[272px] shrink-0 flex-col border-l border-border bg-card">
+        <div
+          data-field-panel=""
+          className="pointer-events-auto flex max-h-full w-[272px] shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+        >
           {clip ? (
             <ClipColumn clip={clip} tab={shown} />
           ) : overlay && shown === ANIM_TAB.id ? (
@@ -345,7 +357,7 @@ function InspectorRail({
   // visible from any view.
   const baking = useMatteBakes((s) => !!clipId && s.jobs[clipId]?.status === "running");
   return (
-    <div className={cn("shrink-0 px-2 pt-2", !open && "absolute top-0 right-0 z-10")}>
+    <div className="pointer-events-auto shrink-0">
       <div className="flex flex-col items-center gap-1 rounded-xl border bg-background p-1 shadow-md">
         <RailButton id="home" label="Home" Icon={House} active={view === "main"} onClick={() => onPick("main")} />
         {tabs.map(({ id, label, Icon }) => (

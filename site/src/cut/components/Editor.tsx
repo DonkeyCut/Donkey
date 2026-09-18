@@ -1282,11 +1282,9 @@ export function Editor({
             copying={copying}
           />
         )}
-        <div
-          className={`grid min-h-0 ${
-            hasInspector ? "grid-cols-[auto_minmax(0,1fr)_auto]" : "grid-cols-[auto_minmax(0,1fr)]"
-          }`}
-        >
+        {/* The inspector floats over this row rather than taking a column of
+            it, so the preview keeps the full width and runs under the panel. */}
+        <div className="relative grid min-h-0 grid-cols-[auto_minmax(0,1fr)]">
           <SidePanel projectId={projectId} onImport={importFiles} importing={importing > 0} />
           <div className="grid min-h-0 min-w-0">
             <Preview />
@@ -1313,12 +1311,12 @@ export function Editor({
       )}
       {exportOpen && <ExportDialog />}
       {shareGone && (
-        <div className="fixed top-14 left-1/2 z-50 -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-xs font-medium text-background shadow-lg">
+        <div className="fixed top-14 left-1/2 z-50 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-full bg-foreground/90 px-3.5 py-1.5 text-center text-xs font-medium text-background shadow-lg">
           This share is no longer available.
         </div>
       )}
       {conflictReloaded && (
-        <div className="fixed top-14 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-foreground/90 py-1.5 pr-1.5 pl-3.5 text-background shadow-lg">
+        <div className="fixed top-14 left-1/2 z-50 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-1.5 rounded-full bg-foreground/90 py-1.5 pr-1.5 pl-3.5 text-background shadow-lg">
           <span className="text-xs font-medium">Reloaded a newer version saved elsewhere.</span>
           <Button
             variant="ghost"
