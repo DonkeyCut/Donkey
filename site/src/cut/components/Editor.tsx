@@ -3,6 +3,7 @@
 import { chatRuntime } from "@/cut/lib/chatRuntime";
 import { useHostBridge } from "@/cut/lib/hostBridge";
 import { useCutMode } from "@/cut/lib/backend/hooks";
+import { usePhoneInbox } from "@/cut/hooks/usePhoneInbox";
 import { useHostCommands } from "@/cut/lib/hostCommands";
 import { useEnvironment } from "@/cut/lib/environment";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -768,6 +769,12 @@ export function Editor({
         /** Media folder the import files into — the one open in the Media
          * panel when the upload started. */
         folderId?: string;
+        /** Called once per file with what became of it. A caller that holds the
+         * only other copy of the bytes — the phone link, whose clip is staged on
+         * this Mac until an editor has it — reads this to know whether it may
+         * let that copy go. Failure here is quiet by design for a drag and drop;
+         * it is not for something waiting on the answer. */
+        onOutcome?: (result: { file: File; assetId: string } | { file: File; failed: true }) => void;
       }
     ) => {
       const list = Array.from(files);
@@ -793,7 +800,10 @@ export function Editor({
           // first, and the asset is built from what comes back.
           const pending = await prepareImport(projectId, file);
           const asset = pending?.asset ?? (await importFileToProject(projectId, file));
-          if (!asset) continue;
+          if (!asset) {
+            opts?.onOutcome?.({ file, failed: true });
+            continue;
+          }
           // Recordings are created media: tag them so they land on the timeline
           // but never in the Media panel (reserved for user imports).
           if (opts?.origin) asset.origin = opts.origin;
@@ -805,7 +815,10 @@ export function Editor({
           // bytes live in that project's storage, so filing it into whatever
           // document is open now would point the new project at the old one's
           // media.
-          if (s.projectId !== projectId) continue;
+          if (s.projectId !== projectId) {
+            opts?.onOutcome?.({ file, failed: true });
+            continue;
+          }
           s.addAsset(asset);
           // mediaOnly stocks the Media panel and leaves the timeline alone
           // (drops that land outside the timeline); placement is up to the user.
@@ -852,8 +865,10 @@ export function Editor({
           // drawn from those rather than downloaded back from storage.
           void enrichAsset(asset, pending?.localUrl);
           if (pending) startUpload(projectId, pending);
+          opts?.onOutcome?.({ file, assetId: asset.id });
         } catch (err) {
           reportSwallowed(`[cut] import failed for ${file.name}`, err);
+          opts?.onOutcome?.({ file, failed: true });
         } finally {
           setImporting((n) => n - 1);
         }
@@ -1187,6 +1202,9 @@ export function Editor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [importFiles]);
+
+  // Takes shot on a paired phone land in this project's media as they arrive.
+  usePhoneInbox(importFiles);
 
   // The project is here, on this Mac — it just can't be opened without the app
   // that holds it. The gate's banner sits above this with the recovery steps,

@@ -7,6 +7,7 @@ import { AvatarDialog } from "@/app/cut/app/(home)/settings/profile/AvatarDialog
 import { EditorSection } from "@/app/cut/app/(home)/settings/profile/EditorSection";
 import { EmailSection } from "@/app/cut/app/(home)/settings/profile/EmailSection";
 import { FeatureFlagsSection } from "@/app/cut/app/(home)/settings/profile/FeatureFlagsSection";
+import { PhoneLinkSection } from "@/app/cut/app/(home)/settings/profile/PhoneLinkSection";
 import { SuperUserSection } from "@/app/cut/app/(home)/settings/profile/SuperUserSection";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -131,6 +132,8 @@ export default function CutProfilePage() {
       <FeatureFlagsSection />
 
       <SuperUserSection />
+
+      <PhoneLinkSection />
 
       <AvatarDialog
         open={editingAvatar}
