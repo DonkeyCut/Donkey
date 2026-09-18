@@ -31,6 +31,29 @@ struct Output: Codable {
   let words: [Word]
 }
 
+/// Map a requested locale onto one the transcriber actually lists.
+///
+/// The analyzer reserves a locale by exact identifier and refuses anything it
+/// does not list, so a caller that names a bare language — `navigator.language`
+/// reports "en" whenever the browser's language carries no region — gets
+/// nothing transcribed. Fall to the closest listed locale instead: the same
+/// identifier, the same language in the requested region, the same language in
+/// this Mac's region, then a region whose model is already installed.
+func resolveLocale(_ requested: Locale) async -> Locale? {
+  let tag = { (l: Locale) in l.identifier(.bcp47).lowercased() }
+  let region = { (l: Locale) in l.region?.identifier.uppercased() }
+  let supported = await SpeechTranscriber.supportedLocales
+  if let exact = supported.first(where: { tag($0) == tag(requested) }) { return exact }
+  guard let language = requested.language.languageCode?.identifier.lowercased() else { return nil }
+  let family = supported.filter { $0.language.languageCode?.identifier.lowercased() == language }
+  guard !family.isEmpty else { return nil }
+  if let want = region(requested), let match = family.first(where: { region($0) == want }) { return match }
+  if let here = region(Locale.current), let match = family.first(where: { region($0) == here }) { return match }
+  let installed = Set(await SpeechTranscriber.installedLocales.map(tag))
+  let ordered = family.sorted { tag($0) < tag($1) }
+  return ordered.first(where: { installed.contains(tag($0)) }) ?? ordered.first
+}
+
 func fail(_ message: String) -> Never {
   FileHandle.standardError.write(Data((message + "\n").utf8))
   exit(1)
@@ -50,14 +73,16 @@ struct Main {
     let args = CommandLine.arguments
     if args.count >= 2 && args[1] == "--live" {
       let localeId = args.count >= 3 ? args[2] : "en-US"
-      await runLive(locale: Locale(identifier: localeId))
+      await runLive(requested: Locale(identifier: localeId))
       return
     }
 
     guard args.count >= 2 else { fail("usage: cut-stt <audio-file> [locale]") }
     let path = args[1]
     let localeId = args.count >= 3 ? args[2] : "en-US"
-    let locale = Locale(identifier: localeId)
+    guard let locale = await resolveLocale(Locale(identifier: localeId)) else {
+      fail("cut-stt: no on-device speech model covers \(localeId).")
+    }
 
     do {
       let transcriber = SpeechTranscriber(
@@ -143,11 +168,15 @@ final class LiveState: @unchecked Sendable {
 let finishDeadline = Duration.seconds(6)
 
 @MainActor
-func runLive(locale: Locale) async {
+func runLive(requested: Locale) async {
   // The browser pipes raw mic audio in this exact format; keep in sync with the
   // client's downsampler in lib/micTranscribe.ts.
   let liveSampleRate = 16000.0
   let live = LiveState()
+  guard let locale = await resolveLocale(requested) else {
+    emit("error", "No on-device speech model covers \(requested.identifier(.bcp47)).")
+    exit(1)
+  }
   do {
     let transcriber = SpeechTranscriber(
       locale: locale,
