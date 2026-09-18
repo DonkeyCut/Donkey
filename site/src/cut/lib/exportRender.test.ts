@@ -157,10 +157,12 @@ describe("bitrateFor by delivery", () => {
   test("HEVC asks for fewer bits than H.264 at the same tier", () => {
     expect(bitrateFor({ ...base, codec: "hevc" })).toBeLessThan(bitrateFor({ ...base, codec: "h264" }));
   });
-  test("ProRes is a fixed rate, above any tier", () => {
+  test("ProRes is a fixed rate, above any tier, and 4444 above 422 HQ", () => {
     expect(bitrateFor({ ...base, codec: "prores" })).toBeGreaterThan(bitrateFor({ ...base, codec: "h264", crf: 10 }));
+    expect(bitrateFor({ ...base, codec: "prores4444" })).toBeGreaterThan(bitrateFor({ ...base, codec: "prores" }));
   });
-  test("a typed bitrate wins", () => {
+  test("a typed bitrate wins, except where the codec sets its own", () => {
     expect(bitrateFor({ ...base, codec: "h264", bitrate: 1_234_000 })).toBe(1_234_000);
+    expect(bitrateFor({ ...base, codec: "prores4444", bitrate: 1_234_000 })).not.toBe(1_234_000);
   });
 });

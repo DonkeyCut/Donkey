@@ -28,7 +28,8 @@ const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
     videoColorInfo: async () => null,
     videoDecodeCost: async () => null,
     mediaDuration: async (file) => produced.get(file) ?? 0,
-    videoEncoder: async (codec) => (codec === "hevc" ? "libx265" : codec === "prores" ? "prores_ks" : "libx264"),
+    videoEncoder: async (codec) =>
+      codec === "hevc" ? "libx265" : codec.startsWith("prores") ? "prores_ks" : "libx264",
     runFfmpeg: async (_job, args) => {
       ffmpegCalls.push(args);
       const piece = args[args.length - 1].match(/^(.*)\.\d+\.(?:mov|wav)$/);
@@ -871,6 +872,29 @@ describe("delivery", () => {
     expect(arg(args, "-c:a")).toBe("pcm_s16le");
     expect(args).not.toContain("-crf");
     expect(args[args.length - 1].endsWith("encode.mov")).toBe(true);
+  });
+
+  test("a ProRes 4444 master writes 10-bit 4:4:4 and composites at full chroma", async () => {
+    const args = await encodeRun({ codec: "prores4444", container: "mov", audioCodec: "pcm" });
+    expect(arg(args, "-c:v")).toBe("prores_ks");
+    expect(arg(args, "-profile:v")).toBe("4");
+    expect(arg(args, "-pix_fmt")).toBe("yuv444p10le");
+    expect(args).not.toContain("-crf");
+    const graph = arg(args, "-filter_complex");
+    // The composite itself holds the chroma; a 4:2:0 graph would have thrown
+    // it away before prores_ks ever saw a frame.
+    expect(graph).toContain("format=yuv444p");
+    expect(graph).not.toContain("yuv420p");
+    expect(graph).not.toContain("yuva420p");
+    for (const stanza of graph.split(";").filter((f) => f.includes("overlay="))) {
+      expect(stanza).toContain(":format=yuv444");
+    }
+  });
+
+  test("an H.264 delivery composites at 4:2:0, where its encoder lands anyway", async () => {
+    const graph = arg(await encodeRun({}), "-filter_complex");
+    expect(graph).toContain("format=yuv420p");
+    expect(graph).not.toContain("yuv444");
   });
 
   test("a typed bitrate replaces the tier's CRF", async () => {

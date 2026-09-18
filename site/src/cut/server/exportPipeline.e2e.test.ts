@@ -11,9 +11,33 @@ import { runExport, type ExportSpec, type RenderHandle } from "./exportPipeline"
 // transitions, edge animations, looks, grades, masks (painted and subject),
 // keyframed poses, borders, shadows, overlay videos, elements (static and
 // slideshow), effects, captions, an audio bed with ducking, whole-video
-// fades, a background color, a gap — and renders it end to end. A filter
-// ffmpeg rejects, a broken option value, or an unconnected pad fails here
-// before it can fail an export.
+// fades, a background color, a gap, a clip played backward — and renders it
+// end to end. A filter ffmpeg rejects, a broken option value, or an
+// unconnected pad fails here before it can fail an export.
+//
+// It runs once per delivery, because the graph is built in the chroma the
+// delivery carries: a ProRes 4444 master composites at 4:4:4, where every
+// filter and every `overlay` negotiates a different pixel family than the
+// 4:2:0 the H.264 file is built in.
+const DELIVERIES = [
+  { name: "an H.264 MP4", ext: "mp4", codec: "h264", pixFmt: "yuv420p", over: {} },
+  {
+    // ProRes 4444's bitstream carries twelve bits, so the file reads back as
+    // yuv444p12le whatever the encoder was handed.
+    name: "a ProRes 4444 master",
+    ext: "mov",
+    codec: "prores",
+    pixFmt: "yuv444p12le",
+    over: { codec: "prores4444", container: "mov", audioCodec: "pcm" },
+  },
+] as const satisfies readonly {
+  name: string;
+  ext: string;
+  codec: string;
+  /** What the finished file decodes as. */
+  pixFmt: string;
+  over: Partial<ExportSpec>;
+}[];
 
 const available = (cmd: string) =>
   spawnSync(cmd, ["-version"], { stdio: "ignore" }).status === 0;
@@ -32,7 +56,7 @@ const probe = (file: string) => {
     [
       "-v", "error",
       "-show_entries", "format=duration",
-      "-show_entries", "stream=codec_type,width,height",
+      "-show_entries", "stream=codec_type,codec_name,pix_fmt,width,height",
       "-of", "json",
       file,
     ],
@@ -41,16 +65,16 @@ const probe = (file: string) => {
   if (r.status !== 0) throw new Error(`ffprobe failed:\n${r.stderr}`);
   return JSON.parse(r.stdout) as {
     format: { duration: string };
-    streams: { codec_type: string; width?: number; height?: number }[];
+    streams: { codec_type: string; codec_name: string; pix_fmt?: string; width?: number; height?: number }[];
   };
 };
 
 const W = 320;
 const H = 568;
 
-describe("export pipeline end to end", () => {
+for (const delivery of DELIVERIES) describe("export pipeline end to end", () => {
   test.skipIf(!tools)(
-    "a project using every pipeline feature renders through real ffmpeg",
+    `a project using every pipeline feature renders through real ffmpeg as ${delivery.name}`,
     async () => {
       const mediaDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-media-"));
       const tmpDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-job-"));
@@ -116,7 +140,7 @@ describe("export pipeline end to end", () => {
             },
             {
               file: "b.mp4", in: 0, out: 2, muted: false,
-              fit: "fit",
+              fit: "fit", reverse: true,
               grade: { brightness: 5, contrast: 8, saturation: -10, temperature: 12, hue: 10 },
               mask: { file: "mask.png" },
               kf: [
@@ -174,11 +198,12 @@ describe("export pipeline end to end", () => {
             { file: "cap.png", start: 0.3, end: 1.2 },
             { file: "cap.png", start: 1.4, end: 2.0 },
           ],
+          ...delivery.over,
         };
 
         const job: RenderHandle = {
           tmpDir,
-          outPath: path.join(tmpDir, "out.mp4"),
+          outPath: path.join(tmpDir, `out.${delivery.ext}`),
           progress: 0,
           log: [],
         };
@@ -192,6 +217,10 @@ describe("export pipeline end to end", () => {
         const video = meta.streams.find((s) => s.codec_type === "video");
         expect(video?.width).toBe(W);
         expect(video?.height).toBe(H);
+        expect(video?.codec_name).toBe(delivery.codec);
+        // The chroma the composite was built in is the chroma the file holds:
+        // 4:4:4 all the way through for the master, 4:2:0 for the MP4.
+        expect(video?.pix_fmt).toBe(delivery.pixFmt);
         expect(meta.streams.some((s) => s.codec_type === "audio")).toBe(true);
       } finally {
         await rm(mediaDir, { recursive: true, force: true });

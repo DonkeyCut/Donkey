@@ -558,6 +558,16 @@ export function applyEffectToCanvas(
  * out of quoted expressions). */
 const gate = (a: number, b: number) => `enable='gte(t,${fmt(a)})*lt(t,${fmt(b)})'`;
 
+/** The pixel family a chain works in: the format its branches carry, and the
+ * option that keeps `overlay` blending in the same one. A 4:2:0 graph is the
+ * default, which is what `overlay` picks on its own. */
+export interface ChainChroma {
+  pixFmt: string;
+  overlay: string;
+}
+
+export const CHROMA_420: ChainChroma = { pixFmt: "yuv420p", overlay: "" };
+
 /**
  * ffmpeg filter_complex lines rendering one effect from `[inLabel]` into
  * `[outLabel]`, active only inside [start, end). Every filter used is in the
@@ -575,7 +585,8 @@ export function effectFilterLines(
   height: number,
   tag: string,
   focus?: { x: number; y: number },
-  ramp?: number
+  ramp?: number,
+  chroma: ChainChroma = CHROMA_420
 ): string[] | null {
   const custom = customEffects.get(effect);
   if (custom) return custom.filterLines(inLabel, outLabel, amount, start, end, width, height, tag);
@@ -590,12 +601,12 @@ export function effectFilterLines(
     // The graded copy renders on its own branch and replaces the frame only
     // inside the window, the same shape the shake recipe uses — a look chain
     // is several filters deep and not all of them take a timeline gate.
-    const lines = lookFilterLines(`lkfi${tag}`, `lkfo${tag}`, look, k, height, "yuv420p", tag);
+    const lines = lookFilterLines(`lkfi${tag}`, `lkfo${tag}`, look, k, height, chroma.pixFmt, tag);
     if (!lines) return null;
     return [
       `[${inLabel}]split[lkfb${tag}][lkfi${tag}]`,
       ...lines,
-      `[lkfb${tag}][lkfo${tag}]overlay=0:0:${en}:eof_action=pass[${outLabel}]`,
+      `[lkfb${tag}][lkfo${tag}]overlay=0:0:${en}:eof_action=pass${chroma.overlay}[${outLabel}]`,
     ];
   }
   switch (effect as VisualEffectId) {
@@ -615,7 +626,7 @@ export function effectFilterLines(
           `[${inLabel}]split[efb${tag}][efs${tag}]`,
           `[efs${tag}]scale=${zw}:${zh},crop=${width}:${height}:` +
             `${Math.round((zw - width) * f.x)}:${Math.round((zh - height) * f.y)}[efc${tag}]`,
-          `[efb${tag}][efc${tag}]overlay=0:0:${en}:eof_action=pass[${outLabel}]`,
+          `[efb${tag}][efc${tag}]overlay=0:0:${en}:eof_action=pass${chroma.overlay}[${outLabel}]`,
         ];
       }
       // Ramped: the branch is rescaled every frame along the same eased curve
@@ -632,7 +643,7 @@ export function effectFilterLines(
         `[${inLabel}]split[efb${tag}][efs${tag}]`,
         `[efs${tag}]scale=w='trunc(iw*${grow}/2)*2':h='trunc(ih*${grow}/2)*2':eval=frame[efc${tag}]`,
         `[efb${tag}][efc${tag}]overlay=x='-(w-W)*${fmt(f.x)}':y='-(h-H)*${fmt(f.y)}':` +
-          `${en}:eof_action=pass[${outLabel}]`,
+          `${en}:eof_action=pass${chroma.overlay}[${outLabel}]`,
       ];
     }
     case "grain":
@@ -708,7 +719,7 @@ export function effectFilterLines(
         `[${inLabel}]split[efb${tag}][efs${tag}]`,
         `[efs${tag}]scale=${zw}:${zh},crop=${width}:${height}:` +
           `x='(in_w-out_w)/2+${ax}*sin(${tl}*33)':y='(in_h-out_h)/2+${ay}*cos(${tl}*47)'[efc${tag}]`,
-        `[efb${tag}][efc${tag}]overlay=0:0:${en}:eof_action=pass[${outLabel}]`,
+        `[efb${tag}][efc${tag}]overlay=0:0:${en}:eof_action=pass${chroma.overlay}[${outLabel}]`,
       ];
     }
     default:

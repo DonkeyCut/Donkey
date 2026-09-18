@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { deliveryContainer, deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor, type ExportRange } from "../lib/exportDelivery";
+import { deliveryCodec, deliveryContainer, deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor, type ExportCodec, type ExportRange } from "../lib/exportDelivery";
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoColorInfo, videoDecodeCost } from "./util";
@@ -64,7 +64,7 @@ export interface ExportSpec {
   crf: number;
   preset: string;
   /** The delivery. A spec from before these existed is an H.264 + AAC MP4. */
-  codec?: "h264" | "hevc" | "prores";
+  codec?: ExportCodec;
   container?: "mp4" | "mov";
   audioCodec?: "aac" | "pcm";
   /** A bitrate the user typed, bits per second; absent = the `crf` tier. */
@@ -376,7 +376,7 @@ export type ExportVideoCodec = NonNullable<ExportSpec["codec"]>;
  */
 export async function videoEncoder(codec: ExportVideoCodec): Promise<string> {
   const have = await ffmpegEncoders();
-  if (codec === "prores") return "prores_ks";
+  if (codec === "prores" || codec === "prores4444") return "prores_ks";
   if (codec === "hevc") return have.has("libx265") ? "libx265" : "hevc_videotoolbox";
   return have.has("libx264") ? "libx264" : "h264_videotoolbox";
 }
@@ -429,8 +429,15 @@ export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
       return ["-c:v", "libx265", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf + 4)]), ...gop, "-x265-params", "log-level=error", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"];
     case "hevc_videotoolbox":
       return ["-c:v", "hevc_videotoolbox", ...rate, ...gop, "-profile:v", "main", "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
-    case "prores_ks":
-      return ["-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0", "-pix_fmt", "yuv422p10le"];
+    case "prores_ks": {
+      // Profile 3 is 422 HQ, profile 4 is 4444. 4444 keeps the chroma the
+      // graph composited at — every pixel its own color, which is what the
+      // titles, captions and stickers drawn in RGBA were made of — and the
+      // alpha-free pixel format spares the file a plane that is all opaque.
+      const full = codec === "prores4444";
+      return ["-c:v", "prores_ks", "-profile:v", full ? "4" : "3", "-vendor", "apl0",
+        "-pix_fmt", full ? "yuv444p10le" : "yuv422p10le"];
+    }
     default:
       throw new Error(`No encoder for ${codec}.`);
   }
@@ -476,7 +483,7 @@ async function resolveMedia(
  * when the matrix itself is BT.2020, or when it's untagged and the wide
  * primaries/transfer tags are the only signal there is.
  */
-export function sdrConvert(c: Awaited<ReturnType<typeof videoColorInfo>>) {
+export function sdrConvert(c: Awaited<ReturnType<typeof videoColorInfo>>, fmt: string) {
   if (c == null) return "";
   const matrix = c.matrix && c.matrix !== "unknown" ? c.matrix : null;
   const wide =
@@ -485,7 +492,7 @@ export function sdrConvert(c: Awaited<ReturnType<typeof videoColorInfo>>) {
       (c.primaries === "bt2020" ||
         c.transfer === "arib-std-b67" ||
         c.transfer === "smpte2084"));
-  return wide ? "format=yuv420p10le,colorspace=all=bt709:iall=bt2020:format=yuv420p," : "";
+  return wide ? `format=yuv420p10le,colorspace=all=bt709:iall=bt2020:format=${fmt},` : "";
 }
 
 /** A clip's effective playback rate (>0, default 1). */
@@ -711,6 +718,25 @@ export async function runExport(
   let spec = narrowSpecToRange(given);
   const { width: W, height: H, fps } = spec;
 
+  // The chroma the composite is built at. A full-chroma delivery composites
+  // at 4:4:4, so the titles, captions, stickers and masks the graph draws in
+  // RGBA reach the file with every pixel's own color — a 4:2:0 graph averages
+  // that away before the encoder ever sees it, whatever the file is written
+  // as afterward. H.264 and HEVC subsample at the encoder regardless, so their
+  // graph stays 4:2:0 and costs what it always did.
+  //
+  // Eight bits a plane either way: the looks and effects carry 0–255
+  // constants (`geq`, `lutyuv`), the sources decode to eight, and ProRes 4444
+  // takes the exact widening to ten at the encoder.
+  const full = deliveryCodec(spec.codec).chroma444 === true;
+  const clipFmt = full ? "yuv444p" : "yuv420p";
+  const alphaFmt = full ? "yuva444p" : "yuva420p";
+  // `overlay` blends in its own pixel family, and its default is yuv420 —
+  // left alone it would undo the graph's chroma at every composite.
+  const ovl = full ? ":format=yuv444" : "";
+  /** The same family, for the effect chains the kit writes. */
+  const chroma = { pixFmt: clipFmt, overlay: ovl };
+
   // A clip that plays backward is rendered off a turned copy of its span,
   // baked ahead of the graph in bounded chunks (turnMedia.ts): the clip
   // becomes a forward clip over that file, its curve's nodes carried along,
@@ -749,7 +775,7 @@ export async function runExport(
     const video = !soundOnly && (await io.hasStream(src, "v"));
     const audio = await io.hasStream(src, "a");
     const mono = audio && (await io.audioChannels(src)) === 1;
-    const colorFix = video ? sdrConvert(await io.videoColorInfo(src)) : "";
+    const colorFix = video ? sdrConvert(await io.videoColorInfo(src), clipFmt) : "";
     const decodeCost = video ? ((await io.videoDecodeCost(src)) ?? 0) : 0;
     const file = path.join(job.tmpDir, `turned_${tag}.${video ? "mov" : "wav"}`);
     const pivot = await bakeTurnedMedia(
@@ -760,7 +786,7 @@ export async function runExport(
         duration: io.mediaDuration,
       },
       src,
-      { lo, hi, video, audio, colorFix, decodeCost },
+      { lo, hi, video, audio, colorFix, decodeCost, fmt: clipFmt, master: full },
       file
     );
     turned.set(file, { video, audio, mono });
@@ -781,7 +807,6 @@ export async function runExport(
   const overlayVideos = [...(spec.overlayVideos ?? [])].sort(
     (a, b) => a.track - b.track || a.start - b.start
   );
-  const clipFmt = "yuv420p";
   // Every bare patch of frame in the graph — the letterbox around a fitted
   // clip, a gap on track 0, the backdrop behind an edge animation — is the
   // project's own background color. ffmpeg takes it as 0xRRGGBB.
@@ -872,7 +897,7 @@ export async function runExport(
       const hasVideo = await io.hasStream(paths[i], "v", () => (videoProbeFailed = true));
       videoPresence.set(f, hasVideo || videoProbeFailed);
       // A failed color probe (null) means no conversion — SDR passthrough.
-      colorFix.set(f, sdrConvert(await io.videoColorInfo(paths[i])));
+      colorFix.set(f, sdrConvert(await io.videoColorInfo(paths[i]), clipFmt));
     })
   );
   // The turned copies: already probed at the bake, already folded to SDR.
@@ -1376,17 +1401,17 @@ export async function runExport(
       const scaleExpr = `scale=w='trunc(iw*(0.8+0.2*(${p}))/2)*2':h=-2:eval=frame`;
       if (fx.bg) {
         filters.push(
-          `[${inLab}]format=yuva420p,` +
+          `[${inLab}]format=${alphaFmt},` +
             `fade=t=${side === "head" ? "in" : "out"}:st=0:d=${d}:alpha=1,${scaleExpr}[${sc}]`
         );
         filters.push(
-          `[${bg}][${sc}]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=${fmt}[${outLab}]`
+          `[${bg}][${sc}]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1${ovl},format=${fmt}[${outLab}]`
         );
         return;
       }
       filters.push(`[${inLab}]${scaleExpr}[${sc}]`);
       filters.push(
-        `[${bg}][${sc}]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,` +
+        `[${bg}][${sc}]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1${ovl},` +
           `fade=t=${side === "head" ? "in" : "out"}:st=0:d=${d},format=${fmt}[${outLab}]`
       );
     };
@@ -1599,7 +1624,7 @@ export async function runExport(
       const brIdx = clipBorderInput.get(j);
       if (brIdx !== undefined) {
         filters.push(`${core}[cbi${j}]`);
-        filters.push(`[cbi${j}][${brIdx}:v]overlay=0:0:eof_action=pass,format=${segFmt}[cbo${j}]`);
+        filters.push(`[cbi${j}][${brIdx}:v]overlay=0:0:eof_action=pass${ovl},format=${segFmt}[cbo${j}]`);
         core = `[cbo${j}]null`;
       }
       // A removal segment carries alpha, so its fades must ramp the alpha
@@ -1630,7 +1655,7 @@ export async function runExport(
         // restores the constant-size opaque frame the join expects. The
         // multiply chains (alphaextract → blend → alphamerge) compose with
         // any alpha the segment carries.
-        pushEdgeFx(core, dur, headFx, tailFx, W, H, rmIn ? "yuva420p" : clipFmt, fades, `vmr${j}`, `c${j}`);
+        pushEdgeFx(core, dur, headFx, tailFx, W, H, rmIn ? alphaFmt : clipFmt, fades, `vmr${j}`, `c${j}`);
         let cur = `vmr${j}`;
         if (mkIdx !== undefined) {
           filters.push(`[${mkIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=gray[cmk${j}]`);
@@ -1651,10 +1676,10 @@ export async function runExport(
           }
           const pos = posePositionExprs(c.kf!, 0);
           filters.push(
-            `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${num(dur)},format=yuva420p[ckb${j}]`
+            `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${num(dur)},format=${alphaFmt}[ckb${j}]`
           );
           filters.push(
-            `[ckb${j}][${cur}]overlay=x=${pos.x}:y=${pos.y}:eof_action=pass[ckp${j}]`
+            `[ckb${j}][${cur}]overlay=x=${pos.x}:y=${pos.y}:eof_action=pass${ovl}[ckp${j}]`
           );
           cur = `ckp${j}`;
         }
@@ -1681,7 +1706,7 @@ export async function runExport(
         );
         const flatOut = rmIn && c.look ? `vrl${j}` : segCore;
         filters.push(
-          `[cmb${j}][${cur}]overlay=0:0:shortest=1,format=${clipFmt},fps=${fps}[${flatOut}]`
+          `[cmb${j}][${cur}]overlay=0:0:shortest=1${ovl},format=${clipFmt},fps=${fps}[${flatOut}]`
         );
         if (flatOut !== segCore) {
           // The removal clip's look, over the flattened opaque segment.
@@ -1695,7 +1720,7 @@ export async function runExport(
       if (shIdx !== undefined) {
         filters.push(`[${shIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=rgba[csh${j}]`);
         filters.push(
-          `[${segCore}][csh${j}]overlay=0:0:eof_action=pass,format=${clipFmt},fps=${fps}[${segOut}]`
+          `[${segCore}][csh${j}]overlay=0:0:eof_action=pass${ovl},format=${clipFmt},fps=${fps}[${segOut}]`
         );
       }
       if (nFz > 0) {
@@ -1958,12 +1983,12 @@ export async function runExport(
     const boxed =
       (ramped || maskIdx !== undefined || !!subjMask || keyed || !!oc.border) && !cover;
     const boxPad = boxed
-      ? `,format=yuva420p,pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black@0.0`
+      ? `,format=${alphaFmt},pad=${boxW}:${boxH}:(ow-iw)/2:(oh-ih)/2:color=black@0.0`
       : "";
     if (boxed) pos = region ? `${region.rx}:${region.ry}` : "0:0";
-    const fmt = hf > 0.01 || tf > 0.01 || boxed || orIn ? "yuva420p" : "yuv420p";
+    const fmt = hf > 0.01 || tf > 0.01 || boxed || orIn ? alphaFmt : clipFmt;
     // The look chain reads the pre-pad picture, which is opaque.
-    const lookFmt = boxed ? "yuv420p" : fmt;
+    const lookFmt = boxed ? clipFmt : fmt;
     const fades =
       (hf > 0.01 ? `,fade=t=in:st=0:d=${num(hf)}:alpha=1` : "") +
       (tf > 0.01 ? `,fade=t=out:st=${num(Math.max(0, olen - tf))}:d=${num(tf)}:alpha=1` : "");
@@ -1984,7 +2009,7 @@ export async function runExport(
         ? `[${idx}:v]setpts=PTS-STARTPTS`
         : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=${retimedPts(ort)}`;
     }
-    let core = `${framedTimebase(timebase, framing, `o${k}`, orIn ? {} : oc, ort, fps, filters)},${orIn ? "" : colorFix.get(oc.file) ?? ""}${gradeChain(orIn ? undefined : oc.grade)}format=${orIn ? "yuva420p" : lookFmt}`;
+    let core = `${framedTimebase(timebase, framing, `o${k}`, orIn ? {} : oc, ort, fps, filters)},${orIn ? "" : colorFix.get(oc.file) ?? ""}${gradeChain(orIn ? undefined : oc.grade)}format=${orIn ? alphaFmt : lookFmt}`;
     // Looks bake into footage overlays only: an image may carry alpha, which
     // the look chain's internal filters would flatten onto black over the
     // tracks beneath. The alpha fades stay safe: they apply after the look.
@@ -2002,7 +2027,7 @@ export async function runExport(
     const obIdx = overlayBorderInput.get(oc);
     if (obIdx !== undefined) {
       filters.push(`${core}[obi${k}]`);
-      filters.push(`[obi${k}][${obIdx}:v]overlay=0:0:eof_action=pass,format=${fmt}[obo${k}]`);
+      filters.push(`[obi${k}][${obIdx}:v]overlay=0:0:eof_action=pass${ovl},format=${fmt}[obo${k}]`);
       core = `[obo${k}]null`;
     }
     const pre = `ovp${k}`;
@@ -2028,13 +2053,13 @@ export async function runExport(
       filters.push(`[${pre}]format=rgba,split[om0${k}][om1${k}]`);
       filters.push(`[om1${k}]alphaextract[oma${k}]`);
       filters.push(`[oma${k}][omk${k}]blend=all_mode=multiply[omm${k}]`);
-      filters.push(`[om0${k}][omm${k}]alphamerge,format=yuva420p[omc${k}]`);
+      filters.push(`[om0${k}][omm${k}]alphamerge,format=${alphaFmt}[omc${k}]`);
       masked = `omc${k}`;
     }
     if (keyed) {
       const tf = poseTransformFilters(oc.kf!, boxW, boxH);
       if (tf) {
-        filters.push(`[${masked}]format=rgba${tf},format=yuva420p[okt${k}]`);
+        filters.push(`[${masked}]format=rgba${tf},format=${alphaFmt}[okt${k}]`);
         masked = `okt${k}`;
       }
     }
@@ -2054,7 +2079,7 @@ export async function runExport(
           `tpad=start_duration=${num(oc.start)}:color=black@0.0[${lit}]`
       );
       const shOnto = `vovs${k}`;
-      filters.push(`[${onto}][${lit}]overlay=0:0:${enable}:eof_action=pass[${shOnto}]`);
+      filters.push(`[${onto}][${lit}]overlay=0:0:${enable}:eof_action=pass${ovl}[${shOnto}]`);
       onto = shOnto;
     }
     if (subjMask) {
@@ -2066,10 +2091,10 @@ export async function runExport(
       if (keyed) {
         const kpos = posePositionExprs(oc.kf!, oc.start);
         filters.push(
-          `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${num(spec.duration)},format=yuva420p[osb${k}]`
+          `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${num(spec.duration)},format=${alphaFmt}[osb${k}]`
         );
         filters.push(
-          `[osb${k}][${seg}]overlay=x=${kpos.x}:y=${kpos.y}:eof_action=pass[osp${k}]`
+          `[osb${k}][${seg}]overlay=x=${kpos.x}:y=${kpos.y}:eof_action=pass${ovl}[osp${k}]`
         );
       } else {
         // The box may reach past the frame; pad to the box holding both and
@@ -2089,15 +2114,15 @@ export async function runExport(
       filters.push(`[osp${k}]format=rgba,split[os0${k}][os1${k}]`);
       filters.push(`[os1${k}]alphaextract[osa${k}]`);
       filters.push(`[osa${k}][${matte}]blend=all_mode=multiply[osm${k}]`);
-      filters.push(`[os0${k}][osm${k}]alphamerge,format=yuva420p[osc${k}]`);
-      filters.push(`[${onto}][osc${k}]overlay=0:0:${enable}:eof_action=pass[${next}]`);
+      filters.push(`[os0${k}][osm${k}]alphamerge,format=${alphaFmt}[osc${k}]`);
+      filters.push(`[${onto}][osc${k}]overlay=0:0:${enable}:eof_action=pass${ovl}[${next}]`);
     } else if (keyed) {
       const kpos = posePositionExprs(oc.kf!, oc.start);
       filters.push(
-        `[${onto}][${seg}]overlay=x=${kpos.x}:y=${kpos.y}:${enable}:eof_action=pass[${next}]`
+        `[${onto}][${seg}]overlay=x=${kpos.x}:y=${kpos.y}:${enable}:eof_action=pass${ovl}[${next}]`
       );
     } else {
-      filters.push(`[${onto}][${seg}]overlay=${pos}:${enable}:eof_action=pass[${next}]`);
+      filters.push(`[${onto}][${seg}]overlay=${pos}:${enable}:eof_action=pass${ovl}[${next}]`);
     }
     if (!oc.muted && audioPresence.get(oc.file)) {
       const vol = (oc.volume ?? 1) !== 1 ? `volume=${num(oc.volume ?? 1)},` : "";
@@ -2162,18 +2187,18 @@ export async function runExport(
         filters.push(`[oe0${k}]fps=${fps}[oef${k}]`);
         filters.push(`[oe1${k}]alphaextract,fps=${fps}[oea${k}]`);
         filters.push(`[oea${k}][${matte}]blend=all_mode=multiply[oem${k}]`);
-        filters.push(`[oef${k}][oem${k}]alphamerge,format=yuva420p[oes${k}]`);
-        filters.push(`[${onto}][oes${k}]overlay=0:0:eof_action=pass[${next}]`);
+        filters.push(`[oef${k}][oem${k}]alphamerge,format=${alphaFmt}[oes${k}]`);
+        filters.push(`[${onto}][oes${k}]overlay=0:0:eof_action=pass${ovl}[${next}]`);
         return next;
       }
-      filters.push(`[${animIdx}:v]format=yuva420p,fps=${fps},setsar=1[oanim${k}]`);
+      filters.push(`[${animIdx}:v]format=${alphaFmt},fps=${fps},setsar=1[oanim${k}]`);
       filters.push(
-        `[${onto}][oanim${k}]overlay=${num(o.x ?? 0)}:${num(o.y ?? 0)}:eof_action=pass[${next}]`
+        `[${onto}][oanim${k}]overlay=${num(o.x ?? 0)}:${num(o.y ?? 0)}:eof_action=pass${ovl}[${next}]`
       );
     } else if (o.file) {
       const idx = inputIndex.get(o.file)!;
       filters.push(
-        `[${onto}][${idx}:v]overlay=0:0:enable='gte(t,${num(o.start)})*lt(t,${num(o.end)})'[${next}]`
+        `[${onto}][${idx}:v]overlay=0:0:enable='gte(t,${num(o.start)})*lt(t,${num(o.end)})'${ovl}[${next}]`
       );
     } else {
       return onto;
@@ -2215,7 +2240,8 @@ export async function runExport(
       spec.height,
       `fx${i}`,
       e.focus,
-      e.ramp
+      e.ramp,
+      chroma
     );
     if (!lines) continue;
     filters.push(...lines);
@@ -2228,8 +2254,8 @@ export async function runExport(
   // costs one ffmpeg input per language instead of one per still. They sit
   // over every element and every effect.
   captionInputs.forEach((idx, k) => {
-    filters.push(`[${idx}:v]format=yuva420p,fps=${fps},setsar=1[caps${k}]`);
-    filters.push(`[${vLabel}][caps${k}]overlay=0:0:eof_action=pass[vcaps${k}]`);
+    filters.push(`[${idx}:v]format=${alphaFmt},fps=${fps},setsar=1[caps${k}]`);
+    filters.push(`[${vLabel}][caps${k}]overlay=0:0:eof_action=pass${ovl}[vcaps${k}]`);
     vLabel = `vcaps${k}`;
   });
 

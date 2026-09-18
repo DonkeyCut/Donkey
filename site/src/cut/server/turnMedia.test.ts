@@ -30,6 +30,7 @@ const spec = (over: Partial<TurnSpec> = {}): TurnSpec => ({
   video: true,
   audio: true,
   colorFix: "",
+  fmt: "yuv420p",
   ...over,
 });
 

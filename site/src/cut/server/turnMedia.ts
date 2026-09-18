@@ -59,6 +59,13 @@ export interface TurnSpec {
   /** Bytes a second of the source's picture comes to decoded (see
    * `videoDecodeCost`), which sizes the chunks. */
   decodeCost?: number;
+  /** The pixel format the pieces are written in, the one the graph reading
+   * them works in. */
+  fmt: string;
+  /** Bake for a full-chroma delivery: ProRes 4444 pieces instead of the
+   * H.264 ones, so a clip that plays backward is not the one place in a
+   * master where the picture went through a lossy intermediate. */
+  master?: boolean;
 }
 
 const vtQuality = (crf: number) => Math.round(Math.max(35, Math.min(80, 100 - crf * 1.8)));
@@ -83,7 +90,7 @@ export async function bakeTurnedMedia(
   const chunk = spec.video ? turnChunkSeconds(spec.decodeCost) : TURN_CHUNK_S;
   const n = Math.max(1, Math.ceil(span / chunk));
   const pieces: string[] = [];
-  const enc = spec.video ? await io.h264Encoder() : null;
+  const enc = spec.video && !spec.master ? await io.h264Encoder() : null;
   for (let i = 0; i < n; i++) {
     // Chunks run from the span's end back to its start, so the joined file
     // plays the span backward.
@@ -93,11 +100,13 @@ export async function bakeTurnedMedia(
     const piece = `${outFile}.${i}${spec.video ? ".mov" : ".wav"}`;
     const args = ["-y", "-hide_banner", "-loglevel", "error", "-ss", num(from), "-t", num(to - from), "-i", src];
     if (spec.video) {
-      args.push("-vf", `${spec.colorFix}reverse,format=yuv420p`);
+      args.push("-vf", `${spec.colorFix}reverse,format=${spec.fmt}`);
       args.push(
-        ...(enc === "libx264"
-          ? ["-c:v", "libx264", "-preset", "veryfast", "-crf", String(TURN_CRF)]
-          : ["-c:v", "h264_videotoolbox", "-q:v", String(vtQuality(TURN_CRF)), "-allow_sw", "1"])
+        ...(spec.master
+          ? ["-c:v", "prores_ks", "-profile:v", "4", "-vendor", "apl0", "-pix_fmt", "yuv444p10le"]
+          : enc === "libx264"
+            ? ["-c:v", "libx264", "-preset", "veryfast", "-crf", String(TURN_CRF)]
+            : ["-c:v", "h264_videotoolbox", "-q:v", String(vtQuality(TURN_CRF)), "-allow_sw", "1"])
       );
     } else {
       args.push("-vn");

@@ -40,17 +40,20 @@ import type {
 } from "./types";
 
 import {
+  deliveryCodec,
   deliveryContainer,
   deliverySpan,
+  EXPORT_CODECS,
   EXPORT_CONTAINERS,
   exportBaseName,
+  fixedRate,
   specMediaFiles,
   type ExportAudioCodec,
   type ExportCodec,
   type ExportContainer,
   type ExportRange,
 } from "./exportDelivery";
-export { EXPORT_CONTAINERS };
+export { deliveryCodec, EXPORT_CODECS, EXPORT_CONTAINERS, fixedRate };
 export type { ExportAudioCodec, ExportCodec, ExportContainer, ExportRange };
 
 export interface ExportSettings {
@@ -75,22 +78,15 @@ export interface ExportSettings {
 
 export { DELIVERY_DEFAULTS, EXPORT_PRESETS } from "./exportPresets";
 
-export const EXPORT_CODECS = [
-  { id: "h264", label: "H.264", detail: "plays everywhere" },
-  { id: "hevc", label: "HEVC", detail: "half the size · newer devices" },
-  { id: "prores", label: "ProRes 422 HQ", detail: "edit master · MOV" },
-] as const satisfies readonly { id: ExportCodec; label: string; detail: string }[];
-
 export const EXPORT_AUDIO = [
   { id: "aac", label: "AAC", detail: "192 kbps" },
   { id: "pcm", label: "PCM", detail: "uncompressed · MOV" },
 ] as const satisfies readonly { id: ExportAudioCodec; label: string; detail: string }[];
 
-/** What a container can carry: ProRes and PCM need MOV. */
+/** What a container can carry: the codec's own demand, and PCM's MOV. */
 export function fitContainer(settings: ExportSettings): ExportSettings {
-  if (settings.codec === "prores" || settings.audioCodec === "pcm") {
-    return settings.container === "mov" ? settings : { ...settings, container: "mov" };
-  }
+  const needed = deliveryCodec(settings.codec).container ?? (settings.audioCodec === "pcm" ? "mov" : null);
+  if (needed && settings.container !== needed) return { ...settings, container: needed };
   return settings;
 }
 
@@ -172,9 +168,9 @@ export const EXPORT_QUICK_PRESETS = [
   {
     id: "master",
     label: "Master",
-    detail: "ProRes 422 HQ · MOV · PCM",
+    detail: "ProRes 4444 · MOV · PCM · nothing given up",
     short: "ProRes",
-    choice: { resolution: "source", fps: "source", quality: "high", codec: "prores", container: "mov", audioCodec: "pcm" },
+    choice: { resolution: "source", fps: "source", quality: "high", codec: "prores4444", container: "mov", audioCodec: "pcm" },
   },
 ] as const satisfies readonly { id: string; label: string; detail: string; short: string; choice: ExportChoice }[];
 
@@ -215,8 +211,9 @@ export function choiceSettings(
     codec: choice.codec,
     container: choice.container,
     audioCodec: choice.audioCodec,
-    // ProRes has one rate per profile; a typed bitrate is for the other codecs.
-    ...(choice.bitrateMbps && choice.codec !== "prores"
+    // A fixed-rate codec has one rate per profile; a typed bitrate is for
+    // the others.
+    ...(choice.bitrateMbps && !fixedRate(choice.codec)
       ? { bitrate: Math.round(choice.bitrateMbps * 1_000_000) }
       : {}),
   });
@@ -1462,6 +1459,10 @@ async function assertEngineCarries(settings: ExportSettings): Promise<void> {
   const wants: [EngineFeature, boolean, string][] = [
     ["export.range", !!settings.range, "export a range"],
     ["export.name", !!settings.name, "name the file"],
+    // An engine that does not know the codec falls through to H.264, which
+    // would hand back a .mov of exactly the picture the master was chosen to
+    // avoid.
+    ["export.prores4444", settings.codec === "prores4444", "export a ProRes 4444 master"],
   ];
   const has = await engineFeatures();
   for (const [feature, wanted, what] of wants) {

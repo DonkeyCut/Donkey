@@ -111,7 +111,7 @@ export async function convertToMp4(
   const cap = opts.maxHeight && opts.maxHeight > 0 ? Math.round(opts.maxHeight) : 0;
   const shrink = !!(cap && dims && dims.height > cap);
   const color = codecs.video ? await videoColorInfo(src) : null;
-  const sdr = sdrConvert(color);
+  const sdr = sdrConvert(color, "yuv420p");
   const transcodedVideo = !!codecs.video && (!KEEPS_VIDEO.has(codecs.video) || shrink || !!sdr);
   const transcodedAudio = !!codecs.audio && !KEEPS_AUDIO.has(codecs.audio);
   if (fitsAlready(src, codecs, { shrink, sdr: !!sdr })) {

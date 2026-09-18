@@ -4,6 +4,6 @@
  * hands an engine work an older app would silently drop. A build from before
  * the list existed answers with none.
  */
-export const ENGINE_FEATURES = ["export.range", "export.name"] as const;
+export const ENGINE_FEATURES = ["export.range", "export.name", "export.prores4444"] as const;
 
 export type EngineFeature = (typeof ENGINE_FEATURES)[number];
