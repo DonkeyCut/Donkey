@@ -22,6 +22,15 @@ const nextConfig: NextConfig = {
   // Keep the server origin intact when the proxy rewrites a local request.
   // Normalizing 127.0.0.1 to localhost makes Next treat it as an external hop.
   skipProxyUrlNormalize: true,
+  // The starter project's media is 54MB. Signup seeding reads the public folder
+  // (src/cut/server/cloud/starter.ts), every route that authenticates imports
+  // that module through src/lib/auth.ts, and tracing therefore put those bytes
+  // in every function — a 69MB download before a cold function could answer a
+  // JSON request. Signup is the one route that reads them, so it keeps them,
+  // and it holds its own fallback besides: the media rides an R2 mirror, and a
+  // file missing from the mirror is fetched from the CDN.
+  outputFileTracingExcludes: { "/**": ["public/cut-starter/media/**"] },
+  outputFileTracingIncludes: { "/api/auth/*": ["public/cut-starter/media/**"] },
   // Cut (the video editor) uploads large media. Two independent limits apply:
   // its media route reads req.formData() (a route handler), so it isn't covered
   // by serverActions.bodySizeLimit; and src/proxy.ts runs on /api/cut/* on every

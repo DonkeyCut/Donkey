@@ -55,6 +55,10 @@ challenge. OAuth tokens authorize only the tools exposed by that adapter.
   402 over quota, 429 rate-limited.
 - Don't wrap a handler in try/catch unless it can recover and return a different
   intentional response. Let unexpected errors surface to the framework.
+- What a handler imports is what its serverless function downloads before it can
+  answer anything. Import the narrow module that holds what you need, and when a
+  module reads files from the public folder, keep those bytes out of every other
+  function with `outputFileTracingExcludes` in the Next config.
 - `process.env` holds secrets only: API keys, credentials, and other sensitive
   deploy values. Configuration is code: a constant where one value fits every
   install, or a settings registry entry with a default and a schema when
