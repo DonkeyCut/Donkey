@@ -60,6 +60,13 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      # The widget's HTML is generated, not committed: `prebuild` writes it
+      # ahead of `npm run build`, which no eval job runs. Without it the MCP
+      # server's module is missing and its tests are dropped where they stand,
+      # so the build runs here too. It is a Bun bundle — seconds, no browser.
+      - name: Build ChatGPT widget
+        run: npm run chatgpt:build
+
       - name: Unit tests
         run: npm test
 
@@ -117,6 +124,13 @@ jobs:
       # ChatGPT evals drive Playwright's own Chromium, which is a download.
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+
+      # The widget eval serves the same HTML ChatGPT reads, and that HTML is
+      # generated rather than committed: `prebuild` writes it ahead of
+      # `npm run build`, which no eval job runs. The build belongs here, before
+      # the evals, and it is a Bun bundle — seconds, and no browser of its own.
+      - name: Build ChatGPT widget
+        run: npm run chatgpt:build
 
       - name: Timeline operations
         run: npm run eval:cut-timeline-operations
