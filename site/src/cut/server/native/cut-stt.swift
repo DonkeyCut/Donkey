@@ -108,11 +108,46 @@ struct Main {
 
 // MARK: - Live streaming (stdin PCM → partial transcripts)
 
+/// Scratch shared by the stdin reader, the results loop, and the finish
+/// watchdog: whether any audio ever arrived, and the newest text to fall back
+/// on. Each of the three runs on its own thread, so the lock is the contract.
+final class LiveState: @unchecked Sendable {
+  private let lock = NSLock()
+  private var heardAudio = false
+  private var newest = ""
+  func markAudio() {
+    lock.lock()
+    heardAudio = true
+    lock.unlock()
+  }
+  var receivedAudio: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return heardAudio
+  }
+  func record(_ text: String) {
+    lock.lock()
+    newest = text
+    lock.unlock()
+  }
+  var latest: String {
+    lock.lock()
+    defer { lock.unlock() }
+    return newest
+  }
+}
+
+// The finish is bounded: whatever the model has said by here is the final text.
+// The parent waits on this process for its transcript, so a finalize that stops
+// answering has to end as an answer, not as a stall.
+let finishDeadline = Duration.seconds(6)
+
 @MainActor
 func runLive(locale: Locale) async {
   // The browser pipes raw mic audio in this exact format; keep in sync with the
   // client's downsampler in lib/micTranscribe.ts.
   let liveSampleRate = 16000.0
+  let live = LiveState()
   do {
     let transcriber = SpeechTranscriber(
       locale: locale,
@@ -161,6 +196,7 @@ func runLive(locale: Locale) async {
           let converted = convertBuffer(buffer, using: converter, to: analyzerFormat)
         {
           inputBuilder.yield(AnalyzerInput(buffer: converted))
+          live.markAudio()
         }
       }
       inputBuilder.finish()
@@ -177,8 +213,10 @@ func runLive(locale: Locale) async {
         let piece = String(result.text.characters)
         if result.isFinal {
           finalized += piece
+          live.record(finalized)
           emit("partial", finalized)
         } else {
+          live.record(finalized + piece)
           emit("partial", finalized + piece)
         }
       }
@@ -190,8 +228,22 @@ func runLive(locale: Locale) async {
     await withCheckedContinuation { cont in
       DispatchQueue.global().async { readerDone.wait(); cont.resume() }
     }
+    // A session that was never fed has nothing to flush, and the analyzer's
+    // finalize never returns for an input that carried no audio — answer with
+    // the empty transcript and go.
+    guard live.receivedAudio else {
+      emit("final", "")
+      exit(0)
+    }
+    let watchdog = Task { @MainActor in
+      try? await Task.sleep(for: finishDeadline)
+      guard !Task.isCancelled else { return }
+      emit("final", live.latest)
+      exit(0)
+    }
     try await analyzer.finalizeAndFinishThroughEndOfInput()
     let finalText = try await results.value
+    watchdog.cancel()
     emit("final", finalText)
   } catch {
     emit("error", "\(error)")

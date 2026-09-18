@@ -36,9 +36,12 @@ const IDLE_MS = 15000;
 // ~250ms) — a new start must never kill it mid-speech. Anything staler is an
 // orphan a new start may reclaim without waiting out the idle reaper.
 const STALE_MS = 1500;
+// How long a confirmed session may take to flush its final text. cut-stt bounds
+// its own finish well inside this, so passing it means the process is gone.
+const STOP_MS = 8000;
 // A confirmed session flushing its final text feeds no PCM by design; stopMic
-// waits up to 8s for the flush, so only past that is the process fair game.
-const FINALIZE_MS = 9000;
+// waits out STOP_MS for the flush, so only past that is the process fair game.
+const FINALIZE_MS = STOP_MS + 1000;
 const { jobs, retire } = createJobRegistry<MicJob>("__cutMicJobs");
 
 function clearIdle(job: MicJob): void {
@@ -172,7 +175,9 @@ export function feedMic(id: string, pcm: Buffer): boolean {
   return true;
 }
 
-/** Close the input so the model flushes its final text, then wait for it. */
+/** Close the input so the model flushes its final text, then wait for it. A
+ * process that misses the deadline is not coming back, so it is killed here
+ * rather than left holding the next dictation's slot. */
 export async function stopMic(id: string): Promise<string | null> {
   const job = jobs.get(id);
   if (!job) return null;
@@ -181,7 +186,7 @@ export async function stopMic(id: string): Promise<string | null> {
     job.finalizeAt = Date.now();
     job.proc.stdin?.end();
   }
-  await withTimeout(job.finished, 8000);
+  if (!(await withTimeout(job.finished, STOP_MS))) job.proc.kill("SIGKILL");
   return job.text;
 }
 
@@ -197,13 +202,14 @@ export function cancelMic(id: string): boolean {
   return true;
 }
 
-function withTimeout(p: Promise<void>, ms: number): Promise<void> {
+/** Resolves true when `p` settled in time, false when the deadline won. */
+function withTimeout(p: Promise<void>, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
-    const t = setTimeout(resolve, ms);
+    const t = setTimeout(() => resolve(false), ms);
     t.unref();
     void p.finally(() => {
       clearTimeout(t);
-      resolve();
+      resolve(true);
     });
   });
 }
