@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChatStatus } from "./ChatStatusBadge";
+import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 
 import { chatRuntime, cutJudge } from "@/cut/lib/chatRuntime";
 import { ChatRequests } from "@/cut/lib/chatRequests";
@@ -689,7 +689,12 @@ export function AiPanel({
           aria-pressed={historyOpen}
           onClick={toggleHistory}
         >
-          <History />
+          {/* A finished reply waiting in another thread marks the button that
+              opens the list, the same blue dot the thread itself carries. */}
+          <span className="relative grid place-items-center">
+            <History />
+            {hasUnread && <ChatStatusBadge status="unread" className="bg-card" />}
+          </span>
         </Button>
         {!readOnly && (
           <Button
