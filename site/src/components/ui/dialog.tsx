@@ -39,6 +39,69 @@ function DialogOverlay({
   )
 }
 
+// Where every modal hangs: a full-viewport column holding the popup, with a
+// collapsible spacer above it. The spacer holds the dialog in the top third
+// while the viewport has room and gives its height back when it runs short, so
+// the whole dialog stays on screen in a frame as short as the ChatGPT card or a
+// phone in landscape. A dialog never sets its own top.
+function ModalPositioner({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="modal-positioner"
+      className={cn(
+        "pointer-events-none fixed inset-0 z-50 flex flex-col items-center p-4",
+        className
+      )}
+      {...props}
+    >
+      <div aria-hidden className="w-0 shrink-[999] basis-[18dvh]" />
+      {children}
+    </div>
+  )
+}
+
+// The popup fills at most the space the positioner leaves it, and its scrolling
+// part takes up the slack. A dialog that declares no scrolling part at all
+// scrolls whole.
+const modalPopupClasses =
+  "pointer-events-auto relative max-h-full min-h-0 w-full overflow-y-auto overscroll-contain rounded-xl bg-popover text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none has-data-[slot=dialog-body]:overflow-y-visible data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+
+// A dialog that never named its scrolling part still gets one: the header and
+// footer it declared stay where they are, and everything between them scrolls
+// in the space that is left. The wrapper inherits the popup's column and gap,
+// so the dialog lays out exactly as it did with the room it has.
+function withScrollingMiddle(
+  children: React.ReactNode,
+  chromeTypes: React.ElementType[]
+) {
+  const nodes = React.Children.toArray(children)
+  const isType = (node: React.ReactNode, type: React.ElementType) =>
+    React.isValidElement(node) && node.type === type
+  if (nodes.some((node) => isType(node, DialogBody))) return children
+  const chrome = (node: React.ReactNode) =>
+    chromeTypes.some((type) => isType(node, type))
+  let start = 0
+  while (start < nodes.length && chrome(nodes[start])) start += 1
+  let end = nodes.length
+  while (end > start && chrome(nodes[end - 1])) end -= 1
+  const middle = nodes.slice(start, end)
+  if (middle.length === 0 || middle.length === nodes.length) return children
+  return [
+    ...nodes.slice(0, start),
+    <DialogBody
+      key="dialog-body"
+      className="mx-0 my-0 flex flex-col gap-[inherit] px-0 py-0"
+    >
+      {middle}
+    </DialogBody>,
+    ...nodes.slice(end),
+  ]
+}
+
 function DialogContent({
   className,
   children,
@@ -52,32 +115,34 @@ function DialogContent({
   return (
     <DialogPortal>
       <DialogOverlay className={overlayClassName} />
-      <DialogPrimitive.Popup
-        data-slot="dialog-content"
-        className={cn(
-          "fixed top-1/2 left-1/2 z-50 flex max-h-[calc(100vh-2rem)] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className
-        )}
-        {...props}
-      >
-        {children}
-        {showCloseButton && (
-          <DialogPrimitive.Close
-            data-slot="dialog-close"
-            render={
-              <Button
-                variant="ghost"
-                className="absolute top-2 right-2"
-                size="icon-sm"
-              />
-            }
-          >
-            <XIcon
-            />
-            <span className="sr-only">Close</span>
-          </DialogPrimitive.Close>
-        )}
-      </DialogPrimitive.Popup>
+      <ModalPositioner>
+        <DialogPrimitive.Popup
+          data-slot="dialog-content"
+          className={cn(
+            modalPopupClasses,
+            "flex flex-col gap-4 p-4 text-sm sm:max-w-sm",
+            className
+          )}
+          {...props}
+        >
+          {withScrollingMiddle(children, [DialogHeader, DialogFooter])}
+          {showCloseButton && (
+            <DialogPrimitive.Close
+              data-slot="dialog-close"
+              render={
+                <Button
+                  variant="ghost"
+                  className="absolute top-2 right-2"
+                  size="icon-sm"
+                />
+              }
+            >
+              <XIcon />
+              <span className="sr-only">Close</span>
+            </DialogPrimitive.Close>
+          )}
+        </DialogPrimitive.Popup>
+      </ModalPositioner>
     </DialogPortal>
   )
 }
@@ -162,6 +227,9 @@ function DialogDescription({
 
 export {
   Dialog,
+  ModalPositioner,
+  modalPopupClasses,
+  withScrollingMiddle,
   DialogClose,
   DialogContent,
   DialogDescription,

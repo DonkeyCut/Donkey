@@ -85,7 +85,7 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
   if (isPro) {
     return (
       <Dialog open onOpenChange={(open) => !open && onClose()}>
-        <DialogContent className="top-[18%] translate-y-0 sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
           </DialogHeader>

@@ -126,7 +126,7 @@ export function OfferDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="top-[18%] translate-y-0 gap-0 overflow-hidden rounded-lg bg-background p-0 sm:max-w-sm"
+        className="gap-0 overflow-hidden rounded-lg bg-background p-0 sm:max-w-sm"
       >
         <div className="relative">
           {isOfferBanner(banner) ? (

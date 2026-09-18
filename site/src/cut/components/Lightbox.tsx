@@ -116,7 +116,7 @@ export function Lightbox() {
       onClick={() => useLightbox.getState().close()}
     >
       <div
-        className="relative flex max-h-[92vh] flex-col gap-3"
+        className="relative flex max-h-full flex-col gap-3"
         style={{ width }}
         onClick={(e) => e.stopPropagation()}
       >

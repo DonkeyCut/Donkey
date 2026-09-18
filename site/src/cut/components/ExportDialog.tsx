@@ -26,6 +26,7 @@ import {
   EXPORT_QUICK_PRESETS,
   choiceSettings,
   estimateExportBytes,
+  fixedRate,
   formatSizeEstimate,
   quickPresetOf,
   resolutionOptions,
@@ -46,10 +47,10 @@ import { subtitleFiles } from "@/cut/lib/subtitleFile";
 import { formatTime } from "@/cut/lib/time";
 import { cn } from "@/lib/utils";
 
-/** A file format the menu offers: a container carrying a codec. MP4 cannot
- * carry ProRes, so that pairing is left out. */
+/** A file format the menu offers: a container carrying a codec. A codec that
+ * demands a container of its own is only offered with it. */
 const FORMATS = EXPORT_CONTAINERS.flatMap((c) =>
-  EXPORT_CODECS.filter((k) => !(c.id === "mp4" && k.id === "prores")).map((k) => ({
+  EXPORT_CODECS.filter((k) => !k.container || k.container === c.id).map((k) => ({
     id: `${c.id}-${k.id}`,
     container: c.id as ExportContainer,
     codec: k.id as ExportCodec,
@@ -201,7 +202,9 @@ export function ExportDialog() {
   };
 
   const sizeEstimate = formatSizeEstimate(estimateExportBytes(settings, span));
-  const prores = settings.codec === "prores";
+  // ProRes encodes at one rate per profile, so the quality scale and the
+  // typed bitrate have nothing to act on.
+  const prores = fixedRate(settings.codec);
   const resolution = resolveResolution(resolutions, choice.resolution);
   const rungIndex = Math.max(0, rungs.findIndex((r) => r.id === resolution.id));
   const qualityIndex = Math.max(0, QUALITY_RUNGS.findIndex((q) => q.id === choice.quality));
@@ -212,7 +215,7 @@ export function ExportDialog() {
 
   return (
     <Dialog open onOpenChange={(o) => !o && setExportOpen(false)}>
-      <DialogContent className="top-[18%] translate-y-0 gap-0 p-0 sm:max-w-lg">
+      <DialogContent className="gap-0 p-0 sm:max-w-lg">
         <DialogHeader className="px-6 pt-6 pb-4">
           <DialogTitle className="text-xl">Export</DialogTitle>
         </DialogHeader>
@@ -318,11 +321,11 @@ export function ExportDialog() {
                 onValueChange={(v) => {
                   const f = FORMATS.find((x) => x.id === v);
                   if (!f) return;
-                  if (f.codec === "prores") setMbpsText("");
+                  if (fixedRate(f.codec)) setMbpsText("");
                   set({
                     container: f.container,
                     codec: f.codec,
-                    ...(f.codec === "prores" ? { bitrateMbps: undefined } : {}),
+                    ...(fixedRate(f.codec) ? { bitrateMbps: undefined } : {}),
                     // MP4 cannot carry PCM either; picking it turns the audio to AAC.
                     ...(f.container === "mp4" && choice.audioCodec === "pcm" ? { audioCodec: "aac" } : {}),
                   });

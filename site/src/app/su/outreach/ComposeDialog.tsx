@@ -390,7 +390,7 @@ export function OutreachComposeDialog({
       }}
       open={person !== null}
     >
-      <DialogContent className="grid h-[85vh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-5xl">
+      <DialogContent className="grid h-[85dvh] grid-rows-[auto_minmax(0,1fr)_auto] sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>Email {target?.name ?? opening?.name}</DialogTitle>
           <DialogDescription>{target?.email ?? opening?.email}</DialogDescription>

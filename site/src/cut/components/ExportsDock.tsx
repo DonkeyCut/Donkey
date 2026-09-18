@@ -69,7 +69,7 @@ export function ExportsDock() {
   const multi = items.length > 1;
 
   return (
-    <div className="fixed right-4 bottom-4 z-50 w-72 overflow-hidden rounded-xl border border-border bg-card shadow-lg">
+    <div className="fixed right-4 bottom-4 z-50 max-h-[calc(100dvh-2rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card shadow-lg">
       {multi && (
         <div className="flex items-center gap-2 px-3 py-2">
           <span className="text-xs font-semibold">Exports</span>
