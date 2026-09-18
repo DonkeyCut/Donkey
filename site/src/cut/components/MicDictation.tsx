@@ -35,6 +35,9 @@ export function DictationBody({
 }) {
   const shown = [text.trim(), mic.partial].filter(Boolean).join(" ");
   const finishing = mic.state === "finishing";
+  // Confirm only means something once capture is live; while the graph is
+  // still coming up the button says so instead of swallowing the click.
+  const ready = mic.state === "recording";
   // Keyboard control while dictating: Enter confirms, Escape cancels. Capture
   // on window so an input still focused under the overlay never sees the key.
   useEffect(() => {
@@ -69,7 +72,11 @@ export function DictationBody({
             className="h-7 min-w-0 flex-1 text-muted-foreground/70"
           />
         ) : (
-          <div className="flex-1" />
+          // Without the app the take is transcribed after the stop, which is a
+          // round trip the meter's empty slot can say out loud.
+          <div className="flex-1 px-1 text-[11px] text-muted-foreground/70">
+            {finishing ? "Transcribing…" : null}
+          </div>
         )}
         <button
           type="button"
@@ -83,7 +90,7 @@ export function DictationBody({
         <button
           type="button"
           title="Use transcription"
-          disabled={finishing}
+          disabled={!ready}
           onClick={() => void mic.confirm()}
           className="grid size-7 place-items-center rounded-lg bg-[#0a84ff] text-white transition-colors hover:bg-[#0a84ff]/90 disabled:opacity-50"
         >
