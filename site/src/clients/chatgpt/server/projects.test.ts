@@ -3,6 +3,12 @@ import type { prisma } from "@/lib/prisma";
 import { SETTINGS } from "@/lib/config/registry";
 import { projectTools } from "@/clients/chatgpt/server/projects";
 
+// A preview's playback URL is signed, so the status tools reach the media CDN.
+// The value is never asserted, but it has to exist: without it the CDN refuses
+// to sign and the tools throw. A developer's .env carries one and CI does not,
+// so naming it here is what keeps the two honest.
+process.env.CUT_MEDIA_SIGNING_SECRET = "test-media-signing-secret";
+
 const config = SETTINGS.chatgptApp.schema.parse(SETTINGS.chatgptApp.default);
 function createTestContext(scopes: string[] = ["projects:read"]) {
   const project = { id: "mine", userId: "owner", name: "My video", version: 4, previewKey: "proxy" };
