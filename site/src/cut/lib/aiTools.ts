@@ -163,6 +163,7 @@ import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from 
 import { buildAiContext, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
 import { sampleClipFrameData } from "./previewCanvas";
 import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
+import { findHighlights } from "./highlights";
 import { fuseTimeline, renderFusedTimeline, speechOnsets, speechOver } from "./watch/fuse";
 import {
   mergeHeard,
@@ -201,7 +202,7 @@ import { stockAssetInDoc } from "./genvideo/docWriter";
 import { resolveVoiceAsk, synthesizeSpeech, SPEECH_VOICES } from "./tts";
 import { hostedPost } from "./hosted";
 import { blockAsset } from "./blockSource";
-import { cutJudge } from "./chatRuntime";
+import { cutClip, cutJudge } from "./chatRuntime";
 import { askJudgeChunked, noul } from "./judge";
 import { SWEEP_CHUNK, sweepPicks, sweepQuestions, sweepState, type SweepCandidate } from "./sweepSelect";
 import { clampVideoDuration, defaultVideoAspects, videoResolutionOf } from "./videoModels";
@@ -1562,6 +1563,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // shots of a cut that has been laid out before its footage exists.
       if (Array.isArray(input.blocks)) return placeBlocks(s, input.blocks, input);
       const asset = requireItem(s.assets, input.asset_id, "project asset");
+      // Spans cut the source apart as they land: one clip per stretch, in
+      // order, with the material between them left out.
+      if (Array.isArray(input.spans))
+        return placeAssetSpans(
+          asset,
+          (input.spans as unknown[])
+            .filter((sp): sp is Record<string, unknown> => !!sp && typeof sp === "object")
+            .map((sp) => ({
+              from: isNum(sp.from) ? sp.from : 0,
+              to: isNum(sp.to) ? sp.to : 0,
+            })),
+          input,
+        );
       return placeAssetOnTimeline(asset, input);
   },
 
@@ -1675,6 +1689,41 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         out: nextOut,
         len: Math.round((nextOut - nextIn) * 100) / 100,
         ...tracksAfter(),
+      };
+  },
+
+  find_highlights: async (s, input) => {
+      const { asset, clip, from, to } = resolveWatchRange(s, input);
+      if (asset.type === "image")
+        throw new ToolError(`"${asset.name}" is a still — there is no stretch of it to clip.`);
+      const said = sourceSpeech(s, asset, clip, from, to ?? asset.duration);
+      if (said.length === 0)
+        throw new ToolError(
+          `Nothing is transcribed for "${asset.name}" over that stretch, and the moments are found in what is said. ` +
+            "listen_audio starts the transcript, which fills in behind you; call this again once it has.",
+        );
+      const count = isNum(input.count) ? clamp(Math.round(input.count), 1, 20) : 5;
+      const post = (payload: Record<string, unknown>, signal?: AbortSignal) =>
+        hostedPost("/api/inference/judge", payload, signal);
+      const clips = await findHighlights(post, said, cutClip(), count).catch((e) => {
+        throw new ToolError(`Finding the moments is unavailable: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      const settings = cutClip();
+      return {
+        source: sourceRef(asset),
+        searched: { from: round2(from), to: round2(to ?? asset.duration) },
+        clips: clips.map((c, i) => ({
+          n: i + 1,
+          rank: c.rank,
+          seconds: c.seconds,
+          spans: c.spans.map((sp) => ({ from: sp.from, to: sp.to, said: sp.text })),
+        })),
+        note:
+          clips.length === 0
+            ? `Nothing in that stretch scored above the floor (${settings.rankFloor}) — the source may be one continuous thread with no part of it that stands alone.`
+            : "Ranked best first, in SOURCE seconds. A clip with two spans is two moments that belong together with the middle cut out; " +
+              "add_clip with `spans` lays one down as it stands. The ranking reads what is SAID — watch_video before you commit to a look, " +
+              "since a moment that reads well can still be someone glancing away from the camera.",
       };
   },
 
@@ -5435,6 +5484,66 @@ function refuseReference(asset: MediaAsset): void {
   throw new ToolError(
     `"${asset.name}" is the reference this cut is blocked out from, so it does not go in the cut. Fill a block with the person's own footage (replace_item), or leave it standing.`
   );
+}
+
+/** Several stretches of one source laid down in order, each trimmed to itself
+ * — a clip assembled from moments that were never next to each other, with
+ * everything between them left out. Placement and trimming both ride the
+ * store's own paths, so track 0 keeps its no-overlap invariant, and the whole
+ * run is one undo step. */
+function placeAssetSpans(
+  asset: MediaAsset,
+  spans: { from: number; to: number }[],
+  input: Record<string, unknown>
+) {
+  refuseReference(asset);
+  if (asset.type === "audio") throw new ToolError("spans cut a video source — audio lands whole.");
+  if (asset.type === "image") throw new ToolError("An image has no time axis to cut spans out of.");
+  const dur = asset.duration > 0 ? asset.duration : Infinity;
+  const cuts = spans
+    .map((sp) => ({
+      from: clamp(Math.min(sp.from, sp.to), 0, dur - 0.1),
+      to: clamp(Math.max(sp.from, sp.to), 0.1, dur),
+    }))
+    .filter((sp) => sp.to - sp.from >= 0.1)
+    .sort((a, b) => a.from - b.from);
+  if (cuts.length === 0) throw new ToolError("Every span was empty or outside the source.");
+  const s = useEditor.getState();
+  s.beginHistoryBatch();
+  const laid: { id: string; in: number; out: number }[] = [];
+  try {
+    let index = isNum(input.index) ? Math.round(input.index) : undefined;
+    for (const cut of cuts) {
+      let clipId: string | null;
+      if (index === undefined) {
+        // Appended, the way a drag to the end of the run would.
+        useEditor.getState().addClipFromAsset(asset.id);
+        const sel = useEditor.getState().selection;
+        clipId = sel?.kind === "clip" ? sel.id : null;
+      } else {
+        clipId = addVideoTrackClip(asset.id, index++).clipId;
+      }
+      if (!clipId) throw new ToolError("Could not create the clip.");
+      useEditor.getState().setClipTrim(clipId, cut.from, cut.to);
+      laid.push({ id: clipId, in: round2(cut.from), out: round2(cut.to) });
+    }
+  } finally {
+    useEditor.getState().endHistoryBatch();
+  }
+  const now = useEditor.getState().clips;
+  return {
+    clips: laid.map((c) => {
+      const live = now.find((x) => x.id === c.id);
+      return {
+        id: c.id,
+        in: c.in,
+        out: c.out,
+        start: round2(live?.start ?? 0),
+        len: round2(c.out - c.in),
+      };
+    }),
+    seconds: round2(laid.reduce((n, c) => n + c.out - c.in, 0)),
+  };
 }
 
 function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>) {

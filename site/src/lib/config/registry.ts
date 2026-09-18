@@ -205,6 +205,59 @@ export const SETTINGS = defineSettings({
     description:
       "Thresholds for the typed judgments that route a chat turn (skill, tool areas), run a one-action turn with no model round, hold a turn back until its work is finished and its reply true to it, re-place the messages waiting in the tray, pick the items a sweep touches, rank stock, find filler words, and resolve described voices.",
   },
+  cutClip: {
+    schema: z
+      .object({
+        // A pause this long ends a sentence when the punctuation does not.
+        pauseBreakSeconds: z.number().min(0.1).max(5),
+        // What a clip may run. The sweep aims at the target and accepts
+        // anything between the bounds, ending on a sentence.
+        minSeconds: z.number().min(3).max(600),
+        targetSeconds: z.number().min(3).max(600),
+        maxSeconds: z.number().min(3).max(600),
+        // How far apart the wide sweep's candidate starts sit. Smaller reads
+        // more of the source and costs more questions.
+        strideSeconds: z.number().min(1).max(120),
+        // How many of the sweep's best earn the close read.
+        shortlist: z.number().int().min(1).max(60),
+        // Standing alone and landing are requirements: a stretch that needs
+        // what came before it, or that trails off into the next thing, is not
+        // a clip however well it opens. Below either floor it is not offered.
+        standaloneFloor: z.number().min(0).max(1),
+        payoffFloor: z.number().min(0).max(1),
+        // What orders the ones that qualify.
+        standaloneWeight: z.number().min(0).max(1),
+        hookWeight: z.number().min(0).max(1),
+        payoffWeight: z.number().min(0).max(1),
+        // The composite below which a moment is not offered at all.
+        rankFloor: z.number().min(0).max(1),
+        // Second beats considered per clip, and the probability one has to
+        // reach to be cut in behind the first.
+        pairsPerClip: z.number().int().min(0).max(10),
+        followsFloor: z.number().min(0).max(1),
+      })
+      .strict(),
+    default: {
+      pauseBreakSeconds: 0.6,
+      minSeconds: 18,
+      targetSeconds: 45,
+      maxSeconds: 75,
+      strideSeconds: 12,
+      shortlist: 14,
+      standaloneFloor: 0.35,
+      payoffFloor: 0.5,
+      standaloneWeight: 0.4,
+      hookWeight: 0.35,
+      payoffWeight: 0.25,
+      rankFloor: 0.45,
+      pairsPerClip: 3,
+      followsFloor: 0.6,
+    },
+    public: true,
+    title: "Clipping a long source",
+    description:
+      "How a talk or an interview is read for the moments worth cutting a short from: what a clip may run, how widely the first sweep looks, how many moments earn the close read, and what the ranking weighs.",
+  },
   experimentResults: {
     schema: z
       .object({

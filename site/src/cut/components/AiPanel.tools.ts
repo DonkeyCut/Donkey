@@ -119,6 +119,18 @@ export const AI_PANEL_TOOLS = [
     }),
   },
   {
+    name: "find_highlights",
+    description:
+      "Find the moments in a long source worth cutting a short from, best first. Reads what is SAID over the source — its transcript, or the project's caption cues where they cover it — and ranks every stretch of it on three things: whether it stands on its own to someone who lands on it cold, whether its opening holds them, and whether it finishes the thought. A talk or an interview holds a handful of these and an hour of material that only makes sense in place; this is how the handful is found without watching all of it. Each result is one or more spans in SOURCE seconds with the words over them — two spans means two moments that belong together with the middle cut out, and `add_clip` with `spans` lays that down as one run of clips. The source needs a transcript: listen_audio starts one and it fills in behind you. Ranking reads the words alone, so a moment that reads well can still be someone glancing away — watch_video the spans before you commit to a look. Nothing is written to the timeline by this call.",
+    inputSchema: obj({
+      clip_id: str("Clip id — ranks the stretch its trim covers"),
+      asset_id: str("Project asset id (video or audio) — ranks the whole source"),
+      from: num("Source start s (default: the clip's in, else 0)"),
+      to: num("Source end s (default: the clip's out, else the source's end)"),
+      count: num("How many moments to return, 1..20 (default 5)"),
+    }),
+  },
+  {
     name: "wait_for_renders",
     description:
       "Block until this project's in-flight video renders settle (up to ~100s), then report each one: landed (with its asset id, ready to place) or failed (with the error). Call it whenever the user's ask depends on a render that `renders` in the state shows as running — \"add it when it's done\", \"assemble the clips\" — and then finish the job in the same turn; never tell the user to come back and report when a card appears. If some renders are still running when it returns, say how long they've been going and call it again on the user's go-ahead.",

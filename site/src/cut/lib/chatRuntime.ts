@@ -13,3 +13,10 @@ export function bindCutJudge(value: unknown): void {
   if (parsed.success) judge = parsed.data;
 }
 export function cutJudge(): Settings["cutJudge"] { return judge; }
+
+let clip: Settings["cutClip"] = SETTINGS.cutClip.default;
+export function bindCutClip(value: unknown): void {
+  const parsed = SETTINGS.cutClip.schema.safeParse(value);
+  if (parsed.success) clip = parsed.data;
+}
+export function cutClip(): Settings["cutClip"] { return clip; }

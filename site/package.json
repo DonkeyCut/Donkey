@@ -24,6 +24,7 @@
     "eval:cut-chat": "bun run scripts/eval-cut-chat.ts",
     "eval:cut-instant": "bun run scripts/eval-cut-instant.ts",
     "eval:cut-queue": "bun run scripts/eval-cut-queue.ts",
+    "eval:cut-clip": "bun run scripts/eval-cut-clip.ts",
     "eval:cut-judge": "bun run scripts/eval-cut-judge.ts",
     "eval:chatgpt-oauth": "bun run scripts/eval-chatgpt-oauth.ts",
     "eval:cut-turn-job": "bun run scripts/eval-cut-turn-job.ts",

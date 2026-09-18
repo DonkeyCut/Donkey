@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 import { getGlobalSetting } from "@/lib/config/effective";
-import { bindCutJudge } from "@/cut/lib/chatRuntime";
+import { bindCutClip, bindCutJudge } from "@/cut/lib/chatRuntime";
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { openCloudProject, pushCloudProject } from "../lib/headless/docSession";
 import { dropPiSession, streamCutChat } from "../lib/pi/cutAgent";
@@ -108,6 +108,7 @@ export async function runTurnJob(
   // behaves the same way in a job.
   const judgeSettings = await getGlobalSetting("cutJudge");
   bindCutJudge(judgeSettings);
+  bindCutClip(await getGlobalSetting("cutClip"));
   deps.judgeSettings = judgeSettings;
   const toolCalls: string[] = [];
   const exec = deps.execTool;
