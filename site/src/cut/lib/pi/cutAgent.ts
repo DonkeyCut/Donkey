@@ -39,6 +39,7 @@ import {
   type TriageRow,
 } from "../queueTriage";
 import {
+  editorSlice,
   judgeTurnState,
   routeTurn,
   TURN_JUDGE_QUESTIONS,
@@ -47,6 +48,16 @@ import {
   type TurnJudgeAnswers,
   type TurnRoute,
 } from "../turnJudge";
+import {
+  QUALITY_QUESTIONS,
+  QUALITY_STEER_PREFIX,
+  qualityState,
+  qualityVerdict,
+  recordLook,
+  type QualityAnswers,
+  type QualityStep,
+  type WatchedSource,
+} from "../turnQuality";
 import { enforceContextBudget } from "./contextBudget";
 import { donkeyModel, type ChatThinkingLevel } from "./donkeyModel";
 import { ledgerText, recordCall, type LedgerRecord } from "./mutationLedger";
@@ -109,6 +120,8 @@ export interface CutAgentDeps {
     onRound?: (ms: number, firstDeltaMs: number | null) => void;
     /** The round budget auto-extended (n = extensions so far). */
     onExtension?: (n: number) => void;
+    /** The quality gate sent the turn back to work (n = times this turn). */
+    onQualityGate?: (step: QualityStep, n: number) => void;
   };
 }
 
@@ -135,12 +148,15 @@ function keepSession(threadId: string, messages: AgentMessage[]): void {
   while (sessions.size > SESSIONS_KEPT) sessions.delete(sessions.keys().next().value!);
 }
 
-function isBudgetSteer(m: AgentMessage): boolean {
+/** Turn-local scaffolding the session never keeps: the budget's own steer and
+ * the quality gate's. Both are instructions to the run, not asks from the
+ * person, so neither counts as the newest ask nor survives the save. */
+function isTurnSteer(m: AgentMessage): boolean {
   const msg = m as Message;
   return (
     msg.role === "user" &&
     typeof msg.content === "string" &&
-    msg.content.startsWith(BUDGET_STEER_PREFIX)
+    (msg.content.startsWith(BUDGET_STEER_PREFIX) || msg.content.startsWith(QUALITY_STEER_PREFIX))
   );
 }
 
@@ -308,7 +324,7 @@ function settleDanglingToolCalls(messages: AgentMessage[]): AgentMessage[] {
 function pruneStaleMedia(messages: AgentMessage[]): AgentMessage[] {
   let lastAsk = -1;
   messages.forEach((m, i) => {
-    if ((m as Message).role === "user" && !isBudgetSteer(m) && !isFold(m)) lastAsk = i;
+    if ((m as Message).role === "user" && !isTurnSteer(m) && !isFold(m)) lastAsk = i;
   });
   return messages.map((m, i) => {
     if (i >= lastAsk) return m;
@@ -344,7 +360,7 @@ function pruneStaleMedia(messages: AgentMessage[]): AgentMessage[] {
  * editor snapshots or media, and every toolCall paired with a result. */
 function sanitizeSession(messages: AgentMessage[]): AgentMessage[] {
   return settleDanglingToolCalls(
-    pruneStaleMedia(pruneStaleSnapshots(messages.filter((m) => !isBudgetSteer(m)))),
+    pruneStaleMedia(pruneStaleSnapshots(messages.filter((m) => !isTurnSteer(m)))),
   );
 }
 
@@ -676,6 +692,38 @@ async function runInstantAction(
   return true;
 }
 
+/** The turn's own work, judged before it closes. Fails open: a judgment that
+ * cannot be asked lets the turn sign off. */
+async function gateVerdict(
+  reply: Message,
+  request: string,
+  records: LedgerRecord[],
+  looks: Map<string, WatchedSource>,
+  deps: CutAgentDeps,
+  settings: CutJudgeSettings,
+  abortSignal?: AbortSignal
+) {
+  const work = {
+    request,
+    reply: Array.isArray(reply.content)
+      ? reply.content
+          .map((c) => (c.type === "text" ? c.text : ""))
+          .join("")
+          .trim()
+      : "",
+    ran: [...new Set(records.filter((r) => !r.error).map((r) => r.name))],
+    failed: [...new Set(records.filter((r) => r.error).map((r) => `${r.name} (${r.error})`))],
+    sources: [...looks.values()],
+    editor: editorSlice(deps.buildContext()),
+  };
+  try {
+    const { answers } = await askJudge(deps.judge, qualityState(work), QUALITY_QUESTIONS, abortSignal);
+    return qualityVerdict(answers as unknown as QualityAnswers, work, settings);
+  } catch {
+    return null;
+  }
+}
+
 /** One chat turn on the pi harness, streamed as UI chunks. Same contract as
  * the legacy streamGeminiChat, plus the thread id that keys the session. */
 export function streamCutChat({
@@ -701,6 +749,10 @@ export function streamCutChat({
       try {
         const gateStart = performance.now();
         const lastUser = messages.findLast((m) => m.role === "user");
+        const askText = (lastUser?.parts ?? [])
+          .map((p) => (p.type === "text" ? p.text : ""))
+          .join("")
+          .trim();
         const context = deps.buildContext();
         const promptPromise = buildPrompt(lastUser, deps, context);
         const settings = deps.judgeSettings ?? cutJudge();
@@ -757,6 +809,14 @@ export function streamCutChat({
           let extensions = 0;
           // Everything this turn ran, harvested off the tool results in code.
           const records: LedgerRecord[] = [];
+          // What this turn has looked at, and how many times the quality gate
+          // has already sent it back to work.
+          const looks = new Map<string, WatchedSource>();
+          let gateRounds = 0;
+          // What the turn had looked at and run the last time the gate held
+          // it. A turn that comes back with the same record has stopped
+          // moving, and sending it back again would only spin.
+          let gateMark = "";
 
           // The catalog this run declares. The speculative run waits a bounded
           // moment for the route; a route that has landed narrows the tools
@@ -858,7 +918,47 @@ export function streamCutChat({
                     ?.text || "failed"
                 : undefined;
               recordCall(records, toolCall.name, details?.response, errorText);
+              if (!isError) recordLook(looks, toolCall.name, details?.response);
               return undefined;
+            },
+            // The quality gate: a round that asks for no tools is the turn
+            // signing off, and a turn built on footage only gets to when the
+            // looking behind it holds up. The judgment reads the record the
+            // turn built — what it watched and wrote down, what ran, the
+            // editor as it now stands, and the line it is about to close on —
+            // and a verdict that finds the job unfinished queues the next step
+            // as a follow-up, which the loop picks up instead of ending.
+            // Never stops the loop itself: the step budget and the ceiling
+            // own that, and the gate stands down near the ceiling so it can
+            // never push a turn into the paused handoff.
+            shouldStopAfterTurn: async ({ message }) => {
+              const msg = message as Message;
+              if (
+                !withTools ||
+                abortSignal?.aborted ||
+                cancelled?.() ||
+                gateRounds >= settings.qualityRounds ||
+                !settings.qualityGate ||
+                rounds >= roundCeiling - 1 ||
+                (Array.isArray(msg.content) && msg.content.some((c) => c.type === "toolCall"))
+              )
+                return false;
+              // The gate judges work grounded in footage: a turn that looked
+              // at a source can be held to what it saw, and one that never
+              // opened a source has nothing the judgment could measure.
+              if (looks.size === 0) return false;
+              const mark = [
+                records.length,
+                ...[...looks.values()].map((l) => `${l.passes}:${l.coveredTo}:${l.observed.length}`),
+              ].join("|");
+              if (mark === gateMark) return false; // sent back once, nothing moved
+              const verdict = await gateVerdict(msg, askText, records, looks, deps, settings, abortSignal);
+              if (!verdict) return false;
+              gateMark = mark;
+              gateRounds++;
+              deps.hooks?.onQualityGate?.(verdict.step, gateRounds);
+              agent.followUp({ role: "user", content: verdict.steer, timestamp: Date.now() });
+              return false;
             },
           });
           onAgent?.(agent);

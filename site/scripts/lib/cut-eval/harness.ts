@@ -102,6 +102,8 @@ export interface CaseResult {
   roundModel: string;
   /** The action the instant path carried the turn out with, if any. */
   instant: string | null;
+  /** Each time the quality gate sent the turn back to work, in order. */
+  qualityGate: string[];
   timings: RunTimings;
 }
 
@@ -128,6 +130,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
   let streamError: string | null = null;
   let extensions = 0;
   let instant: string | null = null;
+  const qualityGate: string[] = [];
 
   const devPost =
     (path: string) =>
@@ -201,6 +204,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
       onExtension: (n) => {
         extensions = n;
       },
+      onQualityGate: (step) => qualityGate.push(step),
     },
   };
 
@@ -262,6 +266,12 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     notes.push(`auto-continue extended ${extensions}× (needed ≥${c.extensions.min})`);
   if (c.extensions?.max !== undefined && extensions > c.extensions.max)
     notes.push(`auto-continue extended ${extensions}× (cap ${c.extensions.max})`);
+  if (c.qualityGate?.min !== undefined && qualityGate.length < c.qualityGate.min)
+    notes.push(
+      `the quality gate let the turn close after ${qualityGate.length} return(s) (needed ≥${c.qualityGate.min})`
+    );
+  if (c.qualityGate?.max !== undefined && qualityGate.length > c.qualityGate.max)
+    notes.push(`the quality gate sent the turn back ${qualityGate.length}× (cap ${c.qualityGate.max})`);
   const simVerify = (sim as unknown as { verify?: () => string[] } | undefined)?.verify;
   if (simVerify) notes.push(...simVerify());
 
@@ -312,6 +322,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     declaredTools: route?.declaredTools ?? 0,
     routingMisses,
     instant,
+    qualityGate,
     roundModel: resolveGeminiModel(intent === "simple" ? cfg.simpleModel : cfg.complexModel),
     timings,
   };

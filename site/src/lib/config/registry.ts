@@ -146,6 +146,16 @@ export const SETTINGS = defineSettings({
         instantRemake: z.number().min(0).max(1),
         // A candidate's fit below which a described sweep leaves it out.
         sweepFit: z.number().min(0).max(1),
+        // Judge the turn's own work before it closes; off lets a turn sign
+        // off on whatever it did.
+        qualityGate: z.boolean(),
+        // The probabilities below which the work is judged unfinished, the
+        // footage under-watched, and the reply wider than the record.
+        qualityFinished: z.number().min(0).max(1),
+        qualitySeen: z.number().min(0).max(1),
+        qualityHonest: z.number().min(0).max(1),
+        // How many times one turn may be sent back to work by the gate.
+        qualityRounds: z.number().int().min(0).max(6),
       })
       .strict(),
     default: {
@@ -171,11 +181,16 @@ export const SETTINGS = defineSettings({
       instantLeftover: 0.5,
       instantRemake: 0.3,
       sweepFit: 0.5,
+      qualityGate: true,
+      qualityFinished: 0.5,
+      qualitySeen: 0.5,
+      qualityHonest: 0.5,
+      qualityRounds: 3,
     },
     public: true,
     title: "Chat judgments",
     description:
-      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), run a one-action turn with no model round, re-place the messages waiting in the tray, pick the items a sweep touches, rank stock, find filler words, and resolve described voices.",
+      "Thresholds for the typed judgments that route a chat turn (skill, tool areas), run a one-action turn with no model round, hold a turn back until its work is finished and its reply true to it, re-place the messages waiting in the tray, pick the items a sweep touches, rank stock, find filler words, and resolve described voices.",
   },
   experimentResults: {
     schema: z

@@ -134,7 +134,9 @@ export function judgeTurnState(messages: UIMessage[], context: unknown): Entry {
   };
 }
 
-function editorSlice(context: unknown): Entry {
+/** The editor as a judgment reads it: counts and settings, no ids, no urls.
+ * The turn route and the quality gate both judge against this. */
+export function editorSlice(context: unknown): Entry {
   const c = (context ?? {}) as Record<string, unknown>;
   const project = (c.project ?? {}) as Record<string, unknown>;
   const selection = c.selection as Record<string, unknown> | null | undefined;

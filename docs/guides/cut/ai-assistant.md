@@ -76,6 +76,8 @@ Decisions that gate, route, or pick (the turn route, queue triage, stock ranking
 
 The judgment that routes a turn also asks whether the whole turn is one known editor action, and fills that action's arguments in the same request. When it settles — mute this clip, make it 16:9, slow that one down — the editor runs the tool and writes the line with no model round at all, and the edit lands in about a third of a second instead of three. It settles only when the action and every argument clear their floors and four guards hold: the ask names no exact figure, touches no second item, leaves no second edit undone, and wants no shot made again. Anything short resolves to nothing and the ordinary loop runs, which is why a miss costs nothing. Claude and Codex run the user's own CLI, so their turns always take the model round.
 
+A turn built on footage is judged once more before it closes. The same judge reads what that turn watched, wrote down and ran against the ask, and a turn holding a slice of a source while about to describe the whole of it is handed its next pass — which source, from where, at what sampling floor — instead of its reply. The hold has to point at something the record measures: seconds nobody looked at, or calls that did not land. A doubt with no gap behind it lets the turn close, because a finished turn sent back does its work a second time.
+
 Deciding what the user wants is prompt text, executed by the model. The prompt orders the calls it must make each turn:
 
 1. **Deliverable first.** "Write me a caption / a script / a prompt" asks for words — the answer goes in chat and the project stays untouched until the user says "do it". A request to change the project gets acted on directly with tools.

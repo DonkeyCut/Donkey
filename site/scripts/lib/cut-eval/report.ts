@@ -28,6 +28,8 @@ export interface RunReport {
   notes: string[];
   /** The registry action the turn ran with no model round, if any. */
   instant?: string | null;
+  /** Each time the quality gate sent the turn back to work, in order. */
+  qualityGate?: string[];
   /** The voice/taste judge's complaint. Report-only: never part of pass. */
   judgeNote?: string | null;
   trace: TraceEntry[];
@@ -110,6 +112,7 @@ export function toRunReport(result: CaseResult | null, error?: string): RunRepor
     roundModel: result.roundModel,
     notes: result.notes,
     instant: result.instant,
+    qualityGate: result.qualityGate,
     judgeNote: result.judgeNote,
     trace: result.trace,
     timings: result.timings,
