@@ -36,6 +36,9 @@ export const SAFE_TOOLS = new Set([
   "list_voices",
   "seek",
   "select",
+  // Finding the items a description covers reads the timeline; the change
+  // that follows is what edits.
+  "select_items",
   "set_playing",
   "set_view",
 ]);
@@ -746,7 +749,7 @@ export function makeTimelineSim(base: typeof FILLER_STATE) {
 }
 
 /** Serve a read-only tool from the fixture snapshot. */
-export function serveSafeTool(name: string, state: unknown): unknown {
+export function serveSafeTool(name: string, state: unknown, args: Record<string, unknown> = {}): unknown {
   if (name === "get_state") {
     // The fixture snapshot is frozen — it can't reflect this turn's stubbed
     // edits. Say so, or the model sees its adds "missing" and re-adds in a
@@ -763,5 +766,21 @@ export function serveSafeTool(name: string, state: unknown): unknown {
   if (name === "find_filler") return { fillers: FILLER_WORDS, count: FILLER_WORDS.length, track: 0 };
   if (name === "measure_level") return { targetId: "", clips: [] };
   if (name === "detect_beats") return { bpm: 0, beats: [] };
+  if (name === "select_items") {
+    // The find half of a sweep, served off the fixture: every item of that
+    // kind matches, so a case asserting the apply half gets the whole row.
+    const s = (state ?? {}) as Record<string, unknown>;
+    const kind = String(args.kind ?? "clip");
+    const rows =
+      kind === "audio" ? s.soundtrack
+      : kind === "overlay" ? s.overlays
+      : kind === "cue" ? ((s.subtitles ?? {}) as Record<string, unknown>).cues
+      : kind === "transition" ? s.transitions
+      : s.videoTrack;
+    const ids = (Array.isArray(rows) ? rows : [])
+      .map((r) => (r as { id?: unknown }).id)
+      .filter((id): id is string => typeof id === "string");
+    return { kind, searched: ids.length, ids, matched: ids.map((id) => ({ id })) };
+  }
   return { ok: true };
 }

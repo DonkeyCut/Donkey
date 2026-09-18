@@ -26,6 +26,8 @@ export interface RunReport {
   /** The model the rounds ran on — differs per turn under a router config. */
   roundModel?: string;
   notes: string[];
+  /** The registry action the turn ran with no model round, if any. */
+  instant?: string | null;
   /** The voice/taste judge's complaint. Report-only: never part of pass. */
   judgeNote?: string | null;
   trace: TraceEntry[];
@@ -107,6 +109,7 @@ export function toRunReport(result: CaseResult | null, error?: string): RunRepor
     routingMisses: result.routingMisses,
     roundModel: result.roundModel,
     notes: result.notes,
+    instant: result.instant,
     judgeNote: result.judgeNote,
     trace: result.trace,
     timings: result.timings,

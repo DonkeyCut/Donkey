@@ -100,6 +100,8 @@ export interface CaseResult {
   routingMisses: string[];
   /** The model the rounds ran on — differs per turn under a router config. */
   roundModel: string;
+  /** The action the instant path carried the turn out with, if any. */
+  instant: string | null;
   timings: RunTimings;
 }
 
@@ -125,6 +127,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
   let reply = "";
   let streamError: string | null = null;
   let extensions = 0;
+  let instant: string | null = null;
 
   const devPost =
     (path: string) =>
@@ -168,7 +171,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
             throw new Error(String((stub as { __error: unknown }).__error));
           return stub;
         }
-        if (SAFE_TOOLS.has(name)) return serveSafeTool(name, c.state ?? EDITOR_STATE);
+        if (SAFE_TOOLS.has(name)) return serveSafeTool(name, c.state ?? EDITOR_STATE, args);
         violations.push(name);
         return { error: "eval: this tool is disabled for this turn — do not retry it" };
       } finally {
@@ -186,6 +189,9 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
         gateMs = ms;
         gateSkipped = skipped;
         route = { skill: r.skill, areas: r.areas, declaredTools: r.declaredTools };
+      },
+      onInstant: (action) => {
+        instant = action?.id ?? null;
       },
       onRequestTools: (areas) => routingMisses.push(...areas),
       onRound: (ms, firstDeltaMs) => {
@@ -237,6 +243,12 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
   // "work" expectation.
   const gateSide = intent === "chat" ? "chat" : "work";
   if (c.gate && gateSide !== c.gate) notes.push(`gate said ${intent}, expected ${c.gate}`);
+  // An instant turn is the whole point of the path: the judgment settled it
+  // and no model round ran. A case that pins one asserts both.
+  if (c.instant !== undefined) {
+    if (instant !== c.instant) notes.push(`instant was ${instant ?? "none"}, expected ${c.instant ?? "none"}`);
+    if (c.instant !== null && rounds.length > 0) notes.push(`instant turn still spent ${rounds.length} model round(s)`);
+  }
   if (!c.reply.test(reply)) notes.push(`reply did not match ${c.reply}`);
   for (const t of c.requiredTools ?? []) {
     if (!trace.some((e) => e.name === t)) notes.push(`required tool ${t} was never called`);
@@ -299,6 +311,7 @@ export async function runCase(c: EvalCase, cfg: RunConfig): Promise<CaseResult> 
     areas: route?.areas ?? [],
     declaredTools: route?.declaredTools ?? 0,
     routingMisses,
+    instant,
     roundModel: resolveGeminiModel(intent === "simple" ? cfg.simpleModel : cfg.complexModel),
     timings,
   };

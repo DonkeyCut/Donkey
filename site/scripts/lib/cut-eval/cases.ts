@@ -4,6 +4,7 @@
  * project-mutating tool calls, edit requests still reach for tools.
  *
  * Every case carries a latency bucket:
+ *   instant     — the judgment settles the whole turn: no model round at all
  *   chat        — the fast path: gated greetings and question turns
  *   single-tool — one decisive call reaches the right tool
  *   multi-tool  — composed edits over several calls
@@ -37,7 +38,7 @@ import {
   userTurn,
 } from "./fixtures";
 
-export type Bucket = "chat" | "single-tool" | "multi-tool";
+export type Bucket = "instant" | "chat" | "single-tool" | "multi-tool";
 
 export interface EvalCase {
   name: string;
@@ -53,6 +54,10 @@ export interface EvalCase {
   /** Latency guard: the turn fails if the trace exceeds this many calls. A
    * simple ask must not detour through skill reads or state polls. */
   maxToolCalls?: number;
+  /** The registry action the instant path must settle this turn to, with no
+   * model round at all. `null` pins the opposite: the turn must reach the
+   * model. Left out, either is allowed. */
+  instant?: string | null;
   /** The gate side the turn must classify to: "chat" turns run with no tool
    * declarations (tool calls become impossible), "work" covers both routing
    * verdicts (simple and complex). */
@@ -95,6 +100,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       // subtitles_generate): a bare greeting asks for nothing, so the turn
       // must classify "chat" and run with every tool declaration withheld.
       name: "greeting-is-gated",
+      instant: null,
       bucket: "chat",
       input: () => [userTurn("hi")],
       reply: /help|what would you/i,
@@ -105,6 +111,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
     {
       // Same gate mid-conversation: thanks after landed work requests nothing.
       name: "thanks-is-gated",
+      instant: null,
       bucket: "chat",
       input: () => [
         plainUserTurn("trim the first clip down to 5 seconds"),
@@ -185,6 +192,9 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       stubs: {
         set_transition: { ok: true },
         add_title: { ok: true },
+        // "Short" is part of the ask, and a photo lands at the default still
+        // length, so trimming the pair down is the movie being made.
+        trim_clip: { in: 0, out: 3.5, len: 3.5 },
       },
     },
     {
@@ -261,6 +271,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       // to "make room" is wrong — the trap word "instead"/"version" is not a
       // delete instruction.
       name: "iterate-keeps-existing-clip",
+      instant: null,
       bucket: "single-tool",
       input: () => [
         userTurn("the beach clip feels off — make me a better version, more of a golden-hour sunset"),
@@ -296,6 +307,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       // then narrates that as the answer. The snapshot names every clip and
       // its muted flag, so the mute needs no reads either.
       name: "mute-all-does-not-redo-prior-turn",
+      instant: null,
       bucket: "single-tool",
       input: () => [
         plainUserTurn(
@@ -410,6 +422,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
     {
       // Fast path: a direct edit is one trim_clip on the clip in the snapshot.
       name: "trim-ask-single-tool",
+      instant: null,
       bucket: "single-tool",
       input: () => [userTurn("trim the first clip down to 5 seconds")],
       reply: /trim|5|second/i,
@@ -546,6 +559,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       // "Pop" exists only as an animation, so the routing is unambiguous
       // (a wipe ask could legitimately become a wipe *transition* instead).
       name: "animation-overrides-transition",
+      instant: null,
       bucket: "single-tool",
       input: () => [
         userTurn("get rid of the crossfade — make the second clip pop in instead", {
@@ -774,6 +788,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       // A described ramp is a curve, laid in one call: the shape the user
       // asked for lands as nodes over the clip's footage.
       name: "speed-ramp-from-description",
+      instant: null,
       bucket: "single-tool",
       // A clean timeline: the debris cases own the parked bars, and a turn
       // that can see them is right to tidy them.
@@ -927,6 +942,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       // blacks" pushes shadows down (or deepens the low end of the master
       // curve) — the interceptor fails any move in the wrong direction.
       name: "warmer-crushed-blacks-in-range",
+      instant: null,
       bucket: "single-tool",
       input: () => [userTurn("make the beach clip warmer and crush the blacks a little")],
       reply: /warm|black|shadow|grade/i,
@@ -957,6 +973,7 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
       // set_color_hsl on aqua or blue — a whole-frame saturation push leaks
       // onto everything else and fails.
       name: "sky-bluer-single-band",
+      instant: "set_color_hsl",
       bucket: "single-tool",
       input: () => [userTurn("make the sky bluer without changing anything else")],
       reply: /sky|blue/i,

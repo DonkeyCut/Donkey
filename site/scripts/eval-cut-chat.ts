@@ -140,6 +140,7 @@ async function runConfig(
       `  ${report.passRate === 1 ? "ok  " : report.passRate > 0 ? "part" : "FAIL"} ${c.name}` +
         `  pass ${pct(report.passRate)}  total p50 ${ms(l?.totalMs.p50)}  ttft p50 ${ms(l?.ttftMs?.p50)}` +
         `  rounds ${l ? l.rounds.mean : "—"}` +
+        (runs.find((r) => r.instant) ? `  instant ${runs.find((r) => r.instant)?.instant}` : "") +
         (report.budgetBreaches.length > 0 ? `  BUDGET: ${report.budgetBreaches.join("; ")}` : "")
     );
     for (const r of runs.filter((r) => !r.pass)) {
