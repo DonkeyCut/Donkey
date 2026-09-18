@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="site/public/donkey-app-icon.png" alt="Donkey Cut" width="128" height="128" />
+  <img src="site/public/icon.png" alt="Donkey Cut" width="128" height="128" />
 </p>
 
 <h1 align="center">Donkey Cut</h1>
