@@ -20,6 +20,7 @@ import {
 import { rewriteCaptions, translateCaptions } from "../ai/captions";
 import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
 import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, skillRelevanceBlock, systemPrompt } from "../ai/catalog";
+import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
 
 interface ChatBody {
   threadId: string;
@@ -79,89 +80,124 @@ async function runClaude(
   signal: AbortSignal
 ) {
   signal.throwIfAborted();
-  const q = query({
-    prompt,
-    options: {
-      model: body.model,
-      ...(body.providerSession ? { resume: body.providerSession } : {}),
-      // Inside the compiled engine the SDK can't resolve its built-in CLI;
-      // the engine resolves the user's own Claude Code install at startup.
-      ...(process.env.DONKEY_CUT_CLAUDE
-        ? { pathToClaudeCodeExecutable: process.env.DONKEY_CUT_CLAUDE }
-        : {}),
-      systemPrompt: systemPrompt(),
-      tools: [], // no built-in tools — the editor MCP server is the whole surface
-      mcpServers: {
-        cut: {
-          type: "stdio",
-          ...mcpCommand(base, sessionKey),
-          alwaysLoad: true,
-        },
-      },
-      allowedTools: ["mcp__cut"],
-      permissionMode: "dontAsk",
-      settingSources: [], // don't drag the user's CLAUDE.md/settings into app chats
-      // The editor MCP is the whole tool surface. settingSources:[] only drops
-      // filesystem config — the SDK still auto-fetches the account's claude.ai
-      // cloud connectors (Gmail, Drive, …) and surfaces them to the model.
-      // These two flags make the isolation total: no connectors, and no MCP
-      // server except the one we pass here.
-      strictMcpConfig: true,
-      settings: { disableClaudeAiConnectors: true },
-      includePartialMessages: true,
-      maxTurns: 30,
-      cwd: os.tmpdir(),
-    },
-  });
-  const onAbort = () => void q.interrupt().catch(() => {});
-  signal.addEventListener("abort", onAbort);
-
   let textCount = 0;
-  let textId: string | null = null;
-  try {
-    for await (const msg of q) {
-      const m = msg as unknown as Record<string, unknown> & { type: string };
-      if (m.type === "system" && m.subtype === "init") {
-        // The editor MCP is the assistant's entire tool surface. If it didn't
-        // bind (an engine hiccup, an out-of-scope proxy call), the model would
-        // improvise by narrating tool calls as raw XML — surface a clear error
-        // instead of letting that reach the user.
-        const tools = Array.isArray(m.tools) ? (m.tools as unknown[]) : [];
-        if (!tools.some((t) => typeof t === "string" && t.startsWith("mcp__cut"))) {
-          emit({ type: "error", errorText: "The editor tools didn't load. Reload the tab and try again." });
-          await q.interrupt().catch(() => {});
+  let session = body.providerSession;
+  const say = (text: string) => {
+    const id = `t${++textCount}`;
+    emit({ type: "text-start", id });
+    emit({ type: "text-delta", id, delta: text });
+    emit({ type: "text-end", id });
+  };
+
+  /** One run of the query. It ends when the model signs off, when the SDK
+   * spends the step budget, or when the editor tools failed to bind. */
+  const pass = async (ask: string): Promise<TurnEnd> => {
+    signal.throwIfAborted();
+    const q = query({
+      prompt: ask,
+      options: {
+        model: body.model,
+        ...(session ? { resume: session } : {}),
+        // Inside the compiled engine the SDK can't resolve its built-in CLI;
+        // the engine resolves the user's own Claude Code install at startup.
+        ...(process.env.DONKEY_CUT_CLAUDE
+          ? { pathToClaudeCodeExecutable: process.env.DONKEY_CUT_CLAUDE }
+          : {}),
+        systemPrompt: systemPrompt(),
+        tools: [], // no built-in tools — the editor MCP server is the whole surface
+        mcpServers: {
+          cut: {
+            type: "stdio",
+            ...mcpCommand(base, sessionKey),
+            alwaysLoad: true,
+          },
+        },
+        allowedTools: ["mcp__cut"],
+        permissionMode: "dontAsk",
+        settingSources: [], // don't drag the user's CLAUDE.md/settings into app chats
+        // The editor MCP is the whole tool surface. settingSources:[] only drops
+        // filesystem config — the SDK still auto-fetches the account's claude.ai
+        // cloud connectors (Gmail, Drive, …) and surfaces them to the model.
+        // These two flags make the isolation total: no connectors, and no MCP
+        // server except the one we pass here.
+        strictMcpConfig: true,
+        settings: { disableClaudeAiConnectors: true },
+        includePartialMessages: true,
+        maxTurns: STEP_BUDGET,
+        cwd: os.tmpdir(),
+      },
+    });
+    const onAbort = () => void q.interrupt().catch(() => {});
+    signal.addEventListener("abort", onAbort);
+
+    let end: TurnEnd = "done";
+    let textId: string | null = null;
+    try {
+      for await (const msg of q) {
+        const m = msg as unknown as Record<string, unknown> & { type: string };
+        if (m.type === "system" && m.subtype === "init") {
+          // The editor MCP is the assistant's entire tool surface. If it didn't
+          // bind (an engine hiccup, an out-of-scope proxy call), the model would
+          // improvise by narrating tool calls as raw XML — surface a clear error
+          // instead of letting that reach the user.
+          const tools = Array.isArray(m.tools) ? (m.tools as unknown[]) : [];
+          if (!tools.some((t) => typeof t === "string" && t.startsWith("mcp__cut"))) {
+            emit({ type: "error", errorText: "The editor tools didn't load. Reload the tab and try again." });
+            await q.interrupt().catch(() => {});
+            end = "blocked";
+            break;
+          }
+          // Each run gets its own session id; the next one resumes from the
+          // newest, so an extended turn keeps one continuous history.
+          if (typeof m.session_id === "string") session = m.session_id;
+          emit({ type: "data-session", data: { providerSession: m.session_id }, transient: true });
+        } else if (m.type === "stream_event") {
+          const ev = m.event as {
+            type: string;
+            content_block?: { type: string };
+            delta?: { type: string; text?: string };
+          };
+          if (ev.type === "content_block_start" && ev.content_block?.type === "text") {
+            textId = `t${++textCount}`;
+            emit({ type: "text-start", id: textId });
+          } else if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta" && textId) {
+            emit({ type: "text-delta", id: textId, delta: ev.delta.text ?? "" });
+          } else if (ev.type === "content_block_stop" && textId) {
+            emit({ type: "text-end", id: textId });
+            textId = null;
+          }
+        } else if (m.type === "result") {
+          // The SDK names its stops with tokens ("error_max_turns"), which
+          // say nothing to someone waiting on a half-built edit: a spent
+          // budget carries on below, and anything else is said in words.
+          if (m.subtype === "error_max_turns") end = "budget";
+          else if (m.subtype !== "success") {
+            end = "failed";
+            emit({ type: "error", errorText: stopText(m.result) });
+          }
+          // The result message is the run's last word — after it the CLI only
+          // tears down. Leaving the loop closes the chat stream now instead of
+          // holding the working indicator open through process exit.
           break;
         }
-        emit({ type: "data-session", data: { providerSession: m.session_id }, transient: true });
-      } else if (m.type === "stream_event") {
-        const ev = m.event as {
-          type: string;
-          content_block?: { type: string };
-          delta?: { type: string; text?: string };
-        };
-        if (ev.type === "content_block_start" && ev.content_block?.type === "text") {
-          textId = `t${++textCount}`;
-          emit({ type: "text-start", id: textId });
-        } else if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta" && textId) {
-          emit({ type: "text-delta", id: textId, delta: ev.delta.text ?? "" });
-        } else if (ev.type === "content_block_stop" && textId) {
-          emit({ type: "text-end", id: textId });
-          textId = null;
-        }
-      } else if (m.type === "result") {
-        if (m.subtype !== "success") {
-          const detail = typeof m.result === "string" ? m.result : String(m.subtype);
-          emit({ type: "error", errorText: `Claude stopped: ${detail}` });
-        }
-        // The result message is the turn's last word — after it the CLI only
-        // tears down. Leaving the loop closes the chat stream now instead of
-        // holding the working indicator open through process exit.
-        break;
       }
+    } finally {
+      signal.removeEventListener("abort", onAbort);
+      if (textId) emit({ type: "text-end", id: textId });
     }
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-    if (textId) emit({ type: "text-end", id: textId });
+    return end;
+  };
+
+  // A run that spent the budget resumes from its own session, so the next
+  // one carries the whole tool history and the build finishes on its own.
+  let ask = prompt;
+  for (let extensions = 0; ; extensions++) {
+    const end = await pass(ask);
+    if (signal.aborted) return;
+    const close = turnClose({ end, spoke: textCount > 0, extensions });
+    if (!close) return;
+    if ("signoff" in close) return say(close.signoff);
+    ask = close.steer;
   }
 }
 
@@ -213,6 +249,12 @@ async function runCodex(
     };
 
     let textCount = 0;
+    const say = (text: string) => {
+      const id = `t${++textCount}`;
+      emit({ type: "text-start", id });
+      emit({ type: "text-delta", id, delta: text });
+      emit({ type: "text-end", id });
+    };
     let stdoutBuf = "";
     let stderrTail = "";
     proc.stdout.setEncoding("utf8");
@@ -232,15 +274,15 @@ async function runCodex(
         if (ev.type === "thread.started" && ev.thread_id) {
           emit({ type: "data-session", data: { providerSession: ev.thread_id }, transient: true });
         } else if (ev.type === "item.completed" && ev.item?.type === "agent_message" && ev.item.text) {
-          const id = `t${++textCount}`;
-          emit({ type: "text-start", id });
-          emit({ type: "text-delta", id, delta: ev.item.text });
-          emit({ type: "text-end", id });
+          say(ev.item.text);
         } else if (ev.type === "error" || ev.type === "turn.failed") {
-          const message = ev.error?.message ?? ev.message ?? "Codex failed.";
-          emit({ type: "error", errorText: message });
+          emit({ type: "error", errorText: stopText(ev.error?.message ?? ev.message) });
           if (ev.type === "turn.failed") settle();
         } else if (ev.type === "turn.completed") {
+          // The CLI runs a turn to its own end — there is no step cap to
+          // extend — so the only ending it can leave open is a silent one.
+          const close = turnClose({ end: "done", spoke: textCount > 0, extensions: 0 });
+          if (close && "signoff" in close && !signal.aborted) say(close.signoff);
           settle();
         }
         if (settled) return;

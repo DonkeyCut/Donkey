@@ -12,6 +12,13 @@ import {
   TOOL_AREA_NAMES,
 } from "@/cut/server/ai/catalog";
 import { isResumeMessage } from "../chatResume";
+import {
+  BUDGET_STEER_PREFIX,
+  budgetSteer,
+  MAX_EXTENSIONS,
+  STEP_BUDGET,
+  turnClose,
+} from "../turnBudget";
 import { cutJudge } from "../chatRuntime";
 import {
   instantAction,
@@ -57,12 +64,10 @@ import { subscribeUiChunks } from "./uiChunks";
 // replay as structured toolCall/toolResult messages, so no bookkeeping rides
 // as prose the model could mimic.
 
-// A round is one assistant message that requests tools. The budget
-// auto-extends so the user never types "keep going". At the ceiling every
+// A round is one assistant message that requests tools; the budget and its
+// extensions are the shared ones in lib/turnBudget. At the ceiling every
 // call blocks with a reply-now instruction; a model that still requests
 // tools the round after gets its batch terminated, ending the turn.
-const ROUND_BUDGET = 24;
-const MAX_EXTENSIONS = 3;
 
 export interface CutAgentDeps {
   post: PostFn;
@@ -129,10 +134,6 @@ function keepSession(threadId: string, messages: AgentMessage[]): void {
   sessions.set(threadId, messages);
   while (sessions.size > SESSIONS_KEPT) sessions.delete(sessions.keys().next().value!);
 }
-
-/** The budget-extension steer is turn-local scaffolding; this prefix marks it
- * so the save path can keep it out of the stored session. */
-const BUDGET_STEER_PREFIX = "[budget]";
 
 function isBudgetSteer(m: AgentMessage): boolean {
   const msg = m as Message;
@@ -723,7 +724,7 @@ export function streamCutChat({
           // its own awaits, inside the try that answers the user.
           .catch(() => {});
 
-        const roundBudget = deps.limits?.roundBudget ?? ROUND_BUDGET;
+        const roundBudget = deps.limits?.roundBudget ?? STEP_BUDGET;
         const maxExtensions = deps.limits?.maxExtensions ?? MAX_EXTENSIONS;
         const roundCeiling = roundBudget * (maxExtensions + 1);
 
@@ -904,7 +905,7 @@ export function streamCutChat({
               deps.hooks?.onExtension?.(extensions);
               agent.steer({
                 role: "user",
-                content: `[budget] Round budget auto-extended (${extensions} of ${maxExtensions}). Keep working; finish the job or report the concrete blocker.`,
+                content: budgetSteer(extensions, maxExtensions),
                 timestamp: Date.now(),
               });
             }
@@ -939,31 +940,35 @@ export function streamCutChat({
           send: (chunk: Record<string, unknown>) => void;
         }) => {
           keepSession(threadId, sanitizeSession(run.agent.state.messages));
-          // The step-limit handoff guarantee: a turn that ends at the ceiling
-          // with the model still requesting tools closes with readable text —
-          // the terminated batch alone would leave the reply on blocked tool
-          // chips with no sign-off.
-          if (run.rounds > roundCeiling && !abortSignal?.aborted) {
-            const last = [...run.agent.state.messages]
-              .reverse()
-              .find((m) => (m as Message).role === "assistant") as Message | undefined;
-            const spoke =
-              !!last &&
-              Array.isArray(last.content) &&
-              last.content.some((c) => c.type === "text" && c.text.trim());
-            if (!spoke) {
-              const id = crypto.randomUUID();
-              run.send({ type: "text-start", id });
-              run.send({
-                type: "text-delta",
-                id,
-                delta:
-                  'Paused at this turn\'s step limit with work still open. Say "keep going" to continue.',
-              });
-              run.send({ type: "text-end", id });
-            }
-          }
           const errorMessage = run.agent.state.errorMessage;
+          // The handoff guarantee, the same one every provider keeps: a turn
+          // that ends at the ceiling with the model still requesting tools,
+          // or ends saying nothing at all, closes with readable text — the
+          // terminated batch alone would leave the reply on blocked tool
+          // chips with no sign-off.
+          const last = [...run.agent.state.messages]
+            .reverse()
+            .find((m) => (m as Message).role === "assistant") as Message | undefined;
+          const spoke =
+            !!last &&
+            Array.isArray(last.content) &&
+            last.content.some((c) => c.type === "text" && c.text.trim());
+          const close = abortSignal?.aborted
+            ? null
+            : turnClose({
+                end: errorMessage ? "failed" : run.rounds > roundCeiling ? "budget" : "done",
+                spoke,
+                // At the ceiling the extensions are all spent, so this is the
+                // handoff rather than more budget.
+                extensions: maxExtensions,
+                maxExtensions,
+              });
+          if (close && "signoff" in close) {
+            const id = crypto.randomUUID();
+            run.send({ type: "text-start", id });
+            run.send({ type: "text-delta", id, delta: close.signoff });
+            run.send({ type: "text-end", id });
+          }
           if (errorMessage && !abortSignal?.aborted) {
             run.send({ type: "error", errorText: errorMessage });
           }
