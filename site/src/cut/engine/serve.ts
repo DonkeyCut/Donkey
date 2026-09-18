@@ -1,6 +1,7 @@
 import { allowedOrigin, corsHeaders, preflightHeaders } from "../server/cors";
 import { matchCutRoute, runCutRoute } from "../server/http/routes";
 import { flattenCutUsers, migrateCutDataDir } from "../server/migrateDataDir";
+import { sweepPhoneInbox } from "../server/phoneLink";
 import { reconcileProjectDirs } from "../server/projects";
 import { ensureToolPath, resolveOnPath } from "../server/tool-path";
 import { enginePort } from "./config";
@@ -40,6 +41,10 @@ async function start() {
   migrateCutDataDir();
   flattenCutUsers();
   reconcileProjectDirs();
+  // The phone inbox is staging, so what no editor took is cleared here rather
+  // than kept: a shoot nobody opened a project for is a second full copy of
+  // itself sitting on the disk.
+  await sweepPhoneInbox().catch(() => {});
   await ensureToolPath();
 
   // The Agent SDK can't resolve its built-in CLI from inside a compiled

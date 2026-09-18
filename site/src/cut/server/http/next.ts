@@ -1,5 +1,6 @@
 import { hostedApiBlock } from "../local-only";
 import { flattenCutUsers } from "../migrateDataDir";
+import { sweepPhoneInbox } from "../phoneLink";
 import { reconcileProjectDirs } from "../projects";
 import { ensureToolPath } from "../tool-path";
 import { matchCutRoute, runCutRoute } from "./routes";
@@ -10,6 +11,7 @@ function flattenOnce() {
   flattened = true;
   flattenCutUsers();
   reconcileProjectDirs();
+  void sweepPhoneInbox().catch(() => {});
 }
 
 /**

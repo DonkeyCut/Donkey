@@ -6,6 +6,7 @@ import { engineApi } from "./engine";
 import { exportApi } from "./export";
 import { libraryApi } from "./library";
 import { micApi } from "./mic";
+import { phoneLinkApi } from "./phoneLink";
 import { projectsApi } from "./projects";
 import { sttApi } from "./stt";
 
@@ -53,6 +54,23 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "POST", path: "/api/cut/projects/:id/audio", handler: (req, p) => projectsApi.audio(req, { id: p.id }) },
   { method: "POST", path: "/api/cut/projects/:id/duplicate", handler: (req, p) => projectsApi.duplicate(req, { id: p.id }) },
   { method: "GET", path: "/api/cut/projects/:id/preview", handler: (req, p) => projectsApi.servePreview(req, { id: p.id }) },
+
+  // The phone link: an iPhone shooting in the field hands its clips to this
+  // Mac over the app's peer listener, and the open editor claims them.
+  { method: "GET", path: "/api/cut/phone", handler: () => phoneLinkApi.status() },
+  { method: "POST", path: "/api/cut/phone/pair", handler: () => phoneLinkApi.pair() },
+  { method: "DELETE", path: "/api/cut/phone/pair", handler: () => phoneLinkApi.cancelPairing() },
+  { method: "POST", path: "/api/cut/phone/pair/claim", handler: (req) => phoneLinkApi.claim(req) },
+  { method: "POST", path: "/api/cut/phone/verify", handler: (req) => phoneLinkApi.verify(req) },
+  { method: "GET", path: "/api/cut/phone/devices", handler: () => phoneLinkApi.devices() },
+  { method: "DELETE", path: "/api/cut/phone/devices/:id", handler: (req, p) => phoneLinkApi.removeDevice(req, { id: p.id }) },
+  { method: "POST", path: "/api/cut/phone/clips", handler: (req) => phoneLinkApi.receive(req) },
+  { method: "GET", path: "/api/cut/phone/clips", handler: () => phoneLinkApi.inbox() },
+  { method: "POST", path: "/api/cut/phone/clips/:id/claim", handler: (req, p) => phoneLinkApi.claimClip(req, { id: p.id }) },
+  { method: "POST", path: "/api/cut/phone/clips/:id/release", handler: (req, p) => phoneLinkApi.releaseClip(req, { id: p.id }) },
+  { method: "POST", path: "/api/cut/phone/clips/:id/into-project", handler: (req, p) => phoneLinkApi.intoProject(req, { id: p.id }) },
+  { method: "GET", path: "/api/cut/phone/clips/:id/file", handler: (req, p) => phoneLinkApi.clipFile(req, { id: p.id }) },
+  { method: "DELETE", path: "/api/cut/phone/clips/:id", handler: (req, p) => phoneLinkApi.removeClip(req, { id: p.id }) },
 
   { method: "GET", path: "/api/cut/library", handler: () => libraryApi.list() },
   { method: "POST", path: "/api/cut/library", handler: (req) => libraryApi.upload(req) },
