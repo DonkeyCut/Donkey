@@ -18,7 +18,8 @@ struct DonkeyApp: App {
                 media: wiring.media,
                 projects: wiring.projects,
                 auth: wiring.auth,
-                analytics: wiring.analytics
+                analytics: wiring.analytics,
+                link: wiring.link
             ) {
                 CameraPreviewView(host: wiring.cameraController.previewView) {
                     wiring.camera.toggleRecording()
@@ -52,6 +53,7 @@ final class AppWiring {
     let projects: ProjectsModel
     let auth: AuthModel
     let analytics: AnalyticsModel
+    let link: PhoneLinkModel
     let cameraController: CameraController
     let watchLink: WatchLinkController
     let sync: SyncEngine
@@ -89,13 +91,19 @@ final class AppWiring {
         analytics = AnalyticsModel(service: cloud)
         projects = ProjectsModel(service: cloud)
         cameraController = CameraController()
+        let link = PhoneLinkModel(tokens: PhoneLinkTokenStore())
+        self.link = link
         networkMonitor = NetworkMonitor { sync.network = $0 }
 
         cameraController.model = camera
         camera.controller = cameraController
         watchLink = WatchLinkController(app: app, camera: camera, cameraController: cameraController)
-        cameraController.onRecordingFinished = { [media] url, duration, thumbnail in
+        cameraController.onRecordingFinished = { [media, link] url, duration, thumbnail in
             media.ingest(movieAt: url, duration: duration, thumbnail: thumbnail)
+            // The cloud queue takes its own copy on its own clock; this is the
+            // take going straight to the Mac, which in the field is the only
+            // path that resolves at all.
+            Task { await link.drain(media) }
         }
     }
 }

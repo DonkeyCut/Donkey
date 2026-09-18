@@ -17,6 +17,12 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Donkey sends the video you shoot straight to your Mac over the local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_donkeycut._tcp</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

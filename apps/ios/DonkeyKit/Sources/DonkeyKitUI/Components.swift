@@ -51,6 +51,9 @@ struct AvatarMenu: View {
                 Button("Analytics", systemImage: "chart.xyaxis.line") {
                     app.showsAnalytics = true
                 }
+                Button("Mac Link", systemImage: "laptopcomputer.and.iphone") {
+                    app.showsMacLink = true
+                }
             }
             Divider()
             Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {

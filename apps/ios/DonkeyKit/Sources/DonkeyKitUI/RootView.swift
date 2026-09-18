@@ -14,6 +14,7 @@ public struct RootView<CameraPreview: View>: View {
     var projects: ProjectsModel
     var auth: AuthModel
     var analytics: AnalyticsModel
+    var link: PhoneLinkModel
     let cameraPreview: () -> CameraPreview
 
     @Environment(\.scenePhase) private var scenePhase
@@ -26,6 +27,7 @@ public struct RootView<CameraPreview: View>: View {
         projects: ProjectsModel,
         auth: AuthModel,
         analytics: AnalyticsModel,
+        link: PhoneLinkModel,
         @ViewBuilder cameraPreview: @escaping () -> CameraPreview
     ) {
         self.app = app
@@ -35,6 +37,7 @@ public struct RootView<CameraPreview: View>: View {
         self.projects = projects
         self.auth = auth
         self.analytics = analytics
+        self.link = link
         self.cameraPreview = cameraPreview
     }
 
@@ -71,6 +74,13 @@ public struct RootView<CameraPreview: View>: View {
                 .tint(.accentBlue)
                 .preferredColorScheme(app.appearance.colorScheme)
         }
+        .sheet(isPresented: $app.showsMacLink) {
+            MacLinkSheet(link: link, media: media) {
+                if !cameraShouldRun { link.stopBrowsing() }
+            }
+            .tint(.accentBlue)
+            .preferredColorScheme(app.appearance.colorScheme)
+        }
         .task { await auth.restore() }
         // Notes and folders are written at the desk as well as here, so the
         // phone looks at the cloud on its own clock for as long as it is on
@@ -105,6 +115,7 @@ public struct RootView<CameraPreview: View>: View {
         .onChange(of: auth.isSignedIn) { _, signedIn in
             guard signedIn else {
                 app.showsAnalytics = false
+                app.showsMacLink = false
                 // The listing on disk belongs to the account that just left.
                 projects.forget()
                 return
@@ -115,9 +126,15 @@ public struct RootView<CameraPreview: View>: View {
         .onChange(of: cameraShouldRun) { _, run in
             if run {
                 camera.appeared()
+                link.startBrowsing()
             } else {
                 camera.disappeared()
+                if !app.showsMacLink { link.stopBrowsing() }
             }
+        }
+        // A Mac coming into range mid-shoot is the moment the queue drains.
+        .onChange(of: link.macs) { _, _ in
+            Task { await link.drain(media) }
         }
     }
 

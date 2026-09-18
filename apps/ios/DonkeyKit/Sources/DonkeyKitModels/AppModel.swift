@@ -32,6 +32,10 @@ public final class AppModel {
     /// The super-user analytics dashboard, opened from the avatar menu.
     public var showsAnalytics = false
 
+    /// The Mac link sheet — pairing this phone with a Mac so field takes reach
+    /// the editor with no network. Opened from the avatar menu.
+    public var showsMacLink = false
+
     private let defaults: UserDefaults
     private static let appearanceKey = "appearancePreference"
     private static let mediaOnWiFiOnlyKey = "mediaOnWiFiOnly"
