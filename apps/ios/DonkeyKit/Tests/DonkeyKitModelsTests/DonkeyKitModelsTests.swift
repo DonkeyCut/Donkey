@@ -1477,6 +1477,52 @@ import Testing
     }
 }
 
+/// An empty dashboard is one answer, not every 404. The route says "no-rollup"
+/// when the nightly job hasn't written one; a 404 from anything else is a
+/// failure that names itself.
+@Suite struct AnalyticsFailureTests {
+    func body(_ json: [String: String]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: json)
+    }
+
+    @Test func anAnswerIsNoFailure() {
+        #expect(analyticsFailure(status: 200, body: Data("{}".utf8)) == nil)
+    }
+
+    @Test func theRoutesOwnCodeIsTheEmptyDashboard() throws {
+        let failure = analyticsFailure(
+            status: 404,
+            body: try body(["error": "no-rollup", "message": "The nightly analytics job hasn't written a rollup yet."])
+        )
+        #expect(failure as? AnalyticsError == .noRollup)
+    }
+
+    @Test func aBare404IsNotAnEmptyDashboard() {
+        let failure = analyticsFailure(status: 404, body: Data("<html>Not Found</html>".utf8))
+        guard case .refused(let message)? = failure as? CloudSyncError else {
+            Issue.record("expected a refusal naming the 404")
+            return
+        }
+        #expect(message.contains("404"))
+    }
+
+    @Test func storageRefusingTheReadReadsAsItself() throws {
+        let failure = analyticsFailure(
+            status: 503,
+            body: try body(["error": "storage-unreadable", "message": "Storage refused the rollup read: Access Denied"])
+        )
+        #expect(failure as? CloudSyncError == .refused("Storage refused the rollup read: Access Denied"))
+    }
+
+    @Test func aSignedOutAnswerIsASessionFact() throws {
+        #expect(analyticsFailure(status: 403, body: try body(["error": "Forbidden"])) as? CloudSyncError == .unauthorized)
+    }
+
+    @Test func aRefusalWithoutASentenceCarriesItsStatus() {
+        #expect(analyticsFailure(status: 500, body: Data()) as? CloudSyncError == .refused("The server answered 500."))
+    }
+}
+
 @Suite struct AnalyticsModelTests {
     final class Service: AnalyticsServicing, @unchecked Sendable {
         var answer: Result<AnalyticsSummaryDocument, any Error> = .failure(CloudSyncError.transport)

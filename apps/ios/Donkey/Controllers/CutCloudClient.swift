@@ -713,12 +713,7 @@ extension CutCloudClient: AnalyticsServicing {
     /// unauthorized here.
     func fetchAnalyticsSummary() async throws -> AnalyticsSummaryDocument {
         let (data, http) = try await perform(try request("GET", "/api/analytics/summary"))
-        switch http.statusCode {
-        case 200..<300: break
-        case 404: throw AnalyticsError.noRollup
-        case 401, 403: throw CloudSyncError.unauthorized
-        default: throw CloudSyncError.refused("The server answered \(http.statusCode).")
-        }
+        if let failure = analyticsFailure(status: http.statusCode, body: data) { throw failure }
         return try AnalyticsSummaryDocument.decode(data)
     }
 
@@ -730,12 +725,7 @@ extension CutCloudClient: AnalyticsServicing {
             "/api/analytics/users",
             query: [URLQueryItem(name: "sort", value: sort), URLQueryItem(name: "cursor", value: String(cursor))]
         ))
-        switch http.statusCode {
-        case 200..<300: break
-        case 404: throw AnalyticsError.noRollup
-        case 401, 403: throw CloudSyncError.unauthorized
-        default: throw CloudSyncError.refused("The server answered \(http.statusCode).")
-        }
+        if let failure = analyticsFailure(status: http.statusCode, body: data) { throw failure }
         return try AnalyticsUsersPage.decode(data)
     }
 }

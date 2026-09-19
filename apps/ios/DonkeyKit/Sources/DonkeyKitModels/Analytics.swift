@@ -396,6 +396,39 @@ nonisolated public enum AnalyticsError: Error, Equatable {
     case unreadable(String)
 }
 
+/// A refusal body from the API: a code the client matches on, and the sentence
+/// the server wrote for a person.
+nonisolated private struct AnalyticsRefusal: Decodable {
+    var error: String?
+    var message: String?
+}
+
+/// What an analytics answer means, from its status and body. Nil is an answer
+/// to read.
+///
+/// The empty dashboard is one specific answer: the route's own `no-rollup`.
+/// A 404 from anywhere else — a server that doesn't serve this route, a proxy
+/// short-circuiting the request — carries no such code, and reading it as
+/// "the nightly job hasn't produced a rollup" tells the reader a story about a
+/// job that may be running fine. Every refusal that names itself is repeated
+/// in the server's own words.
+nonisolated public func analyticsFailure(status: Int, body: Data) -> (any Error)? {
+    let refusal = try? JSONDecoder().decode(AnalyticsRefusal.self, from: body)
+    switch status {
+    case 200..<300:
+        return nil
+    case 401, 403:
+        return CloudSyncError.unauthorized
+    case 404:
+        if refusal?.error == "no-rollup" { return AnalyticsError.noRollup }
+        return CloudSyncError.refused(
+            refusal?.message ?? "This server has no analytics to serve at that address (404)."
+        )
+    default:
+        return CloudSyncError.refused(refusal?.message ?? "The server answered \(status).")
+    }
+}
+
 /// What the app target's CutCloudClient does for the analytics dashboard.
 public protocol AnalyticsServicing: AnyObject {
     func fetchAnalyticsSummary() async throws -> AnalyticsSummaryDocument
@@ -526,6 +559,8 @@ public final class AnalyticsModel {
             "\(reach.sentence) (\(code))"
         case AnalyticsError.unreadable(let detail):
             "The summary came back in a shape this build doesn't read: \(detail)."
+        case AnalyticsError.noRollup:
+            "The rollup went away while this list loaded. Pull to refresh."
         default:
             "The summary didn't load. Try again."
         }
