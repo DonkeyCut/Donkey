@@ -129,16 +129,36 @@ export async function head(
   }
 }
 
-/** An object's bytes, or null when it does not exist. */
+/** True for the bucket saying the key is not there, as opposed to refusing
+ * the read: R2 answers a missing key with NoSuchKey and a 404. */
+function isMissingObject(error: unknown): boolean {
+  const e = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return e?.name === "NoSuchKey" || e?.name === "NotFound" || e?.$metadata?.httpStatusCode === 404;
+}
+
+/** An object's bytes, or null when the key is not in the bucket. A refused or
+ * unreachable read throws, so a caller can tell "nothing is stored" from
+ * "storage would not say". */
+export async function readObject(key: string): Promise<{ bytes: Buffer; mime: string } | null> {
+  let res;
+  try {
+    res = await r2().send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
+  } catch (e) {
+    if (isMissingObject(e)) return null;
+    throw e;
+  }
+  const body = res.Body;
+  if (!body) return null;
+  return {
+    bytes: Buffer.from(await body.transformToByteArray()),
+    mime: res.ContentType ?? "application/octet-stream",
+  };
+}
+
+/** An object's bytes, or null when it does not exist or could not be read. */
 export async function getObject(key: string): Promise<{ bytes: Buffer; mime: string } | null> {
   try {
-    const res = await r2().send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: key }));
-    const body = res.Body;
-    if (!body) return null;
-    return {
-      bytes: Buffer.from(await body.transformToByteArray()),
-      mime: res.ContentType ?? "application/octet-stream",
-    };
+    return await readObject(key);
   } catch (e) {
     if (e instanceof R2NotConfiguredError) throw e;
     return null;

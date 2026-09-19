@@ -873,12 +873,15 @@ export default function SuAnalyticsPage() {
   if (summaryQuery.isPending) return <SuStandIn />;
 
   if (summaryQuery.error || !summaryQuery.data) {
-    const noData = summaryQuery.error instanceof ApiError && summaryQuery.error.status === 404;
+    // Only the route's own `no-rollup` code means the job hasn't run. Any
+    // other failure — storage refusing the read, a 404 from something that
+    // isn't this route — says what it was.
+    const error = summaryQuery.error instanceof ApiError ? summaryQuery.error : null;
     return (
       <div className="rounded-xl border bg-card p-5 text-sm text-muted-foreground">
-        {noData
+        {error?.code === "no-rollup"
           ? "No data yet — the nightly analytics job hasn't produced a rollup. Run the analytics-daily job and refresh."
-          : "Couldn't load analytics."}
+          : `Couldn't load analytics${error ? `: ${error.message}` : "."}`}
       </div>
     );
   }
