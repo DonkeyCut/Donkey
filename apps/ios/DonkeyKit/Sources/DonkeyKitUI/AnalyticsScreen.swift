@@ -204,7 +204,9 @@ private struct PeopleSection: View {
             .padding(.top, 8)
         }
         .padding(.vertical, 20)
-        .task { await analytics.loadMorePeople() }
+        // The refresh that drew the charts is already fetching the first page;
+        // this asks only when the section came up to an empty list.
+        .task { if analytics.people.isEmpty { await analytics.loadMorePeople() } }
     }
 
     private var selectedLabel: String {

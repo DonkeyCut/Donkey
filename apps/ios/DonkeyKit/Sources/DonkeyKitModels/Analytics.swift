@@ -499,13 +499,20 @@ public final class AnalyticsModel {
     /// A cancelled fetch is the screen closing, so it leaves the state alone.
     public func refresh() async {
         if case .failed = state { state = .loading }
+        // The numbers and the list come from the same rollup, so a refresh
+        // takes the list back to its first page — and both reads go out at
+        // once, so the screen waits for the slower one instead of for one
+        // after the other.
+        resetPeople()
+        async let people: Void = loadPeople(cursor: 0)
+        await loadSummary()
+        await people
+    }
+
+    private func loadSummary() async {
         do {
             let document = try await service.fetchAnalyticsSummary()
             state = .loaded(AnalyticsSummary(document: document))
-            // The numbers and the list come from the same rollup, so a refresh
-            // takes the list back to its first page.
-            resetPeople()
-            await loadPeople(cursor: 0)
         } catch AnalyticsError.noRollup {
             state = .empty
         } catch is CancellationError {
