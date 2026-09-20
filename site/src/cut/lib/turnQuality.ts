@@ -59,6 +59,9 @@ export interface WatchedSource {
   observed: { from: number; to: number; text: string }[];
   /** Hard cuts the passes found. */
   cuts: number;
+  /** Moments of the cut held up against this source and looked at. Watching
+   * says what the source does; only this says whether the cut does it too. */
+  compared: number;
 }
 
 /** The turn as the gate sees it. */
@@ -70,6 +73,9 @@ export interface TurnWork {
   /** Tools this turn ran, and the ones that failed. */
   ran: string[];
   failed: string[];
+  /** Whether any of them changed the project. A turn that answered an ask for
+   * work by describing it changed nothing, and that is measurable. */
+  mutated: boolean;
   /** Sources this turn looked at. */
   sources: WatchedSource[];
   /** The editor as it stands now. */
@@ -89,6 +95,7 @@ export function qualityState(work: TurnWork): Entry {
     reply: work.reply.slice(0, TEXT_CAP),
     ran: work.ran,
     failed: work.failed,
+    changedTheProject: work.mutated,
     sources: work.sources.map((s) => ({
       name: s.name,
       duration: s.duration,
@@ -106,6 +113,7 @@ export function qualityState(work: TurnWork): Entry {
             secondsNeverSeen: s.unwatched,
             secondsSeenOnlyAsThumbnails: s.unread,
             cutsFound: s.cuts,
+            momentsCheckedAgainstIt: s.compared,
           }
         : {}),
       ...(s.sound === "none" ? {} : { secondsNeverHeard: s.unheard }),
@@ -121,7 +129,7 @@ export const QUALITY_QUESTIONS = {
   finished: noul(
     "Is the job `request` asks for actually finished in `editor`? Judge the editor's state and `ran`, not the reply's account of it.",
     {
-      true: "Everything the request named exists in the editor now; the request asked for nothing to be built — a question, a look at the footage, a conversation; or it asks for something this editor refuses and the reply says so plainly.",
+      true: "Everything the request named exists in the editor now; the request asked for nothing to be built — a question, a look at the footage, a conversation; the request is genuinely ambiguous or blocked and the reply asks the one question that settles it; or it asks for something this editor refuses and the reply says so plainly.",
       false:
         "Part of the ask is missing, only planned, or only described in words: shots the reply says it would lay down that no item shows, text the reference has that no title carries, a build stopped halfway.",
     },
@@ -178,7 +186,7 @@ export type QualityAnswers = {
   closeness: ChoiceAnswer<Record<"shape" | "normal" | "exact", string>>;
 };
 
-export type QualityStep = "watch" | "repair";
+export type QualityStep = "watch" | "build" | "check" | "repair";
 
 export interface QualityVerdict {
   step: QualityStep;
@@ -217,6 +225,26 @@ function leastHeard(sources: WatchedSource[]): WatchedSource | null {
   for (const s of sources)
     if (s.sound === "yes" && s.unheardFrom !== null && (!worst || s.unheard > worst.unheard)) worst = s;
   return worst && worst.unheard > 0.5 ? worst : null;
+}
+
+/** Whether the cut holds anything a frame would show beside the source.
+ * A shell is the supported end of a replication — colour slabs waiting for
+ * the person's own footage — and every difference between a slab and the
+ * reference's picture is the footage they bring, so there is nothing there to
+ * compare and nothing a steer could fix. An element, or one shot with a
+ * picture in it, is a build with something to look at. */
+function madeAPicture(work: TurnWork): boolean {
+  const e = work.editor as { clips?: unknown; emptyShots?: unknown; overlayKinds?: unknown };
+  const kinds = Array.isArray(e.overlayKinds) ? e.overlayKinds.length : 0;
+  if (kinds > 0) return true;
+  const clips = typeof e.clips === "number" ? e.clips : 0;
+  const empty = typeof e.emptyShots === "number" ? e.emptyShots : 0;
+  return clips - empty > 0;
+}
+
+/** How far into a source the turn's notes reach. */
+function describedTo(src: WatchedSource): number {
+  return src.observed.reduce((n, note) => Math.max(n, note.to), 0);
 }
 
 /** What the turn has already put in the editor, named in the steer. A turn
@@ -337,6 +365,47 @@ export function qualityVerdict(
       };
   }
 
+  // A replica nobody held up against the thing it copies. Watching measures
+  // what went in and the counts measure what came out; neither says the two
+  // look alike. The number here is moments checked, and it is only asked of a
+  // turn that wrote something down about the source and then made a picture to
+  // hold up — so a comparison has something on both sides to compare.
+  //
+  // Only the source the cut was copied from is owed one, and that is the one
+  // the turn read furthest into: a turn also picks shots out of the user's own
+  // footage, and holding the cut up against that asks it to match material it
+  // already contains.
+  const copied = work.sources
+    .filter((src) => src.kind === "video" && src.observed.length > 0)
+    .sort((a, b) => describedTo(b) - describedTo(a))[0];
+  const unchecked =
+    answers.closeness.choice === "exact" && work.mutated && madeAPicture(work) && copied?.compared === 0
+      ? copied
+      : undefined;
+  if (unchecked)
+    return {
+      step: "check",
+      steer:
+        `${QUALITY_STEER_PREFIX} Not yet. Nothing has been held up against "${unchecked.name}": you have what it does written down, and no look at whether the cut does it too. ` +
+        "compare_to_source on it, a few moments at a time, spread across what you built — the source's frame and yours side by side. " +
+        "Name what differs and fix it, then check the moments you changed." +
+        standing(work),
+    };
+
+  // An ask for work, and a turn that did none. The editor cannot prove a build
+  // half-finished — which is why a doubt about it needs a measure — but it can
+  // prove nothing was built. A turn that changed nothing has no work to
+  // duplicate, so sending it back can only add, and one that has already been
+  // sent back without moving closes on the gate's own mark.
+  if (!work.mutated && answers.finished.noul < settings.qualityFinished)
+    return {
+      step: "build",
+      steer:
+        `${QUALITY_STEER_PREFIX} Not yet. Nothing in the project changed this turn, and the ask is for work on it. ` +
+        "Build it with tools now, from the record you already hold, and close on what the cut actually is." +
+        standing(work),
+    };
+
   if (work.failed.length > 0) {
     return {
       step: "repair",
@@ -385,13 +454,24 @@ export function recordLook(
   tool: string,
   response: unknown,
 ): void {
-  if (tool !== "watch_video" && tool !== "note_source" && tool !== "listen_audio") return;
+  if (
+    tool !== "watch_video" &&
+    tool !== "note_source" &&
+    tool !== "listen_audio" &&
+    tool !== "compare_to_source"
+  )
+    return;
   if (!isRec(response)) return;
   const src = isRec(response.source) ? response.source : null;
   const id = src && typeof src.assetId === "string" ? src.assetId : null;
   if (!src || !id) return;
   const kind = src.type === "audio" || src.type === "image" ? src.type : "video";
   const sound = src.sound === "yes" || src.sound === "none" ? src.sound : "unknown";
+  // A comparison is a check on a source, not a look at one: it reports no
+  // coverage. Opening a record from it would mint one saying nothing has been
+  // seen, and the looking holds would send the turn back to watch a source it
+  // may have read in full turns ago.
+  if (tool === "compare_to_source" && !sources.has(id)) return;
   const cur: WatchedSource = sources.get(id) ?? {
     name: typeof src.name === "string" ? src.name : "this source",
     duration: numOf(src.duration),
@@ -408,11 +488,17 @@ export function recordLook(
     unnoted: [],
     observed: [],
     cuts: 0,
+    compared: 0,
   };
   // The source says what it is on every result, so a record opened by one
   // sense learns what the others can ask of it.
   cur.kind = kind;
   cur.sound = sound;
+  if (tool === "compare_to_source") {
+    cur.compared += Array.isArray(response.checked) ? response.checked.length : 0;
+    sources.set(id, cur);
+    return;
+  }
   if (tool === "listen_audio") {
     cur.passes++;
     cur.unheard = numOf(response.unheardSeconds, cur.unheard);

@@ -167,6 +167,9 @@ export const SETTINGS = defineSettings({
         // How many times one turn may be sent back to work by the gate.
         qualityRounds: z.number().int().min(0).max(6),
       })
+      // A stored override is parsed as one whole object, so a key added here
+      // without `.default(...)` makes every row written before it fail and
+      // silently drops that row's other values back to the defaults below.
       .strict(),
     default: {
       skillSuggestion: true,

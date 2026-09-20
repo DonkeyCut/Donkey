@@ -29,6 +29,7 @@ const source = (over: Partial<WatchedSource> = {}): WatchedSource => ({
   spoken: "",
   observed: [{ from: 0, to: 20, text: "hook titles over a talking head" }],
   cuts: 12,
+  compared: 0,
   ...over });
 
 const work = (over: Partial<TurnWork> = {}): TurnWork => ({
@@ -36,6 +37,7 @@ const work = (over: Partial<TurnWork> = {}): TurnWork => ({
   reply: "Here is the whole video rebuilt.",
   ran: ["watch_video", "note_source"],
   failed: [],
+  mutated: true,
   sources: [source()],
   editor: { clips: 0 },
   ...over });
@@ -162,6 +164,7 @@ describe("qualityVerdict", () => {
           unnoted: [],
           unread: 71.6 - settings.qualityTreatmentSeconds,
           unreadFrom: 10,
+          compared: 2,
         }),
       ],
     });
@@ -187,7 +190,7 @@ describe("qualityVerdict", () => {
     // charged for again.
     const read = work({
       sources: [
-        source({ coveredTo: 71.6, unwatched: 0, unnoted: [], unread: 0, unreadFrom: null }),
+        source({ coveredTo: 71.6, unwatched: 0, unnoted: [], unread: 0, unreadFrom: null, compared: 2 }),
       ] });
     expect(qualityVerdict(answers({ honest: 0.1, closeness: "exact" }), read, settings)).toBeNull();
   });
@@ -255,6 +258,7 @@ describe("qualityVerdict", () => {
           unnoted: [],
           unread: 1.4,
           unreadFrom: null,
+          compared: 2,
           unheard: 1.4,
           unheardFrom: null,
         }),
@@ -286,10 +290,113 @@ describe("qualityVerdict", () => {
     expect(verdict?.step).toBe("watch");
   });
 
-  test("a turn that opened no source is never held", () => {
+  test("a turn that opened no source and did the work is never held", () => {
     expect(
       qualityVerdict(answers({ finished: 0.1, seen: 0.1 }), work({ sources: [] }), settings),
     ).toBeNull();
+  });
+
+
+
+
+  test("a replica nobody held against its source is sent back to check it", () => {
+    const blind = work({
+      sources: [source({ observed: [{ from: 0, to: 60, text: "titles and shapes throughout" }], unwatched: 0, unread: 0, unreadFrom: null })],
+      editor: { clips: 40, overlayKinds: ["text"] },
+    });
+    const verdict = qualityVerdict(answers({ finished: 0.2, closeness: "exact" }), blind, settings);
+    expect(verdict?.step).toBe("check");
+    expect(verdict?.steer).toContain("compare_to_source");
+  });
+
+
+
+
+  test("only the source the cut was copied from is owed a comparison", () => {
+    // The reference is checked; the user's own footage the turn also watched
+    // is not the thing the cut is being held up against.
+    const both = work({
+      sources: [
+        source({ observed: [{ from: 0, to: 60, text: "the reference end to end" }], unwatched: 0, unread: 0, unreadFrom: null, compared: 3 }),
+        source({ name: "My kitchen clip", duration: 12, observed: [{ from: 0, to: 12, text: "chopping" }], unwatched: 0, unread: 0, unreadFrom: null, compared: 0 }),
+      ],
+      editor: { clips: 40, overlayKinds: ["text"] },
+    });
+    expect(qualityVerdict(answers({ finished: 0.2, closeness: "exact" }), both, settings)).toBeNull();
+  });
+
+  test("a shell of colour blocks has no picture to hold up against the source", () => {
+    // Every shot is a slot waiting for the person's own footage, so every
+    // difference from the reference is the footage they bring.
+    const shell = work({
+      sources: [source({ observed: [{ from: 0, to: 60, text: "the reference end to end" }], unwatched: 0, unread: 0, unreadFrom: null })],
+      editor: { clips: 40, emptyShots: 40, overlayKinds: [] },
+    });
+    expect(qualityVerdict(answers({ finished: 0.2, closeness: "exact" }), shell, settings)).toBeNull();
+  });
+
+  test("one shot with a picture in it is enough to check", () => {
+    const partly = work({
+      sources: [source({ observed: [{ from: 0, to: 60, text: "the reference end to end" }], unwatched: 0, unread: 0, unreadFrom: null })],
+      editor: { clips: 40, emptyShots: 39, overlayKinds: [] },
+    });
+    expect(qualityVerdict(answers({ finished: 0.2, closeness: "exact" }), partly, settings)?.step).toBe("check");
+  });
+
+  test("a source already checked is not sent back to check it again", () => {
+    const seen = work({
+      sources: [source({ observed: [{ from: 0, to: 60, text: "x" }], unwatched: 0, unread: 0, unreadFrom: null, compared: 4 })],
+      editor: { clips: 40, overlayKinds: ["text"] },
+    });
+    expect(qualityVerdict(answers({ finished: 0.2, closeness: "exact" }), seen, settings)).toBeNull();
+  });
+
+  test("an ask that never needed the source read frame by frame is not sent to check", () => {
+    const loose = work({
+      sources: [source({ observed: [{ from: 0, to: 60, text: "x" }], unwatched: 0, unread: 0, unreadFrom: null })],
+      editor: { clips: 40, overlayKinds: ["text"] },
+    });
+    expect(qualityVerdict(answers({ finished: 0.2, closeness: "normal" }), loose, settings)).toBeNull();
+  });
+
+  test("nothing built yet is a build to finish, never a comparison to make", () => {
+    const bare = work({
+      sources: [source({ observed: [{ from: 0, to: 60, text: "x" }], unwatched: 0, unread: 0, unreadFrom: null })],
+      editor: { clips: 0 },
+      mutated: false,
+    });
+    expect(qualityVerdict(answers({ finished: 0.2, closeness: "exact" }), bare, settings)?.step).toBe("build");
+  });
+
+  test("an ask for work answered in words goes back to build it", () => {
+    const words = work({ sources: [], mutated: false, ran: ["get_state"], reply: "The template is set up." });
+    const verdict = qualityVerdict(answers({ finished: 0.2 }), words, settings);
+    expect(verdict?.step).toBe("build");
+    expect(verdict?.steer).toContain("Build it with tools now");
+  });
+
+  test("a turn that changed nothing because nothing was asked for closes", () => {
+    const chat = work({ sources: [], mutated: false, ran: ["get_state"] });
+    expect(qualityVerdict(answers({ finished: 0.9 }), chat, settings)).toBeNull();
+  });
+
+  test("a turn that asked the one question an ambiguous ask earns is not sent to build", () => {
+    // The gate engages on a turn that changed nothing; what keeps a question
+    // from being ordered to guess is the judge answering finished true, which
+    // is the case the question spells out.
+    const asked = work({
+      sources: [],
+      mutated: false,
+      ran: [],
+      request: "make it pop",
+      reply: "Do you mean the titles or the cuts?",
+    });
+    expect(qualityVerdict(answers({ finished: 0.9 }), asked, settings)).toBeNull();
+  });
+
+  test("the build steer carries what already stands, so the second pass adds to it", () => {
+    const partial = work({ sources: [], mutated: false, editor: { clips: 32, overlayKinds: ["text"] } });
+    expect(qualityVerdict(answers({ finished: 0.2 }), partial, settings)?.steer).toContain("32 clips");
   });
 
   test("the steer names what the turn already built, so it carries on instead of starting over", () => {
@@ -363,6 +470,33 @@ describe("recordLook", () => {
       unnoted: [] });
     expect(looks.get("a1")!.observed).toHaveLength(2);
     expect(looks.get("a1")!.unnoted).toEqual([]);
+  });
+
+  test("a comparison counts the moments it checked against a source already seen", () => {
+    const looks = new Map<string, WatchedSource>();
+    recordLook(looks, "watch_video", {
+      source: { assetId: "a1", name: "reference.mp4", duration: 71.6, type: "video", sound: "yes" },
+      coveredTo: 71.6,
+      unwatchedSeconds: 0,
+      unreadSeconds: 0,
+      unreadFrom: null,
+    });
+    recordLook(looks, "compare_to_source", {
+      source: { assetId: "a1", name: "reference.mp4", duration: 71.6, type: "video", sound: "yes" },
+      checked: [{ at: 1, source: 1 }, { at: 8, source: 8 }],
+    });
+    expect(looks.get("a1")!.compared).toBe(2);
+    // A comparison reports no coverage, so it must not undo what watching read.
+    expect(looks.get("a1")!.unwatched).toBe(0);
+  });
+
+  test("a comparison alone opens no record, because it says nothing about coverage", () => {
+    const looks = new Map<string, WatchedSource>();
+    recordLook(looks, "compare_to_source", {
+      source: { assetId: "a1", name: "reference.mp4", duration: 71.6, type: "video", sound: "yes" },
+      checked: [{ at: 1, source: 1 }],
+    });
+    expect(looks.size).toBe(0);
   });
 
   test("anything that is not a look is ignored", () => {

@@ -60,7 +60,7 @@ import {
 } from "../turnQuality";
 import { enforceContextBudget } from "./contextBudget";
 import { donkeyModel, type ChatThinkingLevel } from "./donkeyModel";
-import { ledgerText, recordCall, type LedgerRecord } from "./mutationLedger";
+import { isMutatingTool, ledgerText, recordCall, type LedgerRecord } from "./mutationLedger";
 import { makeDonkeyStream, type DonkeyToolDetails, type PostFn, type WireCarrier, type WirePart } from "./donkeyStream";
 import { toAgentTools, toToolResult, type ExecTool } from "./tools";
 import { subscribeUiChunks } from "./uiChunks";
@@ -713,6 +713,7 @@ async function gateVerdict(
       : "",
     ran: [...new Set(records.filter((r) => !r.error).map((r) => r.name))],
     failed: [...new Set(records.filter((r) => r.error).map((r) => `${r.name} (${r.error})`))],
+    mutated: records.some((r) => !r.error && isMutatingTool(r.name)),
     sources: [...looks.values()],
     editor: editorSlice(deps.buildContext()),
   };
@@ -944,9 +945,11 @@ export function streamCutChat({
               )
                 return false;
               // The gate judges work grounded in footage: a turn that looked
-              // at a source can be held to what it saw, and one that never
-              // opened a source has nothing the judgment could measure.
-              if (looks.size === 0) return false;
+              // at a source can be held to what it saw. A turn that opened no
+              // source is measurable too when it changed nothing — an ask for
+              // work answered in words leaves the project where it was, and
+              // that is a fact the record carries.
+              if (looks.size === 0 && records.some((r) => !r.error && isMutatingTool(r.name))) return false;
               const mark = [
                 records.length,
                 ...[...looks.values()].map((l) => `${l.passes}:${l.coveredTo}:${l.observed.length}`),

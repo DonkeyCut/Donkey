@@ -64,6 +64,8 @@ function qualityAnswers(finished: number) {
     finished: { type: "noul", noul: finished },
     seen: { type: "noul", noul: finished },
     honest: { type: "noul", noul: 0.9 },
+    hears: { type: "noul", noul: 0.1 },
+    captionsSpeak: { type: "noul", noul: 0.1 },
     next: { type: "choice", choice: "watch", probabilities: { watch: 0.8 }, confidence: 0.8 },
     closeness: { type: "choice", choice: "exact", probabilities: { exact: 0.8 }, confidence: 0.8 },
   };
@@ -80,12 +82,12 @@ async function drain(stream: ReadableStream<unknown>): Promise<Record<string, un
   return out;
 }
 
-function harness(opts: { gateVerdicts: number[] }) {
+function harness(opts: { gateVerdicts: number[]; call?: { name: string; args: Record<string, unknown> } }) {
   const modelPayloads: Record<string, unknown>[] = [];
   const judgeAsks: string[][] = [];
   let gateCalls = 0;
   const rounds: (() => Response)[] = [
-    () => round({ call: { name: "watch_video", args: { asset_id: "a1", from: 0 } } }),
+    () => round({ call: opts.call ?? { name: "watch_video", args: { asset_id: "a1", from: 0 } } }),
     () => round({ text: "That video opens on a yellow title and runs 71 seconds." }),
     () => round({ text: "Watched the rest of it." }),
     () => round({ text: "Still here." }),
@@ -163,16 +165,32 @@ describe("the quality gate in the turn loop", () => {
     dropPiSession(threadId);
   });
 
-  test("a turn that never opened a source is not held", async () => {
+  test("a turn that never opened a source but did the work is not held", async () => {
     const threadId = "gate-no-looks";
     dropPiSession(threadId);
-    const h = harness({ gateVerdicts: [0.01] });
+    const h = harness({
+      gateVerdicts: [0.01],
+      call: { name: "set_clip_muted", args: { clipId: "c1", muted: true } },
+    });
     h.deps.execTool = async () => ({ id: "c1", muted: true });
     await drain(
       streamCutChat({ threadId, model: "chat", messages: ask("mute the first clip"), deps: h.deps })
     );
     expect(h.roundsUsed()).toBe(2);
     expect(h.judgeAsks.filter((q) => q.includes("finished")).length).toBe(0);
+    dropPiSession(threadId);
+  });
+
+  test("an ask for work the turn only described is sent back to build it", async () => {
+    const threadId = "gate-words-only";
+    dropPiSession(threadId);
+    const h = harness({ gateVerdicts: [0.01, 0.9], call: { name: "get_state", args: {} } });
+    h.deps.execTool = async () => ({ videoTrack: [], media: [] });
+    await drain(
+      streamCutChat({ threadId, model: "chat", messages: ask("replicate this video"), deps: h.deps })
+    );
+    expect(h.judgeAsks.filter((q) => q.includes("finished")).length).toBe(1);
+    expect(JSON.stringify(h.modelPayloads[2])).toContain("Build it with tools now");
     dropPiSession(threadId);
   });
 

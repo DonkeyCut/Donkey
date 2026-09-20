@@ -153,6 +153,9 @@ export function editorSlice(context: unknown): Entry {
       ? { kind: typeof selection.kind === "string" ? selection.kind : null, name: typeof selection.name === "string" ? selection.name : null }
       : null,
     clips: videoTrack.length,
+    // Shots holding a slot with no picture in them. A cut whose track 0 is
+    // all placeholder is a shell, and that is a number rather than a reading.
+    emptyShots: videoTrack.filter((c) => !!(c as Record<string, unknown>).emptyShot).length,
     soundtrackClips: soundtrack.length,
     overlayKinds: [...new Set(overlays.map((o) => (typeof o.kind === "string" ? o.kind : "overlay")))],
     captionTracks: tracks.length,
