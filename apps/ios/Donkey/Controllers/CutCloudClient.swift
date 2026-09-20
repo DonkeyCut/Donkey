@@ -15,12 +15,16 @@ final class CutCloudClient: NSObject {
     /// How many times one GET is asked for before the link is called broken.
     private static let attempts = 3
 
-    /// The API's own session. A phone waits a bounded 20 seconds for an
-    /// answer, and a whole call — retries included — is over inside a minute,
-    /// so a screen waiting on it either draws or says why.
+    /// The API's own session. It carries JSON, never media — the library's
+    /// bytes ride URLSession.shared — and every one of these answers measures
+    /// in hundreds of milliseconds, a few seconds when the handler starts
+    /// cold. Ten seconds of silence is therefore a link that has stopped
+    /// carrying rather than a server still thinking, and the call that stops
+    /// waiting that early is the one whose retry still lands while someone is
+    /// looking at the screen.
     private static let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 60
         config.waitsForConnectivity = false
         return URLSession(configuration: config)
@@ -82,6 +86,14 @@ final class CutCloudClient: NSObject {
     /// asked again here, spaced out, and only a link that stays broken across
     /// every attempt reaches the caller. A cancelled task cancels: it is the
     /// screen going away, never a failure to report.
+    ///
+    /// The pool is emptied between attempts. A socket the other end has
+    /// already forgotten takes a request and answers nothing — no refusal
+    /// comes back to end the wait, so only the clock does — and the pool
+    /// hands that same socket to the attempt after it. Three attempts then
+    /// buy three helpings of the same silence and the screen reads a timeout
+    /// for a server that was never asked. Flushing drops the pooled
+    /// connections, so the next attempt opens one that is actually live.
     private func perform(
         _ request: URLRequest,
         delegate: (any URLSessionTaskDelegate)? = nil
@@ -101,6 +113,7 @@ final class CutCloudClient: NSObject {
                 guard idempotent, reach.isWorthAnotherTry, attempt < Self.attempts else {
                     throw CloudSyncError.unreachable(reach, code: error.errorCode)
                 }
+                await Self.session.dropPooledConnections()
                 try await Task.sleep(for: .milliseconds(300 << (attempt - 1)))
             }
         }
@@ -771,6 +784,18 @@ extension CutCloudClient {
             origin: "camera",
             poster: poster
         )
+    }
+}
+
+// MARK: - Session transport
+
+private extension URLSession {
+    /// Drops the session's pooled connections, so the next request opens a
+    /// new one instead of reusing a socket that may be dead.
+    func dropPooledConnections() async {
+        await withCheckedContinuation { continuation in
+            flush { continuation.resume() }
+        }
     }
 }
 
