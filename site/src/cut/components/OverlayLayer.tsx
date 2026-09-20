@@ -630,13 +630,17 @@ function OverlayItem({
           running ? running.tLocal : Math.max(0, t - o.start)
         )
       : null;
-  const animTransform = live
+  // The pose's own zoom is kept apart from the rest of the chain: the element
+  // wears it as a transform, the chrome twin folds it into its size instead,
+  // so a grip and a hairline stay the size they were drawn at.
+  const poseZoom = live && live.scale !== 1 ? live.scale : 1;
+  const animMove = live
     ? ` translate(${live.dx * scale}px, ${live.dy * scale}px)` +
-      (live.rotation ? ` rotate(${live.rotation}deg)` : "") +
-      (live.scale !== 1 ? ` scale(${live.scale})` : "")
+      (live.rotation ? ` rotate(${live.rotation}deg)` : "")
     : o.rotation
       ? ` rotate(${o.rotation}deg)`
       : "";
+  const animTransform = poseZoom !== 1 ? `${animMove} scale(${poseZoom})` : animMove;
   // Per-glyph ramps and loops draw character by character; a wipe uncovers the
   // box from its left edge. Neither runs while the box is being edited.
   const glyphs = isText && !editing && live && hasGlyphMotion(live) ? live : null;
@@ -684,6 +688,10 @@ function OverlayItem({
   const stagePress = useContext(StagePress);
   const liftChrome = !!chromeHost && selected && !editing && !grouped;
   const [chromeSize, setChromeSize] = useState<{ w: number; h: number } | null>(null);
+  // Which mount the chrome lands in. The twin folds the pose's zoom into its
+  // size, so anything inside it that rides the element has to re-apply it;
+  // the element box carries the zoom in its transform already.
+  const chromeLifted = liftChrome && !!chromeSize;
   useLayoutEffect(() => {
     if (!liftChrome) return;
     const el = boxRef.current;
@@ -707,6 +715,7 @@ function OverlayItem({
   // grips circular.
   const { sx, sy } = isText ? textStretch(o) : { sx: 1, sy: 1 };
   const baseTransform = `translate(-50%, -50%)${animTransform}`;
+  const chromeTransform = `translate(-50%, -50%)${animMove}`;
   const style: CSSProperties = {
     // A keyframed element is placed by its pose, not by its resting x/y.
     left: `${(live?.x ?? o.x) * 100}%`,
@@ -1087,14 +1096,30 @@ function OverlayItem({
         onRotate={rotateFrom}
       />
       {o.mask && o.mask.kind !== "subject" && (
-        <MaskGizmo
-          overlay={o}
-          stageWidth={stageWidth}
-          stageHeight={stageHeight}
-          tLocal={tLocal}
-          rotation={live?.rotation ?? o.rotation ?? 0}
-          poseScale={live?.scale ?? 1}
-        />
+        // The gizmo works in the element box's own pixels and folds screen
+        // deltas back through `poseScale`, so its mount has to sit in a space
+        // the zoom has been applied to. In the twin that means re-applying it
+        // here, over the box's stretched size; in the element box it is
+        // already in the transform overhead, and this is the identity.
+        <div
+          className="pointer-events-none absolute"
+          style={{
+            left: "50%",
+            top: "50%",
+            width: chromeLifted ? chromeSize.w * sx : "100%",
+            height: chromeLifted ? chromeSize.h * sy : "100%",
+            transform: `translate(-50%, -50%)${chromeLifted ? ` scale(${poseZoom})` : ""}`,
+          }}
+        >
+          <MaskGizmo
+            overlay={o}
+            stageWidth={stageWidth}
+            stageHeight={stageHeight}
+            tLocal={tLocal}
+            rotation={live?.rotation ?? o.rotation ?? 0}
+            poseScale={poseZoom}
+          />
+        </div>
       )}
     </>
   );
@@ -1105,7 +1130,7 @@ function OverlayItem({
       ref={boxRef}
       className={cn(
         "overlay-item pointer-events-auto absolute cursor-grab rounded-xs text-center whitespace-pre active:cursor-grabbing",
-        selected && (!liftChrome || !chromeSize) && "outline-[1.5px] outline-offset-[3px] outline-[#0a84ff]",
+        selected && !chromeLifted && "outline-[1.5px] outline-offset-[3px] outline-[#0a84ff]",
         editing && "cursor-text"
       )}
       style={style}
@@ -1154,21 +1179,25 @@ function OverlayItem({
       </div>
       {/* The twin can't mount until its size is read, so the in-box chrome
           holds through that first frame — a select never blinks. */}
-      {(!liftChrome || !chromeSize) && chrome}
+      {!chromeLifted && chrome}
     </div>
-    {liftChrome && chromeHost && chromeSize &&
+    {chromeLifted && chromeHost && chromeSize &&
       createPortal(
         (() => {
           // The twin: same placement, the base transform chain, the box's
           // laid-out size with the glyph stretch folded into it — so the
           // chrome lands exactly on the element while escaping the frame's
           // clipping, and the grips it carries stay circular.
+          const ringStyle: CSSProperties = { inset: -4.5, borderRadius: 5, borderWidth: 1.5 };
           const twinStyle: CSSProperties = {
             left: style.left,
             top: style.top,
-            width: chromeSize.w * sx,
-            height: chromeSize.h * sy,
-            transform: baseTransform,
+            // The zoom lands in the size, never in the transform: translating
+            // by half of the grown box centers it exactly where scaling the
+            // small one did, and every line and grip inside stays screen-sized.
+            width: chromeSize.w * sx * poseZoom,
+            height: chromeSize.h * sy * poseZoom,
+            transform: chromeTransform,
           };
           return (
             <>
@@ -1187,7 +1216,7 @@ function OverlayItem({
                   onPointerDown={beginMove}
                   onDoubleClick={isText ? () => setEditing(true) : undefined}
                 >
-                  <div className="pointer-events-none absolute -inset-[4.5px] rounded-[5px] border-[1.5px] border-dashed border-[#0a84ff]" />
+                  <div className="pointer-events-none absolute border-[#0a84ff]" style={{ ...ringStyle, borderStyle: "dashed" }} />
                 </div>
               </div>
               {/* The frame-clipped solid ring paints over it, so dashes show
@@ -1200,7 +1229,7 @@ function OverlayItem({
               >
                 <div className="absolute inset-0" style={{ transform: bandTransform || undefined }}>
                   <div className="absolute" style={twinStyle}>
-                    <div className="absolute -inset-[4.5px] rounded-[5px] border-[1.5px] border-[#0a84ff]" />
+                    <div className="absolute border-[#0a84ff]" style={{ ...ringStyle, borderStyle: "solid" }} />
                   </div>
                 </div>
               </div>

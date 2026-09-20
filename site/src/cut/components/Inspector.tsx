@@ -2106,6 +2106,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             onCommit={(c) => update(o.id, { color: c })}
           />
         </Row>
+        <TransformRows overlay={o} />
         <Section
           title="Outline"
           enabled={!!o.stroke}
@@ -2281,7 +2282,6 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
           </>
         </Section>
         <OverlayMaskSection overlay={o} />
-        <TransformRows overlay={o} />
       </div>
     </>
   );
@@ -3005,11 +3005,16 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
         <Row label="Scale">
           <ValueSlider
             label="Scale"
-            sliderClassName="data-horizontal:w-24"
-            valueClassName="w-9 text-muted-foreground"
+            sliderClassName="data-horizontal:w-20"
+            valueClassName="w-12 text-muted-foreground"
             value={pose.scale}
             min={0.1}
             max={4}
+            // The slider stays fine-grained where most work happens; the
+            // readout scrubs and types past it, because a title that zooms
+            // until one glyph fills the frame is tens of times its own size.
+            scrubMin={0.01}
+            scrubMax={Infinity}
             step={0.01}
             snap={[1]}
             keyStep={0.05}
