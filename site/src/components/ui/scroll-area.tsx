@@ -31,7 +31,11 @@ function ScrollArea({
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn("relative", className)}
+      // A column, so the viewport's height comes from the flex line rather
+      // than a percentage: the root is itself a flex item in most of the app,
+      // its own height is auto, and `height: 100%` against that resolves to
+      // the content — which grows the scroller instead of scrolling it.
+      className={cn("relative flex flex-col", className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
@@ -39,7 +43,7 @@ function ScrollArea({
         ref={viewportRef}
         onScroll={onViewportScroll}
         className={cn(
-          "size-full rounded-[inherit] outline-none",
+          "min-h-0 w-full flex-1 rounded-[inherit] outline-none",
           viewportClassName
         )}
       >
