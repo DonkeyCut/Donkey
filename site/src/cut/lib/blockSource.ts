@@ -1,18 +1,20 @@
-import { wrapTextToRoom } from "@donkeycut/effects-kit";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import type { MediaAsset, StoredAsset } from "./types";
 
 // A block is a shot with nothing in it yet: a source that holds a slot on the
-// timeline and draws itself — a filled rect carrying the label of whatever
-// belongs there. It owns no file, so blocking out a cut writes nothing to
-// storage and decodes nothing; the picture is painted once, at whatever size
-// asks for it, and cached by the reader that asked. A clip playing a block
-// cuts, trims, moves and takes a transition like any other clip, and the day
-// the footage arrives it replaces the block in place.
+// timeline and draws itself as the colour that shot sits on. It owns no file,
+// so blocking out a cut writes nothing to storage and decodes nothing; the
+// picture is painted once, at whatever size asks for it, and cached by the
+// reader that asked. A clip playing a block cuts, trims, moves and takes a
+// transition like any other clip, and the day the footage arrives it replaces
+// the block in place.
+//
+// Nothing is written in the frame. The label says what the person brings and
+// belongs to them — it rides the timeline chip and the editor state — so a
+// blocked-out cut previews and exports as the look it is standing in for,
+// never as a caption describing itself.
 
 export const BLOCK_COLOR = "#161A22";
-const LABEL_COLOR = "#E9EDF5";
-const STROKE_COLOR = "#2E3644";
 
 /** The source a shot stands on until its footage exists. It takes the
  * project's own frame, so a block fills the picture the way the footage that
@@ -43,7 +45,7 @@ export function blockAsset(
 /** Paint a block at this size. Both frame readers — the preview's and the
  * export's — call this in place of fetching and decoding a still. */
 export function drawBlock(
-  asset: Pick<StoredAsset, "block" | "name">,
+  asset: Pick<StoredAsset, "block">,
   width: number,
   height: number
 ): RasterSurface {
@@ -52,25 +54,7 @@ export function drawBlock(
   const canvas = createRasterCanvas(w, h);
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
   if (!ctx) return canvas;
-  const short = Math.min(w, h);
   ctx.fillStyle = asset.block?.color || BLOCK_COLOR;
   ctx.fillRect(0, 0, w, h);
-
-  const inset = Math.round(short * 0.05);
-  ctx.strokeStyle = STROKE_COLOR;
-  ctx.lineWidth = Math.max(2, Math.round(short * 0.006));
-  ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
-
-  const label = asset.block?.label?.trim() || asset.name || "";
-  if (!label) return canvas;
-  const size = Math.round(short * 0.062);
-  ctx.font = `600 ${size}px system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif`;
-  ctx.fillStyle = LABEL_COLOR;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  const lines = wrapTextToRoom(label, w - inset * 4, (line) => ctx.measureText(line).width).split("\n").slice(0, 4);
-  const step = size * 1.3;
-  const top = h / 2 - ((lines.length - 1) * step) / 2;
-  lines.forEach((line, i) => ctx.fillText(line, w / 2, top + i * step));
   return canvas;
 }

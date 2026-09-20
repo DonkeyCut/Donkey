@@ -121,6 +121,7 @@ import {
   importStockAudio,
   importStockVideo,
   importUrlMedia,
+  composeComparison,
   composeSheets,
   makeStillFrame,
   renderAudioSpanWav,
@@ -157,7 +158,8 @@ import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soun
 import { isStylePresetTemplate } from "./stylePresets";
 import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
-import { renderProjectFrame } from "./exportRender";
+import { renderProjectFrame, renderProjectFrames } from "./exportRender";
+import { framesAt } from "./mediaRead";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
@@ -404,6 +406,9 @@ const CAPTURE_LONG_SIDE = 640;
  * undo step, and a whole feature's worth of them in a single step is not
  * something anyone can step back through; a caller with more comes back. */
 const MAX_BLOCKS = 40;
+// Each moment is two frames drawn and one picture composed; a handful at a
+// time keeps the call inside the bridge's deadline and the reply readable.
+const MAX_COMPARE = 4;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -465,7 +470,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (!assetId) throw new ToolError("Pass asset_id.");
     const stickerAsset = s.assets.find((a) => a.id === assetId);
     if (stickerAsset?.type !== "image") throw new ToolError(`No image asset with id ${assetId}.`);
-    refuseReference(stickerAsset);
     if (isNum(input.start)) s.seek(input.start);
     s.addSticker({ assetId, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}), ...aimedLane(input) });
     const sel = useEditor.getState().selection;
@@ -876,6 +880,112 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError(e instanceof Error ? e.message : "Could not draw the frame.");
       });
       return { image: await rasterCanvasToDataUrl(canvas, "image/jpeg", 0.75), at };
+  },
+
+  compare_to_source: async (s, input) => {
+      // Building from a reference and looking at the reference are separate
+      // acts, and until they are put in one picture nothing checks the first
+      // against the second. This renders the cut at a moment, reads the source
+      // at the moment it stands for, and hands back the two side by side.
+      const asset = requireItem(s.assets, input.asset_id, "project asset");
+      if (asset.type === "audio")
+        throw new ToolError(`"${asset.name}" is audio — listen_audio hears it, and a frame is a picture.`);
+      // Without a length every moment clamps to 0 and the comparison hands
+      // back the same opening frame under four different stamps.
+      if (!(asset.duration > 0))
+        throw new ToolError(`"${asset.name}" has no length yet — its import is still being read. Try again in a moment.`);
+      const raw = Array.isArray(input.times) ? input.times : [];
+      const moments = raw
+        .map((x) => {
+          const rec = (x ?? {}) as Record<string, unknown>;
+          const at = isNum(x) ? (x as number) : isNum(rec.at) ? (rec.at as number) : NaN;
+          const sourceAt = isNum(rec.source) ? (rec.source as number) : at;
+          return { at, sourceAt };
+        })
+        .filter((m) => Number.isFinite(m.at) && Number.isFinite(m.sourceAt));
+      if (moments.length === 0)
+        throw new ToolError("Pass times: [seconds] — the moments of the cut to check, or [{at, source}] when the cut sits at a different second than the source does.");
+      if (moments.length > MAX_COMPARE)
+        throw new ToolError(`That is ${moments.length} moments — ${MAX_COMPARE} is the most one call reads. Check these, fix what is off, then call again for the rest.`);
+      const total = totalDuration(s.clips);
+      const frame = frameOf(s.aspect);
+      const k = CAPTURE_LONG_SIDE / Math.max(frame.w, frame.h);
+      const size = { width: Math.round(frame.w * k), height: Math.round(frame.h * k) };
+      // The source keeps its own aspect: a height alone lets a widescreen
+      // reference stay widescreen beside a vertical cut, which is half of what
+      // the comparison is for. Asking for both dimensions squashes it.
+      const sourceSize = { height: size.height };
+      const wanted = moments.map((m) => ({
+        at: clamp(m.at, 0, Math.max(0, total - 0.001)),
+        sourceAt: clamp(m.sourceAt, 0, Math.max(0, asset.duration - 0.001)),
+      }));
+      // One decode pass over the source, in play order, however the moments
+      // were asked for.
+      const order = wanted.map((_, i) => i).sort((a, b) => wanted[a].sourceAt - wanted[b].sourceAt);
+      const refs = new Map<number, string>();
+      if (asset.type === "image") {
+        const still = await makeStillFrame(asset.url, "read").catch((e) => {
+          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`);
+        });
+        for (const i of order) refs.set(i, still.frames[0].image);
+      } else {
+        let seen = 0;
+        try {
+          for await (const c of framesAt(
+            asset.url,
+            order.map((i) => wanted[i].sourceAt),
+            sourceSize
+          )) {
+            const i = order[seen++];
+            if (c) refs.set(i, await rasterCanvasToDataUrl(c.canvas, "image/jpeg", 0.82));
+          }
+        } catch (e) {
+          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`);
+        }
+      }
+      for (let i = 0; i < wanted.length; i++)
+        if (!refs.has(i)) throw new ToolError(`Could not read "${asset.name}" at ${round2(wanted[i].sourceAt)}s.`);
+      // One prepared painter for every moment: preparing stamps every title
+      // and may bring up the segmenter, and the document does not change
+      // between them.
+      const pairs: { t: number; sourceAt: number; source: string; cut: string }[] = [];
+      await renderProjectFrames(
+        {
+          aspect: s.aspect,
+          assets: s.assets,
+          clips: s.clips,
+          audioClips: s.audioClips,
+          overlays: s.overlays,
+          subtitles: s.subtitles,
+          background: s.background,
+        },
+        wanted.map((m) => m.at),
+        size,
+        (a) => a.url,
+        async (canvas, at) => {
+          const i = pairs.length;
+          pairs.push({
+            t: round2(at),
+            sourceAt: round2(wanted[i].sourceAt),
+            source: refs.get(i)!,
+            cut: await rasterCanvasToDataUrl(canvas, "image/jpeg", 0.82),
+          });
+        }
+      ).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : "Could not draw the cut's frame.");
+      });
+      const images = await composeComparison(pairs).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : "Could not compose the comparison.");
+      });
+      return {
+        images,
+        checked: pairs.map((p) => ({ at: p.t, source: p.sourceAt })),
+        // The same shape every look returns, so a record opened by a
+        // comparison knows what the other senses may ask of this source.
+        source: sourceRef(asset),
+        note:
+          "Source on the left, your cut on the right, one picture per moment. Name what differs — colour, the words and their face, where a thing sits, its size, what is moving and how far along it is — then fix it with the tools and check again. A moment that matches needs no edit.",
+      };
   },
 
   watch_video: async (s, input) => {
@@ -1583,7 +1693,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       if (asset.type !== "video" && asset.type !== "image")
         throw new ToolError("Only video or image assets can sit on a video track.");
-      refuseReference(asset);
       const start = isNum(input.start) ? Math.max(0, input.start) : playheadAt();
       // Tracks stack bottom-up from track 0; overlays live on 1+. A stale
       // negative (the old behind-track model) clamps to the first layer.
@@ -2081,8 +2190,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   detach_audio: (s, input) => {
+      // A cut blocked out as empty shots has no clip of the reference to lift
+      // from, and its sound is what the cuts were timed to; naming the asset
+      // puts that whole track on the soundtrack with nothing else placed.
+      if (input.assetId) {
+        const asset = requireItem(s.assets, input.assetId, "project asset");
+        if (asset.type === "image" || assetIsSilent(asset))
+          throw new ToolError(`"${asset.name}" carries no audio.`);
+        const start = isNum(input.start) ? Math.max(0, input.start) : 0;
+        s.addAudioFromAsset(asset.id, start);
+        void ensurePeaks(asset);
+        const sel = useEditor.getState().selection;
+        return { audioClipId: sel?.kind === "audio" ? sel.id : null };
+      }
       const id = input.clipId ? String(input.clipId) : s.selection?.kind === "clip" ? s.selection.id : null;
-      if (!id) throw new ToolError("Pass clipId or select a video clip first.");
+      if (!id) throw new ToolError("Pass clipId, assetId, or select a video clip first.");
       const clip = requireItem(s.clips, id, "video clip");
       if (clip.muted) throw new ToolError("That clip's audio is muted — nothing to detach.");
       s.select({ kind: "clip", id: clip.id });
@@ -2727,7 +2849,6 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   replace_item: (s, input) => {
     const id = typeof input.id === "string" ? input.id : "";
     const asset = requireItem(s.assets, input.asset_id, "project asset");
-    refuseReference(asset);
     const clip = s.clips.find((c) => c.id === id);
     if (clip) {
       if (asset.type !== "video" && asset.type !== "image")
@@ -4623,6 +4744,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "detect_beats",
   "refine_speech_cuts",
   "capture_frame",
+  "compare_to_source",
   "render_preview",
   "freeze_frame",
   "create_sticker",
@@ -5417,6 +5539,17 @@ function audioLaneInput(value: unknown): number {
   return value;
 }
 
+/** A colour the model passed, as the document stores it. A value that is not
+ * a colour is named: silently falling back paints a shot the reference never
+ * had while the reply says the backdrop landed. */
+function hexColor(raw: unknown, what: string): string {
+  const v = typeof raw === "string" ? raw.trim() : "";
+  const short = /^#([0-9a-fA-F]{3})$/.exec(v);
+  if (short) return `#${[...short[1]].map((c) => c + c).join("")}`;
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
+  throw new ToolError(`${what} has to be a hex colour like #ff5a00 or #f50 — got ${JSON.stringify(raw)}.`);
+}
+
 /** Lay out shots that have no footage yet: one block per shot on track 0,
  * each the length that shot runs, in one undo step. The blocks own no files,
  * so this writes nothing to storage — and each one is an ordinary clip, so it
@@ -5427,6 +5560,9 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
     .map((x) => ({
       seconds: isNum(x.seconds) ? clamp(x.seconds, 0.2, 600) : 0,
       label: typeof x.label === "string" ? x.label.trim() : "",
+      // The shot's own backdrop, so a cut waiting on its footage still shows
+      // the look it is standing in for.
+      ...(x.color === undefined || x.color === null ? {} : { color: hexColor(x.color, "A block's color") }),
     }))
     .filter((x) => x.seconds > 0);
   if (shots.length === 0)
@@ -5435,17 +5571,11 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
     throw new ToolError(
       `That is ${shots.length} shots — ${MAX_BLOCKS} is the most one call lays down. Lay the first stretch and call again for the rest.`
     );
-  const reference =
-    typeof input.reference_asset_id === "string" && input.reference_asset_id
-      ? requireItem(s.assets, input.reference_asset_id, "project asset")
-      : null;
   const frame = frameOf(s.aspect);
   const made: { clipId: string; assetId: string; start: number; seconds: number; label: string }[] = [];
   let at = isNum(input.start) ? Math.max(0, input.start) : undefined;
   useEditor.getState().beginHistoryBatch();
   try {
-    // What the shots are copied from does not play in the copy.
-    if (reference) useEditor.getState().updateAsset(reference.id, { reference: true });
     for (const [i, shot] of shots.entries()) {
       const asset = blockAsset(shot, i, frame);
       const cur = useEditor.getState();
@@ -5476,16 +5606,6 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
   };
 }
 
-/** A reference is what the cut is copied from, so it never plays in it: the
- * blocks standing in for its shots are waiting on the person's own footage.
- * Their hands can still place it — this holds the assistant's tools. */
-function refuseReference(asset: MediaAsset): void {
-  if (!asset.reference) return;
-  throw new ToolError(
-    `"${asset.name}" is the reference this cut is blocked out from, so it does not go in the cut. Fill a block with the person's own footage (replace_item), or leave it standing.`
-  );
-}
-
 /** Several stretches of one source laid down in order, each trimmed to itself
  * — a clip assembled from moments that were never next to each other, with
  * everything between them left out. Placement and trimming both ride the
@@ -5496,7 +5616,6 @@ function placeAssetSpans(
   spans: { from: number; to: number }[],
   input: Record<string, unknown>
 ) {
-  refuseReference(asset);
   if (asset.type === "audio") throw new ToolError("spans cut a video source — audio lands whole.");
   if (asset.type === "image") throw new ToolError("An image has no time axis to cut spans out of.");
   const dur = asset.duration > 0 ? asset.duration : Infinity;
@@ -5547,7 +5666,6 @@ function placeAssetSpans(
 }
 
 function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>) {
-  refuseReference(asset);
   const s = useEditor.getState();
   const start = isNum(input.start) ? Math.max(0, input.start) : undefined;
   if (asset.type === "audio") {

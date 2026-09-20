@@ -78,6 +78,7 @@ import {
   penClosed,
   restingMaskFrame,
 } from "@donkeycut/effects-kit";
+import { BLOCK_COLOR } from "@/cut/lib/blockSource";
 import { clipLen, clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
 import { PANEL_GLOBAL, usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import { usePreviewTime } from "@/cut/lib/playhead";
@@ -1195,6 +1196,23 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
           time={formatTime(speedLen)}
           onRename={(name) => updateClip(clip.id, { name })}
         />
+        {asset?.block && (
+          // A blocked-out shot's whole picture is its colour, so that is the
+          // one thing there is to set on it by hand.
+          <Row label="Color">
+            <ColorField
+              value={asset.block.color || BLOCK_COLOR}
+              label="Block color"
+              onBegin={() => useEditor.getState().pushHistory()}
+              onLive={(c) =>
+                useEditor.getState().updateAsset(asset.id, { block: { ...asset.block!, color: c } })
+              }
+              onCommit={(c) =>
+                useEditor.getState().updateAsset(asset.id, { block: { ...asset.block!, color: c } })
+              }
+            />
+          </Row>
+        )}
         <Row label="Trim">
           <ScrubValue
             label="Trim start"

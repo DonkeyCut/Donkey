@@ -1752,6 +1752,55 @@ export async function composeSheets(
   return sheets;
 }
 
+/**
+ * One moment of a replica beside the thing it copies: the source's frame on
+ * the left, the cut's own frame on the right, both stamped with the second
+ * they are read at.
+ *
+ * The pairing is the point. Two images handed over separately are two things
+ * to hold in mind at once; side by side in one picture, a colour that drifted,
+ * a card sitting too low or a move that peaks early is simply visible. Nothing
+ * here measures the difference — a reference is often a recording of another
+ * app, where a pixel comparison reads the chrome around the picture as the
+ * picture — so the composite is made for an eye to judge and the judging is
+ * left to whoever is looking.
+ */
+export async function composeComparison(
+  pairs: { t: number; sourceAt: number; source: string; cut: string }[]
+): Promise<string[]> {
+  const out: string[] = [];
+  for (const pair of pairs) {
+    const [a, b] = await Promise.all([
+      decodeRasterImageUrl(pair.source),
+      decodeRasterImageUrl(pair.cut),
+    ]);
+    if (!a || !b) throw new Error("Bad frame image.");
+    // Both frames stand at one height, so the eye compares like with like
+    // whatever the source's own shape is.
+    const h = Math.max(a.height, b.height);
+    const aw = Math.round((a.width / a.height) * h);
+    const bw = Math.round((b.width / b.height) * h);
+    const size = Math.max(13, Math.round(h / 22));
+    const bar = size + 10;
+    const w = SHEET_GAP * 3 + aw + bw;
+    const canvas = createRasterCanvas(w, h + bar + SHEET_GAP * 2);
+    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!ctx) throw new Error("No 2d context.");
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(a.source, SHEET_GAP, SHEET_GAP + bar, aw, h);
+    ctx.drawImage(b.source, SHEET_GAP * 2 + aw, SHEET_GAP + bar, bw, h);
+    ctx.font = `bold ${size}px ui-monospace, monospace`;
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#fff";
+    ctx.fillText(`SOURCE ${round2(pair.sourceAt)}s`, SHEET_GAP, SHEET_GAP);
+    ctx.fillText(`YOUR CUT ${round2(pair.t)}s`, SHEET_GAP * 2 + aw, SHEET_GAP);
+    out.push(await rasterCanvasToDataUrl(canvas, "image/jpeg", 0.82));
+  }
+  return out;
+}
+
 // Filmstrip generation that failed, by asset id — session state, never doc
 // state. The clip box reads it to swap the loading pulse for a still
 // placeholder; each new enrich attempt (imports fire one, and every project
@@ -1931,6 +1980,9 @@ async function* idleFramesAt(
  * `src` overrides where the frames are read from — an import still uploading
  * has the bytes in the browser already, so it need not wait or re-download. */
 export async function enrichAsset(asset: MediaAsset, src = asset.url) {
+  // A block paints itself at whatever size asks, so there is no file to probe
+  // and no still to stand in as its strip.
+  if (asset.block) return;
   if (enrichInFlight.has(asset.id)) return;
   enrichInFlight.add(asset.id);
   const held = importedBytes.get(asset.id);

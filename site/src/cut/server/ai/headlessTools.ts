@@ -34,6 +34,7 @@ const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "refine_speech_cuts",
   "freeze_frame",
   "capture_frame",
+  "compare_to_source",
   "render_preview",
   "create_sticker",
   "subtitles_generate",

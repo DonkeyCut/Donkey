@@ -4506,6 +4506,8 @@ function filmstripFrames(
   view?: { lo: number; hi: number }
 ): FilmTile[] {
   if (!asset) return [];
+  // A blocked-out shot has no frames to tile: the strip paints its colour.
+  if (asset.block) return [];
   // Before the pre-sampled strip exists — a fresh import, a library clip
   // dropped a moment ago — the clip still has a frame in hand: the one read
   // for its left edge. Standing that in as a one-thumb strip paints the whole

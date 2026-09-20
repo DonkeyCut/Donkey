@@ -2605,7 +2605,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     addAudioFromAsset: (assetId, start, opts) => {
       const asset = get().assets.find((a) => a.id === assetId);
-      if (!asset || asset.type !== "audio") return;
+      // A video's own track plays on the soundtrack the same way a sound file
+      // does — it is what detaching a clip's audio leaves behind — so a cut
+      // laid out as empty shots can still carry the reference's sound.
+      if (!asset || asset.type === "image" || assetIsSilent(asset)) return;
       push();
       // Within its lane the clip slides to the next free slot at or after the
       // target so it never lands on top of an existing sound.
@@ -4891,7 +4894,7 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block, reference }) => ({
+    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block }) => ({
       id,
       fileName,
       name,
@@ -4909,7 +4912,6 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(sceneCuts !== undefined ? { sceneCuts } : {}),
       ...(copiedFrom !== undefined ? { copiedFrom } : {}),
       ...(block !== undefined ? { block } : {}),
-      ...(reference !== undefined ? { reference } : {}),
     }));
 }
 

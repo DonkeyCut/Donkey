@@ -1483,6 +1483,31 @@ export class FramePainter {
  * clips, transitions, effects, elements, captions, the project fade. The
  * canvas comes off the raster seam, so this answers on a page and in a job.
  */
+/** Several frames of one unchanging document, from one prepared painter.
+ * Preparing stamps every title, decodes every backdrop still and may bring up
+ * the subject segmenter, so a call that wants four moments pays for that pass
+ * once. Each frame is handed to `each` before the next overwrites the canvas.
+ */
+export async function renderProjectFrames(
+  doc: ExportDoc,
+  times: number[],
+  size: { width: number; height: number },
+  resolve: (asset: MediaAsset) => string,
+  each: (canvas: RasterSurface, at: number) => Promise<void>
+): Promise<void> {
+  const canvas = createRasterCanvas(size.width, size.height);
+  const painter = new FramePainter(doc, canvas, resolve);
+  try {
+    await painter.prepare();
+    for (const at of times) {
+      await painter.drawAt(at);
+      await each(canvas, at);
+    }
+  } finally {
+    painter.dispose();
+  }
+}
+
 export async function renderProjectFrame(
   doc: ExportDoc,
   at: number,

@@ -256,11 +256,6 @@ export interface StoredAsset {
    * blockSource.ts. Replacing it with real footage is an ordinary item
    * replace; the clip keeps its place and its length. */
   block?: { label: string; color?: string };
-  /** The source a blocked-out cut was copied from. Set when a blockout
-   * names it, and it keeps the assistant's own tools from putting
-   * the thing being copied into the copy: the blocks hold those slots until
-   * the person's footage arrives. The person's own drag is never refused. */
-  reference?: true;
 }
 
 /** A folder in the Media panel's Project Files view — a flat, project-local
@@ -1690,9 +1685,16 @@ export interface ProjectSummary {
  * cloud project's bytes at the local engine, or the reverse, and the asset
  * would carry that wrong address for as long as it lives. */
 export const mediaUrl = (projectId: string, fileName: string, backend?: CutBackend) =>
-  (backend ?? getBackend()).url(
-    `/api/cut/projects/${projectId}/media/${encodeURIComponent(fileName)}`
-  );
+  // A source that owns no file — a blocked-out shot draws itself — has no
+  // address, and minting one aims every reader at a route with no file on the
+  // end of it. The empty string is what "nothing to fetch" looks like
+  // everywhere else here, so the guard belongs at the one place addresses are
+  // made rather than at each of the callers.
+  fileName
+    ? (backend ?? getBackend()).url(
+        `/api/cut/projects/${projectId}/media/${encodeURIComponent(fileName)}`
+      )
+    : "";
 
 /** A filename-safe slug from a display name: lowercased, every run of
  * non-alphanumerics collapsed to a hyphen, trimmed and capped, with `fallback`

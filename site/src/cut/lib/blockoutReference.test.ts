@@ -2,9 +2,9 @@ import { beforeEach, expect, test } from "bun:test";
 import { runAiTool } from "./aiTools";
 import { storedAssets, useEditor } from "./store";
 
-// A cut blocked out from a reference must not end up playing that reference.
-// The mark rides the asset, so the refusal holds for every tool that places
-// media, whatever the model was reaching for when it tried.
+// Blocks hold a watched video's shots until footage arrives. What fills them
+// is the ask's to decide — the person's own footage, or the source the cut was
+// blocked out from — so no tool here refuses a source.
 
 beforeEach(() => {
   useEditor.setState({
@@ -13,28 +13,11 @@ beforeEach(() => {
     transitions: [],
     audioClips: [],
     assets: [
-      { id: "ref", fileName: "ref.mp4", name: "Reference", type: "video", duration: 60, url: "", reference: true },
+      { id: "ref", fileName: "ref.mp4", name: "Reference", type: "video", duration: 60, url: "" },
       { id: "mine", fileName: "mine.mp4", name: "My shot", type: "video", duration: 12, url: "" },
-      { id: "still", fileName: "ref.png", name: "Reference still", type: "image", duration: 0, url: "", reference: true },
+      { id: "still", fileName: "ref.png", name: "Reference still", type: "image", duration: 0, url: "" },
     ],
   });
-});
-
-const message = async (p: Promise<unknown>) =>
-  p.then(() => "", (e: unknown) => (e instanceof Error ? e.message : String(e)));
-
-test("the assistant cannot put the reference in the cut it is copied from", async () => {
-  const error = await message(runAiTool("add_clip", { asset_id: "ref" }));
-  expect(error).toContain("reference this cut is blocked out from");
-  expect(useEditor.getState().clips).toHaveLength(0);
-});
-
-test("the reference cannot fill a block either", async () => {
-  await runAiTool("add_clip", { asset_id: "mine", start: 0 });
-  const clip = useEditor.getState().clips[0]!;
-  const error = await message(runAiTool("replace_item", { id: clip.id, asset_id: "ref" }));
-  expect(error).toContain("reference this cut is blocked out from");
-  expect(useEditor.getState().clips[0]!.assetId).toBe("mine");
 });
 
 test("the person's own footage still goes down", async () => {
@@ -42,21 +25,31 @@ test("the person's own footage still goes down", async () => {
   expect(useEditor.getState().clips.map((c) => c.assetId)).toEqual(["mine"]);
 });
 
-test("an unmarked source is nobody's reference", async () => {
-  useEditor.getState().updateAsset("ref", { reference: undefined });
-  await runAiTool("add_clip", { asset_id: "ref", start: 0 });
-  expect(useEditor.getState().clips.map((c) => c.assetId)).toEqual(["ref"]);
+test("the watched source can play in the cut blocked out from it", async () => {
+  await runAiTool("add_clip", { blocks: [{ seconds: 4 }, { seconds: 3 }] });
+  const [first, second] = useEditor.getState().clips;
+  await runAiTool("replace_item", { id: first!.id, asset_id: "ref" });
+  await runAiTool("replace_item", { id: second!.id, asset_id: "mine" });
+  expect(useEditor.getState().clips.map((c) => c.assetId)).toEqual(["ref", "mine"]);
+});
+
+test("spans cut a source at its own shot boundaries", async () => {
+  const out = (await runAiTool("add_clip", {
+    asset_id: "ref",
+    spans: [{ from: 0, to: 4 }, { from: 4, to: 9.5 }, { from: 9.5, to: 12 }],
+  })) as { clips: { start: number; len: number }[] };
+  expect(out.clips.map((c) => c.len)).toEqual([4, 5.5, 2.5]);
+  expect(out.clips.map((c) => c.start)).toEqual([0, 4, 9.5]);
+  expect(useEditor.getState().clips.every((c) => c.assetId === "ref")).toBe(true);
 });
 
 test("a run of blocks lays a cut out end to end, storing nothing", async () => {
-  useEditor.getState().updateAsset("ref", { reference: undefined });
   const out = (await runAiTool("add_clip", {
     blocks: [
       { seconds: 4, label: "wide of the kitchen" },
       { seconds: 2.5, label: "hands only" },
       { seconds: 6 },
     ],
-    reference_asset_id: "ref",
   })) as { placed: { start: number; seconds: number; label: string }[] };
 
   expect(out.placed.map((p) => [p.start, p.seconds])).toEqual([[0, 4], [4, 2.5], [6.5, 6]]);
@@ -71,12 +64,9 @@ test("a run of blocks lays a cut out end to end, storing nothing", async () => {
   const made = state.assets.filter((a) => a.block !== undefined);
   expect(made).toHaveLength(3);
   expect(made.every((a) => a.url === "" && a.fileName === "")).toBe(true);
-  // Naming the source makes it the reference, so the tools stop placing it.
-  expect(state.assets.find((a) => a.id === "ref")!.reference).toBe(true);
 });
 
 test("the whole blockout is one undo step", async () => {
-  useEditor.getState().updateAsset("ref", { reference: undefined });
   await runAiTool("add_clip", {
     blocks: [{ seconds: 3 }, { seconds: 3 }, { seconds: 3 }],
   });
@@ -98,7 +88,6 @@ test("footage takes a block's place and its length", async () => {
 });
 
 test("a blockout survives the save", () => {
-  useEditor.getState().updateAsset("ref", { reference: true });
   useEditor.setState({
     assets: [
       ...useEditor.getState().assets,
@@ -115,29 +104,16 @@ test("a blockout survives the save", () => {
     ],
   });
   const saved = storedAssets(useEditor.getState().assets);
-  // Without these two the blockout comes back as an image with no file: the
-  // shot draws nothing, footage dropped on it inserts beside it instead of
-  // filling it, and the reference is placeable again.
+  // Without this the blockout comes back as an image with no file: the shot
+  // draws nothing, and footage dropped on it inserts beside it instead of
+  // filling it.
   expect(saved.find((a) => a.id === "b1")?.block).toEqual({ label: "wide of the kitchen" });
-  expect(saved.find((a) => a.id === "ref")?.reference).toBe(true);
-});
-
-test("the reference is refused on every door, not just track 0", async () => {
-  for (const call of [
-    runAiTool("add_overlay_video", { asset_id: "ref", track: 1 }),
-    runAiTool("add_sticker", { asset_id: "still" }),
-  ]) {
-    expect(await message(call)).toContain("reference this cut is blocked out from");
-  }
-  expect(useEditor.getState().clips).toHaveLength(0);
-  expect(useEditor.getState().overlays).toHaveLength(0);
 });
 
 test("a swap drops coverage painted for the source it replaces", async () => {
   await runAiTool("add_clip", { asset_id: "mine", start: 0 });
   const clip = useEditor.getState().clips[0]!;
   useEditor.getState().updateClip(clip.id, { mask: { kind: "rect", x: 0, y: 0, w: 0.5, h: 0.5 } });
-  useEditor.getState().updateAsset("ref", { reference: undefined });
   await runAiTool("replace_item", { id: clip.id, asset_id: "ref" });
   expect(useEditor.getState().clips[0]!.mask).toBeUndefined();
 });
@@ -169,4 +145,34 @@ test("a sticker's swap carries how it plays", async () => {
 
   await runAiTool("replace_item", { id: sticker.id, asset_id: "anim" });
   expect((useEditor.getState().overlays[0] as { lottie?: boolean }).lottie).toBe(true);
+});
+
+test("a block owns no address and no strip of its own", async () => {
+  await runAiTool("add_clip", { blocks: [{ seconds: 4, label: "your photo", color: "#F26722" }] });
+  const block = useEditor.getState().assets.find((a) => a.block)!;
+  // Nothing to fetch: a url built from an empty file name aims the strip, the
+  // preview and the export at a route with no file on the end of it.
+  expect(block.url).toBe("");
+  expect(block.fileName).toBe("");
+  expect(block.thumbs).toBeUndefined();
+  // The shot carries the backdrop it stands in for.
+  expect(block.block).toEqual({ label: "your photo", color: "#F26722" });
+});
+
+test("a block's colour has to be a colour, and says so rather than falling back", async () => {
+  // A silent fallback paints a shot the reference never had while the reply
+  // reports the backdrop landed.
+  const error = await runAiTool("add_clip", {
+    blocks: [{ seconds: 2, label: "your photo", color: "orange-ish" }],
+  }).then(() => "", (e: unknown) => (e instanceof Error ? e.message : String(e)));
+  expect(error).toContain("hex colour");
+  expect(useEditor.getState().assets.some((a) => a.block)).toBe(false);
+});
+
+test("shorthand is a colour too", async () => {
+  await runAiTool("add_clip", { blocks: [{ seconds: 2, label: "your photo", color: "#f50" }] });
+  expect(useEditor.getState().assets.find((a) => a.block)!.block).toEqual({
+    label: "your photo",
+    color: "#ff5500",
+  });
 });

@@ -65,7 +65,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "add_clip",
     description:
-      "Put a project asset on the timeline, the same way the user dragging it in would: a video or image lands on video track 0 (at `start`, inserted at `index`, or appended at the end; a taken spot slides it right), audio lands on the soundtrack (at `start`, default the playhead). Asset ids come from `media` in editor_state — imports, attachments, and chat media alike. Call it only when the user asked for the media in the cut (\"add my beach photo\", \"stitch these into a movie\"); otherwise media stays on its card or panel for them to drag. Pass `blocks` instead of an asset to lay out a cut whose footage does not exist yet: one block per shot on track 0, each the length that shot runs, labelled with what belongs there. That is how a video you watched becomes a timeline — the cuts land at their real times, titles and sound go on top, and the person fills each block later. Blocks own no file and store nothing; footage dropped on one takes its place and its length, and replace_item does the same from here. Pass `spans` to cut several stretches of one source into one run of clips — the moments of a talk worth keeping, in order, with everything between them left out. `reference_asset_id` names the source the shots were copied from: what is being copied does not play in the copy, so the tools stop placing it once it is named.",
+      "Put a project asset on the timeline, the same way the user dragging it in would: a video or image lands on video track 0 (at `start`, inserted at `index`, or appended at the end; a taken spot slides it right), audio lands on the soundtrack (at `start`, default the playhead). Asset ids come from `media` in editor_state — imports, attachments, and chat media alike. Call it only when the user asked for the media in the cut (\"add my beach photo\", \"stitch these into a movie\"); otherwise media stays on its card or panel for them to drag. Pass `blocks` instead of an asset to lay out a cut whose footage does not exist yet: one block per shot on track 0, each the length that shot runs, labelled with what belongs there. That is how a video you watched becomes a timeline — the cuts land at their real times, titles and sound go on top, and the person fills each block later. Blocks own no file and store nothing; footage dropped on one takes its place and its length, and replace_item does the same from here. Pass `spans` to cut one source into a run of clips — the moments of a talk worth keeping, with everything between them left out, or a video cut at its own shot boundaries when its picture is what plays.",
     inputSchema: obj({
       asset_id: str("Project asset id from `media` in editor_state"),
       blocks: {
@@ -74,7 +74,8 @@ export const TIMELINE_TOOLS = [
         items: obj(
           {
             seconds: num("How long this shot runs on the timeline"),
-            label: str("What belongs in this shot — shown on the block and on its timeline chip"),
+            label: str("What the person puts here. It names the slot on its timeline chip; the frame itself is the flat colour"),
+            color: str("The shot's backdrop as #rrggbb, so the slot carries the look it sits in"),
           },
           ["seconds"]
         ),
@@ -82,10 +83,9 @@ export const TIMELINE_TOOLS = [
       spans: {
         type: "array",
         description:
-          "Stretches of this source, in SOURCE seconds — one clip each, in order, with the material between them left out. This is how several moments of one video become one cut.",
+          "Stretches of this source, in SOURCE seconds — one clip each, in order. Gapped spans keep the moments and drop the rest; spans that meet cut the source at those boundaries.",
         items: obj({ from: num("Source start s"), to: num("Source end s") }, ["from", "to"]),
       },
-      reference_asset_id: str("Blocks only: the source these shots were copied from"),
       lane: { type: "integer", minimum: 0, description: "Audio assets only: soundtrack lane, default 0. Put music on lane 1 to overlap narration on lane 0." },
       start: num("Timeline start s"),
       index: num("Insert position on video track 0 (video/image only; 0 = first)"),
@@ -319,7 +319,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "replace_item",
     description:
-      "Replace what an item plays, keeping the item: a video clip (including a blocked-out shot) keeps its place and its length and plays the asset you name instead, trimmed from that source's head; a soundtrack clip keeps its slot; a sticker shows the new image. This is how a block becomes the person's own footage (\"put the kitchen clip in shot 3\"), and how any clip swaps its source without moving what comes after. A block left playing nothing goes with it. The source a cut was copied from is not a fill for its own blocks.",
+      "Replace what an item plays, keeping the item: a video clip (including a blocked-out shot) keeps its place and its length and plays the asset you name instead, trimmed from that source's head; a soundtrack clip keeps its slot; a sticker shows the new image. This is how a block becomes the person's own footage (\"put the kitchen clip in shot 3\"), and how any clip swaps its source without moving what comes after. A block left playing nothing goes with it.",
     inputSchema: obj(
       {
         id: str("The item to refill — a video clip, a soundtrack clip, or a sticker"),

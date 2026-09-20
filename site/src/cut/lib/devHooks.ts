@@ -7,7 +7,7 @@
  * the editor root; a no-op in production builds.
  */
 
-import { renderProjectToMp4 } from "./exportRender";
+import { renderProjectFrame, renderProjectToMp4 } from "./exportRender";
 import { useExports } from "./exportStore";
 import { useGenerate } from "./generate";
 import { useGenScene } from "./genScene";
@@ -44,6 +44,10 @@ export function installDevHooks(): void {
     // The export eval renders a doc through the tab's own pipeline and reads
     // the bytes back out.
     renderProjectToMp4,
+    // One composited frame, the same one an export writes. The preview canvas
+    // cannot be read back — it is a worker's surface — so this is how a check
+    // sees what the cut actually draws at a moment.
+    renderProjectFrame,
     projectDuration,
     // The export eval starts a real export through the store, the way the
     // dialog does, and watches the dock's feed for the file.

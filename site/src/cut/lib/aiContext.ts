@@ -468,6 +468,10 @@ function describeState(
       out: r(sp.clip.out),
       // A still has no source length; report its placed length instead of 0.
       sourceDuration: r(sp.asset.type === "image" ? sp.len : sp.asset.duration),
+      // A blocked-out shot holds a slot and draws a flat colour — there is no
+      // picture here yet, and its label lives on the chip. Without this the
+      // label reads as a clip's name and a shell of a cut looks finished.
+      ...(sp.asset.block ? { emptyShot: true } : {}),
       muted: sp.clip.muted,
       ...(sp.clip.hidden ? { hidden: true } : {}),
       // The clip's own equalizer/compressor/limiter, set through
