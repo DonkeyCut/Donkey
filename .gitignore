@@ -10,6 +10,10 @@ xcuserdata/
 *.dSYM
 
 ## Build artifacts
+# Every npm project here lives in a subdirectory with its own rule; this
+# catches a tool run from the repo root, which resolves its cache to a
+# node_modules beside this file.
+node_modules/
 /dist/
 /apps/Donkey/ultralytics/
 __pycache__/
