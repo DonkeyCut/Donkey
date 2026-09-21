@@ -75,7 +75,7 @@ import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
 import type { ChatStatus } from "./ChatStatusBadge";
 import { ExportDialog } from "./ExportDialog";
-import { Inspector } from "./Inspector";
+import { Inspector, useHasInspector } from "./Inspector";
 import { Lightbox } from "./Lightbox";
 import { Preview } from "./Preview";
 import { SidePanel } from "./SidePanel";
@@ -187,17 +187,7 @@ export function Editor({
   const cutMode = useCutMode();
   // ChatGPT's edits run in this editor while it is the card.
   useHostCommands(projectId, chatgpt && cutMode === "cloud");
-  // The inspector only earns its column when the selection has a panel to
-  // show; otherwise (nothing selected, a subtitle cue, a transition bar — the
-  // Transitions tab is its panel) it is an empty white panel, so collapse it
-  // and let the preview take the space.
-  const hasInspector = useEditor((s) => {
-    if (s.readOnly || s.selection == null) return false;
-    // Two or more items open the group panel over what they share, whatever
-    // was clicked last; one item opens its own panel.
-    if (s.multiSelection.filter((m) => m && m.kind !== "cue" && m.kind !== "transition").length >= 2) return true;
-    return s.selection.kind !== "cue" && s.selection.kind !== "transition";
-  });
+  const hasInspector = useHasInspector();
   // A card is the width of a chat message: the files panel, the preview and
   // the inspector do not fit side by side, and the row would spill past the
   // frame's edge with nothing to scroll it back. Selecting something gives the
@@ -1289,7 +1279,7 @@ export function Editor({
           <div className="grid min-h-0 min-w-0">
             <Preview />
           </div>
-          {hasInspector && <Inspector />}
+          <Inspector />
         </div>
         {/* The strip anchors to the timeline's top edge and floats over the
             row above it. */}

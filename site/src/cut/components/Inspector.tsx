@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PenTool, Scissors, Smile, Sparkles, StretchHorizontal, StretchVertical, Trash2, Type, User, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PanelTopClose, PenTool, Scissors, Smile, Sparkles, StretchHorizontal, StretchVertical, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
@@ -164,6 +164,21 @@ import { GroupPanel } from "@/cut/components/GroupPanel";
 import { RemovalPanel } from "@/cut/components/RemovalPanel";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 
+/**
+ * Whether the selection has a panel to show. Nothing selected, a subtitle cue
+ * or a transition bar (the Transitions tab is its panel) leaves the panel out
+ * and the preview takes the space.
+ */
+export function useHasInspector() {
+  return useEditor((s) => {
+    if (s.readOnly || s.selection == null) return false;
+    // Two or more items open the group panel over what they share, whatever
+    // was clicked last; one item opens its own panel.
+    if (s.multiSelection.filter((m) => m && m.kind !== "cue" && m.kind !== "transition").length >= 2) return true;
+    return s.selection.kind !== "cue" && s.selection.kind !== "transition";
+  });
+}
+
 export function Inspector() {
   const selection = useEditor((s) => s.selection);
   const multi = useEditor((s) => s.multiSelection);
@@ -183,27 +198,57 @@ export function Inspector() {
     selection?.kind === "overlay" ? s.overlays.find((o) => o.id === selection.id) : undefined
   );
 
-  // The panel floats over the editor: the preview runs the full width of the
-  // row and passes under it. While the timeline is folded away its own button
-  // holds this corner, so the panel stops above it.
-  const timelineOpen = useEditor((s) => s.timelineOpen);
+  // The layer floats over the editor: the preview runs the full width of the
+  // row and passes under it. The button that brings a folded timeline back
+  // shares the layer, standing at the foot of the rail's column in the rail's
+  // own chrome. The bottom padding clears the host's own bar, so the panel and
+  // the button both stay above the card's composer.
+  const hasPanel = useHasInspector();
   return (
     <aside
-      className={cn(
-        "pointer-events-none absolute inset-y-0 right-0 z-30 flex items-start gap-2 p-3",
-        !timelineOpen && "pb-14"
-      )}
+      style={{ paddingBottom: "calc(0.75rem + var(--host-inset-bottom, 0px))" }}
+      className="pointer-events-none absolute inset-y-0 right-0 z-30 flex items-start gap-2 p-3"
     >
       {/* Keyed on what is selected: picking something else builds a fresh
           column, so it opens on that thing's own fields. */}
-      <InspectorColumn
-        key={group ? group.map((g) => `${g.kind}:${g.id}`).join() : selection?.id ?? "none"}
-        clip={group ? undefined : clip}
-        audio={group ? undefined : audio}
-        overlay={group ? undefined : overlay}
-        group={group ?? undefined}
-      />
+      {hasPanel ? (
+        <InspectorColumn
+          key={group ? group.map((g) => `${g.kind}:${g.id}`).join() : selection?.id ?? "none"}
+          clip={group ? undefined : clip}
+          audio={group ? undefined : audio}
+          overlay={group ? undefined : overlay}
+          group={group ?? undefined}
+        />
+      ) : (
+        <ShowTimelineButton />
+      )}
     </aside>
+  );
+}
+
+/**
+ * Brings the timeline back while it is folded away. It carries the rail's card
+ * and button shape and hangs at the bottom of the rail's column, so its icon
+ * sits under the rail's own buttons.
+ */
+function ShowTimelineButton() {
+  const open = useEditor((s) => s.timelineOpen);
+  if (open) return null;
+  return (
+    <div className="pointer-events-auto mt-auto shrink-0 self-end rounded-xl border bg-background p-1 shadow-md">
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger
+            aria-label="Show timeline"
+            onClick={() => useEditor.getState().setTimelineOpen(true)}
+            className="grid size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+          >
+            <PanelTopClose className="size-4" />
+          </TooltipTrigger>
+          <TooltipContent side="top">Show timeline</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
   );
 }
 
@@ -283,14 +328,17 @@ function InspectorColumn({
   const shown = tabs.some((t) => t.id === view) ? view : "main";
   return (
     <>
-      <InspectorRail
-        clipId={clip?.id}
-        tabs={tabs}
-        view={open ? shown : null}
-        open={open}
-        onPick={pick}
-        onToggle={() => setOpen(!open)}
-      />
+      <div className="flex shrink-0 flex-col gap-2 self-stretch">
+        <InspectorRail
+          clipId={clip?.id}
+          tabs={tabs}
+          view={open ? shown : null}
+          open={open}
+          onPick={pick}
+          onToggle={() => setOpen(!open)}
+        />
+        <ShowTimelineButton />
+      </div>
       {open && (
         <div
           data-field-panel=""
