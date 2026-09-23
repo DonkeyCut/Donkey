@@ -23,6 +23,7 @@ import {
   openMedia,
   openMediaShared,
   probeMediaFile,
+  readMediaFileSize,
   UnreadableMediaError,
   videoTrackOf,
   type IdleGate,
@@ -416,6 +417,7 @@ export function assetTypeOf(file: File): AssetType | null {
 type ProbedMeta = {
   type: AssetType;
   duration: number;
+  sizeBytes?: number;
   width?: number;
   height?: number;
 };
@@ -437,12 +439,12 @@ async function probeMedia(type: AssetType, src: string | Blob): Promise<ProbedMe
       const blob = typeof src === "string" ? await (await fetch(src)).blob() : src;
       const img = await decodeRasterImage(blob);
       if (!img) throw new UnreadableMediaError();
-      return { type, duration: 0, width: img.width, height: img.height };
+      return { type, duration: 0, sizeBytes: blob.size, width: img.width, height: img.height };
     }
     const url = typeof src === "string" ? src : URL.createObjectURL(src);
     try {
       const dims = await loadImageMeta(url);
-      return { type, duration: 0, width: dims.width, height: dims.height };
+      return { type, duration: 0, sizeBytes: await readMediaFileSize(src), width: dims.width, height: dims.height };
     } finally {
       if (typeof src !== "string") URL.revokeObjectURL(url);
     }
@@ -452,8 +454,8 @@ async function probeMedia(type: AssetType, src: string | Blob): Promise<ProbedMe
   // has landed: enrichAsset reads the peaks behind the editor, from the bytes
   // the import kept, so a song is on the timeline the moment its container
   // has been read.
-  if (!meta.hasVideo) return { type: "audio", duration: meta.duration };
-  return { type: "video", duration: meta.duration, width: meta.width, height: meta.height };
+  if (!meta.hasVideo) return { type: "audio", duration: meta.duration, sizeBytes: meta.sizeBytes };
+  return { type: "video", duration: meta.duration, sizeBytes: meta.sizeBytes, width: meta.width, height: meta.height };
 }
 
 /** Probe a media file's kind/duration/dimensions from the bytes in hand — for
@@ -523,6 +525,7 @@ export async function prepareImport(
     name: file.name,
     type: meta.type,
     duration: meta.duration,
+    sizeBytes: file.size,
     ...(meta.width !== undefined ? { width: meta.width } : {}),
     ...(meta.height !== undefined ? { height: meta.height } : {}),
     url: localUrl,
@@ -764,6 +767,7 @@ export async function importFileToProject(
     name,
     type: meta.type,
     duration: meta.duration,
+    sizeBytes: meta.sizeBytes,
     ...(meta.width !== undefined ? { width: meta.width } : {}),
     ...(meta.height !== undefined ? { height: meta.height } : {}),
     url,
@@ -1140,10 +1144,12 @@ export async function assetFromProjectFile(
     const dims = await loadImageMeta(url);
     asset.width = dims.width;
     asset.height = dims.height;
+    asset.sizeBytes = await readMediaFileSize(url);
     return asset;
   }
   const meta = await probeMediaFile(url);
   asset.duration = meta.duration;
+  asset.sizeBytes = meta.sizeBytes;
   if (!meta.hasVideo) {
     asset.type = "audio";
   } else {

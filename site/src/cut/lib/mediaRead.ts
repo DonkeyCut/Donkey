@@ -48,6 +48,8 @@ import { allowance, holdMemory } from "./memoryBudget";
 
 /** What a file turns out to be, read from its container. */
 export interface MediaProbe {
+  /** Total bytes in the source file, when the source is sized. */
+  sizeBytes?: number;
   /** Sample-exact, from the packets — not the container's rounded metadata. */
   duration: number;
   hasVideo: boolean;
@@ -311,6 +313,11 @@ export async function withMedia<T>(src: string | Blob, fn: (input: Input) => Pro
   }
 }
 
+/** Read the source's byte length without decoding its contents. */
+export function readMediaFileSize(src: string | Blob): Promise<number> {
+  return withMedia(src, (input) => input.source.getSize());
+}
+
 // A headless runtime (the turn runner) has no page, and there the
 // decodability gate is not a gate: nothing plays in that process, rendering
 // goes through ffmpeg, and the probe only reads container metadata — which
@@ -378,14 +385,15 @@ export async function probeMediaFile(src: string | Blob): Promise<MediaProbe> {
       );
     }
     if (!video && !audio) throw new UnreadableMediaError();
-    const duration = await input.computeDuration();
-    if (!video) return { duration, hasVideo: false, hasAudio: true };
+    const [duration, bytes] = await Promise.all([input.computeDuration(), input.source.getSizeOrNull()]);
+    const size = bytes === null ? {} : { sizeBytes: bytes };
+    if (!video) return { ...size, duration, hasVideo: false, hasAudio: true };
     const [width, height, rotation] = await Promise.all([
       video.getDisplayWidth(),
       video.getDisplayHeight(),
       video.getRotation(),
     ]);
-    return { duration, hasVideo: true, hasAudio: !!audio, width, height, rotation };
+    return { ...size, duration, hasVideo: true, hasAudio: !!audio, width, height, rotation };
   });
 }
 

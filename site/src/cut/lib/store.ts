@@ -4894,12 +4894,13 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block }) => ({
+    .map(({ id, fileName, name, type, duration, sizeBytes, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block }) => ({
       id,
       fileName,
       name,
       type,
       duration,
+      ...(sizeBytes !== undefined ? { sizeBytes } : {}),
       ...(width !== undefined ? { width } : {}),
       ...(height !== undefined ? { height } : {}),
       ...(origin !== undefined ? { origin } : {}),

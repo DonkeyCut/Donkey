@@ -210,6 +210,8 @@ export interface StoredAsset {
   name: string; // original display name
   type: AssetType;
   duration: number; // seconds
+  /** Source file size in bytes. */
+  sizeBytes?: number;
   width?: number;
   height?: number;
   /** Watch metadata for video sources — what the assistant has seen. */

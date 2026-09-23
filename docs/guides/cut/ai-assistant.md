@@ -70,7 +70,7 @@ Every knowledge surface is defined once — the catalog file ships in the engine
 
 The system prompt carries the voice, the deliverable rule (below), id discipline, the undo-versus-credits asymmetry, and pointers into the skills. The skills carry the deep per-area documentation — editor overview, timeline editing, watching and cutting by content, transitions and fades, graphics (titles, shapes, stickers, composite builds), audio and subtitles, stock and generation, scene productions, editing taste, media and library, publish and export — so the always-on cost stays near 21K tokens and detail is pulled only when the model works in that area.
 
-The snapshot is a compact JSON picture of everything user-visible: project meta, playhead, selection, every media asset with its origin tag, the video track with gaps and transitions, overlay video, soundtrack, titles, subtitle tracks with the first 60 cues, publish metadata, and view state. Numbers are rounded to two decimals and empty fields are omitted. When a list is truncated the snapshot says so, which is the model's cue to call get-state.
+The snapshot describes the project, timeline, selection, media, captions and view. Media includes filenames, dimensions, durations and known byte sizes; a file-info tool reads missing sizes through the shared media reader. Truncated lists direct the model to the full-state tool.
 
 ## The decision layer
 

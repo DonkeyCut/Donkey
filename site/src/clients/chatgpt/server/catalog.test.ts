@@ -2,6 +2,12 @@ import { expect, test } from "bun:test";
 import { AI_TOOLS, PROJECT_TOOLS } from "@/cut/server/ai/catalog";
 import { COMMANDS, READ_COMMANDS, SKILL_INDEX, readSkill } from "./catalog";
 
+test("ChatGPT exposes file metadata as a read command", () => {
+  expect(READ_COMMANDS.has("get_asset_info")).toBe(true);
+  expect(COMMANDS.find((t) => t.name === "get_asset_info")?.inputSchema)
+    .toBe(PROJECT_TOOLS.find((t) => t.name === "get_asset_info")?.inputSchema);
+});
+
 test("ChatGPT guides and command descriptions refer to available tools", () => {
   const available = new Set([
     ...COMMANDS.map((tool) => tool.name),

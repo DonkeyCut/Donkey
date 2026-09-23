@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import { buildAiContext, describeDoc } from "./aiContext";
 import { richDoc } from "./fixtures/richDoc";
-import { useEditor } from "./store";
+import { storedAssets, useEditor } from "./store";
 import type { MediaAsset } from "./types";
 
 /**
@@ -37,6 +37,18 @@ describe("describeDoc", () => {
     for (const key of ["playhead", "selection", "renders", "view", "fonts", "playing"]) {
       expect(key in read).toBe(false);
     }
+  });
+
+  test("file metadata survives saving and reaches live and headless chat", async () => {
+    const doc = richDoc();
+    doc.assets[0] = { ...doc.assets[0], sizeBytes: 21_000_001, width: 320, height: 240 };
+    const assets = doc.assets.map((a) => ({ ...a, url: "" }));
+    doc.assets = storedAssets(assets);
+    await useEditor.getState().openProjectDoc("file-info", doc, assets);
+    const expected = { fileName: doc.assets[0].fileName, sizeBytes: 21_000_001, width: 320, height: 240 };
+    expect(buildAiContext({ chatId: null }).media[0]).toMatchObject(expected);
+    expect(describeDoc(doc).media[0]).toMatchObject(expected);
+    expect(describeDoc(doc).media[0].duration).toBe(doc.assets[0].duration);
   });
 
   test("another chat's unplaced media stays out of a reference, as it does out of the open project", () => {

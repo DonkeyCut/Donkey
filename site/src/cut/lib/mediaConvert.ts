@@ -51,6 +51,7 @@ import {
   hasUndecodableVideo,
   openMedia,
   probeMediaFile,
+  readMediaFileSize,
   videoTrackOf,
   withMedia,
 } from "./mediaRead";
@@ -171,10 +172,12 @@ export async function convertAssetToMp4(
 
   if (made.unchanged) return { assetId: asset.id, name: asset.name, ...made };
 
+  const url = await storedMediaUrl(projectId, made.fileName, backend);
   const patch: Partial<MediaAsset> = {
     fileName: made.fileName,
     name: mp4DisplayName(asset.name),
-    url: await storedMediaUrl(projectId, made.fileName, backend),
+    url,
+    sizeBytes: await readMediaFileSize(url),
     duration: made.duration,
     ...(made.width !== undefined ? { width: made.width } : {}),
     ...(made.height !== undefined ? { height: made.height } : {}),

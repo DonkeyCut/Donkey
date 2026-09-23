@@ -41,6 +41,10 @@ export interface AdoptedAsset {
   name: string;
   kind: string;
   duration: number;
+  fileName: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
 }
 
 /** The undo history's name for a batch: its label, or the commands that ran. */
@@ -84,7 +88,10 @@ async function adoptFiles(projectId: string, input: Record<string, unknown>): Pr
   if (name && landed.length === 1) landed[0].title = name;
   const { assets } = await adoptImportedFiles(projectId, { files: landed });
   return {
-    assets: assets.map((a) => ({ assetId: a.id, name: a.name, kind: a.type, duration: Math.round(a.duration * 100) / 100 })),
+    assets: assets.map((a) => ({
+      assetId: a.id, name: a.name, kind: a.type, duration: Math.round(a.duration * 100) / 100,
+      fileName: a.fileName, sizeBytes: a.sizeBytes, width: a.width, height: a.height,
+    })),
   };
 }
 

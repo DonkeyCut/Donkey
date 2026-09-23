@@ -50,6 +50,7 @@ export const unknownCommandNames = (names: string[]): string[] => names.filter((
 /** Commands whose output matters and whose effect is on the caller's eyes:
  * a read runs without saving the document. */
 export const READ_COMMANDS = new Set([
+  "get_asset_info",
   "watch_video",
   "capture_frame",
   "compare_to_source",

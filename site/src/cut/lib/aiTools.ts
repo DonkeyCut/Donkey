@@ -159,7 +159,7 @@ import { isStylePresetTemplate } from "./stylePresets";
 import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame, renderProjectFrames } from "./exportRender";
-import { framesAt } from "./mediaRead";
+import { framesAt, readMediaFileSize } from "./mediaRead";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
@@ -847,6 +847,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // The tool result carries the whole transcript; the per-message context
       // snapshot trims it, so this is how the model pulls every cue when needed.
       return buildAiContext({ fullCues: true });
+  },
+
+  get_asset_info: async (s, input) => {
+    const asset = requireItem(s.assets, input.asset_id, "project asset");
+    if (asset.block) throw new ToolError("This placeholder has no source file.");
+    const sizeBytes = asset.sizeBytes ?? await readMediaFileSize(asset.url);
+    return {
+      assetId: asset.id, name: asset.name, fileName: asset.fileName, kind: asset.type,
+      sizeBytes, duration: round2(asset.duration), width: asset.width, height: asset.height,
+    };
   },
 
   render_preview: async (s, _input, operation) => {
@@ -3492,6 +3502,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           assetId: asset.id,
           name: asset.name,
           kind: asset.type,
+          fileName: asset.fileName,
+          sizeBytes: asset.sizeBytes,
+          width: asset.width,
+          height: asset.height,
           duration: round2(asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration),
         })),
         ...(text ? { sourceText: text } : {}),
