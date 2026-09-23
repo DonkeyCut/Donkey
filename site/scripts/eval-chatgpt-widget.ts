@@ -22,20 +22,24 @@ const hostHtml = `<!doctype html><html><body><iframe title="Donkey Cut preview" 
 const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
-window.calls = []; window.links = []; window.modes = []; window.editable = false;
+window.calls = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.freshCard = false;
 const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null});
 // ChatGPT's sandbox drops null-valued keys before the widget sees a result.
 const dropNulls = (value) => Array.isArray(value) ? value.map(dropNulls) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, dropNulls(v)])) : value;
 const result = (data, playback = null, editor = null) => dropNulls({content:[{type:'text',text:'Preview'}],structuredContent:data,_meta:{playback,editor,pollMs:1000}});
 const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,result},'*');
+// A card ChatGPT shows again after a reload replays its own result: a stale
+// preview with an expired playback link, and an editor link whose minute is
+// spent unless the fixture says the card was just opened.
+const cardResult = () => !window.editable ? result(view(false)) : result(view(true,{id:'job',status:'done',progress:1,revision:'cloud:1'}),{url:location.origin+'/preview.mp4?stale',expiresAt:Date.now()-1},window.freshCard ? {url:location.origin+'/embed?code=card&project=project',expiresAt:Date.now()+60000} : {url:location.origin+'/embed?code=spent&project=project',expiresAt:Date.now()-1});
 window.addEventListener('message', ({source,data}) => {
  if(source !== frame.contentWindow || !data.method) return;
  if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
- if(data.method === 'ui/notifications/initialized') frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:window.editable ? result(view(true),null,{url:location.origin+'/embed?code=spent&project=project',expiresAt:Date.now()-1}) : result(view(false))},'*');
+ if(data.method === 'ui/notifications/initialized') frame.contentWindow.postMessage({jsonrpc:'2.0',method:'ui/notifications/tool-result',params:cardResult()},'*');
  if(data.method === 'tools/call') {
   const name = data.params.name; window.calls.push(name);
   if(name === 'list_projects') reply(data.id,result(view(false)));
-  if(name === 'open_project') reply(data.id, window.editable ? result(view(true),null,{url:location.origin+'/embed?code=one-use&project=project',expiresAt:Date.now()+60000}) : result(view(true)));
+  if(name === 'open_project') setTimeout(() => reply(data.id, window.editable ? result(view(true),null,{url:location.origin+'/embed?code=one-use&project=project',expiresAt:Date.now()+60000}) : result(view(true))), window.holdMs);
   if(name === 'render_preview') { count=0; reply(data.id,result(view(true,{id:'job',status:'queued',progress:0,revision:'cloud:2'}))); }
   if(name === 'get_preview_status') {
    count++; const done = count >= 3;
@@ -43,7 +47,7 @@ window.addEventListener('message', ({source,data}) => {
   }
  }
  if(data.method === 'ui/open-link') { window.links.push(data.params.url); reply(data.id,{}); }
- if(data.method === 'ui/request-display-mode') { window.modes.push(data.params.mode); reply(data.id,{mode:window.modes.length > 1 ? data.params.mode : 'inline'}); }
+ if(data.method === 'ui/request-display-mode') { window.modes.push(data.params.mode); reply(data.id,{mode:data.params.mode}); }
 });
 </script></body></html>`;
 const browser = await chromium.launch({ headless: true });
@@ -78,23 +82,38 @@ try {
   await page.evaluate(() => { (window as unknown as { editable: boolean }).editable = true; });
   await app.getByRole("button", { name: "Launch film" }).click();
   await app.frameLocator("iframe.editor").locator("#editor").waitFor();
-  assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen"], "the editor asks for the whole window on open");
+  assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), [], "an opened editor stays inline");
   assert.equal(await app.locator("button").count(), 0, "the editor card has no controls of its own");
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^0$/ }).waitFor();
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();
   await app.frameLocator("iframe.editor").getByRole("button", { name: "Fullscreen" }).click();
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^fullscreen$/ }).waitFor();
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^120$/ }).waitFor();
-  assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen", "fullscreen"], "the button asks again and the granted mode hides it");
+  assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), ["fullscreen"], "the editor's button asks for the whole window");
   await page.screenshot({ path: "/tmp/donkey-chatgpt-widget-editor.png" });
-  // A card rehydrated with a spent link asks for a fresh one instead of showing the preview.
-  await page.evaluate(() => { (window as unknown as { calls: string[] }).calls = []; });
+  // A card rehydrated with a spent link holds the editor's space, inline and
+  // without controls, while it mints a fresh link. The held reply outlasts the
+  // stale playback's one-second renewal, so a poll would show up in the calls.
+  type Host = { calls: string[]; modes: string[]; holdMs: number; freshCard: boolean };
+  await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.holdMs = 1500; });
   await frame.evaluate(() => { location.reload(); });
-  await app.frameLocator("iframe.editor").locator("#editor").waitFor();
-  const rehydrated = await page.evaluate(() => (window as unknown as { calls: string[] }).calls);
-  assert.deepEqual(rehydrated, ["open_project"], "the rehydrated card mints one fresh link");
+  await page.waitForFunction(() => (window as unknown as Host).calls.length === 1);
+  await app.locator("div.editor").waitFor();
+  assert.equal(await app.locator("button").count(), 0, "a waking editor card shows no controls");
+  assert.equal(await app.getByText("Render preview").count(), 0, "a waking editor card shows no preview card");
+  await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "one-use" }).waitFor();
+  await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), ["open_project"], "the rehydrated card mints one fresh link and polls nothing");
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Host).modes), ["fullscreen"], "a card that wakes up stays inline");
+  // A card whose own result carries a live link opens with it, inline.
+  await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.holdMs = 0; host.freshCard = true; });
+  await frame.evaluate(() => { location.reload(); });
+  await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "via card" }).waitFor();
+  await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Host).modes), ["fullscreen"], "a newly opened card opens inline");
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), [], "a live link needs no second call");
   assert.deepEqual(errors, []);
-  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, decoder teardown, lazy HLS.");
+  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, waking editor card, decoder teardown, lazy HLS.");
 } finally {
   await browser.close(); server.stop(true); await rm(scratch, { recursive: true, force: true });
 }

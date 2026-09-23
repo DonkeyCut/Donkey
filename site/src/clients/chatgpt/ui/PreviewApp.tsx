@@ -4,16 +4,21 @@ import { useProjectApp } from "./useProjectApp";
 import "./preview.css";
 
 export function PreviewApp() {
-  const { ready, view, playback, download, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openDownload, openFromFrame, saveFromFrame, requestFullscreen } = useProjectApp();
+  const { ready, view, playback, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor } = useProjectApp();
   const project = view?.project;
   const preview = view?.preview;
   const rendering = preview?.status === "queued" || preview?.status === "running";
-  const exp = view?.export;
-  const exporting = exp?.status === "queued" || exp?.status === "running";
-  // The editor is the card: its own chrome carries every control. Inline, one
-  // control asks the host for the whole window.
-  if (editor && project) return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"}>
-    <EditorFrame url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} />
+  // An editable project is the editor, and its own chrome carries every
+  // control. The card holds the editor's inline space from the first paint,
+  // so a card ChatGPT shows again after a reload is the editor while it
+  // fetches a fresh link.
+  if (view ? project && view.canEdit : !error) return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"} aria-busy={!editor}>
+    {editor && project
+      ? <EditorFrame url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} />
+      : <div className="editor waiting">{error && project && <>
+        <p role="alert">{error}</p>
+        <button disabled={busy || !ready} onClick={retryEditor}>Try again</button>
+      </>}</div>}
   </main>;
   return <main aria-busy={busy}>
     <header><span className="brand">Donkey Cut</span><span>Cloud projects</span></header>
@@ -37,13 +42,8 @@ export function PreviewApp() {
       {preview?.status === "expired" && <p>This preview has expired. Render it again to watch.</p>}
       {preview?.status === "error" && <p role="alert">{preview.error}</p>}
       {preview?.status === "done" && preview.revision !== project.revision && <p className="muted">This preview may be from an earlier edit.</p>}
-      {exporting && <div role="status"><p>{exp.status === "queued" ? "Waiting to export…" : `Exporting ${exp.name ?? "video"}… ${Math.round(exp.progress * 100)}%`}</p><progress max={1} value={exp.progress} /></div>}
-      {exp?.status === "done" && !download && <p className="muted">Export {exp.name ?? ""} finished. Renewing the download link…</p>}
-      {(exp?.status === "error" || exp?.status === "expired") && <p role="alert">{exp.error ?? "The export did not finish."}</p>}
       <nav>
         {view.canRender && <button className="primary" disabled={busy || rendering || !ready} onClick={() => void run("render_preview", { projectId: project.id })}>Render preview</button>}
-        {download && <button className="primary" disabled={!ready} onClick={() => openDownload()}>Download {download.name}</button>}
-        {view.canEdit && <button disabled={busy || exporting || !ready} onClick={() => void run("export_video", { projectId: project.id })}>Export video</button>}
         <button disabled={!ready} onClick={() => openDonkey()}>Open in Donkey Cut ↗</button>
         <button disabled={busy || !ready} onClick={() => void run("list_projects", {})}>Projects</button>
         {error && <button disabled={busy || !ready} onClick={() => void run("open_project", { projectId: project.id })}>Try again</button>}
