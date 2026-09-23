@@ -1,6 +1,7 @@
 "use client";
 
 import { openThroughHost, saveThroughHost } from "./hostBridge";
+import { editorHost } from "@/cut/lib/environment";
 
 /**
  * Save a served media file to the user's Downloads folder.
@@ -22,8 +23,29 @@ export function downloadFromUrl(url: string, name: string) {
  * own and the browser saves it there.
  */
 export function downloadFile(href: string, name: string) {
+  const url = new URL(href, window.location.href);
+  if (editorHost() === "chatgpt" && url.origin === window.location.origin && url.pathname.startsWith("/api/cut-cloud/")) {
+    void downloadThroughHost(url, name);
+    return;
+  }
   if (openThroughHost(href)) return;
   clickAnchor(window, href, name);
+}
+
+/** Resolve cloud media while the frame's partitioned session is available.
+ * HEAD follows the signed redirect without reading the file into memory. */
+async function downloadThroughHost(url: URL, name: string) {
+  const report = (message: string | null) => window.parent.postMessage(
+    { type: "donkeycut:download-error", message }, "*"
+  );
+  report(null);
+  try {
+    const response = await fetch(url, { method: "HEAD", credentials: "same-origin", cache: "no-store" });
+    if (!response.ok || !response.redirected) throw new Error(`Download failed (${response.status}).`);
+    openThroughHost(response.url);
+  } catch {
+    report(`Could not download ${name}. Try again.`);
+  }
 }
 
 /** Save text made in this tab — a captions file — to the user's Downloads

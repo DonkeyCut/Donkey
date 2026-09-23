@@ -10,6 +10,7 @@ export function PreviewApp() {
   const rendering = preview?.status === "queued" || preview?.status === "running";
   // The frame whose editor has said it is on screen.
   const [shown, setShown] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   // An editable project is the editor, and its own chrome carries every
   // control. The card holds the editor's inline space from the first paint,
   // so a card ChatGPT shows again after a reload is the editor while it
@@ -18,7 +19,8 @@ export function PreviewApp() {
   if (view ? project && view.canEdit : !error) {
     const loading = !editor || shown !== editor.url;
     return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"} aria-busy={loading}>
-      {editor && project && <EditorFrame key={editor.url} url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onReady={() => setShown(editor.url)} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} />}
+      {editor && project && <EditorFrame key={editor.url} url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onReady={() => setShown(editor.url)} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} onDownloadError={setDownloadError} />}
+      {downloadError && <div className="download-error"><p role="alert">{downloadError}</p><button onClick={() => setDownloadError(null)}>Dismiss</button></div>}
       {error && project && !editor
         ? <div className="waiting">
           <p role="alert">{error}</p>
@@ -78,7 +80,7 @@ function EditorSkeleton() {
  * asks; it says when it has something on screen, and its own toolbar asks
  * for fullscreen, for a tab on donkeycut.com, and for the saves the sandbox
  * blocks inside the frame. */
-function EditorFrame({ url, name, inset, fullscreen, onReady, onFullscreen, onOpen, onSave }: { url: string; name: string; inset: number; fullscreen: boolean; onReady: () => void; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void }) {
+function EditorFrame({ url, name, inset, fullscreen, onReady, onFullscreen, onOpen, onSave, onDownloadError }: { url: string; name: string; inset: number; fullscreen: boolean; onReady: () => void; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void; onDownloadError: (message: string | null) => void }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const origin = new URL(url).origin;
   const tell = () => frame.current?.contentWindow?.postMessage({ type: "donkeycut:host", insetBottom: inset, displayMode: fullscreen ? "fullscreen" : "inline" }, origin);
@@ -89,6 +91,7 @@ function EditorFrame({ url, name, inset, fullscreen, onReady, onFullscreen, onOp
       if (event.data?.type === "donkeycut:host?") tell();
       if (event.data?.type === "donkeycut:ready") onReady();
       if (event.data?.type === "donkeycut:fullscreen") onFullscreen();
+      if (event.data?.type === "donkeycut:download-error" && (event.data.message === null || typeof event.data.message === "string")) onDownloadError(event.data.message);
       // The frame is the editor on this origin, so what it asks to open is
       // the editor's own link — a project page, an export, the post a clip
       // came from. Only the scheme is worth checking.
