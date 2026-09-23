@@ -1,4 +1,5 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { stubModule } from "@/lib/testing/stubModule";
 import { AudioBuffer, OfflineAudioContext } from "node-web-audio-api";
 
 // The fold runs on Web Audio, which Node has through the same package the
@@ -26,7 +27,7 @@ const tone = () => {
   return buf;
 };
 
-mock.module("./mediaRead", () => ({ decodeAudioSpan: async () => tone() }));
+await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, { decodeAudioSpan: async () => tone() });
 
 const { renderMix } = await import("./audioMix");
 

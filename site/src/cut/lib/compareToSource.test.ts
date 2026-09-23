@@ -1,4 +1,5 @@
-import { beforeEach, expect, mock, test } from "bun:test";
+import { beforeEach, expect, test } from "bun:test";
+import { stubModule } from "@/lib/testing/stubModule";
 import { setRasterFactory, type RasterSurface } from "./raster";
 import { useEditor } from "./store";
 
@@ -36,8 +37,6 @@ setRasterFactory({
 // it accepts is worth pinning: the moments it is given, the ones it turns away
 // before drawing anything, and the shape of the read it makes of the source.
 
-const media = await import("./mediaRead");
-
 /** Every time the source was asked for frames, and at what size. */
 const reads: { times: number[]; size: unknown }[] = [];
 
@@ -46,7 +45,7 @@ async function* framesAt(_src: string | Blob, times: number[], size?: unknown) {
   for (let i = 0; i < times.length; i++) yield { canvas: stubCanvas(90, 160), timestamp: 0, duration: 0 } as never;
 }
 
-mock.module("./mediaRead", () => ({ ...media, framesAt }));
+await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, { framesAt });
 
 const { runAiTool } = await import("./aiTools");
 

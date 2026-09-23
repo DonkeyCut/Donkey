@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, mock, test } from "bun:test";
-import { prisma as actualPrisma } from "@/lib/prisma";
+import { stubModule } from "@/lib/testing/stubModule";
 
 // The commands module reaches the database through the shared client; this
 // stand-in keeps job rows in memory and answers the handful of calls the
@@ -51,7 +51,7 @@ const prisma = {
   user: { findUnique: mock(async () => ({ superUser: true })) },
   settingOverride: { findUnique: mock(async () => null) },
 };
-mock.module("@/lib/prisma", () => ({ prisma }));
+await stubModule<typeof import("@/lib/prisma")>("@/lib/prisma", import.meta.url, { prisma: prisma as never });
 // The wake is a POST to the worker; count those instead of the network.
 process.env.CUT_RENDER_WAKE_SECRET = "test-wake";
 const realFetch = globalThis.fetch;
@@ -60,7 +60,7 @@ globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
   return realFetch(url, init);
 }) as typeof fetch;
 const { claimEditorBatch, CLAIM_QUIET_MS, heartbeatEditorBatch, NO_CARD_OPEN, queueCommands, settleEditorBatch, waitForJob } = await import("./commands");
-afterAll(() => { mock.module("@/lib/prisma", () => ({ prisma: actualPrisma })); globalThis.fetch = realFetch; });
+afterAll(() => { globalThis.fetch = realFetch; });
 beforeEach(() => { rows.splice(0); woken.count = 0; });
 
 test("batches queue behind each other for the card without waking the worker, and the card claims them oldest first", async () => {

@@ -1,8 +1,7 @@
-import { afterAll, afterEach, expect, mock, test } from "bun:test";
+import { afterEach, expect, mock, test } from "bun:test";
 import { Prisma } from "@/generated/prisma/client";
-import { prisma as actualPrisma } from "@/lib/prisma";
+import { stubModule } from "@/lib/testing/stubModule";
 
-const originalPrisma = actualPrisma;
 // The account the charge point weighs every object against: free tier, no Pro.
 const prisma = {
   settingOverride: { findUnique: mock(async () => ({ value: { maxAttempts: 3 } })) },
@@ -15,11 +14,10 @@ const prisma = {
   void run; void options;
   throw new Error("Unexpected transaction");
 }) };
-mock.module("@/lib/prisma", () => ({ prisma }));
+await stubModule<typeof import("@/lib/prisma")>("@/lib/prisma", import.meta.url, { prisma: prisma as never });
 const { registerObject, unregisterObjects } = await import("./db");
 const { FREE_STORAGE_BYTES } = await import("../server/cloud/limits");
 const { STORAGE_FULL } = await import("../lib/operationFailure");
-afterAll(() => { mock.module("@/lib/prisma", () => ({ prisma: originalPrisma })); });
 
 const conflict = () => new Prisma.PrismaClientKnownRequestError("Write conflict", {
   code: "P2034", clientVersion: "test",

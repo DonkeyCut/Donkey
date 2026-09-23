@@ -1,4 +1,5 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { stubModule } from "@/lib/testing/stubModule";
 
 /**
  * The byte cache carried across an import's landing.
@@ -65,26 +66,24 @@ class FakeDir {
 
 let root = new FakeDir();
 
-const opfs = await import("./backend/browser/opfs");
-mock.module("./backend/browser/opfs", () => ({
-  ...opfs,
+await stubModule<typeof import("./backend/browser/opfs")>("./backend/browser/opfs", import.meta.url, {
   supportsBrowserStore: () => true,
   chunksDir: async () => root as never,
   // The real readers over the fake handles.
-  readFileAt: async (dir: FakeDir | null, name: string) => {
+  readFileAt: (async (dir: FakeDir | null, name: string) => {
     if (!dir) return null;
     try {
       return await (await dir.getFileHandle(name)).getFile();
     } catch {
       return null;
     }
-  },
-  writeFileAt: async (dir: FakeDir, name: string, data: Blob | ArrayBuffer | string) => {
+  }) as never,
+  writeFileAt: (async (dir: FakeDir, name: string, data: Blob | ArrayBuffer | string) => {
     const w = await (await dir.getFileHandle(name, { create: true })).createWritable();
     await w.write(data);
     await w.close();
-  },
-  readJson: async (dir: FakeDir | null, name: string) => {
+  }) as never,
+  readJson: (async (dir: FakeDir | null, name: string) => {
     if (!dir) return null;
     try {
       const file = await (await dir.getFileHandle(name)).getFile();
@@ -92,8 +91,8 @@ mock.module("./backend/browser/opfs", () => ({
     } catch {
       return null;
     }
-  },
-}));
+  }) as never,
+});
 
 const { CHUNK_SIZE, adoptChunks, chunkIdentity, encodeResident, decodeResident } = await import(
   "./chunkCache"

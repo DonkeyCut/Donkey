@@ -1,12 +1,11 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { retimeOf } from "@donkeycut/effects-kit";
+import { stubModule } from "@/lib/testing/stubModule";
 import { DECODE_AHEAD_S, type Timed } from "./frameSource";
 import type { MediaAsset } from "./types";
 
 // ── the files a source reads, stood in for ──────────────────────────────────
-// Only the reads are replaced; the module mock spreads the real module, so
-// every other export is carried through as it is (and other test files in the
-// run see the real behavior for everything but these).
+// Only the reads are replaced; every other export is carried through as it is.
 
 interface FakeInput {
   url: string;
@@ -82,7 +81,6 @@ const frameSink = ((track: FakeTrack, size?: { height?: number }) => ({
 })) as never;
 const keyframeTimeAt = (async (_track: unknown, t: number) => Math.max(0, Math.floor(t))) as never;
 
-const media = await import("./mediaRead");
 // The shared open, over the fake files: one input per URL, closed by the
 // last holder to let go, the way the real one is.
 const shared = new Map<string, { input: FakeInput; refs: number }>();
@@ -106,14 +104,13 @@ const openMediaShared = (src: string) => {
     },
   };
 };
-mock.module("./mediaRead", () => ({
-  ...media,
+await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
   openMedia,
-  openMediaShared,
+  openMediaShared: openMediaShared as never,
   videoTrackOf,
   frameSink,
   keyframeTimeAt,
-}));
+});
 
 const { BACK_WINDOW, ClipFrameSource, FrameRing, FrameSourcePool, mappingKey, walkClaim } =
   await import("./frameSource");

@@ -1,4 +1,5 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { stubModule } from "@/lib/testing/stubModule";
 import { AudioBuffer, OfflineAudioContext } from "node-web-audio-api";
 
 // The offline fold's side of a cross dissolve, on the Web Audio the headless
@@ -22,10 +23,10 @@ const tone = (seconds: number, hz: number) => {
   return buf;
 };
 
-mock.module("./mediaRead", () => ({
-  decodeAudioSpan: async (file: string, from: number, to: number) =>
-    tone(to - from, file === "a.mp4" ? 440 : 880),
-}));
+await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
+  decodeAudioSpan: (async (file: string, from: number, to: number) =>
+    tone(to - from, file === "a.mp4" ? 440 : 880)) as never,
+});
 
 const { renderMix } = await import("./audioMix");
 

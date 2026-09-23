@@ -1,4 +1,5 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { stubModule } from "@/lib/testing/stubModule";
 import { retimeOf } from "@donkeycut/effects-kit";
 import { AudioBuffer } from "node-web-audio-api";
 
@@ -217,18 +218,18 @@ const decodeAudioSpan = async (_url: string, from: number, to: number) => {
   });
 };
 
-// Only the reads are stood in for. A module mock replaces the whole module for
-// every test file in the run, so the rest of each one is carried through as it
-// really is.
-const media = await import("./mediaRead");
-const links = await import("./mediaLinks");
-mock.module("./mediaRead", () => ({ ...media, openAudioWalk, assembleAudio, decodeAudioSpan }));
-mock.module("./mediaLinks", () => ({
-  ...links,
+// Only the reads are stood in for; the rest of each module is carried through
+// as it really is.
+await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
+  openAudioWalk: openAudioWalk as never,
+  assembleAudio,
+  decodeAudioSpan: decodeAudioSpan as never,
+});
+await stubModule<typeof import("./mediaLinks")>("./mediaLinks", import.meta.url, {
   reportMediaUrlError: () => {
     reMints.asked++;
   },
-}));
+});
 
 const { PreviewMixer } = await import("./previewMixer");
 
