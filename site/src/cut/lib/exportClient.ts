@@ -1,6 +1,7 @@
 "use client";
 
 import { captureRenderSnapshot, renderDoc, type ExportDoc, type RenderSnapshot } from "./renderSnapshot";
+import { sourceExportPlan, sourceSequence } from "@/cut/lib/sourceExportPlan";
 import { DELIVERY_DEFAULTS, EXPORT_PRESETS, EXPORT_RESOLUTIONS } from "./exportPresets";
 import { operationFailure, type OperationFailure } from "./operationFailure";
 import { projectOperation } from "./projectOperation";
@@ -17,7 +18,7 @@ import { exportsDir, projectDir, writeFileAt, readFileAt, saveExport } from "./b
 import { holdRegistered, registerBlobFile, releaseRegistered, resolveRegisteredBlob } from "./backend/browser/registry";
 import { captureCloudBackend } from "./backend/cloud";
 import { downloadFile, downloadFromUrl } from "./download";
-import { bitrateFor, canRenderInBrowser, renderProjectToMp4 } from "./exportRender";
+import { bitrateFor, canRenderInBrowser, renderProjectToMp4, type SourceExportProfile } from "./exportRender";
 import { putSigned } from "./media";
 import { renderRemovalPieces } from "./removalVideo";
 import { drawBlock } from "./blockSource";
@@ -57,6 +58,10 @@ export { deliveryCodec, EXPORT_CODECS, EXPORT_CONTAINERS, fixedRate };
 export type { ExportAudioCodec, ExportCodec, ExportContainer, ExportRange };
 
 export interface ExportSettings {
+  /** Resolve the original media settings before starting an export. */
+  matchSource?: boolean;
+  /** Source delivery can preserve compatible encoded packets. */
+  copySource?: boolean;
   width: number;
   height: number;
   fps: number;
@@ -71,6 +76,8 @@ export interface ExportSettings {
   bitrate?: number;
   /** AAC bitrate in bits per second; omitted uses the delivery default. */
   audioBitrate?: number;
+  audioSampleRate?: number;
+  audioChannels?: number;
   /** The file's name without its extension, as typed; absent = the project's
    * name. Sanitized by `exportBaseName` wherever a file is named. */
   name?: string;
@@ -110,6 +117,7 @@ export type ExportQualityId = (typeof EXPORT_QUALITIES)[number]["id"];
 
 /** The user's whole choice, as the dialog holds it. */
 export interface ExportChoice {
+  sourceCodec?: boolean;
   /** A `resolutionOptions` id; one the project lacks falls back to "source". */
   resolution: string;
   /** A fixed rate, or "source" for the rate the footage plays at. */
@@ -137,9 +145,9 @@ export const EXPORT_QUICK_PRESETS = [
   {
     id: "best",
     label: "Best",
-    detail: "source size · H.264",
+    detail: "original file settings",
     short: "Source",
-    choice: { resolution: "source", fps: "source", quality: "high", ...DELIVERY_DEFAULTS },
+    choice: { resolution: "source", fps: "source", quality: "high", sourceCodec: true, ...DELIVERY_DEFAULTS },
   },
   {
     id: "social4k",
@@ -167,7 +175,7 @@ export const EXPORT_QUICK_PRESETS = [
 /** The quick preset a choice is, when it is one. */
 export function quickPresetOf(choice: ExportChoice, options: ResolutionOption[]): string | null {
   const key = (c: ExportChoice) =>
-    [resolveResolution(options, c.resolution).id, c.fps, c.quality, c.codec, c.container, c.audioCodec, c.bitrateMbps ?? ""].join("|");
+    [resolveResolution(options, c.resolution).id, c.fps, c.quality, c.codec, c.container, c.audioCodec, c.bitrateMbps ?? "", c.sourceCodec ?? false].join("|");
   const k = key(choice);
   return EXPORT_QUICK_PRESETS.find((p) => key(p.choice) === k)?.id ?? null;
 }
@@ -189,17 +197,18 @@ export function choiceSettings(
   choice: ExportChoice,
   options: ResolutionOption[],
   sourceFps: number = DEFAULT_EXPORT_FPS,
-  sourceRates?: { videoBitrate?: number; audioBitrate?: number }
+  sourceRates?: Partial<SourceExportProfile>
 ): ExportSettings {
   const q = EXPORT_QUALITIES.find((x) => x.id === choice.quality) ?? EXPORT_QUALITIES[0];
   const r = resolveResolution(options, choice.resolution);
   const settings = fitContainer({
+    copySource: choice.resolution === "source" && choice.fps === "source" && choice.quality === "high" && !choice.bitrateMbps,
     width: r.width,
     height: r.height,
     fps: choice.fps === "source" ? sourceFps : choice.fps,
     crf: q.crf,
     preset: q.preset,
-    codec: choice.codec,
+    codec: choice.sourceCodec ? sourceRates?.codec ?? choice.codec : choice.codec,
     container: choice.container,
     audioCodec: choice.audioCodec,
     // A fixed-rate codec has one rate per profile; a typed bitrate is for
@@ -216,16 +225,23 @@ export function choiceSettings(
 /** Source-size delivery keeps the source's compression budget. */
 export function matchSourceBitrates(
   settings: ExportSettings,
-  source?: { videoBitrate?: number; audioBitrate?: number }
+  source?: Partial<SourceExportProfile>
 ): ExportSettings {
   if (fixedRate(settings.codec)) return settings;
   return {
     ...settings,
+    ...(source?.audioSampleRate ? { audioSampleRate: source.audioSampleRate } : {}),
+    ...(source?.audioChannels ? { audioChannels: source.audioChannels } : {}),
     ...(source?.videoBitrate && Number.isFinite(source.videoBitrate) && source.videoBitrate > 0
-      ? { bitrate: Math.round(Math.min(bitrateFor(settings), source.videoBitrate)) } : {}),
+      ? { bitrate: Math.round(settings.copySource ? source.videoBitrate : Math.min(bitrateFor(settings), source.videoBitrate)) } : {}),
     ...(settings.audioCodec === "aac" && source?.audioBitrate && Number.isFinite(source.audioBitrate) && source.audioBitrate > 0
-      ? { audioBitrate: Math.round(Math.min(audioBitrate(settings), source.audioBitrate)) } : {}),
+      ? { audioBitrate: Math.round(settings.copySource ? source.audioBitrate : Math.min(audioBitrate(settings), source.audioBitrate)) } : {}),
   };
+}
+
+/** Apply a probed source profile to an original-settings export. */
+export function matchSourceSettings(settings: ExportSettings, source: SourceExportProfile): ExportSettings {
+  return matchSourceBitrates({ ...settings, matchSource: false, fps: source.fps ?? settings.fps, codec: source.codec ?? settings.codec }, source);
 }
 
 /** A size the dialog offers: the source's own frame, or a named rung above
@@ -253,9 +269,10 @@ export interface ResolutionOption {
 export function resolutionOptions(
   aspect: Aspect,
   clips: VideoClip[],
-  assets: MediaAsset[]
+  assets: MediaAsset[],
+  composition?: Pick<ExportDoc, "audioClips" | "overlays" | "subtitles">
 ): ResolutionOption[] {
-  const src = sourceFrame(aspect, clips, assets);
+  const src = sourceFrame(aspect, clips, assets, composition);
   const srcShort = Math.min(src.width, src.height);
   const rung = (r: (typeof EXPORT_RESOLUTIONS)[number]): ResolutionOption => ({
     id: r.id,
@@ -323,23 +340,28 @@ export function presetSettings(
 }
 
 /**
- * Source dimensions fitted to the project aspect, capped at 4K.
+ * Plain source sequences keep their original frame. Compositions fit the
+ * project aspect, capped at 4K.
  * Projects with no measured source dimensions use the base frame.
  */
 export function originalSettings(
   aspect: Aspect,
   clips: VideoClip[],
-  assets: MediaAsset[]
+  assets: MediaAsset[],
+  composition?: Pick<ExportDoc, "audioClips" | "overlays" | "subtitles">
 ): ExportSettings {
-  return { ...sourceFrame(aspect, clips, assets), fps: 30, crf: 19, preset: "medium", ...DELIVERY_DEFAULTS };
+  return { ...sourceFrame(aspect, clips, assets, composition), copySource: true, matchSource: true, fps: 30, crf: 19, preset: "medium", ...DELIVERY_DEFAULTS };
 }
 
 /** The frame `originalSettings` renders at — see its note for the rules. */
 export function sourceFrame(
   aspect: Aspect,
   clips: VideoClip[],
-  assets: MediaAsset[]
+  assets: MediaAsset[],
+  composition?: Pick<ExportDoc, "audioClips" | "overlays" | "subtitles">
 ): { width: number; height: number } {
+  const source = composition && sourceSequence({ aspect, clips, assets, ...composition })?.[0];
+  if (source) return { width: source.asset.width!, height: source.asset.height! };
   const base = frameOf(aspect);
   const longBase = Math.max(base.w, base.h);
   const sourceScale = Math.max(
@@ -365,8 +387,8 @@ export function estimateExportBytes(settings: ExportSettings, durationSec: numbe
 }
 
 /** AAC follows its source budget or uses 192 kbps; PCM is 48 kHz stereo 16-bit. */
-export function audioBitrate(settings: Pick<ExportSettings, "audioCodec" | "audioBitrate">): number {
-  return settings.audioCodec === "pcm" ? 48_000 * 16 * 2 : settings.audioBitrate ?? 192_000;
+export function audioBitrate(settings: Pick<ExportSettings, "audioCodec" | "audioBitrate" | "audioSampleRate" | "audioChannels">): number {
+  return settings.audioCodec === "pcm" ? (settings.audioSampleRate ?? 48_000) * 16 * (settings.audioChannels ?? 2) : settings.audioBitrate ?? 192_000;
 }
 
 /** Human-readable size estimate matching the finished-export MB display. */
@@ -1310,6 +1332,7 @@ export async function buildExportPayload(
       projectId,
       target,
       ...settings,
+      ...(target === "export" ? { sourceSegments: sourceExportPlan(doc, settings) ?? undefined } : {}),
       duration,
       background: projectBackground(doc.background),
       clips,

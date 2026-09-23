@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { exportSourceFiles } from "./sourceExport";
+import type { SourceSegment } from "../lib/sourceExportPlan";
 import { deliveryCodec, deliveryContainer, deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor, type ExportCodec, type ExportRange } from "../lib/exportDelivery";
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -52,6 +54,7 @@ const soundChain = (sound: ClipSound | undefined): string => {
 };
 
 export interface ExportSpec {
+  sourceSegments?: SourceSegment[];
   projectId: string;
   /** Where the render lands instead of a stamped file in exports/: "hls" is the
    * share's streaming ladder, "preview"
@@ -68,6 +71,8 @@ export interface ExportSpec {
   container?: "mp4" | "mov";
   audioCodec?: "aac" | "pcm";
   audioBitrate?: number;
+  audioSampleRate?: number;
+  audioChannels?: number;
   /** A bitrate the user typed, bits per second; absent = the `crf` tier. */
   bitrate?: number;
   /** The file's name without its extension, as typed; absent = the project's
@@ -446,7 +451,9 @@ export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
 
 /** The audio arguments for a spec's delivery. */
 export function audioCodecArgs(spec: ExportSpec): string[] {
-  return spec.audioCodec === "pcm" ? ["-c:a", "pcm_s16le"] : ["-c:a", "aac", "-b:a", String(spec.audioBitrate ?? 192_000)];
+  return [...(spec.audioCodec === "pcm" ? ["-c:a", "pcm_s16le"] : ["-c:a", "aac", "-b:a", String(spec.audioBitrate ?? 192_000)]),
+    ...(spec.audioSampleRate ? ["-ar", String(spec.audioSampleRate)] : []),
+    ...(spec.audioChannels ? ["-ac", String(spec.audioChannels)] : [])];
 }
 
 /** The file extension a spec's container takes. */
@@ -678,6 +685,7 @@ export function runFfmpeg(
  * takes them as a parameter so the filtergraph tests can build the real graph
  * for a spec with these stubbed. */
 export interface ExportPipelineIO {
+  exportSourceFiles: typeof exportSourceFiles;
   stat: typeof stat;
   writeFile: typeof writeFile;
   readFile: typeof readFile;
@@ -692,6 +700,7 @@ export interface ExportPipelineIO {
 }
 
 const realIO: ExportPipelineIO = {
+  exportSourceFiles,
   stat,
   writeFile,
   readFile,
@@ -716,6 +725,19 @@ export async function runExport(
   io: ExportPipelineIO = realIO
 ) {
   if (given.clips.length === 0) throw new Error("Nothing to export.");
+  const codec = given.codec ?? "h264";
+  if (given.target === "export" && given.sourceSegments?.length && (codec === "h264" || codec === "hevc")) {
+    for (const segment of given.sourceSegments) {
+      if (!given.clips.some((clip) => segment.file === clip.file && segment.from >= clip.in && segment.to <= clip.out)) {
+        // Adjacent splits of a source may be merged into one copy span.
+        const clips = given.clips.filter((clip) => clip.file === segment.file).sort((a, b) => a.in - b.in);
+        let covered = segment.from;
+        for (const clip of clips) if (clip.in <= covered && clip.out > covered) covered = clip.out;
+        if (covered < segment.to) throw new Error("Source export does not match the timeline media.");
+      }
+    }
+    if (await io.exportSourceFiles(job, mediaPathFor, given.sourceSegments, codec, given.audioBitrate)) return;
+  }
   let spec = narrowSpecToRange(given);
   const { width: W, height: H, fps } = spec;
 

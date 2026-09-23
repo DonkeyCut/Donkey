@@ -34,7 +34,7 @@ import { audioFxSpans } from "./audioEffects";
 import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
-import { audioTrackOf, frameSink, keyframeTimeAt, openMedia, videoTrackOf } from "./mediaRead";
+import { frameSink, keyframeTimeAt, openMedia, videoTrackOf } from "./mediaRead";
 import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
@@ -49,6 +49,8 @@ import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectO
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc } from "./renderSnapshot";
 import type { ExportSettings } from "./exportClient";
+import { sourceExportPlan } from "@/cut/lib/sourceExportPlan";
+import { prepareSourceRemux } from "@/cut/lib/sourceRemux";
 import { deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor } from "./exportDelivery";
 
 /** Audio is written at the rate and width a delivery file wants, rather than
@@ -160,9 +162,8 @@ function sliceAudio(mix: AudioBuffer, from: number, to: number): AudioBuffer {
   return out;
 }
 
-/** The frame rates a delivered file is written at. A source's measured rate
- * snaps to the nearest: 23.976 reads as 24, 29.97 as 30, 59.94 as 60. */
-const DELIVERY_RATES = [24, 25, 30, 48, 50, 60];
+/** Standard cadences retain their fractional rates; unusual rates keep the measured value. */
+const DELIVERY_RATES = [24000 / 1001, 24, 25, 30000 / 1001, 30, 48, 50, 60000 / 1001, 60];
 
 /** Sources the probe reads for a rate: the ones with the most time on the
  * timeline, so a cut of many files still answers quickly. */
@@ -191,7 +192,7 @@ function rateSources(doc: Pick<ExportDoc, "clips" | "assets">): [string, number]
     .slice(0, RATE_PROBE_SOURCES);
 }
 
-export type SourceExportProfile = { fps: number | null; videoBitrate?: number; audioBitrate?: number };
+export type SourceExportProfile = { fps: number | null; videoBitrate?: number; audioBitrate?: number; codec?: "h264" | "hevc"; audioSampleRate?: number; audioChannels?: number };
 
 /** Read cadence and compression budgets from the dominant video sources.
  * The largest source bitrate preserves detail across the sampled footage;
@@ -205,6 +206,7 @@ export async function sourceExportProfile(
   const seconds = new Map<number, number>();
   let videoBitrate = 0;
   let audioBitrate = 0;
+  const profiles = new Map<string, Partial<SourceExportProfile>>();
   await Promise.all(
     rateSources(doc).map(async ([id, len]) => {
       if (opts.signal?.aborted) return;
@@ -216,10 +218,10 @@ export async function sourceExportProfile(
       const deadline = setTimeout(close, RATE_PROBE_TIMEOUT_MS);
       opts.signal?.addEventListener("abort", close, { once: true });
       try {
-        const track = await videoTrackOf(input);
+        const track = await input.getPrimaryVideoTrack();
         if (!track) return;
         const stats = await track.computePacketStats(120);
-        const audio = await audioTrackOf(input);
+        const audio = await input.getPrimaryAudioTrack();
         const audioStats = audio ? await audio.computePacketStats(120) : null;
         const sizeBytes = asset.sizeBytes ?? await input.source.getSizeOrNull();
         const sourceAudio = audioStats?.averageBitrate ?? 0;
@@ -227,12 +229,18 @@ export async function sourceExportProfile(
         const sourceVideo = totalBitrate > sourceAudio ? totalBitrate - sourceAudio : stats.averageBitrate;
         if (Number.isFinite(sourceVideo)) videoBitrate = Math.max(videoBitrate, sourceVideo);
         if (Number.isFinite(sourceAudio)) audioBitrate = Math.max(audioBitrate, sourceAudio);
+        const codec = await track.getCodec();
+        profiles.set(id, {
+          ...(codec === "avc" || codec === "hevc" ? { codec: codec === "avc" ? "h264" : "hevc" } : {}),
+          ...(audio ? { audioSampleRate: await audio.getSampleRate(), audioChannels: await audio.getNumberOfChannels() } : {}),
+        });
         const rate = stats.averagePacketRate;
         if (!(rate > 0) || opts.signal?.aborted) return;
         const snapped = DELIVERY_RATES.reduce((best, r) =>
           Math.abs(r - rate) < Math.abs(best - rate) ? r : best
         );
-        seconds.set(snapped, (seconds.get(snapped) ?? 0) + len);
+        const cadence = Math.abs(snapped - rate) / rate < 0.0001 ? snapped : rate;
+        seconds.set(cadence, (seconds.get(cadence) ?? 0) + len);
       } catch {
         // A source the probe cannot read casts no vote.
       } finally {
@@ -247,7 +255,9 @@ export async function sourceExportProfile(
   for (const [rate, len] of seconds) {
     if (pick === null || len > seconds.get(pick)! || (len === seconds.get(pick) && rate > pick)) pick = rate;
   }
-  return { fps: pick, ...(videoBitrate > 0 ? { videoBitrate } : {}), ...(audioBitrate > 0 ? { audioBitrate } : {}) };
+  const primary = rateSources(doc).map(([id]) => profiles.get(id)).find(Boolean);
+  const audioChannels = Math.max(0, ...[...profiles.values()].map((p) => p.audioChannels ?? 0));
+  return { ...primary, ...(audioChannels ? { audioChannels } : {}), fps: pick, ...(videoBitrate > 0 ? { videoBitrate } : {}), ...(audioBitrate > 0 ? { audioBitrate } : {}) };
 }
 
 /** The frame reader for one open video source. */
@@ -929,6 +939,34 @@ export async function renderProjectToMp4(
   opts: RenderOptions
 ): Promise<RenderedExport> {
   const { resolve, onProgress, signal } = opts;
+  const trim = sourceExportPlan(doc, settings);
+  if (trim && (settings.codec === "h264" || settings.codec === "hevc")) {
+    const inputs = new Map<string, ReturnType<typeof openMedia>>();
+    try {
+      for (const segment of trim) if (!inputs.has(segment.file)) inputs.set(segment.file, openMedia(resolve(doc.assets.find((a) => a.fileName === segment.file)!)));
+      const copy = await prepareSourceRemux(inputs, trim, settings.codec);
+      if (copy) {
+        const dir = await scratchDir();
+        void sweepScratch(dir);
+        const name = `source-${crypto.randomUUID()}.mp4`;
+        const handle = await dir.getFileHandle(name, { create: true });
+        const writable = await handle.createWritable();
+        const discard = async () => { await dir.removeEntry(name).catch(() => {}); };
+        try {
+          await copy({
+            write: (data, position) => writable.write({ type: "write", position, data: new Uint8Array(data) }),
+            truncate: (size) => writable.truncate(size),
+          }, (ratio) => onProgress?.({ ratio, stage: "video" }), () => signal?.throwIfAborted());
+          await writable.close();
+          return { file: await handle.getFile(), discard };
+        } catch (error) {
+          await writable.abort().catch(() => {});
+          await discard();
+          throw error;
+        }
+      }
+    } finally { for (const input of inputs.values()) input.dispose(); }
+  }
   const duration = projectDuration(doc);
   if (!(duration > 0)) throw new Error("There is nothing to export yet.");
   // The window of the timeline the file carries: a range when the settings
@@ -956,8 +994,8 @@ export async function renderProjectToMp4(
 
   onProgress?.({ ratio: 0, stage: "audio" });
   const whole = await renderMix(mixSpecFor(doc, resolve), {
-    sampleRate: AUDIO_RATE,
-    channels: AUDIO_CHANNELS,
+    sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
+    channels: settings.audioChannels ?? AUDIO_CHANNELS,
     resolve: (file) => file, // mixSpecFor already resolved each asset to a URL
   });
   const mix = whole && settings.range ? sliceAudio(whole, from, from + span) : whole;
@@ -1007,8 +1045,8 @@ export async function renderProjectToMp4(
       // and a cut with sound keeps it: an Opus stand-in plays nowhere the
       // user is taking the file, so a browser without AAC hands the render on.
       const audioCodec = await getFirstEncodableAudioCodec([deliveryAudioCodec(settings)], {
-        numberOfChannels: AUDIO_CHANNELS,
-        sampleRate: AUDIO_RATE,
+        numberOfChannels: settings.audioChannels ?? AUDIO_CHANNELS,
+        sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
       });
       if (!audioCodec) throw new Error("This browser can't encode AAC audio.");
       audio = new AudioBufferSource({
@@ -1556,6 +1594,14 @@ export async function canRenderInBrowser(
     return false;
   }
   try {
+    const trim = sourceExportPlan(doc, settings);
+    if (trim && (settings.codec === "h264" || settings.codec === "hevc")) {
+      const inputs = new Map<string, ReturnType<typeof openMedia>>();
+      try {
+        for (const segment of trim) if (!inputs.has(segment.file)) inputs.set(segment.file, openMedia(doc.assets.find((a) => a.fileName === segment.file)!.url));
+        return !!await prepareSourceRemux(inputs, trim, settings.codec); }
+      finally { for (const input of inputs.values()) input.dispose(); }
+    }
     const wanted = deliveryVideoCodec(settings);
     if (!wanted) return false;
     const video = await getFirstEncodableVideoCodec([wanted], {
@@ -1568,8 +1614,8 @@ export async function canRenderInBrowser(
     // muxer, or hand back a video whose sound went missing.
     if (!mixHasSound(mixSpecFor(doc, (a) => a.url))) return true;
     return !!(await getFirstEncodableAudioCodec([deliveryAudioCodec(settings)], {
-      numberOfChannels: AUDIO_CHANNELS,
-      sampleRate: AUDIO_RATE,
+      numberOfChannels: settings.audioChannels ?? AUDIO_CHANNELS,
+      sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
     }));
   } catch {
     return false;

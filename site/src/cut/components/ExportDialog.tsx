@@ -81,8 +81,8 @@ export function ExportDialog() {
     [clips, audioClips, overlays]
   );
   const resolutions = useMemo(
-    () => resolutionOptions(aspect, clips, assets),
-    [aspect, clips, assets]
+    () => resolutionOptions(aspect, clips, assets, { audioClips, overlays, subtitles }),
+    [aspect, clips, assets, audioClips, overlays, subtitles]
   );
   // The size rungs in slider order, smallest on the left, largest on the right.
   const rungs = useMemo(() => [...resolutions].reverse(), [resolutions]);
@@ -134,7 +134,7 @@ export function ExportDialog() {
   const settings = useMemo<ExportSettings>(
     () => ({
       ...choiceSettings(choice, resolutions, sourceFps ?? DEFAULT_EXPORT_FPS,
-        !probing && probe ? { ...probe, ...(audioClips.length > 0 ? { audioBitrate: undefined } : {}) } : undefined),
+        !probing && probe ? { ...probe, ...(audioClips.length > 0 ? { audioBitrate: undefined, audioSampleRate: undefined, audioChannels: undefined } : {}) } : undefined),
       ...(typedName ? { name: baseName } : {}),
       ...(range ? { range } : {}),
     }),
@@ -306,7 +306,7 @@ export function ExportDialog() {
                 </SelectTrigger>
                 <SelectContent align="end">
                   <SelectItem value="source" title="The rate the footage plays at">
-                    {probing ? "Source · reading…" : `Source · ${sourceFps ?? DEFAULT_EXPORT_FPS} fps`}
+                    {probing ? "Source · reading…" : `Source · ${Number((sourceFps ?? DEFAULT_EXPORT_FPS).toFixed(3))} fps`}
                   </SelectItem>
                   {EXPORT_FRAME_RATES.map((f) => (
                     <SelectItem key={f} value={String(f)}>
@@ -326,6 +326,7 @@ export function ExportDialog() {
                   set({
                     container: f.container,
                     codec: f.codec,
+                    sourceCodec: false,
                     ...(fixedRate(f.codec) ? { bitrateMbps: undefined } : {}),
                     // MP4 cannot carry PCM either; picking it turns the audio to AAC.
                     ...(f.container === "mp4" && choice.audioCodec === "pcm" ? { audioCodec: "aac" } : {}),

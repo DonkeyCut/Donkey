@@ -4135,7 +4135,7 @@ function ClipMaskKeyStrip({
 }
 
 /** Render just this timeline item through the normal export pipeline: a
- * one-clip cut at the project aspect, trimmed and paced like the segment on
+ * one-clip cut using source settings, trimmed and paced like the segment on
  * the timeline, landing in the project's exports folder and the dock like any
  * full export. */
 function exportSegment(asset: MediaAsset, clip: VideoClip | AudioClip) {
@@ -4160,7 +4160,7 @@ function exportSegment(asset: MediaAsset, clip: VideoClip | AudioClip) {
           overlays: [],
           subtitles: emptySubtitles(),
         };
-  const settings = originalSettings(s.aspect, doc.clips, doc.assets);
+  const settings = originalSettings(s.aspect, doc.clips, doc.assets, doc);
   void useExports.getState().start(s.projectId, doc, settings, s.projectName);
 }
 

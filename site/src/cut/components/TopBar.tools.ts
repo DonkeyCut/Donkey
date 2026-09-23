@@ -48,7 +48,7 @@ export const TOP_BAR_TOOLS = [
   {
     name: "open_export",
     description:
-      `Open the export dialog: Best defaults to source resolution and video/audio bitrates, including sources below 720p. Other presets are Share, Social 4K, Small and Master. Controls include file name, whole video or selection range, MP4/MOV, H.264/HEVC/ProRes, resolution (${EXPORT_RESOLUTIONS.map((r) => r.label).join(", ")}, Source), frame rate, quality or custom bitrate, AAC/PCM, and an SRT captions file. Exporting itself stays a user action.`,
+      `Open the export dialog: Best uses original resolution, frame rate, supported H.264/HEVC codec and audio settings. Whole files, trims and compatible sequences copy compressed video; joined audio is encoded at source settings. Effects or incompatible joins render with source settings. Other presets are Share, Social 4K, Small and Master. Controls include file name, whole video or selection range, MP4/MOV, H.264/HEVC/ProRes, resolution (${EXPORT_RESOLUTIONS.map((r) => r.label).join(", ")}, Source), frame rate, quality or custom bitrate, AAC/PCM, and an SRT captions file. Exporting itself stays a user action.`,
     inputSchema: obj({}),
   },
 ] as const satisfies readonly AiToolDef[];

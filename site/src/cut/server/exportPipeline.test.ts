@@ -19,6 +19,7 @@ const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
   // chunk runs that wrote its pieces, so the bake reads back a whole file.
   const produced = new Map<string, number>();
   const io: ExportPipelineIO = {
+    exportSourceFiles: async () => false,
     stat: (async () => ({ isFile: () => true })) as unknown as ExportPipelineIO["stat"],
     writeFile: (async () => {}) as unknown as ExportPipelineIO["writeFile"],
     readFile: (async () => new Uint8Array(0)) as unknown as ExportPipelineIO["readFile"],

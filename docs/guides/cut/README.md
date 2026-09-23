@@ -52,7 +52,7 @@ Guides draw over the preview from the button beside the timeline zoom: thirds, c
 
 ## The export
 
-Exports use the preview's compositor and mixer. Best matches source dimensions, frame rate and video/audio bitrates, including low-resolution footage; project aspect and edits still apply. Named resolutions reach down to 240p. Explicit resolution, bitrate and ProRes choices control delivery. Extra soundtrack audio keeps the delivery audio budget. The dialog exports the whole timeline or a selection, names the file, and saves captions as SRT. Master uses ProRes 4444 to preserve graphics' color detail. Smooth slow motion estimates intermediate frames; browsers without WebGPU blend them. Files land in the project's home: browser storage, the Mac project folder, or cloud storage. A browser without the required encoder hands rendering to the project's machine. The [local-compute guide](local-compute.md) covers that boundary.
+Best uses original resolution, cadence, supported H.264/HEVC codec and audio settings. Whole files and trims copy compressed streams; compatible sequences copy video and encode joined audio. Interior joins need matching codec configurations and keyframes. Effects and incompatible joins render at source settings. Browser, Mac and cloud share packet copying; audio joins use FFmpeg on the project’s machine. Files land in project storage. The [local-compute guide](local-compute.md) covers browser handoff.
 
 ## Sharing
 

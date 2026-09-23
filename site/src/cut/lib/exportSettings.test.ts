@@ -46,3 +46,18 @@ test("custom bitrate and explicit upscale presets keep their chosen budgets", ()
   expect(choiceSettings(EXPORT_QUICK_PRESETS[2].choice, options, 30, source).bitrate).toBeUndefined();
   expect(choiceSettings(EXPORT_QUICK_PRESETS[4].choice, options, 30, source).audioBitrate).toBeUndefined();
 });
+
+test("Best uses the source codec, fractional cadence and audio format", () => {
+  const options = resolutionOptions("4:3", [clip], [asset]);
+  const profile = { codec: "hevc" as const, videoBitrate: 150_000, audioBitrate: 48_000, audioSampleRate: 44_100, audioChannels: 1 };
+  const settings = choiceSettings(best, options, 30000 / 1001, profile);
+  expect(settings).toMatchObject({ codec: "hevc", fps: 30000 / 1001, audioSampleRate: 44_100, audioChannels: 1, bitrate: 150_000, audioBitrate: 48_000, copySource: true });
+  expect(choiceSettings({ ...best, codec: "h264", sourceCodec: false }, options, 30, profile).codec).toBe("h264");
+});
+
+
+test("original settings preserve source bitrates above the normal delivery budget", () => {
+  const settings = choiceSettings(best, resolutionOptions("4:3", [clip], [asset]), 30, { videoBitrate: 10_000_000, audioBitrate: 256_000 });
+  expect(settings.bitrate).toBe(10_000_000);
+  expect(settings.audioBitrate).toBe(256_000);
+});

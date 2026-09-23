@@ -4,7 +4,7 @@ import {
   buildExportPayload,
   EXPORT_PRESETS,
   originalSettings,
-  matchSourceBitrates,
+  matchSourceSettings,
   presetSettings,
   previewSettings,
   type ExportSettings,
@@ -26,8 +26,8 @@ async function settingsFor(preset: DocExportPreset, doc: ExportDoc): Promise<Exp
   const fixed = EXPORT_PRESETS.find((p) => p.id === preset);
   if (fixed) return presetSettings(fixed, doc.aspect);
   const source = await sourceExportProfile(doc, (asset) => asset.url);
-  return matchSourceBitrates({ ...originalSettings(doc.aspect, doc.clips, doc.assets), fps: source.fps ?? 30 },
-    { ...source, ...(doc.audioClips.length > 0 ? { audioBitrate: undefined } : {}) });
+  return matchSourceSettings(originalSettings(doc.aspect, doc.clips, doc.assets, doc),
+    { ...source, ...(doc.audioClips.length > 0 ? { audioBitrate: undefined, audioSampleRate: undefined, audioChannels: undefined } : {}) });
 }
 
 /**

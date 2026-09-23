@@ -8,6 +8,7 @@ import { browserBackend } from "./backend/browser";
 import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
 import {
+  matchSourceSettings,
   cancelExportJob,
   createExportJob,
   ExportRefusedError,
@@ -16,7 +17,7 @@ import {
   type ExportSettings,
 } from "./exportClient";
 import type { ExportDoc } from "./renderSnapshot";
-import { canRenderInBrowser } from "./exportRender";
+import { canRenderInBrowser, sourceExportProfile } from "./exportRender";
 import { useGenNotify } from "./genNotify";
 import { STORAGE_FULL } from "./operationFailure";
 import { emitStorageQuota } from "./storageQuota";
@@ -111,6 +112,10 @@ export const useExports = create<ExportsState>((set, get) => ({
   start: async (projectId, doc, settings, projectName) => {
     const localId = `local-${crypto.randomUUID().slice(0, 8)}`;
     const backend = getBackend();
+    if (settings.matchSource) {
+      const source = await sourceExportProfile(doc, (asset) => asset.url);
+      settings = matchSourceSettings(settings, { ...source, ...(doc.audioClips.length ? { audioBitrate: undefined, audioSampleRate: undefined, audioChannels: undefined } : {}) });
+    }
     // Every project renders in the tab: the file matches the preview because
     // the compositor that drew the stage and the graph that played the sound
     // draw and mix the file. A browser that can't carry the render — no
