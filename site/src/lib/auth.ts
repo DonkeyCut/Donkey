@@ -7,6 +7,7 @@ import { AUTH_COOKIE_DOMAIN, DONKEYCUT_CANONICAL, SU_ORIGIN } from "@/cut/lib/ho
 import { provisionSignupGrants } from "@/lib/onboarding/signup-grants";
 import { prisma } from "@/lib/prisma";
 import { emailPasswordDisabledPaths, emailPasswordGuard, emailPasswordOptions } from "@/lib/email-password-auth";
+import { sendVerificationEmail } from "@/lib/email/send-verification";
 
 // donkeycut.com owns sign-in: the auth pages, the auth API, and the Google
 // OAuth callback all serve on that one origin (the proxy 308s www. to the apex
@@ -75,6 +76,12 @@ export const auth = betterAuth({
     },
   },
   emailAndPassword: emailPasswordOptions,
+  emailVerification: {
+    sendVerificationEmail,
+    sendOnSignUp: false,
+    sendOnSignIn: false,
+    autoSignInAfterVerification: false,
+  },
   disabledPaths: emailPasswordDisabledPaths,
   hooks: {
     before: emailPasswordGuard,

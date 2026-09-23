@@ -12,6 +12,7 @@ export type AccountProfile = {
   // The name the user chose for the product, when they've set one.
   displayName: string | null;
   email: string;
+  emailVerified: boolean;
   image: string | null;
 };
 
@@ -70,5 +71,15 @@ export function useUpdateDisplayName() {
     onSuccess: (profile) => {
       queryClient.setQueryData(accountProfileQueryKey, profile);
     },
+  });
+}
+
+export function useVerifyEmail() {
+  return useMutation({
+    mutationFn: (email: string) =>
+      apiFetch<{ status: boolean }>("/api/auth/send-verification-email", {
+        method: "POST",
+        body: JSON.stringify({ email, callbackURL: "/app/settings/profile" }),
+      }),
   });
 }

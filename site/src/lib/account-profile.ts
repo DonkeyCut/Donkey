@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 export async function accountProfile(userId: string) {
   const [user, avatar] = await Promise.all([
     prisma.user.findUnique({
-      select: { displayName: true, email: true, image: true, name: true },
+      select: { displayName: true, email: true, emailVerified: true, image: true, name: true },
       where: { id: userId },
     }),
     prisma.userAvatar.findUnique({
@@ -23,6 +23,7 @@ export async function accountProfile(userId: string) {
   return {
     displayName: user.displayName,
     email: user.email,
+    emailVerified: user.emailVerified,
     image: avatar ? `/api/account/avatar?v=${avatar.updatedAt.getTime()}` : user.image,
     name: user.name,
   };

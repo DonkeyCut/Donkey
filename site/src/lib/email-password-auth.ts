@@ -1,4 +1,4 @@
-import { APIError, createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 
 export const emailPasswordOptions = {
   enabled: true,
@@ -12,7 +12,13 @@ export const emailPasswordDisabledPaths = [
 ];
 
 export const emailPasswordGuard = createAuthMiddleware(async (ctx) => {
-  if (ctx.path !== "/sign-in/email" && ctx.path !== "/sign-up/email") return;
+  if (ctx.path === "/send-verification-email") {
+    const session = await getSessionFromCtx(ctx);
+    if (!session || typeof ctx.body?.email !== "string" || ctx.body.email.toLowerCase() !== session.user.email.toLowerCase()) {
+      throw new APIError("UNAUTHORIZED", { message: "Sign in to verify your email." });
+    }
+  }
+  if (ctx.path !== "/sign-in/email" && ctx.path !== "/sign-up/email" && ctx.path !== "/send-verification-email") return;
   const callback: unknown = ctx.body?.callbackURL;
   if (callback !== undefined && (
     typeof callback !== "string" ||

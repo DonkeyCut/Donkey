@@ -17,6 +17,7 @@ import { UserAvatar } from "@/cut/components/UserAvatar";
 import {
   useAccountProfile,
   useUpdateDisplayName,
+  useVerifyEmail,
   visibleName,
 } from "@/queries/accountProfile";
 
@@ -26,6 +27,7 @@ import {
 export default function CutProfilePage() {
   const { data: profile, isPending, isError } = useAccountProfile();
   const update = useUpdateDisplayName();
+  const verifyEmail = useVerifyEmail();
   // Null means "not edited yet", so the field follows the saved value until
   // the user types and again once a save lands.
   const [draft, setDraft] = useState<string | null>(null);
@@ -96,6 +98,30 @@ export default function CutProfilePage() {
               {visibleName(profile, profile.name)}
             </div>
             <div className="truncate text-sm text-muted-foreground">{profile.email}</div>
+            {profile.emailVerified ? (
+              <p className="mt-1 text-xs text-muted-foreground">Email verified</p>
+            ) : (
+              <div className="mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={verifyEmail.isPending}
+                  onClick={() => verifyEmail.mutate(profile.email)}
+                >
+                  {verifyEmail.isPending ? "Sending…" : verifyEmail.isSuccess ? "Resend email" : "Verify email"}
+                </Button>
+                {verifyEmail.isSuccess && (
+                  <p role="status" className="mt-2 text-sm text-muted-foreground">
+                    Check your inbox for a verification link.
+                  </p>
+                )}
+                {verifyEmail.isError && (
+                  <p role="alert" className="mt-2 text-sm text-red-600">
+                    Couldn&apos;t send the verification email. Try again.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
