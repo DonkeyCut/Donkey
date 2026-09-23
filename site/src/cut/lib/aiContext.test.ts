@@ -45,7 +45,7 @@ describe("describeDoc", () => {
     const assets = doc.assets.map((a) => ({ ...a, url: "" }));
     doc.assets = storedAssets(assets);
     await useEditor.getState().openProjectDoc("file-info", doc, assets);
-    const expected = { fileName: doc.assets[0].fileName, sizeBytes: 21_000_001, width: 320, height: 240 };
+    const expected = { fileName: doc.assets[0].fileName, sizeBytes: 21_000_001, fileSize: "20 MB", width: 320, height: 240 };
     expect(buildAiContext({ chatId: null }).media[0]).toMatchObject(expected);
     expect(describeDoc(doc).media[0]).toMatchObject(expected);
     expect(describeDoc(doc).media[0].duration).toBe(doc.assets[0].duration);

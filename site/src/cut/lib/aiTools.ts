@@ -1,5 +1,6 @@
 "use client";
 
+import { formatBytes } from "@/lib/bytes";
 import { projectRevision } from "@/cut/lib/projectRevision";
 import { assertProjectCommand } from "./projectCommands";
 import { projectOperation, type ProjectOperation } from "./projectOperation";
@@ -855,7 +856,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const sizeBytes = asset.sizeBytes ?? await readMediaFileSize(asset.url);
     return {
       assetId: asset.id, name: asset.name, fileName: asset.fileName, kind: asset.type,
-      sizeBytes, duration: round2(asset.duration), width: asset.width, height: asset.height,
+      sizeBytes, fileSize: formatBytes(sizeBytes), duration: round2(asset.duration), width: asset.width, height: asset.height,
     };
   },
 

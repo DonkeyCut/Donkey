@@ -21,13 +21,13 @@ test("existing browser assets can report file size without saved metadata", asyn
   const url = registerBlobFile(path, new File([new Uint8Array(4321)], "test.png"));
   useEditor.setState({ assets: [{ ...asset, url }] });
   expect(await runAiTool("get_asset_info", { asset_id: asset.id })).toMatchObject({
-    sizeBytes: 4321, duration: 0, width: 320, height: 240, fileName: "test.png",
+    sizeBytes: 4321, fileSize: "4 KB", duration: 0, width: 320, height: 240, fileName: "test.png",
   });
 });
 
 test("saved file size needs no media request", async () => {
-  useEditor.setState({ assets: [{ ...asset, sizeBytes: 21_000_000 }] });
-  expect(await runAiTool("get_asset_info", { asset_id: asset.id })).toMatchObject({ sizeBytes: 21_000_000 });
+  useEditor.setState({ assets: [{ ...asset, sizeBytes: 21_988_779 }] });
+  expect(await runAiTool("get_asset_info", { asset_id: asset.id })).toMatchObject({ sizeBytes: 21_988_779, fileSize: "21 MB" });
 });
 
 test("a generated placeholder has no source file", async () => {

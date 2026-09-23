@@ -1,5 +1,6 @@
 "use client";
 
+import { formatBytes } from "@/lib/bytes";
 import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import { hasOverlayAnim, retimeOf, speedCurveOf, type ClipSound, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
@@ -419,7 +420,7 @@ function describeState(
       name: a.name,
       type: a.type,
       fileName: a.fileName,
-      ...(a.sizeBytes !== undefined ? { sizeBytes: a.sizeBytes } : {}),
+      ...(a.sizeBytes !== undefined ? { sizeBytes: a.sizeBytes, fileSize: formatBytes(a.sizeBytes) } : {}),
       ...(a.width !== undefined ? { width: a.width } : {}),
       ...(a.height !== undefined ? { height: a.height } : {}),
       duration: r(a.duration),

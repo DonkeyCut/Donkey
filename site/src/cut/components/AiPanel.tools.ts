@@ -20,7 +20,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "get_asset_info",
     description:
-      "Read a project asset's file name, kind, exact file size in bytes, duration in seconds, and pixel dimensions. Use this for file-size questions when sizeBytes is absent from the media snapshot. Reads file metadata across browser, Mac, and cloud storage.",
+      "Read a project asset's file name, kind, readable fileSize (KB, MB, GB), exact sizeBytes, duration in seconds, and pixel dimensions. Present fileSize in replies; include exact bytes only when asked. Use this for file-size questions when sizeBytes is absent from the media snapshot. Reads file metadata across browser, Mac, and cloud storage.",
     inputSchema: obj({ asset_id: str("Project asset id from media or an import result") }, ["asset_id"]),
   },
   {
