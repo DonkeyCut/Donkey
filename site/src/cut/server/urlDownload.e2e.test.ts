@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { once } from "node:events";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { playableMedia } from "./urlDownload";
+import { download, playableMedia } from "./urlDownload";
 
 // What a link import lands has to play on every surface it reaches: the
 // phone's viewer and the Mac's player go through AVFoundation, which decodes
@@ -53,6 +55,41 @@ const source = (dir: string, name: string, encode: string[]) => {
 // Without ffmpeg on the box there is nothing to hand the gate, so the suite
 // stands down.
 const suite = tools ? describe : (() => {});
+
+const downloadTools = tools && spawnSync("yt-dlp", ["--version"], { stdio: "ignore" }).status === 0;
+
+test.skipIf(!downloadTools)("imports media from a signed attachment URL with a long query", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "cut-attachment-"));
+  const file = source(dir, "fixture.mp4", ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac"]);
+  const bytes = await readFile(file);
+  const signature = "a".repeat(600);
+  const server = createServer((request, response) => {
+    const url = new URL(request.url!, "http://localhost");
+    if (url.pathname !== "/raw" || url.searchParams.get("sig") !== signature) {
+      response.writeHead(403).end();
+      return;
+    }
+    response.writeHead(200, { "Content-Type": "video/mp4", "Content-Length": bytes.length });
+    response.end(request.method === "HEAD" ? undefined : bytes);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing test server address.");
+    const url = `http://127.0.0.1:${address.port}/raw?sig=${signature}`;
+    const result = await download(url, dir);
+    expect(result.files).toHaveLength(1);
+    const landed = result.files[0].file;
+    expect(Buffer.byteLength(path.basename(landed))).toBeLessThan(100);
+    expect(path.basename(landed)).not.toContain("sig");
+    expect(await readFile(landed)).toEqual(bytes);
+    expect(probe(landed).video).toBe("h264");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(dir, { force: true, recursive: true });
+  }
+}, 60_000);
 
 suite("playableMedia", () => {
   test("an H.264 mp4 is handed back untouched", async () => {

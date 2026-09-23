@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { accessSync, constants as fsConstants, realpathSync } from "node:fs";
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -782,7 +783,8 @@ function ytDlp(
   return ytDlpJson(bin, [
     ...(client ? ["--extractor-args", `youtube:player_client=${client}`] : []),
     ...format,
-    "-o", path.join(dir, "%(id)s.%(ext)s"),
+    // Extractor IDs can contain signed URL queries longer than a disk filename.
+    "-o", path.join(dir, `${randomUUID()}.%(ext)s`),
     "--print-json",
     url,
   ], timeoutMs);
