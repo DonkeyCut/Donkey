@@ -71,10 +71,10 @@ export async function buildOutreachEmail(
   payload: OutreachPayload,
   user: EmailUser,
   offerScope = outreachOfferScope(payload.outreachId, payload.attempt),
-): Promise<EmailMessage> {
+): Promise<EmailMessage | null> {
+  if (await isMarketingUnsubscribed(user.id)) return null;
   const from = emailFrom();
   if (!from) throw new PermanentSendError("RESEND_FROM_EMAIL is not configured.");
-  if (await isMarketingUnsubscribed(user.id)) throw new PermanentSendError("That account is unsubscribed.");
 
   const offer = payload.creditOffer
     ? await createTermsCreditOffer({

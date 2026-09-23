@@ -48,6 +48,19 @@ type Outcome =
 // not burn its attempts.
 const backoffSeconds = (attempts: number) => attempts * 5 * 60;
 
+// Failed mail for an opted-out recipient is settled without another send.
+async function skipUnsubscribedFailures(id?: string): Promise<void> {
+  await prisma.emailSend.updateMany({
+    data: { error: null, state: "skipped" },
+    where: {
+      id,
+      state: "failed",
+      kind: { in: EMAIL_KIND_IDS.filter((kind) => EMAIL_KINDS[kind].respectsMarketingOptOut) },
+      user: { emailSettings: { marketingUnsubscribedAt: { not: null } } },
+    },
+  });
+}
+
 function claimable(now: Date): Prisma.EmailSendWhereInput {
   return {
     OR: [{ state: "queued" }, { state: "sending", updatedAt: { lt: new Date(now.getTime() - STALE_SENDING_MS) } }],
@@ -196,6 +209,7 @@ export type DrainResult = {
  * rows go. */
 export async function drainOutbox(budgetMs: number, kind?: EmailKindId): Promise<DrainResult> {
   const startedAt = Date.now();
+  await skipUnsubscribedFailures();
   const result: DrainResult = { sent: 0, failed: 0, skipped: 0, retried: 0, retryAfterSeconds: null, more: false };
   const refused = new Map<EmailSendKind, number>();
   const touchedPromotions = new Set<string>();
@@ -327,6 +341,7 @@ const ITEMS = 60;
 /** The outbox as su sees it: the cycle's budget, every kind's standing, and the
  * rows worth a look. */
 export async function outboxOverview(now = new Date()): Promise<OutboxOverview> {
+  await skipUnsubscribedFailures();
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
   const [quota, priorities, queued, sentToday, failed, byCampaign, waiting, broken, recent, drains] = await Promise.all([
     emailBudgetStatus(now),
@@ -349,7 +364,7 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
     }),
     prisma.emailSend.findMany({
       include: { promotion: { select: { name: true } }, user: { select: { email: true } } },
-      orderBy: { sentAt: "desc" },
+      orderBy: { updatedAt: "desc" },
       take: ITEMS,
       where: { state: { in: ["sent", "skipped"] } },
     }),
@@ -419,6 +434,7 @@ export async function outboxOverview(now = new Date()): Promise<OutboxOverview> 
 /** Puts a failed row back in the queue with a clean slate and sends for a
  * drainer. */
 export async function retryEmail(id: string): Promise<boolean> {
+  await skipUnsubscribedFailures(id);
   const { count } = await prisma.emailSend.updateMany({
     data: { attempts: 0, error: null, notBefore: new Date(), state: "queued" },
     where: { id, state: "failed" },

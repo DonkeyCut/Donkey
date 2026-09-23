@@ -36,6 +36,7 @@ export type OutboxRow = {
 
 export type EmailKind<P = unknown> = {
   quota: EmailSendKind;
+  respectsMarketingOptOut?: boolean;
   payload: z.ZodType<P>;
   // The message for the provider, or null when nothing should go out any
   // more (the account is gone or opted out): the row is dropped as skipped.
@@ -101,6 +102,7 @@ const creditOffer = define({
 
 const outreach = define({
   quota: "manual",
+  respectsMarketingOptOut: true,
   payload: outreachPayloadSchema,
   build: async (payload, row) => {
     const user = await userOf(row);
@@ -114,6 +116,7 @@ const outreach = define({
 // the sending address, since the row's alias would file the row.
 const outreachTest = define({
   quota: "manual",
+  respectsMarketingOptOut: true,
   payload: outreachPayloadSchema,
   build: async (payload, row) => {
     const user = await userOf(row);
@@ -165,6 +168,7 @@ async function promotionEmailFor(
 
 const promotion = define({
   quota: "bulk",
+  respectsMarketingOptOut: true,
   payload: promotionPayloadSchema,
   build: async ({ promotionId }, row) => {
     const [user, promotion] = await Promise.all([userOf(row), promotionRowOf(promotionId)]);
@@ -194,6 +198,7 @@ const promotionTest = define({
 // again. The row's outreach entry is filed as sent, like a note.
 const promotionHand = define({
   quota: "manual",
+  respectsMarketingOptOut: true,
   payload: z
     .object({ promotionId: z.string().min(1), outreachId: z.string().min(1), actorUserId: z.string().min(1) })
     .strict(),
