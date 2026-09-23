@@ -67,6 +67,7 @@ export interface ExportSpec {
   codec?: ExportCodec;
   container?: "mp4" | "mov";
   audioCodec?: "aac" | "pcm";
+  audioBitrate?: number;
   /** A bitrate the user typed, bits per second; absent = the `crf` tier. */
   bitrate?: number;
   /** The file's name without its extension, as typed; absent = the project's
@@ -445,7 +446,7 @@ export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
 
 /** The audio arguments for a spec's delivery. */
 export function audioCodecArgs(spec: ExportSpec): string[] {
-  return spec.audioCodec === "pcm" ? ["-c:a", "pcm_s16le"] : ["-c:a", "aac", "-b:a", "192k"];
+  return spec.audioCodec === "pcm" ? ["-c:a", "pcm_s16le"] : ["-c:a", "aac", "-b:a", String(spec.audioBitrate ?? 192_000)];
 }
 
 /** The file extension a spec's container takes. */

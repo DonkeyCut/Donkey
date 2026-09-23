@@ -40,7 +40,7 @@ import {
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { downloadText } from "@/cut/lib/download";
 import { deliverySpan, exportBaseName } from "@/cut/lib/exportDelivery";
-import { canRenderInBrowser, sourceFrameRate, sourceFrameRateKey } from "@/cut/lib/exportRender";
+import { canRenderInBrowser, sourceExportProfile, sourceFrameRateKey, type SourceExportProfile } from "@/cut/lib/exportRender";
 import { useExports } from "@/cut/lib/exportStore";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { subtitleFiles } from "@/cut/lib/subtitleFile";
@@ -106,13 +106,13 @@ export function ExportDialog() {
   // through the assets list leaves it alone — and a superseded probe closes
   // its readers.
   const probeKey = sourceFrameRateKey({ clips, assets });
-  const [probe, setProbe] = useState<{ key: string; fps: number | null } | null>(null);
+  const [probe, setProbe] = useState<({ key: string } & SourceExportProfile) | null>(null);
   useEffect(() => {
     const abort = new AbortController();
     const s = useEditor.getState();
-    void sourceFrameRate({ clips: s.clips, assets: s.assets }, (a) => a.url, { signal: abort.signal }).then(
-      (fps) => {
-        if (!abort.signal.aborted) setProbe({ key: probeKey, fps });
+    void sourceExportProfile({ clips: s.clips, assets: s.assets }, (a) => a.url, { signal: abort.signal }).then(
+      (profile) => {
+        if (!abort.signal.aborted) setProbe({ key: probeKey, ...profile });
       }
     );
     return () => abort.abort();
@@ -133,11 +133,12 @@ export function ExportDialog() {
   const typedName = baseName !== exportBaseName(projectName);
   const settings = useMemo<ExportSettings>(
     () => ({
-      ...choiceSettings(choice, resolutions, sourceFps ?? DEFAULT_EXPORT_FPS),
+      ...choiceSettings(choice, resolutions, sourceFps ?? DEFAULT_EXPORT_FPS,
+        !probing && probe ? { ...probe, ...(audioClips.length > 0 ? { audioBitrate: undefined } : {}) } : undefined),
       ...(typedName ? { name: baseName } : {}),
       ...(range ? { range } : {}),
     }),
-    [choice, resolutions, sourceFps, typedName, baseName, range]
+    [choice, resolutions, sourceFps, probe, probing, audioClips.length, typedName, baseName, range]
   );
   const set = (patch: Partial<ExportChoice>) => setChoice((c) => ({ ...c, ...patch }));
   const captionFiles = useMemo(
@@ -145,7 +146,7 @@ export function ExportDialog() {
     [subtitles, baseName, range]
   );
   // A "source" rate is not known until the probe answers; the button waits.
-  const waiting = probing && choice.fps === "source";
+  const waiting = probing && (choice.fps === "source" || choice.resolution === "source");
 
   // A browser-resident project renders in this tab when it can, and on the
   // cloud worker when it can't; ask up front which it is, so the dialog says

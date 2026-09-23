@@ -848,6 +848,12 @@ const encodeRun = async (over: Partial<ExportSpec>) => {
 const arg = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
 
 describe("delivery", () => {
+  test("source bitrates reach the worker and Mac encoders", async () => {
+    const args = await encodeRun({ bitrate: 140_000, audioBitrate: 48_000 });
+    expect(arg(args, "-b:v")).toBe("140000");
+    expect(arg(args, "-b:a")).toBe("48000");
+    expect(args).not.toContain("-crf");
+  });
   test("a spec without delivery fields is an H.264 + AAC MP4", async () => {
     const args = await encodeRun({});
     expect(arg(args, "-c:v")).toBe("libx264");

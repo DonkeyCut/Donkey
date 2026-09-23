@@ -1,7 +1,7 @@
 "use client";
 
 import { captureRenderSnapshot, renderDoc, type ExportDoc, type RenderSnapshot } from "./renderSnapshot";
-import { DELIVERY_DEFAULTS, EXPORT_PRESETS } from "./exportPresets";
+import { DELIVERY_DEFAULTS, EXPORT_PRESETS, EXPORT_RESOLUTIONS } from "./exportPresets";
 import { operationFailure, type OperationFailure } from "./operationFailure";
 import { projectOperation } from "./projectOperation";
 
@@ -67,8 +67,10 @@ export interface ExportSettings {
   codec: ExportCodec;
   container: ExportContainer;
   audioCodec: ExportAudioCodec;
-  /** A bitrate the user typed, bits per second. Absent = the tier's model. */
+  /** Video bitrate in bits per second; omitted uses the quality tier. */
   bitrate?: number;
+  /** AAC bitrate in bits per second; omitted uses the delivery default. */
+  audioBitrate?: number;
   /** The file's name without its extension, as typed; absent = the project's
    * name. Sanitized by `exportBaseName` wherever a file is named. */
   name?: string;
@@ -79,7 +81,7 @@ export interface ExportSettings {
 export { DELIVERY_DEFAULTS, EXPORT_PRESETS } from "./exportPresets";
 
 export const EXPORT_AUDIO = [
-  { id: "aac", label: "AAC", detail: "192 kbps" },
+  { id: "aac", label: "AAC", detail: "compressed audio" },
   { id: "pcm", label: "PCM", detail: "uncompressed · MOV" },
 ] as const satisfies readonly { id: ExportAudioCodec; label: string; detail: string }[];
 
@@ -95,18 +97,6 @@ export function exportExtension(settings: Pick<ExportSettings, "container">): st
   return deliveryContainer(settings.container).ext;
 }
 
-
-/**
- * The axes the export dialog offers, each one independent of the others: how
- * big, how smooth, how heavy. A preset above is one point in that space; these
- * let the user pick their own.
- */
-export const EXPORT_RESOLUTIONS = [
-  { id: "2160", label: "4K", shortSide: 2160 },
-  { id: "1440", label: "1440p", shortSide: 1440 },
-  { id: "1080", label: "1080p", shortSide: 1080 },
-  { id: "720", label: "720p", shortSide: 720 },
-] as const;
 
 export const EXPORT_FRAME_RATES = [24, 30, 60] as const;
 
@@ -194,15 +184,16 @@ export const DEFAULT_EXPORT_FPS = 30;
 
 /** The settings a choice adds up to, with the container fitted to the codec
  * and audio it has to carry. `sourceFps` is the footage's rate (see
- * `sourceFrameRate`), what a "source" frame-rate choice resolves to. */
+ * `sourceExportProfile`), what a "source" frame-rate choice resolves to. */
 export function choiceSettings(
   choice: ExportChoice,
   options: ResolutionOption[],
-  sourceFps: number = DEFAULT_EXPORT_FPS
+  sourceFps: number = DEFAULT_EXPORT_FPS,
+  sourceRates?: { videoBitrate?: number; audioBitrate?: number }
 ): ExportSettings {
   const q = EXPORT_QUALITIES.find((x) => x.id === choice.quality) ?? EXPORT_QUALITIES[0];
   const r = resolveResolution(options, choice.resolution);
-  return fitContainer({
+  const settings = fitContainer({
     width: r.width,
     height: r.height,
     fps: choice.fps === "source" ? sourceFps : choice.fps,
@@ -217,6 +208,24 @@ export function choiceSettings(
       ? { bitrate: Math.round(choice.bitrateMbps * 1_000_000) }
       : {}),
   });
+  return choice.resolution === "source" && !choice.bitrateMbps
+    ? matchSourceBitrates(settings, sourceRates)
+    : settings;
+}
+
+/** Source-size delivery keeps the source's compression budget. */
+export function matchSourceBitrates(
+  settings: ExportSettings,
+  source?: { videoBitrate?: number; audioBitrate?: number }
+): ExportSettings {
+  if (fixedRate(settings.codec)) return settings;
+  return {
+    ...settings,
+    ...(source?.videoBitrate && Number.isFinite(source.videoBitrate) && source.videoBitrate > 0
+      ? { bitrate: Math.round(Math.min(bitrateFor(settings), source.videoBitrate)) } : {}),
+    ...(settings.audioCodec === "aac" && source?.audioBitrate && Number.isFinite(source.audioBitrate) && source.audioBitrate > 0
+      ? { audioBitrate: Math.round(Math.min(audioBitrate(settings), source.audioBitrate)) } : {}),
+  };
 }
 
 /** A size the dialog offers: the source's own frame, or a named rung above
@@ -314,11 +323,8 @@ export function presetSettings(
 }
 
 /**
- * "Original": the highest resolution the timeline's own footage justifies,
- * along the project aspect. It scales the 1080p base by the sharpest source
- * clip — never below the base (so it is always the highest option), never
- * above 4K, and never upscaled past the source. Unknown source sizes fall
- * back to the base.
+ * Source dimensions fitted to the project aspect, capped at 4K.
+ * Projects with no measured source dimensions use the base frame.
  */
 export function originalSettings(
   aspect: Aspect,
@@ -336,25 +342,20 @@ export function sourceFrame(
 ): { width: number; height: number } {
   const base = frameOf(aspect);
   const longBase = Math.max(base.w, base.h);
-  const srcLong = Math.max(
+  const sourceScale = Math.max(
     0,
     ...getClipSpans(clips, assets).map((sp) =>
-      Math.max(sp.asset.width ?? 0, sp.asset.height ?? 0)
+      Math.max((sp.asset.width ?? 0) / base.w, (sp.asset.height ?? 0) / base.h)
     )
   );
-  // The 4K long-side cap wins over the 1080 base floor: a very wide custom
-  // ratio (whose base already exceeds 3840) scales down to stay encodable.
-  const k = Math.min(
-    3840 / longBase,
-    Math.min(2, Math.max(1, srcLong / longBase || 1))
-  );
-  const even = (n: number) => 2 * Math.round((n * k) / 2);
+  const k = Math.min(3840 / longBase, sourceScale || 1);
+  const even = (n: number) => Math.max(2, 2 * Math.round((n * k) / 2));
   return { width: even(base.w), height: even(base.h) };
 }
 
 /**
  * Rough output size for a setting, in bytes: the video bitrate the encoders
- * are given (`bitrateFor`) plus the fixed 192 kbps AAC audio. A CRF encode
+ * are given (`bitrateFor`) plus the selected audio bitrate. A CRF encode
  * spends what the footage needs, so busy footage runs larger and flat footage
  * smaller; the dialog shows it as an approximation.
  */
@@ -363,9 +364,9 @@ export function estimateExportBytes(settings: ExportSettings, durationSec: numbe
   return ((bitrateFor(settings) + audioBitrate(settings)) * durationSec) / 8;
 }
 
-/** AAC at the fixed 192 kbps; PCM is 48 kHz stereo 16-bit, uncompressed. */
-export function audioBitrate(settings: Pick<ExportSettings, "audioCodec">): number {
-  return settings.audioCodec === "pcm" ? 48_000 * 16 * 2 : 192_000;
+/** AAC follows its source budget or uses 192 kbps; PCM is 48 kHz stereo 16-bit. */
+export function audioBitrate(settings: Pick<ExportSettings, "audioCodec" | "audioBitrate">): number {
+  return settings.audioCodec === "pcm" ? 48_000 * 16 * 2 : settings.audioBitrate ?? 192_000;
 }
 
 /** Human-readable size estimate matching the finished-export MB display. */

@@ -4,12 +4,14 @@ import {
   buildExportPayload,
   EXPORT_PRESETS,
   originalSettings,
+  matchSourceBitrates,
   presetSettings,
   previewSettings,
   type ExportSettings,
 } from "../exportClient";
 import { renderDoc, type ExportDoc } from "@/cut/lib/renderSnapshot";
 import { useEditor } from "../store";
+import { sourceExportProfile } from "@/cut/lib/exportRender";
 import { bindHeadlessSession, type HeadlessSession } from "./bind";
 import { openCloudSnapshot, type CloudDocSnapshot } from "./docSession";
 
@@ -20,11 +22,12 @@ import { openCloudSnapshot, type CloudDocSnapshot } from "./docSession";
 export { DOC_EXPORT_PRESETS, isDocExportPreset, type DocExportPreset } from "../exportPresets";
 import type { DocExportPreset } from "../exportPresets";
 
-function settingsFor(preset: DocExportPreset, doc: ExportDoc): ExportSettings {
+async function settingsFor(preset: DocExportPreset, doc: ExportDoc): Promise<ExportSettings> {
   const fixed = EXPORT_PRESETS.find((p) => p.id === preset);
-  return fixed
-    ? presetSettings(fixed, doc.aspect)
-    : originalSettings(doc.aspect, doc.clips, doc.assets);
+  if (fixed) return presetSettings(fixed, doc.aspect);
+  const source = await sourceExportProfile(doc, (asset) => asset.url);
+  return matchSourceBitrates({ ...originalSettings(doc.aspect, doc.clips, doc.assets), fps: source.fps ?? 30 },
+    { ...source, ...(doc.audioClips.length > 0 ? { audioBitrate: undefined } : {}) });
 }
 
 /**
@@ -43,7 +46,7 @@ export async function buildDocExportSpec(
   bindHeadlessSession(session);
   await openCloudSnapshot(session, projectId, snapshot);
   const doc = renderDoc(useEditor.getState());
-  const payload = await buildExportPayload(projectId, doc, target === "preview" ? previewSettings(doc.aspect) : settingsFor(preset, doc), target);
+  const payload = await buildExportPayload(projectId, doc, target === "preview" ? previewSettings(doc.aspect) : await settingsFor(preset, doc), target);
   await Promise.all(
     payload.pngs.map(async (p) =>
       writeFile(

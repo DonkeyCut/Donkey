@@ -34,7 +34,7 @@ import { audioFxSpans } from "./audioEffects";
 import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
-import { frameSink, keyframeTimeAt, openMedia, videoTrackOf } from "./mediaRead";
+import { audioTrackOf, frameSink, keyframeTimeAt, openMedia, videoTrackOf } from "./mediaRead";
 import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
@@ -174,9 +174,8 @@ const RATE_PROBE_TIMEOUT_MS = 8_000;
 /** The sources a rate probe would read, by footprint: the key a caller
  * re-probes on, so a change elsewhere in the project leaves the answer. */
 export function sourceFrameRateKey(doc: Pick<ExportDoc, "clips" | "assets">): string {
-  return rateSources(doc)
-    .map(([id]) => id)
-    .join("|");
+  const byId = new Map(doc.assets.map((asset) => [asset.id, asset]));
+  return JSON.stringify(rateSources(doc).map(([id]) => [id, byId.get(id)?.fileName]));
 }
 
 function rateSources(doc: Pick<ExportDoc, "clips" | "assets">): [string, number][] {
@@ -192,19 +191,20 @@ function rateSources(doc: Pick<ExportDoc, "clips" | "assets">): [string, number]
     .slice(0, RATE_PROBE_SOURCES);
 }
 
-/**
- * The rate the footage plays at: the delivery rate the most timeline seconds
- * of video run at, read from each source's packet cadence. Null for a cut
- * with no readable video — stills, titles, sound — which takes the default.
- * An aborted probe closes its readers and answers null.
- */
-export async function sourceFrameRate(
+export type SourceExportProfile = { fps: number | null; videoBitrate?: number; audioBitrate?: number };
+
+/** Read cadence and compression budgets from the dominant video sources.
+ * The largest source bitrate preserves detail across the sampled footage;
+ * the frame rate is weighted by its time on the timeline. */
+export async function sourceExportProfile(
   doc: Pick<ExportDoc, "clips" | "assets">,
   resolve: (asset: MediaAsset) => string,
   opts: { signal?: AbortSignal } = {}
-): Promise<number | null> {
+): Promise<SourceExportProfile> {
   const byId = new Map(doc.assets.map((a) => [a.id, a]));
   const seconds = new Map<number, number>();
+  let videoBitrate = 0;
+  let audioBitrate = 0;
   await Promise.all(
     rateSources(doc).map(async ([id, len]) => {
       if (opts.signal?.aborted) return;
@@ -219,6 +219,14 @@ export async function sourceFrameRate(
         const track = await videoTrackOf(input);
         if (!track) return;
         const stats = await track.computePacketStats(120);
+        const audio = await audioTrackOf(input);
+        const audioStats = audio ? await audio.computePacketStats(120) : null;
+        const sizeBytes = asset.sizeBytes ?? await input.source.getSizeOrNull();
+        const sourceAudio = audioStats?.averageBitrate ?? 0;
+        const totalBitrate = sizeBytes && asset.duration > 0 ? sizeBytes * 8 / asset.duration : 0;
+        const sourceVideo = totalBitrate > sourceAudio ? totalBitrate - sourceAudio : stats.averageBitrate;
+        if (Number.isFinite(sourceVideo)) videoBitrate = Math.max(videoBitrate, sourceVideo);
+        if (Number.isFinite(sourceAudio)) audioBitrate = Math.max(audioBitrate, sourceAudio);
         const rate = stats.averagePacketRate;
         if (!(rate > 0) || opts.signal?.aborted) return;
         const snapped = DELIVERY_RATES.reduce((best, r) =>
@@ -234,12 +242,12 @@ export async function sourceFrameRate(
       }
     })
   );
-  if (opts.signal?.aborted) return null;
+  if (opts.signal?.aborted) return { fps: null };
   let pick: number | null = null;
   for (const [rate, len] of seconds) {
     if (pick === null || len > seconds.get(pick)! || (len === seconds.get(pick) && rate > pick)) pick = rate;
   }
-  return pick;
+  return { fps: pick, ...(videoBitrate > 0 ? { videoBitrate } : {}), ...(audioBitrate > 0 ? { audioBitrate } : {}) };
 }
 
 /** The frame reader for one open video source. */
@@ -1005,7 +1013,7 @@ export async function renderProjectToMp4(
       if (!audioCodec) throw new Error("This browser can't encode AAC audio.");
       audio = new AudioBufferSource({
         codec: audioCodec,
-        ...(audioCodec === "aac" ? { quality: new Quality({ bitrate: 192_000 }) } : {}),
+        ...(audioCodec === "aac" ? { quality: new Quality({ bitrate: settings.audioBitrate ?? 192_000 }) } : {}),
       });
       output.addAudioTrack(audio, { maximumPacketCount: Math.ceil(mix.length / 960) + 32 });
     }

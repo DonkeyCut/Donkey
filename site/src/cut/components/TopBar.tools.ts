@@ -6,6 +6,7 @@
  */
 
 import { obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { EXPORT_RESOLUTIONS } from "@/cut/lib/exportPresets";
 import { GUIDE_IDS, GUIDE_PRESETS } from "@/cut/lib/guides";
 
 export const TOP_BAR_TOOLS = [
@@ -47,7 +48,7 @@ export const TOP_BAR_TOOLS = [
   {
     name: "open_export",
     description:
-      "Open the export dialog so the user can render the cut: quick presets (Share, Best, Social 4K, Small, Master) or the advanced panel — file name, range (whole video or the selected items' span), format MP4/MOV, codec H.264/HEVC/ProRes, resolution from a 4K upscale through Source down to 720p, frame rate Source/24/30/60, quality tier or bitrate, AAC or PCM audio, and a captions file (SRT) saved beside the video. Exporting itself stays a user action.",
+      `Open the export dialog: Best defaults to source resolution and video/audio bitrates, including sources below 720p. Other presets are Share, Social 4K, Small and Master. Controls include file name, whole video or selection range, MP4/MOV, H.264/HEVC/ProRes, resolution (${EXPORT_RESOLUTIONS.map((r) => r.label).join(", ")}, Source), frame rate, quality or custom bitrate, AAC/PCM, and an SRT captions file. Exporting itself stays a user action.`,
     inputSchema: obj({}),
   },
 ] as const satisfies readonly AiToolDef[];
