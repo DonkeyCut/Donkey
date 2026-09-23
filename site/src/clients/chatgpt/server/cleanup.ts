@@ -20,7 +20,10 @@ export async function cleanupConnections() {
     }),
     prisma.verification.deleteMany({
       where: {
-        identifier: { startsWith: "chatgpt-consent:" },
+        OR: [
+          { identifier: { startsWith: "chatgpt-consent:" } },
+          { identifier: "chatgpt-oidc-code" },
+        ],
         expiresAt: { lte: new Date() },
       },
     }),

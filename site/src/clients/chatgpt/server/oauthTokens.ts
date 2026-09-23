@@ -15,6 +15,10 @@ import {
 } from "@/clients/chatgpt/server/oauthPolicy";
 
 import { enforceOAuthUserLimit } from "@/clients/chatgpt/server/oauthRateLimit";
+import { identitySigner } from "@/clients/chatgpt/server/oidc";
+import { z } from "zod";
+
+const oidcCodeSchema = z.object({ nonce: z.string().optional() });
 
 /** The code and every rotated token belong to one revocable connection. */
 export async function createCode(
@@ -23,24 +27,37 @@ export async function createCode(
   config: ChatgptConfig,
   db = prisma,
 ) {
+  const openid = authorization.scope.split(" ").includes("openid");
+  if (openid) identitySigner();
   const code = newToken();
-  await db.chatgptGrant.create({
-    data: {
-      userId,
-      clientId: authorization.client_id,
-      resource: authorization.resource,
-      scope: authorization.scope,
-      redirectUri: authorization.redirect_uri,
-      challenge: authorization.code_challenge,
-      expiresAt: new Date(Date.now() + config.refreshDays * 86_400_000),
-      tokens: {
-        create: {
-          hash: tokenHash(code),
-          kind: "code",
-          expiresAt: new Date(Date.now() + 300_000),
+  await db.$transaction(async (tx) => {
+    await tx.chatgptGrant.create({
+      data: {
+        userId,
+        clientId: authorization.client_id,
+        resource: authorization.resource,
+        scope: authorization.scope,
+        redirectUri: authorization.redirect_uri,
+        challenge: authorization.code_challenge,
+        expiresAt: new Date(Date.now() + config.refreshDays * 86_400_000),
+        tokens: {
+          create: {
+            hash: tokenHash(code),
+            kind: "code",
+            expiresAt: new Date(Date.now() + 300_000),
+          },
         },
       },
-    },
+    });
+    if (openid)
+      await tx.verification.create({
+        data: {
+          id: `chatgpt-oidc:${tokenHash(code)}`,
+          identifier: "chatgpt-oidc-code",
+          value: JSON.stringify({ nonce: authorization.nonce }),
+          expiresAt: new Date(Date.now() + 300_000),
+        },
+      });
   });
   return code;
 }
@@ -102,6 +119,31 @@ export async function exchangeToken(
       return null;
     }
 
+    const scopes = grant.scope.split(" ");
+    let idToken: string | undefined;
+    if (!isRefresh && scopes.includes("openid")) {
+      const contextId = `chatgpt-oidc:${hash}`;
+      const context = await tx.verification.findUnique({
+        where: { id: contextId },
+      });
+      if (!context || context.expiresAt <= new Date()) return null;
+      const { nonce } = oidcCodeSchema.parse(JSON.parse(context.value));
+      const user = await tx.user.findUniqueOrThrow({
+        where: { id: grant.userId },
+        select: { id: true, email: true, emailVerified: true },
+      });
+      idToken = identitySigner().sign(
+        user,
+        scopes,
+        config.issuer,
+        Math.min(
+          config.accessSeconds,
+          Math.floor((grant.expiresAt.getTime() - Date.now()) / 1000),
+        ),
+        nonce,
+      );
+    }
+
     // Throttling leaves the credential usable when this user's window resets.
     enforceOAuthUserLimit(grant.userId, "token", config.requestsPerMinute);
 
@@ -118,7 +160,12 @@ export async function exchangeToken(
       return null;
     }
 
-    return issueTokenPair(tx, grant, config);
+    const pair = await issueTokenPair(tx, grant, config);
+    if (idToken)
+      await tx.verification.deleteMany({
+        where: { id: `chatgpt-oidc:${hash}` },
+      });
+    return pair ? { ...pair, ...(idToken ? { id_token: idToken } : {}) } : null;
   });
 }
 
@@ -188,7 +235,11 @@ export async function accessIdentity(
     return null;
   }
 
-  return { userId: grant.userId, scopes: grant.scope.split(" "), grantId: grant.id };
+  return {
+    userId: grant.userId,
+    scopes: grant.scope.split(" "),
+    grantId: grant.id,
+  };
 }
 
 export async function revokeToken(
@@ -243,7 +294,12 @@ export async function redeemEditorCode(
     where: { hash },
     include: { grant: true },
   });
-  if (!token || token.kind !== "embed" || token.consumedAt || token.expiresAt <= new Date()) {
+  if (
+    !token ||
+    token.kind !== "embed" ||
+    token.consumedAt ||
+    token.expiresAt <= new Date()
+  ) {
     return null;
   }
   const grant = token.grant;
@@ -274,7 +330,12 @@ export async function recordEditorSession(
   db = prisma,
 ) {
   await db.chatgptToken.create({
-    data: { hash: `${SESSION_REF}${session.id}`, grantId, kind: "session", expiresAt: session.expiresAt },
+    data: {
+      hash: `${SESSION_REF}${session.id}`,
+      grantId,
+      kind: "session",
+      expiresAt: session.expiresAt,
+    },
   });
 }
 
@@ -290,7 +351,9 @@ export async function revokeEditorSessions(grantIds: string[], db = prisma) {
     return;
   }
   await db.session.deleteMany({
-    where: { id: { in: rows.map((row) => row.hash.slice(SESSION_REF.length)) } },
+    where: {
+      id: { in: rows.map((row) => row.hash.slice(SESSION_REF.length)) },
+    },
   });
   await db.chatgptToken.deleteMany({
     where: { grantId: { in: grantIds }, kind: "session" },

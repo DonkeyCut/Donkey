@@ -5,7 +5,7 @@ import {
 } from "@/lib/inference/rate-limit";
 import { tokenHash } from "@/clients/chatgpt/server/oauthPolicy";
 
-type OAuthOperation = "token" | "revoke" | "embed";
+type OAuthOperation = "token" | "revoke" | "embed" | "userinfo";
 
 export class OAuthRateLimitError extends Error {
   constructor(public readonly retryAfterSeconds: number) {

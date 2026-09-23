@@ -10,7 +10,7 @@ import {
   CLIENT_ID,
   chatgptConfig,
   OAUTH_PATH,
-  SCOPES,
+  PROJECT_SCOPES,
   resourceUrl,
 } from "@/clients/chatgpt/server/config";
 import {
@@ -32,12 +32,17 @@ import {
   limitOAuthSource,
   OAuthRateLimitError,
 } from "@/clients/chatgpt/server/oauthRateLimit";
+import { identitySigner, openIdMetadata } from "@/clients/chatgpt/server/oidc";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store", Pragma: "no-cache" };
 const CONSENT_COOKIE_NAME = "__Host-donkey-chatgpt-consent";
 const consentSchema = z.object({
   nonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   decision: z.enum(["allow", "deny"]),
+});
+const challengeSchema = z.object({
+  authorization: authorizationSchema,
+  browserTokenHash: z.string().regex(/^[a-f0-9]{64}$/),
 });
 
 export async function authorizationMetadata() {
@@ -47,20 +52,17 @@ export async function authorizationMetadata() {
     return oauthError("temporarily_unavailable", 503);
   }
 
-  const baseUrl = `${config.issuer}${OAUTH_PATH}`;
+  identitySigner();
+  return Response.json(openIdMetadata(config), { headers: NO_STORE_HEADERS });
+}
+
+/** GET /api/chatgpt/oauth/jwks: public keys for verifying ID tokens. */
+export async function identityKeys() {
+  await connection();
+  const config = await chatgptConfig();
+  if (!config.enabled) return oauthError("temporarily_unavailable", 503);
   return Response.json(
-    {
-      issuer: config.issuer,
-      authorization_endpoint: `${baseUrl}/authorize`,
-      token_endpoint: `${baseUrl}/token`,
-      revocation_endpoint: `${baseUrl}/revoke`,
-      response_types_supported: ["code"],
-      grant_types_supported: ["authorization_code", "refresh_token"],
-      code_challenge_methods_supported: ["S256"],
-      token_endpoint_auth_methods_supported: ["none"],
-      authorization_response_iss_parameter_supported: true,
-      scopes_supported: SCOPES,
-    },
+    { keys: [identitySigner().jwk] },
     { headers: NO_STORE_HEADERS },
   );
 }
@@ -76,7 +78,7 @@ export async function protectedResourceMetadata() {
     {
       resource: resourceUrl(config),
       authorization_servers: [config.issuer],
-      scopes_supported: SCOPES,
+      scopes_supported: PROJECT_SCOPES,
       bearer_methods_supported: ["header"],
       resource_name: "Donkey Cut",
     },
@@ -117,6 +119,8 @@ export async function authorize(request: Request) {
   }
 
   const nonce = newToken();
+  const browserToken =
+    consentBrowserToken(request.headers.get("cookie")) ?? newToken();
   const identifier = `chatgpt-consent:${identity.userId}`;
   await prisma.verification.deleteMany({
     where: { identifier, expiresAt: { lte: new Date() } },
@@ -125,12 +129,15 @@ export async function authorize(request: Request) {
     data: {
       id: `chatgpt:${tokenHash(nonce)}`,
       identifier,
-      value: JSON.stringify(authorization),
+      value: JSON.stringify({
+        authorization,
+        browserTokenHash: tokenHash(browserToken),
+      }),
       expiresAt: new Date(Date.now() + 600_000),
     },
   });
 
-  return consentPage(nonce, authorization);
+  return consentPage(nonce, authorization, browserToken);
 }
 
 /** POST /api/chatgpt/oauth/authorize: explicit, browser-bound consent. */
@@ -153,29 +160,31 @@ export const consent = withDonkeyAuth(async (request) => {
   }
   const { nonce, decision } = parsed.data;
 
-  const cookieHeader = request.headers.get("cookie");
-  const consentCookieValue = cookieHeader
-    ?.split(";")
-    .map((cookie) => cookie.trim())
-    .find((cookie) => cookie.startsWith(`${CONSENT_COOKIE_NAME}=`))
-    ?.slice(CONSENT_COOKIE_NAME.length + 1);
-  if (!consentCookieValue || !sameSecret(consentCookieValue, nonce)) {
-    return oauthError("invalid_request");
-  }
+  const browserToken = consentBrowserToken(request.headers.get("cookie"));
+  if (!browserToken) return expiredConsent();
 
   const challengeId = `chatgpt:${tokenHash(nonce)}`;
   const challenge = await prisma.verification.findUnique({
     where: { id: challengeId },
   });
   if (!challenge || challenge.expiresAt <= new Date()) {
-    return oauthError("invalid_request");
+    return expiredConsent();
   }
   if (challenge.identifier !== `chatgpt-consent:${request.donkey.userId}`) {
-    return oauthError("invalid_request");
+    return expiredConsent();
   }
 
   // Revalidate against current settings before issuing a code.
-  const authorization = authorizationSchema.parse(JSON.parse(challenge.value));
+  const parsedChallenge = challengeSchema.safeParse(
+    JSON.parse(challenge.value),
+  );
+  if (
+    !parsedChallenge.success ||
+    !sameSecret(parsedChallenge.data.browserTokenHash, tokenHash(browserToken))
+  ) {
+    return expiredConsent();
+  }
+  const { authorization } = parsedChallenge.data;
   if (!authorizeInput(new URLSearchParams(authorization), config)) {
     return oauthError("invalid_request");
   }
@@ -184,7 +193,7 @@ export const consent = withDonkeyAuth(async (request) => {
     where: { id: challengeId, expiresAt: { gt: new Date() } },
   });
   if (!consumed.count) {
-    return oauthError("invalid_request");
+    return expiredConsent();
   }
 
   const callbackUrl = new URL(authorization.redirect_uri);
@@ -202,7 +211,6 @@ export const consent = withDonkeyAuth(async (request) => {
     headers: {
       ...NO_STORE_HEADERS,
       Location: callbackUrl.href,
-      "Set-Cookie": consentCookie("", 0),
     },
   });
 });
@@ -322,7 +330,38 @@ function consentCookie(value: string, maxAgeSeconds: number) {
   return `${CONSENT_COOKIE_NAME}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAgeSeconds}`;
 }
 
-function consentPage(nonce: string, authorization: Authorization) {
+function consentBrowserToken(header: string | null) {
+  const matches = header
+    ?.split(";")
+    .map((cookie) => cookie.trim())
+    .filter((cookie) => cookie.startsWith(`${CONSENT_COOKIE_NAME}=`));
+  const value =
+    matches?.length === 1
+      ? matches[0].slice(CONSENT_COOKIE_NAME.length + 1)
+      : undefined;
+  return value && /^[A-Za-z0-9_-]{43}$/.test(value) ? value : null;
+}
+
+function expiredConsent() {
+  return new Response(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Restart connection</title></head><body><h1>Start the connection again</h1><p>This connection page expired or your signed-in account changed. Return to OpenAI and start the connection again.</p></body></html>`,
+    {
+      status: 400,
+      headers: {
+        ...NO_STORE_HEADERS,
+        "Content-Type": "text/html; charset=utf-8",
+        "Content-Security-Policy":
+          "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+      },
+    },
+  );
+}
+
+function consentPage(
+  nonce: string,
+  authorization: Authorization,
+  browserToken: string,
+) {
   const scopes = authorization.scope.split(" ");
   const access = scopes.includes("projects:write") ? "view and edit" : "view";
   const escapedNonce = nonce.replace(
@@ -354,7 +393,7 @@ function consentPage(nonce: string, authorization: Authorization) {
   </head>
   <body>
     <h1><img src="/donkey-logo.svg" alt="">Donkey Cut</h1>
-    <p>Connect to ChatGPT. ChatGPT can ${access} your projects.</p>
+    <p>ChatGPT can ${access} your projects${scopes.includes("openid") ? ` and read your account information${scopes.includes("email") ? ", including your email address" : ""}` : ""}.</p>
     <form method="post" action="${OAUTH_PATH}/authorize">
       <input type="hidden" name="nonce" value="${escapedNonce}">
       <button name="decision" value="allow">Connect</button>
@@ -378,7 +417,7 @@ function consentPage(nonce: string, authorization: Authorization) {
     headers: {
       ...NO_STORE_HEADERS,
       "Content-Type": "text/html; charset=utf-8",
-      "Set-Cookie": consentCookie(nonce, 600),
+      "Set-Cookie": consentCookie(browserToken, 600),
       "Content-Security-Policy": contentSecurityPolicy,
       // Preserve the same-origin POST's Origin for consent validation.
       "Referrer-Policy": "strict-origin-when-cross-origin",

@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
+import { identitySigner, openIdMetadata } from "@/clients/chatgpt/server/oidc";
+import { userInfoResponse } from "@/clients/chatgpt/server/userInfo";
 import type { prisma } from "@/lib/prisma";
 import { SETTINGS } from "@/lib/config/registry";
 import { CLIENT_ID, resourceUrl } from "@/clients/chatgpt/server/config";
@@ -57,7 +60,18 @@ type Token = {
 function createTestContext() {
   const grants = new Map<string, Grant>(),
     tokens = new Map<string, Token>();
+  const contexts = new Map<string, { id: string; identifier: string; value: string; expiresAt: Date }>();
+  const user = { id: "owner", email: "owner@example.com", emailVerified: false };
   const tx = {
+    user: {
+      findUnique: async () => user,
+      findUniqueOrThrow: async () => user,
+    },
+    verification: {
+      create: async ({ data }: { data: { id: string; identifier: string; value: string; expiresAt: Date } }) => contexts.set(data.id, data),
+      findUnique: async ({ where }: { where: { id: string } }) => contexts.get(where.id) ?? null,
+      deleteMany: async ({ where }: { where: { id: string } }) => ({ count: contexts.delete(where.id) ? 1 : 0 }),
+    },
     chatgptGrant: {
       create: async ({
         data,
@@ -143,8 +157,70 @@ function createTestContext() {
     redirect_uri: input.redirect_uri,
     code_verifier: verifier,
   });
-  return { db, grants, tokens, sessions, exchange };
+  return { db, grants, tokens, sessions, exchange, user, contexts };
 }
+
+test("OpenID code exchange signs the consented identity and nonce; UserInfo follows live verification and revocation", async () => {
+  const priorKey = process.env.CHATGPT_OIDC_PRIVATE_KEY;
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  process.env.CHATGPT_OIDC_PRIVATE_KEY = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  try {
+    const { db, exchange, user, contexts, tokens } = createTestContext();
+    const authorization = { ...input, scope: "projects:read openid email", nonce: "client-nonce" };
+    expect(authorizeInput(new URLSearchParams(authorization), config)).toEqual(authorization);
+    for (const patch of [{ scope: "projects:read email" }, { scope: "projects:read" }, { nonce: "" }, { prompt: "none" }]) {
+      expect(authorizeInput(new URLSearchParams({ ...authorization, ...patch }), config)).toBeNull();
+    }
+    const metadata = openIdMetadata(config);
+    expect(metadata.scopes_supported).toContain("openid");
+    expect(metadata.scopes_supported).toContain("email");
+    expect(metadata.userinfo_endpoint).toBe(`${config.issuer}/api/chatgpt/oauth/userinfo`);
+    const code = await createCode("owner", authorization, config, db);
+    const pair = (await exchangeToken(exchange(code), config, db))!;
+    const [header, payload, signature] = pair.id_token!.split(".");
+    const jwk = identitySigner().jwk;
+    expect(Object.hasOwn(jwk, "d")).toBe(false);
+    expect(JSON.parse(Buffer.from(header, "base64url").toString())).toMatchObject({ alg: "RS256", kid: jwk.kid });
+    expect(verify("RSA-SHA256", Buffer.from(`${header}.${payload}`), createPublicKey({ key: jwk, format: "jwk" }), Buffer.from(signature, "base64url"))).toBe(true);
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString());
+    expect(claims).toMatchObject({ sub: "owner", iss: config.issuer, aud: CLIENT_ID, nonce: "client-nonce", email: user.email, email_verified: false });
+    expect(claims.exp).toBeGreaterThan(claims.iat);
+    expect(contexts.size).toBe(0);
+    const info = (credential: string, extraConfig = config) => userInfoResponse(new Request(metadata.userinfo_endpoint, { headers: { Authorization: `Bearer ${credential}` } }), extraConfig, db);
+    const response = await info(pair.access_token);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ sub: "owner", email: user.email, email_verified: false });
+    user.emailVerified = true;
+    expect(await (await info(pair.access_token)).json()).toMatchObject({ email_verified: true });
+    expect((await info(pair.refresh_token)).status).toBe(401);
+    expect((await info(code)).status).toBe(401);
+    expect((await info(pair.access_token, { ...config, issuer: "https://other.test" })).status).toBe(401);
+    expect((await info(pair.access_token, { ...config, enabled: false })).status).toBe(503);
+    const missing = await userInfoResponse(new Request(metadata.userinfo_endpoint), config, db);
+    expect(missing.status).toBe(401);
+    expect(missing.headers.get("www-authenticate")).toContain("invalid_token");
+
+    const subjectCode = await createCode("owner", { ...input, scope: "projects:read openid" }, config, db);
+    const subjectPair = (await exchangeToken(exchange(subjectCode), config, db))!;
+    expect(await (await info(subjectPair.access_token)).json()).toEqual({ sub: "owner" });
+    const subjectClaims = JSON.parse(Buffer.from(subjectPair.id_token!.split(".")[1], "base64url").toString());
+    expect(Object.hasOwn(subjectClaims, "email")).toBe(false);
+    expect(Object.hasOwn(subjectClaims, "nonce")).toBe(false);
+    const readCode = await createCode("owner", input, config, db);
+    const readPair = (await exchangeToken(exchange(readCode), config, db))!;
+    expect(Object.hasOwn(readPair, "id_token")).toBe(false);
+    expect((await info(readPair.access_token)).status).toBe(403);
+    const rotated = (await exchangeToken({ grant_type: "refresh_token", client_id: CLIENT_ID, resource: input.resource, refresh_token: pair.refresh_token }, config, db))!;
+    expect(await (await info(rotated.access_token)).json()).toMatchObject({ email_verified: true });
+    tokens.get(tokenHash(pair.access_token))!.expiresAt = new Date(0);
+    expect((await info(pair.access_token)).status).toBe(401);
+    await revokeToken(rotated.access_token, config, db);
+    expect((await info(rotated.access_token)).status).toBe(401);
+  } finally {
+    if (priorKey === undefined) delete process.env.CHATGPT_OIDC_PRIVATE_KEY;
+    else process.env.CHATGPT_OIDC_PRIVATE_KEY = priorKey;
+  }
+});
 
 describe("ChatGPT OAuth boundary", () => {
   test("authorization accepts only exact callbacks, resource, public client, and S256", () => {

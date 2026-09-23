@@ -27,6 +27,8 @@ export const authorizationSchema = z.object({
   code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   code_challenge_method: z.literal("S256"),
   resource: z.url(),
+  nonce: z.string().min(1).max(2048).optional(),
+  prompt: z.literal("consent").optional(),
 });
 export type Authorization = z.infer<typeof authorizationSchema>;
 
@@ -52,6 +54,8 @@ export function authorizeInput(
   if (!scopes.includes("projects:read")) {
     return null;
   }
+  if (scopes.includes("email") && !scopes.includes("openid")) return null;
+  if (input.nonce !== undefined && !scopes.includes("openid")) return null;
   const hasUnknownScope = scopes.some(
     (scope) => !SCOPES.some((known) => known === scope),
   );

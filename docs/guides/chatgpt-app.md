@@ -72,30 +72,24 @@ as the app's own editor on its own domain.
 
 ## Account linking
 
-Donkey Cut is the OAuth authorization server and MCP resource server. The account
-owner signs in and explicitly grants access on Donkey Cut. Consent is bound to the
-browser, account, callback, requested scopes, resource, and S256 challenge.
+Donkey Cut supplies the account identity to ChatGPT through OpenID Connect.
+The user signs in and consents to project access and identity sharing. The
+`openid` and `email` scopes expose the account ID, email, and stored verification
+status through `/api/chatgpt/oauth/userinfo`. Unverified accounts can connect;
+profile settings offer email verification.
 
-Each connection owns a token family. Codes are single use; refresh tokens
-rotate. A replay revokes the family. Tokens are stored as hashes, and every
-MCP request checks expiration, revocation, resource, and scope. Revocation
-invalidates subsequent tool calls. Already issued media links retain their
-normal short lifetime. The daily authenticated cleanup removes expired grants
-and their tokens.
+Discovery lives at `/.well-known/openid-configuration` and
+`/.well-known/oauth-authorization-server`. Configure `CHATGPT_OIDC_PRIVATE_KEY`
+with a PKCS#8 RSA private key of at least 2048 bits before deploying. Code
+exchange signs an ID token bound to the client and requested nonce; the public
+key is served at `/api/chatgpt/oauth/jwks`.
 
-Token exchange and revocation have separate per-user request budgets. Hosted
-requests also have per-source abuse limits using Vercel's forwarded address.
-Local servers without that address use the authenticated user limits. Source
-limits are configured through `chatgptApp.oauthRequestsPerIpMinute`.
-
-| Endpoint | Purpose |
-| --- | --- |
-| `/api/chatgpt/mcp` | Stateless MCP over HTTP POST, serving protocol 2026-07-28 requests directly and older initialize-based clients the same way |
-| `/.well-known/oauth-authorization-server` | OAuth server discovery |
-| `/.well-known/oauth-protected-resource/api/chatgpt/mcp` | MCP resource discovery |
-| `/api/chatgpt/oauth/authorize` | Login and explicit consent |
-| `/api/chatgpt/oauth/token` | Code exchange and refresh rotation |
-| `/api/chatgpt/oauth/revoke` | Revoke a connection using its credential |
+Consent binds the browser, account, callback, scopes, resource, and S256 challenge.
+Codes are single use, refresh tokens rotate, and replay revokes the connection.
+Tokens are hashed in storage. MCP and UserInfo check expiration, revocation,
+resource, and scopes on every request. Source and account rate limits apply;
+daily cleanup removes expired grants, tokens, and challenges. Revocation leaves
+already issued media links valid until their normal expiry.
 
 ## Deployment and verification
 
@@ -111,15 +105,11 @@ through the authenticated hosted API.
 
 Create a ChatGPT developer-mode app pointing at
 `https://donkeycut.com/api/chatgpt/mcp`. Upload `site/public/chatgpt-app-icon.png`
-as the app icon: 256×256, under 10 KB, a full-bleed white square with square
-corners, because ChatGPT applies its own rounded mask, and the mark inside a
-safe area so the mask never clips it. Use the predefined public OAuth client
+as the app icon. Use the predefined public OAuth client
 ID `donkey-chatgpt`, no client secret, and scopes
-`projects:read previews:render projects:write`. The app listing's description
-should say what the server instructions say: Donkey Cut is an open-source video
-editor (Apache 2.0, github.com/DonkeyCut/Donkey) that ChatGPT can edit with
-directly; editing, previews and exports are free, hosted AI generation spends
-credits, and cloud storage counts against the account's allowance.
+`projects:read previews:render projects:write openid email`. The listing
+should describe supported editing and disclose generation credits and storage
+limits.
 Configure the exact redirect URI supplied by ChatGPT in `chatgptApp.redirectUris`.
 The default is ChatGPT's stable callback; discovery advertises issuer
 identification, and every authorization redirect includes `iss`. The embedded

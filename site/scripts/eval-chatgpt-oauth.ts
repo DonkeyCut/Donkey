@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { mock } from "bun:test";
-import { chromium } from "playwright";
 import type {
   DonkeyAuthenticatedRequest,
   DonkeyAuthHandler,
@@ -53,6 +52,7 @@ const config = {
 mock.module("@/clients/chatgpt/server/config", () => ({
   CLIENT_ID: "donkey-chatgpt",
   SCOPES: ["projects:read", "previews:render"],
+  PROJECT_SCOPES: ["projects:read", "previews:render"],
   OAUTH_PATH: oauthPath,
   chatgptConfig: async () => config,
   resourceUrl: () => resource,
@@ -145,6 +145,99 @@ for (const [operation, endpoint] of [
 assert.equal(tokenExchanges, 2);
 assert.equal(revocations, 2);
 
+config.requestsPerMinute = 100;
+const consentUrl = (state: string) => {
+  const url = new URL(`${oauthPath}/authorize`, issuer);
+  url.search = new URLSearchParams({
+    response_type: "code",
+    client_id: "donkey-chatgpt",
+    redirect_uri: redirectUri,
+    scope: "projects:read previews:render",
+    state,
+    code_challenge: "a".repeat(43),
+    code_challenge_method: "S256",
+    resource,
+  }).toString();
+  return url;
+};
+const openConsent = async (state: string, browserCookie = "") => {
+  const response = await authorize(
+    new Request(consentUrl(state), { headers: { Cookie: browserCookie } }),
+  );
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  const nonce = /name="nonce" value="([A-Za-z0-9_-]+)"/.exec(html)?.[1];
+  assert.ok(nonce);
+  const cookie = response.headers.get("set-cookie")!.split(";")[0];
+  return { nonce, cookie };
+};
+const submitConsent = (
+  nonce: string,
+  cookie: string,
+  decision = "allow",
+  origin = issuer,
+) =>
+  consent(
+    new Request(`${issuer}${oauthPath}/authorize`, {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: cookie,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ nonce, decision }),
+    }) as DonkeyAuthenticatedRequest,
+  );
+const first = await openConsent("first-tab");
+const second = await openConsent("second-tab", first.cookie);
+const jar = second.cookie;
+assert.equal(
+  (
+    await submitConsent(
+      first.nonce,
+      "__Host-donkey-chatgpt-consent=" + "b".repeat(43),
+    )
+  ).status,
+  400,
+);
+assert.equal(
+  (await submitConsent(first.nonce, jar, "allow", "https://attacker.test"))
+    .status,
+  400,
+);
+for (const [page, state] of [
+  [first, "first-tab"],
+  [second, "second-tab"],
+] as const) {
+  const response = await submitConsent(page.nonce, jar);
+  assert.equal(response.status, 303);
+  assert.equal(
+    new URL(response.headers.get("location")!).searchParams.get("state"),
+    state,
+  );
+  assert.equal(
+    response.headers.get("set-cookie"),
+    null,
+    "Completing one connection must leave other tabs usable",
+  );
+  assert.equal((await submitConsent(page.nonce, jar)).status, 400);
+}
+const stale = await openConsent("expired-tab");
+for (const challenge of challenges.values()) challenge.expiresAt = new Date(0);
+const expired = await submitConsent(stale.nonce, stale.cookie);
+assert.equal(expired.status, 400);
+assert.match(await expired.text(), /start.*again/i);
+challenges.clear();
+issuedCodes = 0;
+console.log(
+  "PASS: parallel consent tabs, cookie binding, foreign origins, replay, and expired-page recovery.",
+);
+if (process.argv.includes("--http-only")) {
+  appServer.stop(true);
+  callbackServer.stop(true);
+  process.exit(0);
+}
+const { chromium } = await import("playwright");
 const browser = await chromium.launch();
 
 try {
