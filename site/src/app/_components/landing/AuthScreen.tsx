@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 
 import { TopNav } from "@/app/_components/landing/TopNav";
+import { EmailAuthForm } from "@/app/_components/landing/EmailAuthForm";
 import { CutFooter } from "@/app/cut/_components/landing/CutFooter";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,8 @@ type AuthMode = "sign-in" | "sign-up";
 
 type Props = {
   mode: AuthMode;
+  method?: "google" | "email";
+  callbackURL?: string;
 };
 
 const copy = {
@@ -52,11 +55,15 @@ const copy = {
 
 const GOOGLE_BUTTON_HEIGHT = 56;
 
-export function AuthScreen({ mode }: Props) {
+export function AuthScreen({ mode, method = "google", callbackURL }: Props) {
   const [isPending, setIsPending] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const screenCopy = copy[mode];
   const otherMode: AuthMode = mode === "sign-in" ? "sign-up" : "sign-in";
+  const alternateParams = new URLSearchParams();
+  if (method === "email") alternateParams.set("method", "email");
+  if (callbackURL) alternateParams.set("callbackURL", callbackURL);
+  const alternateHref = `${screenCopy.alternateHref}${alternateParams.size ? `?${alternateParams}` : ""}`;
 
   const handleGoogleAuth = useCallback(async () => {
     const searchParams = new URLSearchParams(window.location.search);
@@ -86,7 +93,7 @@ export function AuthScreen({ mode }: Props) {
 
   const formContent = (
     <>
-      <button
+      {method === "email" ? <EmailAuthForm mode={mode} /> : <button
         type="button"
         aria-label={screenCopy.googleAlt}
         disabled={isPending}
@@ -106,11 +113,11 @@ export function AuthScreen({ mode }: Props) {
           className="block h-14"
           style={{ width: googleButtonWidth }}
         />
-      </button>
+      </button>}
       <p className="mt-[18px] text-sm leading-normal text-[#555]">
         {screenCopy.alternateLead}{" "}
         <Link
-          href={screenCopy.alternateHref}
+          href={alternateHref}
           className="font-semibold text-ink underline underline-offset-[3px]"
         >
           {screenCopy.alternateLabel}
@@ -149,14 +156,14 @@ export function AuthScreen({ mode }: Props) {
       <TopNav
         wordmark="Donkey Cut"
         authToggle={{
-          href: screenCopy.alternateHref,
+          href: alternateHref,
           label: copy[otherMode].title,
         }}
       />
       <section className="mx-auto grid w-full max-w-[1400px] grid-cols-1 justify-items-center gap-16 px-6 pt-[44px] pb-[240px] text-center min-[900px]:gap-24 min-[900px]:px-12 min-[900px]:pt-[72px] min-[900px]:pb-[360px]">
         <div>
           <h1 className="max-w-[920px] text-[33px] leading-[0.9] font-semibold break-words min-[900px]:text-[69px]">
-            {screenCopy.heading}
+            {method === "email" ? (mode === "sign-in" ? "Sign in with email" : "Create your account") : screenCopy.heading}
           </h1>
         </div>
 

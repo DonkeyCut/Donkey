@@ -14,20 +14,15 @@ a handler without the wrapper and the endpoint is open to anyone.
 
 ## Authentication
 
-`withDonkeyAuth` takes a session cookie. Inside the handler, `request.donkey`
-carries who the caller is. Its `method` field says how they authenticated — by
-session cookie or dev bypass — and the handler branches on that, never on the
-path.
+`withDonkeyAuth` puts the caller in `request.donkey`; its `method` distinguishes
+session cookies from the dev bypass.
 
-A route that requires more than being signed in declares the role in the same
-wrapper: `withSuperUser(handler)` rejects everyone else with a plain 403 before
-the handler runs. Roles are a typed set on the auth options, so a handler never
-hand-rolls its own role check.
+`withSuperUser(handler)` enforces the super-user role before a handler runs.
 
-Better Auth is the login layer, mounted at `/api/auth/[...all]` and configured
-in one place. The only interactive login is Google OAuth; email-and-password
-stays off unless the product deliberately adds another method. Better Auth's own
-Google callback is `${BETTER_AUTH_URL}/api/auth/callback/google`.
+Better Auth serves `/api/auth/[...all]`. Google OAuth returns to
+`${BETTER_AUTH_URL}/api/auth/callback/google`. Adding `?method=email` to
+`/sign-in` or `/sign-up` opens email/password authentication for anyone;
+the default pages show Google. Password recovery remains unavailable.
 
 **Sign-out is everywhere.** Each browser holds its own session, so signing out on
 any surface revokes *every* session for that user (Better Auth's
