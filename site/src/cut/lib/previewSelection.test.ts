@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
-import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previewSelection";
+import { movePreviewSelection, previewSelectionSnapshot, rotatePreviewSelection, scalePreviewSelection } from "@/cut/lib/previewSelection";
 import { useEditor } from "@/cut/lib/store";
 import { emptySubtitles, type TextOverlay, type VideoClip } from "@/cut/lib/types";
 import { runAiTool } from "@/cut/lib/aiTools";
@@ -84,7 +84,6 @@ test("chat can add, move, and remove preview selections", async () => {
 });
 
 test("scaling grows what each kind stores about the anchor", () => {
-  const { scalePreviewSelection } = require("@/cut/lib/previewSelection");
   useEditor.setState({
     overlays: [title("a", 0.4, 0.4), { id: "box", kind: "shape", shape: "rect", start: 0, end: 4, x: 0.6, y: 0.6, w: 0.2, h: 0.1, fill: "#fff" }],
     clips: [clip],
@@ -103,7 +102,6 @@ test("scaling grows what each kind stores about the anchor", () => {
 });
 
 test("rotating orbits every center and turns every item", () => {
-  const { rotatePreviewSelection } = require("@/cut/lib/previewSelection");
   useEditor.setState({ overlays: [title("a", 0.7, 0.5), title("b", 0.3, 0.5)], clips: [clip] });
   st().setMultiSelection([{ kind: "overlay", id: "a" }, { kind: "overlay", id: "b" }, { kind: "clip", id: "video" }]);
   const snapshot = previewSelectionSnapshot(st(), 1);
