@@ -60,6 +60,21 @@ export function saveThroughHost(text: string, name: string, mimeType: string): b
   return true;
 }
 
+/**
+ * The card draws the editor's skeleton over the frame until the frame says
+ * there is something to see: the editor, or why it cannot open. A crash
+ * reaches the page as an uncaught error and replaces whatever was loading, so
+ * it shows the frame too.
+ */
+const announceReady = () => window.parent.postMessage({ type: "donkeycut:ready" }, "*");
+if (typeof window !== "undefined" && editorHost() === "chatgpt") window.addEventListener("error", announceReady);
+
+export function useHostReady(ready: boolean) {
+  useEffect(() => {
+    if (ready && editorHost() === "chatgpt") announceReady();
+  }, [ready]);
+}
+
 /** The project on donkeycut.com: this page without the frame's embed flag. */
 export function projectPageUrl(): string {
   const url = new URL(window.location.href);

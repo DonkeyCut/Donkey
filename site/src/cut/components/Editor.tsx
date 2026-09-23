@@ -1,7 +1,7 @@
 "use client";
 
 import { chatRuntime } from "@/cut/lib/chatRuntime";
-import { useHostBridge } from "@/cut/lib/hostBridge";
+import { useHostBridge, useHostReady } from "@/cut/lib/hostBridge";
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { usePhoneInbox } from "@/cut/hooks/usePhoneInbox";
 import { useHostCommands } from "@/cut/lib/hostCommands";
@@ -222,6 +222,8 @@ export function Editor({
   // This project lives on this Mac and the Donkey app isn't answering. Nothing
   // to load, and nothing to guess at either: say where it is and wait.
   const [needsApp, setNeedsApp] = useState(false);
+  // The card holds its skeleton until one of this editor's screens is up.
+  useHostReady(needsApp || (!stale && (Boolean(loadError) || (opened && loaded))));
   const dragDepth = useRef(0);
 
   // Load the project document, then enrich assets (thumbs/waveforms) lazily.

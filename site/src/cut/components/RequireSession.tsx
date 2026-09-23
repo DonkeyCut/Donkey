@@ -3,7 +3,7 @@ import { bindChatRuntime, bindCutClip, bindCutJudge } from "@/cut/lib/chatRuntim
 
 import { useEffect, type ReactNode } from "react";
 import { useEnvironment } from "@/cut/lib/environment";
-import { openExternal, projectPageUrl } from "@/cut/lib/hostBridge";
+import { openExternal, projectPageUrl, useHostReady } from "@/cut/lib/hostBridge";
 
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import {
@@ -75,9 +75,12 @@ export function RequireSession({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+// Above the app's loading cover, which waits on an account this frame never
+// gets.
 function EmbeddedSignInFallback() {
+  useHostReady(true);
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-background p-6 text-center">
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-background p-6 text-center">
       <div className="max-w-sm space-y-3">
         <p className="text-sm text-muted-foreground">
           This browser keeps the editor signed out inside ChatGPT.

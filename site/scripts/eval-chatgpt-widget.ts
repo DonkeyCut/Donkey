@@ -14,7 +14,7 @@ const server = Bun.serve({ port: 0, fetch(request) {
   const url = new URL(request.url);
   if (url.pathname === "/widget") return new Response(widgetHtml(url.origin), { headers: { "Content-Type": "text/html" } });
   if (url.pathname === "/preview.mp4") return new Response(Bun.file(video));
-  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><p id="mode"></p><button id="full" onclick="parent.postMessage({ type: 'donkeycut:fullscreen' }, '*')">Fullscreen</button><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host') { document.getElementById('inset').textContent = String(e.data.insetBottom); document.getElementById('mode').textContent = e.data.displayMode; } }); parent.postMessage({ type: 'donkeycut:host?' }, '*');</script>`, { headers: { "Content-Type": "text/html" } });
+  if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><p id="mode"></p><button id="full" onclick="parent.postMessage({ type: 'donkeycut:fullscreen' }, '*')">Fullscreen</button><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host') { document.getElementById('inset').textContent = String(e.data.insetBottom); document.getElementById('mode').textContent = e.data.displayMode; } }); parent.postMessage({ type: 'donkeycut:host?' }, '*'); setTimeout(() => parent.postMessage({ type: 'donkeycut:ready' }, '*'), parent.parent.readyMs);</script>`, { headers: { "Content-Type": "text/html" } });
   if (url.pathname.startsWith("/clients/chatgpt/")) return new Response(Bun.file(path.join(root, "public/clients/chatgpt", path.basename(url.pathname))));
   return new Response(hostHtml, { headers: { "Content-Type": "text/html" } });
 } });
@@ -22,7 +22,7 @@ const hostHtml = `<!doctype html><html><body><iframe title="Donkey Cut preview" 
 const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
-window.calls = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.freshCard = false;
+window.calls = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false;
 const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null});
 // ChatGPT's sandbox drops null-valued keys before the widget sees a result.
 const dropNulls = (value) => Array.isArray(value) ? value.map(dropNulls) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, dropNulls(v)])) : value;
@@ -82,6 +82,7 @@ try {
   await page.evaluate(() => { (window as unknown as { editable: boolean }).editable = true; });
   await app.getByRole("button", { name: "Launch film" }).click();
   await app.frameLocator("iframe.editor").locator("#editor").waitFor();
+  await app.locator(".skeleton").waitFor({ state: "detached" });
   assert.deepEqual(await page.evaluate(() => (window as unknown as { modes: string[] }).modes), [], "an opened editor stays inline");
   assert.equal(await app.locator("button").count(), 0, "the editor card has no controls of its own");
   await app.frameLocator("iframe.editor").locator("#inset").filter({ hasText: /^0$/ }).waitFor();
@@ -94,26 +95,30 @@ try {
   // A card rehydrated with a spent link holds the editor's space, inline and
   // without controls, while it mints a fresh link. The held reply outlasts the
   // stale playback's one-second renewal, so a poll would show up in the calls.
-  type Host = { calls: string[]; modes: string[]; holdMs: number; freshCard: boolean };
+  type Host = { calls: string[]; modes: string[]; holdMs: number; readyMs: number; freshCard: boolean };
   await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.holdMs = 1500; });
   await frame.evaluate(() => { location.reload(); });
   await page.waitForFunction(() => (window as unknown as Host).calls.length === 1);
-  await app.locator("div.editor").waitFor();
+  await app.locator(".skeleton").waitFor();
   assert.equal(await app.locator("button").count(), 0, "a waking editor card shows no controls");
   assert.equal(await app.getByText("Render preview").count(), 0, "a waking editor card shows no preview card");
   await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "one-use" }).waitFor();
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), ["open_project"], "the rehydrated card mints one fresh link and polls nothing");
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).modes), ["fullscreen"], "a card that wakes up stays inline");
-  // A card whose own result carries a live link opens with it, inline.
-  await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.holdMs = 0; host.freshCard = true; });
+  // A card whose own result carries a live link opens with it, inline, and
+  // its skeleton covers the frame until the editor says it is on screen.
+  await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.holdMs = 0; host.readyMs = 1000; host.freshCard = true; });
   await frame.evaluate(() => { location.reload(); });
   await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "via card" }).waitFor();
+  assert.equal(await app.locator(".skeleton").count(), 1, "the skeleton holds until the editor is ready");
+  await page.screenshot({ path: "/tmp/donkey-chatgpt-widget-skeleton.png" });
+  await app.locator(".skeleton").waitFor({ state: "detached" });
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).modes), ["fullscreen"], "a newly opened card opens inline");
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), [], "a live link needs no second call");
   assert.deepEqual(errors, []);
-  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, waking editor card, decoder teardown, lazy HLS.");
+  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, skeleton until ready, waking editor card, decoder teardown, lazy HLS.");
 } finally {
   await browser.close(); server.stop(true); await rm(scratch, { recursive: true, force: true });
 }

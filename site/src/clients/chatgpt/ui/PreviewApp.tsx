@@ -1,5 +1,5 @@
 import { ArtifactVideo } from "@donkeycut/artifact-player/ArtifactVideo";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useProjectApp } from "./useProjectApp";
 import "./preview.css";
 
@@ -8,18 +8,25 @@ export function PreviewApp() {
   const project = view?.project;
   const preview = view?.preview;
   const rendering = preview?.status === "queued" || preview?.status === "running";
+  // The frame whose editor has said it is on screen.
+  const [shown, setShown] = useState<string | null>(null);
   // An editable project is the editor, and its own chrome carries every
   // control. The card holds the editor's inline space from the first paint,
   // so a card ChatGPT shows again after a reload is the editor while it
-  // fetches a fresh link.
-  if (view ? project && view.canEdit : !error) return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"} aria-busy={!editor}>
-    {editor && project
-      ? <EditorFrame url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} />
-      : <div className="editor waiting">{error && project && <>
-        <p role="alert">{error}</p>
-        <button disabled={busy || !ready} onClick={retryEditor}>Try again</button>
-      </>}</div>}
-  </main>;
+  // fetches a fresh link. The editor's skeleton covers the frame until the
+  // frame reports something to see.
+  if (view ? project && view.canEdit : !error) {
+    const loading = !editor || shown !== editor.url;
+    return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"} aria-busy={loading}>
+      {editor && project && <EditorFrame key={editor.url} url={editor.url} name={project.name} inset={hostInset} fullscreen={fullscreen} onReady={() => setShown(editor.url)} onFullscreen={requestFullscreen} onOpen={openFromFrame} onSave={saveFromFrame} />}
+      {error && project && !editor
+        ? <div className="waiting">
+          <p role="alert">{error}</p>
+          <button disabled={busy || !ready} onClick={retryEditor}>Try again</button>
+        </div>
+        : loading && <EditorSkeleton />}
+    </main>;
+  }
   return <main aria-busy={busy}>
     <header><span className="brand">Donkey Cut</span><span>Cloud projects</span></header>
     {error && <p role="alert" className="error">{error}</p>}
@@ -52,11 +59,26 @@ export function PreviewApp() {
   </main>;
 }
 
+/** The editor's shape in its own white while it loads: the top bar, the tab
+ * rail, the preview and the timeline, drawn as the site's skeleton slabs. */
+function EditorSkeleton() {
+  return <div className="skeleton" role="status" aria-label="Opening the editor">
+    <div className="bar"><i className="slab" /><i className="slab" /><span /><i className="slab" /><i className="slab" /></div>
+    <div className="rail">{[0, 1, 2, 3, 4].map((i) => <i key={i} className="slab" />)}</div>
+    <div className="stage"><i className="slab" /></div>
+    <div className="timeline">
+      <div className="controls"><i className="slab" /><i className="slab" /><i className="slab" /></div>
+      {[0, 1, 2].map((i) => <div key={i} className="track"><i className="slab" /><i className="slab" /></div>)}
+    </div>
+  </div>;
+}
+
 /** The editor, framed. It learns the host's display mode and how tall the
  * bottom overlay is when it loads, whenever that changes, and whenever it
- * asks; its own toolbar asks for fullscreen, for a tab on donkeycut.com, and
- * for the saves the sandbox blocks inside the frame. */
-function EditorFrame({ url, name, inset, fullscreen, onFullscreen, onOpen, onSave }: { url: string; name: string; inset: number; fullscreen: boolean; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void }) {
+ * asks; it says when it has something on screen, and its own toolbar asks
+ * for fullscreen, for a tab on donkeycut.com, and for the saves the sandbox
+ * blocks inside the frame. */
+function EditorFrame({ url, name, inset, fullscreen, onReady, onFullscreen, onOpen, onSave }: { url: string; name: string; inset: number; fullscreen: boolean; onReady: () => void; onFullscreen: () => void; onOpen: (url: string) => void; onSave: (text: string, name: string, mimeType: string) => void }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const origin = new URL(url).origin;
   const tell = () => frame.current?.contentWindow?.postMessage({ type: "donkeycut:host", insetBottom: inset, displayMode: fullscreen ? "fullscreen" : "inline" }, origin);
@@ -65,6 +87,7 @@ function EditorFrame({ url, name, inset, fullscreen, onFullscreen, onOpen, onSav
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== origin || event.source !== frame.current?.contentWindow) return;
       if (event.data?.type === "donkeycut:host?") tell();
+      if (event.data?.type === "donkeycut:ready") onReady();
       if (event.data?.type === "donkeycut:fullscreen") onFullscreen();
       // The frame is the editor on this origin, so what it asks to open is
       // the editor's own link — a project page, an export, the post a clip
