@@ -391,6 +391,13 @@ test("edit results reach the model as text and structure, and captured frames be
 
     const skill = await client.callTool({ name: "read_skill", arguments: { name: "timeline-editing" } });
     expect((skill.content as { text: string }[])[0].text).toContain("# Timeline editing");
+
+    const skills = await client.callTool({ name: "list_skills", arguments: {} });
+    const names = (skills.structuredContent as { skills: string[] }).skills;
+    expect(names).toContain("watching-and-cutting");
+    expect(names).not.toContain("scene-productions");
+    const unavailable = await client.callTool({ name: "read_skill", arguments: { name: "scene-productions" } });
+    expect(unavailable.isError).toBe(true);
   } finally {
     await client.close();
     await server.close();

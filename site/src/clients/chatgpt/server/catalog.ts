@@ -1,6 +1,8 @@
 import type { AiToolDef } from "@/cut/lib/aiToolDef";
 import { ADOPT_COMMAND } from "@/cut/lib/commandBatch";
-import { AI_SKILL_INDEX, PROJECT_TOOLS, readSkill } from "@/cut/server/ai/catalog";
+import { PROJECT_TOOLS } from "@/cut/server/ai/catalog";
+import { chatgptDescription } from "@/clients/chatgpt/server/guidance";
+export { SKILL_INDEX, readSkill } from "@/clients/chatgpt/server/guidance";
 
 // The editing commands ChatGPT can run, drawn from the editor's own tool
 // catalog so a command the assistant gains is a command ChatGPT gains. A few
@@ -29,7 +31,15 @@ const HIDDEN = new Set([
   "wait_for_renders",
 ]);
 
-export const COMMANDS: AiToolDef[] = PROJECT_TOOLS.filter((tool) => !HIDDEN.has(tool.name));
+const DESCRIPTIONS: Record<string, string> = {
+  set_removal: "Cut out a subject or background on any video track. mode auto starts the free person matte; custom tracks the subject described in subject and spends credits; off keeps the stored matte and settings. remove background keeps the subject, and remove subject keeps its surroundings. refine requests the paid quality upgrade when the user asks for it. Matting continues in the editor: inspect_project reports each clip's removal readiness and progress. Check readiness before claiming completion, then capture_frame to inspect the result. The user can select an exact instance with the Cutout inspector's brush and Apply controls. Read background-removal for the workflow.",
+  stock_search: "Search the bundled catalogs for footage, images, character references, and sound effects. Stock is free. Use stock_add to import a result, then inspect it before choosing where it belongs in the cut.",
+};
+
+export const COMMANDS: AiToolDef[] = PROJECT_TOOLS.filter((tool) => !HIDDEN.has(tool.name)).map((tool) => ({
+  ...tool,
+  description: DESCRIPTIONS[tool.name] ?? chatgptDescription(tool.description),
+}));
 export const COMMAND_NAMES = COMMANDS.map((tool) => tool.name);
 
 /** What a batch may name: the catalog, the state read inspect_project runs
@@ -75,6 +85,3 @@ export function describeCommands(names: string[]): { found: AiToolDef[]; unknown
   const known = new Set(found.map((tool) => tool.name));
   return { found, unknown: names.filter((name) => !known.has(name)) };
 }
-
-export const SKILL_INDEX = AI_SKILL_INDEX;
-export { readSkill };

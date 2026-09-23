@@ -52,8 +52,11 @@ export const REPOSITORY_URL = "https://github.com/DonkeyCut/Donkey";
 export const SERVER_INSTRUCTIONS = [
   `Donkey Cut is an open-source video editor (Apache 2.0, ${REPOSITORY_URL}). Edit the connected account's cloud projects: import footage, inspect it, cut it, caption it, preview, undo, export.`,
   "Editing, previews and exports are free. Hosted AI (voiceover, music, images, caption rewriting, transcription past the monthly allowance) spends the account's credits. Imports and exports use the account's cloud storage.",
+  "You plan the edit with the user and interpret the footage; Donkey Cut supplies media inspection, signal measurements and editing commands. Use the user's assets and references. Ask for missing files, links or creative decisions when they are needed to fulfill the request. Use list_commands and describe_commands as the capability and input contract, and read_skill for guidance tailored to this ChatGPT client.",
   "Workflow: list_projects or create_project → open_project → import_media → inspect_project → list_commands once, describe_commands for the ones you need → edit_project (batches, one undo step each) → render_preview → undo/redo → export_video.",
   "Every edit runs inside the Donkey Cut editor in the card, on the document the user is looking at: open_project puts that editor in the card, timeline and panels included, when the connection can edit, and edit_project, inspect_project, import_media, undo and redo answer that no card is open until it is. A read-only connection sees the current preview playing. Call render_preview only after an edit or when the card reports no current preview.",
+  "If a tool reports no card open, ask the user to open the project card and keep it open, then resume when it is ready. When the catalog lacks an operation, explain the limit and ask for the required media or a user action in Donkey Cut.",
+  "Inspect before editing. Watch and listen to the relevant media before content-based cuts; use silence, beat, level and color measurements for timing and adjustments. Commands marked reads run through inspect_project; observations saved with note_source and other writes run through edit_project. Verify changes with the returned state, frames and audio, and give the user a preview to review. Claim only coverage and completed work confirmed by tool results.",
   "Times are seconds; ids come from inspect_project. A batch stops at its first failed command. A tool that answers with a job still running is finished by get_job_status.",
 ].join("\n");
 
@@ -330,7 +333,7 @@ export function createChatgptServer(
     "list_skills",
     {
       title: "List editing guides",
-      description: "The editor's own guides — timeline editing, watching and cutting by content, captions, transitions, graphics, audio, export. Read one with read_skill before working in an unfamiliar area.",
+      description: "Guides for Donkey Cut in ChatGPT: the editor-card workflow, watching and listening, signal measurements, timeline editing, captions, transitions, graphics, audio and export. Read one with read_skill before working in an unfamiliar area. Available commands and inputs come from list_commands and describe_commands.",
       inputSchema: z.object({}),
       outputSchema: z.object({ skills: z.array(z.string()) }),
       annotations: readOnlyAnnotations,
@@ -346,7 +349,7 @@ export function createChatgptServer(
     "read_skill",
     {
       title: "Read an editing guide",
-      description: "Read one guide from list_skills.",
+      description: "Read a ChatGPT editing guide from list_skills. Commands marked reads run through inspect_project; commands that write run through edit_project.",
       inputSchema: z.object({ name: z.string().min(1).max(64) }),
       outputSchema: z.object({ name: z.string(), guide: z.string() }),
       annotations: readOnlyAnnotations,
