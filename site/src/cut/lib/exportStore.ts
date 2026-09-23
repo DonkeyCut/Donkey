@@ -81,7 +81,7 @@ interface ExportsState {
   jobs: ExportJob[];
   /** Rows that don't have an engine job yet (preparing / start error). */
   local: LocalRow[];
-  /** Finished/failed engine jobs the user cleared from this tab's dock. */
+  /** Export notifications hidden from this tab's dock. */
   dismissed: string[];
   /** Reserved job rows this tab is rendering itself. They are real rows in the
    * feed, but the local row beside them is the one carrying progress, so they
@@ -185,7 +185,7 @@ export const useExports = create<ExportsState>((set, get) => ({
           r.id === localId ? { ...r, status: "preparing" as const, progress: undefined, abort: undefined } : r
         ),
       }));
-      await createExportJob(projectId, doc, settings);
+      tabOpts.onClaimed(await createExportJob(projectId, doc, settings));
     };
     try {
       if (inBrowser) {
@@ -217,6 +217,9 @@ export const useExports = create<ExportsState>((set, get) => ({
       set((s) => ({
         rendering: s.rendering.filter((id) => !shown.has(id)),
         local: s.local.filter((r) => r.id !== localId),
+        dismissed: s.dismissed.includes(localId)
+          ? [...new Set([...s.dismissed.filter((id) => id !== localId), ...claimed])]
+          : s.dismissed,
       }));
     } catch (err) {
       release();
@@ -258,8 +261,8 @@ export const useExports = create<ExportsState>((set, get) => ({
       cancelExportJob(id, exportBackend(job.residency));
     }
     set((s) => ({
-      local: s.local.filter((r) => r.id !== id),
-      dismissed: s.jobs.some((j) => j.id === id)
+      local: s.local.filter((r) => r.id !== id || r.status !== "error"),
+      dismissed: s.jobs.some((j) => j.id === id) || s.local.some((r) => r.id === id && r.status !== "error")
         ? [...new Set([...s.dismissed, id])]
         : s.dismissed,
     }));
@@ -351,7 +354,9 @@ export const useExports = create<ExportsState>((set, get) => ({
       if (sameJobs(jobs, s.jobs)) return s;
       return {
         jobs,
-        dismissed: s.dismissed.filter((id) => jobs.some((j) => j.id === id)),
+        dismissed: s.dismissed.filter((id) =>
+          jobs.some((j) => j.id === id) || s.local.some((r) => r.id === id)
+        ),
       };
     });
   },

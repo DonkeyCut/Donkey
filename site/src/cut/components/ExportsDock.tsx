@@ -51,7 +51,7 @@ export function ExportsDock() {
   const dismissed = useExports((s) => s.dismissed);
   const all = useExportRows();
   const items = useMemo(
-    () => all.filter((i) => !(i.kind === "job" && dismissed.includes(i.data.id))),
+    () => all.filter((i) => !dismissed.includes(i.data.id)),
     [all, dismissed]
   );
 
@@ -274,26 +274,15 @@ function LocalRowView({ row }: { row: LocalRow }) {
               : row.error || "Couldn't start export"}
         </div>
       </div>
-      {rendering && (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Stop export"
-          onClick={() => useExports.getState().cancel(row.id)}
-        >
-          <X />
-        </Button>
-      )}
-      {row.status === "error" && (
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Dismiss"
-          onClick={() => useExports.getState().dismiss(row.id)}
-        >
-          <X />
-        </Button>
-      )}
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label="Dismiss"
+        title={row.status === "error" ? "Dismiss" : "Hide — the export keeps running"}
+        onClick={() => useExports.getState().dismiss(row.id)}
+      >
+        <X />
+      </Button>
       {rendering && (
         <div className="absolute inset-x-0 bottom-0 h-0.5 bg-secondary">
           <div
