@@ -83,7 +83,7 @@ function EmbeddedSignInFallback() {
     <div className="fixed inset-0 z-[60] grid place-items-center bg-background p-6 text-center">
       <div className="max-w-sm space-y-3">
         <p className="text-sm text-muted-foreground">
-          This browser keeps the editor signed out inside ChatGPT.
+          You’re signed out.
         </p>
         <button
           type="button"
