@@ -28,8 +28,7 @@ import {
   useSaveOnboarding,
 } from "@/queries/onboarding";
 
-const SLIDE_COUNT = 6;
-const REFERRAL_STEP = 1;
+const SLIDES = ["welcome", "referral", "modes", "credits", "ai-chat", "plans"] as const;
 
 // One string for "what the question's answer is right now", so the seeded
 // answer, the last write, and the current picks compare cheaply.
@@ -48,7 +47,7 @@ const doneHere = (userId: string): boolean =>
   typeof window !== "undefined" &&
   Number(localStorage.getItem(doneKey(userId)) ?? 0) >= ONBOARDING_VERSION;
 
-// The welcome sequence: five slides over the whole window, shown once to a new
+// The welcome sequence: slides over the whole window, shown once to a new
 // account and again whenever settings asks to replay it. Mounted in the Cut app
 // shell, above the connect gate, so a first run is the first thing an account
 // sees and the gate is waiting underneath when it ends. A first run is also the
@@ -108,14 +107,18 @@ export function CutOnboarding() {
             : "replay"
           : null;
 
-  // A subscriber has nothing left to be sold, so the plans slide drops off the
-  // end for them: the sequence is one slide shorter, its last slide ends with
-  // Done instead of a pitch, and the header carries a way straight out. Reading
-  // the count this way rather than storing it means a subscription that lands
-  // mid-sequence (or a replay after checkout) is handled by the same clamp.
+  // Navigation and progress use the slides this account can see.
   const isPro = pro?.isActive ?? false;
-  const slideCount = isPro ? SLIDE_COUNT - 1 : SLIDE_COUNT;
+  const signupCredits = state?.signupCredits ?? null;
+  const slides = useMemo(
+    () => SLIDES.filter((slide) =>
+      (slide !== "credits" || signupCredits !== null) &&
+      (slide !== "plans" || !isPro)),
+    [signupCredits, isPro],
+  );
+  const slideCount = slides.length;
   const step = Math.min(rawStep, slideCount - 1);
+  const slide = slides[step];
 
   // Once per open. On the sequence's address the run label can settle from
   // first_run to replay when the account read lands; that is the same open.
@@ -203,7 +206,7 @@ export function CutOnboarding() {
   const advance = useCallback(() => {
     // The question holds the sequence until it has an answer. Guarded here as
     // well as on the button, or the arrow keys would walk right past it.
-    if (step === REFERRAL_STEP && !referrals.length) return;
+    if (slide === "referral" && !referrals.length) return;
     commitReferrals();
     if (step >= slideCount - 1) {
       // The plans slide ends the sequence through its own two answers — Get
@@ -214,7 +217,7 @@ export function CutOnboarding() {
       return;
     }
     setStep(step + 1);
-  }, [commitReferrals, finish, isPro, referrals, slideCount, step]);
+  }, [commitReferrals, finish, isPro, referrals, slide, slideCount, step]);
 
   useEffect(() => {
     if (!run) return;
@@ -317,8 +320,8 @@ export function CutOnboarding() {
       <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-6 py-4 md:px-10">
         <div aria-hidden className="min-h-4 flex-[1]" />
         <div className="mx-auto w-full max-w-[1100px]">
-          {step === 0 && <WelcomeSlide />}
-          {step === 1 && (
+          {slide === "welcome" && <WelcomeSlide />}
+          {slide === "referral" && (
             <ReferralSlide
               selected={referrals}
               onToggle={toggleReferral}
@@ -326,15 +329,15 @@ export function CutOnboarding() {
               onOtherTextChange={setReferralOther}
             />
           )}
-          {step === 2 && <ModesSlide />}
-          {step === 3 && (
+          {slide === "modes" && <ModesSlide />}
+          {slide === "credits" && signupCredits !== null && (
             <CreditsSlide
-              credits={state?.signupCredits ?? null}
+              credits={signupCredits}
               expiresAt={state?.signupCreditsExpiresAt ?? null}
             />
           )}
-          {step === 4 && <AiChatSlide />}
-          {step === 5 && !isPro && <PlansSlide onSkipPro={() => finish(false)} />}
+          {slide === "ai-chat" && <AiChatSlide />}
+          {slide === "plans" && <PlansSlide onSkipPro={() => finish(false)} />}
         </div>
         <div aria-hidden className="flex-[3]" />
       </div>
@@ -366,7 +369,7 @@ export function CutOnboarding() {
             takes them out. */}
         <Button
           onClick={advance}
-          disabled={step === REFERRAL_STEP && !referrals.length}
+          disabled={slide === "referral" && !referrals.length}
           className={cn(
             "gap-1.5 rounded-full bg-ink px-5 text-white hover:bg-ink/90",
             last && !done && "invisible",
