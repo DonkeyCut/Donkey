@@ -163,7 +163,7 @@ export function AuthScreen({ mode, method = "google", callbackURL }: Props) {
       <section className="mx-auto grid w-full max-w-[1400px] grid-cols-1 justify-items-center gap-16 px-6 pt-[44px] pb-[240px] text-center min-[900px]:gap-24 min-[900px]:px-12 min-[900px]:pt-[72px] min-[900px]:pb-[360px]">
         <div>
           <h1 className="max-w-[920px] text-[33px] leading-[0.9] font-semibold break-words min-[900px]:text-[69px]">
-            {method === "email" ? (mode === "sign-in" ? "Sign in with email" : "Create your account") : screenCopy.heading}
+            {screenCopy.heading}
           </h1>
         </div>
 
