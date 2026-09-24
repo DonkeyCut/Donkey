@@ -31,6 +31,9 @@ struct ProjectsScreen: View {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(projects.projects) { project in
                             ProjectCard(project: project) { playing = project }
+                                .task(id: projects.listingRevision) {
+                                    await projects.loadDetails(for: project.id)
+                                }
                         }
                     }
                     .padding(.horizontal, 20)

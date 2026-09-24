@@ -1096,20 +1096,38 @@ import Testing
 
 @MainActor
 @Suite struct ProjectsListingTests {
+    @MainActor
     final class FakeProjects: CloudProjectsServicing {
         let remote: [RemoteProject]
+        var exports: [RemoteExport] = []
+        var exportRequests: [String] = []
+        var thumbnailRequests: [String] = []
+        var concurrentExports = 0
+        var maximumConcurrentExports = 0
+        var exportDelay: Duration = .zero
+        var thumbnail: URL?
 
         init(remote: [RemoteProject] = []) { self.remote = remote }
 
         func fetchProjects() async throws -> [RemoteProject] { remote }
-        func fetchExports(projectId: String) async throws -> [RemoteExport] { [] }
+        func fetchExports(projectId: String) async throws -> [RemoteExport] {
+            exportRequests.append(projectId)
+            concurrentExports += 1
+            maximumConcurrentExports = max(maximumConcurrentExports, concurrentExports)
+            defer { concurrentExports -= 1 }
+            try await Task.sleep(for: exportDelay)
+            return exports
+        }
         func startExport(projectId: String, preset: String) async throws -> String { "job" }
         func exportProgress(jobId: String) async throws -> RenderProgress { .done }
         func exportFile(jobId: String) async throws -> URL { URL(string: "https://example.com/e.mp4")! }
         func streamURL(project: RemoteProject, export: RemoteExport?) async throws -> URL {
             URL(string: "https://example.com/s.mp4")!
         }
-        func thumbnailFile(for project: RemoteProject) async -> URL? { nil }
+        func thumbnailFile(for project: RemoteProject) async -> URL? {
+            thumbnailRequests.append(project.id)
+            return thumbnail
+        }
     }
 
     private func scratch() -> URL {
@@ -1117,6 +1135,69 @@ import Testing
             .appending(path: "projects-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    @Test func shelfRefreshDoesNotRequestEveryProjectsDetails() async {
+        let directory = scratch()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = FakeProjects(remote: (0..<100).map {
+            RemoteProject(id: "p\($0)", name: "Project", duration: 4, updatedAt: Date(), hasPreview: false)
+        })
+        let model = ProjectsModel(service: service, cacheDirectory: directory)
+        await model.refresh()
+        #expect(model.projects.count == 100)
+        #expect(service.exportRequests.isEmpty)
+        #expect(service.thumbnailRequests.isEmpty)
+        let revision = model.listingRevision
+        await model.refresh()
+        #expect(model.listingRevision > revision)
+        #expect(service.exportRequests.isEmpty)
+    }
+
+    @Test func visibleCardsReadDetailsOneAtATime() async {
+        let directory = scratch()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = FakeProjects(remote: (0..<20).map {
+            RemoteProject(id: "p\($0)", name: "Project", duration: 4, updatedAt: Date(), hasPreview: false)
+        })
+        service.exportDelay = .milliseconds(5)
+        service.exports = [RemoteExport(file: "export.mp4", modifiedAt: Date())]
+        service.thumbnail = directory.appending(path: "poster.jpg")
+        let model = ProjectsModel(service: service, cacheDirectory: directory)
+        await model.refresh()
+        await withTaskGroup(of: Void.self) { group in
+            for project in model.projects.prefix(6) {
+                group.addTask { await model.loadDetails(for: project.id) }
+            }
+        }
+        #expect(service.exportRequests.count == 6)
+        #expect(service.thumbnailRequests.count == 6)
+        #expect(service.maximumConcurrentExports == 1)
+        #expect(model.projects.prefix(6).allSatisfy {
+            if case .ready(_, isPreview: false) = $0.export { return $0.thumbnail == service.thumbnail }
+            return false
+        })
+        #expect(model.projects.dropFirst(6).allSatisfy { $0.export == .none && $0.thumbnail == nil })
+    }
+
+    @Test func cancelledVisibleCardDoesNotContinueLoadingDetails() async {
+        let directory = scratch()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let service = FakeProjects(remote: [
+            RemoteProject(id: "p1", name: "Project", duration: 4, updatedAt: Date(), hasPreview: false)
+        ])
+        service.exportDelay = .seconds(60)
+        let model = ProjectsModel(service: service, cacheDirectory: directory)
+        await model.refresh()
+        let card = Task { await model.loadDetails(for: "p1") }
+        while service.exportRequests.isEmpty { await Task.yield() }
+        card.cancel()
+        await card.value
+        #expect(service.thumbnailRequests.isEmpty)
+        #expect(service.concurrentExports == 0)
+        service.exportDelay = .zero
+        await model.loadDetails(for: "p1")
+        #expect(service.thumbnailRequests == ["p1"])
     }
 
     @Test func listingIsThereBeforeTheNetworkIs() async {

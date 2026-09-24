@@ -114,6 +114,7 @@ struct ProjectListingCache {
 public final class ProjectsModel {
     public private(set) var projects: [Project]
     public private(set) var isLoading = false
+    public private(set) var listingRevision = 0
     /// Renders in flight, by project id. A run outlives the screen that asked
     /// for it, so closing the player and coming back finds it where it was.
     public private(set) var exportRuns: [String: ProjectExportState] = [:]
@@ -122,6 +123,8 @@ public final class ProjectsModel {
     private var latestExports: [String: RemoteExport] = [:]
     private var thumbnails: [String: URL] = [:]
     private var exportTasks: [String: Task<Void, Never>] = [:]
+    private var detailTask: Task<Void, Never>?
+    private var accountRevision = UUID()
     private let service: (any CloudProjectsServicing)?
     private let cache: ProjectListingCache
 
@@ -130,11 +133,16 @@ public final class ProjectsModel {
         self.service = service
         cache = ProjectListingCache(directory: cacheDirectory)
         projects = cache.read()
+        thumbnails = Dictionary(uniqueKeysWithValues: projects.compactMap { project in
+            project.thumbnail.map { (project.id, $0) }
+        })
     }
 
     /// Drop what this device knows about the account's projects. Sign-out
     /// calls it, so the next account never opens on someone else's listing.
     public func forget() {
+        accountRevision = UUID()
+        detailTask?.cancel()
         for id in exportRuns.keys { clearExport(id) }
         projects = []
         summaries = [:]
@@ -188,6 +196,7 @@ public final class ProjectsModel {
                 // The finished render is a new export on the project, so the
                 // card stops offering the preview the moment it lands.
                 await refresh()
+                await loadDetails(for: id)
                 return
             }
         }
@@ -236,20 +245,16 @@ public final class ProjectsModel {
         }
     }
 
-    /// Pull the listing and per-project latest exports, then fill thumbnails
-    /// as they cache. A card keeps the poster and export it already carries
-    /// while the refresh runs, so revisiting the screen repaints in place.
+    /// Refresh the shelf. Visible cards fetch their own export and poster.
     public func refresh() async {
         guard let service, !isLoading else { return }
+        let account = accountRevision
         isLoading = true
         defer { isLoading = false }
-        guard let remote = try? await service.fetchProjects() else { return }
+        guard let remote = try? await service.fetchProjects(),
+              !Task.isCancelled, account == accountRevision else { return }
         adopt(remote)
-        async let exports: Void = fillExports(remote, service: service)
-        async let posters: Void = fillThumbnails(remote, service: service)
-        _ = await (exports, posters)
-        // The whole pass landed — names, exports and posters — so this is the
-        // listing the next launch opens on.
+        listingRevision += 1
         cache.write(projects)
     }
 
@@ -263,33 +268,38 @@ public final class ProjectsModel {
         projects = remote.map { project(for: $0, latest: latestExports[$0.id], thumbnail: thumbnails[$0.id]) }
     }
 
-    private func fillExports(_ remote: [RemoteProject], service: any CloudProjectsServicing) async {
-        await withTaskGroup(of: (String, [RemoteExport]?).self) { group in
-            for summary in remote {
-                group.addTask { (summary.id, try? await service.fetchExports(projectId: summary.id)) }
-            }
-            for await (id, exports) in group {
-                // A fetch that failed comes back nil and leaves the export the
-                // card already plays alone; only an answer from the server —
-                // a list, empty or not — changes what a card offers.
-                guard let exports else { continue }
+    /// One visible card at a time reads details. Its view owns cancellation,
+    /// so scrolling away drops queued work and cancels an active request.
+    public func loadDetails(for id: String) async {
+        let account = accountRevision
+        let revision = listingRevision
+        while let pending = detailTask {
+            await pending.value
+            guard !Task.isCancelled else { return }
+        }
+        guard !Task.isCancelled, account == accountRevision, revision == listingRevision,
+              let service, let summary = summaries[id] else { return }
+        let task = Task {
+            defer { detailTask = nil }
+            let exports = try? await service.fetchExports(projectId: id)
+            guard !Task.isCancelled, account == accountRevision, revision == listingRevision else { return }
+            if let exports {
                 latestExports[id] = exports.first
                 rebuild(id)
             }
-        }
-    }
-
-    private func fillThumbnails(_ remote: [RemoteProject], service: any CloudProjectsServicing) async {
-        await withTaskGroup(of: (String, URL?).self) { group in
-            for summary in remote {
-                group.addTask { (summary.id, await service.thumbnailFile(for: summary)) }
-            }
-            for await (id, file) in group {
-                guard let file else { continue }
+            let file = await service.thumbnailFile(for: summary)
+            guard !Task.isCancelled, account == accountRevision, revision == listingRevision else { return }
+            if let file {
                 thumbnails[id] = file
-                guard let index = projects.firstIndex(where: { $0.id == id }) else { continue }
-                projects[index].thumbnail = file
+                rebuild(id)
             }
+            cache.write(projects)
+        }
+        detailTask = task
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
         }
     }
 
@@ -324,7 +334,7 @@ public final class ProjectsModel {
     private func rebuild(_ id: String) {
         guard let summary = summaries[id],
               let index = projects.firstIndex(where: { $0.id == id }) else { return }
-        projects[index] = project(for: summary, latest: latestExports[id], thumbnail: projects[index].thumbnail)
+        projects[index] = project(for: summary, latest: latestExports[id], thumbnail: thumbnails[id] ?? projects[index].thumbnail)
     }
 
     private func project(for summary: RemoteProject, latest: RemoteExport?, thumbnail: URL?) -> Project {
