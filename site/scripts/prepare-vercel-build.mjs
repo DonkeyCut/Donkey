@@ -28,6 +28,10 @@ export function prepareBuildEnvironment(pulled, credentials) {
     }
     delete values[key];
   }
+  return serializeEnvironment(values);
+}
+
+export function serializeEnvironment(values) {
   return Object.entries(values).map(([key, value]) => {
     // dotenv preserves literal backslashes inside single quotes and backticks.
     const quote = ["'", "`"].find(candidate => !value.includes(candidate));
@@ -40,6 +44,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const file = new URL("../../.vercel/.env.production.local", import.meta.url);
   const credentials = JSON.parse(process.env.VERCEL_BUILD_ENV ?? "null");
   const output = prepareBuildEnvironment(readFileSync(file, "utf8"), credentials);
+  if (process.env.GITHUB_ACTIONS === "true") {
+    for (const value of Object.values(parse(output))) {
+      if (!value) continue;
+      const escaped = value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+      console.log(`::add-mask::${escaped}`);
+    }
+  }
   chmodSync(file, 0o600);
   writeFileSync(file, output, { mode: 0o600 });
 }
