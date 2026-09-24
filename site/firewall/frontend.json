@@ -1,0 +1,29 @@
+{
+  "name": "Limit frontend request bursts",
+  "description": "Limit non-API requests before page routing and rendering; exclude Next.js static bundles.",
+  "active": true,
+  "conditionGroup": [
+    {
+      "conditions": [
+        {
+          "type": "path",
+          "op": "re",
+          "neg": true,
+          "value": "^/(?:api(?:/|$)|_next/static(?:/|$))"
+        }
+      ]
+    }
+  ],
+  "action": {
+    "mitigate": {
+      "action": "rate_limit",
+      "rateLimit": {
+        "algo": "fixed_window",
+        "window": 10,
+        "limit": 300,
+        "keys": ["ip"],
+        "action": "rate_limit"
+      }
+    }
+  }
+}

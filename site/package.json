@@ -12,6 +12,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "node --max-old-space-size=8192 node_modules/eslint/bin/eslint.js",
+    "firewall:check": "node scripts/firewall.mjs check",
+    "firewall:stage": "node scripts/firewall.mjs stage",
     "postinstall": "patch-package && node scripts/check-mediabunny-patch.mjs && prisma generate && node scripts/copy-mediapipe-assets.mjs && node scripts/fetch-cut-fonts.mjs && node scripts/stage-frame-synth.mjs",
     "db:generate": "prisma generate",
     "db:pull": "prisma db pull",

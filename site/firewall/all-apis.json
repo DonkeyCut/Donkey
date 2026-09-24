@@ -1,0 +1,24 @@
+{
+  "name": "Limit API request bursts",
+  "description": "Limit all API methods before functions and authentication run.",
+  "active": true,
+  "conditionGroup": [
+    {
+      "conditions": [
+        { "type": "path", "op": "re", "value": "^/api(?:/|$)" }
+      ]
+    }
+  ],
+  "action": {
+    "mitigate": {
+      "action": "rate_limit",
+      "rateLimit": {
+        "algo": "fixed_window",
+        "window": 10,
+        "limit": 100,
+        "keys": ["ip"],
+        "action": "rate_limit"
+      }
+    }
+  }
+}
