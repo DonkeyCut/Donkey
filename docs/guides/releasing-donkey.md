@@ -29,53 +29,37 @@ download URL and the appcast enclosure URL point at
 Use nightly builds to smoke-test the latest default-branch app package. Use
 `Release Donkey` to publish a user-facing release.
 
+## Site Deployments
+
+`Deploy Site` builds relevant pushes to `main` on a standard GitHub Linux
+runner and uploads the finished output to Vercel. Vercel Git deployments are
+disabled. Manual runs use `gh workflow run deploy-site.yml --ref main`.
+
+Each run checks out current `main`, runs unit tests, pulls production settings,
+and uses `vercel build --prod` followed by `vercel deploy --prebuilt --prod`.
+Deployments run one at a time. A unique deployment ID preserves Skew Protection;
+Node 24 matches the hosted project. The repository needs `VERCEL_TOKEN`,
+`VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, and `VERCEL_BUILD_ENV` secrets. The last
+holds a JSON object of the build credentials listed in
+`site/scripts/prepare-vercel-build.mjs`: database and blog storage access,
+auth initialization, and the public analytics key. Vercel retains runtime
+secrets; sensitive values cannot be pulled into CI. Refresh the build credentials
+when their source values change. Scope the deployment token to the site project.
+The Mac release workflow explicitly dispatches the site workflow after
+pushing its appcast and download link because Actions-token pushes do not
+trigger workflows.
+
 ## What Triggers a Release
 
-The commit says so. A subject ending in ` [rebuild]` means the change ships
-inside the Mac app — the Swift app, the Donkey Cut engine sources compiled into the
-bundled binary, the packaging scripts — and a push carrying one cuts a release.
-Anything else lands on the site alone and no build runs.
+A commit subject ending in ` [rebuild]` requests a Mac patch release. The gate
+checks every commit since the last released tag, so queued pushes retain their
+release request. Shared engine modules require the label when their changes
+ship inside the app. Manual runs select the version bump.
 
-The label is the trigger rather than the paths a commit touched, because the
-two aren't the same question. The engine compiles shared modules that also
-serve the hosted page, so a path list either releases site-only edits or misses
-app ones; whether a change needs to reach users' Macs is a judgement the author
-already made.
-
-The gate looks for the label anywhere between the last released tag and the
-branch tip, not just in the commits of one push. A labelled commit that arrives
-while another release is building, or whose own run is skipped, still ships on
-the next push rather than waiting for someone to notice.
-
-The bundled tools take the long way round, because their recipe and the bundle
-the app actually stages move at different times. A push to the tools recipe
-runs `Publish Bundled Tools`, which builds and notarizes the new bundle and
-commits the manifest pinning it — and only then asks for a release. Releasing
-straight off the recipe push would package a build that still stages the
-previous bundle.
-
-Only the bump size stays manual: pushes are always patches, so minor and major
-come from a manual run.
-
-Three guards keep automatic releases from tripping over each other:
-
-1. **One release at a time.** All runs share a concurrency group and are never
-   cancelled mid-flight, so version numbers are derived from a settled set of
-   tags and a run can't die between tagging a release and updating the appcast.
-   Pushes arriving during a build queue up, and only the newest queued run
-   survives.
-2. **The gate picks the commit; the build honors it.** A short first job on a
-   Linux runner decides whether to release, resolves the version, and pins the
-   commit. The macOS build checks out that exact commit, so a push landing
-   mid-run neither sneaks into this release nor gets built twice.
-3. **A released commit is never released again.** A queued run lands on the
-   branch tip, which may already be the commit the previous run shipped. If a
-   numeric tag points at it, the run stops. A manual run bypasses this so a
-   release that failed after tagging can be retried.
-
-Retention keeps the latest ten numeric releases, so automatic patches retire
-older release records faster than manual releases did. The tags stay, and the
-appcast always names exactly one version.
+Bundled-tool changes first publish the new tools and commit their manifest;
+that workflow then dispatches the app release. Each release pins its source
+commit and finishes before another starts. A numeric tag on the selected
+commit skips an automatic duplicate release.
 
 ## Release Runbook
 
