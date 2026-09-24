@@ -31,6 +31,17 @@ function validTimeZone(zone: string): boolean {
 }
 
 export const SETTINGS = defineSettings({
+  databasePool: {
+    schema: z.object({
+      maxConnections: z.number().int().min(1).max(20),
+      idleTimeoutMs: z.number().int().min(100).max(30000),
+      connectionTimeoutMs: z.number().int().min(100).max(30000),
+    }).strict(),
+    default: { maxConnections: 3, idleTimeoutMs: 5000, connectionTimeoutMs: 5000 },
+    public: false,
+    title: "Database connection pool",
+    description: "Connections per server instance, idle connection lifetime, and connection wait limit. Instances start with defaults and apply overrides whenever they read settings. Existing connections drain at their idle deadline.",
+  },
   chatgptApp: {
     schema: z.object({
       enabled: z.boolean(),
@@ -53,6 +64,17 @@ export const SETTINGS = defineSettings({
     public: false,
     title: "ChatGPT app",
     description: "Account linking, allowed OAuth callbacks, token lifetimes, preview polling, how long an edit call waits and how long the card's editor has to claim it, and how long the editor stays signed in inside the card. Enable after the OAuth tables are deployed.",
+  },
+  chatgptPolling: {
+    schema: z.object({
+      pollMs: z.number().int().min(500).max(3000),
+      hiddenPollMs: z.number().int().min(1000).max(3000),
+      maxBackoffMs: z.number().int().min(10000).max(300000),
+    }).strict(),
+    default: { pollMs: 1000, hiddenPollMs: 3000, maxBackoffMs: 60000 },
+    public: true,
+    title: "ChatGPT editor polling",
+    description: "Command polling cadence and maximum failure backoff. Expired sessions stop polling until the editor opens again.",
   },
   cutPreviewJobs: {
     schema: z.object({ maxAttempts: z.number().int().min(1).max(10) }).strict(),

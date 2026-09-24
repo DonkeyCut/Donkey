@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { chatgptPolling } from "@/cut/lib/chatRuntime";
+import { hostCommandPoller } from "@/cut/lib/hostCommandPolling";
 import { runAiTool } from "./aiTools";
 import { apiFetch } from "./backend";
 import { runCommandBatch, type CommandJobSpec } from "./commandBatch";
@@ -17,8 +19,6 @@ import { serializeDoc, useEditor } from "./store";
  * ChatGPT. Each batch is one undo step here, so the user's own ⌘Z and
  * ChatGPT's undo agree on what a step is.
  */
-const POLL_MS = 1000;
-const HIDDEN_POLL_MS = 3000;
 const HEARTBEAT_MS = 10_000;
 
 const snapshot = () => JSON.stringify(serializeDoc(useEditor.getState()));
@@ -114,22 +114,16 @@ export function useHostCommands(projectId: string, enabled: boolean): void {
     const schedule = (ms: number) => {
       if (!signal.aborted) timer = window.setTimeout(tick, ms);
     };
-    const claim = async (): Promise<{ id: string; spec: CommandJobSpec } | null> => {
-      const res = await apiFetch(`/api/cut/projects/${projectId}/commands/claim`, { method: "POST", signal });
-      return res.status === 200 ? ((await res.json()) as { id: string; spec: CommandJobSpec }) : null;
-    };
+    const poll = hostCommandPoller({
+      claim: () => apiFetch(`/api/cut/projects/${projectId}/commands/claim`, { method: "POST", signal }),
+      run: (job) => runClaimed(projectId, job.id, job.spec, signal),
+      settings: chatgptPolling,
+      hidden: () => document.hidden,
+    });
     const tick = async () => {
       if (signal.aborted) return;
-      let claimed: { id: string; spec: CommandJobSpec } | null = null;
-      try {
-        claimed = await claim();
-      } catch {
-        // A failed poll is asked again on the next tick.
-      }
-      if (!claimed) return schedule(document.hidden ? HIDDEN_POLL_MS : POLL_MS);
-      await runClaimed(projectId, claimed.id, claimed.spec, signal);
-      // Another batch may be waiting behind this one.
-      schedule(0);
+      const delay = await poll();
+      if (delay !== null) schedule(delay);
     };
     schedule(0);
     return () => {

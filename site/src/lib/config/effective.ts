@@ -6,7 +6,7 @@ import { variantSchema, type ExperimentVariant } from "@/lib/config/experiment";
 import type { SettingKey, Settings } from "@/lib/config/registry";
 import { resolveSettings } from "@/lib/config/resolve";
 import type { DonkeyAuthenticatedRequest } from "@/lib/donkey-api-auth";
-import { prisma } from "@/lib/prisma";
+import { configureDatabasePool, prisma } from "@/lib/prisma";
 
 // What one user's configuration is right now: overrides from su, plus the
 // variants of every running experiment they are assigned to. Assignment
@@ -58,7 +58,9 @@ export async function contextFromRequest(request: DonkeyAuthenticatedRequest): P
 
 export async function readOverrides(): Promise<Record<string, unknown>> {
   const rows = await prisma.settingOverride.findMany({ select: { key: true, value: true } });
-  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  const overrides = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  configureDatabasePool(overrides);
+  return overrides;
 }
 
 export function parseVariants(raw: Prisma.JsonValue): ExperimentVariant[] {

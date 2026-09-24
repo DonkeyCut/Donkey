@@ -7,6 +7,13 @@ export function bindChatRuntime(value: unknown): void {
 }
 export function chatRuntime(): Settings["chatRuntime"] { return runtime; }
 
+let polling: Settings["chatgptPolling"] = SETTINGS.chatgptPolling.default;
+export function bindChatgptPolling(value: unknown): void {
+  const parsed = SETTINGS.chatgptPolling.schema.safeParse(value);
+  if (parsed.success) polling = parsed.data;
+}
+export function chatgptPolling(): Settings["chatgptPolling"] { return polling; }
+
 let judge: Settings["cutJudge"] = SETTINGS.cutJudge.default;
 export function bindCutJudge(value: unknown): void {
   const parsed = SETTINGS.cutJudge.schema.safeParse(value);
