@@ -1,0 +1,103 @@
+name: Deploy Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - site/**
+      - .github/workflows/deploy-site.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Finish each deployment before starting another. Queued runs check out main
+# when they start, so rerunning an old workflow also ships the current code.
+concurrency:
+  group: deploy-site-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Check deployment credentials
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_BUILD_ENV: ${{ secrets.VERCEL_BUILD_ENV }}
+        run: |
+          : "${VERCEL_TOKEN:?Set the VERCEL_TOKEN repository secret}"
+          : "${VERCEL_ORG_ID:?Set the VERCEL_ORG_ID repository secret}"
+          : "${VERCEL_PROJECT_ID:?Set the VERCEL_PROJECT_ID repository secret}"
+          : "${VERCEL_BUILD_ENV:?Set the VERCEL_BUILD_ENV repository secret}"
+
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
+
+      - name: Build ChatGPT widget
+        working-directory: site
+        run: npm run chatgpt:build
+
+      - name: Test
+        working-directory: site
+        env:
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          DIRECT_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+        run: |
+          node --test scripts/prepare-vercel-build.test.mjs
+          npm test
+
+      # The Vercel project sets site/ as its root directory. Run its CLI from
+      # the repository root so both the build and upload resolve that directory.
+      - name: Pull production settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: npx --yes vercel@59.26.0 pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Prepare build credentials
+        env:
+          VERCEL_BUILD_ENV: ${{ secrets.VERCEL_BUILD_ENV }}
+        run: node site/scripts/prepare-vercel-build.mjs
+
+      - name: Build Vercel output
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL: '1'
+          NODE_OPTIONS: --max-old-space-size=8192
+          DONKEY_DEPLOYMENT_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          npx --yes vercel@59.26.0 build --prod --token="$VERCEL_TOKEN"
+          node --input-type=module - <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const output = JSON.parse(readFileSync('.vercel/output/config.json', 'utf8'));
+          if (output.deploymentId !== process.env.DONKEY_DEPLOYMENT_ID) {
+            throw new Error('Vercel output must retain the build deployment ID for Skew Protection');
+          }
+          NODE
+
+      - name: Deploy prebuilt output
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --yes vercel@59.26.0 deploy --prebuilt --prod --yes --token="$VERCEL_TOKEN" > "$RUNNER_TEMP/site-deployment-url"
+          printf 'Deployed commit `%s`: %s\n' "$(git rev-parse HEAD)" "$(cat "$RUNNER_TEMP/site-deployment-url")" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove pulled credentials
+        if: always()
+        run: rm -f .vercel/.env.production.local

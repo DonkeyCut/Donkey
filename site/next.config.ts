@@ -2,6 +2,8 @@ import createMDX from "@next/mdx";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Prebuilt uploads carry this ID through to Vercel's Skew Protection.
+  deploymentId: process.env.DONKEY_DEPLOYMENT_ID,
   pageExtensions: ["js", "jsx", "ts", "tsx", "md", "mdx"],
   // Workspace packages ship TypeScript source; the app build transpiles them.
   transpilePackages: ["@donkeycut/effects-kit", "@donkeycut/abexp", "@donkeycut/artifact-player"],

@@ -29,6 +29,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 # One release at a time, repo-wide: version numbers are derived from the tags that
 # already exist, so two runs deriving in parallel would both claim the same patch.
@@ -343,3 +344,9 @@ jobs:
           )
 
           python3 scripts/promote-github-release.py "${args[@]}"
+
+      # The Actions token's push does not trigger another push workflow.
+      - name: Deploy updated download link and appcast
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-site.yml --ref main
