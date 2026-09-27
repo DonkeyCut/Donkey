@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build && node scripts/check-cron-routes.mjs",
     "start": "next start",
     "lint": "node --max-old-space-size=8192 node_modules/eslint/bin/eslint.js",
     "firewall:check": "node scripts/firewall.mjs check",

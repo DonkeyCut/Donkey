@@ -26,8 +26,8 @@ const handle = withDonkeyAuth((request) => cutCloudCatchAll(request), {
 // The daily GC cron has no session; Vercel authenticates its invocations with
 // the CRON_SECRET bearer token. Everything else goes through auth (a superuser
 // can also GET /gc directly).
-export const GET = (request: NextRequest) =>
-  new URL(request.url).pathname === "/api/cut-cloud/gc" && isVercelCron(request)
+export const GET = async (request: NextRequest) =>
+  new URL(request.url).pathname === "/api/cut-cloud/gc" && (await isVercelCron(request))
     ? runGc()
     : handle(request);
 export const POST = handle;

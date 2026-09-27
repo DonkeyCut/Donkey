@@ -1,6 +1,6 @@
 import { checkInMemoryRateLimit, rateLimitResponse } from "@/lib/inference/rate-limit";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { type NextRequest, NextResponse } from "next/server";
+import { connection, type NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
 import { isDonkeySuperUser } from "@/lib/super-user";
@@ -72,7 +72,10 @@ export function forbiddenResponse() {
 
 // True when the request comes from Vercel's cron scheduler, which sends the
 // project's CRON_SECRET env var as a bearer token on every invocation.
-export function isVercelCron(request: Request): boolean {
+export async function isVercelCron(request: Request): Promise<boolean> {
+  // Runtime secrets are absent during prebuilt deploys. Authenticate only
+  // after a request arrives so a missing build secret cannot cache a 404.
+  await connection();
   const secret = process.env.CRON_SECRET;
   return !!secret && request.headers.get("authorization") === `Bearer ${secret}`;
 }

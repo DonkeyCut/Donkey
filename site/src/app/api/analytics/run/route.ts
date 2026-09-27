@@ -11,6 +11,6 @@ export const maxDuration = 300;
 // bearer token; manual runs — the dashboard's Run button and per-day
 // {day, force} retriggers — go through POST /api/jobs.
 export const GET = async (request: NextRequest) => {
-  if (!isVercelCron(request)) return notFoundResponse();
+  if (!(await isVercelCron(request))) return notFoundResponse();
   return NextResponse.json(await enqueueJob("analytics-daily", {}, "vercel-cron"));
 };

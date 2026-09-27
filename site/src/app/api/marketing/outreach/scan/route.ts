@@ -11,6 +11,6 @@ export const maxDuration = 300;
 // bearer token; the Outreach tab's Scan now button goes through the super-user
 // POST /api/jobs instead.
 export const GET = async (request: NextRequest) => {
-  if (!isVercelCron(request)) return notFoundResponse();
+  if (!(await isVercelCron(request))) return notFoundResponse();
   return NextResponse.json(await enqueueJob("outreach-scan", {}, "vercel-cron"));
 };

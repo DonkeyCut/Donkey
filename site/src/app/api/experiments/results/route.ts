@@ -11,6 +11,6 @@ export const maxDuration = 300;
 // authenticates with the CRON_SECRET bearer token; a run for one experiment
 // starts from su through POST /api/jobs.
 export const GET = async (request: NextRequest) => {
-  if (!isVercelCron(request)) return notFoundResponse();
+  if (!(await isVercelCron(request))) return notFoundResponse();
   return NextResponse.json(await enqueueJob("experiment-results", {}, "vercel-cron"));
 };
