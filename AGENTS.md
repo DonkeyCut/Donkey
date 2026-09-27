@@ -29,7 +29,6 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 - Every database read and write goes through the Prisma client API. Never use `$queryRaw` or `$executeRaw`; an atomic counter is `updateMany` with `increment` guarded by a `where` on the current value, checked through its count.
 - Do not run database migrations, including `prisma migrate`, `prisma db push`, or any command that applies schema changes to Supabase or another database.
 - Keep Prisma table/model definitions out of `site/prisma/schema.prisma`. Put tables in logically grouped sibling `.prisma` files under `site/prisma/`; reserve `schema.prisma` for shared Prisma configuration such as generator and datasource blocks.
-- Treat `/prototype`, "the prototype route", or route-shaped prototype requests as work on the Next.js route under `site/`, not as a repository-root `prototype/` directory.
 
 ## Cut Surfaces
 
@@ -45,9 +44,8 @@ Every Cut change has to hold on every surface, and the plan for it says how:
 
 ## Working Rules
 
-- Do not touch repository-root `prototype/` unless the user explicitly asks for that filesystem path. By default, assume requested product changes are for the Mac app or the site/landing page.
 - Ask before creating any new plan document.
-- Code reviews run on the latest Opus model; fixes and implementation run on the latest Fable model. Make the switch yourself: a review request (`/review`, "review this") runs in the `code-reviewer` agent (`.claude/agents/code-reviewer.md`, which pins `model: opus`) whatever the session model is, and a fix runs on Fable, spawned in an agent with `model: "fable"` when the session is on something else. A forked skill runs on the session model, so a review never goes through a fork. Never ask the user to `/model`.
+- GitHub Actions owns production deployments. Never deploy directly to Vercel, including `vercel deploy --prebuilt --prod`; push only when asked and let the workflow deploy from `main`.
 - All writing follows `docs/guides/writing-style.md` exactly, for documentation, marketing, and every other writing surface. Read it before writing. Engineering docs under `docs/` also follow the structure in `docs/guides/eng-doc-style.md`.
 - Write straight up — in prompts, docs, commits, code comments, summaries, and UI copy. State what a thing is, once, and stop. Never frame it against what it is not: no "X, not Y", no "X rather than Y", no "instead of Z", no "…, which is exactly what not to do". Cut filler.
 - Keep replies short and action-oriented. For implementation questions, give the recommendation first, then one to three short bullets on why; when the answer is obvious, just say what to do. Skip long explanations, caveats, and "one last thing" sections; flag a real blocker or risk with "One issue:" and explain it briefly.
