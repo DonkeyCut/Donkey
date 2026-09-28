@@ -190,11 +190,12 @@ export const libraryPosterUrl = (
 ) => (a.posterFile ? libraryMediaUrl(a.posterFile, a.residency) : undefined);
 
 /** Save a library file to the user's Downloads folder, off the shelf it sits
- * on. */
+ * on. The download goes through the route because it signs the attachment
+ * name; a minted edge URL is signed for inline reads only. */
 export function downloadLibraryAsset(
   a: Pick<LibraryAsset, "fileName" | "residency">,
 ) {
-  downloadFromUrl(libraryMediaUrl(a.fileName, a.residency), a.fileName);
+  downloadFromUrl(libraryRouteUrl(a.fileName, a.residency), a.fileName);
 }
 
 async function fetchLibraryFrom(r: Residency): Promise<LibraryData> {
