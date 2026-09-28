@@ -20,6 +20,7 @@ export function useProjectApp() {
   const [hostInset, setHostInset] = useState(0);
   const [editorRequest, setEditorRequest] = useState<string | null>(null);
   const requested = useRef<string | null>(null);
+  const reconnecting = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [visible, setVisible] = useState(!document.hidden);
@@ -151,8 +152,15 @@ export function useProjectApp() {
     requested.current = editorRequest;
     void run("open_project", { projectId: editorRequest }, false);
   }, [ready, editorRequest, editor, run]);
-  /** Asks again for the link a waking card could not get. */
-  const retryEditor = () => { if (view?.project) void run("open_project", { projectId: view.project.id }); };
+  /** A fresh one-use link replaces the frame and renews its session cookie. */
+  const retryEditor = () => {
+    if (!ready || busy || reconnecting.current || !projectId) return;
+    reconnecting.current = true;
+    requested.current = projectId;
+    setEditorRequest(null);
+    setEditor(null);
+    void run("open_project", { projectId }).finally(() => { reconnecting.current = false; });
+  };
 
   // The editor's own button asks for the whole window; the host grants what it supports.
   const requestFullscreen = useCallback(async () => {

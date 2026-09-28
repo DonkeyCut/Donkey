@@ -13,6 +13,9 @@ execFileSync("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i
 const downloadBuild = await Bun.build({ entrypoints: [path.join(root, "src/cut/lib/download.ts")], target: "browser" });
 assert.ok(downloadBuild.success, "download helper builds");
 const downloadScript = await downloadBuild.outputs[0].text();
+const sessionBuild = await Bun.build({ entrypoints: [path.join(root, "scripts/lib/chatgpt-session-fixture.tsx")], target: "browser" });
+assert.ok(sessionBuild.success, "session recovery component builds");
+const sessionScript = await sessionBuild.outputs[0].text();
 const downloadRequests: { method: string; cookie: string | null; query: string }[] = [];
 const mediaRequests: string[] = [];
 const mediaServer = Bun.serve({ port: 0, fetch(request) {
@@ -23,6 +26,7 @@ const signedDownload = `http://127.0.0.1:${mediaServer.port}/export.mp4?e=fixtur
 const server = Bun.serve({ port: 0, fetch(request) {
   const url = new URL(request.url);
   if (url.pathname === "/widget") return new Response(widgetHtml(url.origin), { headers: { "Content-Type": "text/html" } });
+  if (url.pathname === "/session.js") return new Response(sessionScript, { headers: { "Content-Type": "text/javascript" } });
   if (url.pathname === "/download.js") return new Response(downloadScript, { headers: { "Content-Type": "text/javascript" } });
   if (url.pathname.startsWith("/api/cut-cloud/")) {
     downloadRequests.push({ method: request.method, cookie: request.headers.get("cookie"), query: url.search });
@@ -31,6 +35,7 @@ const server = Bun.serve({ port: 0, fetch(request) {
     return Response.redirect(signedDownload);
   }
   if (url.pathname === "/preview.mp4") return new Response(Bun.file(video));
+  if (url.pathname === "/embed" && url.searchParams.get("code") === "signed-out") return new Response('<!doctype html><div id="session"></div><script type="module" src="/session.js"></script>', { headers: { "Content-Type": "text/html" } });
   if (url.pathname === "/embed") return new Response(`<!doctype html><title>editor</title><p id="editor">Editor for ${url.searchParams.get("project")} via ${url.searchParams.get("code")}</p><p id="inset"></p><p id="mode"></p><button id="full" onclick="parent.postMessage({ type: 'donkeycut:fullscreen' }, '*')">Fullscreen</button><script>addEventListener('message', (e) => { if (e.source === parent && e.data.type === 'donkeycut:host') { document.getElementById('inset').textContent = String(e.data.insetBottom); document.getElementById('mode').textContent = e.data.displayMode; } }); parent.postMessage({ type: 'donkeycut:host?' }, '*'); setTimeout(() => parent.postMessage({ type: 'donkeycut:ready' }, '*'), parent.parent.readyMs);</script><script type="module">import { downloadFromUrl, downloadFile } from '/download.js'; window.downloadFromUrl = downloadFromUrl; window.downloadFile = downloadFile;</script>`, { headers: { "Content-Type": "text/html", "Set-Cookie": "editor-session=fixture; Path=/api/cut-cloud/; HttpOnly; SameSite=Lax" } });
   if (url.pathname.startsWith("/clients/chatgpt/")) return new Response(Bun.file(path.join(root, "public/clients/chatgpt", path.basename(url.pathname))));
   return new Response(hostHtml, { headers: { "Content-Type": "text/html" } });
@@ -39,7 +44,7 @@ const hostHtml = `<!doctype html><html><body><iframe title="Donkey Cut preview" 
 const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
-window.calls = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false;
+window.calls = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.editorCodes = 0;
 const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null});
 // ChatGPT's sandbox drops null-valued keys before the widget sees a result.
 const dropNulls = (value) => Array.isArray(value) ? value.map(dropNulls) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, dropNulls(v)])) : value;
@@ -48,7 +53,7 @@ const reply = (id, result) => frame.contentWindow.postMessage({jsonrpc:'2.0',id,
 // A card ChatGPT shows again after a reload replays its own result: a stale
 // preview with an expired playback link, and an editor link whose minute is
 // spent unless the fixture says the card was just opened.
-const cardResult = () => !window.editable ? result(view(false)) : result(view(true,{id:'job',status:'done',progress:1,revision:'cloud:1'}),{url:location.origin+'/preview.mp4?stale',expiresAt:Date.now()-1},window.freshCard ? {url:location.origin+'/embed?embed=chatgpt&code=card&project=project',expiresAt:Date.now()+60000} : {url:location.origin+'/embed?embed=chatgpt&code=spent&project=project',expiresAt:Date.now()-1});
+const cardResult = () => !window.editable ? result(view(false)) : result(view(true,{id:'job',status:'done',progress:1,revision:'cloud:1'}),{url:location.origin+'/preview.mp4?stale',expiresAt:Date.now()-1},window.freshCard ? {url:location.origin+'/embed?embed=chatgpt&code='+ (window.signedOut ? 'signed-out' : 'card') +'&project=project',expiresAt:Date.now()+60000} : {url:location.origin+'/embed?embed=chatgpt&code=spent&project=project',expiresAt:Date.now()-1});
 window.addEventListener('message', ({source,data}) => {
  if(source !== frame.contentWindow || !data.method) return;
  if(data.method === 'ui/initialize') reply(data.id,{protocolVersion:data.params.protocolVersion,hostInfo:{name:'fixture',version:'1'},hostCapabilities:{serverTools:{},openLinks:{}},hostContext:{theme:'light',displayMode:'inline',availableDisplayModes:['inline','fullscreen'],safeAreaInsets:{top:0,right:0,bottom:120,left:0}}});
@@ -56,7 +61,7 @@ window.addEventListener('message', ({source,data}) => {
  if(data.method === 'tools/call') {
   const name = data.params.name; window.calls.push(name);
   if(name === 'list_projects') reply(data.id,result(view(false)));
-  if(name === 'open_project') setTimeout(() => reply(data.id, window.editable ? result(view(true),null,{url:location.origin+'/embed?embed=chatgpt&code=one-use&project=project',expiresAt:Date.now()+60000}) : result(view(true))), window.holdMs);
+  if(name === 'open_project') setTimeout(() => reply(data.id, window.failOpen ? {isError:true} : window.editable ? result(view(true),null,{url:location.origin+'/embed?embed=chatgpt&code=one-use-'+ ++window.editorCodes +'&project=project',expiresAt:Date.now()+60000}) : result(view(true))), window.holdMs);
   if(name === 'render_preview') { count=0; reply(data.id,result(view(true,{id:'job',status:'queued',progress:0,revision:'cloud:2'}))); }
   if(name === 'get_preview_status') {
    count++; const done = count >= 3;
@@ -145,7 +150,7 @@ try {
   // A card rehydrated with a spent link holds the editor's space, inline and
   // without controls, while it mints a fresh link. The held reply outlasts the
   // stale playback's one-second renewal, so a poll would show up in the calls.
-  type Host = { calls: string[]; modes: string[]; holdMs: number; readyMs: number; freshCard: boolean };
+  type Host = { calls: string[]; modes: string[]; holdMs: number; readyMs: number; freshCard: boolean; signedOut: boolean; failOpen: boolean; links: string[] };
   await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.holdMs = 1500; });
   await frame.evaluate(() => { location.reload(); });
   await page.waitForFunction(() => (window as unknown as Host).calls.length === 1);
@@ -167,8 +172,36 @@ try {
   await app.frameLocator("iframe.editor").locator("#mode").filter({ hasText: /^inline$/ }).waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).modes), ["fullscreen"], "a newly opened card opens inline");
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), [], "a live link needs no second call");
+  // Render the real signed-out control inside the editor frame.
+  await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.links = []; host.signedOut = true; host.readyMs = 0; host.holdMs = 300; });
+  await frame.evaluate(() => { location.reload(); });
+  const signedOutEditor = app.frameLocator("iframe.editor");
+  await signedOutEditor.getByRole("button", { name: "Reconnect", exact: true }).waitFor();
+  await app.locator(".skeleton").waitFor({ state: "detached" });
+  // The host page has the wrong source: it cannot request a session renewal.
+  await page.evaluate(() => document.querySelector("iframe")!.contentWindow!.postMessage({ type: "donkeycut:reconnect" }, "*"));
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), [], "foreign frames cannot renew the editor session");
+  await signedOutEditor.getByRole("button", { name: "Reconnect", exact: true }).evaluate((button) => {
+    for (let i = 0; i < 3; i++) (button as HTMLButtonElement).click();
+  });
+  await app.locator(".skeleton").waitFor();
+  await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "one-use" }).waitFor();
+  await app.locator(".skeleton").waitFor({ state: "detached" });
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), ["open_project"], "reconnect mints a fresh link once");
+  assert.equal(await page.evaluate(() => (window as unknown as Host).links.length), 0, "reconnect stays inside ChatGPT");
+
+  // Failure is visible and retry replaces the failed frame with a fresh link.
+  await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.failOpen = true; });
+  await frame.evaluate(() => { location.reload(); });
+  await signedOutEditor.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await app.getByRole("alert").filter({ hasText: "Donkey Cut could not complete this request" }).waitFor();
+  assert.equal(await app.locator("iframe.editor").count(), 0, "failed recovery releases the signed-out frame");
+  await page.evaluate(() => { (window as unknown as Host).failOpen = false; });
+  await app.getByRole("button", { name: "Try again", exact: true }).click();
+  await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "one-use" }).waitFor();
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), ["open_project", "open_project"], "manual retry recovers without a browser refresh");
   assert.deepEqual(errors, []);
-  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, authenticated download redirects, download errors, skeleton until ready, waking editor card, decoder teardown, lazy HLS.");
+  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, authenticated download redirects, download errors, skeleton until ready, waking editor card, session renewal and retry, decoder teardown, lazy HLS.");
 } finally {
   await browser.close(); server.stop(true); mediaServer.stop(true); await rm(scratch, { recursive: true, force: true });
 }

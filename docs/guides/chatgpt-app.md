@@ -61,14 +61,10 @@ host bridge. It has no account cookie or OAuth token. Preview rendering uses
 no Donkey Cut AI credits. Derived previews remain exempt from storage quota;
 retained media uses the account's existing storage allowance.
 
-Every project card from a connection that can edit is the whole editor. The
-widget frames `donkeycut.com` through a one-use, one-minute link minted with
-each tool result; a card that wakes with a spent link asks for another. The
-link redeems for a partitioned session cookie, signing the editor in inside
-the frame until the connection is revoked; without partitioned cookies the
-frame offers an Open in Donkey Cut link. The editor's skeleton covers the
-frame until the frame reports something to show. `frameDomains` is justified
-as the app's own editor on its own domain.
+Editable cards frame Donkey Cut through a one-use, one-minute link that creates
+a partitioned session cookie. Reconnect renews that link through the tool bridge
+and reloads the editor. Revoking the connection ends its sessions; the editor skeleton
+covers loading, and `frameDomains` permits the app's own domain.
 
 ## Account linking
 

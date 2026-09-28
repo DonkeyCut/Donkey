@@ -3,7 +3,7 @@ import { bindChatRuntime, bindChatgptPolling, bindCutClip, bindCutJudge } from "
 
 import { useEffect, type ReactNode } from "react";
 import { useEnvironment } from "@/cut/lib/environment";
-import { openExternal, projectPageUrl, useHostReady } from "@/cut/lib/hostBridge";
+import { EmbeddedSignInFallback } from "@/cut/components/EmbeddedSignInFallback";
 
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import {
@@ -29,8 +29,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
   const userId = session?.user.id;
 
   // Framed by the ChatGPT card, the page carries its own partitioned session;
-  // a browser that dropped it gets a link out, since sign-in cannot run in a
-  // frame.
+  // a browser that dropped it renews it through the card's tool bridge.
   const { chatgpt: embedded } = useEnvironment();
 
   useAppLoaded("cut", session?.user);
@@ -74,26 +73,4 @@ export function RequireSession({ children }: { children: ReactNode }) {
 
   if (signedOut && embedded) return <EmbeddedSignInFallback />;
   return <>{children}</>;
-}
-
-// Above the app's loading cover, which waits on an account this frame never
-// gets.
-function EmbeddedSignInFallback() {
-  useHostReady(true);
-  return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-background p-6 text-center">
-      <div className="max-w-sm space-y-3">
-        <p className="text-sm text-muted-foreground">
-          You’re signed out.
-        </p>
-        <button
-          type="button"
-          className="inline-block rounded-md border px-3 py-2 text-sm"
-          onClick={() => openExternal(projectPageUrl())}
-        >
-          Open in Donkey Cut
-        </button>
-      </div>
-    </div>
-  );
 }

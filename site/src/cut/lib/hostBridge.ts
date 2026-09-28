@@ -33,6 +33,12 @@ export function requestHostFullscreen() {
   window.parent.postMessage({ type: "donkeycut:fullscreen" }, "*");
 }
 
+/** Renew the frame's partitioned session through the authenticated tool bridge. */
+export function reconnectThroughHost() {
+  if (editorHost() !== "chatgpt") return;
+  window.parent.postMessage({ type: "donkeycut:reconnect" }, "*");
+}
+
 /**
  * Open a page in a tab the host owns. Answers whether the host took it, so a
  * caller on the web falls through to its own navigation.
