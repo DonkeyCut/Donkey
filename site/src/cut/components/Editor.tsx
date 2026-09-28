@@ -1327,7 +1327,7 @@ export function Editor({
           </Button>
         </div>
       )}
-      <StorageUpgradeDialog />
+      {!chatgpt && <StorageUpgradeDialog />}
       <Lightbox />
     </div>
   );

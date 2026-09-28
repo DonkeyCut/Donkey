@@ -4,6 +4,7 @@ import { lineLikeShape, shapePathD } from "@donkeycut/effects-kit";
 import { SubTabs } from "@/cut/components/SubTabs";
 import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
+import { useEnvironment } from "@/cut/lib/environment";
 import { useEditor } from "@/cut/lib/store";
 import { SHAPE_LABELS, type ShapeKind } from "@/cut/lib/types";
 import { SHAPE_KINDS } from "@/cut/components/ElementsPanel.tools";
@@ -28,9 +29,14 @@ const CATEGORIES = [
 
 export function ElementsPanel({ projectId }: { projectId: string }) {
   const readOnly = useEditor((s) => s.readOnly);
-  const [view, setView] = useLocalPref<Category>("cut-elements-view", "stickers", (v) =>
+  const { chatgpt } = useEnvironment();
+  // Inside ChatGPT the card shows no credits, so Stickers, a generation
+  // surface, leaves the panel.
+  const categories = chatgpt ? CATEGORIES.filter((c) => c.id !== "stickers") : CATEGORIES;
+  const [viewPref, setView] = useLocalPref<Category>("cut-elements-view", "stickers", (v) =>
     CATEGORIES.some((c) => c.id === v)
   );
+  const view = categories.some((c) => c.id === viewPref) ? viewPref : "shapes";
   const { stickers, handleOf } = useProjectStickers();
 
   return (
@@ -38,7 +44,7 @@ export function ElementsPanel({ projectId }: { projectId: string }) {
       {/* PanelHead's height, so the side panel's floating close button lands
           on the toggle's centerline; the right padding keeps clear of it. */}
       <div className="flex h-12 shrink-0 items-center pr-12 pl-3.5">
-        <SubTabs tabs={CATEGORIES} value={view} onChange={setView} />
+        {categories.length > 1 && <SubTabs tabs={categories} value={view} onChange={setView} />}
       </div>
 
       {/* The top pad is the selected tile's ring and its offset: the grid starts

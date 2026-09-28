@@ -726,7 +726,7 @@ export function TopBar({
         <div ref={pillRef} className="flex items-center gap-2">
           {!chatgpt && <SubscribeBonusPill />}
           {!chatgpt && <CreditsPill />}
-          <StoragePill />
+          {!chatgpt && <StoragePill />}
         </div>
         <div className="relative flex items-center">
           {/* Inert copies of the labelled and icon-only rows, held out of the
