@@ -42,9 +42,8 @@ export const COMMANDS: AiToolDef[] = PROJECT_TOOLS.filter((tool) => !HIDDEN.has(
 }));
 export const COMMAND_NAMES = COMMANDS.map((tool) => tool.name);
 
-/** What a batch may name: the catalog, the state read inspect_project runs
- * by default, and the adoption an import queues after its download. */
-const KNOWN_COMMANDS = new Set([...COMMAND_NAMES, "get_state", ADOPT_COMMAND]);
+/** Batches include the catalog and commands queued by first-class tools. */
+const KNOWN_COMMANDS = new Set([...COMMAND_NAMES, "get_state", "undo", "redo", ADOPT_COMMAND]);
 export const unknownCommandNames = (names: string[]): string[] => names.filter((name) => !KNOWN_COMMANDS.has(name));
 
 /** Commands whose output matters and whose effect is on the caller's eyes:
