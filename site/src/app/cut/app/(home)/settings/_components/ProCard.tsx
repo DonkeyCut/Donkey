@@ -94,17 +94,18 @@ export function ProCard() {
               {formatUsd(data.allowanceRemaining)} of{" "}
               {formatUsd(data.monthlyAllowance)} included left this month
             </div>
-            <div>
-              Renews:{" "}
-              {data.currentPeriodEnd
-                ? new Date(data.currentPeriodEnd).toLocaleDateString()
-                : "—"}
-            </div>
-            {data.cancelAtPeriodEnd ? (
+            {data.endsAt ? (
               <div className="text-foreground">
-                Cancels at the end of the current period.
+                Cancels on {new Date(data.endsAt).toLocaleDateString()}.
               </div>
-            ) : null}
+            ) : (
+              <div>
+                Renews:{" "}
+                {data.currentPeriodEnd
+                  ? new Date(data.currentPeriodEnd).toLocaleDateString()
+                  : "—"}
+              </div>
+            )}
             {promotion ? (
               <div>
                 {promotion.lastDay !== null

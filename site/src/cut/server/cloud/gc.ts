@@ -184,7 +184,7 @@ async function reclaimOverQuota() {
   // ones the sweep will never touch, and they are not worth a query each.
   const subs = await prisma.proSubscription.findMany({
     where: { userId: { in: overCap.map((r) => r.userId) } },
-    select: { userId: true, status: true, currentPeriodEnd: true },
+    select: { userId: true, status: true, endedAt: true, cancelAt: true, currentPeriodEnd: true },
   });
   const now = Date.now();
   const lapsed = subs.filter((s) => {

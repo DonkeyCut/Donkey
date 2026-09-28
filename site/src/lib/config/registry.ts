@@ -450,11 +450,25 @@ export const SETTINGS = defineSettings({
     description:
       "Multiplies the AI allowance a Pro billing period starts with, for periods that start on or before the last day. Later periods start with the plain allowance.",
   },
+  proEndingNotice: {
+    schema: z
+      .object({
+        // The editor's top bar shows the days left once fewer than this many
+        // remain before a cancelled Pro plan ends.
+        daysBefore: z.number().int().min(1).max(365),
+      })
+      .strict(),
+    default: { daysBefore: 14 },
+    public: true,
+    title: "Pro ending notice",
+    description:
+      "How many days before a cancelled Pro plan ends the editor starts showing the days left. Until then a plan set to cancel looks like one that renews.",
+  },
 });
 
 // The settings su shows on its Product tab: what an account gets. The
 // settings tab under Experiments still lists every key.
-export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "manualCreditOffer", "promotionCreditOffer", "subscribeBonus", "proAllowancePromotion"] as const satisfies readonly SettingKey[];
+export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "manualCreditOffer", "promotionCreditOffer", "subscribeBonus", "proAllowancePromotion", "proEndingNotice"] as const satisfies readonly SettingKey[];
 
 export type SettingKey = keyof typeof SETTINGS;
 export type Settings = SettingsOf<typeof SETTINGS>;

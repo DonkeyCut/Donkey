@@ -32,6 +32,27 @@ export function subscriptionCancelScheduled(subscription: Stripe.Subscription): 
   return subscription.cancel_at_period_end || subscription.cancel_at !== null;
 }
 
+// The date a scheduled cancel ends the subscription. Stripe fills cancel_at
+// for a period-end cancel too, and a portal-scheduled cancel_at can sit months
+// past the current period (a comped run of Pro), so this is the one field.
+export function subscriptionCancelAt(subscription: Stripe.Subscription): Date | null {
+  return unixToDate(subscription.cancel_at);
+}
+
+type ProEndAnchor = {
+  cancelAt: Date | null;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEnd: Date | null;
+};
+
+// When Pro ends for a row with a cancel scheduled, or null when it renews.
+// Rows synced before cancelAt was stored still carry only the flag; those read
+// as the period end until the next webhook writes the date.
+export function scheduledProEnd(subscription: ProEndAnchor): Date | null {
+  if (subscription.cancelAt) return subscription.cancelAt;
+  return subscription.cancelAtPeriodEnd ? subscription.currentPeriodEnd : null;
+}
+
 export function proPriceId(): string | undefined {
   return process.env.STRIPE_PRO_PRICE_ID || undefined;
 }
@@ -99,6 +120,8 @@ export async function syncProSubscription(
   const price = item?.price;
   const periodStart = unixToDate(item?.current_period_start ?? null);
   const periodEnd = unixToDate(item?.current_period_end ?? null);
+  const cancelAt = subscriptionCancelAt(subscription);
+  const endedAt = unixToDate(subscription.ended_at);
   const allowanceMicros = periodStart
     ? promotedAllowanceMicros(
         allowanceMicrosFromPrice(price),
@@ -109,9 +132,11 @@ export async function syncProSubscription(
 
   await prisma.proSubscription.upsert({
     create: {
+      cancelAt,
       cancelAtPeriodEnd: subscriptionCancelScheduled(subscription),
       currentPeriodEnd: periodEnd,
       currentPeriodStart: periodStart,
+      endedAt,
       monthlyAllowanceMicros: allowanceMicros,
       planKey: proPlanKey,
       status: subscription.status,
@@ -120,9 +145,11 @@ export async function syncProSubscription(
       userId,
     },
     update: {
+      cancelAt,
       cancelAtPeriodEnd: subscriptionCancelScheduled(subscription),
       currentPeriodEnd: periodEnd,
       currentPeriodStart: periodStart,
+      endedAt,
       monthlyAllowanceMicros: allowanceMicros,
       status: subscription.status,
       stripeCustomerId: customerId,

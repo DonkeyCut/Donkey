@@ -15,6 +15,11 @@ model ProSubscription {
   currentPeriodStart     DateTime?
   currentPeriodEnd       DateTime?
   cancelAtPeriodEnd      Boolean   @default(false)
+  // Stripe's cancel_at: when a scheduled cancel ends the subscription. Null
+  // while nothing is scheduled.
+  cancelAt               DateTime?
+  // Stripe's ended_at: when the subscription ended. Null while it runs.
+  endedAt                DateTime?
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 

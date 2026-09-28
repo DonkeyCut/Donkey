@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
+import { getActiveProSubscription, scheduledProEnd } from "@/lib/billing/pro-subscription";
 import { creditMicrosToString, zeroCreditMicros } from "@/lib/credits/amounts";
 import { withDonkeyAuth } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
@@ -43,8 +43,9 @@ export const GET = withDonkeyAuth(async (request) => {
 
   return NextResponse.json({
     allowanceRemaining: creditMicrosToString(allowanceRemainingMicros),
-    cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
     currentPeriodEnd: subscription?.currentPeriodEnd?.toISOString() ?? null,
+    // When a scheduled cancel ends Pro; null while the plan renews.
+    endsAt: subscription ? (scheduledProEnd(subscription)?.toISOString() ?? null) : null,
     isActive: Boolean(subscription),
     monthlyAllowance: subscription
       ? creditMicrosToString(monthlyAllowanceMicros)

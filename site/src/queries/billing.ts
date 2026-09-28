@@ -10,8 +10,11 @@ export const proSubscriptionQueryKey = ["billing", "pro"] as const;
 export type ProSubscription = {
   isActive: boolean;
   status: string | null;
-  cancelAtPeriodEnd: boolean;
+  // End of the current billing period: the allowance resets and the plan
+  // renews here.
   currentPeriodEnd: string | null;
+  // When a scheduled cancel ends Pro; null while the plan renews.
+  endsAt: string | null;
   // Included monthly allowance (USD) and how much is left this period.
   monthlyAllowance: string | null;
   allowanceRemaining: string;

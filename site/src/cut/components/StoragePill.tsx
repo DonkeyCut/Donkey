@@ -2,8 +2,9 @@
 
 // The top bar's subscription surface for cloud projects, one slot with two
 // mutually exclusive faces: free accounts see their storage usage (click →
-// upgrade dialog); a Pro set to cancel sees the days it has left (click →
-// Stripe portal, where Resume lives).
+// upgrade dialog); a Pro set to cancel sees the days it has left once fewer
+// than the `proEndingNotice` days remain (click → Stripe portal, where Resume
+// lives).
 import { type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import {
@@ -16,7 +17,9 @@ import { useCloudUsage, useCutMode } from "@/cut/lib/backend/hooks";
 import { openStorageUpgrade } from "@/cut/lib/storageQuota";
 import { daysUntil } from "@/cut/lib/time";
 import { track } from "@/lib/analytics";
+import { SETTINGS } from "@/lib/config/registry";
 import { cn } from "@/lib/utils";
+import { useAccountConfig } from "@/queries/accountConfig";
 import { useOpenBillingPortal, useProSubscription } from "@/queries/billing";
 import { formatBytes } from "@/lib/bytes";
 
@@ -45,13 +48,19 @@ function CloudStoragePill() {
   // The meter has to move as media lands, so this reader is the polling one.
   const usage = useCloudUsage(pro.data?.isActive === false, { poll: true });
   const portal = useOpenBillingPortal();
+  const config = useAccountConfig({ enabled: true });
 
   if (!pro.data) return null;
 
   if (pro.data.isActive) {
-    const end = pro.data.cancelAtPeriodEnd ? pro.data.currentPeriodEnd : null;
+    const end = pro.data.endsAt;
     if (!end) return null;
     const days = daysUntil(end);
+    // The config read can fail without taking the pill with it: the registry
+    // default stands in until an override arrives.
+    const daysBefore =
+      config.data?.settings.proEndingNotice.daysBefore ?? SETTINGS.proEndingNotice.default.daysBefore;
+    if (days >= daysBefore) return null;
     return (
       <PillTooltip message="Your Pro plan is set to cancel. Resume it to keep your cloud storage.">
         <TooltipTrigger

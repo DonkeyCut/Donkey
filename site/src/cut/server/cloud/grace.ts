@@ -12,17 +12,26 @@ const GRACE_MS = 30 * 24 * 60 * 60 * 1000;
 // ended long before the sweep existed still get a full warning window.
 const RECLAIM_EPOCH_MS = Date.UTC(2026, 6, 26);
 
-type SubscriptionAnchor = { status: string; currentPeriodEnd: Date | null };
+type SubscriptionAnchor = {
+  status: string;
+  endedAt: Date | null;
+  cancelAt: Date | null;
+  currentPeriodEnd: Date | null;
+};
 
 /** When a lapsed subscription's storage becomes reclaimable, or null when the
  * subscription is not one we count as ended. Dunning is not churn: while
  * Stripe is still retrying the invoice (`past_due`) a recovered card puts the
  * account straight back on Pro, so the deletion clock has not started. */
 export function graceDeadline(sub: SubscriptionAnchor): Date | null {
-  if (!sub.currentPeriodEnd || isActiveProStatus(sub.status) || sub.status === "past_due") {
+  // Stripe's ended_at is the truth once the subscription ended. Rows synced
+  // before it was stored fall back to the scheduled cancel date, which can sit
+  // before the last billing period closes, then to the period end.
+  const endedAt = sub.endedAt ?? sub.cancelAt ?? sub.currentPeriodEnd;
+  if (!endedAt || isActiveProStatus(sub.status) || sub.status === "past_due") {
     return null;
   }
-  return new Date(Math.max(sub.currentPeriodEnd.getTime(), RECLAIM_EPOCH_MS) + GRACE_MS);
+  return new Date(Math.max(endedAt.getTime(), RECLAIM_EPOCH_MS) + GRACE_MS);
 }
 
 /** Non-null when the account is out of Pro, over the free cap, and anchored to
