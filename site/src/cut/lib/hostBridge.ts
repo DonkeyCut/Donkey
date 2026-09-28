@@ -81,6 +81,13 @@ export function useHostReady(ready: boolean) {
   }, [ready]);
 }
 
+/** An address the frame itself navigates to keeps the embed flag, so the page
+ * it lands on is still the card. On the web the address is returned as is. */
+export function framedHref(href: string): string {
+  if (editorHost() !== "chatgpt") return href;
+  return `${href}${href.includes("?") ? "&" : "?"}embed=chatgpt`;
+}
+
 /** The project on donkeycut.com: this page without the frame's embed flag. */
 export function projectPageUrl(): string {
   const url = new URL(window.location.href);

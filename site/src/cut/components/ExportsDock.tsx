@@ -24,6 +24,7 @@ import {
   type ExportJob,
   type LocalRow,
 } from "@/cut/lib/exportStore";
+import { framedHref } from "@/cut/lib/hostBridge";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { cn } from "@/lib/utils";
 
@@ -130,7 +131,7 @@ function ProjectName({ projectId, name }: { projectId: string; name?: string }) 
   const base = useCutBase();
   return (
     <Link
-      href={projectHref(base, projectId, "projects")}
+      href={framedHref(projectHref(base, projectId, "projects"))}
       className="block truncate text-xs font-medium hover:underline"
       title={name || "Untitled"}
     >

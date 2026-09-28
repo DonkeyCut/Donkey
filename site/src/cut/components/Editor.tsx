@@ -74,6 +74,7 @@ import { playheadAt, previewAt, skimAt } from "@/cut/lib/playhead";
 import type { MediaAsset } from "@/cut/lib/types";
 import { AiPanel } from "./AiPanel";
 import type { ChatStatus } from "./ChatStatusBadge";
+import { EmbeddedNewProject } from "./EmbeddedNewProject";
 import { ExportDialog } from "./ExportDialog";
 import { Inspector, useHasInspector } from "./Inspector";
 import { Lightbox } from "./Lightbox";
@@ -1198,6 +1199,19 @@ export function Editor({
   // Takes shot on a paired phone land in this project's media as they arrive.
   usePhoneInbox(importFiles);
 
+  // The way out of a project that can't open. On the web it is the home tab
+  // the project was opened from; the card has no home behind it, so a new
+  // project opens in its place.
+  const leave = chatgpt ? (
+    <EmbeddedNewProject />
+  ) : (
+    <Button
+      variant="outline"
+      nativeButton={false}
+      render={<Link href={back.href}>Back to {back.tab}</Link>}
+    />
+  );
+
   // The project is here, on this Mac — it just can't be opened without the app
   // that holds it. The gate's banner sits above this with the recovery steps,
   // and the moment the app answers this screen loads the project itself.
@@ -1210,11 +1224,7 @@ export function Editor({
             This is a local project — it lives on this Mac. Open the Donkey app and it opens
             here.
           </p>
-          <Button
-            variant="outline"
-            nativeButton={false}
-            render={<Link href={back.href}>Back to {back.tab}</Link>}
-          />
+          {leave}
         </div>
       </div>
     );
@@ -1226,11 +1236,7 @@ export function Editor({
         <div className="flex flex-col items-center gap-3 text-center">
           <Clapperboard className="size-7 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">{loadError}</p>
-          <Button
-            variant="outline"
-            nativeButton={false}
-            render={<Link href={back.href}>Back to {back.tab}</Link>}
-          />
+          {leave}
         </div>
       </div>
     );
