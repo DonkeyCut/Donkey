@@ -254,7 +254,7 @@ export function createChatgptServer(
         audio_only: z.boolean().optional(),
       }),
       outputSchema: viewSchema,
-      annotations: editAnnotations,
+      annotations: { ...editAnnotations, openWorldHint: true },
       _meta: { ...editMetadata, "openai/fileParams": ["files"], ...status("Importing footage", "Footage imported") },
     },
     ({ projectId, files, urls, audio_only }) =>
@@ -375,7 +375,7 @@ export function createChatgptServer(
         label: z.string().max(80).optional().describe("What this step does, e.g. \"Cut to 30s and add captions\""),
       }),
       outputSchema: viewSchema,
-      annotations: editAnnotations,
+      annotations: { ...editAnnotations, destructiveHint: true },
       _meta: { ...editMetadata, ...status("Editing the project", "Project edited") },
     },
     ({ projectId, commands, label }) =>

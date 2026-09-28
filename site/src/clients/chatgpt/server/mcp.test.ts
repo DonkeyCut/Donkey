@@ -106,9 +106,15 @@ describe("ChatGPT MCP protocol", () => {
       expect(tools.find((tool) => tool.name === "import_media")?._meta).toMatchObject({
         "openai/fileParams": ["files"],
       });
-      expect(tools.find((tool) => tool.name === "edit_project")?.annotations).toMatchObject({
+      expect(tools.find((tool) => tool.name === "import_media")?.annotations).toMatchObject({
         readOnlyHint: false,
         destructiveHint: false,
+        openWorldHint: true,
+      });
+      expect(tools.find((tool) => tool.name === "edit_project")?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        openWorldHint: false,
       });
       expect(
         tools.find((tool) => tool.name === "render_preview")?.annotations,
