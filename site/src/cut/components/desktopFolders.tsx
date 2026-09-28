@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import type { AssetRef } from "@/cut/lib/assetRef";
 import { formatBytes } from "@/lib/bytes";
@@ -30,6 +31,21 @@ export interface DeskFolder {
    * Roll): it opens like any other but can't be renamed, deleted, or dropped
    * into. */
   locked?: boolean;
+}
+
+// A folder sits in the grid's pick beside the items, under an id of its own
+// shape, so a folder and an item never collide in the one Set.
+const FOLDER_SEL = "folder:";
+export const folderSelId = (id: string) => FOLDER_SEL + id;
+
+/** A pick taken apart: the folder ids and the item ids it holds. */
+export function splitPick(ids: Iterable<string>): { folders: string[]; items: string[] } {
+  const folders: string[] = [];
+  const items: string[] = [];
+  for (const id of ids)
+    if (id.startsWith(FOLDER_SEL)) folders.push(id.slice(FOLDER_SEL.length));
+    else items.push(id);
+  return { folders, items };
 }
 
 export function readDragIds(e: React.DragEvent, mime: string): string[] {
@@ -104,8 +120,9 @@ const MARQUEE_SKIP =
 /** Rubber-band selection like a desktop: press-drag on empty space to sweep a
  * rectangle, and every tile (marked `data-sel-id`) it touches is selected. Armed
  * off the whole `<main>` arena — so it starts anywhere in the content area, not
- * just over the grid — while the left sidebar is left alone. ⇧/⌘ keeps the prior
- * selection; a plain click on empty space clears it. */
+ * just over the grid — while the left sidebar is left alone. The sweep reaches
+ * every tile in the arena, so the folder shelf above the grid is swept with it.
+ * ⇧/⌘ keeps the prior selection; a plain click on empty space clears it. */
 export function Marquee({
   className,
   rootClassName = "relative min-h-[68vh] flex-1",
@@ -162,7 +179,7 @@ export function Marquee({
         };
         setRect(r);
         const hit = new Set(base);
-        ref.current?.querySelectorAll<HTMLElement>("[data-sel-id]").forEach((el) => {
+        arena.querySelectorAll<HTMLElement>("[data-sel-id]").forEach((el) => {
           const b = el.getBoundingClientRect();
           const overlaps =
             b.left < r.left + r.width && b.right > r.left && b.top < r.top + r.height && b.bottom > r.top;
@@ -240,11 +257,13 @@ function CrumbStep({
   onDropFolders?: (ids: string[]) => void;
 }) {
   const [over, setOver] = useState(false);
+  // A pick that holds both drags both payloads, and the step takes each.
   const carried = (e: React.DragEvent) => {
     const types = Array.from(e.dataTransfer.types);
-    if (types.includes(mime)) return "items";
-    if (folderMime && onDropFolders && types.includes(folderMime)) return "folders";
-    return null;
+    return {
+      items: types.includes(mime),
+      folders: !!folderMime && !!onDropFolders && types.includes(folderMime),
+    };
   };
   return (
     <button
@@ -254,7 +273,8 @@ function CrumbStep({
       )}
       onClick={onGo}
       onDragOver={(e) => {
-        if (!carried(e)) return;
+        const kind = carried(e);
+        if (!kind.items && !kind.folders) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         setOver(true);
@@ -262,11 +282,11 @@ function CrumbStep({
       onDragLeave={() => setOver(false)}
       onDrop={(e) => {
         const kind = carried(e);
-        if (!kind) return;
+        if (!kind.items && !kind.folders) return;
         e.preventDefault();
         setOver(false);
-        if (kind === "folders") onDropFolders?.(readDragIds(e, folderMime!));
-        else onDrop(readDragIds(e, mime));
+        if (kind.folders) onDropFolders?.(readDragIds(e, folderMime!));
+        if (kind.items) onDrop(readDragIds(e, mime));
       }}
     >
       {label}
@@ -336,6 +356,34 @@ export function FolderCrumb({
   );
 }
 
+/** The actions on a folder, shared by its ⋯ button and the grid's right-click
+ * menu. `deleteLabel` says what Delete takes: the folder, or the pick it is
+ * in. */
+export function FolderMenuItems({
+  onShare,
+  onRename,
+  onDelete,
+  deleteLabel = "Delete folder",
+}: {
+  onShare?: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+  deleteLabel?: string;
+}) {
+  return (
+    <>
+      {onShare && <DropdownMenuItem onClick={onShare}><Share2 /> Share</DropdownMenuItem>}
+      <DropdownMenuItem onClick={onRename}>
+        <Pencil /> Rename
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem variant="destructive" onClick={onDelete}>
+        <Trash2 /> {deleteLabel}
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 /** The desktop-style folder shelf: each folder as a blue folder icon and a
  * drop target for dragged items. Folder creation is driven by the host (e.g.
  * a header button) through `creating`/`onCreatingChange`. A host that nests
@@ -347,6 +395,10 @@ export function FolderShelf<F extends DeskFolder>({
   badgeOf,
   mime,
   folderMime,
+  picked,
+  onPick,
+  renaming,
+  onRenamingChange,
   onOpen,
   onCreate,
   onRename,
@@ -368,9 +420,23 @@ export function FolderShelf<F extends DeskFolder>({
   mime: string;
   /** The MIME a dragged folder tile carries its id under. */
   folderMime?: string;
+  /** The grid's pick, when folder tiles join it: a tile is marked for the
+   * marquee and the selection menu under `folderSelId`, wears the ring while
+   * picked, and hands a ⌘/⇧ click to `onPick`; a plain click opens it. A
+   * picked tile drags the whole pick — the folders under `folderMime`, the
+   * items under `mime`. A locked folder stays out of the pick. */
+  picked?: Set<string>;
+  onPick?: (e: React.MouseEvent, id: string) => void;
+  /** The folder whose name is being edited, when the host drives that (its
+   * right-click menu offers Rename); unset, the tile keeps it itself. */
+  renaming?: string | null;
+  onRenamingChange?: (id: string | null) => void;
   onOpen: (id: string) => void;
   onCreate?: (name: string) => void | Promise<void>;
   onRename: (id: string, name: string) => void | Promise<void>;
+  /** Delete from the tile's ⋯ menu. The host decides what a picked folder's
+   * Delete takes: the tile labels it "Delete" when the folder is in a pick
+   * with others. */
   onDelete: (id: string) => void | Promise<void>;
   onShare?: (id: string) => void;
   onDropIds: (ids: string[], folderId: string) => void;
@@ -399,8 +465,13 @@ export function FolderShelf<F extends DeskFolder>({
     dragTypes(e).includes(mime) ||
     (nests && dragTypes(e).includes(folderMime) && dragging !== target) ||
     (!!onDropFiles && dragTypes(e).includes("Files"));
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [ownEditing, setOwnEditing] = useState<string | null>(null);
+  const editingId = renaming ?? ownEditing;
+  const setEditingId = onRenamingChange ?? setOwnEditing;
   const [draft, setDraft] = useState("");
+  // The rename field opens on the folder's own name, whoever opened it, and
+  // holds the draft only once it has been typed in.
+  const [draftFor, setDraftFor] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   // Every close path clears the draft, so the next create opens with an empty
   // name field.
@@ -410,6 +481,7 @@ export function FolderShelf<F extends DeskFolder>({
   };
   const closeRename = () => {
     setDraft("");
+    setDraftFor(null);
     setEditingId(null);
   };
 
@@ -426,34 +498,51 @@ export function FolderShelf<F extends DeskFolder>({
       {folders.map((f) => {
         const s = statOf(f.id);
         const isOver = over === f.id;
-        if (editingId === f.id)
+        if (editingId === f.id) {
+          const text = draftFor === f.id ? draft : f.name;
           return (
             <div key={f.id} className={editRowClass}>
               <FolderGlyph className={editGlyphClass} />
               <Input
                 autoFocus
-                value={draft}
+                value={text}
                 className={cn("h-6 text-[11px]", rows ? "flex-1" : "w-full")}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  setDraftFor(f.id);
+                  setDraft(e.target.value);
+                }}
                 onBlur={closeRename}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && draft.trim()) {
-                    void onRename(f.id, draft.trim());
+                  if (e.key === "Enter" && text.trim()) {
+                    void onRename(f.id, text.trim());
                     closeRename();
                   } else if (e.key === "Escape") closeRename();
                 }}
               />
             </div>
           );
+        }
+        const sel = folderSelId(f.id);
+        const pickable = !!picked && !!onPick && !f.locked;
+        const isPicked = pickable && picked.has(sel);
+        // The pick this tile drags: itself first, then the rest of the
+        // folders, with the items riding under their own MIME.
+        const carried = isPicked ? splitPick(picked) : { folders: [], items: [] };
+        const carriedFolders = [f.id, ...carried.folders.filter((id) => id !== f.id)];
         const interact = {
-          onClick: () => onOpen(f.id),
+          ...(pickable ? { "data-sel-id": sel } : {}),
+          onClick: (e: React.MouseEvent) => {
+            if (pickable && additiveClick(e)) {
+              e.preventDefault();
+              onPick(e, f.id);
+              return;
+            }
+            onOpen(f.id);
+          },
           ...(f.locked
             ? {}
             : {
-                onDoubleClick: () => {
-                  setDraft(f.name);
-                  setEditingId(f.id);
-                },
+                onDoubleClick: () => setEditingId(f.id),
                 onDragOver: (e: React.DragEvent) => {
                   if (!accepts(e, f.id)) return;
                   e.preventDefault();
@@ -472,22 +561,29 @@ export function FolderShelf<F extends DeskFolder>({
                     onDropFiles(e.dataTransfer.files, f.id);
                     return;
                   }
-                  if (nests && dragTypes(e).includes(folderMime)) {
+                  // A pick that holds both drops both: the folders file in,
+                  // then the items.
+                  if (nests && dragTypes(e).includes(folderMime))
                     onDropFolders(readDragIds(e, folderMime), f.id);
-                    return;
-                  }
-                  onDropIds(readDragIds(e, mime), f.id);
+                  if (dragTypes(e).includes(mime)) onDropIds(readDragIds(e, mime), f.id);
                 },
                 // The tile itself is what a nesting host drags: its own id,
-                // with the glyph as the ghost.
+                // with the glyph as the ghost — and the rest of the pick
+                // when it is in one.
                 ...(nests
                   ? {
                       draggable: true,
                       onDragStart: (e: React.DragEvent) => {
-                        e.dataTransfer.setData(folderMime, JSON.stringify([f.id]));
+                        e.dataTransfer.setData(folderMime, JSON.stringify(carriedFolders));
+                        if (carried.items.length)
+                          e.dataTransfer.setData(mime, JSON.stringify(carried.items));
                         e.dataTransfer.effectAllowed = "move";
                         setDragging(f.id);
-                        setObjectDragImage(e, 1, [f.id]);
+                        setObjectDragImage(
+                          e,
+                          carriedFolders.length + carried.items.length,
+                          [...carriedFolders.map(folderSelId), ...carried.items]
+                        );
                       },
                       onDragEnd: () => setDragging(null),
                     }
@@ -515,19 +611,12 @@ export function FolderShelf<F extends DeskFolder>({
               <MoreHorizontal className="size-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
-              {onShare && <DropdownMenuItem onClick={() => onShare(f.id)}><Share2 /> Share</DropdownMenuItem>}
-              <DropdownMenuItem
-                onClick={() => {
-                  setDraft(f.name);
-                  setEditingId(f.id);
-                }}
-              >
-                <Pencil /> Rename
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={() => void onDelete(f.id)}>
-                <Trash2 /> Delete folder
-              </DropdownMenuItem>
+              <FolderMenuItems
+                onShare={onShare && (() => onShare(f.id))}
+                onRename={() => setEditingId(f.id)}
+                onDelete={() => void onDelete(f.id)}
+                deleteLabel={isPicked && picked.size > 1 ? "Delete" : "Delete folder"}
+              />
             </DropdownMenuContent>
           </DropdownMenu>
         );
@@ -535,7 +624,8 @@ export function FolderShelf<F extends DeskFolder>({
           <div
             className={cn(
               "group/f flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
-              isOver && "bg-primary/10"
+              isOver && "bg-primary/10",
+              isPicked && PICKED_RING
             )}
             {...interact}
           >
@@ -558,7 +648,10 @@ export function FolderShelf<F extends DeskFolder>({
           </div>
         ) : (
           <div
-            className="group/f relative flex w-[92px] cursor-pointer flex-col items-start rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60"
+            className={cn(
+              "group/f relative flex w-[92px] cursor-pointer flex-col items-start rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
+              isPicked && PICKED_RING
+            )}
             {...interact}
           >
             <div

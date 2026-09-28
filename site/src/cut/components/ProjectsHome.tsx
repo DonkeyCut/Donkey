@@ -43,6 +43,7 @@ import {
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { capturePosterWhenReady, readPoster } from "@/cut/lib/posterCache";
+import { apiJson } from "@/cut/lib/api";
 import { quotaErrorMessage } from "@/cut/lib/backend/cloud";
 import {
   useCloudUsage,
@@ -82,10 +83,24 @@ import {
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
-import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
+import { childrenOf, folderTrail, folderWithin, parentOf, subtreeOf } from "@/cut/lib/folderTree";
 import { PICKED_RING } from "@/cut/lib/assetPick";
-import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
-import { DeleteConfirm, SelectionMenu, useSelectionMenu } from "./selectionMenu";
+import {
+  FolderCrumb,
+  FolderMenuItems,
+  FolderShelf,
+  Marquee,
+  folderSelId,
+  splitPick,
+  useTilePicks,
+} from "./desktopFolders";
+import {
+  DeleteConfirm,
+  SelectionMenu,
+  foldersGoNote,
+  pickLabel,
+  useSelectionMenu,
+} from "./selectionMenu";
 import { formatBytes } from "@/lib/bytes";
 
 type View = "gallery" | "list";
@@ -119,6 +134,17 @@ type SectionData = {
   folders: ProjectFolder[];
   error: boolean;
 };
+
+/** What a delete is about to take: folders and projects, picked together. */
+type DeleteSet = {
+  folders: ProjectFolder[];
+  projects: { project: ProjectSummary; residency: Residency }[];
+};
+const NO_PICK: DeleteSet = { folders: [], projects: [] };
+
+// What a shelf's refusal says, when it says anything.
+const errorOf = async (res: Response | null) =>
+  res ? (await apiJson<object>(res)).error : undefined;
 
 // A dragged selection is carried as a JSON array of project ids, so one drag can
 // move a whole marquee-selected collection into a folder.
@@ -279,7 +305,6 @@ export function ProjectsHome() {
   const folderOwner: Residency | null = openFolder
     ? (residencies.find((r) => data[r].folders.some((f) => f.id === openFolder)) ?? null)
     : null;
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const view = useSyncExternalStore(subscribeView, readView, serverView);
   // The residency the pending creation was launched for; null when the naming
   // dialog is closed.
@@ -290,9 +315,9 @@ export function ProjectsHome() {
   );
   // What a delete is about to take: the pick when the card is in it, else
   // the one card. Null while nothing is being asked.
-  const [deleting, setDeleting] = useState<
-    { project: ProjectSummary; residency: Residency }[] | null
-  >(null);
+  const [deleting, setDeleting] = useState<DeleteSet | null>(null);
+  // The folder whose name field is open, when the right-click menu opened it.
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -357,20 +382,36 @@ export function ProjectsHome() {
     router.push(homeHref(base, "projects", id));
   };
 
-  // What a deleted folder held comes up one level, the way the shelf files it.
+  // A deleted folder takes everything under it: the folders filed there,
+  // however deep, and every project they hold. The shelf deletes each project
+  // the way its own delete goes; once it has, this side purges what it keeps
+  // for them. A shelf that refuses gets its list back.
   const deleteFolder = async (r: Residency, id: string) => {
     if (!live(r)) return;
-    const up = parentOf(data[r].folders.find((f) => f.id === id) ?? { id });
+    const tree = new Set(subtreeOf(data[r].folders, id));
+    const inTree = (p: ProjectSummary) => !!p.folderId && tree.has(p.folderId);
+    const held = (data[r].projects ?? []).filter(inTree);
     patch(r, (s) => ({
-      folders: s.folders
-        .filter((f) => f.id !== id)
-        .map((f) => (parentOf(f) === id ? { ...f, parentId: up } : f)),
-      projects: s.projects.map((p) => (p.folderId === id ? { ...p, folderId: up } : p)),
+      folders: s.folders.filter((f) => !tree.has(f.id)),
+      projects: s.projects.filter((p) => !inTree(p)),
     }));
-    await backendFor(r)
+    const res = await backendFor(r)
       .fetch(`/api/cut/projects/folders/${id}`, { method: "DELETE" })
-      .catch(() => void refresh(r));
+      .catch(() => null);
+    if (!res?.ok) {
+      void refresh(r);
+      throw new Error((await errorOf(res)) ?? "Could not delete the folder.");
+    }
+    for (const p of held) purgeProject(p.id, r);
   };
+  // How many projects the folders hold between them, however deep — what
+  // the confirm counts beside them.
+  const heldBy = (fs: ProjectFolder[]) =>
+    fs.reduce((n, f) => {
+      const r = residencyOfFolder(f.id);
+      const tree = new Set(subtreeOf(data[r].folders, f.id));
+      return n + (data[r].projects ?? []).filter((p) => !!p.folderId && tree.has(p.folderId)).length;
+    }, 0);
 
   // File folders under a folder (or out to the root, parentId null). A folder
   // files only beside itself: under a folder on its own shelf, never under
@@ -390,6 +431,7 @@ export function ProjectsHome() {
         ...s,
         folders: s.folders.map((f) => (idset.has(f.id) ? { ...f, parentId } : f)),
       }));
+      setSelected(new Set());
       await Promise.all(
         moving.map((f) =>
           backendFor(r).fetch(`/api/cut/projects/folders/${f.id}`, {
@@ -574,32 +616,47 @@ export function ProjectsHome() {
     }
   };
 
-  const removeOne = async (id: string, residency: Residency) => {
-    await backendFor(residency).fetch(`/api/cut/projects/${id}`, { method: "DELETE" });
-    // The doc, media, and exports go with the folder on the server. Purge the
-    // client-side residue keyed to this project so nothing survives it: a live
-    // scene run, its in-flight renders, its chat history (whose ids the
-    // render-resume guard reads to keep a deleted thread's render from
-    // landing), and the cached copy of its document.
+  // The doc, media, and exports go with the folder on the server. Purge the
+  // client-side residue keyed to this project so nothing survives it: a live
+  // scene run, its in-flight renders, its chat history (whose ids the
+  // render-resume guard reads to keep a deleted thread's render from
+  // landing), and the cached copy of its document.
+  const purgeProject = (id: string, residency: Residency) => {
     useGenScene.getState().killProject(id);
     useGenerate.getState().cancelForOwner({ projectId: id });
     clearProjectThreads(id);
     dropCachedDoc(id, residency);
     if (residency === "cloud") void dropLocalProjectCopy(id);
+  };
+
+  const removeOne = async (id: string, residency: Residency) => {
+    const res = await backendFor(residency).fetch(`/api/cut/projects/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error((await errorOf(res)) ?? "Could not delete the project.");
+    purgeProject(id, residency);
     patch(residency, (s) => ({ ...s, projects: s.projects.filter((p) => p.id !== id) }));
   };
 
   const remove = async () => {
     if (!deleting) return;
-    // A shelf that isn't answering keeps its projects.
-    const taking = deleting.filter(({ residency }) => live(residency));
-    if (taking.length === 0) return setDeleting(null);
+    // A shelf that isn't answering keeps its projects. A project filed under
+    // a folder in the set goes with the folder.
+    const folders = deleting.folders.filter((f) => live(residencyOfFolder(f.id)));
+    const trees = new Set(folders.flatMap((f) => subtreeOf(data[residencyOfFolder(f.id)].folders, f.id)));
+    const projects = deleting.projects.filter(
+      ({ project, residency }) => live(residency) && !(project.folderId && trees.has(project.folderId))
+    );
+    if (folders.length + projects.length === 0) return setDeleting(null);
     setBusy(true);
     try {
-      await Promise.all(taking.map(({ project, residency }) => removeOne(project.id, residency)));
+      await Promise.all([
+        ...projects.map(({ project, residency }) => removeOne(project.id, residency)),
+        ...folders.map((f) => deleteFolder(residencyOfFolder(f.id), f.id)),
+      ]);
       setSelected(new Set());
-      setDeleting(null);
+    } catch (e) {
+      setDupError(e instanceof Error && e.message ? e.message : "Could not delete.");
     } finally {
+      setDeleting(null);
       setBusy(false);
     }
   };
@@ -636,55 +693,71 @@ export function ProjectsHome() {
         .map((p) => ({ p, r }))
     )
     .sort((a, b) => (b.p.updatedAt ?? 0) - (a.p.updatedAt ?? 0));
+  // What can be picked at this level, in the order a ⇧-range runs: the
+  // shelf's folders, then the grid.
+  const order = [...shownFolders.map((f) => folderSelId(f.id)), ...mergedShown.map(({ p }) => p.id)];
+  const { picked: selected, setPicked: setSelected, pick: pickTile } = useTilePicks(order);
 
-  // The picked run, built once for the whole grid, on the shelves that answer.
-  // A card inside the pick carries the whole set, the rule its ⋯ menu, the
-  // right-click menu and ⌫ follow.
-  const pickedRun = mergedShown
-    .filter(({ p, r }) => selected.has(p.id) && live(r))
-    .map(({ p, r }) => ({ project: p, residency: r }));
-  const setOf = (p: ProjectSummary, r: Residency) =>
-    selected.has(p.id) ? pickedRun : [{ project: p, residency: r }];
-  useDeleteKey(rootRef, pickedRun.length > 0 ? () => setDeleting(pickedRun) : null);
-  const ctx = useSelectionMenu({
-    picked: selected,
-    setPicked: setSelected,
-    shown: mergedShown.map(({ p }) => p.id),
-  });
-  // What the open right-click menu acts on: the live projects among its ids,
-  // and where the whole set can move — a place every one of them can go.
+  // The pick, built once for the whole grid, on the shelves that answer: the
+  // folders on the shelf and the projects in the grid. A card inside the
+  // pick carries the whole set, the rule its ⋯ menu, the right-click menu
+  // and ⌫ follow.
+  const pick: DeleteSet = {
+    folders: shownFolders.filter(
+      (f) => selected.has(folderSelId(f.id)) && live(residencyOfFolder(f.id))
+    ),
+    projects: mergedShown
+      .filter(({ p, r }) => selected.has(p.id) && live(r))
+      .map(({ p, r }) => ({ project: p, residency: r })),
+  };
+  const pickSize = pick.folders.length + pick.projects.length;
+  const setOf = (p: ProjectSummary, r: Residency): DeleteSet =>
+    selected.has(p.id) ? pick : { ...NO_PICK, projects: [{ project: p, residency: r }] };
+  useDeleteKey(rootRef, pickSize > 0 ? () => setDeleting(pick) : null);
+  const ctx = useSelectionMenu({ picked: selected, setPicked: setSelected, shown: order });
+  // What the open right-click menu acts on: the live folders and projects
+  // among its ids, and where the projects can move — a place every one of
+  // them can go, offered while no folder is along.
   const ctxSet = ctx.menu
     ? mergedShown.filter(({ p, r }) => ctx.menu!.ids.includes(p.id) && live(r))
     : [];
-  const ctxMoveTo = ctxSet.length
-    ? moveDests(ctxSet[0].r)
-        .filter((d) => ctxSet.every(({ r }) => moveDests(r).includes(d)))
-        .map((d) => ({
-          target: d,
-          run: () =>
-            void (async () => {
-              for (const { p, r } of ctxSet) await moveAcross(r, d, p);
-            })(),
-        }))
+  const ctxFolders = ctx.menu
+    ? shownFolders.filter(
+        (f) => ctx.menu!.ids.includes(folderSelId(f.id)) && live(residencyOfFolder(f.id))
+      )
     : [];
+  // A menu over one folder offers the folder's own actions.
+  const ctxFolder = ctxFolders.length === 1 && ctxSet.length === 0 ? ctxFolders[0] : null;
+  // What the open confirm counts: the projects the folders hold, and
+  // everything going in all.
+  const deletingHeld = deleting ? heldBy(deleting.folders) : 0;
+  const deletingTotal = (deleting?.projects.length ?? 0) + deletingHeld;
+  const ctxMoveTo =
+    ctxSet.length && ctxFolders.length === 0
+      ? moveDests(ctxSet[0].r)
+          .filter((d) => ctxSet.every(({ r }) => moveDests(r).includes(d)))
+          .map((d) => ({
+            target: d,
+            run: () =>
+              void (async () => {
+                for (const { p, r } of ctxSet) await moveAcross(r, d, p);
+              })(),
+          }))
+      : [];
 
   // Begin a project drag. Dragging a member of the current selection carries the
-  // whole selection; dragging anything else drags (and selects) just that item.
+  // whole selection, the folders in it under their own MIME; dragging anything
+  // else drags (and selects) just that item.
   const onProjectDragStart = (e: React.DragEvent, p: ProjectSummary) => {
-    const ids = selected.has(p.id) && selected.size > 0 ? Array.from(selected) : [p.id];
-    if (!selected.has(p.id)) setSelected(new Set([p.id]));
-    e.dataTransfer.setData(PROJECT_MIME, JSON.stringify(ids));
+    const inPick = selected.has(p.id);
+    const { folders, items } = inPick ? splitPick(selected) : { folders: [], items: [p.id] };
+    if (!inPick) setSelected(new Set([p.id]));
+    e.dataTransfer.setData(PROJECT_MIME, JSON.stringify(items));
+    if (folders.length) e.dataTransfer.setData(PROJECT_FOLDER_MIME, JSON.stringify(folders));
     e.dataTransfer.effectAllowed = "move";
+    const ids = [p.id, ...items.filter((x) => x !== p.id), ...folders.map(folderSelId)];
     setObjectDragImage(e, ids.length, ids, () => setSelected(new Set()));
   };
-
-  const toggleSelect = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   // Only OS-file drags are drop targets here; internal project drags carry
   // PROJECT_MIME and are handled by the folder tiles and breadcrumb instead.
@@ -708,13 +781,24 @@ export function ProjectsHome() {
           size: items.reduce((n, p) => n + (p.sizeBytes ?? 0), 0),
         };
       }}
+      picked={selected}
+      onPick={(e, id) => pickTile(e, folderSelId(id), order)}
+      renaming={renamingFolder}
+      onRenamingChange={setRenamingFolder}
       onOpen={gotoFolder}
       onCreate={(n) => {
         const r = folderCreating ?? folderTarget;
         void createFolder(r, n, r === folderOwner ? openFolder : null);
       }}
       onRename={(id, n) => void renameFolder(residencyOfFolder(id), id, n)}
-      onDelete={(id) => void deleteFolder(residencyOfFolder(id), id)}
+      // A folder in a pick with others takes the pick to the confirm; alone,
+      // itself.
+      onDelete={(id) => {
+        const f = shownFolders.find((x) => x.id === id);
+        if (!f) return;
+        if (selected.has(folderSelId(id)) && pickSize > 1) setDeleting(pick);
+        else setDeleting({ ...NO_PICK, folders: [f] });
+      }}
       onDropIds={(ids, fid) => void moveProjects(residencyOfFolder(fid), ids, fid)}
       onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
       // File imports run on the globally bound backend, so only its folders
@@ -759,7 +843,7 @@ export function ProjectsHome() {
           onClick={(e) => {
             if (additiveClick(e)) {
               e.preventDefault();
-              toggleSelect(p.id);
+              pickTile(e, p.id, order);
               return;
             }
             router.push(projectHref(base, p.id, "projects", openFolder));
@@ -843,7 +927,7 @@ export function ProjectsHome() {
           onClick={(e) => {
             if (additiveClick(e)) {
               e.preventDefault();
-              toggleSelect(p.id);
+              pickTile(e, p.id, order);
               return;
             }
             router.push(projectHref(base, p.id, "projects", openFolder));
@@ -1104,38 +1188,64 @@ export function ProjectsHome() {
       </Dialog>
 
       {/* A shelf that isn't answering takes no changes, so a pick with none
-          of its projects live opens no menu. */}
-      <SelectionMenu menu={ctxSet.length > 0 ? ctx.menu : null} onClose={ctx.close}>
-        <ProjectMenuItems
-          onRename={
-            ctxSet.length === 1
-              ? () => {
-                  setName(ctxSet[0].p.name);
-                  setRenaming({ project: ctxSet[0].p, residency: ctxSet[0].r });
-                }
-              : undefined
-          }
-          onDuplicate={
-            ctxSet.length === 1 ? () => void duplicate(ctxSet[0].r, ctxSet[0].p) : undefined
-          }
-          moveTo={ctxMoveTo}
-          onDelete={() => setDeleting(ctxSet.map(({ p, r }) => ({ project: p, residency: r })))}
-        />
+          of its projects or folders live opens no menu. */}
+      <SelectionMenu menu={ctxSet.length + ctxFolders.length > 0 ? ctx.menu : null} onClose={ctx.close}>
+        {ctxFolder ? (
+          <FolderMenuItems
+            onRename={() => setRenamingFolder(ctxFolder.id)}
+            onDelete={() => setDeleting({ ...NO_PICK, folders: [ctxFolder] })}
+          />
+        ) : (
+          <ProjectMenuItems
+            onRename={
+              ctxSet.length === 1 && ctxFolders.length === 0
+                ? () => {
+                    setName(ctxSet[0].p.name);
+                    setRenaming({ project: ctxSet[0].p, residency: ctxSet[0].r });
+                  }
+                : undefined
+            }
+            onDuplicate={
+              ctxSet.length === 1 && ctxFolders.length === 0
+                ? () => void duplicate(ctxSet[0].r, ctxSet[0].p)
+                : undefined
+            }
+            moveTo={ctxMoveTo}
+            onDelete={() =>
+              setDeleting({
+                folders: ctxFolders,
+                projects: ctxSet.map(({ p, r }) => ({ project: p, residency: r })),
+              })
+            }
+          />
+        )}
       </SelectionMenu>
 
       <DeleteConfirm
         open={!!deleting}
         title={
-          deleting && deleting.length > 1
-            ? `Delete ${deleting.length} projects?`
-            : `Delete “${deleting?.[0]?.project.name}”?`
+          deleting
+            ? `Delete ${pickLabel(deleting.folders, deleting.projects.map((x) => x.project), ["project", "projects"], deletingHeld)}?`
+            : ""
         }
-        description={
-          deleting && deleting.length > 1
-            ? "This deletes each project’s whole folder, including its media files and exports. This can’t be undone."
-            : "This deletes the whole project folder, including its media files and exports. This can’t be undone."
+        description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${
+          deletingTotal === 0
+            ? deleting?.folders.length === 1
+              ? "The folder is empty."
+              : "The folders are empty."
+            : deletingTotal === 1
+              ? "This deletes the whole project folder, including its media files and exports."
+              : "This deletes each project’s whole folder, including its media files and exports."
+        } This can’t be undone.`}
+        action={
+          !deleting || deleting.folders.length === 0
+            ? deleting && deleting.projects.length > 1
+              ? "Delete projects"
+              : "Delete project"
+            : deleting.projects.length === 0 && deleting.folders.length === 1
+              ? "Delete folder"
+              : "Delete"
         }
-        action={deleting && deleting.length > 1 ? "Delete projects" : "Delete project"}
         busy={busy}
         onClose={() => setDeleting(null)}
         onConfirm={() => void remove()}

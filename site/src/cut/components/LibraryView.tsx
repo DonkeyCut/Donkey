@@ -44,6 +44,7 @@ import {
   deleteLibraryFolder,
   deleteTemplate,
   estimatedShape,
+  folderDeleteTakes,
   importUrlToLibrary,
   libraryMediaUrl,
   carryAssetTo,
@@ -54,9 +55,11 @@ import {
   uploadToLibrary,
   type ImportStage,
   type LibraryAsset,
+  type LibraryFolder,
   type LibraryTemplateItem,
   type LibraryData,
 } from "@/cut/lib/library";
+import { additiveClick } from "@/cut/lib/hostKeys";
 import { linkFromText, normalizeLink } from "@/cut/lib/link";
 import { dialogOnTop, isPasteTarget } from "@/cut/lib/shortcutGate";
 import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
@@ -72,7 +75,7 @@ import { TabStatus } from "./TabStatus";
 import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import {
-  forgetLinkedCopy,
+  forgetLinkedCopies,
   expandLinkedFiles,
   isLinkedFile,
   linkedAccept,
@@ -84,8 +87,23 @@ import { shapeBand } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { AudioCardFace } from "./AudioPanel";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
-import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
-import { DeleteConfirm, SelectionMenu, useSelectionMenu } from "./selectionMenu";
+import {
+  FolderCrumb,
+  FolderMenuItems,
+  FolderShelf,
+  Marquee,
+  folderSelId,
+  splitPick,
+  useTilePicks,
+} from "./desktopFolders";
+import {
+  DeleteConfirm,
+  SelectionMenu,
+  foldersGoNote,
+  phoneGoNote,
+  pickLabel,
+  useSelectionMenu,
+} from "./selectionMenu";
 
 // A dragged library selection travels as a JSON array of asset ids, so a whole
 // marquee-selected collection can be dropped onto a folder at once.
@@ -96,6 +114,10 @@ const LIBRARY_FOLDER_MOVE_MIME = "application/x-cut-library-folder";
 /** A saved arrangement among the media a pick can carry off the shelf. */
 const isTemplate = (x: LibraryAsset | LibraryTemplateItem): x is LibraryTemplateItem =>
   "layers" in x;
+
+/** What a delete is about to take: folders and items, picked together. */
+type DeleteSet = { folders: LibraryFolder[]; items: (LibraryAsset | LibraryTemplateItem)[] };
+const NO_PICK: DeleteSet = { folders: [], items: [] };
 
 /** What an arriving item is doing right now. An upload is one push from this
  * browser; a link is fetched by whichever shelf is taking it, and comes down
@@ -356,6 +378,7 @@ export function LibraryView() {
   const folderList = library.data?.folders;
   const folders = useMemo(() => folderList ?? [], [folderList]);
   const templates = library.data?.templates ?? [];
+  const listing: LibraryData = { assets: library.data?.assets ?? [], folders, templates };
   const patch = useCallback(
     (fn: (prev: LibraryData) => LibraryData) => patchLibrary(client, fn),
     [client],
@@ -364,7 +387,6 @@ export function LibraryView() {
   // The open folder lives in the URL (?folder=…) so the browser's back button
   // steps folder → root and the location survives reloads.
   const openFolder = useSearchParams().get("folder");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   // Media on its way in — an upload or a link — each one a tile in the grid
   // from the moment it starts, so the library shows the work rather than the
   // dialog holding it.
@@ -382,7 +404,9 @@ export function LibraryView() {
   const [folderCreating, setFolderCreating] = useState(false);
   // What a delete is about to take: the pick when the card is in it, else
   // the one card. Null while nothing is being asked.
-  const [deleting, setDeleting] = useState<(LibraryAsset | LibraryTemplateItem)[] | null>(null);
+  const [deleting, setDeleting] = useState<DeleteSet | null>(null);
+  // The folder whose name field is open, when the right-click menu opened it.
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Whether an OS-file drag is hovering the surface (a depth counter tames
@@ -611,30 +635,53 @@ export function LibraryView() {
     return () => window.removeEventListener("paste", onPaste);
   }, []);
 
-  const remove = async () => {
-    if (!deleting) return;
+  // Delete a set. A folder takes everything under it — the folders filed
+  // there, however deep, and every item they hold — the way the shelf deletes
+  // it; an item filed in one of those needs no delete of its own. A camera
+  // clip filed there stays in Camera Roll, unfiled.
+  const remove = async (set: DeleteSet) => {
     setDeleting(null);
     // A shelf that isn't answering keeps its items.
-    const taking = deleting.filter((a) => live(a.residency));
-    if (taking.length === 0) return;
-    const gone = new Set(taking.map((a) => a.id));
+    const goneFolders = set.folders.filter((f) => live(f.residency));
+    const takes = folderDeleteTakes(listing, goneFolders);
+    const inTree = (x: { folderId?: string | null }) => !!x.folderId && takes.tree.has(x.folderId);
+    const goneItems = set.items.filter((a) => live(a.residency) && !inTree(a));
+    if (goneFolders.length + goneItems.length === 0) return;
+    const gone = new Set([...goneItems, ...takes.assets, ...takes.templates].map((a) => a.id));
+    forgetLinkedCopies([...goneItems.filter((a): a is LibraryAsset => !isTemplate(a)), ...takes.assets]);
     patch((d) => ({
       ...d,
-      assets: d.assets.filter((a) => !gone.has(a.id)),
+      folders: d.folders.filter((f) => !takes.tree.has(f.id)),
+      assets: d.assets
+        .filter((a) => !gone.has(a.id))
+        .map((a) => (inTree(a) ? { ...a, folderId: null } : a)),
       templates: d.templates.filter((t) => !gone.has(t.id)),
     }));
     setSelected(new Set());
-    for (const a of taking) if (!isTemplate(a) && isLinkedType(a.type)) forgetLinkedCopy(a.id);
     try {
-      await Promise.all(
-        taking.map((a) =>
+      await Promise.all([
+        ...goneItems.map((a) =>
           isTemplate(a) ? deleteTemplate(a.residency, a.id) : deleteFromLibrary(a.residency, a.id),
         ),
-      );
+        ...goneFolders.map((f) => deleteLibraryFolder(f.residency, f.id)),
+      ]);
     } catch {
       void reload();
     }
   };
+  // How many items the folders hold between them, however deep — what the
+  // confirm counts beside them.
+  const heldBy = (fs: LibraryFolder[]) => {
+    const takes = folderDeleteTakes(listing, fs);
+    return takes.assets.length + takes.templates.length;
+  };
+  // How many of the items a delete takes were synced from the phone, which
+  // takes them off the phone too.
+  const phoneSynced = (set: DeleteSet) =>
+    [
+      ...set.items.filter((a): a is LibraryAsset => !isTemplate(a)),
+      ...folderDeleteTakes(listing, set.folders).assets,
+    ].filter((a) => !!a.origin).length;
 
   // Open a folder (or the root, id null) by navigating, so the location is
   // shareable and back-button friendly.
@@ -730,6 +777,7 @@ export function LibraryView() {
         idset.has(f.id) ? { ...f, parentId } : f,
       ),
     }));
+    setSelected(new Set());
     await Promise.all(
       moving.map((f) => updateLibraryFolder(f.residency, f.id, { parentId })),
     ).catch(() => void reload());
@@ -737,16 +785,20 @@ export function LibraryView() {
 
   // Carry the current selection (or just this card) as a folder-move payload,
   // with a ghost — alongside the timeline-drag payload the card already sets.
-  // A single card drags as itself; a multi-selection keeps the counted stack.
+  // A single card drags as itself; a multi-selection keeps the counted stack,
+  // the folders in it riding under their own MIME.
   const dragSelection = (e: React.DragEvent, id: string): string[] => {
-    const ids =
-      selected.has(id) && selected.size > 0 ? Array.from(selected) : [id];
-    if (!selected.has(id)) setSelected(new Set([id]));
-    e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify(ids));
+    const inPick = selected.has(id);
+    const { folders: pickedFolders, items } = inPick
+      ? splitPick(selected)
+      : { folders: [], items: [id] };
+    if (!inPick) setSelected(new Set([id]));
+    e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify(items));
+    if (pickedFolders.length)
+      e.dataTransfer.setData(LIBRARY_FOLDER_MOVE_MIME, JSON.stringify(pickedFolders));
     e.dataTransfer.effectAllowed = "copyMove";
-    return ids;
+    return [id, ...items.filter((x) => x !== id), ...pickedFolders.map(folderSelId)];
   };
-
   const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
     const ids = dragSelection(e, a.id);
     setObjectDragImage(e, ids.length, ids, () => setSelected(new Set()));
@@ -757,23 +809,46 @@ export function LibraryView() {
   const shownTemplates = templates.filter(
     (t) => (t.folderId ?? null) === openFolder,
   );
+  // The way down to the open folder, and what is filed right here.
+  const trail = useMemo(() => folderTrail(folders, openFolder), [folders, openFolder]);
+  const shownFolders = useMemo(() => childrenOf(folders, openFolder), [folders, openFolder]);
+  // What can be picked at this level, in the order a ⇧-range runs: the
+  // shelf's folders, then the grid with templates leading.
+  const order = [
+    ...shownFolders.map((f) => folderSelId(f.id)),
+    ...[...shownTemplates, ...shown].map((a) => a.id),
+  ];
+  const { picked: selected, setPicked: setSelected, pick: pickTile } = useTilePicks(order);
   // The picked run, built once for the whole grid: every card hands the same
   // array to its drag and its ⌘C.
   const pickedRun = shown.filter((a) => selected.has(a.id));
-  // The whole pick, templates leading the way the grid lays them out.
-  const picked: (LibraryAsset | LibraryTemplateItem)[] = [
-    ...shownTemplates.filter((t) => selected.has(t.id)),
-    ...pickedRun,
-  ];
+  // The whole pick: the folders on the shelf, and the items with templates
+  // leading the way the grid lays them out.
+  const pick: DeleteSet = {
+    folders: shownFolders.filter((f) => selected.has(folderSelId(f.id))),
+    items: [...shownTemplates.filter((t) => selected.has(t.id)), ...pickedRun],
+  };
+  const pickSize = pick.folders.length + pick.items.length;
   // A card inside the pick carries the whole set, the rule its drag, its ⌘C
   // and its delete follow.
-  const setOf = (a: LibraryAsset | LibraryTemplateItem) => (selected.has(a.id) ? picked : [a]);
-  useDeleteKey(rootRef, picked.length > 0 ? () => setDeleting(picked) : null);
-  const ctx = useSelectionMenu({
-    picked: selected,
-    setPicked: setSelected,
-    shown: [...shownTemplates, ...shown].map((a) => a.id),
-  });
+  const setOf = (a: LibraryAsset | LibraryTemplateItem): DeleteSet =>
+    selected.has(a.id) ? pick : { ...NO_PICK, items: [a] };
+  useDeleteKey(rootRef, pickSize > 0 ? () => setDeleting(pick) : null);
+  const ctx = useSelectionMenu({ picked: selected, setPicked: setSelected, shown: order });
+  // What the open right-click menu acts on.
+  const ctxSet: DeleteSet = ctx.menu
+    ? {
+        folders: shownFolders.filter((f) => ctx.menu!.ids.includes(folderSelId(f.id))),
+        items: [...shownTemplates, ...shown].filter((a) => ctx.menu!.ids.includes(a.id)),
+      }
+    : NO_PICK;
+  // A menu over one folder offers the folder's own actions.
+  const ctxFolder =
+    ctxSet.folders.length === 1 && ctxSet.items.length === 0 ? ctxSet.folders[0] : null;
+  // What the open confirm counts: the items the folders hold, and everything
+  // going in all.
+  const deletingHeld = deleting ? heldBy(deleting.folders) : 0;
+  const deletingTotal = (deleting?.items.length ?? 0) + deletingHeld;
   // Right-click over a card: the selection menu. An arrival's preview is the
   // one other media here, and the browser's own menu never shows over it.
   const onPageContextMenu = (e: React.MouseEvent) => {
@@ -807,9 +882,6 @@ export function LibraryView() {
   // Sound tiles are 70% of the shared tile's width and height.
   const TILE_AREA = LIBRARY_TILE_AREA;
   const audioArea = LIBRARY_AUDIO_TILE_AREA;
-  // The way down to the open folder, and what is filed right here.
-  const trail = useMemo(() => folderTrail(folders, openFolder), [folders, openFolder]);
-  const shownFolders = useMemo(() => childrenOf(folders, openFolder), [folders, openFolder]);
   // Where a new folder goes: inside the open folder on its shelf, or at the
   // top level of the shelf new items go to — the rule `landing` applies to
   // items, spelled out here so the render stays pure.
@@ -934,6 +1006,10 @@ export function LibraryView() {
                 <ShelfBadge residency={r} offline={!live(r)} />
               ) : null;
             }}
+            picked={selected}
+            onPick={(e, id) => pickTile(e, folderSelId(id), order)}
+            renaming={renamingFolder}
+            onRenamingChange={setRenamingFolder}
             onOpen={gotoFolder}
             onShare={shareFolder}
             onCreate={async (name) => {
@@ -952,24 +1028,13 @@ export function LibraryView() {
               }));
               await updateLibraryFolder(r, id, { name }).catch(() => void reload());
             }}
-            onDelete={async (id) => {
-              // What the folder held comes up one level, the way the shelf
-              // files it.
-              const gone = folders.find((f) => f.id === id);
-              if (!gone || !live(gone.residency)) return;
-              const up = parentOf(gone);
-              patch((d) => ({
-                folders: d.folders
-                  .filter((f) => f.id !== id)
-                  .map((f) => (parentOf(f) === id ? { ...f, parentId: up } : f)),
-                assets: d.assets.map((a) =>
-                  a.folderId === id ? { ...a, folderId: up } : a,
-                ),
-                templates: d.templates.map((t) =>
-                  t.folderId === id ? { ...t, folderId: up } : t,
-                ),
-              }));
-              await deleteLibraryFolder(gone.residency, id).catch(() => void reload());
+            // A folder in a pick with others takes the pick to the confirm;
+            // alone, itself.
+            onDelete={(id) => {
+              const f = shownFolders.find((x) => x.id === id);
+              if (!f) return;
+              if (selected.has(folderSelId(id)) && pickSize > 1) setDeleting(pick);
+              else setDeleting({ ...NO_PICK, folders: [f] });
             }}
             onDropIds={(ids, fid) => void moveItems(ids, fid)}
             onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
@@ -998,7 +1063,8 @@ export function LibraryView() {
           </button>
         ) : shown.length === 0 &&
           shownPending.length === 0 &&
-          shownTemplates.length === 0 ? null : (
+          shownTemplates.length === 0 &&
+          shownFolders.length === 0 ? null : (
           <Marquee
             className="flex min-h-[40vh] flex-col content-start gap-8"
             selected={selected}
@@ -1060,14 +1126,14 @@ export function LibraryView() {
                       // can only remember is the moment something is actually
                       // blocked, so that is when the gate's banner — and the way
                       // out of it — comes up.
-                      onClick={
-                        live(a.residency)
-                          ? () =>
-                              useLightbox
-                                .getState()
-                                .open(lightboxItemFromLibrary(a, true))
-                          : () => setNeedsApp(true)
-                      }
+                      onClick={(e) => {
+                        if (additiveClick(e)) {
+                          e.preventDefault();
+                          pickTile(e, a.id, order);
+                        } else if (live(a.residency))
+                          useLightbox.getState().open(lightboxItemFromLibrary(a, true));
+                        else setNeedsApp(true);
+                      }}
                       onDelete={
                         live(a.residency) ? () => setDeleting(setOf(a)) : undefined
                       }
@@ -1125,40 +1191,41 @@ export function LibraryView() {
         </Dialog>
 
         <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
-          {ctx.menu?.ids.length === 1 && shown.some((a) => a.id === ctx.menu!.ids[0]) && (
-            <DropdownMenuItem
-              onClick={() => {
-                const asset = shown.find((a) => a.id === ctx.menu!.ids[0]);
-                if (asset && live(asset.residency))
-                  setSharing({ kind: "asset", id: asset.id, residency: asset.residency });
-              }}
-            >
-              <Share2 /> Share
-            </DropdownMenuItem>
+          {ctxFolder ? (
+            <FolderMenuItems
+              onShare={() => shareFolder(ctxFolder.id)}
+              onRename={() => setRenamingFolder(ctxFolder.id)}
+              onDelete={() => setDeleting({ ...NO_PICK, folders: [ctxFolder] })}
+            />
+          ) : (
+            <>
+              {ctxSet.folders.length === 0 && ctxSet.items.length === 1 && shown.some((a) => a.id === ctxSet.items[0].id) && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    const asset = ctxSet.items[0];
+                    if (live(asset.residency))
+                      setSharing({ kind: "asset", id: asset.id, residency: asset.residency });
+                  }}
+                >
+                  <Share2 /> Share
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem variant="destructive" onClick={() => setDeleting(ctxSet)}>
+                <Trash2 /> Delete
+              </DropdownMenuItem>
+            </>
           )}
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() =>
-              setDeleting(
-                [...shownTemplates, ...shown].filter((a) => ctx.menu!.ids.includes(a.id)),
-              )
-            }
-          >
-            <Trash2 /> Delete
-          </DropdownMenuItem>
         </SelectionMenu>
 
         <DeleteConfirm
           open={!!deleting}
           title={
-            deleting && deleting.length > 1
-              ? `Delete ${deleting.length} items?`
-              : `Delete “${deleting?.[0]?.name}”?`
+            deleting ? `Delete ${pickLabel(deleting.folders, deleting.items, ["item", "items"], deletingHeld)}?` : ""
           }
-          description={`Projects that already use ${deleting && deleting.length > 1 ? "them" : "it"} keep their own copy.`}
+          description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}Projects that already use ${deletingTotal === 1 ? "it" : "them"} keep their own copy.`}
           action="Remove"
           onClose={() => setDeleting(null)}
-          onConfirm={() => void remove()}
+          onConfirm={() => deleting && void remove(deleting)}
         />
 
         {sharing && library.data && <LibraryShareDialog

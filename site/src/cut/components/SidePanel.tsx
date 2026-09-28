@@ -65,6 +65,7 @@ import {
   deleteFromLibrary,
   deleteLibraryFolder,
   deleteTemplate,
+  folderDeleteTakes,
   importLibraryAsset,
   importTemplateToProject,
   libraryMediaUrl,
@@ -89,7 +90,7 @@ import { isSoundPresetTemplate } from "@/cut/lib/soundPresets";
 import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
 import {
-  forgetLinkedCopy,
+  forgetLinkedCopies,
   expandLinkedFiles,
   isLinkedFile,
   linkedAccept,
@@ -121,8 +122,23 @@ import { usePanelRequestEffect } from "@/cut/lib/panelRequest";
 import { CopyNameLabel } from "./AssetRefs";
 import { AudioCardFace, AudioPanel } from "./AudioPanel";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
-import { FolderCrumb, FolderShelf, Marquee, useTilePicks } from "./desktopFolders";
-import { DeleteConfirm, SelectionMenu, useSelectionMenu } from "./selectionMenu";
+import {
+  FolderCrumb,
+  FolderMenuItems,
+  FolderShelf,
+  Marquee,
+  folderSelId,
+  splitPick,
+  useTilePicks,
+} from "./desktopFolders";
+import {
+  DeleteConfirm,
+  SelectionMenu,
+  foldersGoNote,
+  phoneGoNote,
+  pickLabel,
+  useSelectionMenu,
+} from "./selectionMenu";
 import { TemplateCard } from "./TemplateCard";
 import { GenerateVideoPanel } from "./GeneratePanel";
 import { ImageGenPanel } from "./ImageGenPanel";
@@ -808,21 +824,39 @@ function ProjectFilesPanel({
       ? null
       : storedFolder;
   const shown = assets.filter((a) => (a.folderId ?? null) === openFolder);
+  const readOnly = useEditor((s) => s.readOnly);
+  // The shelf's folders join the pick at the root, while the project takes
+  // changes; a shared view's folders only open.
+  const shelfFolders = openFolder === null ? folders : [];
+  const order = [
+    ...(readOnly ? [] : shelfFolders).map((f) => folderSelId(f.id)),
+    ...shown.map((a) => a.id),
+  ];
   // Which tiles are picked, so a sweep or a ⇧-click can hand the timeline a
   // run of media in one drag. Anything that leaves the grid leaves the pick.
-  const { picked, setPicked, pick } = useTilePicks(shown.map((a) => a.id));
-  // Built once for the whole grid; each card hands the same array on.
-  const pickedIds = [...picked];
+  const { picked, setPicked, pick } = useTilePicks(order);
+  // Built once for the whole grid; each card hands the same array on. The
+  // folders in the pick stay on the shelf: nothing drags them.
+  const pickedIds = splitPick(picked).items;
   // The name field of a folder being made: [] from the empty-space menu, the
   // picked ids when the selection menu starts one — those file into the
   // folder the moment its name is committed.
   const [creatingIds, setCreatingIds] = useState<string[] | null>(null);
+  // The folder whose name field is open, when the right-click menu opened it.
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   // The right-click menu at the cursor: `ids` carries the selection it acts
   // on, empty over empty space (just "New folder").
-  const ctx = useSelectionMenu({ picked, setPicked, shown: shown.map((a) => a.id) });
-  // A selection delete that would also take timeline clips waits on this
-  // confirm; ids whose media is unused delete without one.
+  const ctx = useSelectionMenu({ picked, setPicked, shown: order });
+  // A delete that would also take timeline clips, or a folder with files in
+  // it, waits on this confirm; unused media and an empty folder go without
+  // one. The ids are the pick's, folders and files alike.
   const [deletingIds, setDeletingIds] = useState<string[] | null>(null);
+  const deletingSet = splitPick(deletingIds ?? []);
+  const deletingFolders = folders.filter((f) => deletingSet.folders.includes(f.id));
+  const deletingFiles = assets.filter((a) => deletingSet.items.includes(a.id));
+  const deletingHeld = assets.filter(
+    (a) => !!a.folderId && deletingSet.folders.includes(a.folderId)
+  ).length;
   const templates = useEditor((s) => s.templates);
   const exportOpen = useEditor((s) => s.exportOpen);
   // A render that finishes in the background (dialog closed) drops a new file in
@@ -846,7 +880,6 @@ function ProjectFilesPanel({
   // and that render carries its progress on a local row; the engine's feed
   // alone showed nothing at all while it ran.
   const exporting = useExportRows(projectId).filter(exportInFlight);
-  const readOnly = useEditor((s) => s.readOnly);
   // The whole panel takes drops: OS files import into this project and stay off
   // the timeline, and a project asset made elsewhere (a generation, a
   // recording) dropped here moves into Media. It lights up for both.
@@ -931,16 +964,26 @@ function ProjectFilesPanel({
     if (preview && !list.some((e) => e.file === preview.file)) setPreview(null);
   };
 
-  // The selection menu's delete: unused media goes straight away; media on
-  // the timeline waits on the confirm below, which names what goes with it.
+  // Delete a pick, folders and files. A folder takes every file in it with
+  // it: unused media and an empty folder go straight away; media on the
+  // timeline, or a folder with files in it, waits on the confirm below,
+  // which names what goes.
   const removeMany = (ids: string[]) => {
     const s = useEditor.getState();
-    const gone = new Set(ids);
+    const { folders: goneFolders, items } = splitPick(ids);
+    const held = s.assets.filter((a) => !!a.folderId && goneFolders.includes(a.folderId));
+    const gone = new Set([...items, ...held.map((a) => a.id)]);
     const uses =
       s.clips.filter((c) => gone.has(c.assetId)).length +
       s.audioClips.filter((c) => gone.has(c.assetId)).length;
-    if (uses > 0) setDeletingIds(ids);
-    else for (const id of ids) s.removeAsset(id);
+    if (uses > 0 || held.length > 0) setDeletingIds(ids);
+    else deleteNow(ids);
+  };
+  const deleteNow = (ids: string[]) => {
+    const s = useEditor.getState();
+    const { folders: goneFolders, items } = splitPick(ids);
+    for (const id of goneFolders) s.removeMediaFolder(id);
+    for (const id of items) s.removeAsset(id);
   };
 
   // Right-click: over a card, the selection menu (the card joins the pick if
@@ -1004,44 +1047,54 @@ function ProjectFilesPanel({
           />
         </div>
       )}
-      {openFolder === null && (folders.length > 0 || creatingIds !== null) && (
-        <div className="shrink-0 px-3.5">
-          <FolderShelf
-            rows
-            folders={readOnly ? folders.map((f) => ({ ...f, locked: true })) : folders}
-            mime={MEDIA_MOVE_MIME}
-            statOf={(id) => ({ count: assets.filter((a) => a.folderId === id).length })}
-            onOpen={(id) => setOpenFolder(id)}
-            onCreate={(name) => {
-              useEditor.getState().addMediaFolder(name, creatingIds ?? undefined);
-            }}
-            onRename={(id, name) => useEditor.getState().renameMediaFolder(id, name)}
-            onDelete={(id) => useEditor.getState().removeMediaFolder(id)}
-            onDropIds={(ids, fid) => useEditor.getState().moveAssetsToMediaFolder(ids, fid)}
-            onDropFiles={
-              readOnly
-                ? undefined
-                : (files, fid) => onImport(files, { mediaOnly: true, folderId: fid })
-            }
-            onRefDrop={(ref, fid) => {
-              // Media made elsewhere — a generation, a recording, a timeline
-              // clip's asset — dropped on a folder tile joins Media filed there.
-              if (ref.scope !== "project") return;
-              useEditor.getState().updateAsset(ref.id, {
-                origin: undefined,
-                chatId: undefined,
-                folderId: fid,
-              });
-            }}
-            creating={creatingIds !== null}
-            onCreatingChange={(c) => {
-              if (!c) setCreatingIds(null);
-            }}
-          />
-        </div>
-      )}
-
+      {/* The shelf scrolls with the grid, so one sweep reaches both. */}
       <ScrollArea className="min-h-0 flex-1" contentClassName="pt-1 pb-3.5">
+        {openFolder === null && (folders.length > 0 || creatingIds !== null) && (
+          <div className="shrink-0 px-3.5">
+            <FolderShelf
+              rows
+              folders={readOnly ? folders.map((f) => ({ ...f, locked: true })) : folders}
+              mime={MEDIA_MOVE_MIME}
+              picked={picked}
+              onPick={(e, id) => pick(e, folderSelId(id), order)}
+              renaming={renamingFolder}
+              onRenamingChange={setRenamingFolder}
+              statOf={(id) => ({ count: assets.filter((a) => a.folderId === id).length })}
+              onOpen={(id) => setOpenFolder(id)}
+              onCreate={(name) => {
+                useEditor.getState().addMediaFolder(name, creatingIds ?? undefined);
+              }}
+              onRename={(id, name) => useEditor.getState().renameMediaFolder(id, name)}
+              // A folder in a pick with others takes the pick; alone, itself.
+              onDelete={(id) =>
+                removeMany(
+                  picked.has(folderSelId(id)) && picked.size > 1 ? [...picked] : [folderSelId(id)]
+                )
+              }
+              onDropIds={(ids, fid) => useEditor.getState().moveAssetsToMediaFolder(ids, fid)}
+              onDropFiles={
+                readOnly
+                  ? undefined
+                  : (files, fid) => onImport(files, { mediaOnly: true, folderId: fid })
+              }
+              onRefDrop={(ref, fid) => {
+                // Media made elsewhere — a generation, a recording, a timeline
+                // clip's asset — dropped on a folder tile joins Media filed there.
+                if (ref.scope !== "project") return;
+                useEditor.getState().updateAsset(ref.id, {
+                  origin: undefined,
+                  chatId: undefined,
+                  folderId: fid,
+                });
+              }}
+              creating={creatingIds !== null}
+              onCreatingChange={(c) => {
+                if (!c) setCreatingIds(null);
+              }}
+            />
+          </div>
+        )}
+
         {openFolder === null && templates.length > 0 && (
           <div className="flex flex-col gap-1.5 px-3.5 pb-3">
             {templates.map((t) => (
@@ -1066,7 +1119,7 @@ function ProjectFilesPanel({
             ))}
           </div>
         )}
-        {shown.length === 0 && !importing ? (
+        {order.length === 0 && !importing ? (
           openFolder !== null ? (
             <div className="px-3.5 py-6 text-center text-xs text-muted-foreground">
               Empty folder
@@ -1095,7 +1148,7 @@ function ProjectFilesPanel({
                 asset={a}
                 projectId={projectId}
                 selected={picked.has(a.id)}
-                onSelect={(e) => pick(e, a.id, shown.map((x) => x.id))}
+                onSelect={(e) => pick(e, a.id, order)}
                 dragGroup={pickedIds}
                 onDragLanded={() => setPicked(new Set())}
               />
@@ -1240,19 +1293,31 @@ function ProjectFilesPanel({
           <DropdownMenuItem onClick={() => setCreatingIds([])}>
             <FolderPlus /> New folder
           </DropdownMenuItem>
+        ) : ctx.menu && splitPick(ctx.menu.ids).folders.length === 1 && ctx.menu.ids.length === 1 ? (
+          // A menu over one folder offers the folder's own actions.
+          <FolderMenuItems
+            onRename={() => setRenamingFolder(splitPick(ctx.menu!.ids).folders[0])}
+            onDelete={() => removeMany(ctx.menu!.ids)}
+          />
         ) : (
           <>
-            <DropdownMenuItem
-              onClick={() => {
-                // The name field opens on the root shelf; the picked ids
-                // file into the folder when the name is committed.
-                setCreatingIds(ctx.menu!.ids);
-                setOpenFolder(null);
-              }}
-            >
-              <FolderPlus /> New folder
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            {/* Folders file into nothing here, so a pick holding one makes
+                no new folder. */}
+            {ctx.menu && splitPick(ctx.menu.ids).folders.length === 0 && (
+              <>
+                <DropdownMenuItem
+                  onClick={() => {
+                    // The name field opens on the root shelf; the picked ids
+                    // file into the folder when the name is committed.
+                    setCreatingIds(ctx.menu!.ids);
+                    setOpenFolder(null);
+                  }}
+                >
+                  <FolderPlus /> New folder
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuItem variant="destructive" onClick={() => removeMany(ctx.menu!.ids)}>
               <Trash2 /> Delete
             </DropdownMenuItem>
@@ -1263,16 +1328,15 @@ function ProjectFilesPanel({
       <DeleteConfirm
         open={deletingIds !== null}
         title={
-          deletingIds !== null && deletingIds.length > 1
-            ? `Remove ${deletingIds.length} files from the project?`
-            : "Remove this file from the project?"
+          deletingFolders.length === 0 && deletingFiles.length === 1
+            ? "Remove this file from the project?"
+            : `Remove ${pickLabel(deletingFolders, deletingFiles, ["file", "files"], deletingHeld)} from the project?`
         }
-        description="Timeline clips made from them are removed too."
+        description={`${foldersGoNote(deletingFolders.length, deletingHeld)}Timeline clips made from them are removed too.`}
         action="Remove"
         onClose={() => setDeletingIds(null)}
         onConfirm={() => {
-          const s = useEditor.getState();
-          for (const id of deletingIds ?? []) s.removeAsset(id);
+          deleteNow(deletingIds ?? []);
           setDeletingIds(null);
         }}
       />
@@ -1582,6 +1646,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const templates = (library.data?.templates ?? []).filter(
     (t) => reachable(t.residency) && !isStylePresetTemplate(t) && !isSoundPresetTemplate(t)
   );
+  const listing: LibraryData = { assets, folders, templates };
   const patch = useCallback(
     (fn: (prev: LibraryData) => LibraryData) => patchLibrary(client, fn),
     [client]
@@ -1594,7 +1659,9 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   );
   // What a delete is about to take: the pick when the card is in it, else
   // the one card. Null while nothing is being asked.
-  const [deleting, setDeleting] = useState<LibraryAsset[] | null>(null);
+  const [deleting, setDeleting] = useState<LibraryDeleteSet | null>(null);
+  // The folder whose name field is open, when the right-click menu opened it.
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const [uploading, setUploading] = useState(0);
 
   // Where an asset shows: phone recordings gather in the derived Camera Roll
@@ -1637,20 +1704,48 @@ function LibraryPanel({ projectId }: { projectId: string }) {
     await renameTemplate(r, id, name).catch(() => void reload());
   };
 
-  const remove = async () => {
-    if (!deleting) return;
-    const gone = new Set(deleting.map((a) => a.id));
-    patch((d) => ({ ...d, assets: d.assets.filter((a) => !gone.has(a.id)) }));
+  // Delete a set. A folder takes everything under it — the folders filed
+  // there, however deep, and every asset and template they hold — the way
+  // the shelf deletes it; an asset filed in one of those needs no delete of
+  // its own. A camera clip filed there stays in Camera Roll, unfiled.
+  const remove = async (set: LibraryDeleteSet) => {
     setDeleting(null);
+    const takes = folderDeleteTakes(listing, set.folders);
+    const inTree = (x: { folderId?: string | null }) => !!x.folderId && takes.tree.has(x.folderId);
+    const goneAssets = set.items.filter((a) => !inTree(a));
+    const gone = new Set([...goneAssets, ...takes.assets, ...takes.templates].map((a) => a.id));
+    forgetLinkedCopies([...goneAssets, ...takes.assets]);
+    patch((d) => ({
+      ...d,
+      folders: d.folders.filter((f) => !takes.tree.has(f.id)),
+      assets: d.assets
+        .filter((a) => !gone.has(a.id))
+        .map((a) => (inTree(a) ? { ...a, folderId: null } : a)),
+      templates: d.templates.filter((t) => !gone.has(t.id)),
+    }));
     setPicked(new Set());
-    for (const a of deleting) if (isLinkedType(a.type)) forgetLinkedCopy(a.id);
     try {
-      await Promise.all(deleting.map((a) => deleteFromLibrary(a.residency, a.id)));
+      await Promise.all([
+        ...goneAssets.map((a) => deleteFromLibrary(a.residency, a.id)),
+        ...set.folders.map((f) => deleteLibraryFolder(f.residency, f.id)),
+      ]);
     } catch {
       // Server delete failed; pull a fresh list so the UI stays truthful.
       void reload();
     }
   };
+  // How many items the folders hold between them, however deep — what the
+  // confirm counts beside them: what shows inside them, so a camera clip
+  // filed there, which shows in Camera Roll, is left out.
+  const heldBy = (fs: LibraryFolder[]) => {
+    const takes = folderDeleteTakes(listing, fs);
+    return takes.assets.length + takes.templates.length;
+  };
+  // How many of the items a delete takes were synced from the phone, which
+  // takes them off the phone too.
+  const phoneSynced = (set: LibraryDeleteSet) =>
+    [...set.items, ...folderDeleteTakes(listing, set.folders).assets].filter((a) => !!a.origin)
+      .length;
 
   // Every item carries its shelf; a folder belongs to one, so an item only
   // files into a folder on the same shelf.
@@ -1727,27 +1822,6 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const all = assets;
   const shown = all.filter((a) => folderOf(a) === openFolder);
 
-  // Which cards are picked, so a sweep or a ⇧-click hands the timeline (or a
-  // folder tile) a run of clips in one drag. Only what the open folder shows
-  // can be picked, so walking into another folder leaves its selection behind.
-  const { picked, setPicked, pick } = useTilePicks(shown.map((a) => a.id));
-  // Built once for the whole grid; each card hands the same array on.
-  const pickedRun = shown.filter((a) => picked.has(a.id));
-  // A card inside the pick carries the whole set, the rule its drag and ⌘C
-  // follow.
-  const setOf = (a: LibraryAsset) => (picked.has(a.id) ? pickedRun : [a]);
-  const ctx = useSelectionMenu({ picked, setPicked, shown: shown.map((a) => a.id) });
-
-  // Let a clip be dragged onto a folder tile to file it (alongside the timeline
-  // drag payload the card already sets). The ghost is the card's picture, and
-  // it hands over to the timeline's segment preview.
-  const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
-    const ids = picked.has(a.id) ? [a.id, ...[...picked].filter((id) => id !== a.id)] : [a.id];
-    e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify(ids));
-    e.dataTransfer.effectAllowed = "copyMove";
-    setObjectDragImage(e, ids.length, ids, () => setPicked(new Set()));
-  };
-
   const bothShelves = availableResidencies().length > 1;
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   // The shelf at this level: the folders filed here. At the top the Camera
@@ -1769,6 +1843,59 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const trail =
     openFolder === CAMERA_ROLL_FOLDER ? [cameraRoll] : folderTrail(folders, openFolder);
 
+  // Which cards are picked, so a sweep or a ⇧-click hands the timeline (or a
+  // folder tile) a run of clips in one drag. Only what the open folder shows
+  // can be picked — the shelf's folders and the grid's cards — so walking into
+  // another folder leaves its selection behind.
+  const order = [
+    ...shelfFolders.filter((f) => !f.locked).map((f) => folderSelId(f.id)),
+    ...shown.map((a) => a.id),
+  ];
+  const { picked, setPicked, pick } = useTilePicks(order);
+  // Built once for the whole grid; each card hands the same array on.
+  const pickedRun = shown.filter((a) => picked.has(a.id));
+  const pickSet: LibraryDeleteSet = {
+    folders: shelfFolders.filter((f) => !f.locked && picked.has(folderSelId(f.id))),
+    items: pickedRun,
+  };
+  // A card inside the pick carries the whole set, the rule its drag and ⌘C
+  // follow.
+  const setOf = (a: LibraryAsset): LibraryDeleteSet =>
+    picked.has(a.id) ? pickSet : { folders: [], items: [a] };
+  const ctx = useSelectionMenu({ picked, setPicked, shown: order });
+  // What the open right-click menu acts on.
+  const ctxSet: LibraryDeleteSet = ctx.menu
+    ? {
+        folders: shelfFolders.filter(
+          (f) => !f.locked && ctx.menu!.ids.includes(folderSelId(f.id))
+        ),
+        items: shown.filter((a) => ctx.menu!.ids.includes(a.id)),
+      }
+    : { folders: [], items: [] };
+  // A menu over one folder offers the folder's own actions.
+  const ctxFolder =
+    ctxSet.folders.length === 1 && ctxSet.items.length === 0 ? ctxSet.folders[0] : null;
+  // What the open confirm counts: the items the folders hold, and everything
+  // going in all.
+  const deletingHeld = deleting ? heldBy(deleting.folders) : 0;
+  const deletingTotal = (deleting?.items.length ?? 0) + deletingHeld;
+
+  // Let a clip be dragged onto a folder tile to file it (alongside the timeline
+  // drag payload the card already sets), the folders in the pick riding under
+  // their own MIME. The ghost is the card's picture, and it hands over to the
+  // timeline's segment preview.
+  const onCardDragExtra = (e: React.DragEvent, a: LibraryAsset) => {
+    const { folders: pickedFolders, items } = picked.has(a.id)
+      ? splitPick(picked)
+      : { folders: [], items: [a.id] };
+    e.dataTransfer.setData(LIBRARY_MOVE_MIME, JSON.stringify(items));
+    if (pickedFolders.length)
+      e.dataTransfer.setData(LIBRARY_FOLDER_MOVE_MIME, JSON.stringify(pickedFolders));
+    e.dataTransfer.effectAllowed = "copyMove";
+    const ids = [a.id, ...items.filter((id) => id !== a.id), ...pickedFolders.map(folderSelId)];
+    setObjectDragImage(e, ids.length, ids, () => setPicked(new Set()));
+  };
+
   // File folders under a folder (or out to the root, parentId null). A folder
   // files only beside itself: under a folder on its own shelf, never under
   // itself or anything inside it.
@@ -1789,6 +1916,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
       ...d,
       folders: d.folders.map((f) => (idset.has(f.id) ? { ...f, parentId } : f)),
     }));
+    setPicked(new Set());
     await Promise.all(
       moving.map((f) => updateLibraryFolder(f.residency, f.id, { parentId }))
     ).catch(() => void reload());
@@ -1844,6 +1972,10 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                   const r = folders.find((f) => f.id === id)?.residency;
                   return bothShelves && r ? <ShelfBadge residency={r} /> : null;
                 }}
+                picked={picked}
+                onPick={(e, id) => pick(e, folderSelId(id), order)}
+                renaming={renamingFolder}
+                onRenamingChange={setRenamingFolder}
                 onOpen={(id) => setOpenFolder(id)}
                 onRename={async (id, name) => {
                   const r = folders.find((f) => f.id === id)?.residency;
@@ -1854,24 +1986,14 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                   }));
                   await updateLibraryFolder(r, id, { name }).catch(() => void reload());
                 }}
-                onDelete={async (id) => {
-                  // What the folder held comes up one level, the way the shelf
-                  // files it.
-                  const gone = folders.find((f) => f.id === id);
-                  if (!gone) return;
-                  const up = parentOf(gone);
-                  patch((d) => ({
-                    folders: d.folders
-                      .filter((f) => f.id !== id)
-                      .map((f) => (parentOf(f) === id ? { ...f, parentId: up } : f)),
-                    assets: d.assets.map((a) =>
-                      a.folderId === id ? { ...a, folderId: up } : a
-                    ),
-                    templates: d.templates.map((t) =>
-                      t.folderId === id ? { ...t, folderId: up } : t
-                    ),
-                  }));
-                  await deleteLibraryFolder(gone.residency, id).catch(() => void reload());
+                // A folder in a pick with others takes the pick to the
+                // confirm; alone, itself.
+                onDelete={(id) => {
+                  const f = folders.find((x) => x.id === id);
+                  if (!f) return;
+                  const size = pickSet.folders.length + pickSet.items.length;
+                  if (picked.has(folderSelId(id)) && size > 1) setDeleting(pickSet);
+                  else setDeleting({ folders: [f], items: [] });
                 }}
                 onDropIds={(ids, fid) => ids.forEach((id) => void move(id, fid))}
                 onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
@@ -1929,7 +2051,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
               </div>
             </div>
           )}
-          {shown.length === 0 && uploading === 0 ? (
+          {order.length === 0 && uploading === 0 ? (
             // At the root, filed-away assets, folders, and templates all count as
             // content — the invitation is only for a truly empty library.
             openFolder !== null ? (
@@ -1956,7 +2078,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                     asset={a}
                     mention
                     selected={picked.has(a.id)}
-                    onClick={(e) => pick(e, a.id, shown.map((x) => x.id))}
+                    onClick={(e) => pick(e, a.id, order)}
                     dragGroup={pickedRun}
                     // A font is used from the font menu; there is nothing to place.
                     onUse={
@@ -1980,29 +2102,35 @@ function LibraryPanel({ projectId }: { projectId: string }) {
       )}
 
       <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
-        <DropdownMenuItem
-          variant="destructive"
-          onClick={() => setDeleting(shown.filter((a) => ctx.menu!.ids.includes(a.id)))}
-        >
-          <Trash2 /> Delete
-        </DropdownMenuItem>
+        {ctxFolder ? (
+          <FolderMenuItems
+            onRename={() => setRenamingFolder(ctxFolder.id)}
+            onDelete={() => setDeleting({ folders: [ctxFolder], items: [] })}
+          />
+        ) : (
+          <DropdownMenuItem variant="destructive" onClick={() => setDeleting(ctxSet)}>
+            <Trash2 /> Delete
+          </DropdownMenuItem>
+        )}
       </SelectionMenu>
 
       <DeleteConfirm
         open={!!deleting}
         title={
-          deleting && deleting.length > 1
-            ? `Delete ${deleting.length} items?`
-            : `Delete “${deleting?.[0]?.name}”?`
+          deleting ? `Delete ${pickLabel(deleting.folders, deleting.items, ["item", "items"], deletingHeld)}?` : ""
         }
-        description={`Projects that already use ${deleting && deleting.length > 1 ? "them" : "it"} keep their own copy.`}
+        description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}Projects that already use ${deletingTotal === 1 ? "it" : "them"} keep their own copy.`}
         action="Remove"
         onClose={() => setDeleting(null)}
-        onConfirm={() => void remove()}
+        onConfirm={() => deleting && void remove(deleting)}
       />
     </div>
   );
 }
+
+/** What a library delete is about to take: folders and assets, picked
+ * together. */
+type LibraryDeleteSet = { folders: LibraryFolder[]; items: LibraryAsset[] };
 
 function CopyChip({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
