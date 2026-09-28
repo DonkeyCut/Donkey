@@ -15,22 +15,9 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useElapsed } from "@/cut/hooks/useElapsed";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -98,12 +85,17 @@ import { cn } from "@/lib/utils";
 import { AudioCardFace } from "./AudioPanel";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { DeleteConfirm, SelectionMenu, useSelectionMenu } from "./selectionMenu";
 
 // A dragged library selection travels as a JSON array of asset ids, so a whole
 // marquee-selected collection can be dropped onto a folder at once.
 const LIBRARY_MOVE_MIME = "application/x-cut-library-move";
 // A dragged folder tile, filed into another folder or back out to a crumb.
 const LIBRARY_FOLDER_MOVE_MIME = "application/x-cut-library-folder";
+
+/** A saved arrangement among the media a pick can carry off the shelf. */
+const isTemplate = (x: LibraryAsset | LibraryTemplateItem): x is LibraryTemplateItem =>
+  "layers" in x;
 
 /** What an arriving item is doing right now. An upload is one push from this
  * browser; a link is fetched by whichever shelf is taking it, and comes down
@@ -390,10 +382,8 @@ export function LibraryView() {
   const [folderCreating, setFolderCreating] = useState(false);
   // What a delete is about to take: the pick when the card is in it, else
   // the one card. Null while nothing is being asked.
-  const [deleting, setDeleting] = useState<LibraryAsset[] | null>(null);
-  // The right-click menu over a card, anchored to the pointer, with the ids it
-  // acts on.
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
+  const [deleting, setDeleting] = useState<(LibraryAsset | LibraryTemplateItem)[] | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Whether an OS-file drag is hovering the surface (a depth counter tames
   // enter/leave noise as the cursor crosses child tiles).
@@ -425,12 +415,6 @@ export function LibraryView() {
       templates: d.templates.map((t) => (t.id === id ? { ...t, name } : t)),
     }));
     await renameTemplate(r, id, name).catch(() => void reload());
-  };
-
-  const removeTpl = async (r: Residency, id: string) => {
-    if (!live(r)) return;
-    patch((d) => ({ ...d, templates: d.templates.filter((t) => t.id !== id) }));
-    await deleteTemplate(r, id).catch(() => void reload());
   };
 
   // Track one arrival from its first moment to its last: the tile goes up
@@ -634,11 +618,19 @@ export function LibraryView() {
     const taking = deleting.filter((a) => live(a.residency));
     if (taking.length === 0) return;
     const gone = new Set(taking.map((a) => a.id));
-    patch((d) => ({ ...d, assets: d.assets.filter((a) => !gone.has(a.id)) }));
+    patch((d) => ({
+      ...d,
+      assets: d.assets.filter((a) => !gone.has(a.id)),
+      templates: d.templates.filter((t) => !gone.has(t.id)),
+    }));
     setSelected(new Set());
-    for (const a of taking) if (isLinkedType(a.type)) forgetLinkedCopy(a.id);
+    for (const a of taking) if (!isTemplate(a) && isLinkedType(a.type)) forgetLinkedCopy(a.id);
     try {
-      await Promise.all(taking.map((a) => deleteFromLibrary(a.residency, a.id)));
+      await Promise.all(
+        taking.map((a) =>
+          isTemplate(a) ? deleteTemplate(a.residency, a.id) : deleteFromLibrary(a.residency, a.id),
+        ),
+      );
     } catch {
       void reload();
     }
@@ -762,27 +754,31 @@ export function LibraryView() {
 
   const bothShelves = listed.length > 1;
   const shown = all.filter((a) => (a.folderId ?? null) === openFolder);
+  const shownTemplates = templates.filter(
+    (t) => (t.folderId ?? null) === openFolder,
+  );
   // The picked run, built once for the whole grid: every card hands the same
   // array to its drag and its ⌘C.
   const pickedRun = shown.filter((a) => selected.has(a.id));
-  // A card inside the pick carries the whole set, the rule its drag and ⌘C
-  // follow.
-  const setOf = (a: LibraryAsset) => (selected.has(a.id) ? pickedRun : [a]);
-
-  // Right-click over a card: the selection menu, with the card joining the
-  // pick if it wasn't in it. The browser's own media menu never shows here.
+  // The whole pick, templates leading the way the grid lays them out.
+  const picked: (LibraryAsset | LibraryTemplateItem)[] = [
+    ...shownTemplates.filter((t) => selected.has(t.id)),
+    ...pickedRun,
+  ];
+  // A card inside the pick carries the whole set, the rule its drag, its ⌘C
+  // and its delete follow.
+  const setOf = (a: LibraryAsset | LibraryTemplateItem) => (selected.has(a.id) ? picked : [a]);
+  useDeleteKey(rootRef, picked.length > 0 ? () => setDeleting(picked) : null);
+  const ctx = useSelectionMenu({
+    picked: selected,
+    setPicked: setSelected,
+    shown: [...shownTemplates, ...shown].map((a) => a.id),
+  });
+  // Right-click over a card: the selection menu. An arrival's preview is the
+  // one other media here, and the browser's own menu never shows over it.
   const onPageContextMenu = (e: React.MouseEvent) => {
-    const t = e.target as HTMLElement;
-    if (t.closest("button,a,input,textarea,[role='button'],[role='menuitem'],[data-no-marquee]"))
-      return;
-    const card = t.closest<HTMLElement>("[data-sel-id]");
-    if (!card) return;
-    const id = card.dataset.selId!;
-    if (!shown.some((a) => a.id === id)) return;
-    e.preventDefault();
-    const ids = selected.has(id) ? [id, ...[...selected].filter((x) => x !== id)] : [id];
-    if (!selected.has(id)) setSelected(new Set([id]));
-    setCtxMenu({ x: e.clientX, y: e.clientY, ids });
+    if (!ctx.onContextMenu(e) && (e.target as HTMLElement).closest("video,img"))
+      e.preventDefault();
   };
   // Similar-shape tiles get their own band of wrapped rows, so a wide tile
   // never shares a row with a tall one; audio and unmeasured assets band as
@@ -811,9 +807,6 @@ export function LibraryView() {
   // Sound tiles are 70% of the shared tile's width and height.
   const TILE_AREA = LIBRARY_TILE_AREA;
   const audioArea = LIBRARY_AUDIO_TILE_AREA;
-  const shownTemplates = templates.filter(
-    (t) => (t.folderId ?? null) === openFolder,
-  );
   // The way down to the open folder, and what is filed right here.
   const trail = useMemo(() => folderTrail(folders, openFolder), [folders, openFolder]);
   const shownFolders = useMemo(() => childrenOf(folders, openFolder), [folders, openFolder]);
@@ -844,6 +837,7 @@ export function LibraryView() {
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "min-h-full",
         fileOver &&
@@ -1032,7 +1026,7 @@ export function LibraryView() {
                     }
                     onDelete={
                       live(t.residency)
-                        ? () => void removeTpl(t.residency, t.id)
+                        ? () => setDeleting(setOf(t))
                         : undefined
                     }
                   />
@@ -1130,65 +1124,42 @@ export function LibraryView() {
           </DialogContent>
         </Dialog>
 
-        {/* The right-click menu, anchored to the pointer. */}
-        <DropdownMenu open={ctxMenu !== null} onOpenChange={(o) => !o && setCtxMenu(null)}>
-          {ctxMenu && (
-            <DropdownMenuContent
-              className="w-48"
-              sideOffset={0}
-              anchor={{
-                getBoundingClientRect: () => new DOMRect(ctxMenu.x, ctxMenu.y, 0, 0),
+        <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
+          {ctx.menu?.ids.length === 1 && shown.some((a) => a.id === ctx.menu!.ids[0]) && (
+            <DropdownMenuItem
+              onClick={() => {
+                const asset = shown.find((a) => a.id === ctx.menu!.ids[0]);
+                if (asset && live(asset.residency))
+                  setSharing({ kind: "asset", id: asset.id, residency: asset.residency });
               }}
-              finalFocus={false}
             >
-              {ctxMenu.ids.length === 1 && <DropdownMenuItem onClick={() => {
-                const asset = shown.find((a) => a.id === ctxMenu.ids[0]);
-                if (asset && live(asset.residency)) setSharing({ kind: "asset", id: asset.id, residency: asset.residency });
-                setCtxMenu(null);
-              }}><Share2 /> Share</DropdownMenuItem>}
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => {
-                  setDeleting(shown.filter((a) => ctxMenu.ids.includes(a.id)));
-                  setCtxMenu(null);
-                }}
-              >
-                <Trash2 /> Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
+              <Share2 /> Share
+            </DropdownMenuItem>
           )}
-        </DropdownMenu>
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() =>
+              setDeleting(
+                [...shownTemplates, ...shown].filter((a) => ctx.menu!.ids.includes(a.id)),
+              )
+            }
+          >
+            <Trash2 /> Delete
+          </DropdownMenuItem>
+        </SelectionMenu>
 
-        <AlertDialog
+        <DeleteConfirm
           open={!!deleting}
-          onOpenChange={(o) => !o && setDeleting(null)}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {deleting && deleting.length > 1
-                  ? `Delete ${deleting.length} items?`
-                  : `Delete “${deleting?.[0]?.name}”?`}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                Projects that already use {deleting && deleting.length > 1 ? "them" : "it"} keep
-                their own copy.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive/10 text-destructive hover:bg-destructive/20"
-                onClick={(e) => {
-                  e.preventDefault();
-                  void remove();
-                }}
-              >
-                Remove
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+          title={
+            deleting && deleting.length > 1
+              ? `Delete ${deleting.length} items?`
+              : `Delete “${deleting?.[0]?.name}”?`
+          }
+          description={`Projects that already use ${deleting && deleting.length > 1 ? "them" : "it"} keep their own copy.`}
+          action="Remove"
+          onClose={() => setDeleting(null)}
+          onConfirm={() => void remove()}
+        />
 
         {sharing && library.data && <LibraryShareDialog
           key={`${sharing.kind}:${sharing.id}`}

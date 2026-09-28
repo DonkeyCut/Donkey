@@ -96,7 +96,17 @@ export const popupOnTop = (el: Popup): boolean =>
 /** Whether a dialog stands over the editor, which owns the keyboard while it
  * is open. */
 export function dialogOnTop(): boolean {
-  for (const el of document.querySelectorAll('[data-slot="dialog-content"]')) {
+  for (const el of document.querySelectorAll(
+    '[data-slot="dialog-content"],[data-slot="alert-dialog-content"]'
+  )) {
+    if (popupOnTop(el)) return true;
+  }
+  return false;
+}
+
+/** Whether a menu is open, which owns the keyboard while it is up. */
+export function menuOnTop(): boolean {
+  for (const el of document.querySelectorAll('[role="menu"]')) {
     if (popupOnTop(el)) return true;
   }
   return false;

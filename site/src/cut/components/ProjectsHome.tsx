@@ -27,16 +27,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -70,6 +60,7 @@ import {
   type ProjectsSection,
   type Residency,
 } from "@/cut/lib/queries";
+import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useInView } from "@/cut/hooks/useInView";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { NewProjectButton } from "@/cut/components/NewProjectButton";
@@ -94,6 +85,7 @@ import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { DeleteConfirm, SelectionMenu, useSelectionMenu } from "./selectionMenu";
 import { formatBytes } from "@/lib/bytes";
 
 type View = "gallery" | "list";
@@ -296,9 +288,12 @@ export function ProjectsHome() {
   const [renaming, setRenaming] = useState<{ project: ProjectSummary; residency: Residency } | null>(
     null
   );
-  const [deleting, setDeleting] = useState<{ project: ProjectSummary; residency: Residency } | null>(
-    null
-  );
+  // What a delete is about to take: the pick when the card is in it, else
+  // the one card. Null while nothing is being asked.
+  const [deleting, setDeleting] = useState<
+    { project: ProjectSummary; residency: Residency }[] | null
+  >(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   // One line of feedback when a cross-residency duplicate fails.
@@ -579,25 +574,30 @@ export function ProjectsHome() {
     }
   };
 
+  const removeOne = async (id: string, residency: Residency) => {
+    await backendFor(residency).fetch(`/api/cut/projects/${id}`, { method: "DELETE" });
+    // The doc, media, and exports go with the folder on the server. Purge the
+    // client-side residue keyed to this project so nothing survives it: a live
+    // scene run, its in-flight renders, its chat history (whose ids the
+    // render-resume guard reads to keep a deleted thread's render from
+    // landing), and the cached copy of its document.
+    useGenScene.getState().killProject(id);
+    useGenerate.getState().cancelForOwner({ projectId: id });
+    clearProjectThreads(id);
+    dropCachedDoc(id, residency);
+    if (residency === "cloud") void dropLocalProjectCopy(id);
+    patch(residency, (s) => ({ ...s, projects: s.projects.filter((p) => p.id !== id) }));
+  };
+
   const remove = async () => {
     if (!deleting) return;
-    const { project, residency } = deleting;
-    if (!live(residency)) return setDeleting(null);
+    // A shelf that isn't answering keeps its projects.
+    const taking = deleting.filter(({ residency }) => live(residency));
+    if (taking.length === 0) return setDeleting(null);
     setBusy(true);
-    const id = project.id;
     try {
-      await backendFor(residency).fetch(`/api/cut/projects/${id}`, { method: "DELETE" });
-      // The doc, media, and exports go with the folder on the server. Purge the
-      // client-side residue keyed to this project so nothing survives it: a live
-      // scene run, its in-flight renders, its chat history (whose ids the
-      // render-resume guard reads to keep a deleted thread's render from
-      // landing), and the cached copy of its document.
-      useGenScene.getState().killProject(id);
-      useGenerate.getState().cancelForOwner({ projectId: id });
-      clearProjectThreads(id);
-      dropCachedDoc(id, residency);
-      if (residency === "cloud") void dropLocalProjectCopy(id);
-      patch(residency, (s) => ({ ...s, projects: s.projects.filter((p) => p.id !== id) }));
+      await Promise.all(taking.map(({ project, residency }) => removeOne(project.id, residency)));
+      setSelected(new Set());
       setDeleting(null);
     } finally {
       setBusy(false);
@@ -636,6 +636,37 @@ export function ProjectsHome() {
         .map((p) => ({ p, r }))
     )
     .sort((a, b) => (b.p.updatedAt ?? 0) - (a.p.updatedAt ?? 0));
+
+  // The picked run, built once for the whole grid, on the shelves that answer.
+  // A card inside the pick carries the whole set, the rule its ⋯ menu, the
+  // right-click menu and ⌫ follow.
+  const pickedRun = mergedShown
+    .filter(({ p, r }) => selected.has(p.id) && live(r))
+    .map(({ p, r }) => ({ project: p, residency: r }));
+  const setOf = (p: ProjectSummary, r: Residency) =>
+    selected.has(p.id) ? pickedRun : [{ project: p, residency: r }];
+  useDeleteKey(rootRef, pickedRun.length > 0 ? () => setDeleting(pickedRun) : null);
+  const ctx = useSelectionMenu({
+    picked: selected,
+    setPicked: setSelected,
+    shown: mergedShown.map(({ p }) => p.id),
+  });
+  // What the open right-click menu acts on: the live projects among its ids,
+  // and where the whole set can move — a place every one of them can go.
+  const ctxSet = ctx.menu
+    ? mergedShown.filter(({ p, r }) => ctx.menu!.ids.includes(p.id) && live(r))
+    : [];
+  const ctxMoveTo = ctxSet.length
+    ? moveDests(ctxSet[0].r)
+        .filter((d) => ctxSet.every(({ r }) => moveDests(r).includes(d)))
+        .map((d) => ({
+          target: d,
+          run: () =>
+            void (async () => {
+              for (const { p, r } of ctxSet) await moveAcross(r, d, p);
+            })(),
+        }))
+    : [];
 
   // Begin a project drag. Dragging a member of the current selection carries the
   // whole selection; dragging anything else drags (and selects) just that item.
@@ -765,7 +796,7 @@ export function ProjectsHome() {
                 onDuplicate={() => void duplicate(r, p)}
                 moveTo={moveDests(r)
                   .map((d) => ({ target: d, run: () => void moveAcross(r, d, p) }))}
-                onDelete={() => setDeleting({ project: p, residency: r })}
+                onDelete={() => setDeleting(setOf(p, r))}
               />
             )}
           </div>
@@ -847,7 +878,7 @@ export function ProjectsHome() {
               onDuplicate={() => void duplicate(r, p)}
               moveTo={moveDests(r)
                 .map((d) => ({ target: d, run: () => void moveAcross(r, d, p) }))}
-              onDelete={() => setDeleting({ project: p, residency: r })}
+              onDelete={() => setDeleting(setOf(p, r))}
             />
           ) : (
             <span />
@@ -877,11 +908,13 @@ export function ProjectsHome() {
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "min-h-full",
         fileOver &&
           "rounded-3xl outline-2 outline-dashed outline-offset-[-10px] outline-[#0a84ff]/60"
       )}
+      onContextMenu={ctx.onContextMenu}
       onDragEnter={(e) => {
         if (!isFileDrag(e)) return;
         e.preventDefault();
@@ -1070,30 +1103,43 @@ export function ProjectsHome() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete “{deleting?.project.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This deletes the whole project folder, including its media files
-              and exports. This can’t be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={busy}
-              className="bg-destructive/10 text-destructive hover:bg-destructive/20"
-              onClick={(e) => {
-                e.preventDefault();
-                void remove();
-              }}
-            >
-              Delete project
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* A shelf that isn't answering takes no changes, so a pick with none
+          of its projects live opens no menu. */}
+      <SelectionMenu menu={ctxSet.length > 0 ? ctx.menu : null} onClose={ctx.close}>
+        <ProjectMenuItems
+          onRename={
+            ctxSet.length === 1
+              ? () => {
+                  setName(ctxSet[0].p.name);
+                  setRenaming({ project: ctxSet[0].p, residency: ctxSet[0].r });
+                }
+              : undefined
+          }
+          onDuplicate={
+            ctxSet.length === 1 ? () => void duplicate(ctxSet[0].r, ctxSet[0].p) : undefined
+          }
+          moveTo={ctxMoveTo}
+          onDelete={() => setDeleting(ctxSet.map(({ p, r }) => ({ project: p, residency: r })))}
+        />
+      </SelectionMenu>
+
+      <DeleteConfirm
+        open={!!deleting}
+        title={
+          deleting && deleting.length > 1
+            ? `Delete ${deleting.length} projects?`
+            : `Delete “${deleting?.[0]?.project.name}”?`
+        }
+        description={
+          deleting && deleting.length > 1
+            ? "This deletes each project’s whole folder, including its media files and exports. This can’t be undone."
+            : "This deletes the whole project folder, including its media files and exports. This can’t be undone."
+        }
+        action={deleting && deleting.length > 1 ? "Delete projects" : "Delete project"}
+        busy={busy}
+        onClose={() => setDeleting(null)}
+        onConfirm={() => void remove()}
+      />
     </div>
     </div>
   );
@@ -1275,6 +1321,49 @@ const MOVE_DEST: Record<Residency, { Icon: typeof Cloud; label: string }> = {
   browser: { Icon: Laptop, label: "Move to Local" },
 };
 
+/** The actions on a project, or on a set of them: Rename and Duplicate take
+ * one project, so a set offers only the moves every member can make and
+ * Delete. */
+function ProjectMenuItems({
+  onRename,
+  onDuplicate,
+  moveTo,
+  onDelete,
+}: {
+  onRename?: () => void;
+  onDuplicate?: () => void;
+  /** The other live residencies this project can move to. */
+  moveTo?: { target: Residency; run: () => void }[];
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      {onRename && (
+        <DropdownMenuItem onClick={onRename}>
+          <Pencil /> Rename
+        </DropdownMenuItem>
+      )}
+      {onDuplicate && (
+        <DropdownMenuItem onClick={onDuplicate}>
+          <Copy /> Duplicate
+        </DropdownMenuItem>
+      )}
+      {moveTo?.map(({ target, run }) => {
+        const { Icon, label } = MOVE_DEST[target];
+        return (
+          <DropdownMenuItem key={target} onClick={run}>
+            <Icon /> {label}
+          </DropdownMenuItem>
+        );
+      })}
+      {(onRename || onDuplicate || (moveTo?.length ?? 0) > 0) && <DropdownMenuSeparator />}
+      <DropdownMenuItem variant="destructive" onClick={onDelete}>
+        <Trash2 /> Delete
+      </DropdownMenuItem>
+    </>
+  );
+}
+
 function ProjectMenu({
   className,
   onRename,
@@ -1305,24 +1394,12 @@ function ProjectMenu({
         <MoreHorizontal />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-        <DropdownMenuItem onClick={onRename}>
-          <Pencil /> Rename
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={onDuplicate}>
-          <Copy /> Duplicate
-        </DropdownMenuItem>
-        {moveTo?.map(({ target, run }) => {
-          const { Icon, label } = MOVE_DEST[target];
-          return (
-            <DropdownMenuItem key={target} onClick={run}>
-              <Icon /> {label}
-            </DropdownMenuItem>
-          );
-        })}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={onDelete}>
-          <Trash2 /> Delete
-        </DropdownMenuItem>
+        <ProjectMenuItems
+          onRename={onRename}
+          onDuplicate={onDuplicate}
+          moveTo={moveTo}
+          onDelete={onDelete}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );

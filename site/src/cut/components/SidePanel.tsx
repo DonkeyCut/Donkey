@@ -122,6 +122,7 @@ import { CopyNameLabel } from "./AssetRefs";
 import { AudioCardFace, AudioPanel } from "./AudioPanel";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import { FolderCrumb, FolderShelf, Marquee, useTilePicks } from "./desktopFolders";
+import { DeleteConfirm, SelectionMenu, useSelectionMenu } from "./selectionMenu";
 import { TemplateCard } from "./TemplateCard";
 import { GenerateVideoPanel } from "./GeneratePanel";
 import { ImageGenPanel } from "./ImageGenPanel";
@@ -817,10 +818,8 @@ function ProjectFilesPanel({
   // folder the moment its name is committed.
   const [creatingIds, setCreatingIds] = useState<string[] | null>(null);
   // The right-click menu at the cursor: `ids` carries the selection it acts
-  // on, null means the empty-space menu (just "New folder").
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; ids: string[] | null } | null>(
-    null
-  );
+  // on, empty over empty space (just "New folder").
+  const ctx = useSelectionMenu({ picked, setPicked, shown: shown.map((a) => a.id) });
   // A selection delete that would also take timeline clips waits on this
   // confirm; ids whose media is unused delete without one.
   const [deletingIds, setDeletingIds] = useState<string[] | null>(null);
@@ -947,24 +946,9 @@ function ProjectFilesPanel({
   // Right-click: over a card, the selection menu (the card joins the pick if
   // it wasn't in it); over empty panel space at the root, the New-folder menu.
   const onPanelContextMenu = (e: React.MouseEvent) => {
-    if (readOnly) return;
-    const t = e.target as HTMLElement;
-    // Controls, folder tiles, and the crumb keep their own menus and clicks.
-    if (t.closest("button,a,input,textarea,[role='button'],[role='menuitem'],[data-no-marquee]"))
-      return;
-    const card = t.closest<HTMLElement>("[data-sel-id]");
-    if (card) {
-      const id = card.dataset.selId!;
-      if (!shown.some((a) => a.id === id)) return;
-      e.preventDefault();
-      const ids = picked.has(id) ? [id, ...pickedIds.filter((x) => x !== id)] : [id];
-      if (!picked.has(id)) setPicked(new Set([id]));
-      setCtxMenu({ x: e.clientX, y: e.clientY, ids });
-      return;
-    }
-    if (openFolder !== null) return;
+    if (readOnly || ctx.onContextMenu(e) || openFolder !== null) return;
     e.preventDefault();
-    setCtxMenu({ x: e.clientX, y: e.clientY, ids: null });
+    ctx.openAt(e, []);
   };
 
   return (
@@ -1251,87 +1235,47 @@ function ProjectFilesPanel({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* The right-click menu: the same dropdown the cards' "…" button uses,
-          anchored to the pointer. */}
-      <DropdownMenu open={ctxMenu !== null} onOpenChange={(o) => !o && setCtxMenu(null)}>
-        {ctxMenu && (
-          <DropdownMenuContent
-            className="w-48"
-            sideOffset={0}
-            anchor={{
-              getBoundingClientRect: () => new DOMRect(ctxMenu.x, ctxMenu.y, 0, 0),
-            }}
-            // No focus return on close — there is no trigger to go back to,
-            // and reclaiming focus would blur the folder-name field the "New
-            // folder" items open, whose blur cancels the creation.
-            finalFocus={false}
-          >
-            {ctxMenu.ids === null ? (
-              <DropdownMenuItem
-                onClick={() => {
-                  setCreatingIds([]);
-                  setCtxMenu(null);
-                }}
-              >
-                <FolderPlus /> New folder
-              </DropdownMenuItem>
-            ) : (
-              <>
-                <DropdownMenuItem
-                  onClick={() => {
-                    // The name field opens on the root shelf; the picked ids
-                    // file into the folder when the name is committed.
-                    setCreatingIds(ctxMenu.ids);
-                    setOpenFolder(null);
-                    setCtxMenu(null);
-                  }}
-                >
-                  <FolderPlus /> New folder
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => {
-                    removeMany(ctxMenu.ids!);
-                    setCtxMenu(null);
-                  }}
-                >
-                  <Trash2 /> Delete
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        )}
-      </DropdownMenu>
-
-      <AlertDialog open={deletingIds !== null} onOpenChange={(o) => !o && setDeletingIds(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {deletingIds !== null && deletingIds.length > 1
-                ? `Remove ${deletingIds.length} files from the project?`
-                : "Remove this file from the project?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Timeline clips made from them are removed too.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive/10 text-destructive hover:bg-destructive/20"
-              onClick={(e) => {
-                e.preventDefault();
-                const s = useEditor.getState();
-                for (const id of deletingIds ?? []) s.removeAsset(id);
-                setDeletingIds(null);
+      <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
+        {ctx.menu?.ids.length === 0 ? (
+          <DropdownMenuItem onClick={() => setCreatingIds([])}>
+            <FolderPlus /> New folder
+          </DropdownMenuItem>
+        ) : (
+          <>
+            <DropdownMenuItem
+              onClick={() => {
+                // The name field opens on the root shelf; the picked ids
+                // file into the folder when the name is committed.
+                setCreatingIds(ctx.menu!.ids);
+                setOpenFolder(null);
               }}
             >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              <FolderPlus /> New folder
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" onClick={() => removeMany(ctx.menu!.ids)}>
+              <Trash2 /> Delete
+            </DropdownMenuItem>
+          </>
+        )}
+      </SelectionMenu>
+
+      <DeleteConfirm
+        open={deletingIds !== null}
+        title={
+          deletingIds !== null && deletingIds.length > 1
+            ? `Remove ${deletingIds.length} files from the project?`
+            : "Remove this file from the project?"
+        }
+        description="Timeline clips made from them are removed too."
+        action="Remove"
+        onClose={() => setDeletingIds(null)}
+        onConfirm={() => {
+          const s = useEditor.getState();
+          for (const id of deletingIds ?? []) s.removeAsset(id);
+          setDeletingIds(null);
+        }}
+      />
     </div>
   );
 }
@@ -1651,9 +1595,6 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   // What a delete is about to take: the pick when the card is in it, else
   // the one card. Null while nothing is being asked.
   const [deleting, setDeleting] = useState<LibraryAsset[] | null>(null);
-  // The right-click menu over a card, anchored to the pointer, with the ids it
-  // acts on.
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
   const [uploading, setUploading] = useState(0);
 
   // Where an asset shows: phone recordings gather in the derived Camera Roll
@@ -1795,22 +1736,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   // A card inside the pick carries the whole set, the rule its drag and ⌘C
   // follow.
   const setOf = (a: LibraryAsset) => (picked.has(a.id) ? pickedRun : [a]);
-
-  // Right-click over a card: the selection menu, with the card joining the
-  // pick if it wasn't in it. The browser's own media menu never shows here.
-  const onShelfContextMenu = (e: React.MouseEvent) => {
-    const t = e.target as HTMLElement;
-    if (t.closest("button,a,input,textarea,[role='button'],[role='menuitem'],[data-no-marquee]"))
-      return;
-    const card = t.closest<HTMLElement>("[data-sel-id]");
-    if (!card) return;
-    const id = card.dataset.selId!;
-    if (!shown.some((a) => a.id === id)) return;
-    e.preventDefault();
-    const ids = picked.has(id) ? [id, ...[...picked].filter((x) => x !== id)] : [id];
-    if (!picked.has(id)) setPicked(new Set([id]));
-    setCtxMenu({ x: e.clientX, y: e.clientY, ids });
-  };
+  const ctx = useSelectionMenu({ picked, setPicked, shown: shown.map((a) => a.id) });
 
   // Let a clip be dragged onto a folder tile to file it (alongside the timeline
   // drag payload the card already sets). The ghost is the card's picture, and
@@ -1877,7 +1803,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
         dropActive &&
           "rounded-xl bg-[#0a84ff]/5 outline-2 outline-dashed outline-offset-[-4px] outline-[#0a84ff]/60"
       )}
-      onContextMenu={onShelfContextMenu}
+      onContextMenu={ctx.onContextMenu}
     >
       {!loaded ? (
         <div className="grid flex-1 place-items-center text-muted-foreground">
@@ -2053,57 +1979,27 @@ function LibraryPanel({ projectId }: { projectId: string }) {
         </ScrollArea>
       )}
 
-      {/* The right-click menu, anchored to the pointer. */}
-      <DropdownMenu open={ctxMenu !== null} onOpenChange={(o) => !o && setCtxMenu(null)}>
-        {ctxMenu && (
-          <DropdownMenuContent
-            className="w-48"
-            sideOffset={0}
-            anchor={{
-              getBoundingClientRect: () => new DOMRect(ctxMenu.x, ctxMenu.y, 0, 0),
-            }}
-            finalFocus={false}
-          >
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => {
-                setDeleting(shown.filter((a) => ctxMenu.ids.includes(a.id)));
-                setCtxMenu(null);
-              }}
-            >
-              <Trash2 /> Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        )}
-      </DropdownMenu>
+      <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={() => setDeleting(shown.filter((a) => ctx.menu!.ids.includes(a.id)))}
+        >
+          <Trash2 /> Delete
+        </DropdownMenuItem>
+      </SelectionMenu>
 
-      <AlertDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {deleting && deleting.length > 1
-                ? `Delete ${deleting.length} items?`
-                : `Delete “${deleting?.[0]?.name}”?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Projects that already use {deleting && deleting.length > 1 ? "them" : "it"} keep
-              their own copy.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive/10 text-destructive hover:bg-destructive/20"
-              onClick={(e) => {
-                e.preventDefault();
-                void remove();
-              }}
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteConfirm
+        open={!!deleting}
+        title={
+          deleting && deleting.length > 1
+            ? `Delete ${deleting.length} items?`
+            : `Delete “${deleting?.[0]?.name}”?`
+        }
+        description={`Projects that already use ${deleting && deleting.length > 1 ? "them" : "it"} keep their own copy.`}
+        action="Remove"
+        onClose={() => setDeleting(null)}
+        onConfirm={() => void remove()}
+      />
     </div>
   );
 }
