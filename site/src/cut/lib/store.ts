@@ -869,7 +869,7 @@ export interface EditorState {
   /** Create a Media folder, filing `assetIds` into it; returns the new id. */
   addMediaFolder: (name: string, assetIds?: string[]) => string;
   renameMediaFolder: (id: string, name: string) => void;
-  /** Delete a Media folder; its assets drop back to the panel's top level. */
+  /** Delete a Media folder and every asset in it, timeline clips and all. */
   removeMediaFolder: (id: string) => void;
   /** File assets into a Media folder (null = back to the top level). */
   moveAssetsToMediaFolder: (ids: string[], folderId: string | null) => void;
@@ -3708,13 +3708,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         mediaFolders: s.mediaFolders.map((f) => (f.id === id ? { ...f, name } : f)),
       })),
 
-    removeMediaFolder: (id) =>
-      set((s) => ({
-        mediaFolders: s.mediaFolders.filter((f) => f.id !== id),
-        assets: s.assets.map((a) =>
-          a.folderId === id ? { ...a, folderId: undefined } : a
-        ),
-      })),
+    removeMediaFolder: (id) => {
+      // Every file in the folder goes the way its own delete goes, timeline
+      // clips and all; then the folder.
+      const s = get();
+      for (const a of s.assets) if (a.folderId === id) s.removeAsset(a.id);
+      set((s) => ({ mediaFolders: s.mediaFolders.filter((f) => f.id !== id) }));
+    },
 
     moveAssetsToMediaFolder: (ids, folderId) => {
       const move = new Set(ids);

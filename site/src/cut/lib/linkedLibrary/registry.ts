@@ -292,6 +292,13 @@ export async function syncLinkedLibrary(): Promise<void> {
   publish([...found.values()]);
 }
 
+/** Drop the shelf copies of the linked assets among `assets` — what a
+ * delete of them takes, whether the grid, a folder delete, or the assistant
+ * runs it. */
+export function forgetLinkedCopies(assets: readonly Pick<LibraryAsset, "id" | "type">[]): void {
+  for (const a of assets) if (isLinkedType(a.type)) forgetLinkedCopy(a.id);
+}
+
 /** Drop one shelf copy the moment it is deleted, so the shelf and the menus
  * never disagree while the round trip settles. */
 export function forgetLinkedCopy(assetId: string): void {

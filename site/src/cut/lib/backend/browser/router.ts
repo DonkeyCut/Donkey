@@ -6,7 +6,7 @@
 // Owned here: projects CRUD + folders, media bytes, image import, presign-get
 // (answered with blob URLs), exports, the export-jobs feed, and the library
 // shelf (./library.ts). Everything else is the driver's cloud proxy.
-import { resolveParent, settleParents } from "../../folderTree";
+import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
 import { sanitizeGuideLines, sanitizeGuides } from "../../guides";
 import { normalizeAspect, type ProjectDoc, type ProjectFolder } from "../../types";
 import {
@@ -207,31 +207,33 @@ async function updateFolder(req: Request, fid: string): Promise<Response> {
   }
 }
 
-/** Delete a folder. What it held — its projects and the folders inside it —
- * comes up one level, filed where the folder was. */
+/** Delete a folder and everything in it: the folders filed under it, however
+ * deep, and every project they hold, each the way its own delete goes. The
+ * projects go first and the folders last, so a run that stops partway leaves
+ * the rest where a retry finds it. */
 async function deleteFolder(fid: string): Promise<Response> {
   try {
-    let up: string | null = null;
-    await store.updateIndex((idx) => {
-      up = idx.folders.find((f) => f.id === fid)?.parentId ?? null;
-      return {
-        ...idx,
-        folders: idx.folders
-          .filter((f) => f.id !== fid)
-          .map((f) => ((f.parentId ?? null) === fid ? { ...f, parentId: up } : f)),
-      };
-    });
+    const { folders } = await store.readIndex();
+    if (!folders.some((f) => f.id === fid)) return json({ ok: true });
+    const tree = new Set(subtreeOf(folders, fid));
     for (const id of await store.listProjectIds()) {
       const doc = await store.readDoc(id);
-      if (doc?.folderId === fid) {
-        doc.folderId = up;
-        await store.writeDoc(id, doc);
-      }
+      if (doc?.folderId && tree.has(doc.folderId)) await dropProject(id);
     }
+    await store.updateIndex((idx) => ({
+      ...idx,
+      folders: idx.folders.filter((f) => !tree.has(f.id)),
+    }));
     return json({ ok: true });
   } catch (e) {
     return caught(e, "Could not delete folder.");
   }
+}
+
+/** Delete a project: its directory, and the blob URLs minted for its files. */
+async function dropProject(id: string): Promise<void> {
+  await store.deleteProject(id);
+  revokeRegistered(`/api/cut/projects/${id}/`);
 }
 
 async function uploadMedia(req: Request, id: string): Promise<Response> {
@@ -392,8 +394,7 @@ export async function dispatchBrowserRoute(
       }
       if (method === "PUT") return putProject(req(), id);
       if (method === "DELETE") {
-        await store.deleteProject(id);
-        revokeRegistered(`/api/cut/projects/${id}/`);
+        await dropProject(id);
         return json({ ok: true });
       }
       return err("Method not allowed.", 405);

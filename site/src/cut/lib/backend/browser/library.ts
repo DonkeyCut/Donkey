@@ -11,7 +11,7 @@
 // video off a link, so that import runs on the cloud worker and the bytes are
 // adopted afterwards (`lib/library.ts`); those paths fall through to the
 // hosted twin.
-import { resolveParent, settleParents } from "../../folderTree";
+import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
 import type {
   AssetType,
   LibraryTemplate,
@@ -244,20 +244,47 @@ async function serveMedia(
   return serveFile(file, fileName, download);
 }
 
+/** Take the assets in `ids` out of the index, handing back the files they
+ * own — the source and its poster — for the caller to drop once the index
+ * is written. */
+function takeAssets(idx: LibraryIndex, ids: ReadonlySet<string>): string[] {
+  const files: string[] = [];
+  idx.assets = idx.assets.filter((a) => {
+    if (!ids.has(a.id)) return true;
+    files.push(a.fileName);
+    if (a.posterFile) files.push(a.posterFile);
+    return false;
+  });
+  return files;
+}
+
+/** Take the templates in `ids` out of the index, handing back their media
+ * copies, which are private to them. */
+function takeTemplates(idx: LibraryIndex, ids: ReadonlySet<string>): string[] {
+  const files: string[] = [];
+  idx.templates = idx.templates.filter((t) => {
+    if (!ids.has(t.id)) return true;
+    for (const m of t.media ?? []) files.push(m.fileName);
+    return false;
+  });
+  return files;
+}
+
+/** Drop files the index no longer names, with the blob URLs minted for them. */
+async function dropFiles(files: string[]): Promise<void> {
+  for (const f of files) {
+    await store.deleteLibraryMedia(f);
+    revokeRegistered(libraryMediaApiPath(f));
+  }
+}
+
 async function removeAsset(id: string): Promise<Response> {
   try {
-    const { fileName, posterFile } = await mutateIndex((idx) => {
-      const asset = idx.assets.find((a) => a.id === id);
-      if (!asset) throw new Error("Library asset not found.");
-      idx.assets = idx.assets.filter((a) => a.id !== id);
-      return { fileName: asset.fileName, posterFile: asset.posterFile };
+    const files = await mutateIndex((idx) => {
+      if (!idx.assets.some((a) => a.id === id)) throw new Error("Library asset not found.");
+      return takeAssets(idx, new Set([id]));
     });
-    await store.deleteLibraryMedia(fileName);
-    revokeRegistered(libraryMediaApiPath(fileName));
-    if (posterFile) {
-      await store.deleteLibraryMedia(posterFile).catch(() => {});
-      revokeRegistered(libraryMediaApiPath(posterFile));
-    }
+    await dropFiles(files);
     return json({ ok: true });
   } catch (e) {
     return caught(e, "Could not delete.");
@@ -338,19 +365,20 @@ async function updateFolder(req: Request, id: string): Promise<Response> {
   }
 }
 
-/** Delete a folder. What it held — its items and the folders inside it —
- * comes up one level, filed where the folder was. */
+/** Delete a folder and everything in it: the folders filed under it, however
+ * deep, and every asset and template they hold, in one write of the index. */
 async function deleteFolder(id: string): Promise<Response> {
   try {
-    await mutateIndex((idx) => {
-      const gone = idx.folders.find((f) => f.id === id);
-      if (!gone) return;
-      const up = gone.parentId ?? null;
-      idx.folders = idx.folders.filter((f) => f.id !== id);
-      for (const f of idx.folders) if ((f.parentId ?? null) === id) f.parentId = up;
-      for (const a of idx.assets) if (a.folderId === id) a.folderId = up;
-      for (const t of idx.templates) if (t.folderId === id) t.folderId = up;
+    const files = await mutateIndex((idx) => {
+      if (!idx.folders.some((f) => f.id === id)) return [];
+      const tree = new Set(subtreeOf(idx.folders, id));
+      const filed = (x: { folderId?: string | null }) => !!x.folderId && tree.has(x.folderId);
+      const assets = new Set(idx.assets.filter(filed).map((a) => a.id));
+      const templates = new Set(idx.templates.filter(filed).map((t) => t.id));
+      idx.folders = idx.folders.filter((f) => !tree.has(f.id));
+      return [...takeAssets(idx, assets), ...takeTemplates(idx, templates)];
     });
+    await dropFiles(files);
     return json({ ok: true });
   } catch (e) {
     return caught(e, "Could not delete folder.");
@@ -609,16 +637,8 @@ async function renameTemplate(req: Request, id: string): Promise<Response> {
 
 async function deleteTemplate(id: string): Promise<Response> {
   try {
-    const template = await mutateIndex((idx) => {
-      const t = idx.templates.find((x) => x.id === id);
-      idx.templates = idx.templates.filter((x) => x.id !== id);
-      return t;
-    });
-    // A template's media copies are private to it, so they go with it.
-    for (const m of template?.media ?? []) {
-      await store.deleteLibraryMedia(m.fileName);
-      revokeRegistered(libraryMediaApiPath(m.fileName));
-    }
+    const files = await mutateIndex((idx) => takeTemplates(idx, new Set([id])));
+    await dropFiles(files);
     return json({ ok: true });
   } catch (e) {
     return caught(e, "Could not delete the template.");

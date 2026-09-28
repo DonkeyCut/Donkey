@@ -2,7 +2,7 @@ import fsSync from "node:fs";
 import { isDeliveryName } from "../lib/exportDelivery";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { resolveParent, settleParents } from "@/cut/lib/folderTree";
+import { resolveParent, settleParents, subtreeOf } from "@/cut/lib/folderTree";
 import type { Aspect, ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
@@ -470,6 +470,24 @@ async function writeFolders(folders: ProjectFolder[]) {
   await writeJsonAtomic(foldersIndex(), { folders });
 }
 
+// Serialize read-modify-write cycles on the folder list, so two folder changes
+// in flight at once can't write each other's out. Each mutation reads the
+// freshly-written list, applies its change, and writes.
+let foldersLock: Promise<unknown> = Promise.resolve();
+async function mutateFolders<T>(fn: (idx: { folders: ProjectFolder[] }) => T): Promise<T> {
+  const run = foldersLock.then(async () => {
+    const idx = { folders: await readFolders() };
+    const result = fn(idx);
+    await writeFolders(idx.folders);
+    return result;
+  });
+  foldersLock = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
+}
+
 export async function listProjectFolders(): Promise<ProjectFolder[]> {
   return settleParents(await readFolders()).sort((a, b) => a.createdAt - b.createdAt);
 }
@@ -480,16 +498,17 @@ export async function createProjectFolder(
 ): Promise<ProjectFolder> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Folder name required.");
-  const folders = await readFolders();
   const id = crypto.randomUUID().slice(0, 8);
-  const folder: ProjectFolder = {
-    id,
-    name: trimmed.slice(0, 80),
-    parentId: resolveParent(folders, id, parentId),
-    createdAt: Date.now(),
-  };
-  await writeFolders([...folders, folder]);
-  return folder;
+  return mutateFolders(({ folders }) => {
+    const folder: ProjectFolder = {
+      id,
+      name: trimmed.slice(0, 80),
+      parentId: resolveParent(folders, id, parentId),
+      createdAt: Date.now(),
+    };
+    folders.push(folder);
+    return folder;
+  });
 }
 
 /** Rename a folder, file it under another (null for the top level), or
@@ -500,35 +519,28 @@ export async function updateProjectFolder(
 ): Promise<ProjectFolder> {
   const trimmed = patch.name?.trim();
   if (patch.name !== undefined && !trimmed) throw new Error("Folder name required.");
-  const folders = await readFolders();
-  const folder = folders.find((f) => f.id === id);
-  if (!folder) throw new Error("Folder not found.");
-  if (trimmed) folder.name = trimmed.slice(0, 80);
-  if (patch.parentId !== undefined) folder.parentId = resolveParent(folders, id, patch.parentId);
-  await writeFolders(folders);
-  return folder;
+  return mutateFolders(({ folders }) => {
+    const folder = folders.find((f) => f.id === id);
+    if (!folder) throw new Error("Folder not found.");
+    if (trimmed) folder.name = trimmed.slice(0, 80);
+    if (patch.parentId !== undefined) folder.parentId = resolveParent(folders, id, patch.parentId);
+    return folder;
+  });
 }
 
-/** Delete a folder. What it held — its projects and the folders inside it —
- * comes up one level, filed where the folder was. */
+/** Delete a folder and everything in it: the folders filed under it, however
+ * deep, and every project they hold, each the way its own delete goes. The
+ * projects go first and the folders last, so a run that stops partway leaves
+ * the rest where a retry finds it. */
 export async function deleteProjectFolder(id: string) {
   const folders = await readFolders();
-  const gone = folders.find((f) => f.id === id);
-  if (!gone) return;
-  const up = gone.parentId ?? null;
-  await writeFolders(
-    folders
-      .filter((f) => f.id !== id)
-      .map((f) => ((f.parentId ?? null) === id ? { ...f, parentId: up } : f))
-  );
-  await Promise.all(
-    (await readProjectEntries()).map(async ({ id: projectId, doc }) => {
-      if (doc.folderId === id) {
-        doc.folderId = up;
-        await writeProject(projectId, doc);
-      }
-    })
-  );
+  if (!folders.some((f) => f.id === id)) return;
+  const tree = new Set(subtreeOf(folders, id));
+  for (const { id: projectId, doc } of await readProjectEntries())
+    if (doc.folderId && tree.has(doc.folderId)) await deleteProject(projectId);
+  await mutateFolders((idx) => {
+    idx.folders = idx.folders.filter((f) => !tree.has(f.id));
+  });
 }
 
 export async function moveProjectToFolder(id: string, folderId: string | null) {

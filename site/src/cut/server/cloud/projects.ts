@@ -1,7 +1,7 @@
 // Cloud twin of the engine's project CRUD (server/projects.ts + http/projects.ts):
 // docs and metadata in Postgres, media bytes in R2. Every query scopes by userId.
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
-import { resolveParent } from "@/cut/lib/folderTree";
+import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import { normalizeAspect, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -353,25 +353,25 @@ export const projectsCloud = {
     }
   },
 
-  /** Delete a folder. What it held — its projects and the folders inside it —
-   * comes up one level, filed where the folder was. */
+  /** Delete a folder and everything in it: the folders filed under it,
+   * however deep, and every project they hold, each through the cascade its
+   * own delete runs. The projects go first and the folders last, so a run
+   * that stops partway leaves the rest where a retry finds it. */
   async deleteFolder(userId: string, id: string) {
     try {
-      await prisma.$transaction(async (tx) => {
-        const gone = await tx.cutFolder.findFirst({
-          where: { id, userId, scope: "project" },
-          select: { parentId: true },
-        });
-        if (!gone) return;
-        await tx.cutFolder.delete({ where: { id } });
-        await tx.cutProject.updateMany({
-          where: { userId, folderId: id },
-          data: { folderId: gone.parentId },
-        });
-        await tx.cutFolder.updateMany({
-          where: { userId, scope: "project", parentId: id },
-          data: { parentId: gone.parentId },
-        });
+      const folders = await prisma.cutFolder.findMany({
+        where: { userId, scope: "project" },
+        select: { id: true, parentId: true },
+      });
+      if (!folders.some((f) => f.id === id)) return Response.json({ ok: true });
+      const tree = subtreeOf(folders, id);
+      const projects = await prisma.cutProject.findMany({
+        where: { userId, folderId: { in: tree } },
+        select: { id: true },
+      });
+      for (const p of projects) await deleteProjectCascade(userId, p.id);
+      await prisma.cutFolder.deleteMany({
+        where: { userId, scope: "project", id: { in: tree } },
       });
       return Response.json({ ok: true });
     } catch (e) {

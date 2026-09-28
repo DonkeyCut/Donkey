@@ -5,6 +5,7 @@ import { cloudBackend } from "./backend/cloud";
 import { readSnapshot, writeSnapshot } from "./cache";
 import { pollCloudJob } from "./cloudJob";
 import { downloadFromUrl } from "./download";
+import { subtreeOf } from "./folderTree";
 import { normalizeLink } from "./link";
 import { installFontFace } from "./fontAssets";
 import { fontLabelFor } from "./fontName";
@@ -464,7 +465,24 @@ export async function updateLibraryFolder(
   return { ...((await res.json()) as Omit<LibraryFolder, "residency">), residency };
 }
 
-/** Delete a folder. What it held comes up one level. */
+/** What a delete of `folders` takes off the shelf: those folders and the ones
+ * filed under them, however deep, and the assets and templates filed in any
+ * of them. A camera clip lives in Camera Roll whatever folder it is filed
+ * under, so it stays; the shelf unfiles it. */
+export function folderDeleteTakes(
+  data: LibraryData,
+  folders: readonly { id: string }[],
+): { tree: Set<string>; assets: LibraryAsset[]; templates: LibraryTemplateItem[] } {
+  const tree = new Set(folders.flatMap((f) => subtreeOf(data.folders, f.id)));
+  const filed = (x: { folderId?: string | null }) => !!x.folderId && tree.has(x.folderId);
+  return {
+    tree,
+    assets: data.assets.filter((a) => filed(a) && a.origin !== "camera"),
+    templates: data.templates.filter(filed),
+  };
+}
+
+/** Delete a folder and everything in it, folders and items alike. */
 export async function deleteLibraryFolder(
   residency: Residency,
   id: string,

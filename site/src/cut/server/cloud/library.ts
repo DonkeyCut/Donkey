@@ -12,7 +12,7 @@ import type {
   TemplateMedia,
 } from "../library";
 import { templateExtras } from "../templateExtras";
-import { resolveParent } from "@/cut/lib/folderTree";
+import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -783,36 +783,39 @@ export const libraryCloud = {
     }
   },
 
-  /** Delete a folder. What it held — its items and the folders inside it —
-   * comes up one level, filed where the folder was. */
+  /** Delete a folder and everything in it: the folders filed under it,
+   * however deep, and every asset and template they hold, each through the
+   * cascade its own delete runs — an asset leaves a tombstone for the phone
+   * like any other delete. A camera clip lives in Camera Roll whatever folder
+   * it is filed under, so it stays, unfiled. The items go first and the
+   * folders last, so a run that stops partway leaves the rest where a retry
+   * finds it. */
   async deleteFolder(userId: string, id: string) {
     try {
-      await prisma.$transaction(async (tx) => {
-        const gone = await tx.cutFolder.findFirst({
-          where: { id, userId, scope: "library" },
-          select: { parentId: true },
-        });
-        if (!gone) return;
-        const up = gone.parentId;
-        await tx.cutFolder.delete({ where: { id } });
-        await tx.cutFolder.updateMany({
-          where: { userId, scope: "library", parentId: id },
-          data: { parentId: up },
-        });
-        await tx.cutLibraryAsset.updateMany({
-          where: { userId, folderId: id },
-          data: { folderId: up },
-        });
-        const templates = await tx.cutTemplate.findMany({ where: { userId } });
-        for (const t of templates) {
-          const doc = t.doc as unknown as TemplateDoc;
-          if (doc.folderId === id) {
-            await tx.cutTemplate.update({
-              where: { id: t.id },
-              data: { doc: asJson({ ...doc, folderId: up }) },
-            });
-          }
-        }
+      const folders = await prisma.cutFolder.findMany({
+        where: { userId, scope: "library" },
+        select: { id: true, parentId: true },
+      });
+      if (!folders.some((f) => f.id === id)) return Response.json({ ok: true });
+      const tree = subtreeOf(folders, id);
+      const assets = await prisma.cutLibraryAsset.findMany({
+        where: { userId, folderId: { in: tree }, deletedAt: null },
+        select: { id: true, meta: true },
+      });
+      const isCamera = (a: { meta: unknown }) => ((a.meta ?? {}) as AssetMeta).origin === "camera";
+      for (const a of assets)
+        if (!isCamera(a)) await deleteLibraryAssetCascade(userId, a.id, { tombstone: true });
+      await prisma.cutLibraryAsset.updateMany({
+        where: { userId, id: { in: assets.filter(isCamera).map((a) => a.id) } },
+        data: { folderId: null },
+      });
+      const templates = await prisma.cutTemplate.findMany({ where: { userId } });
+      for (const t of templates) {
+        const folderId = (t.doc as unknown as TemplateDoc).folderId;
+        if (folderId && tree.includes(folderId)) await deleteTemplateCascade(userId, t);
+      }
+      await prisma.cutFolder.deleteMany({
+        where: { userId, scope: "library", id: { in: tree } },
       });
       return Response.json({ ok: true });
     } catch (e) {
@@ -1060,19 +1063,23 @@ export const libraryCloud = {
   async removeTemplate(userId: string, id: string) {
     try {
       const row = await findTemplate(userId, id);
-      if (row) {
-        await prisma.cutTemplate.delete({ where: { id } });
-        // The media copies are private to this template, so removing them is safe.
-        const doc = row.doc as unknown as TemplateDoc;
-        for (const m of doc.media ?? [])
-          await deleteLibraryObject(userId, m.fileName);
-      }
+      if (row) await deleteTemplateCascade(userId, row);
       return Response.json({ ok: true });
     } catch (e) {
       return caught(e, "Could not delete the template.");
     }
   },
 };
+
+/** Delete a template row with its media copies, which are private to it. */
+async function deleteTemplateCascade(
+  userId: string,
+  row: NonNullable<Awaited<ReturnType<typeof findTemplate>>>,
+) {
+  await prisma.cutTemplate.delete({ where: { id: row.id } });
+  const doc = row.doc as unknown as TemplateDoc;
+  for (const m of doc.media ?? []) await deleteLibraryObject(userId, m.fileName);
+}
 
 /** The folder a new account starts with, so the Library shows that it takes
  * font files before anyone has dropped one in. Derived from the user id, so a

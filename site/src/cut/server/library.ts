@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { copyFile, constants, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ClipSound } from "@donkeycut/effects-kit";
-import { resolveParent, settleParents } from "@/cut/lib/folderTree";
+import { resolveParent, settleParents, subtreeOf } from "@/cut/lib/folderTree";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { mediaPath as projectMediaPath, readProject } from "./projects";
@@ -378,15 +378,42 @@ export async function copyLibraryAssetToProject(
   return dest;
 }
 
-export async function removeAsset(id: string) {
-  const { fileName, posterFile } = await mutateIndex((idx) => {
-    const asset = idx.assets.find((a) => a.id === id);
-    if (!asset) throw new Error("Library asset not found.");
-    idx.assets = idx.assets.filter((a) => a.id !== id);
-    return { fileName: asset.fileName, posterFile: asset.posterFile };
+/** Take the assets in `ids` out of the index, handing back the files they
+ * own — the source and its poster — for the caller to remove once the index
+ * is written. */
+function takeAssets(idx: LibraryIndex, ids: ReadonlySet<string>): string[] {
+  const files: string[] = [];
+  idx.assets = idx.assets.filter((a) => {
+    if (!ids.has(a.id)) return true;
+    files.push(a.fileName);
+    if (a.posterFile) files.push(a.posterFile);
+    return false;
   });
-  await rm(libMediaPath(fileName), { force: true });
-  if (posterFile) await rm(libMediaPath(posterFile), { force: true });
+  return files;
+}
+
+/** Take the templates in `ids` out of the index, handing back their media
+ * copies, which are private to them. */
+function takeTemplates(idx: LibraryIndex, ids: ReadonlySet<string>): string[] {
+  const files: string[] = [];
+  idx.templates = (idx.templates ?? []).filter((t) => {
+    if (!ids.has(t.id)) return true;
+    for (const m of t.media ?? []) files.push(m.fileName);
+    return false;
+  });
+  return files;
+}
+
+async function removeFiles(files: string[]) {
+  for (const f of files) await rm(libMediaPath(f), { force: true });
+}
+
+export async function removeAsset(id: string) {
+  const files = await mutateIndex((idx) => {
+    if (!idx.assets.some((a) => a.id === id)) throw new Error("Library asset not found.");
+    return takeAssets(idx, new Set([id]));
+  });
+  await removeFiles(files);
 }
 
 export function getAsset(id: string) {
@@ -439,19 +466,27 @@ export async function updateFolder(
   });
 }
 
-/** Delete a folder. What it held — its items and the folders inside it —
- * comes up one level, filed where the folder was. */
+/** Delete a folder and everything in it: the folders filed under it, however
+ * deep, and every asset and template they hold, in one write of the index.
+ * A camera clip lives in Camera Roll whatever folder it is filed under, so
+ * it stays, unfiled. */
 export async function deleteFolder(id: string) {
-  await mutateIndex((idx) => {
-    const gone = (idx.folders ?? []).find((f) => f.id === id);
-    if (!gone) return;
-    const up = gone.parentId ?? null;
-    idx.folders = (idx.folders ?? []).filter((f) => f.id !== id);
-    for (const f of idx.folders) if ((f.parentId ?? null) === id) f.parentId = up;
-    for (const a of idx.assets) if (a.folderId === id) a.folderId = up;
-    for (const t of idx.templates ?? [])
-      if (t.folderId === id) t.folderId = up;
+  const files = await mutateIndex((idx) => {
+    const folders = idx.folders ?? [];
+    if (!folders.some((f) => f.id === id)) return [];
+    const tree = new Set(subtreeOf(folders, id));
+    const filed = (x: { folderId?: string | null }) => !!x.folderId && tree.has(x.folderId);
+    const assets = new Set<string>();
+    for (const a of idx.assets) {
+      if (!filed(a)) continue;
+      if (a.origin === "camera") a.folderId = null;
+      else assets.add(a.id);
+    }
+    const templates = new Set((idx.templates ?? []).filter(filed).map((t) => t.id));
+    idx.folders = folders.filter((f) => !tree.has(f.id));
+    return [...takeAssets(idx, assets), ...takeTemplates(idx, templates)];
   });
+  await removeFiles(files);
 }
 
 /** File a library item — an asset or a template — into a folder (`null` ungroups). */
@@ -666,12 +701,6 @@ export async function renameTemplate(
 }
 
 export async function deleteTemplate(id: string) {
-  const template = await mutateIndex((idx) => {
-    const t = (idx.templates ?? []).find((x) => x.id === id);
-    idx.templates = (idx.templates ?? []).filter((x) => x.id !== id);
-    return t;
-  });
-  // The media copies are private to this template, so removing them is safe.
-  for (const m of template?.media ?? [])
-    await rm(libMediaPath(m.fileName), { force: true });
+  const files = await mutateIndex((idx) => takeTemplates(idx, new Set([id])));
+  await removeFiles(files);
 }

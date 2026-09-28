@@ -48,7 +48,7 @@ export const SIDE_PANEL_TOOLS = [
   {
     name: "media_organize",
     description:
-      "Organize the Media panel's Project Files with folders (this project only; the shared Library has library_organize): create_folder / rename_folder / delete_folder (a deleted folder's files drop back to the top level), move_asset files user-imported media into a folder (omit folder_id for the top level). Folders and each asset's folderId are in `media` / `mediaFolders` from get_state. create_folder can take asset_ids to file into the new folder in the same call.",
+      "Organize the Media panel's Project Files with folders (this project only; the shared Library has library_organize): create_folder / rename_folder / delete_folder (permanent: every file in the folder is removed from the project, and the timeline clips made from them go too), move_asset files user-imported media into a folder (omit folder_id for the top level). Folders and each asset's folderId are in `media` / `mediaFolders` from get_state. create_folder can take asset_ids to file into the new folder in the same call.",
     inputSchema: obj({
       action: {
         type: "string",

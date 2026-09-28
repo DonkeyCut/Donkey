@@ -71,7 +71,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_organize",
     description:
-      "Organize the shared Library. Folders nest: create_folder makes one at the root or inside parent_id, rename_folder renames, move_folder files a folder under another (omit parent_id for the root; never into itself or a folder inside it), delete_folder removes one (what it held — items and folders — moves up one level). move_asset files an asset or template into a folder (omit folder_id for the root), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"camera\" or \"inspiration\" takes it off the user's phone as well.",
+      "Organize the shared Library. Folders nest: create_folder makes one at the root or inside parent_id, rename_folder renames, move_folder files a folder under another (omit parent_id for the root; never into itself or a folder inside it), delete_folder deletes one with everything in it — its folders and every item they hold — permanently; a camera clip filed there stays in Camera Roll, and an inspiration item in it leaves the phone too. move_asset files an asset or template into a folder (omit folder_id for the root), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"camera\" or \"inspiration\" takes it off the user's phone as well.",
     inputSchema: obj({
       action: {
         type: "string",

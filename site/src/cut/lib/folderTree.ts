@@ -2,8 +2,10 @@
  * Folders that file into folders. Every folder table — project folders,
  * library folders, note folders, on every shelf — carries `parentId`, null
  * for the top level, and these are the rules they all share: a folder never
- * files under itself, what a deleted folder held comes up one level, and a
- * parent nothing answers for reads as the top level.
+ * files under itself, a deleted folder takes everything under it with it, and
+ * a parent nothing answers for reads as the top level. Note folders are the
+ * exception on deletes: what they held comes up one level, the way the phone
+ * files it.
  */
 
 export interface TreeFolder {
@@ -60,6 +62,25 @@ export function resolveParent(
   if (!folders.some((f) => f.id === parentId)) return null;
   if (folderWithin(folders, parentId, id)) return null;
   return parentId;
+}
+
+/** `id` and every folder filed under it, however deep: what a delete of `id`
+ * takes. A loop in the listing is walked once. */
+export function subtreeOf(folders: readonly TreeFolder[], id: string): string[] {
+  const under = new Map<string | null, string[]>();
+  for (const f of folders) {
+    const p = parentOf(f);
+    under.set(p, [...(under.get(p) ?? []), f.id]);
+  }
+  const tree = [id];
+  const seen = new Set(tree);
+  for (let i = 0; i < tree.length; i++)
+    for (const child of under.get(tree[i]) ?? [])
+      if (!seen.has(child)) {
+        seen.add(child);
+        tree.push(child);
+      }
+  return tree;
 }
 
 /** The folders filed right under `parentId` (null for the top level). */

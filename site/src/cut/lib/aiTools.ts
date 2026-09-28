@@ -104,11 +104,13 @@ import {
   deleteLibraryFolder,
   deleteTemplate,
   fetchLibrary,
+  folderDeleteTakes,
   importLibraryAsset,
   moveLibraryItem,
   updateLibraryFolder,
   saveAssetToLibrary,
 } from "./library";
+import { forgetLinkedCopies } from "./linkedLibrary";
 import { fetchNotes } from "./notes";
 import {
   captureFreezeFrame,
@@ -3896,8 +3898,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           const id = String(input.folder_id ?? "");
           const r = folderShelf(id);
           if (!r) throw new ToolError(`No library folder with id ${id}.`);
+          const takes = folderDeleteTakes(lib, [{ id }]);
+          forgetLinkedCopies(takes.assets);
           await deleteLibraryFolder(r, id);
-          return { deleted: true, note: "What it held moved up one level." };
+          const phone = takes.assets.filter((a) => !!a.origin).length;
+          return {
+            deleted: true,
+            items: takes.assets.length + takes.templates.length,
+            ...(phone > 0 ? { removedFromPhone: phone } : {}),
+            note: "Everything in it — folders and items — was deleted too. A camera clip filed there stays in Camera Roll.",
+          };
         }
         case "move_asset": {
           const folderId =
@@ -3973,8 +3983,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         }
         case "delete_folder": {
           const f = folderOf(String(input.folder_id ?? ""));
+          const files = s.assets.filter((a) => a.folderId === f.id).length;
           s.removeMediaFolder(f.id);
-          return { deleted: true, note: "Its files moved to the Media panel's top level." };
+          return {
+            deleted: true,
+            files,
+            note: "Its files were removed from the project, with the timeline clips made from them.",
+          };
         }
         case "move_asset": {
           const folderId =
