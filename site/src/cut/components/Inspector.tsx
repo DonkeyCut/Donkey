@@ -328,7 +328,7 @@ function InspectorColumn({
   const shown = tabs.some((t) => t.id === view) ? view : "main";
   return (
     <>
-      <div className="flex shrink-0 flex-col gap-2 self-stretch">
+      <div className="flex min-h-0 shrink-0 flex-col gap-2 self-stretch">
         <InspectorRail
           clipId={clip?.id}
           tabs={tabs}
@@ -406,8 +406,8 @@ function InspectorRail({
   // visible from any view.
   const baking = useMatteBakes((s) => !!clipId && s.jobs[clipId]?.status === "running");
   return (
-    <div className="pointer-events-auto shrink-0">
-      <div className="flex flex-col items-center gap-1 rounded-xl border bg-background p-1 shadow-md">
+    <div className="pointer-events-auto flex min-h-0 flex-col items-center rounded-xl border bg-background p-1 shadow-md">
+      <ScrollArea className="min-h-0 w-full" viewportClassName="overscroll-contain" contentClassName="flex flex-col items-center gap-1">
         <RailButton id="home" label="Home" Icon={House} active={view === "main"} onClick={() => onPick("main")} />
         {tabs.map(({ id, label, Icon }) => (
           <RailButton key={id} id={id} label={label} Icon={Icon} active={view === id} onClick={() => onPick(id)}>
@@ -416,15 +416,15 @@ function InspectorRail({
             )}
           </RailButton>
         ))}
-        <div className="my-0.5 h-px w-5 bg-border" />
-        <RailButton
-          id="toggle"
-          label={open ? "Hide panel" : "Show panel"}
-          Icon={open ? PanelRightClose : PanelRightOpen}
-          active={false}
-          onClick={onToggle}
-        />
-      </div>
+      </ScrollArea>
+      <div className="my-1 h-px w-5 shrink-0 bg-border" />
+      <RailButton
+        id="toggle"
+        label={open ? "Hide panel" : "Show panel"}
+        Icon={open ? PanelRightClose : PanelRightOpen}
+        active={false}
+        onClick={onToggle}
+      />
     </div>
   );
 }
@@ -451,7 +451,7 @@ function RailButton({
       aria-label={label}
       aria-pressed={active}
       className={cn(
-        `panel-tab-${id} relative grid size-8 place-items-center rounded-lg transition-colors`,
+        `panel-tab-${id} relative grid size-8 shrink-0 place-items-center rounded-lg transition-colors`,
         active
           ? "bg-neutral-900 text-white"
           : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
