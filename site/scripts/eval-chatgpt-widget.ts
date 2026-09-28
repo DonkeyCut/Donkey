@@ -44,8 +44,10 @@ const hostHtml = `<!doctype html><html><body><iframe title="Donkey Cut preview" 
 const frame = document.querySelector('iframe');
 const project = {id:'project',name:'Launch film',revision:'cloud:2',url:'https://donkeycut.com/app/p/project'};
 let count = 0, renewals = 0;
-window.calls = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.editorCodes = 0;
-const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null});
+window.calls = []; window.links = []; window.modes = []; window.editable = false; window.holdMs = 0; window.readyMs = 0; window.freshCard = false; window.signedOut = false; window.failOpen = false; window.missing = false; window.editorCodes = 0;
+const view = (selected, preview = null) => ({view:selected?'project':'projects',projects:selected?[]:[project],nextCursor:null,project:selected?project:null,preview,canRender:true,canEdit:window.editable,export:null,job:null,results:[],changed:false,account:null,missing:null});
+const missingView = () => ({...view(false),view:'missing',projects:[],missing:{id:project.id}});
+const editorLink = () => ({url:location.origin+'/embed?embed=chatgpt&code=one-use-'+ ++window.editorCodes +'&project=project',expiresAt:Date.now()+60000});
 // ChatGPT's sandbox drops null-valued keys before the widget sees a result.
 const dropNulls = (value) => Array.isArray(value) ? value.map(dropNulls) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null).map(([k, v]) => [k, dropNulls(v)])) : value;
 const result = (data, playback = null, editor = null) => dropNulls({content:[{type:'text',text:'Preview'}],structuredContent:data,_meta:{playback,editor,pollMs:1000}});
@@ -61,7 +63,8 @@ window.addEventListener('message', ({source,data}) => {
  if(data.method === 'tools/call') {
   const name = data.params.name; window.calls.push(name);
   if(name === 'list_projects') reply(data.id,result(view(false)));
-  if(name === 'open_project') setTimeout(() => reply(data.id, window.failOpen ? {isError:true} : window.editable ? result(view(true),null,{url:location.origin+'/embed?embed=chatgpt&code=one-use-'+ ++window.editorCodes +'&project=project',expiresAt:Date.now()+60000}) : result(view(true))), window.holdMs);
+  if(name === 'open_project') setTimeout(() => reply(data.id, window.failOpen ? {isError:true} : window.missing ? result(missingView()) : window.editable ? result(view(true),null,editorLink()) : result(view(true))), window.holdMs);
+  if(name === 'create_project') reply(data.id, result(view(true),null,editorLink()));
   if(name === 'render_preview') { count=0; reply(data.id,result(view(true,{id:'job',status:'queued',progress:0,revision:'cloud:2'}))); }
   if(name === 'get_preview_status') {
    count++; const done = count >= 3;
@@ -150,7 +153,7 @@ try {
   // A card rehydrated with a spent link holds the editor's space, inline and
   // without controls, while it mints a fresh link. The held reply outlasts the
   // stale playback's one-second renewal, so a poll would show up in the calls.
-  type Host = { calls: string[]; modes: string[]; holdMs: number; readyMs: number; freshCard: boolean; signedOut: boolean; failOpen: boolean; links: string[] };
+  type Host = { calls: string[]; modes: string[]; holdMs: number; readyMs: number; freshCard: boolean; signedOut: boolean; failOpen: boolean; missing: boolean; links: string[] };
   await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.holdMs = 1500; });
   await frame.evaluate(() => { location.reload(); });
   await page.waitForFunction(() => (window as unknown as Host).calls.length === 1);
@@ -200,8 +203,20 @@ try {
   await app.getByRole("button", { name: "Try again", exact: true }).click();
   await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "one-use" }).waitFor();
   assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), ["open_project", "open_project"], "manual retry recovers without a browser refresh");
+  // A card for a project that has since been deleted says so, in the editor's
+  // space, and makes a new project there in its place.
+  await page.evaluate(() => { const host = window as unknown as Host; host.calls = []; host.freshCard = false; host.missing = true; });
+  await frame.evaluate(() => { location.reload(); });
+  await app.getByRole("status").filter({ hasText: "This project was deleted." }).waitFor();
+  assert.equal(await app.locator("iframe.editor").count(), 0, "a deleted project shows no editor frame");
+  assert.equal(await app.getByText("Your projects").count(), 0, "a deleted project shows no projects home");
+  await page.evaluate(() => { (window as unknown as Host).missing = false; });
+  await app.getByRole("button", { name: "Create New Project", exact: true }).click();
+  await app.frameLocator("iframe.editor").locator("#editor").filter({ hasText: "one-use" }).waitFor();
+  await app.locator(".skeleton").waitFor({ state: "detached" });
+  assert.deepEqual(await page.evaluate(() => (window as unknown as Host).calls), ["open_project", "create_project"], "a deleted project creates a new one in its place");
   assert.deepEqual(errors, []);
-  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, authenticated download redirects, download errors, skeleton until ready, waking editor card, session renewal and retry, decoder teardown, lazy HLS.");
+  console.log("PASS: project selection, repeated polling, native playback, URL recovery, hidden pause, Open in Donkey Cut, editor in the card, authenticated download redirects, download errors, skeleton until ready, waking editor card, session renewal and retry, deleted project, decoder teardown, lazy HLS.");
 } finally {
   await browser.close(); server.stop(true); mediaServer.stop(true); await rm(scratch, { recursive: true, force: true });
 }

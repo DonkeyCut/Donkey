@@ -4,13 +4,25 @@ import { useProjectApp } from "./useProjectApp";
 import "./preview.css";
 
 export function PreviewApp() {
-  const { ready, view, playback, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor } = useProjectApp();
+  const { ready, view, playback, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject } = useProjectApp();
   const project = view?.project;
   const preview = view?.preview;
   const rendering = preview?.status === "queued" || preview?.status === "running";
   // The frame whose editor has said it is on screen.
   const [shown, setShown] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // The card is the whole surface, so a project that is gone has no projects
+  // home to fall back to: it says so in the editor's space and a new project
+  // opens there in its place.
+  if (view?.view === "missing") {
+    return <main className="editing" data-mode={fullscreen ? "fullscreen" : "inline"} aria-busy={busy}>
+      <div className="waiting">
+        <p role="status">This project was deleted.</p>
+        {error && <p role="alert">{error}</p>}
+        <button className="primary" disabled={busy || !ready} onClick={createProject}>Create New Project</button>
+      </div>
+    </main>;
+  }
   // An editable project is the editor, and its own chrome carries every
   // control. The card holds the editor's inline space from the first paint,
   // so a card ChatGPT shows again after a reload is the editor while it

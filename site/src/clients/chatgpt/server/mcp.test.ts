@@ -51,6 +51,7 @@ const fakeProjects = (overrides: Partial<Projects> = {}): Projects => {
   return {
     list: answer,
     status: answer,
+    open: answer,
     render: answer,
     withEditor: async (result: ProjectResult) => result,
     create: answer,
@@ -153,6 +154,29 @@ describe("ChatGPT MCP protocol", () => {
       await server.close();
     }
   });
+});
+
+test("open_project answers a deleted project as a typed view the card can read", async () => {
+  const missing: ProjectResult = { view: { ...data.view, view: "missing", project: null, preview: null, missing: { id: "gone" } }, playback: null };
+  const server = createChatgptServer(
+    { userId: "owner", scopes: ["projects:read", "projects:write"], grantId: "grant" },
+    config,
+    fakeProjects({ open: async () => missing }),
+  );
+  const client = new Client({ name: "test", version: "1" });
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  try {
+    const result = await client.callTool({ name: "open_project", arguments: { projectId: "gone" } });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toEqual(missing.view);
+    expect(JSON.stringify(result.content)).toContain("no longer exists");
+    expect(result._meta).toMatchObject({ editor: null });
+  } finally {
+    await client.close();
+    await server.close();
+  }
 });
 
 test("render scope requests a reconnect through the MCP authentication challenge", async () => {

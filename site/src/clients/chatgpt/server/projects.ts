@@ -72,13 +72,18 @@ export function projectTools(
     results: [],
     changed: false,
     account: null,
+    missing: null,
   });
 
-  async function getOwnedRow(projectId: string) {
-    const row = await db.cutProject.findFirst({
+  function findOwnedRow(projectId: string) {
+    return db.cutProject.findFirst({
       where: { id: projectId, userId: identity.userId },
       select: { id: true, name: true, version: true, previewKey: true },
     });
+  }
+
+  async function getOwnedRow(projectId: string) {
+    const row = await findOwnedRow(projectId);
     if (!row) {
       throw new ProjectToolError(
         "Project not found. Choose one of your cloud projects.",
@@ -104,7 +109,14 @@ export function projectTools(
     projectId: string,
     jobId?: string,
   ): Promise<ProjectResult> {
-    const row = await getOwnedRow(projectId);
+    return previewStatus(await getOwnedRow(projectId), jobId);
+  }
+
+  async function previewStatus(
+    row: NonNullable<Awaited<ReturnType<typeof findOwnedRow>>>,
+    jobId?: string,
+  ): Promise<ProjectResult> {
+    const projectId = row.id;
     const selectedProject = projectSummary(row);
     const job = await db.cutRenderJob.findFirst({
       where: {
@@ -365,6 +377,13 @@ export function projectTools(
       };
     },
     status: getPreviewStatus,
+    /** open_project's answer. A project the account no longer has is a
+     * typed view carrying the id asked for, so the card can say so. */
+    async open(projectId: string): Promise<ProjectResult> {
+      const row = await findOwnedRow(projectId);
+      if (!row) return { view: { ...emptyProjectView(), view: "missing", missing: { id: projectId } }, playback: null };
+      return previewStatus(row);
+    },
     /** A project card is the full editor, signed in through a one-use link,
      * whenever the connection can edit; a read-only one shows the preview. */
     async withEditor(result: ProjectResult): Promise<ProjectResult> {

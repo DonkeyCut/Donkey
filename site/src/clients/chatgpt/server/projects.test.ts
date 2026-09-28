@@ -60,6 +60,15 @@ describe("ChatGPT cloud projects", () => {
     expect(db.cutRenderJob.findFirst).not.toHaveBeenCalled();
     expect(db.cutProject.findMany).not.toHaveBeenCalled();
   });
+  test("opening a project the account no longer has answers a typed missing view", async () => {
+    const { tools, db } = createTestContext(["projects:read", "projects:write"]);
+    const gone = await tools.withEditor(await tools.open("foreign"));
+    expect(gone.view).toMatchObject({ view: "missing", project: null, missing: { id: "foreign" } });
+    expect(gone.editor).toBeUndefined();
+    expect(db.cutRenderJob.findFirst).not.toHaveBeenCalled();
+    const opened = await tools.open("mine");
+    expect(opened.view).toMatchObject({ view: "project", project: { id: "mine" }, missing: null });
+  });
   test("read scope cannot enqueue renders or edits", async () => {
     const { tools } = createTestContext();
     await expect(tools.render("mine")).rejects.toThrow("permission");

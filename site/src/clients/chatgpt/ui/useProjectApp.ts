@@ -93,7 +93,9 @@ export function useProjectApp() {
     const current = ++epoch.current;
     if (manual) { recoveries.current = 0; setBusy(true); setError(null); }
     try {
-      const result = await app.callServerTool({ name, arguments: args });
+      // The host rejects a failed call with its own error text; the card
+      // shows its one sentence for that.
+      const result = await app.callServerTool({ name, arguments: args }).catch((): ToolResult => ({ isError: true }));
       if (current === epoch.current && appRef.current === app) receive(result, origin);
     } catch (e) {
       if (current === epoch.current && appRef.current === app) setError(e instanceof Error ? e.message : "Request failed.");
@@ -162,6 +164,11 @@ export function useProjectApp() {
     void run("open_project", { projectId }).finally(() => { reconnecting.current = false; });
   };
 
+  /** The way forward from a project the account no longer has: a new cloud
+   * project, opened here in its place. Its result carries the editor link,
+   * so it opens like any other. */
+  const createProject = () => { void run("create_project", { name: "Untitled" }); };
+
   // The editor's own button asks for the whole window; the host grants what it supports.
   const requestFullscreen = useCallback(async () => {
     const app = appRef.current;
@@ -173,5 +180,5 @@ export function useProjectApp() {
       setHostInset(full ? (app.getHostContext()?.safeAreaInsets?.bottom ?? 120) : 0);
     } catch { /* the inline card still works */ }
   }, []);
-  return { ready, view, playback, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor };
+  return { ready, view, playback, editor, fullscreen, hostInset, error, busy, visible, run, playbackFailed, openDonkey, openFromFrame, saveFromFrame, requestFullscreen, retryEditor, createProject };
 }

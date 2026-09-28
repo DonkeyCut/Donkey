@@ -14,11 +14,13 @@ export const jobSchema = z.object({ id: z.string(), kind: z.string(), status: jo
 /** One command's outcome inside a batch. */
 export const outcomeSchema = z.object({ name: z.string(), ok: z.boolean(), output: z.unknown().optional(), error: z.string().optional() });
 export const accountSchema = z.object({ credits: z.string(), storageBytes: z.number(), storageQuotaBytes: z.number().nullish(), plan: z.string() });
+/** The project open_project asked for and the account no longer has. */
+export const missingSchema = z.object({ id: z.string() });
 export const viewSchema = z.object({
-  view: z.enum(["projects", "project"]), projects: z.array(projectSchema), nextCursor: z.string().nullish(),
+  view: z.enum(["projects", "project", "missing"]), projects: z.array(projectSchema), nextCursor: z.string().nullish(),
   project: projectSchema.nullish(), preview: previewSchema.nullish(), canRender: z.boolean(), canEdit: z.boolean(),
   export: exportSchema.nullish(), job: jobSchema.nullish(), results: z.array(outcomeSchema), changed: z.boolean(),
-  account: accountSchema.nullish(),
+  account: accountSchema.nullish(), missing: missingSchema.nullish(),
 });
 export const playbackSchema = z.object({ url: z.url(), expiresAt: z.number() });
 export const downloadSchema = z.object({ url: z.url(), expiresAt: z.number(), name: z.string() });

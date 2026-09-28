@@ -7,6 +7,7 @@ const views = [
   { ...base, view: "projects", projects: [project] },
   { ...base, view: "project", projects: [], project, preview: { id: "j1", status: "done", progress: 1, revision: null } },
   { ...base, view: "project", projects: [], project, export: { id: "e1", status: "running", progress: 0.5, name: null }, history: { undo: "Trim", redo: null }, account: { credits: "3.00", storageBytes: 10, storageQuotaBytes: null, plan: "free" } },
+  { ...base, view: "missing", projects: [], missing: { id: "gone" } },
 ];
 
 /** What ChatGPT's sandbox hands the widget: every null-valued key removed. */

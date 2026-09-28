@@ -179,14 +179,14 @@ export function createChatgptServer(
     {
       title: "Open a Donkey Cut project",
       description:
-        "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening creates a fresh editor with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the project picker.",
+        "Open a cloud project initially, switch projects, or recover a missing card. Keep the existing card during edits and preview checks: reopening creates a fresh editor with empty undo history. The editable card holds the full editor, timeline, media panel, inspector and preview. A read-only connection sees the preview; use render_preview when its revision is stale or missing. With no projectId, show the project picker. A deleted project answers view \"missing\" and the card offers to create a new one.",
       inputSchema: z.object({ projectId: idSchema.optional() }),
       outputSchema: viewSchema,
       annotations: readOnlyAnnotations,
       _meta: { ...readMetadata, ui: { resourceUri: WIDGET_URI } },
     },
     ({ projectId }) =>
-      runTool(() => (projectId ? projects.status(projectId) : projects.list())),
+      runTool(() => (projectId ? projects.open(projectId) : projects.list())),
   );
 
   server.registerTool(
@@ -504,6 +504,9 @@ function describeProjectView(view: ProjectView): string {
     return view.projects
       .map((project) => `${project.name}: ${project.id} (${project.url})`)
       .join("\n");
+  }
+  if (view.view === "missing") {
+    return `Project ${view.missing?.id ?? ""} no longer exists. The card offers to create a new project; list_projects shows the others.`;
   }
 
   const project = view.project!;
