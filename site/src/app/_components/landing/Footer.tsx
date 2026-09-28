@@ -1,9 +1,8 @@
-"use client";
-
 import { Link as LinkIcon, Play, Send, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 
 import { GITHUB_REPO_URL } from "@/app/_components/landing/data";
+import { hasPublishedPosts } from "@/lib/blog/read";
 
 type SocialLink = {
   href: string;
@@ -14,7 +13,8 @@ type SocialLink = {
 type FooterLink = { href: string; label: string };
 type FooterColumn = { title: string; links: FooterLink[] };
 
-export function Footer() {
+export async function Footer() {
+  const showBlog = await hasPublishedPosts();
   const socialLinks: SocialLink[] = [
     { href: "https://www.linkedin.com", icon: LinkIcon, label: "LinkedIn" },
     { href: "https://www.youtube.com", icon: Play, label: "YouTube" },
@@ -27,7 +27,7 @@ export function Footer() {
       title: "Product",
       links: [
         { href: GITHUB_REPO_URL, label: "GitHub" },
-        { href: "/blog", label: "Blog" },
+        ...(showBlog ? [{ href: "/blog", label: "Blog" }] : []),
       ],
     },
     {

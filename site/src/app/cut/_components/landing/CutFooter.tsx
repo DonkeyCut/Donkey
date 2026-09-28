@@ -1,8 +1,7 @@
-"use client";
-
 import Link from "next/link";
 
 import { GITHUB_REPO_URL } from "@/app/_components/landing/data";
+import { hasPublishedPosts } from "@/lib/blog/read";
 
 type FooterLink = { href: string; label: string };
 type FooterColumn = { title: string; links: FooterLink[] };
@@ -12,14 +11,15 @@ const DISCORD_URL = "https://discord.gg/Xv6qGax7sT";
 // Cut's own footer, in the shared landing Footer's grouped-column design. The
 // shared Footer links routes that don't exist on donkeycut.com (/sign-in,
 // /use-cases), so this one carries only links that resolve on both hosts.
-export function CutFooter() {
+export async function CutFooter() {
+  const showBlog = await hasPublishedPosts();
   const linkGroups: FooterColumn[] = [
     {
       title: "Product",
       links: [
         { href: GITHUB_REPO_URL, label: "GitHub" },
         { href: DISCORD_URL, label: "Discord" },
-        { href: "/blog", label: "Blog" },
+        ...(showBlog ? [{ href: "/blog", label: "Blog" }] : []),
       ],
     },
     {

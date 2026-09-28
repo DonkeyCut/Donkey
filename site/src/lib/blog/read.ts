@@ -83,6 +83,16 @@ export async function listPublishedPosts(): Promise<BlogPostCard[]> {
   return rows.map(cardOf);
 }
 
+// Whether the blog has anything to show; the footers hide their Blog link
+// until it does.
+export async function hasPublishedPosts(): Promise<boolean> {
+  "use cache";
+  cacheTag(BLOG_TAG);
+  cacheLife("max");
+  const row = await prisma.blogPost.findFirst({ select: { id: true }, where: { status: "PUBLISHED" } });
+  return row !== null;
+}
+
 // One post with its body. Null for an unknown or unpublished slug; that answer
 // is held briefly, since the slug may be published next.
 export async function getPost(slug: string): Promise<BlogPostPage | null> {

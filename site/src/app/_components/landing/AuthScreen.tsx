@@ -2,11 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 
 import { TopNav } from "@/app/_components/landing/TopNav";
 import { EmailAuthForm } from "@/app/_components/landing/EmailAuthForm";
-import { CutFooter } from "@/app/cut/_components/landing/CutFooter";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +15,8 @@ type Props = {
   mode: AuthMode;
   method?: "google" | "email";
   callbackURL?: string;
+  // CutFooter reads the blog on the server, so the page hands it in.
+  footer: ReactNode;
 };
 
 const copy = {
@@ -55,7 +56,7 @@ const copy = {
 
 const GOOGLE_BUTTON_HEIGHT = 56;
 
-export function AuthScreen({ mode, method = "google", callbackURL }: Props) {
+export function AuthScreen({ mode, method = "google", callbackURL, footer }: Props) {
   const [isPending, setIsPending] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const screenCopy = copy[mode];
@@ -171,7 +172,7 @@ export function AuthScreen({ mode, method = "google", callbackURL }: Props) {
           {formContent}
         </div>
       </section>
-      <CutFooter />
+      {footer}
     </main>
   );
 }

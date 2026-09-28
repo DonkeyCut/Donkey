@@ -23,11 +23,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "monthly",
       priority: 0.8,
     },
-    {
-      url: `${DONKEYCUT_CANONICAL}/blog`,
-      changeFrequency: "weekly",
-      priority: 0.8,
-    },
+    ...(posts.length > 0
+      ? [{ url: `${DONKEYCUT_CANONICAL}/blog`, changeFrequency: "weekly" as const, priority: 0.8 }]
+      : []),
     ...Array.from({ length: Math.max(0, pages - 1) }, (_, i) => ({
       url: `${DONKEYCUT_CANONICAL}${blogPageHref(i + 2)}`,
       changeFrequency: "weekly" as const,

@@ -1,5 +1,3 @@
-"use client";
-
 import { BG, BLACK } from "@/app/_components/landing/theme";
 import { CutFinalCTA } from "@/app/cut/_components/landing/CutFinalCTA";
 import { CutFooter } from "@/app/cut/_components/landing/CutFooter";
