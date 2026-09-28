@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import type { RenderHandle } from "../server/exportPipeline";
-import { prisma, type ClaimedJob } from "./db";
+import { claimNextJob, prisma, type ClaimedJob } from "./db";
 import { overlayKeysOf, runExportJob } from "./exportJob";
 import { runHlsJob } from "./hlsJob";
 import { runConvertJob } from "./convertJob";
@@ -71,51 +71,6 @@ const active = new Map<string, ActiveJob>();
 let stopping = false;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** The kinds someone is watching happen: an export, a URL import, or a chat
- * turn has a progress surface on screen, while a hover proxy and a share card
- * are background polish nobody is waiting on. */
-const WATCHED_KINDS = ["export", "import_url", "convert", "agent_turn"];
-
-/** Atomically claim the next queued job: the updateMany's state guard makes
- * exactly one worker win each row, so replicas never double-run a job.
- *
- * Watched kinds go first, FIFO within a tier. Strict FIFO across all kinds let
- * a proxy render queued moments earlier hold up an export the user is staring
- * at — the wait was invisible in the UI, because the export's elapsed clock
- * only starts once it is claimed. */
-async function claimNext(): Promise<ClaimedJob | null> {
-  for (const kind of [{ in: WATCHED_KINDS }, { notIn: WATCHED_KINDS }]) {
-    const candidates = await prisma.cutRenderJob.findMany({
-      where: { state: "queued", kind },
-      orderBy: { createdAt: "asc" },
-      take: 10,
-      select: { id: true, userId: true, projectId: true, kind: true, spec: true, outName: true },
-    });
-    for (const c of candidates) {
-      const claimed = await prisma.$transaction(async (tx) => {
-        if (["preview", "card", "hls"].includes(c.kind)) {
-          const running = await tx.cutRenderJob.findFirst({
-            where: { userId: c.userId, projectId: c.projectId, kind: c.kind, state: "running" },
-            select: { id: true },
-          });
-          if (running) return null;
-        }
-        const updated = await tx.cutRenderJob.updateMany({
-          where: { id: c.id, state: "queued" },
-          data: { state: "running", claimedAt: new Date(), progress: 0, error: null },
-        });
-        if (updated.count !== 1) return null;
-        return tx.cutRenderJob.findUnique({
-          where: { id: c.id },
-          select: { id: true, userId: true, projectId: true, kind: true, spec: true, outName: true },
-        });
-      }, { isolationLevel: "Serializable" });
-      if (claimed) return claimed;
-    }
-  }
-  return null;
-}
 
 /** Requeue "running" rows whose heartbeat (updatedAt) has gone quiet: their
  * worker died without SIGTERM (OOM, host kill), so nothing else will ever
@@ -319,7 +274,7 @@ async function main(): Promise<void> {
         lastSweep = Date.now();
         await sweepStaleRunning();
       }
-      job = await claimNext();
+      job = await claimNextJob();
       failingSince = null;
     } catch (err) {
       console.error("[cut-worker] claim failed:", err instanceof Error ? err.message : err);

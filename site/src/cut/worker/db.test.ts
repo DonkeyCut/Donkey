@@ -4,6 +4,7 @@ import { stubModule } from "@/lib/testing/stubModule";
 
 // The account the charge point weighs every object against: free tier, no Pro.
 const prisma = {
+  cutRenderJob: { findMany: mock(async (args: unknown): Promise<QueueRow[]> => { void args; return []; }) },
   settingOverride: { findUnique: mock(async () => ({ value: { maxAttempts: 3 } })) },
   user: { findUnique: mock(async () => ({ superUser: false })) },
   proSubscription: { findUnique: mock(async () => null) },
@@ -15,7 +16,7 @@ const prisma = {
   throw new Error("Unexpected transaction");
 }) };
 await stubModule<typeof import("@/lib/prisma")>("@/lib/prisma", import.meta.url, { prisma: prisma as never });
-const { registerObject, unregisterObjects } = await import("./db");
+const { claimNextJob, registerObject, unregisterObjects } = await import("./db");
 const { FREE_STORAGE_BYTES } = await import("../server/cloud/limits");
 const { STORAGE_FULL } = await import("../lib/operationFailure");
 
@@ -129,4 +130,60 @@ test("a re-registration that shrinks the object is charged its delta", async () 
   const h = harness(0);
   expect(await registerObject({ ...input, bytes: 10 })).toBe("object");
   expect(h.state()).toMatchObject({ usage: BigInt(110), stored: { bytes: BigInt(10) } });
+});
+
+
+type QueueRow = {
+  id: string; userId: string; projectId: string; kind: string; state: string;
+  spec: null; outName: null;
+};
+function queueHarness(kinds: string[]) {
+  const rows: QueueRow[] = kinds.map((kind, i) => ({
+    id: `job-${i}`, userId: "user", projectId: "project", kind, state: "queued", spec: null, outName: null,
+  }));
+  const findMany = prisma.cutRenderJob.findMany.mockImplementation(async (args: unknown) => {
+    const { where, take } = args as { where: { state: string; kind: { in?: string[]; notIn?: string[] } }; take: number };
+    return rows.filter((row) => row.state === where.state
+      && (!where.kind.in || where.kind.in.includes(row.kind))
+      && (!where.kind.notIn || !where.kind.notIn.includes(row.kind))).slice(0, take);
+  });
+  const transaction = prisma.$transaction.mockImplementation(async (run: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+    const tx = { cutRenderJob: {
+      findFirst: async ({ where }: { where: { kind: string; state: string } }) => rows.find((row) => row.kind === where.kind && row.state === where.state) ?? null,
+      updateMany: async ({ where, data }: { where: { id: string; state: string }; data: { state: string } }) => {
+        const row = rows.find((row) => row.id === where.id && row.state === where.state);
+        if (!row) return { count: 0 };
+        row.state = data.state;
+        return { count: 1 };
+      },
+      findUnique: async ({ where }: { where: { id: string } }) => rows.find((row) => row.id === where.id) ?? null,
+    } };
+    return run(tx as unknown as Prisma.TransactionClient);
+  });
+  restores.push(() => { findMany.mockRestore(); transaction.mockRestore(); });
+  return rows;
+}
+
+test("the worker leaves editor command batches queued, even when they fill the oldest page", async () => {
+  const rows = queueHarness([...Array<string>(12).fill("commands"), "preview", "card", "hls"]);
+  for (const kind of ["preview", "card", "hls"]) expect((await claimNextJob())?.kind).toBe(kind);
+  expect(await claimNextJob()).toBeNull();
+  expect(rows.filter((row) => row.kind === "commands").every((row) => row.state === "queued")).toBe(true);
+});
+
+test("watched jobs precede background work and unsupported jobs stay queued", async () => {
+  const rows = queueHarness(["future_kind", "preview", "commands", "export", "import_url", "convert", "agent_turn"]);
+  for (const kind of ["export", "import_url", "convert", "agent_turn", "preview"]) {
+    expect((await claimNextJob())?.kind).toBe(kind);
+  }
+  expect(await claimNextJob()).toBeNull();
+  expect(rows.slice(0, 3).filter((row) => row.kind !== "preview").every((row) => row.state === "queued")).toBe(true);
+});
+
+test("a running project preview prevents a second preview claim while other work proceeds", async () => {
+  const rows = queueHarness(["preview", "preview", "card"]);
+  expect((await claimNextJob())?.id).toBe(rows[0].id);
+  expect((await claimNextJob())?.kind).toBe("card");
+  expect(await claimNextJob()).toBeNull();
+  expect(rows[1].state).toBe("queued");
 });
