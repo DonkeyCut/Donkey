@@ -410,7 +410,11 @@ export async function refsToParts(
     if (ref.kind === "text") {
       parts.push({
         text:
-          isCatalogRef(ref)
+          ref.scope === "note"
+            ? `Referenced note "${ref.name}". Read its current text with read_note: ${JSON.stringify({ id: ref.id })}`
+            : ref.scope === "folder"
+            ? `Referenced folder "${ref.name}". Read its current contents with read_folder: ${JSON.stringify(ref.folder)}`
+            : isCatalogRef(ref)
             ? `Referenced "${ref.name}" — ${await readRefText(ref)}`
             : ref.scope === "entity"
               ? `Referenced timeline entity "${ref.name}":\n${await readRefText(ref)}`

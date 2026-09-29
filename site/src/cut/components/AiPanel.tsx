@@ -1,5 +1,7 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { notesKey } from "@/cut/lib/queries";
 import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 
 import { chatRuntime, cutJudge } from "@/cut/lib/chatRuntime";
@@ -499,6 +501,12 @@ export function AiPanel({
     onRunningChange(id, false, "");
   }, [onRunningChange]);
   const anyRunning = Object.keys(runningThreads).length > 0;
+  const queryClient = useQueryClient();
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !anyRunning) void queryClient.invalidateQueries({ queryKey: notesKey });
+    wasRunning.current = anyRunning;
+  }, [anyRunning, queryClient]);
   useEffect(() => {
     reportActivity("chat", anyRunning);
     return () => reportActivity("chat", false);
@@ -945,7 +953,7 @@ function ChatSession({
   // written. They ride with the message so the time can be re-read against
   // the cut the message actually runs on.
   const [times, setTimes] = useState<TimeMark[]>([]);
-  const candidates = useRefCandidates(visible);
+  const candidates = useRefCandidates(visible, true);
   // Any OS file drag over the window hints the composer as a drop target;
   // hovering it (dropActive below) strengthens the ring and shows the label.
   const fileDropHint = useEditor((s) => s.dropActive !== null);
@@ -2118,7 +2126,7 @@ function ChatSession({
                   className="ai-input max-h-56 w-full resize-none overflow-y-auto bg-transparent px-3 pt-2 text-[12.5px] leading-relaxed outline-none placeholder:text-muted-foreground/70"
                   rows={5}
                   autoGrow
-                  placeholder="Ask about your video, or tell me what to change… @ references media"
+                  placeholder="Ask about your video, or tell me what to change… @ references files, folders, and notes"
                   value={input}
                   onChange={setInput}
                   candidates={candidates}

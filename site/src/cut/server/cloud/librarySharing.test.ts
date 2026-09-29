@@ -68,6 +68,16 @@ describe("library sharing", () => {
     expect(lookup).not.toHaveBeenCalled();
     expect((await api.media(request(), token, "asset")).status).toBe(404);
   });
+  test("authenticated clients resolve a media URL after the same grant checks", async () => {
+    const { api, db } = harness();
+    const req = new Request(`https://donkeycut.com/api/cut-shared/library/${token}/media/asset?resolve=1`);
+    const response = await api.media(req, token, "asset");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ url: "https://media.test/cut/owner/library/sound.mp3" });
+    expect(response.headers.get("Location")).toBeNull();
+    db.cutLibraryShare.findUnique.mockResolvedValue({ ...share, access: "restricted" });
+    expect((await api.media(req, token, "asset")).status).toBe(401);
+  });
   test("restricted reads stop before content lookup without a session", async () => {
     const { api, db } = harness();
     db.cutLibraryShare.findUnique.mockResolvedValue({ ...share, access: "restricted" });

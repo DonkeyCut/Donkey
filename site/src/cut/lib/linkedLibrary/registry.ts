@@ -375,6 +375,14 @@ export async function uploadLinkedItem(
   return linkId(prefix, key);
 }
 
+/** Shelve a dropped OS file as whichever linked kind claims it and return its
+ * id — what a paste or a drop on the editor does with a font or a LUT. */
+export async function uploadLinkedFile(file: File): Promise<string> {
+  const kind = [...kinds.values()].find((k) => k.matches(file));
+  if (!kind) throw new Error("That file is not something the Library links to.");
+  return uploadLinkedItem(kind.prefix, file);
+}
+
 /** Every linked id a document is set in, across kinds. */
 export function linkedIdsIn(doc: ProjectDoc): string[] {
   const ids = new Set<string>();

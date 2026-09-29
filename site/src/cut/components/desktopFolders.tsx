@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { additiveClick } from "@/cut/lib/hostKeys";
-import type { AssetRef } from "@/cut/lib/assetRef";
+import { clearRefDrag, setRefDragData, type AssetRef } from "@/cut/lib/assetRef";
 import { formatBytes } from "@/lib/bytes";
 import { RefDropZone } from "./RefDropZone";
 import { cn } from "@/lib/utils";
@@ -393,6 +393,7 @@ export function FolderShelf<F extends DeskFolder>({
   folders,
   statOf,
   badgeOf,
+  referenceOf,
   mime,
   folderMime,
   picked,
@@ -417,6 +418,7 @@ export function FolderShelf<F extends DeskFolder>({
   /** Small marker beside the item count — where the library says which shelf
    * a folder is on. */
   badgeOf?: (id: string) => React.ReactNode;
+  referenceOf?: (folder: F) => AssetRef;
   mime: string;
   /** The MIME a dragged folder tile carries its id under. */
   folderMime?: string;
@@ -570,14 +572,15 @@ export function FolderShelf<F extends DeskFolder>({
                 // The tile itself is what a nesting host drags: its own id,
                 // with the glyph as the ghost — and the rest of the pick
                 // when it is in one.
-                ...(nests
+                ...(nests || referenceOf
                   ? {
                       draggable: true,
                       onDragStart: (e: React.DragEvent) => {
-                        e.dataTransfer.setData(folderMime, JSON.stringify(carriedFolders));
+                        if (nests) e.dataTransfer.setData(folderMime!, JSON.stringify(carriedFolders));
                         if (carried.items.length)
                           e.dataTransfer.setData(mime, JSON.stringify(carried.items));
-                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.effectAllowed = referenceOf ? "copyMove" : "move";
+                        if (referenceOf) setRefDragData(e, referenceOf(f));
                         setDragging(f.id);
                         setObjectDragImage(
                           e,
@@ -585,7 +588,7 @@ export function FolderShelf<F extends DeskFolder>({
                           [...carriedFolders.map(folderSelId), ...carried.items]
                         );
                       },
-                      onDragEnd: () => setDragging(null),
+                      onDragEnd: () => { setDragging(null); clearRefDrag(); },
                     }
                   : {}),
               }),

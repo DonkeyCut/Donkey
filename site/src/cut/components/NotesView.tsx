@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { FolderPlus, Loader2, Plus, StickyNote } from "lucide-react";
+import { noteRef, type NoteLocation } from "@/cut/lib/noteReference";
+import { setRefDragData, clearRefDrag } from "@/cut/lib/assetRef";
+import type { Residency } from "@/cut/lib/residency";
 import { Button } from "@/components/ui/button";
 import {
   deleteNote,
@@ -49,7 +52,7 @@ async function writeNote(
   settleFolder: (folderId: string | null) => Promise<void>,
   settleLabels: (labelIds: string[]) => Promise<string[]>,
 ): Promise<boolean> {
-  const { id, title, body, colorIndex, folderId, labelIds } = d;
+  const { id, title, body, colorIndex, folderId, labelIds, libraryLocation } = d;
   if (!title.trim() && !body.trim()) return true;
   if (!noteChanged(d)) return true;
   const now = Date.now();
@@ -60,6 +63,7 @@ async function writeNote(
     colorIndex,
     folderId,
     labelIds,
+    libraryLocation,
     updatedAt: now,
     deletedAt: null,
     createdAt: now,
@@ -84,6 +88,7 @@ async function writeNote(
     colorIndex,
     folderId,
     labelIds: live,
+    ...(d.isNew ? { libraryLocation } : {}),
   }).catch(() => null);
   if (!saved) return false;
   patchNotes(client, (prev) => ({
@@ -109,6 +114,7 @@ const draftOf = (n: CutNote): NoteDraft => ({
   colorIndex: n.colorIndex,
   folderId: n.folderId ?? null,
   labelIds: n.labelIds,
+  libraryLocation: n.libraryLocation,
   isNew: false,
   saved: { title: n.title, body: n.body, colorIndex: n.colorIndex, labelIds: n.labelIds },
 });
@@ -119,13 +125,19 @@ const draftOf = (n: CutNote): NoteDraft => ({
  * folders on the desktop-style shelf the library uses, and folders file into
  * folders: every level has the shelf, the New folder button and the grid the
  * top level has. */
-export function NotesView() {
+export type NotesViewHandle = { create: () => void };
+type Props = {
+  library?: { folderId: string | null; residency: Residency; name: string };
+  ref?: Ref<NotesViewHandle>;
+};
+export function NotesView({ library, ref }: Props = {}) {
   const client = useQueryClient();
   const base = useCutBase();
   const notes = useNotes();
   // The edits made to the note on screen, good only while the URL still names
   // that note. The ref carries the same value where a browser event can reach
   // it, so a back out of a note writes what was typed.
+  const [failedDraft, setFailedDraft] = useState<NoteDraft | null>(null);
   const [editing, setEditing] = useState<NoteDraft | null>(null);
   const buffer = useRef<NoteDraft | null>(null);
   const edit = (d: NoteDraft) => {
@@ -143,13 +155,16 @@ export function NotesView() {
   // so the browser's back button — the mouse's too — steps out of the note and
   // then out of the folder, and the location survives a reload.
   const params = useSearchParams();
-  const openFolder = params.get("folder");
+  const openFolder = library ? null : params.get("folder");
   const openNoteId = params.get("note");
   // The way down to the open folder, for the crumb; and what is filed right
   // here: the folders and the notes this level holds.
   const trail = folderTrail(folders, openFolder);
   const shownFolders = folders.filter((f) => f.parentId === openFolder);
-  const shown = list.filter((n) => (n.folderId ?? null) === openFolder);
+  const shown = list.filter((n) => library
+    ? library.folderId === null ? !n.libraryLocation
+      : n.libraryLocation?.folderId === library.folderId && n.libraryLocation.residency === library.residency
+    : (n.folderId ?? null) === openFolder);
   // What the composer shows: the buffer while it belongs to the note the URL
   // names, and the stored note otherwise. A note nobody has typed into has no
   // buffer, and one still being written has no stored note.
@@ -160,10 +175,11 @@ export function NotesView() {
   const reload = () => void client.invalidateQueries({ queryKey: notesKey });
   const notesHref = (folder: string | null, note?: string | null) => {
     const q = new URLSearchParams();
-    if (folder) q.set("folder", folder);
+    const destination = library ? library.folderId : folder;
+    if (destination) q.set("folder", destination);
     if (note) q.set("note", note);
     const query = q.toString();
-    return query ? `${homeHref(base, "notes")}?${query}` : homeHref(base, "notes");
+    return query ? `${homeHref(base, library ? "library" : "notes")}?${query}` : homeHref(base, library ? "library" : "notes");
   };
   // Opening a folder or a note only changes this page's query, so it goes
   // through the history API. This page is prefetched as a static shell, and a
@@ -191,6 +207,7 @@ export function NotesView() {
       colorIndex: 0,
       // A note written inside a folder is filed there.
       folderId: openFolder,
+      ...(library ? { libraryLocation: library.folderId ? { folderId: library.folderId, residency: library.residency } satisfies NoteLocation : null } : {}),
       labelIds: [],
       isNew: true,
       saved: { title: "", body: "", colorIndex: 0, labelIds: [] },
@@ -198,6 +215,7 @@ export function NotesView() {
     openAt(id);
   };
   const openNote = (n: CutNote) => openAt(n.id);
+  useImperativeHandle(ref, () => ({ create: openNew }));
 
   // A folder tile is on screen the moment it is made, so a note can be filed
   // into it while its own write is still in flight. The write is held here
@@ -278,7 +296,8 @@ export function NotesView() {
   const commit = (d: NoteDraft) => {
     setEditing(null);
     void writeNote(client, d, settleFolder, settleLabels).then((ok) => {
-      if (!ok) reload();
+      if (!ok) setFailedDraft(d);
+      else { setFailedDraft(null); reload(); }
     });
   };
 
@@ -423,7 +442,7 @@ export function NotesView() {
     if (stale) window.history.replaceState(null, "", listHref);
   }, [stale, listHref]);
   const staleFolder = !!openFolder && !!notes.data && trail.length === 0;
-  const rootHref = homeHref(base, "notes");
+  const rootHref = homeHref(base, library ? "library" : "notes");
   useEffect(() => {
     if (staleFolder) window.history.replaceState(null, "", rootHref);
   }, [staleFolder, rootHref]);
@@ -433,8 +452,10 @@ export function NotesView() {
   const onCardDragStart = (e: React.DragEvent, id: string) => {
     const ids = selected.has(id) && selected.size > 0 ? Array.from(selected) : [id];
     if (!selected.has(id)) setSelected(new Set([id]));
-    e.dataTransfer.setData(NOTES_MOVE_MIME, JSON.stringify(ids));
-    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData(library ? "application/x-cut-library-move" : NOTES_MOVE_MIME, JSON.stringify(ids));
+    const note = list.find((n) => n.id === id);
+    if (note) setRefDragData(e, noteRef(note));
+    e.dataTransfer.effectAllowed = "copyMove";
     setObjectDragImage(e, ids.length, ids, () => setSelected(new Set()));
   };
 
@@ -447,13 +468,14 @@ export function NotesView() {
   const pageRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div ref={pageRef} className="mx-auto w-full max-w-6xl px-10 py-9">
+    <div ref={pageRef} className={library ? "mb-6" : "mx-auto w-full max-w-6xl px-10 py-9"}>
+      {failedDraft && <p role="alert" className="py-3 text-sm text-destructive">Could not save the note. <button className="underline" onClick={() => { edit(failedDraft); openAt(failedDraft.id); setFailedDraft(null); }}>Reopen and retry</button></p>}
       {/* One note at a time, over the whole window. The list stays mounted
           behind it, so closing comes back to the same scroll position. */}
       {draft && (
         <NoteComposer
           draft={draft}
-          back={draftFolderName ?? "All notes"}
+          back={library?.name ?? draftFolderName ?? "All notes"}
           from={pageRef}
           labels={labels}
           onChange={edit}
@@ -464,7 +486,7 @@ export function NotesView() {
           onDeleteLabel={removeLabel}
         />
       )}
-      <div className="mb-5 flex items-center justify-between gap-4">
+      {!library && <div className="mb-5 flex items-center justify-between gap-4">
         {openFolder === null ? (
           <h1 className="text-lg font-semibold tracking-tight">Notes</h1>
         ) : (
@@ -486,11 +508,11 @@ export function NotesView() {
             <Plus data-icon="inline-start" /> New note
           </Button>
         </div>
-      </div>
+      </div>}
 
       {/* The folders filed at this level, at the top and inside any folder
         alike. A new one is made here and a dropped one is filed here. */}
-      {shownFolders.length > 0 || folderCreating ? (
+      {!library && (shownFolders.length > 0 || folderCreating) ? (
         <FolderShelf
           folders={shownFolders}
           mime={NOTES_MOVE_MIME}
@@ -557,7 +579,8 @@ export function NotesView() {
         />
       ) : null}
 
-      {!notes.data && notes.isPending ? (
+      {notes.isError && <p role="alert" className="py-3 text-sm text-destructive">Could not load notes. <button onClick={reload} className="underline">Retry</button></p>}
+      {library && shown.length === 0 ? null : !notes.data && notes.isPending ? (
         <div className="grid place-items-center py-24 text-muted-foreground">
           <Loader2 className="size-5 animate-spin" />
         </div>
@@ -591,6 +614,7 @@ export function NotesView() {
                 data-sel-id={n.id}
                 draggable
                 onDragStart={(e) => onCardDragStart(e, n.id)}
+                onDragEnd={clearRefDrag}
                 className={cn(
                   "flex min-h-40 cursor-pointer flex-col gap-1.5 rounded-2xl p-4 text-left shadow-sm transition-transform hover:-translate-y-0.5",
                   selected.has(n.id) && PICKED_RING,

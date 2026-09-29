@@ -1,11 +1,12 @@
 "use client";
 
 import type { LibraryUploadState } from "@/cut/lib/libraryUpload";
-
+import { libraryFolderRef } from "@/cut/lib/folderReference";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  StickyNote,
   FolderOpen,
   FolderPlus,
   Link as LinkIcon,
@@ -39,6 +40,8 @@ import { LibraryCard, LIBRARY_TILE_AREA, LIBRARY_AUDIO_TILE_AREA } from "@/cut/c
 import { ShelfBadge } from "@/cut/components/ShelfBadge";
 import { assetTypeOf, isMediaFile, MEDIA_ACCEPT } from "@/cut/lib/media";
 import { isFontArchive } from "@/cut/lib/fontArchive";
+import { saveNote } from "@/cut/lib/notes";
+import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
 import { libraryKey, libraryScope, patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   createLibraryFolder,
@@ -72,6 +75,7 @@ import { setNeedsApp } from "@/cut/lib/needsApp";
 import type { Residency } from "@/cut/lib/residency";
 import { LibraryShareDialog } from "@/cut/components/LibraryShareDialog";
 import type { LibraryShareTarget } from "@/cut/lib/librarySharing";
+import { NotesView, type NotesViewHandle } from "@/cut/components/NotesView";
 import { Lightbox } from "./Lightbox";
 import { TabStatus } from "./TabStatus";
 import { TemplateCard } from "./TemplateCard";
@@ -342,6 +346,7 @@ function PendingTile({
 }
 
 export function LibraryView() {
+  const noteView = useRef<NotesViewHandle>(null);
   const router = useRouter();
   const base = useCutBase();
   const client = useQueryClient();
@@ -355,6 +360,7 @@ export function LibraryView() {
   // upload, a second tab, a linked import finishing — lands in the grid on its
   // own timer instead of waiting for a reload.
   const library = useLibrary({ live: true });
+  const notes = useNotes();
   const listed = useListedResidencies();
   const engineUp = useLocalCompute();
   // Every shelf but the Mac's is always answering: the cloud is a request away
@@ -672,6 +678,7 @@ export function LibraryView() {
         ),
         ...goneFolders.map((f) => deleteLibraryFolder(f.residency, f.id)),
       ]);
+      if (goneFolders.length) void client.invalidateQueries({ queryKey: notesKey });
     } catch {
       void reload();
     }
@@ -704,6 +711,16 @@ export function LibraryView() {
     const target = folderId
       ? folders.find((f) => f.id === folderId)?.residency
       : null;
+    const movingNotes = (notes.data?.notes ?? []).filter((n) => ids.includes(n.id));
+    if (movingNotes.length) {
+      try {
+        const saved = await Promise.all(movingNotes.map((n) => saveNote({ ...n, libraryLocation: folderId && target ? { folderId, residency: target } : null })));
+        const byId = new Map(saved.map((n) => [n.id, n]));
+        patchNotes(client, (data) => ({ ...data, notes: data.notes.map((n) => byId.get(n.id) ?? n) }));
+      } catch {
+        void client.invalidateQueries({ queryKey: notesKey });
+      }
+    }
     const moving = ids
       .map((id) => ({ id, residency: shelfOf(id) }))
       .filter((x): x is { id: string; residency: Residency } => !!x.residency)
@@ -859,8 +876,10 @@ export function LibraryView() {
   // Right-click over a card: the selection menu. An arrival's preview is the
   // one other media here, and the browser's own menu never shows over it.
   const onPageContextMenu = (e: React.MouseEvent) => {
-    if (!ctx.onContextMenu(e) && (e.target as HTMLElement).closest("video,img"))
+    if (!ctx.onContextMenu(e)) {
       e.preventDefault();
+      ctx.openAt(e, []);
+    }
   };
   // Similar-shape tiles get their own band of wrapped rows, so a wide tile
   // never shares a row with a tall one; audio and unmeasured assets band as
@@ -904,6 +923,7 @@ export function LibraryView() {
     if (staleFolder) router.replace(homeHref(base, "library"));
   }, [staleFolder, router, base]);
   const hasContent =
+    (notes.data?.notes.length ?? 0) > 0 ||
     all.length > 0 ||
     folders.length > 0 ||
     templates.length > 0 ||
@@ -972,6 +992,7 @@ export function LibraryView() {
                 <FolderPlus data-icon="inline-start" /> New folder
               </Button>
             )}
+            <Button variant="outline" onClick={() => noteView.current?.create()}><StickyNote data-icon="inline-start" /> Add note</Button>
             <Button onClick={() => setAddOpen(true)}>
               <Upload data-icon="inline-start" /> Add media
             </Button>
@@ -997,6 +1018,7 @@ export function LibraryView() {
         {shownFolders.length > 0 || folderCreating ? (
           <FolderShelf
             folders={shownFolders}
+            referenceOf={(f) => libraryFolderRef(f, folders)}
             mime={LIBRARY_MOVE_MIME}
             folderMime={LIBRARY_FOLDER_MOVE_MIME}
             creating={folderCreating}
@@ -1005,7 +1027,8 @@ export function LibraryView() {
               count:
                 all.filter((a) => (a.folderId ?? null) === id).length +
                 templates.filter((t) => (t.folderId ?? null) === id).length +
-                childrenOf(folders, id).length,
+                childrenOf(folders, id).length +
+                (notes.data?.notes ?? []).filter((n) => n.libraryLocation?.folderId === id && n.libraryLocation.residency === folders.find((f) => f.id === id)?.residency).length,
             })}
             badgeOf={(id) => {
               const r = folders.find((f) => f.id === id)?.residency;
@@ -1048,6 +1071,8 @@ export function LibraryView() {
             onDropFiles={(files, fid) => void upload(files, fid)}
           />
         ) : null}
+
+        <NotesView ref={noteView} library={{ folderId: openFolder, residency: openOwner ?? target, name: trail.at(-1)?.name ?? "Library" }} />
 
         {!library.data && library.isPending && shownPending.length === 0 ? (
           <div className="grid place-items-center py-24 text-muted-foreground">
@@ -1198,7 +1223,10 @@ export function LibraryView() {
         </Dialog>
 
         <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
-          {ctxFolder ? (
+          {ctx.menu?.ids.length === 0 ? <>
+            <DropdownMenuItem onClick={() => noteView.current?.create()}><StickyNote /> Add note</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setAddOpen(true)}><Upload /> Add media</DropdownMenuItem>
+          </> : ctxFolder ? (
             <FolderMenuItems
               onShare={() => shareFolder(ctxFolder.id)}
               onRename={() => setRenamingFolder(ctxFolder.id)}
@@ -1229,7 +1257,7 @@ export function LibraryView() {
           title={
             deleting ? `Delete ${pickLabel(deleting.folders, deleting.items, ["item", "items"], deletingHeld)}?` : ""
           }
-          description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}Projects that already use ${deletingTotal === 1 ? "it" : "them"} keep their own copy.`}
+          description={`${deleting?.folders.length ? "Notes return to the Library root. " : ""}${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}Projects that already use ${deletingTotal === 1 ? "it" : "them"} keep their own copy.`}
           action="Remove"
           onClose={() => setDeleting(null)}
           onConfirm={() => deleting && void remove(deleting)}

@@ -12,6 +12,7 @@ import type {
   TemplateMedia,
 } from "../library";
 import { templateExtras } from "../templateExtras";
+import { notesCloud } from "@/cut/server/cloud/notes";
 import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import type { StoredAsset } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
@@ -820,6 +821,7 @@ export const libraryCloud = {
         const folderId = (t.doc as unknown as TemplateDoc).folderId;
         if (folderId && tree.includes(folderId)) await deleteTemplateCascade(userId, t);
       }
+      await notesCloud.unfileLibraryFolders(userId, "cloud", tree);
       await prisma.cutFolder.deleteMany({
         where: { userId, scope: "library", id: { in: tree } },
       });

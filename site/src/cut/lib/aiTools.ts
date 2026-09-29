@@ -1,5 +1,11 @@
 "use client";
 
+import { readFolder, sharedFolderPage } from "@/cut/lib/folderBrowse";
+import { parseFolderLink } from "@/cut/lib/folderReference";
+import { cloudRequest } from "@/cut/lib/backend/cloud";
+import { assetTypeOf, importFileToProject } from "@/cut/lib/media";
+import { linkIdForAsset, uploadLinkedFile, syncLinkedLibrary, isLinkedType } from "@/cut/lib/linkedLibrary/registry";
+
 import { formatBytes } from "@/lib/bytes";
 import { projectRevision } from "@/cut/lib/projectRevision";
 import { assertProjectCommand } from "./projectCommands";
@@ -3712,6 +3718,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       ...(action === "remove" ? { removed: true } : {}) };
   },
 
+  read_folder: async (_s, input) => readFolder(input),
+
   library_list: async () => {
       const lib = await fetchLibrary();
       return {
@@ -3745,6 +3753,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
   },
 
+  note_save: async (_s, input) => (await import("@/cut/lib/notes")).writeNoteFromTool(input),
+  read_note: async (_s, input) => (await import("@/cut/lib/notes")).readNote(input),
+
   notes_list: async () => {
       const { notes, folders, labels } = await fetchNotes();
       const folderName = new Map(folders.map((f) => [f.id, f.name]));
@@ -3764,6 +3775,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             id: n.id,
             title: n.title,
             body: n.body,
+            libraryLocation: n.libraryLocation,
             ...(n.folderId ? { folder: folderName.get(n.folderId) ?? n.folderId } : {}),
             ...(worn.length > 0 ? { labels: worn } : {}),
             updatedAt: new Date(n.updatedAt).toISOString(),
@@ -3775,13 +3787,54 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   library_add: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
+      if (input.share_link) {
+        const ref = parseFolderLink(String(input.share_link));
+        if (!ref || ref.scope !== "shared") throw new ToolError("Provide a shared Library link.");
+        if (typeof input.folder_id === "string") ref.folderId = input.folder_id;
+        const offset = input.offset ?? 0;
+        if (typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0) throw new ToolError("Invalid page offset.");
+        const chatId = chatOwner();
+        const page = await sharedFolderPage(ref, offset);
+        const templateFile = typeof input.template_file === "string"
+          ? page.templates.find((t) => t.id === input.id)?.files.find((f) => f.fileName === input.template_file)
+          : undefined;
+        const source = templateFile
+          ? { ...templateFile, id: String(input.id), type: assetTypeOf(new File([], templateFile.fileName)) }
+          : page.assets.find((a) => a.id === input.id);
+        if (!source || !source.type) throw new ToolError("That asset is not on this shared page. Read the folder for its folder_id and offset.");
+        const params = new URLSearchParams({ resolve: "1" });
+        if (templateFile) { params.set("template", source.id); params.set("file", source.fileName); }
+        const res = await cloudRequest(`/api/cut-shared/library/${encodeURIComponent(ref.shareToken)}/media/${encodeURIComponent(source.id)}?${params}`);
+        if (!res.ok) throw new ToolError(`Could not read the shared asset (${res.status}).`);
+        const { url: mediaUrl } = await res.json() as { url: string };
+        const media = await fetch(mediaUrl);
+        if (!media.ok) throw new ToolError(`Could not download the shared asset (${media.status}).`);
+        const file = new File([await media.blob()], source.fileName);
+        if (isLinkedType(source.type)) {
+          const linkedId = await uploadLinkedFile(file);
+          return { name: source.name, kind: source.type,
+            ...(source.type === "font" ? { fontId: linkedId } : { lutId: linkedId }) };
+        }
+        const asset = await importFileToProject(projectId, file);
+        if (!asset) throw new ToolError("This shared file cannot be imported into the project.");
+        asset.name = source.name;
+        useEditor.getState().addAsset(asset);
+        void enrichAsset(asset);
+        tagChatAsset(asset.id, chatId);
+        const place = input.add_to_timeline === true || isNum(input.start) || isNum(input.index);
+        return { assetId: asset.id, name: asset.name, kind: asset.type, duration: round2(asset.duration),
+          ...(place ? { addedToTimeline: true, clip: placeAssetOnTimeline(asset, input) } : { addedToTimeline: false }) };
+      }
       const lib = (await fetchLibrary()).assets.find((a) => a.id === String(input.id ?? ""));
       if (!lib)
         throw new ToolError(`No library asset with id ${String(input.id)}. Call library_list for ids.`);
-      if (lib.type === "font")
-        throw new ToolError(
-          `"${lib.name}" is a font. It is already available to this project — set a title or the captions to font id font:${lib.id}.`
-        );
+      if (isLinkedType(lib.type)) {
+        await syncLinkedLibrary();
+        const linkedId = linkIdForAsset(lib.id);
+        if (!linkedId) throw new ToolError(`Could not load "${lib.name}" from the Library.`);
+        return { libraryId: lib.id, name: lib.name, kind: lib.type,
+          ...(lib.type === "font" ? { fontId: linkedId } : { lutId: linkedId }) };
+      }
       // Captured before the import: the media files under the chat that asked,
       // even if the user switches threads while it copies.
       const chatId = chatOwner();

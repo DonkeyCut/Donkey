@@ -1,5 +1,6 @@
 "use client";
 
+import { libraryFolderRef, projectFolderRef } from "@/cut/lib/folderReference";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Plus, Shapes, Sparkles, Trash2, Upload, X, Blend } from "lucide-react";
@@ -293,7 +294,7 @@ export function SidePanel({
   // Clicking a reference token anywhere jumps here: switch to the tab that
   // owns the asset; the matching card scrolls into view and flashes.
   useRevealEffect((ref) => {
-    if (ref.scope === "project" || ref.scope === "library") {
+    if (ref.scope === "project" || ref.scope === "library" || ref.scope === "folder") {
       setTab("media");
       return;
     }
@@ -751,7 +752,9 @@ function MediaPanel({
   const view = sharedFeatures ? "project" : sub;
   // A revealed card may sit on the other sub-tab; bring its side on screen.
   useRevealEffect((ref) => {
-    if (ref.scope === "project") setSub("project");
+    if (ref.folder?.scope === "project") setSub("project");
+    else if (ref.folder?.scope === "library") setSub("library");
+    else if (ref.scope === "project") setSub("project");
     else if (ref.scope === "library") setSub("library");
   });
   return (
@@ -823,6 +826,9 @@ function ProjectFilesPanel({
     storedFolder !== null && projectLoaded && !folders.some((f) => f.id === storedFolder)
       ? null
       : storedFolder;
+  useRevealEffect((ref) => {
+    if (ref.folder?.scope === "project" && ref.folder.projectId === projectId) setOpenFolder(ref.folder.folderId);
+  });
   const shown = assets.filter((a) => (a.folderId ?? null) === openFolder);
   const readOnly = useEditor((s) => s.readOnly);
   // The shelf's folders join the pick at the root, while the project takes
@@ -1055,6 +1061,7 @@ function ProjectFilesPanel({
               rows
               folders={readOnly ? folders.map((f) => ({ ...f, locked: true })) : folders}
               mime={MEDIA_MOVE_MIME}
+              referenceOf={projectId ? (f) => projectFolderRef(f, projectId) : undefined}
               picked={picked}
               onPick={(e, id) => pick(e, folderSelId(id), order)}
               renaming={renamingFolder}
@@ -1686,6 +1693,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   // A revealed library asset may sit inside a folder — open it so the card is
   // on screen to scroll to and flash.
   useRevealEffect((ref) => {
+    if (ref.folder?.scope === "library") { setOpenFolder(ref.folder.folderId); return; }
     if (ref.scope !== "library") return;
     const a = assets.find((x) => x.id === ref.id);
     if (a) setOpenFolder(folderOf(a));
@@ -1960,6 +1968,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
               <FolderShelf
                 rows
                 folders={shelfFolders}
+                referenceOf={(f) => libraryFolderRef(f, folders)}
                 mime={LIBRARY_MOVE_MIME}
                 folderMime={LIBRARY_FOLDER_MOVE_MIME}
                 statOf={(id) => ({

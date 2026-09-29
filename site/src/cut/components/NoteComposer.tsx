@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type React from "react";
+import type { NoteLocation } from "@/cut/lib/noteReference";
 import { createPortal } from "react-dom";
 import { ArrowLeft, Check, ChevronDown, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 const NOTE_INK = "#201a0d";
 
 export interface NoteDraft {
+  libraryLocation?: NoteLocation | null;
   id: string;
   title: string;
   body: string;

@@ -1,9 +1,12 @@
 "use client";
 
+import { noteRef, noteIdSchema } from "@/cut/lib/noteReference";
+import { folderRef, folderReferenceSchema, projectFolderRef, libraryFolderRefs, type FolderReference } from "@/cut/lib/folderReference";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { libraryRouteUrl, type LibraryAsset, type LibraryData } from "./library";
-import { useLibrary } from "./queries";
+import { useLibrary, useNotes } from "./queries";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockSfx, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_MUSIC } from "./stockMusicManifest";
@@ -62,12 +65,14 @@ import type {
  * on an element's or clip's pose/mask track. Its `id` is an internal composite
  * (`overlay:<id>`, `key:clip:<id>:pose:<index>`, …) and its `url` is a
  * data: text payload describing the entity — the parent's id included — so a
- * mention lands in chat as grounded text the tools can act on. */
-export type AssetRefScope = "project" | "library" | "stock" | "file" | "clip" | "entity";
+ * mention lands in chat as grounded text the tools can act on.
+ * "folder" carries a typed collection reference for read_folder. */
+export type AssetRefScope = "project" | "library" | "stock" | "file" | "clip" | "entity" | "folder" | "note";
 export type AssetRefKind = "video" | "audio" | "image" | "text";
 
 export interface AssetRef {
   scope: AssetRefScope;
+  folder?: FolderReference;
   id: string;
   /** Display name; mentions resolve against it (`@"beach sunset"`). */
   name: string;
@@ -245,6 +250,10 @@ export function normalizeRef(v: unknown): AssetRef | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Partial<AssetRef> & { type?: AssetRefKind };
   if (!o.id || !o.name || !o.url) return null;
+  if (o.scope === "note") return noteIdSchema.safeParse(o.id).success ? { ...noteRef({ id: o.id, title: "" }), name: o.name } : null;
+  const folder = o.scope === "folder" ? folderReferenceSchema.safeParse(o.folder) : null;
+  if (folder && !folder.success) return null;
+  if (folder?.success) return folderRef(folder.data, o.name);
   const scope = o.scope ?? "project";
   return {
     scope,
@@ -874,7 +883,9 @@ export function selectionRefTokens(s: EntitySources & {
  * Names are unique within the list (first scope wins) so a mention resolves
  * to one asset. Library items mention by name; stock ids are already short
  * (`@nature-dunes`). */
-export function useRefCandidates(enabled = true): AssetRef[] {
+export function useRefCandidates(enabled = true, includeCollections = false): AssetRef[] {
+  const folders = useEditor((s) => enabled && includeCollections ? s.mediaFolders : null);
+  const projectId = useEditor((s) => enabled && includeCollections ? s.projectId : null);
   const assets = useEditor((s) => enabled ? s.assets : null);
   const clips = useEditor((s) => enabled ? s.clips : null);
   const audioClips = useEditor((s) => enabled ? s.audioClips : null);
@@ -887,10 +898,27 @@ export function useRefCandidates(enabled = true): AssetRef[] {
   // mentionable the moment it lands.
   const lib = useLibrary({ enabled }).data ?? EMPTY_LIBRARY;
 
+  const notes = useNotes(enabled && includeCollections).data;
+  const folderRefs = useMemo(() => {
+    if (!includeCollections) return [];
+    const refs = [
+      ...(projectId ? (folders ?? []).map((f) => projectFolderRef(f, projectId)) : []),
+      ...libraryFolderRefs(lib.folders),
+      ...(notes?.notes ?? []).map(noteRef),
+    ];
+    const counts = new Map<string, number>();
+    for (const ref of refs) counts.set(ref.name.toLowerCase(), (counts.get(ref.name.toLowerCase()) ?? 0) + 1);
+    return refs.map((ref) => (counts.get(ref.name.toLowerCase()) ?? 0) > 1
+      ? { ...ref, name: `${ref.name} [${ref.id}]` } : ref);
+  }, [includeCollections, projectId, folders, lib.folders, notes]);
+
   return useMemo(() => {
     if (!assets || !clips || !audioClips || !overlays || !transitions || !subtitles || !projectTemplates) return [];
-    return refCandidatesOf({ assets, clips, audioClips, overlays, transitions, subtitles, templates: projectTemplates }, lib);
-  }, [assets, clips, audioClips, overlays, transitions, subtitles, projectTemplates, lib]);
+    return [
+      ...folderRefs,
+      ...refCandidatesOf({ assets, clips, audioClips, overlays, transitions, subtitles, templates: projectTemplates }, lib),
+    ];
+  }, [assets, clips, audioClips, overlays, transitions, subtitles, projectTemplates, lib, folderRefs]);
 }
 
 /** The candidates for one state and one shelf listing — what the hook memoizes,
@@ -944,7 +972,7 @@ const NBSP = " ";
 export const refToken = (ref: AssetRef) =>
   ref.handle
     ? `@${ref.handle}`
-    : ref.scope === "entity"
+    : ref.scope === "entity" || ref.scope === "folder" || ref.scope === "note"
       ? `@"${ref.name.replace(/"/g, "").replace(/ /g, NBSP)}"`
       : mentionToken(ref.name);
 

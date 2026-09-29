@@ -145,6 +145,8 @@ model CutStorageUsage {
 // clock and comes from the writing client; a delete keeps the row as a
 // tombstone so the other side drops its copy on the next merge.
 model CutNote {
+  // Library placement is independent of the phone’s note folders.
+  libraryLocation Json?
   id         String    @id
   userId     String
   title      String    @default("")

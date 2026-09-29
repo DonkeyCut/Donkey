@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { auth } from "@/lib/auth";
+import { getDonkeyAuthContext } from "@/lib/donkey-api-auth";
 import { prisma } from "@/lib/prisma";
 import { getGlobalSetting } from "@/lib/config/effective";
 import {
@@ -125,6 +125,7 @@ export function createLibrarySharing(
         file: z.string().min(1).max(512).optional(),
         download: z.enum(["1"]).optional(),
         poster: z.enum(["1"]).optional(),
+        resolve: z.enum(["1"]).optional(),
       }).safeParse(Object.fromEntries(new URL(req.url).searchParams));
       if (!query.success) return err("Invalid media request.", 400);
       let folderId: string | null;
@@ -165,13 +166,12 @@ export function createLibrarySharing(
           ...(mediaObjectId ? { id: mediaObjectId } : { fileName }) },
       });
       if (!object) return err("Not found.", 404);
-      return new Response(null, { status: 302, headers: {
-        ...privateHeaders,
-        Location: signMedia(object.r2Key, {
-          version: String(object.updatedAt.getTime()),
-          ...(query.data.download ? { downloadName: object.fileName } : {}),
-        }),
-      } });
+      const url = signMedia(object.r2Key, {
+        version: String(object.updatedAt.getTime()),
+        ...(query.data.download ? { downloadName: object.fileName } : {}),
+      });
+      if (query.data.resolve) return json({ url });
+      return new Response(null, { status: 302, headers: { ...privateHeaders, Location: url } });
     },
   };
 
@@ -194,6 +194,11 @@ export function createLibrarySharing(
 
 export const librarySharing = createLibrarySharing(
   prisma,
-  (headers) => auth.api.getSession({ headers }),
+  async (headers) => {
+    const context = await getDonkeyAuthContext(headers, { allowRunner: true, allowApiKey: true });
+    if (!context) return null;
+    const user = await prisma.user.findUnique({ where: { id: context.userId }, select: { id: true, email: true, emailVerified: true } });
+    return user ? { user } : null;
+  },
   async () => (await getGlobalSetting("librarySharing")).pageSize,
 );

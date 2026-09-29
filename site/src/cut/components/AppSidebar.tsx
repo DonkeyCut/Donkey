@@ -28,12 +28,12 @@ import { cn } from "@/lib/utils";
 const NAV: { tab: CutTab; label: string; icon: typeof Clapperboard }[] = [
   { tab: "projects", label: "Projects", icon: Clapperboard },
   { tab: "library", label: "Library", icon: FolderOpen },
+  { tab: "notes", label: "Notes", icon: StickyNote },
 ];
 
 // Surfaces fed by the iOS app, listed only for accounts that use it.
 const PHONE_NAV: { tab: CutTab; label: string; icon: typeof Clapperboard }[] = [
   { tab: "camera-roll", label: "Camera Roll", icon: Camera },
-  { tab: "notes", label: "Notes", icon: StickyNote },
 ];
 
 export function AppSidebar() {

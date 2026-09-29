@@ -263,11 +263,12 @@ const NOTES_SNAPSHOT = "cut-notes-v3";
 
 /** The account's synced notes and their folders, phone and desktop edits
  * merged server-side. */
-export function useNotes() {
+export function useNotes(enabled = true) {
   const client = useQueryClient();
-  useEffect(() => seedFromSnapshot<NotesData>(client, notesKey, NOTES_SNAPSHOT), [client]);
+  useEffect(() => enabled ? seedFromSnapshot<NotesData>(client, notesKey, NOTES_SNAPSHOT) : undefined, [client, enabled]);
   return useQuery<NotesData>({
     queryKey: notesKey,
+    enabled,
     queryFn: async () => {
       const data = await fetchNotes();
       writeSnapshot(NOTES_SNAPSHOT, data);

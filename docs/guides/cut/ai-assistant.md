@@ -68,9 +68,7 @@ Every knowledge surface is defined once — the catalog file ships in the engine
 | The rendered frame | One 640px JPEG | The capture-frame tool: the composite an export would write at that time — footage, transitions, effects, elements, captions — at the playhead or any time asked for. |
 | The footage itself | 36 thumbnails, or 6 whole frames | The watch-video tool: the browser decodes candidates on a dense floor and on the lines the source speaks, keeping the frames that differ. A detail ladder sets how many pixels each is worth — thumbnails for coverage, the source's own frames for reading type a mosaic cell destroys. Captions and transcript fuse in as one clock; text that only repeats them is read for treatment, not words. Detect-silence reports dead air. |
 
-The system prompt carries the voice, the deliverable rule (below), id discipline, the undo-versus-credits asymmetry, and pointers into the skills. The skills carry the deep per-area documentation — editor overview, timeline editing, watching and cutting by content, transitions and fades, graphics (titles, shapes, stickers, composite builds), audio and subtitles, stock and generation, scene productions, editing taste, media and library, publish and export — so the always-on cost stays near 21K tokens and detail is pulled only when the model works in that area.
-
-The snapshot describes the project, timeline, selection, media, captions and view. Media includes filenames, dimensions, durations and known byte sizes; a file-info tool reads missing sizes through the shared media reader. Truncated lists direct the model to the full-state tool.
+Folder and note mentions retain identity through saved chats; the assistant reads current note text and paged folder contents in the browser, engine and worker, opens accessible Donkey folder links through their sharing grants, and imports selected files, while a detached Mac needs the editor’s session for Library and Notes access.
 
 ## The decision layer
 

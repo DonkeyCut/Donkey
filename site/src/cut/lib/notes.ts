@@ -12,12 +12,14 @@
  * offline, and the one PUT creates, renames and moves.
  */
 
+import { noteReadSchema, noteSaveSchema, parseNoteLink, type NoteLocation } from "@/cut/lib/noteReference";
 import { settleParents } from "./folderTree";
 import { backendFor } from "./residency";
 
 export { folderTrail, folderWithin } from "./folderTree";
 
 export interface CutNote {
+  libraryLocation?: NoteLocation | null;
   id: string;
   title: string;
   body: string;
@@ -90,9 +92,29 @@ export async function fetchNotes(): Promise<NotesData> {
   };
 }
 
+export async function readNote(raw: unknown): Promise<CutNote> {
+  const input = noteReadSchema.parse(raw);
+  const id = input.id ?? (input.link ? parseNoteLink(input.link) : null);
+  if (!id) throw new Error("Provide a note id or a Donkey note link.");
+  const res = await notesFetch(`/api/cut/notes/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error(res.status === 404 ? "This note was deleted or is unavailable." : "Could not read the note.");
+  return res.json();
+}
+
+export async function writeNoteFromTool(raw: unknown): Promise<CutNote> {
+  const input = noteSaveSchema.parse(raw);
+  const { id, ...changes } = input;
+  const prior = id ? await readNote({ id }) : null;
+  if (!prior && !input.title?.trim() && !input.body?.trim()) throw new Error("A new note needs a title or body.");
+  return saveNote({ id: prior?.id ?? crypto.randomUUID(), title: prior?.title ?? "Untitled", body: prior?.body ?? "",
+    colorIndex: prior?.colorIndex ?? 0, folderId: prior?.folderId ?? null, labelIds: prior?.labelIds ?? [],
+    ...(prior ? {} : { libraryLocation: null }), ...changes });
+}
+
 /** Write one note. The server answers with the winning version — this write,
  * or a newer one from the phone. */
 export async function saveNote(note: {
+  libraryLocation?: NoteLocation | null;
   id: string;
   title: string;
   body: string;
@@ -129,6 +151,11 @@ export async function saveNoteFolder(
   );
   if (!res.ok) throw new Error("Could not save the folder.");
   return (await res.json()) as CutNoteFolder;
+}
+
+export async function unfileLibraryNotes(residency: "browser" | "local", folderIds: string[]): Promise<void> {
+  const res = await notesFetch("/api/cut/notes/library-location", json({ residency, folderIds }));
+  if (!res.ok) throw new Error("Could not move the folder’s notes to the Library root.");
 }
 
 /** Delete a folder. What it held comes up one level. */

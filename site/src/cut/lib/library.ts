@@ -494,6 +494,13 @@ export async function deleteLibraryFolder(
   residency: Residency,
   id: string,
 ): Promise<void> {
+  if (residency !== "cloud") {
+    const listing = await backendFor(residency).fetch("/api/cut/library");
+    if (!listing.ok) throw new Error("Could not read the folder.");
+    const data = await listing.json() as LibraryData;
+    const { unfileLibraryNotes } = await import("@/cut/lib/notes");
+    await unfileLibraryNotes(residency, subtreeOf(data.folders, id));
+  }
   const res = await backendFor(residency).fetch(
     `/api/cut/library/folders/${id}`,
     {

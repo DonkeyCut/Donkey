@@ -49,19 +49,9 @@ as it lands — so a reel stands tall beside a landscape clip, and the grid
 deals cards into whichever of its two columns is shorter. A card always says where its link stands: waiting to be handed over,
 fetching, or failed with the reason and a way to try again. Every attempt that
 fails writes that reason on the item, so a card can never spin on a request
-nothing is making any more. Notes merge both ways by last-writer-wins on the edit stamp,
-with tombstones so a delete made offline on either side still lands on the
-other. The folders notes file into travel with them, under ids whichever
-device made them chose. Folders file into folders the same way, and a folder
-goes up after the folder it sits in, so the cloud never meets a child before
-its parent. A folder carries no tombstone, so a folder the cloud listing no
-longer names was deleted elsewhere, and what it held — its notes and the
-folders inside it — comes up one level, on both sides. Labels follow the same rule as folders: a note's labels ride its
-own write, and a label the listing no longer names comes off every note that
-wore it. A note wears twenty labels at most, and both pickers stop offering
-more at that count — the write past it is refused rather than trimmed, so a
-note never comes back from a merge wearing fewer labels than the person put
-on it.
+nothing is making any more. Notes merge by edit stamp; tombstones carry offline deletions. Folder ids come from the creating device, parents sync first, and deleting a folder moves its contents up one level. Labels travel with each note; deleted labels disappear everywhere, and writes above twenty labels fail.
+
+The desktop Library creates notes through its context menu and existing note editor; notes stay cloud-synced, with Library placement stored independently of phone folders and preserved when a phone edits their text.
 
 Deletes on the shelf run both ways. A synced recording deleted on the phone
 takes the cloud copy with it, and a clip deleted at the desk — from the Camera
@@ -115,9 +105,7 @@ a rejection signs out, a server that cannot be reached leaves the session
 standing, since recording and viewing are local. Nothing waits on the network
 to draw.
 
-Every request carries an `x-donkey-cut-client: ios` header. The server
-remembers accounts it has seen it from, and the desktop shows its phone
-surfaces (Camera Roll and Notes tabs) only to those accounts.
+The `x-donkey-cut-client: ios` header enables Camera Roll on desktop; Notes is available to every account.
 
 ## Camera
 

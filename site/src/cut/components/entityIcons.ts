@@ -16,6 +16,8 @@ import {
   Droplets,
   Expand,
   FoldHorizontal,
+  Folder,
+  StickyNote,
   Heart,
   Hexagon,
   Layers,
@@ -91,6 +93,8 @@ export function entityGlyph(ref: AssetRef, className: string): ReactNode {
 /** The icon an entity ref's pill and chip lead with. Null for media refs —
  * those show the media itself. */
 export function entityIcon(ref: AssetRef): LucideIcon | null {
+  if (ref.scope === "note") return StickyNote;
+  if (ref.scope === "folder") return Folder;
   switch (ref.entityKind) {
     case "title":
       return Type;

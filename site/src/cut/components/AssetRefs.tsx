@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import Link from "next/link";
+import { CUT_APP_BASE, homeHref } from "@/cut/lib/nav";
 import { Check, Clock, Copy, FileText, X } from "lucide-react";
 import {
   highlightMentions,
@@ -41,6 +43,12 @@ import {
 import { parseTimeInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
+
+function CollectionLink({ item, children, className }: { item: AssetRef; children: ReactNode; className?: string }) {
+  return item.scope === "note"
+    ? <Link href={`${homeHref(CUT_APP_BASE, "notes")}?note=${encodeURIComponent(item.id)}`} target="_blank" title={item.name} className={className}>{children}</Link>
+    : <button type="button" onClick={() => revealRef(item)} title={item.name} className={className}>{children}</button>;
+}
 
 // Shared UI for asset references: the preview thumbnail, attachment chips,
 // copy-the-reference affordances, interactive `@v2` token chips (hover peek,
@@ -313,6 +321,9 @@ export function RefTokenChip({
   const [peek, setPeek] = useState(false);
   // Entity refs have no media to peek at and no card to jump to — the pill
   // itself, icon plus name, is the whole story.
+  if (item.scope === "folder" || item.scope === "note") {
+    return <CollectionLink item={item} className="inline-flex items-center gap-1 rounded-md bg-blue-500/15 px-1 text-blue-500">{entityGlyph(item, "size-3")} {item.name}</CollectionLink>;
+  }
   if (item.scope === "entity") {
     return (
       <span
@@ -467,6 +478,13 @@ export function RefChips({
         // become candidates.
         const handle =
           candidates.find((c) => c.scope === r.scope && c.id === r.id)?.handle ?? r.handle;
+        if (r.scope === "folder" || r.scope === "note") return (
+          <span key={r.id} className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted px-2 py-1 text-xs">
+            {entityGlyph(r, "size-3 shrink-0")}
+            <CollectionLink item={r} className="truncate">{r.name}</CollectionLink>
+            <button type="button" aria-label={`Remove ${r.name}`} onClick={() => onRemove(r)}><X className="size-3" /></button>
+          </span>
+        );
         return (
           <RefChip
             key={`${r.scope}:${r.id}`}
@@ -1106,14 +1124,14 @@ function MentionPill({
     )
   );
   const rich =
-    item.scope === "entity" &&
+    (item.scope === "entity" || item.scope === "folder" || item.scope === "note") &&
     !editing &&
     !wrapped &&
     clippedFor !== text &&
     !!(glyph || item.preview);
   // Entity pills act as one object: a click selects the whole token, so the
   // caret never lands inside and typing replaces it in one stroke.
-  const atomic = item.scope === "entity" && !pinnable;
+  const atomic = (item.scope === "entity" || item.scope === "folder" || item.scope === "note") && !pinnable;
   return (
     <span
       ref={spanRef}
@@ -1497,7 +1515,10 @@ export function MentionTextarea({
     });
   };
 
-  const pick = (ref: AssetRef) => writeToken(refToken(ref) + " ");
+  const pick = (ref: AssetRef) => {
+    if (ref.scope === "folder" || ref.scope === "note") onUpsertRef?.(ref);
+    writeToken(refToken(ref) + " ");
+  };
 
   /** Write the preview's moment as a token, and hand the caller the mark that
    * holds what it points at, so the time can be re-read if the cut moves. */
@@ -1565,6 +1586,7 @@ export function MentionTextarea({
               <button
                 key={`${c.scope}:${c.id}`}
                 type="button"
+                title={c.name}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left",
                   row === selIndex ? "bg-muted" : "hover:bg-muted/60"
@@ -1577,7 +1599,7 @@ export function MentionTextarea({
                 }}
               >
                 <RefThumb item={c} className="size-8" />
-                {c.handle && <RefHandleBadge handle={c.handle} className="shrink-0" />}
+                {c.handle && c.scope !== "folder" && <RefHandleBadge handle={c.handle} className="shrink-0" />}
                 <span className="min-w-0 flex-1 truncate text-[11.5px]">{c.name}</span>
               </button>
             );

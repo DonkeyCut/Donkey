@@ -1,3 +1,4 @@
+import { parseFolderLink } from "@/cut/lib/folderReference";
 import { copyFile } from "node:fs/promises";
 import { UI_TOOLS } from "@/cut/lib/projectCommands";
 import { runProjectCommand } from "../../lib/aiTools";
@@ -63,6 +64,8 @@ const PAGE_SESSION_TOOLS: ReadonlySet<string> = new Set([
   "library_organize",
   "library_share",
   "notes_list",
+  "read_note",
+  "note_save",
   "template_add",
   "file_asset",
   "import_url",
@@ -155,6 +158,11 @@ async function executeHeadlessTool(
       output: { noEditor: true, note: DETACHED_UI_NOTE },
     };
   if (PAGE_MEDIA_TOOLS.has(toolName)) return { errorText: DETACHED_MEDIA_ERROR };
+  if (toolName === "read_folder") {
+    const args = (input ?? {}) as { reference?: { scope?: string }; link?: string };
+    const ref = args.reference ?? (args.link ? parseFolderLink(args.link) : null);
+    if (ref?.scope !== "project") return { errorText: DETACHED_SESSION_ERROR };
+  }
   if (PAGE_SESSION_TOOLS.has(toolName)) return { errorText: DETACHED_SESSION_ERROR };
   const doc = await ensureOpen(projectId);
   if (!doc) return { errorText: "Project not found on this Mac." };

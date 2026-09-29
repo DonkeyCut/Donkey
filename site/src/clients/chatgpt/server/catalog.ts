@@ -61,7 +61,9 @@ export const READ_COMMANDS = new Set([
   "stock_search",
   "list_voices",
   "library_list",
+  "read_folder",
   "notes_list",
+  "read_note",
   "read_project",
 ]);
 
