@@ -9,16 +9,13 @@ import { attachedAssetsBlock, AI_TOOLS } from "@/cut/server/ai/catalog";
 import { READ_COMMANDS, COMMAND_NAMES } from "@/clients/chatgpt/server/catalog";
 const note: CutNote = { id: "script", title: 'Brand "Voice"', body: "First draft", colorIndex: 2, folderId: "phone-folder", labelIds: ["brand"], createdAt: 1, updatedAt: 1, deletedAt: null, libraryLocation: { folderId: "assets", residency: "browser" } };
 describe("note references", () => {
-  test("existing Notes stay outside the Library; explicit roots and folders retain placement", () => {
+  test("root notes stay in Notes and Library notes require a folder", () => {
     expect(noteInLibraryFolder({ libraryLocation: null }, null)).toBe(false);
     expect(noteInLibraryFolder({}, null)).toBe(false);
     for (const residency of ["browser", "local", "cloud"] as const) {
-      const root = { libraryLocation: { folderId: null, residency } };
       const filed = { libraryLocation: { folderId: "assets", residency } };
-      expect(noteInLibraryFolder(root, null)).toBe(true);
       expect(noteInLibraryFolder(filed, null)).toBe(false);
       expect(noteInLibraryFolder(filed, "assets", residency)).toBe(true);
-      expect(noteInLibraryFolder(root, "assets", residency)).toBe(false);
       expect(noteInLibraryFolder(filed, "assets", residency === "cloud" ? "browser" : "cloud")).toBe(false);
     }
   });

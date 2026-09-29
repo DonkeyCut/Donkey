@@ -127,7 +127,7 @@ const draftOf = (n: CutNote): NoteDraft => ({
  * top level has. */
 export type NotesViewHandle = { create: () => void };
 type Props = {
-  library?: { folderId: string | null; residency: Residency; name: string };
+  library?: { folderId: string; residency: Residency; name: string };
   ref?: Ref<NotesViewHandle>;
 };
 export function NotesView({ library, ref }: Props = {}) {
@@ -162,7 +162,7 @@ export function NotesView({ library, ref }: Props = {}) {
   const trail = folderTrail(folders, openFolder);
   const shownFolders = folders.filter((f) => f.parentId === openFolder);
   const shown = list.filter((n) => library
-    ? noteInLibraryFolder(n, library.folderId, library.folderId === null ? undefined : library.residency)
+    ? noteInLibraryFolder(n, library.folderId, library.residency)
     : (n.folderId ?? null) === openFolder);
   // What the composer shows: the buffer while it belongs to the note the URL
   // names, and the stored note otherwise. A note nobody has typed into has no

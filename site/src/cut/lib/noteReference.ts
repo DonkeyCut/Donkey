@@ -6,14 +6,14 @@ import { normalizeLink } from "@/cut/lib/link";
 
 export const noteIdSchema = z.string().regex(/^[\w-]{1,64}$/);
 export const noteLocationSchema = z.object({
-  folderId: z.string().min(1).max(128).nullable(),
+  folderId: z.string().min(1).max(128),
   residency: z.enum(["browser", "local", "cloud"]),
 });
 export type NoteLocation = z.infer<typeof noteLocationSchema>;
-export const NOTE_LIBRARY_LOCATION_DESCRIPTION = "Library placement requires a residency and folderId; folderId:null selects that shelf's Library root. libraryLocation:null keeps the note in Notes without Library placement.";
+export const NOTE_LIBRARY_LOCATION_DESCRIPTION = "Library placement requires a residency and a folderId. libraryLocation:null keeps the note in the Notes tab. Library shows notes inside folders only.";
 export function noteInLibraryFolder(note: Pick<CutNote, "libraryLocation">, folderId: string | null, residency?: NoteLocation["residency"]): boolean {
   const location = note.libraryLocation;
-  return !!location && location.folderId === folderId && (!residency || location.residency === residency);
+  return folderId !== null && !!location && location.folderId === folderId && (!residency || location.residency === residency);
 }
 export const noteUnfileSchema = z.object({ residency: z.enum(["browser", "local", "cloud"]), folderIds: z.array(z.string().min(1).max(128)).max(10000) });
 export const noteReadSchema = z.object({ id: noteIdSchema.optional(), link: z.string().optional() });

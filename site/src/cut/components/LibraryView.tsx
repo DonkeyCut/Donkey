@@ -436,7 +436,7 @@ export function LibraryView() {
     const movingNotes = (notes.data?.notes ?? []).filter((n) => ids.includes(n.id));
     if (movingNotes.length) {
       try {
-        const saved = await Promise.all(movingNotes.map((n) => saveNote({ ...n, libraryLocation: { folderId, residency: target ?? n.libraryLocation?.residency ?? landing(null).residency } })));
+        const saved = await Promise.all(movingNotes.map((n) => saveNote({ ...n, libraryLocation: folderId && target ? { folderId, residency: target } : null })));
         const byId = new Map(saved.map((n) => [n.id, n]));
         patchNotes(client, (data) => ({ ...data, notes: data.notes.map((n) => byId.get(n.id) ?? n) }));
       } catch {
@@ -656,7 +656,7 @@ export function LibraryView() {
     if (staleFolder) router.replace(homeHref(base, "library"));
   }, [staleFolder, router, base]);
   const hasContent =
-    (notes.data?.notes.length ?? 0) > 0 ||
+    (notes.data?.notes.some((note) => !!note.libraryLocation?.folderId) ?? false) ||
     all.length > 0 ||
     folders.length > 0 ||
     templates.length > 0 ||
@@ -795,7 +795,7 @@ export function LibraryView() {
           />
         ) : null}
 
-        <NotesView ref={noteView} library={{ folderId: openFolder, residency: openOwner ?? target, name: trail.at(-1)?.name ?? "Library" }} />
+        {openFolder && <NotesView ref={noteView} library={{ folderId: openFolder, residency: openOwner ?? target, name: trail.at(-1)?.name ?? "Library" }} />}
 
         {!library.data && library.isPending && shownPending.length === 0 ? (
           <div className="grid place-items-center py-24 text-muted-foreground">
@@ -947,7 +947,7 @@ export function LibraryView() {
 
         <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
           {ctx.menu?.ids.length === 0 ? <>
-            <DropdownMenuItem onClick={() => noteView.current?.create()}><StickyNote /> Add note</DropdownMenuItem>
+            {openFolder && <DropdownMenuItem onClick={() => noteView.current?.create()}><StickyNote /> Add note</DropdownMenuItem>}
             <DropdownMenuItem onClick={() => setAddOpen(true)}><Upload /> Add media</DropdownMenuItem>
           </> : ctxFolder ? (
             <FolderMenuItems
