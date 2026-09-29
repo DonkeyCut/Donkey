@@ -21,7 +21,7 @@ import { lightboxItemFromLibrary, type LightboxItem } from "@/cut/lib/lightbox";
 import { availableResidencies } from "@/cut/lib/residency";
 import { SPECIMEN_BG, SPECIMEN_INK, SPECIMEN_META } from "@/cut/lib/fontSpecimen";
 import { PICKED_RING } from "@/cut/lib/assetPick";
-import { formatTime } from "@/cut/lib/time";
+import { formatElapsed } from "@/cut/lib/time";
 import { formatBytes } from "@/lib/bytes";
 import { cn } from "@/lib/utils";
 
@@ -303,7 +303,7 @@ export function LibraryCard({
                 >
                   {a.type === "video" && (
                     <span className={cn(sizeBytes != null && "group-hover:hidden")}>
-                      {formatTime(a.duration)}
+                      {formatElapsed(a.duration * 1000)}
                     </span>
                   )}
                   {sizeBytes != null && (
