@@ -294,6 +294,42 @@ function CrumbStep({
   );
 }
 
+function FolderTitle({ name, onRename }: { name: string; onRename: (name: string) => void | Promise<void> }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const draftRef = useRef<string | null>(null);
+  const [error, setError] = useState(false);
+  const finish = () => {
+    const value = draftRef.current;
+    draftRef.current = null;
+    setDraft(null);
+    const next = value?.trim();
+    if (!next || next === name) return;
+    void Promise.resolve().then(() => onRename(next)).catch(() => setError(true));
+  };
+  return (
+    <span className="min-w-0">
+      {draft !== null ? (
+        <input
+          autoFocus
+          aria-label="Folder name"
+          className="h-7 w-52 max-w-full rounded-md border border-input bg-transparent px-2 outline-none select-text focus:border-ring"
+          value={draft}
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => { draftRef.current = e.target.value; setDraft(e.target.value); }}
+          onBlur={finish}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); finish(); }
+            if (e.key === "Escape") { e.preventDefault(); draftRef.current = null; setDraft(null); }
+          }}
+        />
+      ) : (
+        <button type="button" title="Rename folder" className="max-w-full cursor-text truncate rounded-md px-1 hover:bg-muted" onClick={() => { setError(false); draftRef.current = name; setDraft(name); }}>{name}</button>
+      )}
+      {error && <span role="alert" className="ml-2 text-xs font-normal text-destructive">Could not rename folder.</span>}
+    </span>
+  );
+}
+
 /** The breadcrumb shown while a folder is open: the root, then every folder
  * on the way down to the open one. Each step above the open folder is a
  * button and a drop target, so a selection can be dragged back out to any
@@ -304,6 +340,7 @@ export function FolderCrumb({
   mime,
   folderMime,
   onGo,
+  onRename,
   onDrop,
   onDropFolders,
   className,
@@ -315,6 +352,7 @@ export function FolderCrumb({
   /** Set when folders themselves are dragged; steps then take those drops too. */
   folderMime?: string;
   onGo: (id: string | null) => void;
+  onRename?: (id: string, name: string) => void | Promise<void>;
   onDrop: (ids: string[], id: string | null) => void;
   onDropFolders?: (ids: string[], id: string | null) => void;
   className?: string;
@@ -349,7 +387,7 @@ export function FolderCrumb({
       {open && (
         <>
           <span className="text-muted-foreground/50">/</span>
-          <span className="truncate">{open.name}</span>
+          {onRename ? <FolderTitle key={open.id} name={open.name} onRename={(name) => onRename(open.id, name)} /> : <span className="truncate">{open.name}</span>}
         </>
       )}
     </div>

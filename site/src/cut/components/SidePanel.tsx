@@ -1044,6 +1044,7 @@ function ProjectFilesPanel({
           <FolderCrumb
             className="text-sm"
             root="Project Files"
+            onRename={!readOnly ? (id, name) => useEditor.getState().renameMediaFolder(id, name) : undefined}
             trail={[
               { id: openFolder, name: folders.find((f) => f.id === openFolder)?.name ?? "Folder" },
             ]}
@@ -1830,6 +1831,12 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const all = assets;
   const shown = all.filter((a) => folderOf(a) === openFolder);
 
+  const renameFolder = async (id: string, name: string) => {
+    const r = folders.find((f) => f.id === id)?.residency;
+    if (!r || !reachable(r)) return;
+    patch((d) => ({ ...d, folders: d.folders.map((f) => f.id === id ? { ...f, name } : f) }));
+    await updateLibraryFolder(r, id, { name }).catch(() => void reload());
+  };
   const bothShelves = availableResidencies().length > 1;
   const shownTemplates = templates.filter((t) => (t.folderId ?? null) === openFolder);
   // The shelf at this level: the folders filed here. At the top the Camera
@@ -1955,6 +1962,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                 className="text-sm"
                 root="Library"
                 trail={trail}
+                onRename={openFolder !== CAMERA_ROLL_FOLDER ? renameFolder : undefined}
                 mime={LIBRARY_MOVE_MIME}
                 folderMime={LIBRARY_FOLDER_MOVE_MIME}
                 onGo={setOpenFolder}
@@ -1986,15 +1994,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                 renaming={renamingFolder}
                 onRenamingChange={setRenamingFolder}
                 onOpen={(id) => setOpenFolder(id)}
-                onRename={async (id, name) => {
-                  const r = folders.find((f) => f.id === id)?.residency;
-                  if (!r) return;
-                  patch((d) => ({
-                    ...d,
-                    folders: d.folders.map((f) => (f.id === id ? { ...f, name } : f)),
-                  }));
-                  await updateLibraryFolder(r, id, { name }).catch(() => void reload());
-                }}
+                onRename={renameFolder}
                 // A folder in a pick with others takes the pick to the
                 // confirm; alone, itself.
                 onDelete={(id) => {

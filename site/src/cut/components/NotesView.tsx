@@ -285,6 +285,15 @@ export function NotesView({ library, ref }: Props = {}) {
     void saveNoteLabel(id, name).catch(() => reload());
   };
 
+  const renameFolder = async (id: string, name: string) => {
+    const parentId = folders.find((f) => f.id === id)?.parentId ?? null;
+    patchNotes(client, (prev) => ({
+      ...prev,
+      folders: prev.folders.map((f) => (f.id === id ? { ...f, name } : f)),
+    }));
+    await settleFolder(id);
+    await saveNoteFolder(id, { name, parentId }).catch(() => reload());
+  };
   /** Delete a label. Every note wearing it — the open draft too — lets it
    * go. */
   const removeLabel = (id: string) => {
@@ -493,6 +502,7 @@ export function NotesView({ library, ref }: Props = {}) {
           <FolderCrumb
             root="Notes"
             trail={trail}
+            onRename={renameFolder}
             mime={NOTES_MOVE_MIME}
             folderMime={NOTE_FOLDERS_MOVE_MIME}
             onGo={gotoFolder}
@@ -549,15 +559,7 @@ export function NotesView({ library, ref }: Props = {}) {
               folderWrites.current.delete(folder.id);
             }
           }}
-          onRename={async (id, name) => {
-            const parentId = folders.find((f) => f.id === id)?.parentId ?? null;
-            patchNotes(client, (prev) => ({
-              ...prev,
-              folders: prev.folders.map((f) => (f.id === id ? { ...f, name } : f)),
-            }));
-            await settleFolder(id);
-            await saveNoteFolder(id, { name, parentId }).catch(() => reload());
-          }}
+          onRename={renameFolder}
           onDelete={async (id) => {
             // What the folder held comes up one level, the way the server
             // files it.

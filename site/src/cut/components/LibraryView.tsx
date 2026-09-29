@@ -859,6 +859,17 @@ export function LibraryView() {
     selected.has(a.id) ? pick : { ...NO_PICK, items: [a] };
   useDeleteKey(rootRef, pickSize > 0 ? () => setDeleting(pick) : null);
   const ctx = useSelectionMenu({ picked: selected, setPicked: setSelected, shown: order });
+  const renameFolder = async (id: string, name: string) => {
+    const r = folders.find((f) => f.id === id)?.residency;
+    if (!r || !live(r)) return;
+    patch((d) => ({
+      ...d,
+      folders: d.folders.map((f) =>
+        f.id === id ? { ...f, name } : f,
+      ),
+    }));
+    await updateLibraryFolder(r, id, { name }).catch(() => void reload());
+  };
   // What the open right-click menu acts on.
   const ctxSet: DeleteSet = ctx.menu
     ? {
@@ -978,6 +989,7 @@ export function LibraryView() {
             <FolderCrumb
               root="Library"
               trail={trail}
+              onRename={openOwner && live(openOwner) ? renameFolder : undefined}
               mime={LIBRARY_MOVE_MIME}
               folderMime={LIBRARY_FOLDER_MOVE_MIME}
               onGo={gotoFolder}
@@ -1047,17 +1059,7 @@ export function LibraryView() {
               const f = await createLibraryFolder(name, newShelf, newParent);
               patch((d) => ({ ...d, folders: [...d.folders, f] }));
             }}
-            onRename={async (id, name) => {
-              const r = folders.find((f) => f.id === id)?.residency;
-              if (!r || !live(r)) return;
-              patch((d) => ({
-                ...d,
-                folders: d.folders.map((f) =>
-                  f.id === id ? { ...f, name } : f,
-                ),
-              }));
-              await updateLibraryFolder(r, id, { name }).catch(() => void reload());
-            }}
+            onRename={renameFolder}
             // A folder in a pick with others takes the pick to the confirm;
             // alone, itself.
             onDelete={(id) => {

@@ -1043,6 +1043,7 @@ export function ProjectsHome() {
             <FolderCrumb
               root="Projects"
               trail={trail}
+              onRename={folderOwner && live(folderOwner) ? (id, name) => renameFolder(folderOwner, id, name) : undefined}
               mime={PROJECT_MIME}
               folderMime={PROJECT_FOLDER_MIME}
               onGo={gotoFolder}
