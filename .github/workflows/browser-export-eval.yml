@@ -72,7 +72,7 @@ jobs:
         run: |
           npm run dev > /tmp/next-dev.log 2>&1 &
           for i in $(seq 1 60); do
-            if curl -sf -o /dev/null http://localhost:3000; then exit 0; fi
+            if curl -sf -o /dev/null http://localhost:3000/api/health; then exit 0; fi
             sleep 2
           done
           echo "dev server never answered" >&2
