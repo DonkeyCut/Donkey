@@ -1,3 +1,5 @@
+import { runLibraryUploadJob } from "@/cut/worker/libraryUploadJob";
+import type { LibraryAsset } from "@/cut/server/library";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -32,7 +34,10 @@ export async function runConvertJob(
   job: ClaimedJob,
   handle: RenderHandle,
   isCanceled: () => boolean
-): Promise<ConvertResult> {
+): Promise<ConvertResult | LibraryAsset> {
+  if ((job.spec as { target?: string } | null)?.target === "library") {
+    return runLibraryUploadJob(job, handle, isCanceled);
+  }
   const { file, maxHeight } = (job.spec ?? {}) as { file?: string; maxHeight?: number };
   if (!file) throw new Error("Convert job has no file.");
   const projectId = job.projectId;

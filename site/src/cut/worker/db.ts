@@ -9,7 +9,7 @@ import { resolveSettings } from "@/lib/config/resolve";
 export { prisma };
 
 /** A conflict rolls back every write; retry with a fresh transaction snapshot. */
-async function storageTransaction<T>(run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+export async function storageTransaction<T>(run: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   const override = await prisma.settingOverride.findUnique({
     where: { key: "cutStorageTransactions" }, select: { value: true },
   });
@@ -88,7 +88,7 @@ export async function claimNextJob(): Promise<ClaimedJob | null> {
  * preview re-render, a retried job) charge only the size delta instead of
  * double-counting.
  */
-export async function registerObject(opts: {
+type ObjectRegistration = {
   userId: string;
   /** Null for objects no project owns — the account's shared library. */
   projectId: string | null;
@@ -97,36 +97,41 @@ export async function registerObject(opts: {
   mime: string;
   bytes: number;
   kind: string;
-}): Promise<string> {
-  return storageTransaction(async (tx) => {
-    const prior = await tx.cutMediaObject.findUnique({
-      where: { r2Key: opts.r2Key },
-      select: { bytes: true, uploadState: true, quotaExempt: true },
-    });
-    const quotaExempt = artifactLifecycle(opts.kind) !== "retained";
-    const priorBytes = prior ? artifactUsageBytes(prior.bytes, prior.uploadState === "complete", prior.quotaExempt) : BigInt(0);
-    const delta = artifactUsageBytes(BigInt(opts.bytes), true, quotaExempt) - priorBytes;
-    // The wall every stored artifact meets, wherever it came from: a job that
-    // grew past what its account can hold is failed here, at the moment the
-    // bytes would be charged, instead of landing a row nothing can undo.
-    if (delta > BigInt(0)) {
-      const ceiling = storageCeiling(await cutLimitsFor(opts.userId), quotaMarginFor(opts.kind));
-      if (ceiling !== null) {
-        const usage = await tx.cutStorageUsage.findUnique({
-          where: { userId: opts.userId },
-          select: { bytes: true },
-        });
-        if ((usage?.bytes ?? BigInt(0)) + delta > BigInt(ceiling)) throw new Error(STORAGE_FULL);
-      }
-    }
-    const row = await tx.cutMediaObject.upsert({
-      where: { r2Key: opts.r2Key },
-      create: { ...opts, bytes: BigInt(opts.bytes), quotaExempt, uploadState: "complete" },
-      update: { bytes: BigInt(opts.bytes), uploadState: "complete", quotaExempt },
-    });
-    if (delta !== BigInt(0)) await adjustStorageBytes(tx, opts.userId, delta);
-    return row.id;
+};
+
+export async function registerObject(opts: ObjectRegistration): Promise<string> {
+  return storageTransaction((tx) => registerObjectIn(tx, opts));
+}
+
+/** Register related files inside the transaction that publishes their asset. */
+export async function registerObjectIn(tx: Prisma.TransactionClient, opts: ObjectRegistration): Promise<string> {
+  const prior = await tx.cutMediaObject.findUnique({
+    where: { r2Key: opts.r2Key },
+    select: { bytes: true, uploadState: true, quotaExempt: true },
   });
+  const quotaExempt = artifactLifecycle(opts.kind) !== "retained";
+  const priorBytes = prior ? artifactUsageBytes(prior.bytes, prior.uploadState === "complete", prior.quotaExempt) : BigInt(0);
+  const delta = artifactUsageBytes(BigInt(opts.bytes), true, quotaExempt) - priorBytes;
+  // The wall every stored artifact meets, wherever it came from: a job that
+  // grew past what its account can hold is failed here, at the moment the
+  // bytes would be charged, instead of landing a row nothing can undo.
+  if (delta > BigInt(0)) {
+    const ceiling = storageCeiling(await cutLimitsFor(opts.userId), quotaMarginFor(opts.kind));
+    if (ceiling !== null) {
+      const usage = await tx.cutStorageUsage.findUnique({
+        where: { userId: opts.userId },
+        select: { bytes: true },
+      });
+      if ((usage?.bytes ?? BigInt(0)) + delta > BigInt(ceiling)) throw new Error(STORAGE_FULL);
+    }
+  }
+  const row = await tx.cutMediaObject.upsert({
+    where: { r2Key: opts.r2Key },
+    create: { ...opts, bytes: BigInt(opts.bytes), quotaExempt, uploadState: "complete" },
+    update: { bytes: BigInt(opts.bytes), uploadState: "complete", quotaExempt },
+  });
+  if (delta !== BigInt(0)) await adjustStorageBytes(tx, opts.userId, delta);
+  return row.id;
 }
 
 /**

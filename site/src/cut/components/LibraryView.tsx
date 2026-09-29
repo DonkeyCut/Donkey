@@ -1,5 +1,7 @@
 "use client";
 
+import type { LibraryUploadState } from "@/cut/lib/libraryUpload";
+
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -486,6 +488,7 @@ export function LibraryView() {
       const id = crypto.randomUUID();
       // Filing can fail after storage succeeds. Retrying keeps that stored copy.
       let asset: LibraryAsset | undefined;
+      const uploadState: LibraryUploadState = {};
       const run = async () => {
         try {
           if (isFontArchive(file)) {
@@ -505,7 +508,11 @@ export function LibraryView() {
             const shelf = isLinkedFile(file) && !folderId
               ? await shelfForNewItem(file.size)
               : residency;
-            asset = await uploadToLibrary(file, shelf);
+            asset = await uploadToLibrary(file, shelf, {
+              state: uploadState,
+              folderId: shelf === "cloud" ? folderId : undefined,
+              onStage: (stage) => setStage(id, stage),
+            });
           }
           if (folderId) {
             setStage(id, "saving");

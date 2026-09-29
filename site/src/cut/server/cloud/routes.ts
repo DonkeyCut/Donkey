@@ -1,3 +1,4 @@
+import { prepareLibraryUpload } from "@/cut/server/cloud/libraryUpload";
 import { librarySharing } from "@/cut/server/cloud/librarySharing";
 // The hosted Cut API surface in one table, namespaced under /api/cut-cloud/*.
 // The client's cloud driver rewrites /api/cut/X -> /api/cut-cloud/X, so paths
@@ -77,6 +78,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "DELETE", path: "/api/cut-cloud/library/shares/:kind/:id", handler: (r, u, p) => librarySharing.manage(r, u, p.kind, p.id) },
   { method: "GET", path: "/api/cut-cloud/library", handler: (r, u) => libraryCloud.list(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/presign", handler: (r, u) => libraryCloud.presign(u, r) },
+  { method: "POST", path: "/api/cut-cloud/library/prepare", handler: (r, u) => prepareLibraryUpload(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/complete", handler: (r, u) => libraryCloud.complete(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/presign-get", handler: (r, u) => libraryCloud.presignGetBatch(u, r) },
   { method: "POST", path: "/api/cut-cloud/library/use", handler: (r, u) => libraryCloud.use(u, r) },

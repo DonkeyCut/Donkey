@@ -30,6 +30,7 @@ const PRESIGN_GET_BATCH_MAX = 500;
  * the source project doc. */
 interface AssetMeta {
   name?: string;
+  originalFile?: string;
   /** The short name the titling model read off the clip itself, standing in
    * for the file's own name wherever the asset is shown. Written once, by
    * cloud/clipTitle.ts. */
@@ -92,6 +93,7 @@ export function assetView(
   return {
     id: row.id,
     fileName: obj.fileName,
+    ...(meta.originalFile ? { originalFile: meta.originalFile } : {}),
     name: meta.name ?? obj.fileName,
     type: meta.type ?? typeOf(obj.fileName) ?? "video",
     duration: meta.duration ?? 0,
@@ -218,7 +220,11 @@ export async function deleteLibraryAssetCascade(
         where: { userId, kind: "library", fileName: posterName },
       })
     : null;
-  const objects = [obj, poster].filter((o): o is NonNullable<typeof o> => !!o);
+  const originalName = ((asset.meta ?? {}) as AssetMeta).originalFile;
+  const original = originalName
+    ? await prisma.cutMediaObject.findFirst({ where: { userId, kind: "library", fileName: originalName } })
+    : null;
+  const objects = [obj, poster, original].filter((o): o is NonNullable<typeof o> => !!o);
   const freed = objects
     .filter((o) => o.uploadState === "complete")
     .reduce((n, o) => n + Number(o.bytes), 0);

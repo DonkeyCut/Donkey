@@ -6,6 +6,8 @@
  * toolset and `aiTools.ts` keys its handlers on `LibraryToolName`.
  */
 
+import { CLOUD_LIBRARY_IMPORT_DESCRIPTION } from "@/cut/lib/libraryUpload";
+
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 import { LIBRARY_SHARE_ACTIONS, LIBRARY_SHARE_KINDS, SHARE_ACCESS } from "@/cut/lib/librarySharing";
@@ -26,7 +28,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_list",
     description:
-      "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, and the account's own font files), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
+      CLOUD_LIBRARY_IMPORT_DESCRIPTION + " " + "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, and the account's own font files), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
     inputSchema: obj({}),
   },
   {

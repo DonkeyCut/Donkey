@@ -187,6 +187,7 @@ export const libraryApi = {
           typeof name === "string" ? name : undefined,
           source,
           poster instanceof File ? poster : undefined,
+          form.get("prepare") === "true",
         ),
       );
     } catch (e) {

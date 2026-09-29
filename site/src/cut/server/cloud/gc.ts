@@ -284,9 +284,18 @@ export async function runGc(): Promise<Response> {
     });
   }
 
+  const preparing = await prisma.cutRenderJob.findMany({
+    where: { kind: "convert", state: { in: ["queued", "running"] }, spec: { path: ["target"], equals: "library" } },
+    select: { spec: true },
+  });
+  const heldUploads = preparing.flatMap((job) => {
+    const key = (job.spec as { key?: unknown } | null)?.key;
+    return typeof key === "string" ? [key] : [];
+  });
   const pending = await prisma.cutMediaObject.findMany({
     where: {
       uploadState: "pending",
+      r2Key: { notIn: heldUploads },
       createdAt: { lt: new Date(Date.now() - PENDING_CLAIM_MAX_AGE_MS) },
     },
     select: { id: true, r2Key: true },

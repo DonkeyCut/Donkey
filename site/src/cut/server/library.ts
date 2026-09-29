@@ -1,3 +1,4 @@
+import { convertToMp4, mp4NameFor, streamCodecs } from "@/cut/server/convert";
 import { spawn } from "node:child_process";
 import { copyFile, constants, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -26,6 +27,8 @@ export interface LibrarySource {
 export interface LibraryAsset {
   id: string;
   fileName: string;
+  /** Uploaded source retained when playback needs conversion. */
+  originalFile?: string;
   name: string;
   type: "video" | "audio" | "image" | "font";
   duration: number;
@@ -270,6 +273,7 @@ export async function register(
   name: string,
   source?: LibrarySource,
   posterFile?: string,
+  originalFile?: string,
 ): Promise<LibraryAsset> {
   const type = typeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
@@ -278,6 +282,7 @@ export async function register(
   const asset: LibraryAsset = {
     id: crypto.randomUUID().slice(0, 8),
     fileName,
+    ...(originalFile ? { originalFile } : {}),
     name,
     type,
     duration: meta.duration,
@@ -299,6 +304,7 @@ export async function addUpload(
   name?: string,
   source?: LibrarySource,
   poster?: File,
+  prepare = false,
 ): Promise<LibraryAsset> {
   if (!typeOf(file.name)) throw new Error("Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
@@ -318,7 +324,22 @@ export async function addUpload(
       Buffer.from(await poster.arrayBuffer()),
     );
   }
-  return register(fileName, name?.trim() || file.name, source, posterFile);
+  let playback = fileName;
+  try {
+    if (prepare) {
+      const codecs = await streamCodecs(libMediaPath(fileName));
+      const convertedName = mp4NameFor(fileName);
+      playback = await freeName(codecs.video ? convertedName : convertedName.replace(/\.mp4$/, ".m4a"));
+      const handle = { tmpDir: "", outPath: libMediaPath(playback), progress: 0, log: [] as string[] };
+      const outcome = await convertToMp4(handle, libMediaPath(fileName), libMediaPath(playback));
+      if (outcome.unchanged) playback = fileName;
+    }
+    return await register(playback, name?.trim() || file.name, source, posterFile,
+      playback === fileName ? undefined : fileName);
+  } catch (error) {
+    await removeFiles([...new Set([fileName, playback, ...(posterFile ? [posterFile] : [])])]);
+    throw error;
+  }
 }
 
 /** Copy a project's media file into the library for reuse. */
@@ -387,6 +408,7 @@ function takeAssets(idx: LibraryIndex, ids: ReadonlySet<string>): string[] {
     if (!ids.has(a.id)) return true;
     files.push(a.fileName);
     if (a.posterFile) files.push(a.posterFile);
+    if (a.originalFile) files.push(a.originalFile);
     return false;
   });
   return files;

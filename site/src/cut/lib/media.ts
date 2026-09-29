@@ -735,6 +735,7 @@ export async function importFileToProject(
   if (!type) return null;
 
   let fileName = await uploadProjectMediaTo(backend, projectId, file, file.name);
+  const originalFileName = fileName;
   let name = file.name;
   // Probe the bytes in hand: the same file the upload just wrote, with no
   // second network read — which also lets a headless process import media.
@@ -751,7 +752,7 @@ export async function importFileToProject(
       void dropProjectFile(projectId, fileName, backend).catch(() => {});
       throw convertError;
     });
-    void dropProjectFile(projectId, fileName, backend).catch(() => {});
+    if (made.fileName !== fileName) void dropProjectFile(projectId, fileName, backend).catch(() => {});
     fileName = made.fileName;
     // The asset answers to what it now is: a card reading .MOV over an MP4
     // file is the card lying about the media.
@@ -760,7 +761,7 @@ export async function importFileToProject(
   });
   const url = mediaUrl(projectId, fileName, backend);
   const id = uid();
-  keepImportedBytes(id, file);
+  if (fileName === originalFileName) keepImportedBytes(id, file);
   return {
     id,
     fileName,

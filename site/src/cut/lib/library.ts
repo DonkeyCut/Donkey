@@ -1,5 +1,9 @@
 "use client";
 
+import { uploadCloudLibraryMedia, withCloudPreparedMedia } from "@/cut/lib/cloudLibraryUpload";
+import type { LibraryUploadStage, LibraryUploadState } from "@/cut/lib/libraryUpload";
+import { assetTypeOf } from "@/cut/lib/media";
+
 import { apiJson, getBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { readSnapshot, writeSnapshot } from "./cache";
@@ -51,6 +55,8 @@ export interface LibrarySource {
 export interface LibraryAsset {
   id: string;
   fileName: string;
+  /** Uploaded source retained when playback needs conversion. */
+  originalFile?: string;
   name: string;
   type: "video" | "audio" | "image" | "font";
   duration: number;
@@ -194,9 +200,10 @@ export const libraryPosterUrl = (
  * on. The download goes through the route because it signs the attachment
  * name; a minted edge URL is signed for inline reads only. */
 export function downloadLibraryAsset(
-  a: Pick<LibraryAsset, "fileName" | "residency">,
+  a: Pick<LibraryAsset, "fileName" | "originalFile" | "residency">,
 ) {
-  downloadFromUrl(libraryRouteUrl(a.fileName, a.residency), a.fileName);
+  const file = a.originalFile ?? a.fileName;
+  downloadFromUrl(libraryRouteUrl(file, a.residency), file);
 }
 
 async function fetchLibraryFrom(r: Residency): Promise<LibraryData> {
@@ -590,7 +597,7 @@ export async function uploadToLibrary(
   /** What the shelf should call it and where it came from, when the file is
    * arriving from somewhere that already knows — a carry from another shelf,
    * say. Left out, the file names itself and keeps whatever cover it makes. */
-  keep: { name?: string; source?: LibrarySource; poster?: Blob } = {},
+  keep: { name?: string; source?: LibrarySource; poster?: Blob; folderId?: string | null; state?: LibraryUploadState; onStage?: (stage: LibraryUploadStage) => void } = {},
 ): Promise<LibraryAsset> {
   const backend = backendFor(residency);
   // A font has no streams to measure; it is checked by installing it instead,
@@ -601,19 +608,17 @@ export async function uploadToLibrary(
   const posterName = `${file.name}${SPECIMEN_FILE_SUFFIX}`;
   const fontMeta = { type: "font" as const, duration: 0 };
   if (residency === "cloud") {
-    // Presign -> direct R2 PUT -> complete, with the media probed here — the
-    // cloud can't cheaply probe an R2 object the way the engine probes disk.
-    // A file this browser can't decode would land as a zero-length asset it
-    // also couldn't preview, so reject it before any bytes go up.
-    const meta = fontLabel
-      ? fontMeta
-      : await probeFileMeta(file).catch(() => null);
+    const type = assetTypeOf(file);
+    const meta = fontLabel ? fontMeta : await probeFileMeta(file).catch(() => null);
+    if ((!meta || !(meta.duration > 0)) && (type === "video" || type === "audio")) {
+      return uploadCloudLibraryMedia(file, keep);
+    }
     if (
       !meta ||
       (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))
     ) {
       throw new Error(
-        "This file can't be read in this browser, so it can't go in the cloud library. Import it in the Mac app instead.",
+        "This image could not be read.",
       );
     }
     const key = await presignedUpload(
@@ -656,27 +661,40 @@ export async function uploadToLibrary(
   if (keep.source) form.append("source", JSON.stringify(keep.source));
   if (poster) form.append("poster", poster, posterName);
   if (residency === "browser") {
-    // The shelf is this page's storage, with no ffprobe behind it: the file is
-    // measured here, and one this browser can't read is refused rather than
-    // shelved as an asset nothing can play.
-    const meta = fontLabel
-      ? fontMeta
-      : await probeFileMeta(file).catch(() => null);
+    // Hosted preparation supplies missing decoders before the page stores media.
+    const meta = fontLabel ? fontMeta : await probeFileMeta(file).catch(() => null);
     if (
       !meta ||
       (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))
     ) {
-      throw new Error(
-        "This file can't be read in this browser, so it can't go in the library.",
-      );
+      const type = assetTypeOf(file);
+      if (type === "video" || type === "audio") {
+        return withCloudPreparedMedia(file, async (prepared) => {
+          await probeFileMeta(prepared);
+          return uploadToLibrary(prepared, residency, { ...keep, name: keep.name ?? file.name });
+        }, { ...keep, folderId: undefined });
+      }
+      throw new Error("This image could not be read.");
     }
     form.append("meta", JSON.stringify(meta));
+  } else {
+    const type = assetTypeOf(file);
+    if ((type === "video" || type === "audio") && !(await probeFileMeta(file).catch(() => null))) {
+      keep.onStage?.("preparing");
+      form.append("prepare", "true");
+    }
   }
   const res = await backend.fetch("/api/cut/library", {
     method: "POST",
     body: form,
   });
   const body = await apiJson<LibraryAsset>(res);
+  if (!res.ok && form.get("prepare") === "true") {
+    return withCloudPreparedMedia(file, async (prepared) => {
+      await probeFileMeta(prepared);
+      return uploadToLibrary(prepared, residency, { ...keep, name: keep.name ?? file.name });
+    }, { ...keep, folderId: undefined });
+  }
   if (!res.ok) throw new Error(body.error ?? "Upload failed.");
   return { ...body, residency };
 }

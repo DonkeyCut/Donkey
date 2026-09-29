@@ -1,36 +1,8 @@
 "use client";
 
-/**
- * Converting a project's media to MP4 — H.264 picture, AAC sound — in place.
- *
- * Footage arrives in whatever the camera wrote. A phone's .mov is HEVC, a
- * screen recorder's is ProRes with raw PCM sound, and neither decodes in
- * every browser: the clip previews black, or refuses to import at all.
- * Converting it is the repair, and it is the same repair someone means when
- * they say "turn these .mov files into mp4".
- *
- * Where a conversion runs is decided by where the bytes already are, because
- * moving a video file costs more than converting one:
- *
- *   Mac project      the engine's ffmpeg, on the file in the project folder.
- *   cloud project    a render-worker job, on the object in R2. The tab sends
- *                    nothing and waits on the job row it polls.
- *   browser project  this tab, where mediabunny drives WebCodecs — and where
- *                    a file whose streams already fit is copied packet for
- *                    packet, with no decoding at all. Footage this browser
- *                    has no decoder for goes to the Mac when the app is
- *                    running: the page posts the bytes to the engine and gets
- *                    an MP4 back, the trade transcription already makes.
- *   headless         a process with no page converts for itself. The engine
- *                    installs a converter that works the project folder
- *                    directly; the cloud runner carries decoders of its own
- *                    and runs the same in-process path a tab runs.
- *
- * The asset keeps its id and its name, so every clip cut from it keeps
- * playing; only the file underneath changes. The old file is deleted once the
- * new one is in the document — a conversion that left both behind would
- * double what the project costs against the user's storage.
- */
+/** Conversion uses the project's backend and keeps each asset's identity.
+ * Browser projects borrow preparation when a decoder or encoder is unavailable;
+ * the prepared media returns to the project's own storage. */
 
 import {
   BufferTarget,
@@ -40,6 +12,7 @@ import {
   type ConversionAudioOptions,
   type ConversionVideoOptions,
 } from "mediabunny";
+import { withCloudPreparedMedia } from "@/cut/lib/cloudLibraryUpload";
 import { apiFetch as engineFetch } from "./api";
 import { getBackend, hasLocalCompute, type CutBackend } from "./backend";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
@@ -48,12 +21,11 @@ import { enrichAsset, uploadProjectMediaTo } from "./media";
 import { storedMediaUrl } from "./mediaSync";
 import {
   audioTrackOf,
-  hasUndecodableVideo,
   openMedia,
   probeMediaFile,
   readMediaFileSize,
   videoTrackOf,
-  withMedia,
+  UnreadableMediaError,
 } from "./mediaRead";
 import { useEditor } from "./store";
 import type { MediaAsset } from "./types";
@@ -260,23 +232,37 @@ async function convertOnBackend(
   return fromServer(body);
 }
 
-/** No machine stores this project, so the work happens beside the bytes: in
- * this process, or on the Mac when this process has no decoder for them. */
+/** Convert beside the project, borrowing hosted preparation for missing codecs. */
 async function convertNearThePage(
   projectId: string,
   source: ConvertSource,
   opts: ConvertOptions
 ): Promise<FileConversion> {
-  const decodable = await withMedia(
-    source.url,
-    async (input) => !(await hasUndecodableVideo(input))
-  );
-  if (decodable) return convertInProcess(projectId, source, opts);
-  if (hasLocalCompute()) return convertOnTheMac(projectId, source, opts);
-  throw new Error(
-    `${source.name} is in a format this browser can't decode. Run the Donkey app to convert it on this Mac, open the project in Safari, or move it to the cloud.`
+  const decodable = await probeMediaFile(source.url).then(() => true, (error: unknown) => {
+    if (error instanceof UnreadableMediaError && error.undecodable) return false;
+    throw error;
+  });
+  if (decodable) {
+    try { return await convertInProcess(projectId, source, opts); }
+    catch (error) { if (!(error instanceof ConversionUnavailableError)) throw error; }
+  }
+  if (hasLocalCompute()) {
+    try { return await convertOnTheMac(projectId, source, opts); }
+    catch { /* The browser still needs a decoder; hosted preparation supplies it. */ }
+  }
+  const response = resolveRegisteredBlob(source.url) ?? await fetch(source.url).then((res) => {
+    if (!res.ok) throw new Error(`Could not read ${source.name}.`);
+    return res.blob();
+  });
+  if (!response) throw new Error(`Could not read ${source.name}.`);
+  return withCloudPreparedMedia(
+    new File([response], source.fileName, { type: response.type }),
+    (prepared) => land(projectId, source, prepared, opts),
+    { name: source.name, maxHeight: opts.maxHeight },
   );
 }
+
+class ConversionUnavailableError extends Error {}
 
 /**
  * Convert in this process with mediabunny: WebCodecs in a tab, the headless
@@ -291,7 +277,7 @@ async function convertInProcess(
 ): Promise<FileConversion> {
   const bytes = resolveRegisteredBlob(source.url);
   if (bytes && bytes.size > IN_PROCESS_MAX_BYTES) {
-    throw new Error(`${source.name} is too large to convert here.`);
+    throw new ConversionUnavailableError(`${source.name} needs hosted conversion.`);
   }
   const input = openMedia(source.url);
   try {
@@ -332,17 +318,14 @@ async function convertInProcess(
     const conversion = await Conversion.init({
       input,
       output,
-      video: videoOptions,
-      audio: audioOptions,
+      video: (track) => track === video ? videoOptions : { discard: true },
+      audio: (track) => track === audio ? audioOptions : { discard: true },
     });
-    if (!conversion.isValid) {
-      const reason = conversion.discardedTracks[0]?.reason;
-      throw new Error(
-        reason === "undecodable_source_codec" || reason === "no_encodable_target_codec"
-          ? `${source.name} is in a format this browser can't convert. Run the Donkey app to convert it on this Mac, open the project in Safari, or move it to the cloud.`
-          : `Could not convert ${source.name}.`
-      );
-    }
+    if (conversion.discardedTracks.some(({ track, reason }) =>
+      (track === video || track === audio) &&
+      (reason === "undecodable_source_codec" || reason === "no_encodable_target_codec")
+    )) throw new ConversionUnavailableError("This media needs hosted conversion.");
+    if (!conversion.isValid) throw new Error(`Could not convert ${source.name}.`);
     await conversion.execute();
     const buffer = output.target.buffer;
     if (!buffer) throw new Error(`Could not convert ${source.name}.`);
