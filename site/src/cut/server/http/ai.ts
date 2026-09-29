@@ -5,6 +5,7 @@ import { SETTINGS } from "@/lib/config/registry";
 import { startTurnStream, followTurnStream, cancelTurnStream } from "../ai/turnStreams";
 import path from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { claudeFailure } from "../ai/claudeFailure";
 import { createUIMessageStream, type UIMessage } from "ai";
 
 import {
@@ -135,6 +136,12 @@ async function runClaude(
     try {
       for await (const msg of q) {
         const m = msg as unknown as Record<string, unknown> & { type: string };
+        const failure = claudeFailure(m);
+        if (failure) {
+          emit({ type: "error", errorText: failure });
+          end = "failed";
+          break;
+        }
         if (m.type === "system" && m.subtype === "init") {
           // The editor MCP is the assistant's entire tool surface. If it didn't
           // bind (an engine hiccup, an out-of-scope proxy call), the model would
