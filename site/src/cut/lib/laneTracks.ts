@@ -77,7 +77,7 @@ export interface RowBox {
 }
 
 /** The display row a drag aims at from the pointer's screen y: the row under
- * the pointer (a pointer in the gap between two rows takes the row below),
+ * the pointer, a half-index for insertion between neighboring rows,
  * `-1` past the top of the band, `rows.length` past the bottom. Reaching past
  * an edge takes `NEW_ROW_PX` of travel; holding it takes none, since by then
  * the new row's own box fills the space the pointer is in — `held` is the row
@@ -97,6 +97,11 @@ export function resolveRow(
   const bottom = rows[n - 1];
   if (edges.top && y < top.top - (held === -1 ? 0 : NEW_ROW_PX)) return -1;
   if (edges.bottom && y > bottom.top + bottom.h + (held === n ? 0 : NEW_ROW_PX)) return n;
+  for (let i = 0; i < n - 1; i++) {
+    const seam = (rows[i].top + rows[i].h + rows[i + 1].top) / 2;
+    const reach = Math.min(rows[i].h, rows[i + 1].h, NEW_ROW_PX) / (held === i + 0.5 ? 2 : 4);
+    if (Math.abs(y - seam) <= reach) return i + 0.5;
+  }
   const i = rows.findIndex((r) => y <= r.top + r.h);
   return i < 0 ? n - 1 : Math.max(0, i);
 }
@@ -229,7 +234,7 @@ function videoMaxLen(s: S, c: VideoClip): number {
 
 const videoAdapter: LaneAdapter<VideoClip> = {
   minLen: 0.15,
-  multiLane: true,
+  multiLane: !!ITEM_KINDS.clip.multiLane,
   rowsDescend: true,
   raws: (s) => s.clips,
   view: (c) => ({ id: c.id, start: c.start, len: ITEM_KINDS.clip.duration(c), lane: ITEM_KINDS.clip.lane(c) }),
@@ -257,7 +262,7 @@ const videoAdapter: LaneAdapter<VideoClip> = {
 
 const audioAdapter: LaneAdapter<AudioClip> = {
   minLen: 0.15,
-  multiLane: true,
+  multiLane: !!ITEM_KINDS.audio.multiLane,
   raws: (s) => s.audioClips,
   view: (a) => ({ id: a.id, start: a.start, len: ITEM_KINDS.audio.duration(a), lane: ITEM_KINDS.audio.lane(a) }),
   apply: (patches) => useEditor.getState().updateAudiosTransient(patches),
@@ -283,7 +288,7 @@ const audioAdapter: LaneAdapter<AudioClip> = {
 
 const textAdapter: LaneAdapter<Overlay> = {
   minLen: 0.2,
-  multiLane: true,
+  multiLane: !!ITEM_KINDS.overlay.multiLane,
   raws: (s) => s.overlays,
   view: (o) => ({ id: o.id, start: o.start, len: ITEM_KINDS.overlay.duration(o), lane: ITEM_KINDS.overlay.lane(o) }),
   apply: (patches) => useEditor.getState().updateOverlaysTransient(patches),
@@ -1004,7 +1009,7 @@ export function startLaneMove(e: React.PointerEvent, kind: LaneKind, id: string,
         ? targetRow < 0
           ? -Infinity
           : targetRow < usedLanes.length
-            ? usedLanes[targetRow]
+            ? usedLanes[targetRow] ?? Infinity
             : Infinity
         : self.lane;
 
@@ -1083,6 +1088,9 @@ function laneOrder(kind: LaneKind, s: S, lanes: number[]): number[] {
  * after the move folds back into 0..n-1. `beyond` counts rows past the end
  * for a group whose members straddle the edge. */
 function laneAtRow(kind: LaneKind, used: number[], row: number): number {
+  if (!Number.isInteger(row)) {
+    return (laneAtRow(kind, used, Math.floor(row)) + laneAtRow(kind, used, Math.ceil(row))) / 2;
+  }
   if (row >= 0 && row < used.length) return used[row];
   const lo = Math.min(0, ...used) - 1;
   const hi = Math.max(-1, ...used) + 1;
@@ -1112,6 +1120,20 @@ export function commitRow(kind: LaneKind, id: string, targetRow: number) {
   ad.apply(raws.map((r, i) => ad.lanePatch!(r, remap.get(moved[i]) ?? 0)));
 }
 
+/** Insert an item before a display row, using the drag's placement and undo. */
+export function insertItemRow(kind: ItemKind, id: string, beforeRow: number): void {
+  if (!ITEM_KINDS[kind].multiLane) throw new Error("This item has no movable rows.");
+  const band = kind === "clip" ? "video" : kind;
+  const ad = ADAPTERS[band];
+  const state = useEditor.getState();
+  const views = ad.raws(state).map((raw) => ad.view(raw));
+  if (!views.some((view) => view.id === id)) throw new Error("Timeline item not found.");
+  const rows = laneOrder(band, state, views.map((view) => view.lane));
+  if (!Number.isInteger(beforeRow) || beforeRow < 0 || beforeRow > rows.length) throw new Error("Row is outside this timeline band.");
+  state.pushHistory();
+  commitRow(band, id, beforeRow === 0 ? -1 : beforeRow === rows.length ? rows.length : beforeRow - 0.5);
+}
+
 /**
  * Land a new item on a display row of a multi-lane band — the row under a
  * drop, or one past either edge — by the lane arithmetic a lane drag commits
@@ -1133,7 +1155,11 @@ export function landOnRow(kind: LaneKind, row: number, add: (lane: number) => vo
   let lane = laneAtRow(kind, used, row);
   s.beginHistoryBatch();
   try {
-    if (lane < 0) {
+    if (!Number.isInteger(row)) {
+      const next = [...new Set([...used, lane])].sort((a, b) => a - b);
+      ad.apply(raws.map((r, i) => ad.lanePatch!(r, next.indexOf(views[i].lane))));
+      lane = next.indexOf(lane);
+    } else if (lane < 0) {
       const lift = -lane;
       ad.apply(raws.map((r, i) => ad.lanePatch!(r, views[i].lane + lift)));
       lane = 0;

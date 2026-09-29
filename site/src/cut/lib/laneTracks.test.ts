@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { commitRow, groupTrimEdges, landOnRow, NEW_ROW_PX, partAround, resolveRow } from "./laneTracks";
+import { runAiTool } from "./aiTools";
 import { clipLen, useEditor } from "./store";
 import { emptySubtitles } from "./types";
 import type { AudioClip, VideoClip } from "./types";
@@ -63,12 +64,14 @@ describe("resolveRow", () => {
     expect(resolveRow(rows, 219, null, open)).toBe(2);
   });
 
-  test("a pointer in the gap between rows takes the row below", () => {
+  test("a pointer between rows opens an insertion", () => {
     const gapped = [
       { top: 100, h: 40 },
       { top: 146, h: 40 },
     ];
-    expect(resolveRow(gapped, 143, null, open)).toBe(1);
+    expect(resolveRow(gapped, 143, null, open)).toBe(0.5);
+    expect(resolveRow(gapped, 153, 0.5, open)).toBe(0.5);
+    expect(resolveRow(gapped, 160, 0.5, open)).toBe(1);
   });
 
   test("a new row opens only past the reach beyond either edge", () => {
@@ -240,17 +243,17 @@ describe("element rows use the shared drop and move placement", () => {
     effect: (lane: number) => s().addEffect("blur", { at: 4, lane }),
   };
   for (const [kind, place] of Object.entries(add)) {
-    for (const row of [-1, 0, 1, 2]) {
+    for (const row of [-1, 0, 0.5, 1, 2]) {
       test(`${kind} drops on row ${row} and undoes as one edit`, () => {
         s().addOverlay({ at: 0, lane: 0 });
         s().addShape("rect", { at: 0, lane: 1 });
         const before = s().overlays;
         landOnRow("overlay", row, place);
         const landed = s().overlays.find((o) => o.id === s().selection?.id)!;
-        expect(landed.lane).toBe(Math.max(0, row));
+        expect(landed.lane).toBe(Math.max(0, Math.ceil(row)));
         expect(landed.start).toBe(4);
         expect(s().overlays.find((o) => o.id === before[0].id)?.lane).toBe(row < 0 ? 1 : 0);
-        expect(s().overlays.find((o) => o.id === before[1].id)?.lane).toBe(row < 0 ? 2 : 1);
+        expect(s().overlays.find((o) => o.id === before[1].id)?.lane).toBe(row < 0 || row === 0.5 ? 2 : 1);
         s().undo();
         expect(s().overlays).toEqual(before);
       });
@@ -259,6 +262,22 @@ describe("element rows use the shared drop and move placement", () => {
       landOnRow("overlay", 0, place);
       expect(s().overlays).toHaveLength(1);
       expect(s().overlays[0].lane).toBe(0);
+    });
+    test(`${kind} can move between occupied rows and undo`, () => {
+      s().addOverlay({ at: 0, lane: 0 });
+      const a = s().selection!.id;
+      s().addShape("rect", { at: 0, lane: 1 });
+      const b = s().selection!.id;
+      place(0);
+      const id = s().selection!.id;
+      const before = s().overlays;
+      s().pushHistory();
+      commitRow("overlay", id, 0.5);
+      expect(s().overlays.find((o) => o.id === id)?.lane).toBe(1);
+      expect(s().overlays.find((o) => o.id === a)?.lane).toBe(0);
+      expect(s().overlays.find((o) => o.id === b)?.lane).toBe(2);
+      s().undo();
+      expect(s().overlays).toEqual(before);
     });
     test(`${kind} can move to a fresh row at either end`, () => {
       s().addOverlay({ at: 0, lane: 0 });
@@ -315,4 +334,32 @@ describe("groupTrimEdges", () => {
   test("a member out of room stops at its wall while the rest keep going", () => {
     expect(groupTrimEdges(edges, 2, 5)).toEqual({ travel: 5, at: [14, 13, 13] });
   });
+});
+
+for (const kind of ["video", "audio"] as const) {
+  test(`${kind} inserts between occupied rows through the shared resolver`, () => {
+    const a = kind === "video" ? vclip({ track: 0 }) : aclip({ lane: 0 });
+    const b = kind === "video" ? vclip({ track: 1 }) : aclip({ lane: 1 });
+    const mover = kind === "video" ? vclip({ track: 0, start: 3 }) : aclip({ lane: 0, start: 3 });
+    useEditor.setState(kind === "video" ? { clips: [a, b, mover] as VideoClip[] } : { audioClips: [a, b, mover] as AudioClip[] });
+    const row = resolveRow([{ top: 0, h: 40 }, { top: 40, h: 40 }], 40, null, { top: true, bottom: true });
+    commitRow(kind, mover.id, row);
+    const lane = (id: string) => kind === "video" ? clipById(id).track : audioById(id).lane ?? 0;
+    expect(lane(mover.id)).toBe(1);
+    expect(lane(a.id)).toBe(0);
+    expect(lane(b.id)).toBe(2);
+  });
+}
+
+test("chat inserts an element row through the drag coordinator and undoes it", async () => {
+  s().addOverlay({ at: 0, lane: 0 });
+  s().addShape("rect", { at: 0, lane: 1 });
+  s().addOverlay({ at: 5, lane: 0 });
+  const id = s().selection!.id;
+  const before = s().overlays;
+  await runAiTool("insert_item_row", { kind: "overlay", id, before_row: 1 });
+  expect(s().overlays.map((o) => o.lane)).toEqual([0, 2, 1]);
+  expect(s().overlays[2].start).toBe(5);
+  s().undo();
+  expect(s().overlays).toEqual(before);
 });

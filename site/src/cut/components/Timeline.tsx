@@ -803,6 +803,7 @@ export function Timeline() {
     if (row < 0)
       return { kind: "insert", level: Math.max(0, ...overlayLayers(st.clips).map((c) => c.track)) + 1 };
     if (row >= rows.length) return { kind: "insert", level: 0 };
+    if (!Number.isInteger(row)) return { kind: "insert", level: rows[Math.floor(row)].track };
     return { kind: "track", track: rows[row].track };
   }, []);
 
@@ -1859,6 +1860,18 @@ export function Timeline() {
       />
     ) : null;
 
+  const insertionLine = (top: number, key?: number) => (
+    <div key={key} data-tl-insertion="" className="pointer-events-none absolute inset-x-0 z-30 h-0.5 bg-[#0a84ff]" style={{ top }} />
+  );
+  const insertionMarks = (slots: LaneDrag[], h: number, shift: number, external?: number) =>
+    [...new Set([...slots.map((slot) => slot.targetRow), ...(external === undefined ? [] : [external])])]
+      .filter((row) => !Number.isInteger(row))
+      .map((row) => insertionLine(Math.ceil(row) * h + shift - 1, row));
+  const videoInsertion = (row: number, track: number) => row > 0 && (
+    videoSlots.some((slot) => slot.targetRow === row - 0.5) ||
+    (overlayDrop?.target.kind === "insert" && overlayDrop.target.level === track + 1)
+  ) ? insertionLine(-4) : null;
+
   // The would-be new video track, one row past the stack's edge — the same
   // grown-row experience as the audio and title lanes. It mounts only while
   // the drag is out there, and it grows away from the stack (the top one
@@ -2310,6 +2323,7 @@ export function Timeline() {
                 (_, r) => laneRail((r + 1) * TEXT_H - 4, r)
               )}
               {rowMarks(overlayLanes.count, TEXT_H, topRowShift)}
+              {insertionMarks(overlaySlots, TEXT_H, topRowShift, elementDrop?.row)}
               {overlayLanes.used.map((lane, r) => (
                 <Fragment key={`tgap-${lane}`}>
                   {gapHighlight(
@@ -2570,6 +2584,7 @@ export function Timeline() {
               onContextMenu={openGapMenu({ kind: "video", index: track })}
               {...overlayDropHandlers}
             >
+              {videoInsertion(row, track)}
               {laneRail(rowH - 2 + railH)}
               {gapHighlight({ kind: "video", index: track }, rowH - 4)}
               {videoSlots.filter((d) => d.targetRow === row).map((d) => (
@@ -2625,6 +2640,7 @@ export function Timeline() {
             onPointerDown={deselectIfSelf}
             onContextMenu={openGapMenu({ kind: "video", index: 0 })}
           >
+            {videoInsertion(aboveTracks.length, 0)}
             {spans.length > 0 && laneRail(rowH0 - 2 + rail0)}
             {gapHighlight({ kind: "video", index: 0 }, rowH0 - 4)}
             {trackSlot(TRACK_ZERO, rowH0 - 4)}
@@ -2699,6 +2715,7 @@ export function Timeline() {
                 (_, r) => laneRail((r + 1) * AUDIO_H - 2, r)
               )}
               {rowMarks(audioLanes.count, AUDIO_H, audioTopShift)}
+              {insertionMarks(audioSlots, AUDIO_H, audioTopShift, audioDrop?.row)}
               {audioLanes.used.map((lane, r) => (
                 <Fragment key={`agap-${lane}`}>
                   {gapHighlight(

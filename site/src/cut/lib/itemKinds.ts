@@ -52,6 +52,8 @@ export interface ItemLists {
 }
 
 export interface ItemKindDef<K extends ItemKind> {
+  /** Items can move between rows or open a row between existing ones. */
+  multiLane?: boolean;
   /** The list this kind lives in. */
   list(s: ItemLists): ItemOf[K][];
   /** Store the list while preserving the document's other collections. */
@@ -86,6 +88,7 @@ function splitMedia<T extends VideoClip | AudioClip>(item: T, at: number): [T, T
 
 export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
   clip: {
+    multiLane: true,
     list: (s) => s.clips,
     withList: (s, clips) => ({ ...s, clips }),
     duration: (c) => retimeOf(c).len,
@@ -125,6 +128,7 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
     },
   },
   audio: {
+    multiLane: true,
     list: (s) => s.audioClips,
     withList: (s, audioClips) => ({ ...s, audioClips }),
     duration: (a) => retimeOf(a).len,
@@ -137,6 +141,7 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
     crossProject: (a) => a,
   },
   overlay: {
+    multiLane: true,
     list: (s) => s.overlays,
     withList: (s, overlays) => ({ ...s, overlays }),
     duration: (o) => o.end - o.start,
@@ -199,6 +204,7 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
 };
 
 export const ITEM_KIND_IDS = Object.keys(ITEM_KINDS) as ItemKind[];
+export const ROW_ITEM_KINDS = ITEM_KIND_IDS.filter((kind) => ITEM_KINDS[kind].multiLane);
 
 /** The item a selection names, as a clipboard item, or null when gone. */
 export function clipboardItemFor(s: ItemLists, sel: NonNullable<Selection>): TimelineClipboardItem | null {

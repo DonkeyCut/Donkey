@@ -13,7 +13,8 @@ import { projectOperation, type ProjectOperation } from "./projectOperation";
 import { captureRenderSnapshot, renderDoc } from "./renderSnapshot";
 import { submitPreviewSnapshot } from "./exportClient";
 
-import { ITEM_KIND_IDS, ITEM_KINDS, type ItemKind } from "./itemKinds";
+import { ITEM_KIND_IDS, ITEM_KINDS, ROW_ITEM_KINDS, type ItemKind } from "./itemKinds";
+import { insertItemRow } from "./laneTracks";
 import { timelineItem } from "./timelineItems";
 import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previewSelection";
 
@@ -1646,6 +1647,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   move_timeline_selection: (s, input) => {
     if (!isNum(input.delta)) throw new ToolError("delta is required.");
     return { delta: s.moveTimelineSelection(input.delta), selection: useEditor.getState().multiSelection };
+  },
+
+  insert_item_row: (_s, input) => {
+    if (!ROW_ITEM_KINDS.includes(input.kind as ItemKind) || typeof input.id !== "string" || !isNum(input.before_row)) throw new ToolError("kind, id and before_row are required.");
+    insertItemRow(input.kind as ItemKind, input.id, input.before_row);
+    return { ...tracksAfter() };
   },
 
   split_at: (s, input) => {

@@ -7,7 +7,7 @@
  */
 
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
-import { ITEM_KIND_IDS, canSplitItem } from "@/cut/lib/itemKinds";
+import { ITEM_KIND_IDS, ROW_ITEM_KINDS, canSplitItem } from "@/cut/lib/itemKinds";
 import { TIMELINE_ITEM_KINDS } from "@/cut/lib/timelineGroups";
 import {
   TEXT_EMPHASIS_IDS,
@@ -43,6 +43,15 @@ export const TIMELINE_TOOLS = [
     name: "move_timeline_selection",
     description: "Move selected timeline items and their group members together by delta seconds, preserving relative timing and caption word timings. Negative moves stop at the timeline start; occupied rows move the set to the next free position. Use this for a grouped selection, including captions and transitions.",
     inputSchema: obj({ delta: num("Timeline shift in seconds") }, ["delta"]),
+  },
+  {
+    name: "insert_item_row",
+    description: "Move an item into a new row before a displayed row in its own timeline band, like dropping between rows. Display rows count from the top starting at 0; the row count inserts after the last row. Empty source rows collapse. Timing stays fixed and the edit is undoable.",
+    inputSchema: obj({
+      kind: { type: "string", enum: ROW_ITEM_KINDS, description: "Timeline item kind" },
+      id: str("Timeline item id"),
+      before_row: { type: "integer", minimum: 0, description: "Display row to insert before" },
+    }, ["kind", "id", "before_row"]),
   },
   {
     name: "split_at",
