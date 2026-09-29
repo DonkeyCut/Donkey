@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PanelTopClose, PenTool, Scissors, Smile, Sparkles, StretchHorizontal, StretchVertical, Trash2, Type, User, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PanelTopClose, PenTool, Scissors, Smile, Sparkles, StretchHorizontal, Trash2, Type, User, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
@@ -1911,7 +1911,7 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
 export const LINE_HEIGHTS = [0.9, 1, 1.15, 1.25, 1.5, 1.75, 2];
 export const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
 /** Glyph stretch stops, percent of the face's own width or height. */
-export const STRETCHES = [50, 75, 100, 125, 150, 200];
+export const TEXT_WIDTHS = [0, 25, 50, 75, 100];
 
 function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const update = useEditor((s) => s.updateOverlay);
@@ -1920,7 +1920,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const opacityCk = useSliderCheckpoint();
   const spacingCk = useSliderCheckpoint();
   const lineHeightCk = useSliderCheckpoint();
-  const stretchCk = useSliderCheckpoint();
+  const widthCk = useSliderCheckpoint();
   const strokeCk = useSliderCheckpoint();
   const shadowCk = useSliderCheckpoint();
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -2112,39 +2112,15 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             />
           </Field>
         </div>
-        {/* Glyph stretch: the face drawn wider or taller than designed, the
-            same fields the stage's corner grip and the assistant write. */}
-        <div className="mt-1 grid grid-cols-2 gap-2">
-          {(["stretchX", "stretchY"] as const).map((axis) => (
-            <Field key={axis} label={axis === "stretchX" ? "Width" : "Height"}>
-              <NumberField
-                label={axis === "stretchX" ? "Width stretch" : "Height stretch"}
-                icon={axis === "stretchX" ? <StretchHorizontal /> : <StretchVertical />}
-                value={(o[axis] ?? 1) * 100}
-                min={25}
-                max={400}
-                step={5}
-                snap={[100]}
-                presets={STRETCHES}
-                format={(v) => `${Math.round(v)}%`}
-                parse={(raw) => parseNumberInput(raw.replace(/%$/, ""))}
-                onDraft={(v) => {
-                  stretchCk.begin();
-                  useEditor.getState().updateOverlayTransient(o.id, {
-                    [axis]: Math.abs(v - 100) < 0.5 ? undefined : v / 100,
-                  });
-                }}
-                onCommit={(v) => {
-                  stretchCk.begin();
-                  useEditor.getState().updateOverlayTransient(o.id, {
-                    [axis]: Math.abs(v - 100) < 0.5 ? undefined : v / 100,
-                  });
-                  stretchCk.end();
-                }}
-              />
-            </Field>
-          ))}
-        </div>
+        <Field label="Text width">
+          <NumberField label="Text box width" icon={<StretchHorizontal />}
+            value={(o.wrapWidth ?? 0) * 100} min={0} max={200} step={1} presets={TEXT_WIDTHS}
+            format={(v) => v === 0 ? "Auto" : `${Math.round(v)}%`}
+            parse={(raw) => parseNumberInput(raw.replace(/%$/, ""))}
+            onDraft={(v) => { widthCk.begin(); useEditor.getState().updateOverlayTransient(o.id, { wrapWidth: v > 0 ? v / 100 : undefined }); }}
+            onCommit={(v) => { widthCk.begin(); useEditor.getState().updateOverlayTransient(o.id, { wrapWidth: v > 0 ? v / 100 : undefined }); widthCk.end(); }}
+          />
+        </Field>
         <Row label="Color">
           <ColorField
             value={o.color}

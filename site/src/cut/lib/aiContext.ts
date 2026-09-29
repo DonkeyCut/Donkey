@@ -740,7 +740,6 @@ function describeOverlay(o: Overlay) {
     shadow: o.shadow,
     plate: o.plate,
     ...(o.plateRadius !== undefined && { plateRadius: r(o.plateRadius) }),
-    ...(o.stretchX !== undefined ? { stretchX: r(o.stretchX) } : {}),
-    ...(o.stretchY !== undefined ? { stretchY: r(o.stretchY) } : {}),
+    ...(o.wrapWidth !== undefined ? { wrapWidth: r(o.wrapWidth) } : {}),
   };
 }

@@ -1,6 +1,7 @@
-import { hasOverlayKeys, keyAt, upsertKey, type OverlayKey } from "@donkeycut/effects-kit";
+import { textBoxSize } from "@/cut/lib/textFit";
+import { PLATE_PAD_X, hasOverlayKeys, keyAt, upsertKey, type OverlayKey } from "@donkeycut/effects-kit";
 import { clipLen, type EditorState } from "@/cut/lib/store";
-import { clampOverlayPos, clipKeyed, clipPoseAt, isShapeOverlay, isTextOverlay, rectOf, type FrameRect, type OverlayPatch, type Selection } from "@/cut/lib/types";
+import { frameOf, clampOverlayPos, clipKeyed, clipPoseAt, isShapeOverlay, isTextOverlay, rectOf, type FrameRect, type OverlayPatch, type Selection } from "@/cut/lib/types";
 import { captionStyle, laneHidden, trackPos } from "@/cut/lib/subtitles";
 
 export const SELECTABLE_ITEM_KINDS = ["clip", "audio", "overlay", "cue"] as const;
@@ -23,9 +24,9 @@ type Position = {
   /** The item's angle at the gesture's start, degrees clockwise. */
   rotation: number;
   /** What a scale gesture grows: a shape or sticker's box, a title's size or
-   * stretch, a clip's frame. A keyed item scales its key instead. */
+   * wrapping width, a clip's frame. A keyed item scales its key instead. */
   box?: { w: number; h?: number };
-  text?: { size: number; stretchX: number; stretchY: number };
+  text?: { size: number; wrapWidth?: number; width: number };
 };
 
 /** Into (-180, 180], the range every rotation is stored in. */
@@ -43,7 +44,7 @@ export function previewSelectionSnapshot(s: EditorState, t: number): Position[] 
       kind: "overlay", id: o.id, x: key?.x ?? o.x, y: key?.y ?? o.y, key, keys: o.kf,
       rotation: key?.rotation ?? o.rotation ?? 0,
       box: isShapeOverlay(o) || o.kind === "sticker" ? { w: o.w, h: o.h } : undefined,
-      text: isTextOverlay(o) ? { size: o.size, stretchX: o.stretchX ?? 1, stretchY: o.stretchY ?? 1 } : undefined,
+      text: isTextOverlay(o) ? { size: o.size, wrapWidth: o.wrapWidth, width: (textBoxSize(o, frameOf(s.aspect).w).width - (o.plate ? 2 * PLATE_PAD_X * o.size : 0)) / frameOf(s.aspect).w } : undefined,
     });
   }
   for (const c of s.clips) {
@@ -126,7 +127,7 @@ const clipCenter = (p: Position) => ({ x: p.x + (p.key ? 0 : p.frame!.w / 2), y:
 /**
  * Scale the selection about an anchor (frame fractions) by kx and ky: every
  * center walks out from the anchor, and each item grows what it stores — a
- * shape's box, a sticker's width, a title's size (or its stretch on a
+ * shape's box, a sticker's width, a title's size (or its wrapping width on a
  * one-axis pull), a clip's frame, a keyed item's scale.
  */
 export function scalePreviewSelection(s: EditorState, positions: Position[], anchor: { x: number; y: number }, kx: number, ky: number) {
@@ -150,20 +151,13 @@ export function scalePreviewSelection(s: EditorState, positions: Position[], anc
       // whichever axis the pull moved.
       own = { w: Math.max(0.01, p.box.w * (p.box.h === undefined && kx === 1 ? ky : kx)), ...(p.box.h !== undefined ? { h: Math.max(0.01, p.box.h * ky) } : {}) };
     } else if (p.text) {
-      // Every frame writes the whole set from the snapshot, so a pull that
-      // turns uniform mid-drag lands cleanly on one of the two.
-      own = uniform
-        ? { size: Math.max(8, p.text.size * k), stretchX: stretch(p.text.stretchX), stretchY: stretch(p.text.stretchY) }
-        : { size: p.text.size, stretchX: stretch(p.text.stretchX * kx), stretchY: stretch(p.text.stretchY * ky) };
+      own = uniform || kx === 1
+        ? { size: Math.max(8, p.text.size * k), wrapWidth: p.text.wrapWidth === undefined ? undefined : p.text.wrapWidth * k }
+        : { size: p.text.size, wrapWidth: Math.max(0.01, Math.min(2, (p.text.wrapWidth ?? p.text.width) * kx)) };
     }
     return { p, x: clampOverlayPos(cx), y: clampOverlayPos(cy), own };
   }));
 }
-
-const stretch = (v: number) => {
-  const c = Math.max(0.25, Math.min(4, v));
-  return Math.abs(c - 1) < 1e-6 ? undefined : c;
-};
 
 /**
  * Turn the selection rigidly about a center (frame fractions) by `delta`

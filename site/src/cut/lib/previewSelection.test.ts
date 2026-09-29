@@ -98,7 +98,7 @@ test("scaling grows what each kind stores about the anchor", () => {
   expect(st().clips[0].frame).toEqual({ x: 0.0, y: 0.0, w: 0.6, h: 0.6 });
   scalePreviewSelection(st(), snapshot, { x: 0.2, y: 0.2 }, 2, 1);
   expect((st().overlays[0] as TextOverlay).size).toBe(60);
-  expect((st().overlays[0] as TextOverlay).stretchX).toBeCloseTo(2);
+  expect((st().overlays[0] as TextOverlay).wrapWidth).toBeCloseTo(snapshot[0].text!.width * 2);
 });
 
 test("rotating orbits every center and turns every item", () => {
@@ -112,4 +112,16 @@ test("rotating orbits every center and turns every item", () => {
   expect(st().overlays[1].y).toBeCloseTo(0.3);
   expect(st().clips[0].rotation).toBe(90);
   expect(st().clips[0].frame!.x + 0.15).toBeCloseTo(0.75);
+});
+
+test("chat changes text wrapping without changing font size", async () => {
+  const a = { ...title("a", 0.5, 0.5), lane: 0 };
+  const b = { ...title("b", 0.5, 0.5), lane: 1 };
+  const moving = { ...title("moving", 0.5, 0.5), start: 5, end: 8, lane: 0 };
+  useEditor.setState({ overlays: [a, b, moving] });
+  await runAiTool("update_overlay", { id: "moving", wrap_width: 0.3 });
+  expect((st().overlays[2] as TextOverlay).wrapWidth).toBe(0.3);
+  expect((st().overlays[2] as TextOverlay).size).toBe(60);
+  await runAiTool("update_overlay", { id: "moving", wrap_width: 0 });
+  expect((st().overlays[2] as TextOverlay).wrapWidth).toBeUndefined();
 });

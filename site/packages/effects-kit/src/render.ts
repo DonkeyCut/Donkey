@@ -26,7 +26,6 @@ import { elementPlugin } from "./registry";
 import { kitCanvas } from "./surface";
 import {
   lineLikeShape,
-  textStretch,
   type Overlay,
   type ShapeOverlay,
   type StickerOverlay,
@@ -262,6 +261,11 @@ export function textRoom(x: number, frameWidth: number): number {
   return Math.min(TEXT_SAFE_WIDTH, anchored) * frameWidth;
 }
 
+/** Explicit boxes wrap at their width; auto-width text stays within the frame. */
+export function textWrapRoom(o: Pick<TextOverlay, "x" | "wrapWidth">, frameWidth: number): number {
+  return o.wrapWidth && Number.isFinite(o.wrapWidth) ? Math.max(0.01, o.wrapWidth) * frameWidth : textRoom(o.x, frameWidth);
+}
+
 /**
  * Break text into lines that each fit `room`, keeping the author's own breaks.
  *
@@ -343,35 +347,7 @@ async function paintText(
   overlay: TextOverlay,
   frame: PaintFrame,
   env: RenderEnv,
-  /** Width a line may measure, in the space this call draws in. The stretch
-   * pass hands its own down, because everything measured under `ctx.scale` is
-   * drawn wider than it measures. */
-  room?: number
 ) {
-  // Glyph stretch scales everything the element paints — plate, stroke,
-  // per-glyph motion — about its center, the same space the DOM pair
-  // stretches with its CSS transform.
-  const { sx, sy } = textStretch(overlay);
-  if (sx !== 1 || sy !== 1) {
-    const cx = overlay.x * frame.width;
-    const cy = overlay.y * frame.height;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(sx, sy);
-    ctx.translate(-cx, -cy);
-    try {
-      await paintText(
-        ctx,
-        { ...overlay, stretchX: undefined, stretchY: undefined },
-        frame,
-        env,
-        textRoom(overlay.x, frame.width) / sx
-      );
-    } finally {
-      ctx.restore();
-    }
-    return;
-  }
   const { width, scale } = frame;
   const fpx = overlay.size * scale;
   const cssFont = textCssFont(overlay, fpx, env);
@@ -387,7 +363,7 @@ async function paintText(
 
   // Words stay in the picture: a line wider than the room its anchor leaves
   // is broken here, measured on the very context that is about to draw it.
-  const lines = wrapTextToRoom(overlay.text, room ?? textRoom(overlay.x, width), (line) =>
+  const lines = wrapTextToRoom(overlay.text, textWrapRoom(overlay, width), (line) =>
     ctx.measureText(line).width
   ).split("\n");
   const lineH = fpx * (overlay.lineHeight ?? LINE_HEIGHT);
@@ -461,7 +437,7 @@ async function paintText(
         });
       })();
   const widthsOf = runs ? runs.map((r) => r.lineW) : lines.map((l) => ctx.measureText(l).width);
-  const maxW = Math.max(...widthsOf, 1);
+  const maxW = overlay.wrapWidth ? textWrapRoom(overlay, width) : Math.max(...widthsOf, 1);
 
   if (overlay.plate) {
     const padX = PLATE_PAD_X * fpx;
@@ -784,11 +760,10 @@ export async function measureElementBounds(
   const ctx = scratch.getContext("2d")!;
   ctx.font = cssFont;
   if ("letterSpacing" in ctx) ctx.letterSpacing = `${(o.letterSpacing ?? 0) * fpx}px`;
-  const { sx, sy } = textStretch(o);
-  const lines = wrapTextToRoom(o.text, textRoom(o.x, frame.width) / sx, (line) =>
+  const lines = wrapTextToRoom(o.text, textWrapRoom(o, frame.width), (line) =>
     ctx.measureText(line).width
   ).split("\n");
-  const maxW = Math.max(...lines.map((l) => ctx.measureText(l).width), 1);
+  const maxW = o.wrapWidth ? textWrapRoom(o, frame.width) : Math.max(...lines.map((l) => ctx.measureText(l).width), 1);
   const lineH = fpx * (o.lineHeight ?? LINE_HEIGHT);
   let w = maxW;
   let h = lines.length * lineH;
@@ -796,7 +771,7 @@ export async function measureElementBounds(
     w += PLATE_PAD_X * fpx * 2;
     h += PLATE_PAD_Y * fpx * 2;
   }
-  if (opts?.pad === false) return { cx, cy, w: w * sx, h: h * sy };
+  if (opts?.pad === false) return { cx, cy, w, h };
   const strokePad = (o.stroke?.width ?? 0) * fpx * 2;
   const shadow = resolveShadow(o.shadow);
   const shadowPad = shadow ? (shadow.blur + Math.abs(shadow.offsetY)) * frame.scale : 0;
@@ -804,8 +779,8 @@ export async function measureElementBounds(
   return {
     cx,
     cy,
-    w: (w + strokePad * 2 + shadowPad * 2) * sx,
-    h: (h + fpx * 0.3 + strokePad * 2 + shadowPad * 2) * sy,
+    w: (w + strokePad * 2 + shadowPad * 2),
+    h: (h + fpx * 0.3 + strokePad * 2 + shadowPad * 2),
   };
 }
 

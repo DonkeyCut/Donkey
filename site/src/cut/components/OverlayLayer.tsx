@@ -18,7 +18,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, textStretch, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -28,7 +28,7 @@ import {
   SHADOW,
   wordDrawCss,
 } from "@/cut/lib/textRender";
-import { fitTextToFrame } from "@/cut/lib/textFit";
+import { fitTextToFrame, textBoxSize } from "@/cut/lib/textFit";
 import {
   behindSubjectOverlay,
   clampOverlayPos,
@@ -709,18 +709,13 @@ function OverlayItem({
   // The box carries position, rotation, and opacity; the content wrapper
   // inside it carries a title's type styles (the edit caret inherits them)
   // and the mask.
-  // A title's glyph stretch rides the box transform, so every rect the stage
-  // reads off the box — snapping, the rotate gesture — is the stretched one.
-  // The chrome twin composes its own transform from the base, keeping its
-  // grips circular.
-  const { sx, sy } = isText ? textStretch(o) : { sx: 1, sy: 1 };
   const baseTransform = `translate(-50%, -50%)${animTransform}`;
   const chromeTransform = `translate(-50%, -50%)${animMove}`;
   const style: CSSProperties = {
     // A keyframed element is placed by its pose, not by its resting x/y.
     left: `${(live?.x ?? o.x) * 100}%`,
     top: `${(live?.y ?? o.y) * 100}%`,
-    transform: sx !== 1 || sy !== 1 ? `${baseTransform} scale(${sx}, ${sy})` : baseTransform,
+    transform: baseTransform,
     opacity: (live ? live.opacity : (o.opacity ?? 1)) * (ghost ? 0.35 : 1),
   };
   const contentStyle: CSSProperties = {
@@ -728,6 +723,7 @@ function OverlayItem({
       ? (() => {
           const shadow = resolveShadow(o.shadow);
           return {
+            width: o.wrapWidth ? o.wrapWidth * stageWidth + (o.plate ? 2 * PLATE_PAD_X * o.size * scale : 0) : undefined,
             fontSize: o.size * scale,
             fontFamily: fontStack(o.font),
             fontWeight: o.weight,
@@ -831,7 +827,7 @@ function OverlayItem({
 
   // A grip resizes what the kind actually stores: a corner takes a title's
   // font size, a shape's box, a sticker's width; a side grip takes one axis
-  // alone — a shape's width or height, a title's glyph stretch. The grip's
+  // alone — a shape's width or height, a title's wrapping width. The grip's
   // opposite corner or side stays planted: a corner takes both axes by how
   // far it travels from the far corner, a side grip its own axis measured
   // from the far side, and the center walks out so the planted edge holds
@@ -846,10 +842,9 @@ function OverlayItem({
     const axis = HANDLE_AXIS[handle];
     const rad = (-(live?.rotation ?? o.rotation ?? 0) * Math.PI) / 180;
     // The box's own size on screen: the bounding rect is the turned box's
-    // envelope, so take the layout size under the pose's scale and the glyph
-    // stretch.
-    const ow = el.offsetWidth * (live?.scale ?? 1) * sx;
-    const oh = el.offsetHeight * (live?.scale ?? 1) * sy;
+    // envelope, so take the layout size under the pose's scale.
+    const ow = el.offsetWidth * (live?.scale ?? 1);
+    const oh = el.offsetHeight * (live?.scale ?? 1);
     // The planted point, in the element's own space relative to its center.
     const ax = (-axis.x * ow) / 2;
     const ay = (-axis.y * oh) / 2;
@@ -867,11 +862,7 @@ function OverlayItem({
     const d0 = Math.max(8, reach(e.clientX, e.clientY));
     const members = groupSnapshot();
     const self = members.find((m) => m.id === o.id) ?? members[0];
-    // A stretch multiplier, clamped and stored as absence at 1.
-    const stretchVal = (v: number): number | undefined => {
-      const c = Math.round(Math.min(4, Math.max(0.25, v)) * 1000) / 1000;
-      return Math.abs(c - 1) < 0.005 ? undefined : c;
-    };
+    const textSizes = new Map(members.filter(isTextOverlay).map((m) => [m.id, textBoxSize(m, frame.w)]));
     const stickerSize = (v: number) => Math.min(1.5, Math.max(0.02, v));
     // A sticker's resting height as a frame fraction: the one it stores, or
     // the grabbed box laid out under the source's own aspect. A side grip
@@ -884,11 +875,12 @@ function OverlayItem({
     };
     const scaled = (m: Overlay, k: number): Partial<Overlay> => {
       if (isTextOverlay(m)) {
-        // A side grip pulls one axis of the glyph stretch; a corner scales
-        // the font, stretch carried along.
-        if (axis.y === 0) return { stretchX: stretchVal((m.stretchX ?? 1) * k) };
-        if (axis.x === 0) return { stretchY: stretchVal((m.stretchY ?? 1) * k) };
-        return { size: Math.round(Math.min(320, Math.max(16, m.size * k))) };
+        if (axis.y === 0) {
+          const width = Math.max(frame.w * 0.01, textSizes.get(m.id)!.width * k - (m.plate ? 2 * PLATE_PAD_X * m.size : 0));
+          return { wrapWidth: Math.min(2, width / frame.w) };
+        }
+        const size = Math.min(320, Math.max(16, m.size * k));
+        return { size, ...(m.wrapWidth ? { wrapWidth: m.wrapWidth * size / m.size } : {}) };
       }
       if (m.kind === "shape") {
         const w = { w: Math.min(2, Math.max(0.01, m.w * k)) };
@@ -916,15 +908,12 @@ function OverlayItem({
         size?: number;
         w?: number;
         h?: number;
-        stretchX?: number;
-        stretchY?: number;
+        wrapWidth?: number;
       };
       if (isTextOverlay(self)) {
-        const ks = (p.size ?? self.size) / self.size;
-        return {
-          kx: "stretchX" in p ? (p.stretchX ?? 1) / (self.stretchX ?? 1) : ks,
-          ky: "stretchY" in p ? (p.stretchY ?? 1) / (self.stretchY ?? 1) : ks,
-        };
+        const before = textSizes.get(self.id)!;
+        const after = textBoxSize({ ...self, size: p.size ?? self.size, wrapWidth: p.wrapWidth ?? self.wrapWidth }, frame.w);
+        return { kx: after.width / before.width, ky: after.height / before.height };
       }
       if (self.kind === "shape")
         return { kx: (p.w ?? self.w) / self.w, ky: (p.h ?? self.h) / self.h };
@@ -944,7 +933,7 @@ function OverlayItem({
         // The center's walk that keeps the planted point on its screen spot,
         // rotated back to the screen and into frame fractions.
         const wx = axis.x ? ((kx - 1) * axis.x * ow) / 2 : 0;
-        const wy = axis.y ? ((ky - 1) * axis.y * oh) / 2 : 0;
+        const wy = axis.y ? ((ky - 1) * axis.y * oh) / 2 : isTextOverlay(self) ? ((ky - 1) * oh) / 2 : 0;
         const mx = (wx * Math.cos(rad) + wy * Math.sin(rad)) / stageWidth;
         const my = (-wx * Math.sin(rad) + wy * Math.cos(rad)) / stageHeight;
         writeTransform(
@@ -1091,7 +1080,7 @@ function OverlayItem({
         rotateCursor={rotateCursor(live?.rotation ?? o.rotation ?? 0)}
         // Every element wears the whole frame; a line has only its own
         // length to pull on.
-        handles={o.kind === "shape" && lineLikeShape(o.shape) ? BOX_HANDLES : FRAME_HANDLES}
+        handles={isText || (o.kind === "shape" && lineLikeShape(o.shape)) ? BOX_HANDLES : FRAME_HANDLES}
         onResize={resizeFrom}
         onRotate={rotateFrom}
       />
@@ -1106,8 +1095,8 @@ function OverlayItem({
           style={{
             left: "50%",
             top: "50%",
-            width: chromeLifted ? chromeSize.w * sx : "100%",
-            height: chromeLifted ? chromeSize.h * sy : "100%",
+            width: chromeLifted ? chromeSize.w : "100%",
+            height: chromeLifted ? chromeSize.h : "100%",
             transform: `translate(-50%, -50%)${chromeLifted ? ` scale(${poseZoom})` : ""}`,
           }}
         >
@@ -1146,7 +1135,7 @@ function OverlayItem({
           editing ? (
             <div
               ref={editRef}
-              className="min-w-2 outline-none select-text"
+              className="min-w-2 whitespace-pre-wrap break-words outline-none select-text"
               contentEditable
               suppressContentEditableWarning
               onBlur={commitText}
@@ -1185,7 +1174,7 @@ function OverlayItem({
       createPortal(
         (() => {
           // The twin: same placement, the base transform chain, the box's
-          // laid-out size with the glyph stretch folded into it — so the
+          // laid-out size — so the
           // chrome lands exactly on the element while escaping the frame's
           // clipping, and the grips it carries stay circular.
           const ringStyle: CSSProperties = { inset: -4.5, borderRadius: 5, borderWidth: 1.5 };
@@ -1195,8 +1184,8 @@ function OverlayItem({
             // The zoom lands in the size, never in the transform: translating
             // by half of the grown box centers it exactly where scaling the
             // small one did, and every line and grip inside stays screen-sized.
-            width: chromeSize.w * sx * poseZoom,
-            height: chromeSize.h * sy * poseZoom,
+            width: chromeSize.w * poseZoom,
+            height: chromeSize.h * poseZoom,
             transform: chromeTransform,
           };
           return (
@@ -1329,10 +1318,6 @@ function useMaskCss(
   disabled: boolean
 ): CSSProperties | undefined {
   const m = o.mask;
-  // The mask image lands on the content wrapper, inside the box's glyph
-  // stretch — so the frame-space geometry pre-divides by the stretch, and the
-  // transform lands it back where every canvas renderer draws it.
-  const { sx, sy } = isTextOverlay(o) ? textStretch(o) : { sx: 1, sy: 1 };
   // A behind (inverted subject) element renders in the canvas pass; the DOM
   // masks shapes and front subject elements.
   const subjectFront = !!m && m.kind === "subject" && !m.invert;
@@ -1387,15 +1372,15 @@ function useMaskCss(
       ctx.drawImage(snap.canvas, 0, 0);
       ctx.filter = "none";
       const url = canvas.toDataURL();
-      const posX = box.w / 2 - (o.x * stageWidth) / sx;
-      const posY = box.h / 2 - (o.y * stageHeight) / sy;
+      const posX = box.w / 2 - (o.x * stageWidth);
+      const posY = box.h / 2 - (o.y * stageHeight);
       return {
         maskImage: `url(${url})`,
         WebkitMaskImage: `url(${url})`,
         maskRepeat: "no-repeat",
         WebkitMaskRepeat: "no-repeat",
-        maskSize: `${stageWidth / sx}px ${stageHeight / sy}px`,
-        WebkitMaskSize: `${stageWidth / sx}px ${stageHeight / sy}px`,
+        maskSize: `${stageWidth}px ${stageHeight}px`,
+        WebkitMaskSize: `${stageWidth}px ${stageHeight}px`,
         maskPosition: `${posX}px ${posY}px`,
         WebkitMaskPosition: `${posX}px ${posY}px`,
       };
@@ -1423,7 +1408,6 @@ function useMaskCss(
     // box center, which is where the painter anchors the mask.
     ctx.scale(s, s);
     ctx.translate(box.w / 2, box.h / 2);
-    ctx.scale(1 / sx, 1 / sy);
     ctx.translate(-o.x * stageWidth, -o.y * stageHeight);
     paintMaskCoverage(
       ctx,
@@ -1444,7 +1428,7 @@ function useMaskCss(
     // The keyed tick folds a 15fps-quantized tLocal in only when the mask
     // actually animates; the matte stamp refreshes the subject branch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, m, box, o.x, o.y, sx, sy, stageWidth, stageHeight, scale, keyTick, snapTick]);
+  }, [active, m, box, o.x, o.y, stageWidth, stageHeight, scale, keyTick, snapTick]);
 }
 
 /**

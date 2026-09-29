@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, FlipHorizontal2, FlipVertical2, Italic, StretchHorizontal, StretchVertical, Type } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, FlipHorizontal2, FlipVertical2, Italic, StretchHorizontal, Type } from "lucide-react";
 import { hasOverlayKeys, hasSpeedCurve, lineLikeShape, poseAt, retimeOf, ZOOM_LEVELS, ZOOM_RAMP_MAX, zoomRampOf } from "@donkeycut/effects-kit";
 import { ColorField } from "@/cut/components/ColorField";
 import { FontPicker } from "@/cut/components/FontPicker";
-import { LETTER_SPACINGS, LINE_HEIGHTS, SoundQualityPanel, SoundQualityRow, STRETCHES, StylePresetsRow } from "@/cut/components/Inspector";
+import { LETTER_SPACINGS, LINE_HEIGHTS, SoundQualityPanel, SoundQualityRow, TEXT_WIDTHS, StylePresetsRow } from "@/cut/components/Inspector";
 import { NumberField } from "@/cut/components/NumberField";
 import { Field, Row, Section, SegGroup, SegToggle, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { parseNumberInput, parsePercentInput, parseSecondsInput, parseSpeedInput, ScrubValue } from "@/cut/components/ScrubValue";
@@ -353,8 +353,7 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
   const align = sharedValue(texts.map((t) => t.align ?? "center"));
   const lineHeight = sharedNumber(texts.map((t) => t.lineHeight ?? 1.25));
   const letterSpacing = sharedNumber(texts.map((t) => (t.letterSpacing ?? 0) * 100));
-  const stretchX = sharedNumber(texts.map((t) => (t.stretchX ?? 1) * 100));
-  const stretchY = sharedNumber(texts.map((t) => (t.stretchY ?? 1) * 100));
+  const wrapWidth = sharedNumber(texts.map((t) => (t.wrapWidth ?? 0) * 100));
   const color = sharedValue(texts.map((t) => t.color.toLowerCase()));
   const outlined = texts.every((t) => !!t.stroke);
   const strokeColor = sharedValue(texts.map((t) => t.stroke?.color.toLowerCase() ?? ""));
@@ -473,32 +472,13 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
           />
         </Field>
       </div>
-      <div className="mt-1 grid grid-cols-2 gap-2">
-        {(
-          [
-            ["stretchX", "Width", stretchX, StretchHorizontal],
-            ["stretchY", "Height", stretchY, StretchVertical],
-          ] as const
-        ).map(([axis, label, shared, Icon]) => (
-          <Field key={axis} label={label}>
-            <NumberField
-              label={`${label} stretch`}
-              icon={<Icon />}
-              value={shared.value}
-              mixed={shared.mixed}
-              min={25}
-              max={400}
-              step={5}
-              snap={[100]}
-              presets={STRETCHES}
-              format={(v) => `${Math.round(v)}%`}
-              parse={parsePercentText}
-              onDraft={(v) => write.draft(() => set({ [axis]: Math.abs(v - 100) < 0.5 ? undefined : v / 100 }))}
-              onCommit={(v) => write.commit(() => set({ [axis]: Math.abs(v - 100) < 0.5 ? undefined : v / 100 }))}
-            />
-          </Field>
-        ))}
-      </div>
+      <Field label="Text width">
+        <NumberField label="Text box width" icon={<StretchHorizontal />} value={wrapWidth.value} mixed={wrapWidth.mixed}
+          min={0} max={200} step={1} presets={TEXT_WIDTHS} format={(v) => v === 0 ? "Auto" : `${Math.round(v)}%`} parse={parsePercentText}
+          onDraft={(v) => write.draft(() => set({ wrapWidth: v > 0 ? v / 100 : undefined }))}
+          onCommit={(v) => write.commit(() => set({ wrapWidth: v > 0 ? v / 100 : undefined }))}
+        />
+      </Field>
       <Row label="Color">
         <ColorField
           value={color.value}

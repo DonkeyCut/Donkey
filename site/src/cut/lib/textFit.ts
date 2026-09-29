@@ -1,6 +1,6 @@
 "use client";
 
-import { textRoom, wrapTextToRoom } from "@donkeycut/effects-kit";
+import { textWrapRoom, wrapTextToRoom, LINE_HEIGHT, PLATE_PAD_X, PLATE_PAD_Y } from "@donkeycut/effects-kit";
 import { createRasterCanvas } from "./raster";
 import { fontStack, type TextOverlay } from "./types";
 
@@ -98,14 +98,17 @@ export function textFontOf(
  * anchor leaves in the frame. Returns the text unchanged when it already fits,
  * so nothing re-renders for an element that was never in trouble. */
 export function fitTextToFrame(o: TextOverlay, frameW: number): string {
-  // A stretched element is measured at its own size and drawn wider, so the
-  // room shrinks by the stretch — the same arithmetic the kit painter does
-  // under `ctx.scale`, which keeps the two breaking in the same places.
   const size = o.size;
   const font = textFontOf(o, size);
-  const room = textRoom(o.x, frameW) / Math.max(0.01, o.stretchX ?? 1);
+  const room = textWrapRoom(o, frameW);
   const width = (line: string) => measureLine(line, font, size, o.letterSpacing ?? 0);
   if (o.text.split("\n").every((line) => width(line) <= room)) return o.text;
   return wrapTextToRoom(o.text, room, width);
 }
 
+/** Resting box in design pixels, measured once for resize gestures. */
+export function textBoxSize(o: TextOverlay, frameW: number): { width: number; height: number } {
+  const lines = fitTextToFrame(o, frameW).split("\n");
+  const width = o.wrapWidth ? textWrapRoom(o, frameW) : Math.max(1, ...lines.map((line) => measureLine(line, textFontOf(o, o.size), o.size, o.letterSpacing ?? 0)));
+  return { width: width + (o.plate ? 2 * PLATE_PAD_X * o.size : 0), height: (lines.length * (o.lineHeight ?? LINE_HEIGHT) + (o.plate ? 2 * PLATE_PAD_Y : 0)) * o.size };
+}
