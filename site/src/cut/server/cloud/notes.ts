@@ -145,7 +145,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
         { libraryLocation: { path: ["residency"], equals: residency } },
         { OR: folderIds.map((id) => ({ libraryLocation: { path: ["folderId"], equals: id } })) },
       ] },
-      data: { libraryLocation: Prisma.DbNull },
+      data: { libraryLocation: { residency, folderId: null } },
     });
   }
   return {
@@ -202,7 +202,7 @@ export function createNotesCloud(db: typeof prisma = prisma) {
       if (parsedLocation && !parsedLocation.success) return err("Invalid Library location.", 400);
       const location = body.libraryLocation === undefined ? undefined
         : parsedLocation?.success ? parsedLocation.data : null;
-      if (location?.residency === "cloud" && !await db.cutFolder.findFirst({ where: { id: location.folderId, userId, scope: "library" }, select: { id: true } })) {
+      if (location?.residency === "cloud" && location.folderId !== null && !await db.cutFolder.findFirst({ where: { id: location.folderId, userId, scope: "library" }, select: { id: true } })) {
         return err("Library folder not found.", 404);
       }
       // Over the cap the write is refused outright: truncating here would

@@ -4,7 +4,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "reac
 import { useSearchParams } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { FolderPlus, Loader2, Plus, StickyNote } from "lucide-react";
-import { noteRef, type NoteLocation } from "@/cut/lib/noteReference";
+import { noteInLibraryFolder, noteRef, type NoteLocation } from "@/cut/lib/noteReference";
 import { setRefDragData, clearRefDrag } from "@/cut/lib/assetRef";
 import type { Residency } from "@/cut/lib/residency";
 import { Button } from "@/components/ui/button";
@@ -162,8 +162,7 @@ export function NotesView({ library, ref }: Props = {}) {
   const trail = folderTrail(folders, openFolder);
   const shownFolders = folders.filter((f) => f.parentId === openFolder);
   const shown = list.filter((n) => library
-    ? library.folderId === null ? !n.libraryLocation
-      : n.libraryLocation?.folderId === library.folderId && n.libraryLocation.residency === library.residency
+    ? noteInLibraryFolder(n, library.folderId, library.folderId === null ? undefined : library.residency)
     : (n.folderId ?? null) === openFolder);
   // What the composer shows: the buffer while it belongs to the note the URL
   // names, and the stored note otherwise. A note nobody has typed into has no
@@ -207,7 +206,7 @@ export function NotesView({ library, ref }: Props = {}) {
       colorIndex: 0,
       // A note written inside a folder is filed there.
       folderId: openFolder,
-      ...(library ? { libraryLocation: library.folderId ? { folderId: library.folderId, residency: library.residency } satisfies NoteLocation : null } : {}),
+      ...(library ? { libraryLocation: { folderId: library.folderId, residency: library.residency } satisfies NoteLocation } : {}),
       labelIds: [],
       isNew: true,
       saved: { title: "", body: "", colorIndex: 0, labelIds: [] },

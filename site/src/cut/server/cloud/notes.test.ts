@@ -51,6 +51,15 @@ describe("synced Library notes", () => {
     expect((await api.put("owner", "n1", request({ updatedAt: 2, libraryLocation: null }))).status).toBe(200);
     expect(db.cutNote.update.mock.calls[0][0]).toMatchObject({ data: { libraryLocation: Prisma.DbNull } });
   });
+  test("Library roots use explicit placement on every shelf", async () => {
+    for (const residency of ["browser", "local", "cloud"] as const) {
+      const { api, db } = harness();
+      const libraryLocation = { residency, folderId: null };
+      expect((await api.put("owner", "n1", request({ updatedAt: 2, libraryLocation }))).status).toBe(200);
+      expect(db.cutNote.update.mock.calls[0][0]).toMatchObject({ data: { libraryLocation } });
+      expect(db.cutFolder.findFirst.mock.calls.length).toBe(0);
+    }
+  });
   test("old phone writes cannot replace newer text or placement", async () => {
     const { api, db } = harness();
     const res = await api.put("owner", "n1", request({ title: "Old", updatedAt: 0 }));
@@ -63,6 +72,6 @@ describe("synced Library notes", () => {
     expect(db.cutNote.updateMany.mock.calls[0][0]).toEqual({ where: { userId: "owner", AND: [
       { libraryLocation: { path: ["residency"], equals: "local" } },
       { OR: ["brand", "child"].map((id) => ({ libraryLocation: { path: ["folderId"], equals: id } })) },
-    ] }, data: { libraryLocation: Prisma.DbNull } });
+    ] }, data: { libraryLocation: { residency: "local", folderId: null } } });
   });
 });

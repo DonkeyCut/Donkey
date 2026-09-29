@@ -714,7 +714,7 @@ export function LibraryView() {
     const movingNotes = (notes.data?.notes ?? []).filter((n) => ids.includes(n.id));
     if (movingNotes.length) {
       try {
-        const saved = await Promise.all(movingNotes.map((n) => saveNote({ ...n, libraryLocation: folderId && target ? { folderId, residency: target } : null })));
+        const saved = await Promise.all(movingNotes.map((n) => saveNote({ ...n, libraryLocation: { folderId, residency: target ?? n.libraryLocation?.residency ?? landing(null).residency } })));
         const byId = new Map(saved.map((n) => [n.id, n]));
         patchNotes(client, (data) => ({ ...data, notes: data.notes.map((n) => byId.get(n.id) ?? n) }));
       } catch {
@@ -1004,7 +1004,6 @@ export function LibraryView() {
                 <FolderPlus data-icon="inline-start" /> New folder
               </Button>
             )}
-            <Button variant="outline" onClick={() => noteView.current?.create()}><StickyNote data-icon="inline-start" /> Add note</Button>
             <Button onClick={() => setAddOpen(true)}>
               <Upload data-icon="inline-start" /> Add media
             </Button>
