@@ -127,7 +127,7 @@ const draftOf = (n: CutNote): NoteDraft => ({
  * top level has. */
 export type NotesViewHandle = { create: () => void };
 type Props = {
-  library?: { folderId: string; residency: Residency; name: string };
+  library?: { folderId: string | null; residency: Residency; name: string };
   ref?: Ref<NotesViewHandle>;
 };
 export function NotesView({ library, ref }: Props = {}) {
@@ -206,7 +206,7 @@ export function NotesView({ library, ref }: Props = {}) {
       colorIndex: 0,
       // A note written inside a folder is filed there.
       folderId: openFolder,
-      ...(library ? { libraryLocation: { folderId: library.folderId, residency: library.residency } satisfies NoteLocation } : {}),
+      ...(library ? { libraryLocation: library.folderId ? { folderId: library.folderId, residency: library.residency } satisfies NoteLocation : null } : {}),
       labelIds: [],
       isNew: true,
       saved: { title: "", body: "", colorIndex: 0, labelIds: [] },
@@ -476,7 +476,7 @@ export function NotesView({ library, ref }: Props = {}) {
   const pageRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div ref={pageRef} className={library ? "mb-6" : "mx-auto w-full max-w-6xl px-10 py-9"}>
+    <div ref={pageRef} className={library ? (shown.length > 0 ? "mb-6" : undefined) : "mx-auto w-full max-w-6xl px-10 py-9"}>
       {failedDraft && <p role="alert" className="py-3 text-sm text-destructive">Could not save the note. <button className="underline" onClick={() => { edit(failedDraft); openAt(failedDraft.id); setFailedDraft(null); }}>Reopen and retry</button></p>}
       {/* One note at a time, over the whole window. The list stays mounted
           behind it, so closing comes back to the same scroll position. */}

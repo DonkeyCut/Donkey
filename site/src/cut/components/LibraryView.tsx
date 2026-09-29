@@ -795,7 +795,7 @@ export function LibraryView() {
           />
         ) : null}
 
-        {openFolder && <NotesView ref={noteView} library={{ folderId: openFolder, residency: openOwner ?? target, name: trail.at(-1)?.name ?? "Library" }} />}
+        <NotesView ref={noteView} library={{ folderId: openFolder, residency: openOwner ?? target, name: trail.at(-1)?.name ?? "Library" }} />
 
         {!library.data && library.isPending && shownPending.length === 0 ? (
           <div className="grid place-items-center py-24 text-muted-foreground">
@@ -947,7 +947,7 @@ export function LibraryView() {
 
         <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
           {ctx.menu?.ids.length === 0 ? <>
-            {openFolder && <DropdownMenuItem onClick={() => noteView.current?.create()}><StickyNote /> Add note</DropdownMenuItem>}
+            <DropdownMenuItem onClick={() => noteView.current?.create()}><StickyNote /> Add note</DropdownMenuItem>
             <DropdownMenuItem onClick={() => setAddOpen(true)}><Upload /> Add media</DropdownMenuItem>
           </> : ctxFolder ? (
             <FolderMenuItems
