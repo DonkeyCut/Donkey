@@ -55,7 +55,7 @@ Imports and the assistant's conversion tool prepare playable H.264/AAC media thr
 
 The Library uploads originals even when browser probing fails; the worker prepares playback and retains the source for download. A browser-local project or shelf without the required codec borrows preparation, saves the result into its own storage, and removes the temporary cloud copy. The engine shelf uses the same worker when its tools fail. Hosted preparation requires a signed-in account with available storage and worker capacity.
 
-Retries resume the same uploaded object and job. The Library publishes the prepared asset and its storage accounting together; failed preparation keeps the upload available for retry until its staging claim expires. The pending tile reports uploading, queued, preparing, and failure states.
+Library drops share local previews and background storage across folders and panels; cards show “Importing”, and retries reuse uploaded bytes and jobs.
 
 Project conversion keeps the asset id, so existing clips continue to reference it. The same tools run in the editor and headless clients.
 

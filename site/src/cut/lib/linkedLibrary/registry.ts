@@ -101,6 +101,11 @@ export const isLinkedFile = (file: File): boolean =>
 export const linkedAccept = (): string =>
   [...kinds.values()].flatMap((k) => (k.accept ? [k.accept] : [])).join(",");
 
+/** The library asset type a dropped OS file would shelve as, when a linked
+ * kind claims it. */
+export const linkedTypeOfFile = (file: File): LibraryAsset["type"] | null =>
+  [...kinds.values()].find((k) => k.matches(file))?.type ?? null;
+
 /**
  * A dropped batch with its archives opened.
  *

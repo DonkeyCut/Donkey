@@ -1,6 +1,7 @@
 "use client";
 
-import type { LibraryUploadState } from "@/cut/lib/libraryUpload";
+import { dismissLibraryImport, importLibraryFiles, useLibraryFileImports, type LibraryArrival as Pending } from "@/cut/lib/libraryIntake";
+import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
 import { libraryFolderRef } from "@/cut/lib/folderReference";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -11,16 +12,13 @@ import {
   FolderPlus,
   Link as LinkIcon,
   Loader2,
-  RotateCcw,
   Share2,
   Trash2,
   Upload,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
-import { useElapsed } from "@/cut/hooks/useElapsed";
 import {
   Dialog,
   DialogContent,
@@ -28,21 +26,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Skeleton } from "@/components/ui/skeleton";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { LibraryCard, LIBRARY_TILE_AREA, LIBRARY_AUDIO_TILE_AREA } from "@/cut/components/LibraryCard";
 import { ShelfBadge } from "@/cut/components/ShelfBadge";
-import { assetTypeOf, isMediaFile, MEDIA_ACCEPT } from "@/cut/lib/media";
-import { isFontArchive } from "@/cut/lib/fontArchive";
+import { MEDIA_ACCEPT } from "@/cut/lib/media";
 import { saveNote } from "@/cut/lib/notes";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
-import { libraryKey, libraryScope, patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
+import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   createLibraryFolder,
   deleteFromLibrary,
@@ -57,8 +47,6 @@ import {
   moveLibraryItem,
   updateLibraryFolder,
   renameTemplate,
-  uploadToLibrary,
-  type ImportStage,
   type LibraryAsset,
   type LibraryFolder,
   type LibraryTemplateItem,
@@ -82,16 +70,11 @@ import { TemplateCard } from "./TemplateCard";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import {
   forgetLinkedCopies,
-  expandLinkedFiles,
-  isLinkedFile,
   linkedAccept,
-  isLinkedType,
-  shelfForNewItem,
   syncLinkedLibrary,
 } from "@/cut/lib/linkedLibrary";
 import { shapeBand } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
-import { AudioCardFace } from "./AudioPanel";
 import { childrenOf, folderTrail, folderWithin, parentOf } from "@/cut/lib/folderTree";
 import {
   FolderCrumb,
@@ -124,39 +107,6 @@ const isTemplate = (x: LibraryAsset | LibraryTemplateItem): x is LibraryTemplate
 /** What a delete is about to take: folders and items, picked together. */
 type DeleteSet = { folders: LibraryFolder[]; items: (LibraryAsset | LibraryTemplateItem)[] };
 const NO_PICK: DeleteSet = { folders: [], items: [] };
-
-/** What an arriving item is doing right now. An upload is one push from this
- * browser; a link is fetched by whichever shelf is taking it, and comes down
- * in stages. */
-type PendingStage = "preparing" | "uploading" | ImportStage;
-
-/** Media on its way into the library: the tile it will occupy, standing in
- * for it while the work runs. */
-type Pending = {
-  id: string;
-  /** The whole link, for the tile's tooltip: the label on the face is cut to
-   * the site and the post's id. */
-  source?: string;
-  /** The file name being uploaded, or the link being imported. */
-  name: string;
-  folderId: string | null;
-  file?: File;
-  mediaType?: LibraryAsset["type"];
-  stage: PendingStage;
-  startedAt: number;
-  /** A guess at the media's shape, for a link, so the tile opens near the size
-   * the clip will take. Uploads sit square until the file lands. */
-  shape?: { width: number; height: number };
-  /** Set when the arrival failed: the tile holds the reason, and the way to
-   * try again or give up, until the user picks one. */
-  error?: string;
-  /** The stage the work opens in, so a retry reads from the start again. */
-  startStage: PendingStage;
-  /** The whole arrival, ready to run once more: a failed tile retries by
-   * calling this, with the file or link and where it was headed still in
-   * hand. */
-  run: () => Promise<void>;
-};
 
 /** Routing words a path spends on the way to the thing: they say nothing about
  * which post this is, so a label built from one ("youtube.com/watch") reads the
@@ -197,153 +147,6 @@ function linkLabel(url: string): string {
   }
 }
 
-const STAGE_LABEL: Record<PendingStage, string> = {
-  preparing: "Preparing",
-  uploading: "Uploading",
-  queued: "Queued",
-  downloading: "Downloading",
-  saving: "Saving",
-};
-
-/** The tile an arriving item occupies: a card the size and shape the media
- * will take, its face a skeleton until the file lands, with the link it came
- * from and what the work is doing riding on top. A failed arrival holds the
- * reason until the user clears it. */
-function PendingTile({
-  item,
-  area,
-  onRetry,
-  onDismiss,
-}: {
-  item: Pending;
-  area: number;
-  onRetry: () => void;
-  onDismiss: () => void;
-}) {
-  const elapsed = useElapsed(item.error ? null : item.startedAt);
-  const [previewUrl, setPreviewUrl] = useState<string>();
-  const file = item.file;
-  const mediaType = item.mediaType;
-  const tileRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (!node || !file || !mediaType || mediaType === "font") return;
-      let url: string | undefined;
-      const observer = new IntersectionObserver(
-        (entries) => {
-          if (!entries.some((entry) => entry.isIntersecting)) return;
-          observer.disconnect();
-          url = URL.createObjectURL(file);
-          setPreviewUrl(url);
-        },
-        { rootMargin: "150px" },
-      );
-      observer.observe(node);
-      return () => {
-        observer.disconnect();
-        if (url) URL.revokeObjectURL(url);
-      };
-    },
-    [file, mediaType],
-  );
-  const frame = item.shape ?? { width: 1, height: 1 };
-  return (
-    <div
-      ref={tileRef}
-      className={cn(
-        "relative max-w-full overflow-hidden rounded-xl border",
-        item.error ? "border-destructive/50 bg-muted" : "border-border",
-      )}
-      style={{
-        width: Math.round(Math.sqrt((area * frame.width) / frame.height)),
-        aspectRatio: `${frame.width} / ${frame.height}`,
-      }}
-    >
-      {item.error ? (
-        // Clear of the strip the link and the reason share along the top.
-        <div className="flex size-full flex-col items-center justify-center gap-1.5 pt-8">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-24 justify-start"
-            onClick={onRetry}
-          >
-            <RotateCcw data-icon="inline-start" /> Retry
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-24 justify-start text-destructive hover:text-destructive"
-            onClick={onDismiss}
-          >
-            <X data-icon="inline-start" /> Cancel
-          </Button>
-        </div>
-      ) : previewUrl && mediaType === "audio" ? (
-        <AudioCardFace url={previewUrl} duration={0} durationClassName="hidden" />
-      ) : previewUrl && mediaType === "image" ? (
-        // eslint-disable-next-line @next/next/no-img-element -- local file preview
-        <img src={previewUrl} alt={item.name} className="size-full object-cover" />
-      ) : previewUrl && mediaType === "video" ? (
-        <video
-          src={previewUrl}
-          muted
-          playsInline
-          preload="metadata"
-          className="size-full object-cover"
-        />
-      ) : (
-        <Skeleton className="size-full rounded-none" />
-      )}
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                className={cn(
-                  "absolute top-1.5 left-1.5 truncate rounded-lg bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm",
-                  item.error ? "max-w-[calc(100%-4rem)]" : "max-w-[70%]",
-                )}
-              />
-            }
-          >
-            {item.name}
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs break-all">
-            {item.source ?? item.name}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-      {item.error ? (
-        // The reason rides in the tooltip: on a tile this size the message
-        // itself would cover the media it stands in for.
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className="absolute top-1.5 right-1.5 rounded-md bg-destructive/90 px-1.5 py-0.5 text-[10px] text-white" />
-              }
-            >
-              Failed
-            </TooltipTrigger>
-            <TooltipContent className="max-w-xs">{item.error}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : (
-        <span
-          className={cn(
-            "absolute bottom-1.5 flex items-center gap-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] text-white",
-            mediaType === "audio"
-              ? "right-1.5 max-w-[calc(100%-3.5rem)]"
-              : "left-1.5 max-w-[calc(100%-0.75rem)]",
-          )}
-        >
-          <span className="truncate">{STAGE_LABEL[item.stage]}</span>
-          <span className="shrink-0 font-mono tabular-nums">{elapsed}</span>
-        </span>
-      )}
-    </div>
-  );
-}
 
 export function LibraryView() {
   const noteView = useRef<NotesViewHandle>(null);
@@ -398,9 +201,10 @@ export function LibraryView() {
   // Media on its way in — an upload or a link — each one a tile in the grid
   // from the moment it starts, so the library shows the work rather than the
   // dialog holding it.
-  const [pending, setPending] = useState<Pending[]>([]);
+  const [linkPending, setPending] = useState<Pending[]>([]);
+  const filePending = useLibraryFileImports((state) => state.items);
+  const pending = useMemo(() => [...linkPending, ...filePending], [linkPending, filePending]);
   // One drain bounds probe, decode, and transfer work across overlapping drops.
-  const uploadTail = useRef(Promise.resolve());
   const [sharing, setSharing] = useState<(LibraryShareTarget & { residency: Residency }) | null>(null);
   useLayoutEffect(() => () => setSharing(null), []);
   const shareFolder = (id: string) => {
@@ -457,12 +261,14 @@ export function LibraryView() {
     reportActivity("import", pending.some((p) => !p.error));
   }, [pending]);
   const addPending = (p: Pending) => setPending((q) => [...q, p]);
-  const setStage = (id: string, stage: PendingStage) =>
+  const setStage = (id: string, stage: Pending["stage"]) =>
     setPending((q) => q.map((p) => (p.id === id ? { ...p, stage } : p)));
   const failPending = (id: string, error: string) =>
     setPending((q) => q.map((p) => (p.id === id ? { ...p, error } : p)));
-  const dropPending = (id: string) =>
+  const dropPending = (id: string) => {
     setPending((q) => q.filter((p) => p.id !== id));
+    dismissLibraryImport(id);
+  };
   // Run a failed arrival again on the tile it already has: the reason clears,
   // the clock restarts, and the same work goes out once more.
   const retryPending = (item: Pending) => {
@@ -478,97 +284,13 @@ export function LibraryView() {
           : p,
       ),
     );
-    uploadTail.current = uploadTail.current.then(item.run);
+    void item.run();
   };
 
-  // Upload a batch into `folderId` (the open folder by default — folder tiles
-  // pass their own id when files are dropped straight onto them).
-  const upload = async (
-    files: FileList | File[],
-    into: string | null = openFolder,
-  ) => {
-    const { residency, folderId } = landing(into);
-    if (!live(residency)) return;
-    const accepts = (file: File) => isMediaFile(file) || isLinkedFile(file);
-    const prepare = (file: File): Pending => {
-      const id = crypto.randomUUID();
-      // Filing can fail after storage succeeds. Retrying keeps that stored copy.
-      let asset: LibraryAsset | undefined;
-      const uploadState: LibraryUploadState = {};
-      const run = async () => {
-        try {
-          if (isFontArchive(file)) {
-            setStage(id, "preparing");
-            const children = (await expandLinkedFiles([file]))
-              .filter(accepts)
-              .map(prepare);
-            if (!children.length) {
-              throw new Error("This archive contains no supported font files.");
-            }
-            setPending((q) => q.flatMap((p) => p.id === id ? children : [p]));
-            for (const child of children) await child.run();
-            return;
-          }
-          setStage(id, residency === "browser" ? "saving" : "uploading");
-          if (!asset) {
-            const shelf = isLinkedFile(file) && !folderId
-              ? await shelfForNewItem(file.size)
-              : residency;
-            asset = await uploadToLibrary(file, shelf, {
-              state: uploadState,
-              folderId: shelf === "cloud" ? folderId : undefined,
-              onStage: (stage) => setStage(id, stage),
-            });
-          }
-          if (folderId) {
-            setStage(id, "saving");
-            await moveLibraryItem(asset.residency, asset.id, folderId);
-            asset.folderId = folderId;
-          }
-          const landed = asset;
-          // A drop can beat the first listing. Keep its tile until the cache
-          // can take the stored asset alongside the rest of the shelf.
-          if (!client.getQueryData(libraryKey(libraryScope()))) {
-            await reload();
-            if (!client.getQueryData(libraryKey(libraryScope()))) {
-              throw new Error("Could not refresh the library. Retry to show the saved file.");
-            }
-          }
-          patch((d) => ({
-            ...d,
-            assets: [landed, ...d.assets.filter((a) => a.id !== landed.id)],
-          }));
-          // A lent item is only usable once it is in reach of the menus.
-          if (isLinkedType(asset.type)) void syncLinkedLibrary();
-          dropPending(id);
-        } catch (e) {
-          failPending(
-            id,
-            e instanceof Error ? e.message : "Could not upload that file.",
-          );
-        }
-      };
-      return {
-        id,
-        name: file.name,
-        file,
-        mediaType: assetTypeOf(file) ?? (isLinkedFile(file) ? "font" : undefined),
-        folderId,
-        stage: "queued",
-        startStage: "queued",
-        startedAt: Date.now(),
-        run,
-      };
-    };
-    const batch = Array.from(files)
-      .filter((file) => accepts(file) || isFontArchive(file))
-      .map(prepare);
-    // Publish every tile before unpacking, probing, or sending the first file.
-    setPending((q) => [...q, ...batch]);
-    uploadTail.current = uploadTail.current.then(async () => {
-      for (const item of batch) await item.run();
-    });
-    await uploadTail.current;
+  const upload = (files: FileList | File[], into: string | null = openFolder) => {
+    const destination = landing(into);
+    if (!live(destination.residency)) return Promise.resolve();
+    return importLibraryFiles(files, destination, client);
   };
 
   // The link's tile goes up at once — shaped by what that kind of link usually
@@ -1137,7 +859,7 @@ export function LibraryView() {
                 {tiles.map((tile) => {
                   if ("pending" in tile)
                     return (
-                      <PendingTile
+                      <LibraryImportCard
                         key={tile.pending.id}
                         item={tile.pending}
                         area={tile.pending.mediaType === "audio" ? audioArea : TILE_AREA}

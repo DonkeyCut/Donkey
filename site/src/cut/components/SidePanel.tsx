@@ -1,5 +1,8 @@
 "use client";
 
+import { dismissLibraryImport, importLibraryFiles, useLibraryFileImports } from "@/cut/lib/libraryIntake";
+import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
+
 import { libraryFolderRef, projectFolderRef } from "@/cut/lib/folderReference";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -75,7 +78,6 @@ import {
   renameTemplate,
   saveAssetToLibrary,
   saveTemplate,
-  uploadToLibrary,
   type LibraryAsset,
   type LibraryData,
   type LibraryFolder,
@@ -92,14 +94,9 @@ import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
 import {
   forgetLinkedCopies,
-  expandLinkedFiles,
-  isLinkedFile,
   linkedAccept,
-  isLinkedType,
-  shelfForNewItem,
-  syncLinkedLibrary,
 } from "@/cut/lib/linkedLibrary";
-import { downloadMedia, isMediaFile, MEDIA_ACCEPT, revealMedia } from "@/cut/lib/media";
+import { downloadMedia, MEDIA_ACCEPT, revealMedia } from "@/cut/lib/media";
 import { mediaUrl } from "@/cut/lib/types";
 import {
   genPulseOverlay,
@@ -152,7 +149,7 @@ import { StockVideosPanel } from "./StockVideosPanel";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { STOCK_SFX } from "@/cut/lib/stockSfxManifest";
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
-import { LibraryCard } from "@/cut/components/LibraryCard";
+import { LibraryCard, LIBRARY_TILE_AREA } from "@/cut/components/LibraryCard";
 import { ShelfBadge } from "@/cut/components/ShelfBadge";
 import { MediaCardShell } from "./MediaCardShell";
 import { lightboxItemFromAsset } from "@/cut/lib/lightbox";
@@ -785,7 +782,7 @@ function MediaPanel({
           importing={importing}
         />
       ) : (
-        <LibraryPanel projectId={projectId} />
+        <LibraryPanel projectId={projectId} onImport={onImport} />
       )}
     </>
   );
@@ -1632,7 +1629,10 @@ const CAMERA_ROLL_FOLDER = "camera-roll";
  * array on every render. */
 const EMPTY_CLIPS: LibraryAsset[] = [];
 
-function LibraryPanel({ projectId }: { projectId: string }) {
+function LibraryPanel({ projectId, onImport }: {
+  projectId: string;
+  onImport: (files: FileList | File[], opts?: { mediaOnly?: boolean; folderId?: string }) => void;
+}) {
   const client = useQueryClient();
   // One cached listing serves every library surface (lib/queries.ts), and it
   // stays live while this panel is open: the shelf re-reads on a timer and
@@ -1670,7 +1670,8 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const [deleting, setDeleting] = useState<LibraryDeleteSet | null>(null);
   // The folder whose name field is open, when the right-click menu opened it.
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(0);
+  const arrivals = useLibraryFileImports((state) => state.items);
+  const pending = arrivals.filter((item) => item.folderId === openFolder);
 
   // Where an asset shows: phone recordings gather in the derived Camera Roll
   // folder whatever their server folderId says.
@@ -1781,37 +1782,11 @@ function LibraryPanel({ projectId }: { projectId: string }) {
   const shelfForNew = (folderId: string | null) =>
     (folderId ? folders.find((f) => f.id === folderId)?.residency : null) ?? activeResidency();
 
-  const upload = async (files: FileList | File[], into: string | null = openFolder) => {
-    // The Camera Roll takes nothing by hand; an upload made while it is open
-    // lands at the root like any other.
+  const upload = (files: FileList | File[], into: string | null = openFolder) => {
     const folderId = into === CAMERA_ROLL_FOLDER ? null : into;
-    const list = (await expandLinkedFiles(Array.from(files))).filter(
-      (f) => isMediaFile(f) || isLinkedFile(f)
-    );
-    if (list.length === 0) return;
     const residency = shelfForNew(folderId);
-    setUploading((n) => n + list.length);
-    for (const file of list) {
-      try {
-        // Something the Library lends rather than copies, dropped outside a
-        // folder, takes the shelf every surface can read; dropped into one, the
-        // folder still decides.
-        const shelf =
-          isLinkedFile(file) && !folderId ? await shelfForNewItem(file.size) : residency;
-        const asset = await uploadToLibrary(file, shelf);
-        if (folderId) {
-          await moveLibraryItem(shelf, asset.id, folderId).catch(() => {});
-          asset.folderId = folderId;
-        }
-        patch((d) => ({ ...d, assets: [asset, ...d.assets] }));
-        // A lent item is only usable once it is in reach of the menus.
-        if (isLinkedType(asset.type)) void syncLinkedLibrary();
-      } catch {
-        // Skip unreadable files; the rest of the batch still uploads.
-      } finally {
-        setUploading((n) => n - 1);
-      }
-    }
+    if (!reachable(residency)) return Promise.resolve();
+    return importLibraryFiles(files, { residency, folderId }, client);
   };
 
   // The whole panel takes drops: OS files upload to the shared library (into
@@ -2060,7 +2035,7 @@ function LibraryPanel({ projectId }: { projectId: string }) {
               </div>
             </div>
           )}
-          {order.length === 0 && uploading === 0 ? (
+          {order.length === 0 && pending.length === 0 ? (
             // At the root, filed-away assets, folders, and templates all count as
             // content — the invitation is only for a truly empty library.
             openFolder !== null ? (
@@ -2097,14 +2072,13 @@ function LibraryPanel({ projectId }: { projectId: string }) {
                     onDragStartExtra={(e) => onCardDragExtra(e, a)}
                   />
                 ))}
-                {uploading > 0 && (
-                  <div className="flex aspect-square flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-input text-[11px] text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" />
-                    <span>
-                      Uploading… <LiveElapsed />
-                    </span>
-                  </div>
-                )}
+                {pending.map((item) => (
+                  <LibraryImportCard key={item.id} item={item} area={LIBRARY_TILE_AREA}
+                    onRetry={() => void item.run()}
+                    onDismiss={() => dismissLibraryImport(item.id)}
+                    onUse={item.file ? () => onImport([item.file!], { mediaOnly: true }) : undefined}
+                  />
+                ))}
               </Marquee>
           )}
         </ScrollArea>
