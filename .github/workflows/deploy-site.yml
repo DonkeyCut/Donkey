@@ -50,6 +50,11 @@ jobs:
         working-directory: site
         run: npm ci
 
+      - name: Install media test tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
       - name: Build ChatGPT widget
         working-directory: site
         run: npm run chatgpt:build
