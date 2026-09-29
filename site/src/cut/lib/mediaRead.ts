@@ -68,9 +68,7 @@ export interface FrameSize {
 }
 
 export class UnreadableMediaError extends Error {
-  /** The container parsed and the file carries video — this browser just has
-   * no decoder for it. Callers that can convert branch on this rather than on
-   * the message. */
+  /** The container parsed, but a media stream needs a decoder this runtime lacks. */
   readonly undecodable: boolean;
 
   constructor(message = "Cut can't read this media file.", undecodable = false) {
@@ -362,9 +360,9 @@ export async function hasUndecodableVideo(input: Input): Promise<boolean> {
 
 /** The primary audio track, or null — same decodability rule as video. */
 export async function audioTrackOf(input: Input): Promise<InputAudioTrack | null> {
-  const track = await tracked(input.getPrimaryAudioTrack());
-  if (!track) return null;
-  return headless() || (await track.canDecode()) ? track : null;
+  return tracked(input.getPrimaryAudioTrack({
+    filter: (track) => headless() ? track.codec !== null : track.canDecode(),
+  }));
 }
 
 /** Read what a file is: how long, whether it carries picture or sound, and at
@@ -383,6 +381,9 @@ export async function probeMediaFile(src: string | Blob): Promise<MediaProbe> {
         "This video is in a format Cut can't decode in this browser.",
         true
       );
+    }
+    if (!audio && (await tracked(input.getAudioTracks())).length) {
+      throw new UnreadableMediaError("This file's audio needs conversion.", true);
     }
     if (!video && !audio) throw new UnreadableMediaError();
     const [duration, bytes] = await Promise.all([input.computeDuration(), input.source.getSizeOrNull()]);

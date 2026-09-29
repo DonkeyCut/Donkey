@@ -80,9 +80,10 @@ setHostMediaStore({
     const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
     const outcome = await convertToMp4(handle, src, outPath, { maxHeight: opts.maxHeight });
     return {
-      fileName,
+      fileName: outcome.unchanged ? source.fileName : fileName,
+      ...(outcome.unchanged ? { unchanged: true } : {}),
       reencoded: outcome.transcodedVideo || outcome.transcodedAudio,
-      duration: await probeDuration(outPath),
+      duration: await probeDuration(outcome.unchanged ? src : outPath),
       ...(outcome.width !== undefined ? { width: outcome.width, height: outcome.height } : {}),
     };
   },

@@ -24,10 +24,10 @@ export const convertApi = {
       const out = path.join(tmp, mp4NameFor(path.basename(file.name) || "media"));
       await writeFile(src, new Uint8Array(await file.arrayBuffer()));
       const handle = { tmpDir: tmp, outPath: out, progress: 0, log: [] as string[] };
-      await convertToMp4(handle, src, out, {
+      const outcome = await convertToMp4(handle, src, out, {
         maxHeight: Number.isFinite(maxHeight) && maxHeight > 0 ? maxHeight : undefined,
       });
-      const bytes = await readFile(out);
+      const bytes = await readFile(outcome.unchanged ? src : out);
       return new Response(new Uint8Array(bytes), {
         headers: { "Content-Type": "video/mp4", "Content-Length": String(bytes.length) },
       });

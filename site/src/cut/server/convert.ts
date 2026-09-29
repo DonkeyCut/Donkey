@@ -44,53 +44,67 @@ const MP4_EXT = /\.(mp4|m4v)$/i;
  * to leave it alone. */
 export const fitsAlready = (
   file: string,
-  codecs: { video?: string; audio?: string },
+  codecs: { video?: string; audio?: string; remux?: boolean; videoNeedsEncoding?: boolean },
   work: { shrink: boolean; sdr: boolean }
 ) =>
   MP4_EXT.test(file) &&
   !work.shrink &&
   !work.sdr &&
+  !codecs.remux &&
+  !codecs.videoNeedsEncoding &&
   (!codecs.video || KEEPS_VIDEO.has(codecs.video)) &&
   (!codecs.audio || KEEPS_AUDIO.has(codecs.audio));
 
-/** The first video and audio stream's codec names, or undefined for a file
- * that carries no such stream (or a probe that fails — the conversion then
- * takes the re-encode path, which is correct for anything). */
-export function streamCodecs(file: string): Promise<{ video?: string; audio?: string }> {
-  return new Promise((resolve) => {
+export type MediaStream = {
+  index: number;
+  codec_type?: string;
+  codec_name?: string;
+  codec_tag_string?: string;
+  pix_fmt?: string;
+  disposition?: { default?: number; attached_pic?: number };
+};
+
+/** Choose the playable audio rendition carried beside optional spatial tracks. */
+export function selectConversionStreams(streams: MediaStream[]) {
+  const video = streams.find((s) => s.codec_type === "video" && !s.disposition?.attached_pic);
+  const audioTracks = streams.filter((s) => s.codec_type === "audio");
+  const knownAudio = audioTracks.filter((s) => s.codec_name && s.codec_name !== "unknown" && s.codec_tag_string !== "apac");
+  const audio = knownAudio.find((s) => s.disposition?.default) ?? knownAudio[0];
+  if (audioTracks.length && !audio) throw new Error("This file has no supported audio track for conversion.");
+  if (video && (!video.codec_name || video.codec_name === "unknown")) throw new Error("This file has no supported video track for conversion.");
+  return {
+    video: video?.codec_name,
+    audio: audio?.codec_name,
+    videoIndex: video?.index,
+    videoNeedsEncoding: !!video && (video.codec_name !== "h264" || (!!video.pix_fmt && video.pix_fmt !== "yuv420p" && video.pix_fmt !== "yuvj420p")),
+    audioIndex: audio?.index,
+    remux: audioTracks.length > 1,
+  };
+}
+
+/** Probe stream indexes as well as codecs so conversion maps the selected rendition. */
+export function streamCodecs(file: string): Promise<ReturnType<typeof selectConversionStreams>> {
+  return new Promise((resolve, reject) => {
     const p = spawn("ffprobe", [
-      "-v", "error",
-      "-show_entries", "stream=codec_type,codec_name",
-      "-of", "json",
-      file,
+      "-v", "error", "-show_entries",
+      "stream=index,codec_type,codec_name,codec_tag_string,pix_fmt:stream_disposition=default,attached_pic",
+      "-of", "json", file,
     ]);
     let out = "";
     const timer = setTimeout(() => {
       p.kill("SIGKILL");
-      resolve({});
+      reject(new Error("Media inspection timed out."));
     }, 30_000);
     timer.unref();
     p.stdout.on("data", (d) => (out += d));
     p.on("close", (code) => {
       clearTimeout(timer);
-      if (code !== 0) return resolve({});
+      if (code !== 0) return reject(new Error("Could not inspect this media file."));
       try {
-        const streams = (JSON.parse(out).streams ?? []) as {
-          codec_type?: string;
-          codec_name?: string;
-        }[];
-        resolve({
-          video: streams.find((s) => s.codec_type === "video")?.codec_name,
-          audio: streams.find((s) => s.codec_type === "audio")?.codec_name,
-        });
-      } catch {
-        resolve({});
-      }
+        resolve(selectConversionStreams((JSON.parse(out).streams ?? []) as MediaStream[]));
+      } catch (error) { reject(error); }
     });
-    p.on("error", () => {
-      clearTimeout(timer);
-      resolve({});
-    });
+    p.on("error", (error) => { clearTimeout(timer); reject(error); });
   });
 }
 
@@ -112,7 +126,7 @@ export async function convertToMp4(
   const shrink = !!(cap && dims && dims.height > cap);
   const color = codecs.video ? await videoColorInfo(src) : null;
   const sdr = sdrConvert(color, "yuv420p");
-  const transcodedVideo = !!codecs.video && (!KEEPS_VIDEO.has(codecs.video) || shrink || !!sdr);
+  const transcodedVideo = !!codecs.video && (codecs.videoNeedsEncoding || shrink || !!sdr);
   const transcodedAudio = !!codecs.audio && !KEEPS_AUDIO.has(codecs.audio);
   if (fitsAlready(src, codecs, { shrink, sdr: !!sdr })) {
     return {
@@ -125,7 +139,7 @@ export async function convertToMp4(
 
   const video: string[] = [];
   if (codecs.video) {
-    video.push("-map", "0:v:0");
+    video.push("-map", `0:${codecs.videoIndex}`);
     if (!transcodedVideo) {
       video.push("-c:v", "copy");
     } else {
@@ -146,7 +160,7 @@ export async function convertToMp4(
 
   const audio: string[] = [];
   if (codecs.audio) {
-    audio.push("-map", "0:a:0");
+    audio.push("-map", `0:${codecs.audioIndex}`);
     audio.push(...(transcodedAudio ? ["-c:a", "aac", "-b:a", "192k"] : ["-c:a", "copy"]));
   }
 
