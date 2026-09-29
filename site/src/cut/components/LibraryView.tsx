@@ -436,7 +436,7 @@ export function LibraryView() {
     const movingNotes = (notes.data?.notes ?? []).filter((n) => ids.includes(n.id));
     if (movingNotes.length) {
       try {
-        const saved = await Promise.all(movingNotes.map((n) => saveNote({ ...n, libraryLocation: folderId && target ? { folderId, residency: target } : null })));
+        const saved = await Promise.all(movingNotes.map((n) => saveNote({ ...n, libraryLocation: { folderId, residency: target ?? n.libraryLocation?.residency ?? landing(null).residency } })));
         const byId = new Map(saved.map((n) => [n.id, n]));
         patchNotes(client, (data) => ({ ...data, notes: data.notes.map((n) => byId.get(n.id) ?? n) }));
       } catch {
@@ -656,7 +656,7 @@ export function LibraryView() {
     if (staleFolder) router.replace(homeHref(base, "library"));
   }, [staleFolder, router, base]);
   const hasContent =
-    (notes.data?.notes.some((note) => !!note.libraryLocation?.folderId) ?? false) ||
+    (notes.data?.notes.some((note) => !!note.libraryLocation) ?? false) ||
     all.length > 0 ||
     folders.length > 0 ||
     templates.length > 0 ||

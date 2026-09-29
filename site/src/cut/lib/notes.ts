@@ -155,7 +155,7 @@ export async function saveNoteFolder(
 
 export async function unfileLibraryNotes(residency: "browser" | "local", folderIds: string[]): Promise<void> {
   const res = await notesFetch("/api/cut/notes/library-location", json({ residency, folderIds }));
-  if (!res.ok) throw new Error("Could not return the folder’s notes to Notes.");
+  if (!res.ok) throw new Error("Could not move the folder’s notes to the Library root.");
 }
 
 /** Delete a folder. What it held comes up one level. */

@@ -162,7 +162,7 @@ export function NotesView({ library, ref }: Props = {}) {
   const trail = folderTrail(folders, openFolder);
   const shownFolders = folders.filter((f) => f.parentId === openFolder);
   const shown = list.filter((n) => library
-    ? noteInLibraryFolder(n, library.folderId, library.residency)
+    ? noteInLibraryFolder(n, library.folderId, library.folderId === null ? undefined : library.residency)
     : (n.folderId ?? null) === openFolder);
   // What the composer shows: the buffer while it belongs to the note the URL
   // names, and the stored note otherwise. A note nobody has typed into has no
@@ -206,7 +206,7 @@ export function NotesView({ library, ref }: Props = {}) {
       colorIndex: 0,
       // A note written inside a folder is filed there.
       folderId: openFolder,
-      ...(library ? { libraryLocation: library.folderId ? { folderId: library.folderId, residency: library.residency } satisfies NoteLocation : null } : {}),
+      ...(library ? { libraryLocation: { folderId: library.folderId, residency: library.residency } satisfies NoteLocation } : {}),
       labelIds: [],
       isNew: true,
       saved: { title: "", body: "", colorIndex: 0, labelIds: [] },

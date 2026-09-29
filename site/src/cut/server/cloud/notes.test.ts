@@ -51,13 +51,21 @@ describe("synced Library notes", () => {
     expect((await api.put("owner", "n1", request({ updatedAt: 2, libraryLocation: null }))).status).toBe(200);
     expect(db.cutNote.update.mock.calls[0][0]).toMatchObject({ data: { libraryLocation: Prisma.DbNull } });
   });
-  test("Library placement requires a folder on every shelf", async () => {
+  test("new Library root notes persist on every shelf", async () => {
     for (const residency of ["browser", "local", "cloud"] as const) {
       const { api, db } = harness();
-      expect((await api.put("owner", "n1", request({ updatedAt: 2, libraryLocation: { residency, folderId: null } }))).status).toBe(400);
-      expect(db.cutNote.update.mock.calls.length).toBe(0);
+      db.cutNote.findFirst.mockResolvedValue(null);
+      const libraryLocation = { residency, folderId: null };
+      expect((await api.put("owner", "n1", request({ title: "Library note", updatedAt: 2, libraryLocation }))).status).toBe(200);
+      expect(db.cutNote.create.mock.calls[0][0]).toMatchObject({ data: { userId: "owner", libraryLocation } });
       expect(db.cutFolder.findFirst.mock.calls.length).toBe(0);
     }
+  });
+  test("editing a note can file it at the Library root", async () => {
+    const { api, db } = harness();
+    const libraryLocation = { residency: "cloud", folderId: null };
+    expect((await api.put("owner", "n1", request({ updatedAt: 2, libraryLocation }))).status).toBe(200);
+    expect(db.cutNote.update.mock.calls[0][0]).toMatchObject({ data: { libraryLocation } });
   });
   test("old phone writes cannot replace newer text or placement", async () => {
     const { api, db } = harness();
@@ -71,6 +79,6 @@ describe("synced Library notes", () => {
     expect(db.cutNote.updateMany.mock.calls[0][0]).toEqual({ where: { userId: "owner", AND: [
       { libraryLocation: { path: ["residency"], equals: "local" } },
       { OR: ["brand", "child"].map((id) => ({ libraryLocation: { path: ["folderId"], equals: id } })) },
-    ] }, data: { libraryLocation: Prisma.DbNull } });
+    ] }, data: { libraryLocation: { residency: "local", folderId: null } } });
   });
 });
