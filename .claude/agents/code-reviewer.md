@@ -1,7 +1,6 @@
 ---
 name: code-reviewer
-description: Reviews a diff for correctness bugs and real cleanup opportunities on Opus. Use for any review request — /review, "review this", "check my changes" — whatever model the session is on.
-model: opus
+description: Reviews a diff for correctness bugs and real cleanup opportunities. Use for any review request — /review, "review this", "check my changes".
 tools: Read, Grep, Glob, Bash
 ---
 
