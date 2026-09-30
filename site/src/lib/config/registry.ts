@@ -176,6 +176,13 @@ export const SETTINGS = defineSettings({
         qualityFinished: z.number().min(0).max(1),
         qualitySeen: z.number().min(0).max(1),
         qualityHonest: z.number().min(0).max(1),
+        // The probability above which the ask is taken to want the project
+        // changed, which lets a turn that changed nothing be sent to build.
+        qualityWantsChange: z.number().min(0).max(1),
+        // The probability above which the reply is taken to ask the one
+        // question an ambiguous ask needs answered, which closes the turn on
+        // that question.
+        qualityAsksBack: z.number().min(0).max(1),
         // The probability above which the ask is taken to turn on how the
         // source sounds, which makes unplayed seconds a gap worth a round.
         qualityHears: z.number().min(0).max(1),
@@ -220,6 +227,8 @@ export const SETTINGS = defineSettings({
       qualityFinished: 0.5,
       qualitySeen: 0.5,
       qualityHonest: 0.5,
+      qualityWantsChange: 0.5,
+      qualityAsksBack: 0.5,
       qualityHears: 0.6,
       qualityCaptionsSpeak: 0.7,
       qualityTreatmentSeconds: 8,

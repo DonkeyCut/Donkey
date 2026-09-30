@@ -44,6 +44,8 @@ const work = (over: Partial<TurnWork> = {}): TurnWork => ({
 
 function answers(over: {
   finished?: number;
+  wantsChange?: number;
+  asksBack?: number;
   seen?: number;
   honest?: number;
   hears?: number;
@@ -53,6 +55,8 @@ function answers(over: {
   const closeness = over.closeness ?? "normal";
   return {
     finished: { type: "noul", noul: over.finished ?? 0.9 },
+    wantsChange: { type: "noul", noul: over.wantsChange ?? 0.9 },
+    asksBack: { type: "noul", noul: over.asksBack ?? 0.1 },
     seen: { type: "noul", noul: over.seen ?? 0.9 },
     honest: { type: "noul", noul: over.honest ?? 0.9 },
     hears: { type: "noul", noul: over.hears ?? 0.1 },
@@ -380,18 +384,45 @@ describe("qualityVerdict", () => {
     expect(qualityVerdict(answers({ finished: 0.9 }), chat, settings)).toBeNull();
   });
 
+  test("a question the judge finds thin is answered again, never built", () => {
+    // `finished` reads low on a question whose reply came up short; only the
+    // judgment that the ask wants the project changed can send it to build.
+    const question = work({
+      sources: [],
+      mutated: false,
+      ran: ["get_transcript"],
+      request: "what does the speaker say in the attached audio?",
+      reply: "Here is the transcript.",
+    });
+    expect(qualityVerdict(answers({ finished: 0.2, wantsChange: 0.1 }), question, settings)).toBeNull();
+  });
+
+  test("an ask for work the judge finds unfinished and unbuilt is sent to build", () => {
+    const words = work({ sources: [], mutated: false, ran: ["get_state"], reply: "I would add three titles." });
+    expect(qualityVerdict(answers({ finished: 0.2, wantsChange: 0.9 }), words, settings)?.step).toBe("build");
+  });
+
   test("a turn that asked the one question an ambiguous ask earns is not sent to build", () => {
-    // The gate engages on a turn that changed nothing; what keeps a question
-    // from being ordered to guess is the judge answering finished true, which
-    // is the case the question spells out.
+    // The gate engages on a turn that changed nothing and an ask for work the
+    // judge finds unfinished; what keeps the turn from being ordered to guess
+    // is the judgment that the reply asked back.
     const asked = work({
       sources: [],
       mutated: false,
-      ran: [],
-      request: "make it pop",
-      reply: "Do you mean the titles or the cuts?",
+      ran: ["get_state"],
+      request: "make that clip a bit shorter",
+      reply: "Which clip: the intro at 0s or the interview at 12s?",
     });
-    expect(qualityVerdict(answers({ finished: 0.9 }), asked, settings)).toBeNull();
+    expect(
+      qualityVerdict(answers({ finished: 0.2, wantsChange: 0.9, asksBack: 0.9 }), asked, settings),
+    ).toBeNull();
+  });
+
+  test("a reply that asks something the ask already settles is still sent to build", () => {
+    const stalled = work({ sources: [], mutated: false, ran: ["get_state"], reply: "Shall I go ahead?" });
+    expect(
+      qualityVerdict(answers({ finished: 0.2, wantsChange: 0.9, asksBack: 0.1 }), stalled, settings)?.step,
+    ).toBe("build");
   });
 
   test("the build steer carries what already stands, so the second pass adds to it", () => {
@@ -508,9 +539,11 @@ describe("recordLook", () => {
 });
 
 describe("QUALITY_QUESTIONS", () => {
-  test("asks whether the work is finished, seen, honest, and what comes next", () => {
+  test("asks whether the work is finished, wanted, asked back, seen, honest, and what comes next", () => {
     expect(Object.keys(QUALITY_QUESTIONS)).toEqual([
       "finished",
+      "wantsChange",
+      "asksBack",
       "seen",
       "honest",
       "hears",

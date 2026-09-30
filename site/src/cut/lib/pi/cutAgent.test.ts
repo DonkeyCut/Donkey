@@ -62,6 +62,8 @@ function routeAnswers() {
 function qualityAnswers(finished: number) {
   return {
     finished: { type: "noul", noul: finished },
+    wantsChange: { type: "noul", noul: 0.9 },
+    asksBack: { type: "noul", noul: 0.1 },
     seen: { type: "noul", noul: finished },
     honest: { type: "noul", noul: 0.9 },
     hears: { type: "noul", noul: 0.1 },

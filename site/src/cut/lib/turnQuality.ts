@@ -11,8 +11,8 @@ import type { Settings } from "@/lib/config/registry";
 // unbuilt, goes back to work before it replies.
 //
 // The looking is what makes the judgment measurable — coverage, notes and
-// cuts are numbers the turn cannot argue with — so a turn that opened no
-// source is never held here.
+// cuts are numbers the turn cannot argue with. A turn that opened no source
+// is held on one measure only: an ask for work that changed nothing.
 //
 // The judgment reads the record in fields, never the user's words for intent
 // — the request is state to judge against, and every threshold and cap lives
@@ -129,9 +129,25 @@ export const QUALITY_QUESTIONS = {
   finished: noul(
     "Is the job `request` asks for actually finished in `editor`? Judge the editor's state and `ran`, not the reply's account of it.",
     {
-      true: "Everything the request named exists in the editor now; the request asked for nothing to be built — a question, a look at the footage, a conversation; the request is genuinely ambiguous or blocked and the reply asks the one question that settles it; or it asks for something this editor refuses and the reply says so plainly.",
+      true: "Everything the request named exists in the editor now; the request asked for nothing to be built — a question, a look at the footage, a conversation; or it asks for something this editor refuses and the reply says so plainly.",
       false:
         "Part of the ask is missing, only planned, or only described in words: shots the reply says it would lay down that no item shows, text the reference has that no title carries, a build stopped halfway.",
+    },
+  ),
+  wantsChange: noul(
+    "Does `request` ask for a change to the project to be MADE NOW — an instruction to edit, build, add, remove, move, generate or replicate something in the editor?",
+    {
+      true: "The ask is an instruction to do work on the cut now: edit this, build that, add, remove, move, generate, replicate.",
+      false:
+        "The ask leaves the project as it is: asking how something would be done, what the options are, for a plan, an explanation or advice, even when the subject is an edit; a question; a transcript or a description read back; a look at the footage; an opinion; a conversation; or a complaint that asks for nothing to be done.",
+    },
+  ),
+  asksBack: noul(
+    "Does `reply` end by asking the one question a genuinely ambiguous or blocked `request` needs answered before any work can start — which clip, which of two readings, a missing file?",
+    {
+      true: "The reply asks exactly that question, and the request cannot be acted on until it is answered.",
+      false:
+        "The reply does the work, reports it, answers a question, or asks something the request already settles.",
     },
   ),
   seen: noul(
@@ -179,6 +195,8 @@ export const QUALITY_QUESTIONS = {
 
 export type QualityAnswers = {
   finished: NoulAnswer;
+  wantsChange: NoulAnswer;
+  asksBack: NoulAnswer;
   seen: NoulAnswer;
   honest: NoulAnswer;
   hears: NoulAnswer;
@@ -396,8 +414,18 @@ export function qualityVerdict(
   // half-finished — which is why a doubt about it needs a measure — but it can
   // prove nothing was built. A turn that changed nothing has no work to
   // duplicate, so sending it back can only add, and one that has already been
-  // sent back without moving closes on the gate's own mark.
-  if (!work.mutated && answers.finished.noul < settings.qualityFinished)
+  // sent back without moving closes on the gate's own mark. Whether work was
+  // asked for is its own judgment: `finished` also reads low on a question
+  // the reply answered thinly, and a question sent to build gets edits nobody
+  // wanted. So is whether the reply asked back: an ask that could mean two
+  // things earns the one question that settles it, and a turn sent to build
+  // over that question guesses.
+  if (
+    !work.mutated &&
+    answers.wantsChange.noul >= settings.qualityWantsChange &&
+    answers.asksBack.noul < settings.qualityAsksBack &&
+    answers.finished.noul < settings.qualityFinished
+  )
     return {
       step: "build",
       steer:
