@@ -9,7 +9,7 @@ export const maxDuration = 300;
 
 // The nightly results run for every live experiment. Vercel's cron
 // authenticates with the CRON_SECRET bearer token; a run for one experiment
-// starts from su.
+// enqueues the same job with its id.
 export const GET = async (request: NextRequest) => {
   if (!(await isVercelCron(request))) return notFoundResponse();
   return NextResponse.json(await enqueueJob("experiment-results", {}, "vercel-cron"));

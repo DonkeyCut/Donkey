@@ -4,9 +4,8 @@
 // donkeycut.com at the edge (Cloudflare) and never reach this app.
 //
 // The set below is the product host and its aliases, and it is what the
-// www-to-apex canonicalization keys off. Sibling subdomains — media, worker,
-// reply, su — are deliberately outside it: each is its own surface with its
-// own routing.
+// www-to-apex canonicalization keys off. Sibling subdomains are deliberately
+// outside it: each is its own surface with its own routing.
 //
 // Local dev is deliberately absent from the set: the proxy serves localhost
 // the same mapping, keeping the session cookie same-origin on the one dev
@@ -40,8 +39,7 @@ export const OUTREACH_REPLY_HOST = "reply.donkeycut.com";
 export const CUT_WORKER_HOST = "worker.donkeycut.com";
 export const CUT_WORKER_WAKE_URL = `https://${CUT_WORKER_HOST}/wake`;
 
-// The super-user app lives in a private repo on its own host and signs in
-// through donkeycut.com, which trusts it as a callback origin (src/lib/auth.ts).
+// An internal admin app on su.donkeycut.com signs in through this host.
 export const SU_HOST = "su.donkeycut.com";
 export const SU_ORIGIN = `https://${SU_HOST}`;
 

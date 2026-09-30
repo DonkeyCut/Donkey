@@ -1,8 +1,8 @@
 // Founder outreach: one row per account per campaign, seeded by the nightly
-// outreach-scan job (src/lib/jobs/outreach-scan.ts) and worked by hand from the
-// super-user Outreach tab. The row is a marker, not a mailbox — it carries
-// status, timestamps, and the scan's credit snapshot, never a subject or a message
-// body. The conversation itself lives in the operator's inbox.
+// outreach-scan job (src/lib/jobs/outreach-scan.ts) and worked by hand. The
+// row is a marker, not a mailbox — it carries status, timestamps, and the
+// scan's credit snapshot, never a subject or a message body. The conversation
+// itself lives in the operator's inbox.
 
 model UserOutreach {
   id           String   @id @default(cuid())
@@ -18,7 +18,7 @@ model UserOutreach {
   lastSentAt   DateTime?
   repliedAt    DateTime?
   ignoredAt    DateTime?
-  // The super user whose click sent or filed the row.
+  // The super user who sent or filed the row.
   actorUserId  String?
   // The scan's snapshot, so the list renders from this table alone.
   spentMicros  BigInt   @default(0)
@@ -63,7 +63,7 @@ model OutreachTemplate {
   updatedAt DateTime @updatedAt
 }
 
-// A promotion is one email written on su and sent to a segment: an audience
+// A promotion is one email sent to a segment: an audience
 // (the experiment rules, minus country) and, optionally, everyone who already
 // received earlier promotions left out. The words live here so a draft can be
 // edited, test-sent and counted before anything goes out. Sending resolves the

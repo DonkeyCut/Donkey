@@ -1,4 +1,4 @@
-// The outreach campaigns the scan and the super-user surface know about. Ids are
+// The outreach campaigns the scan knows about. Ids are
 // code, not data: adding one here is what makes it scannable and listable.
 
 /** Free accounts that spent real credits recently, or that are holding a real

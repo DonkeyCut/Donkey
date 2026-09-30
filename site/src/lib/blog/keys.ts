@@ -1,6 +1,6 @@
 // Where a blog post lives: the key scheme in R2, the public addresses on
-// donkeycut.com, and the list's page size. Client-safe, so the su editor and
-// the public pages build the same paths.
+// donkeycut.com, and the list's page size. Client-safe, so any page builds
+// the same paths.
 import { CUT_MEDIA_ORIGIN } from "@/cut/lib/hosts";
 
 // Everything a post owns sits under this prefix, so a delete sweeps it whole.

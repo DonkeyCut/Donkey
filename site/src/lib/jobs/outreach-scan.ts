@@ -42,9 +42,9 @@ function newest(...dates: (Date | null | undefined)[]): Date | null {
 }
 
 // Rolls product usage and billing state into the outreach list. Runs nightly
-// from /api/marketing/outreach/scan and by hand from the Outreach tab's Scan
-// now button. Everything the Outreach tab shows is written here or read
-// alongside it, so the page itself never touches the credit tables.
+// from /api/marketing/outreach/scan, or by hand as the same job. Everything
+// the list shows is written here or read alongside it, so a reader never
+// touches the credit tables.
 //
 // Two kinds of people make the list. Free accounts using the product well —
 // spending credits or holding media, and warm — are the ones worth a personal

@@ -1,7 +1,7 @@
 // Nightly analytics pipeline. Extraction writes one small JSON file per day
 // per source to R2, a snapshot of users and balances is rewritten every run,
 // and consolidation folds the window into the single rollup.json the
-// superuser dashboard reads. Idempotency is per day: a day file is *final*
+// analytics routes read. Idempotency is per day: a day file is *final*
 // once it was written after its UTC day closed, and final files are skipped
 // unless forced — so a premature run of today, a per-day retrigger, and the
 // regular nightly run all compose without redoing finished work.

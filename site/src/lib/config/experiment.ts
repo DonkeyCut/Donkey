@@ -2,8 +2,8 @@ import { experimentSchemas } from "@donkeycut/abexp";
 
 import { SETTINGS } from "@/lib/config/registry";
 
-// The experiment schemas bound to this product's registry, so the su form and
-// the route validate variant settings against the same declarations.
+// The experiment schemas bound to this product's registry, so every writer and
+// reader validates variant settings against the same declarations.
 
 export {
   EXPERIMENT_STATUSES,

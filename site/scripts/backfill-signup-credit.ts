@@ -23,7 +23,7 @@ if (userIds.length === 0) {
 
 const setting = await getGlobalSetting("signupCredits");
 if (setting.dollars <= 0) {
-  console.error("signupCredits grants nothing; set the amount on su first");
+  console.error("signupCredits grants nothing; set the signupCredits amount override first");
   process.exit(1);
 }
 

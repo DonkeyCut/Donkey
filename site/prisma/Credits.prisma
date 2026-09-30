@@ -51,7 +51,7 @@ model CreditOffer {
   id               String           @id @default(cuid())
   userId           String
   user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // What made the offer: "manual" from su, or the promotion's key.
+  // What made the offer: "manual" by hand, or the promotion's key.
   kind             String           @default("manual")
   amountMicros     BigInt
   // The credit's life once claimed: a fixed moment, or days from the claim;

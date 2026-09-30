@@ -13,7 +13,7 @@ import { isDeletedAddress } from "@/lib/onboarding/deleted-account";
 // idempotent and keyed to the user, so provisioning can run more than once
 // (e.g. a retried signup) without double-granting, double-seeding, or
 // double-sending. The grant amount and its lifetime are the signupCredits
-// setting, edited on su; the welcome email names the amount that landed.
+// setting; the welcome email names the amount that landed.
 export async function provisionSignupGrants(user: EmailUser): Promise<void> {
   const setting = await getGlobalSetting("signupCredits");
   // An address that was deleted already had its signup credits once. The

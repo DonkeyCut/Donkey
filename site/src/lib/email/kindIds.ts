@@ -1,7 +1,7 @@
 // The kinds of email the site sends, and where each stands in the queue. The
 // server side of a kind (what it builds, whose quota it spends) is in
 // src/lib/email/kinds.ts; this file is client-safe so the settings registry
-// can offer the priorities to su.
+// can declare the priorities.
 export const EMAIL_KIND_IDS = [
   "reply-forward",
   "credit-offer",

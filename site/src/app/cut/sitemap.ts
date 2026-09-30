@@ -7,7 +7,7 @@ import { listPublishedPosts } from "@/lib/blog/read";
 // Served at donkeycut.com/sitemap.xml via the proxy rewrite (src/proxy.ts).
 // The legal pages are canonical on this host, since they describe Donkey Cut.
 // The blog entries come from the same cached read the index uses, so a
-// publish on su refreshes them; the dates are the rows' own, never the clock,
+// publish refreshes them; the dates are the rows' own, never the clock,
 // which keeps the route prerenderable.
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const posts = await listPublishedPosts();

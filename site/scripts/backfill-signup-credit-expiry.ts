@@ -23,7 +23,7 @@ const apply = process.argv.includes("--apply");
 const setting = await getGlobalSetting("signupCredits");
 const expiresAt = creditGrantExpiry(setting.expiresAfterDays);
 if (!expiresAt) {
-  console.error("signupCredits grants never expire; set a lifetime on su first");
+  console.error("signupCredits grants never expire; set the signupCredits lifetime override first");
   process.exit(1);
 }
 

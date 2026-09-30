@@ -5,9 +5,9 @@ import { z } from "zod";
 
 import { revalidateBlogLater, revalidateBlogNow } from "@/lib/blog/revalidate";
 
-// The blog editor runs in the internal su app, a separate deployment. Its
-// writes change rows this app's blog pages have cached, and a cache clears only
-// from inside the app that holds it, so the editor posts here after each write.
+// Blog posts are written by a separate deployment. Its writes change rows this
+// app's blog pages have cached, and a cache clears only from inside the app
+// that holds it, so the writer posts here after each write.
 // Deliberately not wrapped in withDonkeyAuth — the caller is a machine, not a
 // session — and gated by a shared secret, like the job worker's callback.
 

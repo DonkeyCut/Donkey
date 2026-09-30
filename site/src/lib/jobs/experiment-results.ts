@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 // Computes each experiment's read and stores it on the row: for every metric,
 // how many exposed accounts in each variant converted after their exposure,
 // and the verdict that follows. Runs nightly for every experiment that is
-// running, paused, or recently ended, and on demand from su for one.
+// running, paused, or recently ended, and on demand for one.
 
 type Exposure = { userId: string; variant: string; exposedAt: Date };
 
@@ -61,8 +61,8 @@ export async function computeExperimentResults(experimentId: string): Promise<{ 
   const metrics = metricSchema.array().safeParse(experiment.metrics);
   if (!metrics.success) throw new JobFailure(`Experiment ${experiment.key} has metrics that no longer parse.`);
 
-  // Only what the hash assigned and the app showed counts; a row written from
-  // su, a held-out account, and an unexposed assignment are left out.
+  // Only what the hash assigned and the app showed counts; a row written by
+  // hand, a held-out account, and an unexposed assignment are left out.
   const [rows, holdouts] = await Promise.all([
     prisma.experimentAssignment.findMany({
       where: { experimentId, manual: false, variant: { not: null }, exposedAt: { not: null } },

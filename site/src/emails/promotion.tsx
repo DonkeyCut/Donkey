@@ -15,7 +15,7 @@ import { Fragment } from "react";
 
 import { DonkeyMark } from "./_components/DonkeyMark";
 
-// A promotion written on su: its paragraphs, an optional button, and the
+// A promotion: its paragraphs, an optional button, and the
 // opt-out footer. Sent by src/lib/marketing/promotions.ts; preview with
 // `npm run email:dev`. This module stays pure — the react-email preview server
 // bundles it on its own, so everything it needs comes in as props.

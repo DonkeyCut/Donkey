@@ -8,8 +8,8 @@ import { prisma } from "@/lib/prisma";
 
 const idSchema = z.string().trim().min(1);
 
-// The su editor's Preview button lands here on the apex host, because the
-// Draft Mode cookie is host-only. Draft Mode makes the blog's cached reads run
+// A super user previews a draft here on the apex host, because the Draft Mode
+// cookie is host-only. Draft Mode makes the blog's cached reads run
 // fresh for this browser and include drafts; everyone else keeps the cache.
 export const GET = withSuperUser(async (request) => {
   const id = idSchema.safeParse(request.nextUrl.searchParams.get("id"));

@@ -11,17 +11,17 @@ export const creditTopUpMinDollars = 5;
 export const creditTopUpMaxDollars = 2_000;
 
 // The default pay-as-you-go amount: the value we pre-fill / fall back to when no
-// other amount is chosen (auto-reload default, the "buy once to save a card"
-// nudge, and the super user grant default all key off this so they stay in sync).
+// other amount is chosen (the auto-reload default and the "buy once to save a
+// card" nudge both key off this so they stay in sync).
 export const creditTopUpDefaultDollars = 25;
 
 // Stripe metadata "kind" tags that route a completed payment to a credit grant.
 export const creditTopUpKind = "credit_topup";
 export const creditAutoReloadKind = "credit_topup_autoreload";
 
-// Ceiling on a single super-user credit grant (whole dollars), enforced both by
-// the grant API's schema and the settings form so the two never drift. Kept low
-// as a typo guard — grants above this are rejected.
+// Ceiling on a single credit grant a setting names (whole dollars), enforced
+// by the registry's schema. Kept low as a typo guard — grants above this are
+// rejected.
 export const maxCreditGrantDollars = 100;
 
 export function dollarsToStripeCents(amountDollars: number): number {

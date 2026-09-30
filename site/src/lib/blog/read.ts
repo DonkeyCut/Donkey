@@ -1,7 +1,7 @@
 // The public read path. Every function here is a cache scope tagged so a save
-// on su clears exactly the pages that showed the post. Draft Mode (the su
-// Preview button) re-runs these per request without storing the result, and
-// is the only way a draft reaches a page.
+// clears exactly the pages that showed the post. Draft Mode (the preview
+// route) re-runs these per request without storing the result, and is the
+// only way a draft reaches a page.
 import { cacheLife, cacheTag } from "next/cache";
 import { draftMode } from "next/headers";
 

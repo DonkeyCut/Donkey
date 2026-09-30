@@ -30,7 +30,7 @@ export const instant = true;
 
 // The blog index, served at /blog by the proxy's "/…" → "/cut/…" rewrite. The
 // list is a cached read, so it joins the static shell and refreshes when a
-// post is saved on su.
+// save calls the revalidate route.
 export default function BlogIndexPage() {
   return (
     <BlogShell>

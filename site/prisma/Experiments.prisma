@@ -1,6 +1,6 @@
 // Runtime configuration and experiments. Every tunable is declared in code
 // (src/lib/config/registry.ts) with a default and a schema; a row here exists
-// only for a key a super user changed from su.donkeycut.com.
+// only for a key a super user overrode.
 
 model SettingOverride {
   key         String   @id
@@ -41,7 +41,7 @@ model Experiment {
 
 // Sticky: once a user is assigned, the row is what they read, whatever the
 // audience says later. A null variant holds the user out of this experiment.
-// A manual row was written from su and stands in place of the hash.
+// A manual row was written by hand and stands in place of the hash.
 model ExperimentAssignment {
   id           String     @id @default(cuid())
   experimentId String

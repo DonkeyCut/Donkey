@@ -8,7 +8,7 @@ import { enqueueJob } from "@/lib/jobs/queue";
 export const maxDuration = 300;
 
 // The nightly analytics run. Vercel's cron authenticates with the CRON_SECRET
-// bearer token; manual runs start from su.
+// bearer token; a manual run enqueues the same job.
 export const GET = async (request: NextRequest) => {
   if (!(await isVercelCron(request))) return notFoundResponse();
   return NextResponse.json(await enqueueJob("analytics-daily", {}, "vercel-cron"));

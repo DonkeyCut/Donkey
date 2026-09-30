@@ -8,9 +8,9 @@ import { resolveSettings } from "@/lib/config/resolve";
 import type { DonkeyAuthenticatedRequest } from "@/lib/donkey-api-auth";
 import { configureDatabasePool, prisma } from "@/lib/prisma";
 
-// What one user's configuration is right now: overrides from su, plus the
-// variants of every running experiment they are assigned to. Assignment
-// happens here, on first read, and sticks.
+// What one user's configuration is right now: overrides from the database,
+// plus the variants of every running experiment they are assigned to.
+// Assignment happens here, on first read, and sticks.
 
 export type ConfigContext = {
   userId: string;

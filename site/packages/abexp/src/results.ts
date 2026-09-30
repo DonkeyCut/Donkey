@@ -2,8 +2,8 @@ import type { ExperimentMetric } from "./experiment";
 import { probabilityBeats, sampleSizePerArm, twoProportionTest } from "./stats";
 
 // An experiment's read, computed from exposure and conversion counts by the
-// results job and stored on the row. The verdict answers the one question su
-// asks: roll it out, stop it, or keep running — and how much longer.
+// results job and stored on the row. The verdict answers one question: roll
+// it out, stop it, or keep running — and how much longer.
 
 // Exposures each arm needs, and conversions across the pair, before a
 // positive result is believed.

@@ -330,7 +330,7 @@ export type OutboxOverview = {
 
 const ITEMS = 60;
 
-/** The outbox as su sees it: the cycle's budget, every kind's standing, and the
+/** The outbox at a glance: the cycle's budget, every kind's standing, and the
  * rows worth a look. */
 export async function outboxOverview(now = new Date()): Promise<OutboxOverview> {
   await skipUnsubscribedFailures();

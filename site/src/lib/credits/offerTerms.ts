@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// The terms of a credit offer an email carries, as su writes them: how much,
+// The terms of a credit offer an email carries: how much,
 // what lands it, how long the person has to take it up, and how long the
 // credit lives once it lands. A promotion to a segment and an outreach note
 // to one person share these terms and the placeholders that name the offer in

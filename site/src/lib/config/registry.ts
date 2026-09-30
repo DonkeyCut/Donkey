@@ -16,9 +16,9 @@ import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/t
 
 // The settings registry: every runtime tunable the product has, declared once
 // with a schema and a default. A value resolves default < override < variant
-// (src/lib/config/resolve.ts); su edits the override, an experiment supplies
-// the variant. Client-safe: zod only, so the su forms read the same
-// declarations the server validates against. A feature that people might
+// (src/lib/config/resolve.ts); a database row holds the override, an
+// experiment supplies the variant. Client-safe: zod only, so a form reads the
+// same declarations the server validates against. A feature that people might
 // tune ships its setting here in the same change.
 
 function validTimeZone(zone: string): boolean {
@@ -505,10 +505,6 @@ export const SETTINGS = defineSettings({
       "How many days before a cancelled Pro plan ends the editor starts showing the days left. Until then a plan set to cancel looks like one that renews.",
   },
 });
-
-// The settings su shows on its Product tab: what an account gets. The
-// settings tab under Experiments still lists every key.
-export const PRODUCT_SETTING_KEYS = ["signupCredits", "creditExpiryNotice", "manualCreditOffer", "promotionCreditOffer", "subscribeBonus", "proAllowancePromotion", "proEndingNotice"] as const satisfies readonly SettingKey[];
 
 export type SettingKey = keyof typeof SETTINGS;
 export type Settings = SettingsOf<typeof SETTINGS>;

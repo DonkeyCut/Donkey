@@ -1,7 +1,7 @@
 // The rollup folded to what a dashboard draws: one point per day plus the
-// headline numbers. Pure, and the only place those numbers are computed — the
-// su charts and the phone both read the result, so neither walks the user
-// list to draw a line.
+// headline numbers. Pure, and the only place those numbers are computed —
+// every dashboard reads the result, so none walks the user list to draw a
+// line.
 import type { AnalyticsRollup } from "@/lib/analytics/schema";
 
 /** Activity is null for a day the pipeline never extracted: nothing was read,
