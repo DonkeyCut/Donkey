@@ -208,6 +208,10 @@ async function runClaude(
   }
 }
 
+/** The Codex CLI the engine resolved at startup (tool-path.ts); bare
+ * `codex` when none was found, so the spawn fails as "not installed". */
+const codexCommand = () => process.env.DONKEY_CUT_CODEX ?? "codex";
+
 /** GPT models through the Codex CLI — the user's ChatGPT login. */
 async function runCodex(
   emit: UIChunkWriter["write"],
@@ -237,7 +241,7 @@ async function runCodex(
 
   await new Promise<void>((resolve, reject) => {
     // stdin must be closed: `codex exec` otherwise waits on it for EOF.
-    const proc = spawn("codex", args, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(codexCommand(), args, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     const onAbort = () => proc.kill("SIGTERM");
     signal.addEventListener("abort", onAbort);
 
@@ -303,7 +307,7 @@ async function runCodex(
       settled = true;
       signal.removeEventListener("abort", onAbort);
       reject(
-        err.message.includes("ENOENT")
+        (err as NodeJS.ErrnoException).code === "ENOENT"
           ? new Error("Codex CLI not found — install it with: npm i -g @openai/codex")
           : err
       );
@@ -373,7 +377,7 @@ function probe(cmd: string, args: string[]): Promise<{ ok: boolean; note: string
         // words the error `Executable not found in $PATH` with no "ENOENT".
         const missing = err.code === "ENOENT";
         const note = missing
-          ? `${cmd} is not installed`
+          ? `${path.basename(cmd)} is not installed`
           : (stderr || err.message).trim().split("\n")[0];
         resolve({ ok: false, note, installed: !missing });
       } else {
@@ -520,7 +524,7 @@ export const aiApi = {
     if (!value) {
       const [claude, codexLogin] = await Promise.all([
         probe("claude", ["--version"]),
-        probe("codex", ["login", "status"]),
+        probe(codexCommand(), ["login", "status"]),
       ]);
       // The login probe running at all means codex is installed; only its
       // ENOENT failure (carried through in codexLogin) marks it missing.

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
-import { exists, findOnPath } from "./util";
+import { exists, findOnPath, isExecutable } from "./util";
 
 /** Directories a GUI-spawned process misses but user CLIs commonly live in. */
 const COMMON_BIN_DIRS = [
@@ -72,3 +72,48 @@ export function ensureToolPath(): Promise<void> {
 
 /** First executable named `name` on the (widened) PATH, or null. */
 export const resolveOnPath = findOnPath;
+
+/** The ChatGPT desktop app ships a Codex CLI inside its bundle, off every PATH. */
+const CODEX_BUNDLE_SUBPATH = path.join(
+  "ChatGPT.app", "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex",
+);
+
+/** Where a bundled Codex can sit: the system and the user Applications folders. */
+export function codexBundleCandidates(home: string = os.homedir()): string[] {
+  return ["/Applications", path.join(home, "Applications")].map((dir) =>
+    path.join(dir, CODEX_BUNDLE_SUBPATH),
+  );
+}
+
+export interface CodexResolverDeps {
+  onPath: (name: string) => Promise<string | null>;
+  executable: (p: string) => Promise<boolean>;
+  home: string;
+}
+
+/** The Codex CLI to run: the first `codex` on the (widened) PATH, else the
+ * ChatGPT app's bundled copy, else null. */
+export async function resolveCodex(
+  deps: CodexResolverDeps = { onPath: findOnPath, executable: isExecutable, home: os.homedir() },
+): Promise<string | null> {
+  const onPath = await deps.onPath("codex");
+  if (onPath) return onPath;
+  for (const candidate of codexBundleCandidates(deps.home)) {
+    if (await deps.executable(candidate)) return candidate;
+  }
+  return null;
+}
+
+let codexResolved: Promise<void> | null = null;
+
+/** Resolve Codex once into DONKEY_CUT_CODEX, which the probe and the turn
+ * runner spawn. Widens PATH first. Missing is fine — the models probe reports it. */
+export function ensureCodexPath(): Promise<void> {
+  codexResolved ??= (async () => {
+    await ensureToolPath();
+    if (process.env.DONKEY_CUT_CODEX) return;
+    const codex = await resolveCodex();
+    if (codex) process.env.DONKEY_CUT_CODEX = codex;
+  })();
+  return codexResolved;
+}

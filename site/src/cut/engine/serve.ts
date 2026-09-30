@@ -3,7 +3,7 @@ import { matchCutRoute, runCutRoute } from "../server/http/routes";
 import { flattenCutUsers, migrateCutDataDir } from "../server/migrateDataDir";
 import { sweepPhoneInbox } from "../server/phoneLink";
 import { reconcileProjectDirs } from "../server/projects";
-import { ensureToolPath, resolveOnPath } from "../server/tool-path";
+import { ensureCodexPath, ensureToolPath, resolveOnPath } from "../server/tool-path";
 import { enginePort } from "./config";
 
 // Throws (and exits with a clear message) on a bad DONKEY_CUT_PORT rather than
@@ -54,6 +54,8 @@ async function start() {
     const claude = await resolveOnPath("claude");
     if (claude) process.env.DONKEY_CUT_CLAUDE = claude;
   }
+  // Codex may live only inside the ChatGPT app's bundle, off every PATH.
+  await ensureCodexPath();
 
   native.serve({
     hostname: "127.0.0.1",

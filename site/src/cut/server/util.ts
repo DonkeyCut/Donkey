@@ -37,16 +37,21 @@ export async function findOnPath(name: string): Promise<string | null> {
   for (const dir of (process.env.PATH ?? "").split(":")) {
     if (!dir) continue;
     const candidate = path.join(dir, name);
-    try {
-      const s = await stat(candidate); // follows symlinks
-      if (!s.isFile()) continue;
-      await access(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // absent or not executable — keep looking
-    }
+    if (await isExecutable(candidate)) return candidate;
   }
   return null;
+}
+
+/** Whether `p` is an executable file (symlinks followed). */
+export async function isExecutable(p: string): Promise<boolean> {
+  try {
+    const s = await stat(p);
+    if (!s.isFile()) return false;
+    await access(p, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

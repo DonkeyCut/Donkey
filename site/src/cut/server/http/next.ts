@@ -2,7 +2,7 @@ import { hostedApiBlock } from "../local-only";
 import { flattenCutUsers } from "../migrateDataDir";
 import { sweepPhoneInbox } from "../phoneLink";
 import { reconcileProjectDirs } from "../projects";
-import { ensureToolPath } from "../tool-path";
+import { ensureCodexPath } from "../tool-path";
 import { matchCutRoute, runCutRoute } from "./routes";
 
 let flattened = false;
@@ -26,9 +26,10 @@ export async function cutCatchAll(req: Request): Promise<Response> {
   if (blocked) return blocked;
 
   // The dev server spawns tools (yt-dlp, ffmpeg, …) in-process, so it needs
-  // the same widened PATH the packaged engine builds at startup, and it runs
-  // the same users/-dir flatten the engine runs before serving data routes.
-  await ensureToolPath();
+  // the same widened PATH the packaged engine builds at startup, the same
+  // resolved Codex, and it runs the same users/-dir flatten the engine runs
+  // before serving data routes.
+  await ensureCodexPath();
   flattenOnce();
 
   const { pathname } = new URL(req.url);
