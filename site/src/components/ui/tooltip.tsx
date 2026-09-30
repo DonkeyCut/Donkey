@@ -1,5 +1,6 @@
 "use client"
 
+import { useState, useSyncExternalStore } from "react"
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
@@ -17,8 +18,77 @@ function TooltipProvider({
   )
 }
 
-function Tooltip({ ...props }: TooltipPrimitive.Root.Props) {
-  return <TooltipPrimitive.Root data-slot="tooltip" {...props} />
+// A drag carries the pointer off its trigger without the pointer leaving,
+// so every drag start and end closes whatever tooltip is open.
+let dragEpoch = 0
+const dragListeners = new Set<() => void>()
+const bumpDragEpoch = () => {
+  dragEpoch++
+  dragListeners.forEach((listener) => listener())
+}
+function subscribeDragEpoch(listener: () => void) {
+  if (dragListeners.size === 0) {
+    document.addEventListener("dragstart", bumpDragEpoch, true)
+    document.addEventListener("dragend", bumpDragEpoch, true)
+  }
+  dragListeners.add(listener)
+  return () => {
+    dragListeners.delete(listener)
+    if (dragListeners.size === 0) {
+      document.removeEventListener("dragstart", bumpDragEpoch, true)
+      document.removeEventListener("dragend", bumpDragEpoch, true)
+    }
+  }
+}
+
+const ignoreDragEpoch = () => () => {}
+
+function Tooltip({
+  open,
+  defaultOpen = false,
+  onOpenChange,
+  ...props
+}: TooltipPrimitive.Root.Props) {
+  const [own, setOwn] = useState(defaultOpen)
+  // Closed by a drag: stays closed until the tooltip next opens, or the
+  // caller sets `open` again.
+  const [dragged, setDragged] = useState(false)
+  // The drag count this tooltip last caught up with.
+  const [seen, setSeen] = useState(dragEpoch)
+  const [lastOpen, setLastOpen] = useState(open)
+  if (open !== lastOpen) {
+    setLastOpen(open)
+    setDragged(false)
+    setSeen(dragEpoch)
+  }
+  const shown = (open ?? own) && !dragged
+  // Only an open tooltip listens, so a drag re-renders nothing else.
+  const epoch = useSyncExternalStore(
+    shown ? subscribeDragEpoch : ignoreDragEpoch,
+    () => dragEpoch,
+    () => 0
+  )
+  if (epoch !== seen) {
+    setSeen(epoch)
+    if (shown) {
+      setOwn(false)
+      setDragged(true)
+    }
+  }
+  return (
+    <TooltipPrimitive.Root
+      data-slot="tooltip"
+      open={shown && epoch === seen}
+      onOpenChange={(next, details) => {
+        setOwn(next)
+        setDragged(false)
+        // Drags while it was closed are no reason to close it now.
+        setSeen(dragEpoch)
+        onOpenChange?.(next, details)
+      }}
+      {...props}
+    />
+  )
 }
 
 function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
