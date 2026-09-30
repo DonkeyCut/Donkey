@@ -62,11 +62,9 @@ RUN npm install --no-package-lock --omit=dev \
       node-web-audio-api@^2.2.0
 COPY dist/cut-worker/main.js ./main.js
 # The faces the editor shows, staged as files the canvas loads at startup so a
-# title renders in its own font. Fetched here so the image carries them
-# whatever state the build context is in; a family that will not come down
-# leaves the rest staged and falls back at draw time.
-COPY scripts/fetch-cut-fonts.mjs ./scripts/fetch-cut-fonts.mjs
-RUN node scripts/fetch-cut-fonts.mjs
+# title renders in its own font. npm install stages them from the @fontsource
+# packages (scripts/stage-cut-fonts.mjs).
+COPY public/cut-fonts ./public/cut-fonts
 
 ENV NODE_ENV=production
 ENTRYPOINT ["node", "main.js"]

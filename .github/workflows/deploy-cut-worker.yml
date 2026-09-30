@@ -15,7 +15,7 @@ on:
       # change to the drawing, decoding or effects code ships in this image.
       - site/src/cut/lib/**
       - site/packages/effects-kit/**
-      - site/scripts/fetch-cut-fonts.mjs
+      - site/scripts/stage-cut-fonts.mjs
       - site/src/cut/server/exportPipeline.ts
       - site/src/cut/server/exportPipeline.e2e.test.ts
       - site/src/cut/server/filterGraph.ts

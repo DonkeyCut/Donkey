@@ -5,11 +5,11 @@ import { registerFonts } from "../types";
 /**
  * Fonts for a headless render.
  *
- * A page gets its faces from next/font, which serves them to the browser and
- * hands the painters a CSS stack. Nothing in that reaches a render worker, so
- * the same faces are staged as files by scripts/fetch-cut-fonts.mjs and
- * loaded into skia here, under both their own names and the names the base
- * system stacks ask for ("SF Pro Display", "Impact", "New York"). After this
+ * A page gets its faces from the @fontsource stylesheets, which serve them to
+ * the browser. Nothing in that reaches a render worker, so the same faces are
+ * staged as files by scripts/stage-cut-fonts.mjs and loaded into skia here,
+ * under both their own names and the names the base system stacks ask for
+ * ("SF Pro Display", "Impact", "New York"). After this
  * runs, `fontStack` resolves every Cut font id to a family skia can draw, and
  * a title rendered headless looks like the title in the tab.
  *

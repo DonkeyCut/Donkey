@@ -1,10 +1,11 @@
 /**
  * The bundled font families, named once.
  *
- * `googleFonts.ts` maps the next/font loaders onto this list to register them,
- * and the assistant's catalog builds its font sentence from it, so the menu the
- * user sees and the ids the model is taught can't drift apart. Framework-free
- * on purpose: the server imports it too.
+ * `googleFonts.ts` registers this list for the page, and the assistant's
+ * catalog builds its font sentence from it, so the menu the user sees and the
+ * ids the model is taught can't drift apart. A label is the family's own name,
+ * the one its stylesheet and the headless renderer declare it under.
+ * Framework-free on purpose: the server imports it too.
  */
 
 export interface BundledFont {

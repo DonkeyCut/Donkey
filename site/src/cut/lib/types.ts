@@ -1250,8 +1250,8 @@ export const FONTS: FontDef[] = [
   { id: "impact", label: "Impact", stack: 'Impact, "Arial Black", "Helvetica Neue", sans-serif' },
 ];
 
-// Fonts registered at runtime: the bundled Google families (build-time
-// self-hosted via next/font) and per-project uploaded fonts. The page
+// Fonts registered at runtime: the bundled Google families (self-hosted
+// from @fontsource) and per-project uploaded fonts. The page
 // registers them before text renders; the engine imports this module but
 // never rasterizes, so an empty registry there is fine.
 const registeredFonts: FontDef[] = [];
