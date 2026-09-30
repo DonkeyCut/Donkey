@@ -14,3 +14,9 @@ Bundled in `donkey-tools/` (built by `scripts/fetch-bundled-tools.sh`).
 Not bundled — used only if the user already has them installed:
 - **pandoc** (GPL-3.0): macOS `textutil` covers the common office conversions.
 - **ImageMagick** (`magick`): `sips` covers the common image operations.
+
+## Content served by the site
+
+| Content | License | Notes |
+|---|---|---|
+| Built-in LUTs (`site/public/cut/luts/`) | CC BY-SA 4.0 | resampled from the RawTherapee Film Simulation Collection by Pat David, Pavlov Dmitry and Michael Ezra (`scripts/build-builtin-luts.ts`) |

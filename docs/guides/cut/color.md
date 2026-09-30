@@ -14,7 +14,7 @@ That needs the code values untouched, and a browser converts a decoded frame by 
 
 ## LUTs
 
-A `.cube` or `.3dl` file is a Library file keyed by its content, so the same file dropped twice is one LUT and it travels with a project. A clip's grade names it by `lut:<key>` with an intensity, and the recipe bakes it into the clip's lattice between the source conversion and the grade, so the preview, ffmpeg's lut3d and the headless worker all apply the same numbers. An export stages the LUT's bytes beside the job, so the engine and the worker parse the file the tab did.
+A `.cube` or `.3dl` file is a Library file keyed by its content, so the same file dropped twice is one LUT and it travels with a project. The built-in film LUTs are `.cube` files the site serves, keyed the same way. A grade names either by `lut:<key>`; the recipe bakes it between the source conversion and the grade, and an export stages its bytes beside the job, so every renderer applies the same numbers.
 
 ## HDR delivery
 
