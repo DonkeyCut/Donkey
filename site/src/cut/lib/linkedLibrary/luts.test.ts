@@ -36,13 +36,21 @@ await stubModule<typeof import("../residency")>("../residency", import.meta.url,
     },
   })) as never,
 });
+const requested: string[] = [];
+await stubModule<typeof import("../backend/cloud")>("../backend/cloud", import.meta.url, {
+  cloudRequest: async (path: string) => {
+    requested.push(path);
+    return new Response(CUBE);
+  },
+});
 await stubModule<typeof import("../cache")>("../cache", import.meta.url, {
   readSnapshot: async () => null,
   writeSnapshot: () => {},
 });
 
 const { linkedIdsIn, syncLinkedLibrary } = await import("./registry");
-const { cachedLut, loadLibraryLut, lutIdOf, lutKind } = await import("./luts");
+const { cachedLut, listLutChoices, loadLibraryLut, loadLibraryLutFile, lutIdOf, lutKind, lutLabel } = await import("./luts");
+const { BUILTIN_LUTS } = await import("../builtinLuts");
 
 const grade = (id: string) => ({ lut: { id } }) as unknown as NonNullable<ProjectDoc["clips"][number]["grade"]>;
 
@@ -84,5 +92,18 @@ describe("the LUT kind", () => {
     expect(cachedLut("lut:abc123")).toBe(lut);
     expect(fetched.length).toBe(1);
     await expect(loadLibraryLut("lut:missing")).rejects.toThrow(/not in the library/);
+  });
+
+  test("reads a built-in LUT off the site and lists it before the shelf's own", async () => {
+    const vivid = BUILTIN_LUTS.find((l) => l.id === "vivid")!;
+    const id = `lut:${vivid.key}`;
+    const file = await loadLibraryLutFile(id);
+    expect(file.fileName).toBe("vivid.cube");
+    expect(requested).toEqual([vivid.file]);
+    expect((await loadLibraryLut(id)).cube?.size).toBe(2);
+    expect(lutLabel(id)).toBe("Vivid");
+    const choices = listLutChoices();
+    expect(choices.slice(0, BUILTIN_LUTS.length).every((c) => c.builtIn)).toBe(true);
+    expect(choices.at(-1)).toEqual({ id: "lut:abc123", label: "Look", builtIn: false });
   });
 });

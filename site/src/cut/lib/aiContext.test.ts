@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BUILTIN_LUTS } from "./builtinLuts";
 
 import { buildAiContext, describeDoc } from "./aiContext";
 import { richDoc } from "./fixtures/richDoc";
@@ -81,7 +82,10 @@ describe("describeDoc", () => {
       grade: { exposure: 4, fade: 10 },
       wheels: ["lift", "offset"],
     });
-    expect(Array.isArray(live.luts)).toBe(true);
+    // Every built-in LUT reaches the chat by the id set_color_lut takes.
+    expect(live.luts.slice(0, BUILTIN_LUTS.length)).toEqual(
+      BUILTIN_LUTS.map((l) => ({ id: `lut:${l.key}`, label: l.label, builtIn: true }))
+    );
     expect(Array.isArray(live.savedGrades)).toBe(true);
     expect(describeDoc(doc).media[0]).toMatchObject({ sourceColor: { profile: "rec709", detected: "apple-log" } });
   });

@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * The account's colour LUTs: `.cube` and `.3dl` files on the Library shelf,
- * named by a clip's grade (`grade.lut.id = "lut:<contentKey>"`) and read the
- * moment a renderer needs the table.
+ * The account's colour LUTs: `.cube` and `.3dl` files on the Library shelf
+ * and the built-in set every account has, named by a clip's grade
+ * (`grade.lut.id = "lut:<contentKey>"`) and read the moment a renderer needs
+ * the table.
  *
  * A LUT is a linked kind, so identity, placement and travelling with a
  * project live in `registry.ts`. It is also a lazy one: the page that shelved
@@ -12,9 +13,11 @@
  * budget and read back on demand.
  */
 
-import { lutBytes, parseLutFile, type ColorGrade, type ParsedLut } from "@donkeycut/effects-kit";
+import { lutBytes, type ColorGrade, type ParsedLut } from "@donkeycut/effects-kit";
 import { allowance, holdMemory } from "../memoryBudget";
-import { lutFileName } from "../library";
+import { BUILTIN_LUTS, builtinLutByKey, type BuiltinLut } from "../builtinLuts";
+import { cloudRequest } from "../backend/cloud";
+import { parseLutBytes } from "../lutParse";
 import { isLutFile, LUT_ACCEPT } from "../media";
 import type { ProjectDoc } from "../types";
 import {
@@ -81,41 +84,30 @@ export function cachedLut(id: string): ParsedLut | undefined {
 
 const loading = new Map<string, Promise<ParsedLut>>();
 
-/** The parsed LUT for a grade id, read off whichever shelf holds it. Fails
- * when no shelf in reach has it, naming the id. */
+/** The parsed LUT for a grade id, read out of the built-in set or off
+ * whichever shelf holds it. Fails when neither has it, naming the id. */
 export function loadLibraryLut(id: string): Promise<ParsedLut> {
   const hit = cachedLut(id);
   if (hit) return Promise.resolve(hit);
   let pending = loading.get(id);
   if (pending) return pending;
-  pending = (async () => {
-    const item = listLinked(PREFIX).find((i) => libraryLutId(i.key) === id);
-    if (!item) throw new Error(`The LUT ${id} is not in the library.`);
-    let lastError: unknown = null;
-    for (const copy of item.copies) {
-      try {
-        const bytes = await linkedBytes({
-          id: copy.assetId,
-          fileName: copy.fileName,
-          residency: copy.residency,
-        });
-        const lut = parseLutFile(copy.fileName, new TextDecoder().decode(bytes));
-        remember(id, lut);
-        return lut;
-      } catch (e) {
-        lastError = e; // That shelf isn't answering; another copy may still serve.
-      }
-    }
-    throw lastError instanceof Error ? lastError : new Error(`Could not read the LUT ${id}.`);
-  })().finally(() => loading.delete(id));
+  pending = loadLibraryLutFile(id)
+    .then(({ fileName, bytes }) => parseLutBytes(fileName, bytes))
+    .then((lut) => {
+      remember(id, lut);
+      return lut;
+    })
+    .finally(() => loading.delete(id));
   loading.set(id, pending);
   return pending;
 }
 
-/** The LUT file itself, off whichever shelf holds it: what an export stages
- * beside its pictures so the engine parses the same bytes the tab did. Fails
- * naming the id when no shelf in reach has it. */
+/** The LUT file itself, out of the built-in set or off whichever shelf holds
+ * it: what an export stages beside its pictures so the engine parses the
+ * same bytes the tab did. Fails naming the id when nothing in reach has it. */
 export async function loadLibraryLutFile(id: string): Promise<{ fileName: string; bytes: Uint8Array }> {
+  const builtin = builtinLutOf(id);
+  if (builtin) return { fileName: `${builtin.id}.cube`, bytes: new Uint8Array(await builtinBytes(builtin)) };
   const item = listLinked(PREFIX).find((i) => libraryLutId(i.key) === id);
   if (!item) throw new Error(`The LUT ${id} is not in the library.`);
   let lastError: unknown = null;
@@ -124,11 +116,53 @@ export async function loadLibraryLutFile(id: string): Promise<{ fileName: string
       const bytes = await linkedBytes({ id: copy.assetId, fileName: copy.fileName, residency: copy.residency });
       return { fileName: copy.fileName, bytes: new Uint8Array(bytes) };
     } catch (e) {
-      lastError = e;
+      lastError = e; // That shelf isn't answering; another copy may still serve.
     }
   }
   const why = lastError instanceof Error ? ` ${lastError.message}` : "";
   throw new Error(`The LUT "${item.label}" could not be read.${why}`);
+}
+
+/** A built-in LUT's bytes, off the site: same-origin in the page, the bound
+ * session's origin in a headless run. */
+async function builtinBytes(l: BuiltinLut): Promise<ArrayBuffer> {
+  const res = await cloudRequest(l.file);
+  if (!res.ok) throw new Error(`The built-in LUT "${l.label}" could not be fetched (${res.status}).`);
+  return res.arrayBuffer();
+}
+
+/** The built-in LUT a grade id names. */
+export function builtinLutOf(id: string): BuiltinLut | undefined {
+  return id.startsWith(`${PREFIX}:`) ? builtinLutByKey(id.slice(PREFIX.length + 1)) : undefined;
+}
+
+/** One LUT a grade can name, as a menu or the chat lists it. */
+export interface LutChoice {
+  id: string;
+  label: string;
+  builtIn: boolean;
+}
+
+let choices: { from: LinkedItem[]; list: LutChoice[] } | null = null;
+
+/** Every LUT a grade can name: the built-in set, then the account's files
+ * that are not one of them. Held until the shelf listing changes. */
+export function listLutChoices(): LutChoice[] {
+  const shelf = listLinked(PREFIX);
+  if (choices?.from === shelf) return choices.list;
+  const list: LutChoice[] = [
+    ...BUILTIN_LUTS.map((l) => ({ id: libraryLutId(l.key), label: l.label, builtIn: true })),
+    ...shelf
+      .filter((i) => !builtinLutByKey(i.key))
+      .map((i) => ({ id: libraryLutId(i.key), label: i.label, builtIn: false })),
+  ];
+  choices = { from: shelf, list };
+  return list;
+}
+
+/** What a LUT id is called, or undefined when nothing in reach answers to it. */
+export function lutLabel(id: string): string | undefined {
+  return listLutChoices().find((c) => c.id === id)?.label;
 }
 
 /** The LUT kind as the registry holds it. */
@@ -136,7 +170,6 @@ export const lutKind: LinkedKind = {
   prefix: PREFIX,
   type: "lut",
   lazy: true,
-  labelOf: (a) => lutFileName(a.fileName),
   matches: isLutFile,
   accept: LUT_ACCEPT,
   extract: (doc: ProjectDoc) => {

@@ -173,7 +173,7 @@ import { clampLayersToAssets, mediaTypeFits, templateFromDoc } from "./projectTe
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
 import { isGradePresetTemplate, listSavedGrades, saveGradePreset } from "./gradePresets";
 import { isStylePresetTemplate } from "./stylePresets";
-import { libraryLutId, listLibraryLuts } from "./linkedLibrary";
+import { lutLabel } from "./linkedLibrary";
 import { sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
 import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
@@ -4701,11 +4701,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (lut === "none") {
         delete grade.lut;
       } else {
-        const item = listLibraryLuts().find((l) => libraryLutId(l.key) === lut);
-        if (!item)
-          throw new ToolError(
-            `No LUT "${lut}" in the Library — pass one of editor_state.luts, or "none".`
-          );
+        if (!lutLabel(lut))
+          throw new ToolError(`No LUT "${lut}" — pass one of editor_state.luts, or "none".`);
         grade.lut = { id: lut, amount };
       }
       s.updateClip(clip.id, { grade: normalizeGrade(grade) });

@@ -4,6 +4,7 @@ import { stubModule } from "@/lib/testing/stubModule";
 import type { LibraryAsset, LibraryData } from "./library";
 import type { SavedGrade } from "./gradePresets";
 import type { MediaAsset } from "./types";
+import { BUILTIN_LUTS } from "./builtinLuts";
 
 // The colour tools: every slider the panel renders, four wheels, the LUT
 // off the shelf, one grade copied across the timeline as one undo step, the
@@ -127,6 +128,13 @@ test("set_color_lut names a shelf LUT, keeps its amount, and takes it off again"
   expect(gradeOf(id)).toEqual({ exposure: 3, lut: { id: "lut:kodak", amount: 0.5 } });
   await runAiTool("set_color_lut", { clipId: id, lut: "none" });
   expect(gradeOf(id)).toEqual({ exposure: 3 });
+});
+
+test("set_color_lut takes a built-in LUT by the id editor_state lists", async () => {
+  const [id] = clipIds();
+  const vivid = `lut:${BUILTIN_LUTS.find((l) => l.id === "vivid")!.key}`;
+  await runAiTool("set_color_lut", { clipId: id, lut: vivid });
+  expect(gradeOf(id)?.lut).toEqual({ id: vivid });
 });
 
 test("copy_color_grade puts one clip's whole grade on every other clip, one undo step", async () => {

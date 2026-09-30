@@ -19,10 +19,14 @@ import "./luts";
 export * from "./registry";
 export { libraryFontId, listLibraryFonts, uploadLibraryFont } from "./fonts";
 export {
+  builtinLutOf,
   cachedLut,
   libraryLutId,
   listLibraryLuts,
+  listLutChoices,
   loadLibraryLut,
+  lutLabel,
+  type LutChoice,
   LUT_FILE_ICON,
   LUT_MARK_ICON,
   lutIdOf,

@@ -1,0 +1,1 @@
+Derived from the RawTherapee Film Simulation Collection by Pat David, Pavlov Dmitry and Michael Ezra, licensed CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Resampled to 33 points by Donkey Cut; shared under the same license.

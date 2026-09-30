@@ -12,6 +12,7 @@
 import { EXPORT_RESOLUTIONS } from "@/cut/lib/exportPresets";
 import { UI_TOOLS } from "@/cut/lib/projectCommands";
 import { STOCK_SFX_CATEGORIES } from "@/cut/lib/stock";
+import { BUILTIN_LUTS } from "@/cut/lib/builtinLuts";
 import { AI_PANEL_TOOLS } from "@/cut/components/AiPanel.tools";
 import {
   geminiOmniDefaultResolution,
@@ -275,7 +276,7 @@ Grade like a colorist: read the image, correct it, then style it — in that ord
 **One model, layered.** A clip's color is one pipeline: the source conversion, then its LUT (scaled by amount), then the preset, then the manual adjustments on top. set_color_preset never touches the manual layer and vice versa; intensity (amount) scales only the preset; the LUT sits under both. Preview, thumbnails, and export render the same numbers.
 
 **Which tool for which job.**
-- set_color_lut — a look from a file: the user's .cube/.3dl LUTs are in editor_state.luts; amount 0..1 blends it. "none" removes it.
+- set_color_lut — a film look from a LUT: the built-in ones (${BUILTIN_LUTS.map((l) => l.label).join(", ")}) and the user's .cube/.3dl files, all in editor_state.luts; amount 0..1 blends it. "none" removes it.
 - set_color_preset — a fast, coherent base. Catalog: ${gradePresetCatalogText()}. Start amount around 0.6–0.8 and tune to taste; protect_skin when a strong palette would discolor faces.
 - set_color_grade — the sliders. Light: ${GRADE_BASIC_FIELDS.filter((f) => f.group === "light").map((f) => f.key).join(", ")} — exposure/contrast for tone, highlights/shadows for the ends, whites/blacks for the end points, brilliance to open the darks and hold the brights at once, fade for lifted film blacks. Color: ${GRADE_BASIC_FIELDS.filter((f) => f.group === "color").map((f) => f.key).join(", ")} — temperature/tint for balance, saturation/vibrance for color amount (vibrance favors the muted colors and spares what is already rich). Detail: ${GRADE_DETAIL_FIELDS.map((f) => f.key).join(", ")} — sharpen for fine edges, clarity for local contrast, both on luma only.
 - set_color_curves — tonal shape: curve_contrast for an s-curve, explicit points when you need a precise remap; red/green/blue channels split-tone tonally (a touch of blue lifted in shadows = cool shadows).

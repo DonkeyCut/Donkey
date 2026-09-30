@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Loader2, RotateCcw, SlidersHorizontal, Trash2, Wand2, X } from "lucide-react";
 import {
@@ -44,11 +44,12 @@ import { needsProxy, useProxyJobs } from "@/cut/lib/mediaProxy";
 import {
   cachedLut,
   libraryLutId,
-  listLibraryLuts,
+  listLutChoices,
   loadLibraryLut,
   LUT_MARK_ICON,
   lutIdOf,
   onLinkedChanged,
+  type LutChoice,
 } from "@/cut/lib/linkedLibrary";
 import {
   deleteGradePreset,
@@ -67,6 +68,7 @@ import { useClipSourceFrame } from "@/cut/components/usePlayheadFrame";
 import { cn } from "@/lib/utils";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { draggedLutKey } from "@/cut/lib/assetDrag";
+import { useInView } from "@/cut/hooks/useInView";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -343,11 +345,19 @@ function GradeFooter({ clip }: { clip: VideoClip }) {
 /* ------------------------------------------------------------------ */
 
 const SAVED = "saved";
-type Category = GradePresetCategory | "all" | typeof SAVED;
+const LUTS = "luts";
+type Category = GradePresetCategory | "all" | typeof SAVED | typeof LUTS;
 
 /** A saved grade in the tile's shape: its id names the shelf copy, so a tile
  * can delete it, and its grade replaces the clip's whole grade when picked. */
 type SavedTile = GradePreset & { saved: SavedGrade };
+
+/** A LUT in the tile's shape: picking it sets the clip's LUT, under whatever
+ * preset and adjustments the clip already wears. */
+type LutTile = GradePreset & { lutId: string };
+
+/** Every LUT a grade can name, re-read as the Library changes. */
+const useLutChoices = (): LutChoice[] => useSyncExternalStore(onLinkedChanged, listLutChoices, listLutChoices);
 
 function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readonly VideoClip[]; onAdjust: () => void }) {
   const [category, setCategory] = usePanelState<Category>(clip.id, "colorPresetCategory", "all");
@@ -369,17 +379,41 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
   );
   // The chat reads the same list off editor_state.
   useEffect(() => rememberSavedGrades(saved.map((t) => t.saved)), [saved]);
+  const lutChoices = useLutChoices();
+  const lutTiles = useMemo<LutTile[]>(
+    () =>
+      lutChoices.map((l) => ({
+        id: `lut-${l.id.slice("lut:".length)}`,
+        label: l.label,
+        category: "film",
+        grade: { lut: { id: l.id } },
+        lutId: l.id,
+      })),
+    [lutChoices]
+  );
   const active = clip.grade?.preset;
+  const lut = clip.grade?.lut;
+  const lutView = category === LUTS;
   const manualDirty = TOOLS.some((t) => toolDirty(clip.grade, t.id));
-  const presets: (GradePreset | SavedTile)[] =
+  const presets: (GradePreset | SavedTile | LutTile)[] =
     category === "all"
       ? GRADE_PRESET_CATEGORIES.flatMap((c) => gradePresetsInCategory(c.id))
       : category === SAVED
         ? saved
-        : gradePresetsInCategory(category);
+        : category === LUTS
+          ? lutTiles
+          : gradePresetsInCategory(category);
   const currentKey = gradeKey(clip.grade);
 
-  const pick = (p: GradePreset | SavedTile) => {
+  const pick = (p: GradePreset | SavedTile | LutTile) => {
+    if ("lutId" in p) {
+      // Picking the LUT the clip wears takes it off again.
+      const next: ColorGrade = { ...clip.grade };
+      if (lut?.id === p.lutId) delete next.lut;
+      else next.lut = { id: p.lutId, amount: lut?.amount };
+      commit(next);
+      return;
+    }
     if ("saved" in p) {
       // A saved grade is the whole grade — it replaces what the clip wears,
       // and picking it again takes the clip back to neutral.
@@ -437,6 +471,13 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
           ))}
           <button
             type="button"
+            className={cn("clip-grade-category-luts", chip(category === LUTS))}
+            onClick={() => setCategory(LUTS)}
+          >
+            LUTs
+          </button>
+          <button
+            type="button"
             className={cn("clip-grade-category-saved", chip(category === SAVED))}
             onClick={() => setCategory(SAVED)}
           >
@@ -460,7 +501,9 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
             preset={p}
             frame={frame}
             profile={profile}
-            selected={"saved" in p ? gradeKey(p.grade) === currentKey : active?.id === p.id}
+            selected={
+              "lutId" in p ? lut?.id === p.lutId : "saved" in p ? gradeKey(p.grade) === currentKey : active?.id === p.id
+            }
             onPick={() => pick(p)}
             onRemove={"saved" in p ? () => remove(p) : undefined}
           />
@@ -477,23 +520,31 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
             label="Intensity"
             sliderClassName="clip-grade-preset-amount data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
-            value={Math.round((active?.amount ?? 1) * 100)}
+            value={Math.round(((lutView ? lut?.amount : active?.amount) ?? 1) * 100)}
             min={0}
             max={100}
             step={1}
-            disabled={!active}
+            disabled={lutView ? !lut : !active}
             format={(v) => `${Math.round(v)}%`}
             parse={parseNumberInput}
-            onDraft={(v) => active && draft({ ...clip.grade, preset: { ...active, amount: v / 100 } })}
-            onCommit={(v) => active && commit({ ...clip.grade, preset: { ...active, amount: v / 100 } })}
+            onDraft={(v) => {
+              if (lutView) {
+                if (lut) draft({ ...clip.grade, lut: { ...lut, amount: v / 100 } });
+              } else if (active) draft({ ...clip.grade, preset: { ...active, amount: v / 100 } });
+            }}
+            onCommit={(v) => {
+              if (lutView) {
+                if (lut) commit({ ...clip.grade, lut: { ...lut, amount: v / 100 } });
+              } else if (active) commit({ ...clip.grade, preset: { ...active, amount: v / 100 } });
+            }}
           />
         </Row>
         <Row label="Protect skin tones">
           <Switch
             size="sm"
             className="clip-grade-protect-skin"
-            checked={!!active?.skin}
-            disabled={!active}
+            checked={!lutView && !!active?.skin}
+            disabled={lutView || !active}
             onCheckedChange={(on: boolean) => active && commit({ ...clip.grade, preset: { ...active, skin: on || undefined } })}
           />
         </Row>
@@ -545,12 +596,15 @@ function PresetTile({
   const approx = useMemo(() => gradeCssApprox(preset.grade), [preset]);
   const lutId = lutIdOf(preset.grade);
   const userLut = lutId ? cachedLut(lutId) : undefined;
-  const key = needsLut && frame ? `${preset.id}|${profile}|${userLut ? "lut" : ""}|${frame}` : null;
+  // A LUT tile reads its file only once it scrolls near view: the grid mounts
+  // every tile, and the ones below the fold stay unread until then.
+  const [tileRef, seen] = useInView<HTMLDivElement>();
+  const key = needsLut && frame && (seen || !lutId) ? `${preset.id}|${profile}|${userLut ? "lut" : ""}|${frame}` : null;
   // The render reads the module cache; the effect fills it asynchronously
   // (decode → convert → LUT → data URL) and bumps to re-read.
   const [, bump] = useState(0);
   useEffect(() => {
-    if (!lutId || userLut) return;
+    if (!lutId || userLut || !seen) return;
     let gone = false;
     loadLibraryLut(lutId).then(
       () => !gone && bump((n) => n + 1),
@@ -559,7 +613,7 @@ function PresetTile({
     return () => {
       gone = true;
     };
-  }, [lutId, userLut]);
+  }, [lutId, userLut, seen]);
   useEffect(() => {
     if (!key || !frame || presetThumbCache.has(key)) return;
     let gone = false;
@@ -609,7 +663,7 @@ function PresetTile({
   if (fresh && fresh !== held) setHeld(fresh);
   const src = fresh ?? held;
   return (
-    <div className="group relative">
+    <div ref={tileRef} className="group relative">
       <button
         type="button"
         aria-pressed={selected}
@@ -968,11 +1022,10 @@ function HslTool({ clipId, grade, draft, commit }: GradeWrite & { clipId: string
 /* LUT                                                                 */
 /* ------------------------------------------------------------------ */
 
-/** The label of a LUT file in the Library, re-read as the Library changes. */
+/** The label of a built-in or Library LUT, re-read as the Library changes. */
 function useLutLabel(id: string | null): string | undefined {
-  const [, bump] = useState(0);
-  useEffect(() => onLinkedChanged(() => bump((n) => n + 1)), []);
-  return id ? listLibraryLuts().find((l) => libraryLutId(l.key) === id)?.label : undefined;
+  const choices = useLutChoices();
+  return id ? choices.find((c) => c.id === id)?.label : undefined;
 }
 
 /** The LUT tool: the applied table as a chip with its intensity. A LUT file

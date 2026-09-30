@@ -13,7 +13,7 @@ import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
 import { laneCues, subtitleLaneCount } from "./subtitles";
 import { watchSweepActive } from "./watch/sweep";
-import { libraryFontId, libraryLutId, listLibraryFonts, listLibraryLuts } from "./linkedLibrary";
+import { libraryFontId, listLibraryFonts, listLutChoices } from "./linkedLibrary";
 import { savedGradesKnown } from "./gradePresets";
 import { sourceProfileOf } from "./baseFrame";
 import {
@@ -230,9 +230,10 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         .filter((a) => a.type === "font")
         .map((a) => ({ id: uploadedFontId(a.id), label: a.name })),
     ],
-    // The LUT files in the Library, by the id set_color_lut takes, and the
-    // grades saved there by name for apply_saved_grade.
-    luts: listLibraryLuts().map((l) => ({ id: libraryLutId(l.key), label: l.label })),
+    // Every LUT set_color_lut takes, by id: the built-in film looks and the
+    // user's own files in the Library. The grades saved there, by name, for
+    // apply_saved_grade.
+    luts: listLutChoices().map((l) => ({ id: l.id, label: l.label, ...(l.builtIn ? { builtIn: true } : {}) })),
     savedGrades: savedGradesKnown().map((g) => ({ id: g.id, name: g.name })),
     ...(core.mediaFolders ? { mediaFolders: core.mediaFolders } : {}),
     media: core.media,
