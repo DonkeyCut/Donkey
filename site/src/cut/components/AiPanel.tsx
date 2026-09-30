@@ -602,7 +602,11 @@ export function AiPanel({
     let alive = true;
     void localBackend
       .fetch("/api/cut/ai/models")
-      .then((r) => r.json())
+      .then((r) => {
+        // An error body carries no provider list.
+        if (!r.ok) throw new Error(`models probe answered ${r.status}`);
+        return r.json();
+      })
       .then((d: ModelsInfo) => alive && setInfo(d))
       .catch(() => {});
     return () => {
