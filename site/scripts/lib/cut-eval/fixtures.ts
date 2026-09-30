@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AI_SKILL_INDEX } from "../../../src/cut/server/ai/catalog";
+import { BUILTIN_LUTS } from "../../../src/cut/lib/builtinLuts";
 
 export type Item = Record<string, unknown>;
 
@@ -184,12 +185,16 @@ export const TWO_CLIP_STATE = {
   ],
 };
 
-/** The pair with a Library LUT on the first clip and the shelf's LUT list,
- * for the copy-to-all case; the source is listed as plain Rec.709 with no
- * header reading, for the source-colour case. */
+/** The pair with a Library LUT on the first clip and the LUT list as the
+ * editor builds it — the built-in set, then the shelf's file — for the LUT
+ * cases; the source is listed as plain Rec.709 with no header reading, for
+ * the source-colour case. */
 export const LUT_STATE = {
   ...TWO_CLIP_STATE,
-  luts: [{ id: "lut:kodak2383", label: "Kodak 2383" }],
+  luts: [
+    ...BUILTIN_LUTS.map((l) => ({ id: `lut:${l.key}`, label: l.label, builtIn: true })),
+    { id: "lut:kodak2383", label: "Kodak 2383" },
+  ],
   savedGrades: [],
   videoTrack: [
     { ...TWO_CLIP_STATE.videoTrack[0], lut: { id: "lut:kodak2383", amount: 1 } },

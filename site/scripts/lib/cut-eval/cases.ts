@@ -11,6 +11,7 @@
  */
 
 import { gradePresetsInCategory } from "@donkeycut/effects-kit";
+import { BUILTIN_LUTS } from "../../../src/cut/lib/builtinLuts";
 import {
   AUDIO_STATE,
   CLIP_REFS,
@@ -330,6 +331,29 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           if (args.all_clips !== true && !Array.isArray(args.ids))
             throw new Error("copy_color_grade must land on all clips (all_clips or ids)");
           return { from: "c1", ids: ["c2"], grade: { lut: { id: "lut:kodak2383" } } };
+        }
+        return undefined;
+      },
+    },
+    {
+      // A built-in LUT asked for by name: the chat reads its id off
+      // editor_state.luts and lands it on both clips in one sweep.
+      name: "builtin-lut-by-name",
+      instant: null,
+      bucket: "single-tool",
+      state: LUT_STATE,
+      input: () => [userTurn("put the Warm Fade LUT on both clips")],
+      reply: /Warm Fade|LUT|look|both|clips/i,
+      requiredTools: ["set_color_lut"],
+      maxToolCalls: 3,
+      simulate: () => (name, args) => {
+        if (name === "set_color_lut") {
+          const want = `lut:${BUILTIN_LUTS.find((l) => l.id === "warm-fade")!.key}`;
+          if (args.lut !== want)
+            throw new Error(`set_color_lut must name the built-in Warm Fade (${want}), got ${JSON.stringify(args.lut)}`);
+          if (args.all_clips !== true && !Array.isArray(args.ids))
+            throw new Error("set_color_lut must land on both clips (all_clips or ids), not one at a time");
+          return { ran: 2, ids: ["c1", "c2"], results: [] };
         }
         return undefined;
       },
