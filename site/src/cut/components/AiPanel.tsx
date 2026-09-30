@@ -113,7 +113,7 @@ import { projectBackend } from "@/cut/lib/residency";
 import { beginBrowserChat, browserChatRunning, cancelBrowserChat, watchBrowserChatTurns } from "@/cut/lib/browserChatTurns";
 import { putCloudThread } from "@/cut/lib/chatCloud";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { AI_MODELS, aiModelProvider as provider } from "@/cut/lib/aiModels";
+import { AI_MODELS, aiModelProvider as provider, currentChatModel } from "@/cut/lib/aiModels";
 import { saveAssetToLibrary } from "@/cut/lib/library";
 import { formatDuration, useGenScene } from "@/cut/lib/genScene";
 import { lightboxItemFromRef, useLightbox } from "@/cut/lib/lightbox";
@@ -449,14 +449,16 @@ export function AiPanel({
   const engineUp = useLocalCompute();
   const readOnly = useEditor((s) => s.readOnly);
   const signedIn = useSignedIn();
-  // A saved id whose model left the catalog (a retired model after a bump)
-  // falls back to the default; passed through, the hosted route rejects it.
+  // A saved id that was retired moves to its replacement and the move is
+  // written back; an id the catalog has never known falls back to the
+  // default, since passed through the hosted route rejects it.
   const [model, setModel] = useState<string>(() => {
     if (typeof window === "undefined") return DEFAULT_MODEL;
     const saved = localStorage.getItem(MODEL_KEY);
-    return saved && AI_MODELS.some((m) => m.id === saved)
-      ? saved
-      : DEFAULT_MODEL;
+    const current = saved ? currentChatModel(saved) : undefined;
+    if (!current) return DEFAULT_MODEL;
+    if (current !== saved) localStorage.setItem(MODEL_KEY, current);
+    return current;
   });
   // One chat is active at a time; every past chat lives in the Threads panel.
   // The id persists so closing and reopening the panel resumes the same chat.
@@ -2816,10 +2818,13 @@ function ModelSelector({
   model: string;
   onSelect: (id: string) => void;
 }) {
+  // Favorites follow the catalog: a retired id becomes its replacement, an
+  // unknown id drops, and one replacement standing in for two ids lists once.
   const [favs, setFavs] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      return JSON.parse(localStorage.getItem(FAVS_KEY) ?? "[]") as string[];
+      const saved = JSON.parse(localStorage.getItem(FAVS_KEY) ?? "[]") as string[];
+      return [...new Set(saved.map(currentChatModel).filter((id): id is string => !!id))];
     } catch {
       return [];
     }

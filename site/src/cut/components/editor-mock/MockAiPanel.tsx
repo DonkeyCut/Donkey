@@ -59,7 +59,7 @@ export function MockAiPanel({ project }: { project: MockProject }) {
           <div className="flex items-center gap-1 px-1.5 pb-1.5">
             <span className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground">
               <Sparkles className="size-3" />
-              Fable 5
+              Fable 5.1
               <ChevronDown className="size-3" />
             </span>
             <div className="flex-1" />
