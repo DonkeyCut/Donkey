@@ -3,9 +3,7 @@
  * library folders, note folders, on every shelf — carries `parentId`, null
  * for the top level, and these are the rules they all share: a folder never
  * files under itself, a deleted folder takes everything under it with it, and
- * a parent nothing answers for reads as the top level. Note folders are the
- * exception on deletes: what they held comes up one level, the way the phone
- * files it.
+ * a parent nothing answers for reads as the top level.
  */
 
 export interface TreeFolder {

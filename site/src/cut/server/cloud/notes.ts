@@ -8,9 +8,9 @@
 // client-generated like note ids, so a phone can make one offline and push it
 // under the id it already filed notes against. Folders file into folders the
 // same way, through `parentId`; the top level is null.
-import { noteLocationSchema, noteUnfileSchema } from "@/cut/lib/noteReference";
+import { noteLibraryFoldersSchema, noteLocationSchema } from "@/cut/lib/noteReference";
 import { Prisma } from "@/generated/prisma/client";
-import { resolveParent } from "@/cut/lib/folderTree";
+import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import { NOTE_LABELS_MAX } from "@/cut/lib/types";
 import { prisma } from "@/lib/prisma";
 import { caught, err } from "./util";
@@ -138,22 +138,25 @@ async function resolveLabels(db: typeof prisma, userId: string, labelIds: unknow
 }
 
 export function createNotesCloud(db: typeof prisma = prisma) {
-  async function unfileLibraryFolders(userId: string, residency: string, folderIds: string[]) {
+  /** A deleted Library folder takes the notes filed in it, the way it takes
+   * its files: each stays as a tombstone so the phone drops it too. */
+  async function deleteLibraryFolderNotes(userId: string, residency: string, folderIds: string[]) {
     if (!folderIds.length) return;
+    const now = new Date();
     await db.cutNote.updateMany({
-      where: { userId, AND: [
+      where: { userId, deletedAt: null, AND: [
         { libraryLocation: { path: ["residency"], equals: residency } },
         { OR: folderIds.map((id) => ({ libraryLocation: { path: ["folderId"], equals: id } })) },
       ] },
-      data: { libraryLocation: { residency, folderId: null } },
+      data: { updatedAt: now, deletedAt: now },
     });
   }
   return {
-  unfileLibraryFolders,
-  async unfileLibrary(userId: string, req: Request) {
-    const parsed = noteUnfileSchema.safeParse(await req.json());
+  deleteLibraryFolderNotes,
+  async deleteInLibraryFolders(userId: string, req: Request) {
+    const parsed = noteLibraryFoldersSchema.safeParse(await req.json());
     if (!parsed.success) return err("Invalid Library folders.", 400);
-    await unfileLibraryFolders(userId, parsed.data.residency, parsed.data.folderIds);
+    await deleteLibraryFolderNotes(userId, parsed.data.residency, parsed.data.folderIds);
     return Response.json({ ok: true });
   },
   async get(userId: string, id: string) {
@@ -292,25 +295,24 @@ export function createNotesCloud(db: typeof prisma = prisma) {
     }
   },
 
-  /** Delete one folder. What it held — its notes and the folders inside it —
-   * comes up one level, filed where the folder was. */
+  /** Delete one folder and everything under it: the folders filed inside,
+   * however deep, and every note they hold, which stay as tombstones so the
+   * phone drops its copies on the next merge. */
   async removeFolder(userId: string, id: string) {
     try {
       await db.$transaction(async (tx) => {
-        const gone = await tx.cutFolder.findFirst({
-          where: { id, userId, scope: "note" },
-          select: { parentId: true },
+        const folders = await tx.cutFolder.findMany({
+          where: { userId, scope: "note" },
+          select: { id: true, parentId: true },
         });
-        if (!gone) return;
-        await tx.cutFolder.delete({ where: { id } });
+        if (!folders.some((f) => f.id === id)) return;
+        const tree = subtreeOf(folders, id);
+        const now = new Date();
         await tx.cutNote.updateMany({
-          where: { userId, folderId: id },
-          data: { folderId: gone.parentId },
+          where: { userId, folderId: { in: tree }, deletedAt: null },
+          data: { updatedAt: now, deletedAt: now },
         });
-        await tx.cutFolder.updateMany({
-          where: { userId, scope: "note", parentId: id },
-          data: { parentId: gone.parentId },
-        });
+        await tx.cutFolder.deleteMany({ where: { userId, scope: "note", id: { in: tree } } });
       });
       return Response.json({ ok: true });
     } catch (e) {

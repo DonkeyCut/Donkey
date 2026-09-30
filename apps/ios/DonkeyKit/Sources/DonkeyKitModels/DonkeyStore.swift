@@ -321,33 +321,36 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
         try context.save()
     }
 
+    /// Delete a folder and everything under it: the folders filed inside,
+    /// however deep, and every note they hold. The cloud deletes the same
+    /// tree off the folder's own tombstone; each note leaves one too, so a
+    /// note that moved there offline still goes.
     public func deleteNoteFolder(id: UUID) throws {
-        let parentId = try noteFolderParent(id)
-        try context.delete(model: NoteFolderRecord.self, where: #Predicate { $0.id == id })
-        // What the folder held stays and comes up one level. Each note is a
-        // write of its own so the cloud files it there too, and so is each
-        // folder.
-        let notes = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
-        for record in try context.fetch(notes) {
-            record.folderId = parentId
-            record.updatedAt = .now
-            record.dirty = true
+        let tree = try noteFolderTree(id)
+        for record in try context.fetch(FetchDescriptor<NoteFolderRecord>()) where tree.contains(record.id) {
+            context.delete(record)
         }
-        let folders = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.parentId == id })
-        for record in try context.fetch(folders) {
-            record.parentId = parentId
-            record.updatedAt = .now
-            record.dirty = true
+        for record in try context.fetch(FetchDescriptor<NoteRecord>()) {
+            guard let folderId = record.folderId, tree.contains(folderId) else { continue }
+            context.insert(TombstoneRecord(kind: SyncTombstone.Kind.note.rawValue, remoteId: record.id.uuidString, stamp: .now))
+            context.delete(record)
         }
         context.insert(TombstoneRecord(kind: SyncTombstone.Kind.noteFolder.rawValue, remoteId: id.uuidString, stamp: .now))
         try context.save()
     }
 
-    /// Where a folder is filed, read before it goes so what it held can
-    /// follow.
-    private func noteFolderParent(_ id: UUID) throws -> UUID? {
-        let descriptor = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.id == id })
-        return try context.fetch(descriptor).first?.parentId
+    /// A folder and every folder filed under it, however deep.
+    private func noteFolderTree(_ id: UUID) throws -> Set<UUID> {
+        let folders = try context.fetch(FetchDescriptor<NoteFolderRecord>())
+        var tree: Set<UUID> = [id]
+        var frontier = [id]
+        while let next = frontier.popLast() {
+            for folder in folders where folder.parentId == next && !tree.contains(folder.id) {
+                tree.insert(folder.id)
+                frontier.append(folder.id)
+            }
+        }
+        return tree
     }
 
     public func loadNoteLabels() throws -> [NoteLabel] {
@@ -540,18 +543,11 @@ public final class DonkeyStore: IdeasStoring, RecordingStoring, SyncJournalStori
     }
 
     public func removeNoteFolderFromCloudDelete(id: UUID) throws {
-        // The cloud filed what the folder held one level up; the listing
-        // already carried the folders, and the notes follow here.
-        let parentId = try noteFolderParent(id)
+        // The cloud deleted everything under the folder too: the folders
+        // inside leave the listing the same way, and the notes come down as
+        // tombstones. A note edited here since keeps its edit, at the top
+        // level.
         try context.delete(model: NoteFolderRecord.self, where: #Predicate { $0.id == id })
-        let notes = FetchDescriptor<NoteRecord>(predicate: #Predicate { $0.folderId == id })
-        for record in try context.fetch(notes) where record.dirty != true {
-            record.folderId = parentId
-        }
-        let folders = FetchDescriptor<NoteFolderRecord>(predicate: #Predicate { $0.parentId == id })
-        for record in try context.fetch(folders) {
-            record.parentId = parentId
-        }
         try context.save()
     }
 

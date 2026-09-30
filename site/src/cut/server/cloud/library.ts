@@ -833,7 +833,7 @@ export const libraryCloud = {
         const folderId = (t.doc as unknown as TemplateDoc).folderId;
         if (folderId && tree.includes(folderId)) await deleteTemplateCascade(userId, t);
       }
-      await notesCloud.unfileLibraryFolders(userId, "cloud", tree);
+      await notesCloud.deleteLibraryFolderNotes(userId, "cloud", tree);
       await prisma.cutFolder.deleteMany({
         where: { userId, scope: "library", id: { in: tree } },
       });

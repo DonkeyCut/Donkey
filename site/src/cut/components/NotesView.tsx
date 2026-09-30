@@ -18,6 +18,7 @@ import {
   saveNote,
   saveNoteFolder,
   saveNoteLabel,
+  subtreeOf,
   type CutNote,
   type CutNoteFolder,
 } from "@/cut/lib/notes";
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { DeleteConfirm, foldersGoNote } from "./selectionMenu";
 import { LIBRARY_SQUARE } from "./LibraryCard";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
 
@@ -147,11 +149,29 @@ export function NotesView({ library, ref }: Props = {}) {
   };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [folderCreating, setFolderCreating] = useState(false);
+  const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
 
   const list = notes.data?.notes ?? [];
   const folders = notes.data?.folders ?? [];
   const labels = notes.data?.labels ?? [];
   const labelName = new Map(labels.map((l) => [l.id, l.name]));
+  // What deleting a folder takes: the folders under it, however deep, and
+  // every note they hold, the way the server deletes it.
+  const folderTakes = (id: string) => {
+    const tree = new Set(subtreeOf(folders, id));
+    const notes = list.filter((n) => !!n.folderId && tree.has(n.folderId));
+    return { tree, notes, held: tree.size - 1 + notes.length };
+  };
+  const removeFolder = async (id: string) => {
+    const { tree } = folderTakes(id);
+    patchNotes(client, (prev) => ({
+      ...prev,
+      folders: prev.folders.filter((f) => !tree.has(f.id)),
+      notes: prev.notes.filter((n) => !n.folderId || !tree.has(n.folderId)),
+    }));
+    await settleFolder(id);
+    await deleteNoteFolder(id).catch(() => reload());
+  };
   // The open folder and the open note both live in the URL (?folder=…&note=…),
   // so the browser's back button — the mouse's too — steps out of the note and
   // then out of the folder, and the location survives a reload.
@@ -560,21 +580,11 @@ export function NotesView({ library, ref }: Props = {}) {
             }
           }}
           onRename={renameFolder}
-          onDelete={async (id) => {
-            // What the folder held comes up one level, the way the server
-            // files it.
-            const parentId = folders.find((f) => f.id === id)?.parentId ?? null;
-            patchNotes(client, (prev) => ({
-              ...prev,
-              folders: prev.folders
-                .filter((f) => f.id !== id)
-                .map((f) => (f.parentId === id ? { ...f, parentId } : f)),
-              notes: prev.notes.map((n) =>
-                n.folderId === id ? { ...n, folderId: parentId } : n,
-              ),
-            }));
-            await settleFolder(id);
-            await deleteNoteFolder(id).catch(() => reload());
+          // An empty folder goes at once; one holding anything asks first,
+          // since everything under it goes with it.
+          onDelete={(id) => {
+            if (folderTakes(id).held > 0) setDeletingFolder(id);
+            else void removeFolder(id);
           }}
           onDropIds={(ids, folderId) => void moveNotes(ids, folderId)}
           onDropFolders={(ids, folderId) => void moveFolders(ids, folderId)}
@@ -654,6 +664,17 @@ export function NotesView({ library, ref }: Props = {}) {
           })}
         </Marquee>
       )}
+      <DeleteConfirm
+        open={deletingFolder !== null}
+        title={`Delete “${folders.find((f) => f.id === deletingFolder)?.name ?? "folder"}”?`}
+        description={`${foldersGoNote(1, deletingFolder ? folderTakes(deletingFolder).held : 0)}It is removed from your phone too.`}
+        onClose={() => setDeletingFolder(null)}
+        onConfirm={() => {
+          const id = deletingFolder;
+          setDeletingFolder(null);
+          if (id) void removeFolder(id);
+        }}
+      />
     </div>
   );
 }

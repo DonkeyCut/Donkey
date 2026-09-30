@@ -11,10 +11,15 @@ function harness() {
       update: mock(async (args: unknown) => { void args; return row; }), create: mock(async (args: unknown) => { void args; return row; }),
       updateMany: mock(async (args: unknown) => { void args; return { count: 1 }; }),
     },
-    cutFolder: { findFirst: mock(async (args: unknown) => { void args; return null as { id: string } | null; }) },
+    cutFolder: {
+      findFirst: mock(async (args: unknown) => { void args; return null as { id: string } | null; }),
+      findMany: mock(async (args: unknown) => { void args; return [] as { id: string; parentId: string | null }[]; }),
+      deleteMany: mock(async (args: unknown) => { void args; return { count: 0 }; }),
+    },
     cutNoteLabel: { findMany: mock(async (args: unknown) => { void args; return []; }) },
   };
-  return { db, api: createNotesCloud(db as unknown as typeof prisma) };
+  const withTx = { ...db, $transaction: async (fn: (tx: typeof db) => Promise<unknown>) => fn(db) };
+  return { db, api: createNotesCloud(withTx as unknown as typeof prisma) };
 }
 const request = (body: unknown) => new Request("https://donkeycut.com/api/cut-cloud/notes/n1", { method: "PUT", body: JSON.stringify(body), headers: { "Content-Type": "application/json" } });
 describe("synced Library notes", () => {
@@ -73,12 +78,35 @@ describe("synced Library notes", () => {
     expect(await res.json()).toMatchObject({ title: "Script", libraryLocation: location });
     expect(db.cutNote.update.mock.calls.length).toBe(0);
   });
-  test("folder deletion unfiles only matching owner, shelf, and folders", async () => {
+  test("deleting Library folders deletes only the matching owner's notes on that shelf", async () => {
     const { api, db } = harness();
-    await api.unfileLibraryFolders("owner", "local", ["brand", "child"]);
-    expect(db.cutNote.updateMany.mock.calls[0][0]).toEqual({ where: { userId: "owner", AND: [
+    await api.deleteLibraryFolderNotes("owner", "local", ["brand", "child"]);
+    const call = db.cutNote.updateMany.mock.calls[0][0] as { where: unknown; data: { deletedAt: Date; updatedAt: Date } };
+    expect(call.where).toEqual({ userId: "owner", deletedAt: null, AND: [
       { libraryLocation: { path: ["residency"], equals: "local" } },
       { OR: ["brand", "child"].map((id) => ({ libraryLocation: { path: ["folderId"], equals: id } })) },
-    ] }, data: { libraryLocation: { residency: "local", folderId: null } } });
+    ] });
+    expect(call.data.deletedAt instanceof Date).toBe(true);
+    expect(call.data.updatedAt).toEqual(call.data.deletedAt);
+  });
+  test("deleting a note folder takes the folders under it and every note they hold", async () => {
+    const { api, db } = harness();
+    db.cutFolder.findMany.mockResolvedValue([
+      { id: "scripts", parentId: null },
+      { id: "drafts", parentId: "scripts" },
+      { id: "old", parentId: "drafts" },
+      { id: "other", parentId: null },
+    ]);
+    expect((await api.removeFolder("owner", "scripts")).status).toBe(200);
+    const notes = db.cutNote.updateMany.mock.calls[0][0] as { where: unknown; data: { deletedAt: Date } };
+    expect(notes.where).toEqual({ userId: "owner", folderId: { in: ["scripts", "drafts", "old"] }, deletedAt: null });
+    expect(notes.data.deletedAt instanceof Date).toBe(true);
+    expect(db.cutFolder.deleteMany.mock.calls[0][0]).toEqual({ where: { userId: "owner", scope: "note", id: { in: ["scripts", "drafts", "old"] } } });
+  });
+  test("deleting a folder someone else owns changes nothing", async () => {
+    const { api, db } = harness();
+    expect((await api.removeFolder("owner", "scripts")).status).toBe(200);
+    expect(db.cutNote.updateMany.mock.calls.length).toBe(0);
+    expect(db.cutFolder.deleteMany.mock.calls.length).toBe(0);
   });
 });

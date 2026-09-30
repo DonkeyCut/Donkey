@@ -357,6 +357,9 @@ struct FolderList: View {
 
     /// The row a drag is held over.
     @State private var targeted: UUID?
+    /// A folder holding anything asks before it goes, since everything under
+    /// it goes with it.
+    @State private var deleting: NoteFolder?
 
     var body: some View {
         if !folders.isEmpty {
@@ -393,7 +396,11 @@ struct FolderList: View {
                             onMove(NotesDragItem(kind: .folder, id: folder.id))
                         }
                         Button("Delete", systemImage: "trash", role: .destructive) {
-                            onDelete(folder)
+                            if ideas.notes(in: folder.id).isEmpty && ideas.folders(in: folder.id).isEmpty {
+                                onDelete(folder)
+                            } else {
+                                deleting = folder
+                            }
                         }
                     }
                     if folder.id != folders.last?.id {
@@ -403,6 +410,16 @@ struct FolderList: View {
             }
             .padding(.horizontal, 14)
             .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 16))
+            .alert(
+                "Delete “\(deleting?.name ?? "")”?",
+                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+                presenting: deleting
+            ) { folder in
+                Button("Delete", role: .destructive) { onDelete(folder) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("Everything inside the folder goes with it, here and in Donkey Cut.")
+            }
         }
     }
 }

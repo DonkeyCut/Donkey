@@ -125,6 +125,7 @@ import {
 } from "./library";
 import { forgetLinkedCopies } from "./linkedLibrary";
 import { fetchNotes } from "./notes";
+import { noteInLibraryFolder } from "./noteReference";
 import {
   captureFreezeFrame,
   beatlessFor,
@@ -3979,14 +3980,18 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           const r = folderShelf(id);
           if (!r) throw new ToolError(`No library folder with id ${id}.`);
           const takes = folderDeleteTakes(lib, [{ id }]);
+          const notes = (await fetchNotes()).notes.filter((n) =>
+            [...takes.tree].some((f) => noteInLibraryFolder(n, f, r)),
+          ).length;
           forgetLinkedCopies(takes.assets);
           await deleteLibraryFolder(r, id);
           const phone = takes.assets.filter((a) => !!a.origin).length;
           return {
             deleted: true,
             items: takes.assets.length + takes.templates.length,
+            ...(notes > 0 ? { notes } : {}),
             ...(phone > 0 ? { removedFromPhone: phone } : {}),
-            note: "Everything in it — folders and items — was deleted too. A camera clip filed there stays in Camera Roll.",
+            note: "Everything in it — folders, items and notes — was deleted too. A camera clip filed there stays in Camera Roll.",
           };
         }
         case "move_asset": {

@@ -16,7 +16,7 @@ import { noteReadSchema, noteSaveSchema, parseNoteLink, type NoteLocation } from
 import { settleParents } from "./folderTree";
 import { backendFor } from "./residency";
 
-export { folderTrail, folderWithin } from "./folderTree";
+export { folderTrail, folderWithin, subtreeOf } from "./folderTree";
 
 export interface CutNote {
   libraryLocation?: NoteLocation | null;
@@ -153,12 +153,17 @@ export async function saveNoteFolder(
   return (await res.json()) as CutNoteFolder;
 }
 
-export async function unfileLibraryNotes(residency: "browser" | "local", folderIds: string[]): Promise<void> {
-  const res = await notesFetch("/api/cut/notes/library-location", json({ residency, folderIds }));
-  if (!res.ok) throw new Error("Could not move the folder’s notes to the Library root.");
+/** Delete the notes filed in Library folders on a shelf that keeps no notes
+ * of its own — what deleting those folders takes. */
+export async function deleteLibraryFolderNotes(residency: "browser" | "local", folderIds: string[]): Promise<void> {
+  const res = await notesFetch("/api/cut/notes/library-folders/delete", {
+    ...json({ residency, folderIds }),
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Could not delete the folder’s notes.");
 }
 
-/** Delete a folder. What it held comes up one level. */
+/** Delete a folder and everything under it: its folders and their notes. */
 export async function deleteNoteFolder(id: string): Promise<void> {
   const res = await notesFetch(`/api/cut/notes/folders/${encodeURIComponent(id)}`, {
     method: "DELETE",

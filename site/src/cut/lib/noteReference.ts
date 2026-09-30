@@ -15,7 +15,7 @@ export function noteInLibraryFolder(note: Pick<CutNote, "libraryLocation">, fold
   const location = note.libraryLocation;
   return !!location && location.folderId === folderId && (!residency || location.residency === residency);
 }
-export const noteUnfileSchema = z.object({ residency: z.enum(["browser", "local", "cloud"]), folderIds: z.array(z.string().min(1).max(128)).max(10000) });
+export const noteLibraryFoldersSchema = z.object({ residency: z.enum(["browser", "local", "cloud"]), folderIds: z.array(z.string().min(1).max(128)).max(10000) });
 export const noteReadSchema = z.object({ id: noteIdSchema.optional(), link: z.string().optional() });
 export const noteSaveSchema = z.object({
   id: noteIdSchema.optional().describe("Existing note id; omit to create a note"),

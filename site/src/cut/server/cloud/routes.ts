@@ -122,7 +122,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/projects/:id/scene-lease", handler: (r, u, p) => cloudSceneLease(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/turns/:jobId/cancel", handler: (_r, u, p) => turnsCloud.cancel(u, p.jobId) },
 
-  { method: "PUT", path: "/api/cut-cloud/notes/library-location", handler: (r, u) => notesCloud.unfileLibrary(u, r) },
+  { method: "POST", path: "/api/cut-cloud/notes/library-folders/delete", handler: (r, u) => notesCloud.deleteInLibraryFolders(u, r) },
   { method: "GET", path: "/api/cut-cloud/notes", handler: (_r, u) => notesCloud.list(u) },
   { method: "PUT", path: "/api/cut-cloud/notes/folders/:id", handler: (r, u, p) => notesCloud.putFolder(u, p.id, r) },
   { method: "DELETE", path: "/api/cut-cloud/notes/folders/:id", handler: (_r, u, p) => notesCloud.removeFolder(u, p.id) },

@@ -370,10 +370,18 @@ export function LibraryView() {
     return () => window.removeEventListener("paste", onPaste);
   }, []);
 
+  // The notes filed in a set of Library folders, which a delete of those
+  // folders takes with it.
+  const notesIn = (tree: Set<string>) =>
+    (notes.data?.notes ?? []).filter((n) => {
+      const at = n.libraryLocation;
+      return !!at?.folderId && tree.has(at.folderId) &&
+        folders.find((f) => f.id === at.folderId)?.residency === at.residency;
+    });
   // Delete a set. A folder takes everything under it — the folders filed
-  // there, however deep, and every item they hold — the way the shelf deletes
-  // it; an item filed in one of those needs no delete of its own. A camera
-  // clip filed there stays in Camera Roll, unfiled.
+  // there, however deep, and every item and note they hold — the way the
+  // shelf deletes it; an item filed in one of those needs no delete of its
+  // own. A camera clip filed there stays in Camera Roll, unfiled.
   const remove = async (set: DeleteSet) => {
     setDeleting(null);
     // A shelf that isn't answering keeps its items.
@@ -392,6 +400,9 @@ export function LibraryView() {
         .map((a) => (inTree(a) ? { ...a, folderId: null } : a)),
       templates: d.templates.filter((t) => !gone.has(t.id)),
     }));
+    const goneNotes = new Set(notesIn(takes.tree).map((n) => n.id));
+    if (goneNotes.size)
+      patchNotes(client, (d) => ({ ...d, notes: d.notes.filter((n) => !goneNotes.has(n.id)) }));
     setSelected(new Set());
     try {
       await Promise.all([
@@ -400,16 +411,18 @@ export function LibraryView() {
         ),
         ...goneFolders.map((f) => deleteLibraryFolder(f.residency, f.id)),
       ]);
-      if (goneFolders.length) void client.invalidateQueries({ queryKey: notesKey });
     } catch {
       void reload();
+    } finally {
+      // Notes the delete took, or the ones a failed delete left in place.
+      if (goneFolders.length) void client.invalidateQueries({ queryKey: notesKey });
     }
   };
   // How many items the folders hold between them, however deep — what the
   // confirm counts beside them.
   const heldBy = (fs: LibraryFolder[]) => {
     const takes = folderDeleteTakes(listing, fs);
-    return takes.assets.length + takes.templates.length;
+    return takes.assets.length + takes.templates.length + notesIn(takes.tree).length;
   };
   // How many of the items a delete takes were synced from the phone, which
   // takes them off the phone too.
@@ -982,7 +995,7 @@ export function LibraryView() {
           title={
             deleting ? `Delete ${pickLabel(deleting.folders, deleting.items, ["item", "items"], deletingHeld)}?` : ""
           }
-          description={`${deleting?.folders.length ? "Notes return to the Library root. " : ""}${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}Projects that already use ${deletingTotal === 1 ? "it" : "them"} keep their own copy.`}
+          description={`${foldersGoNote(deleting?.folders.length ?? 0, deletingHeld)}${phoneGoNote(deleting ? phoneSynced(deleting) : 0, deletingTotal)}Projects that already use ${deletingTotal === 1 ? "it" : "them"} keep their own copy.`}
           action="Remove"
           onClose={() => setDeleting(null)}
           onConfirm={() => deleting && void remove(deleting)}

@@ -449,7 +449,7 @@ public final class IdeasModel {
         onLocalChange?()
     }
 
-    /// Delete a folder. What it held comes up one level.
+    /// Delete a folder and everything under it: its folders and their notes.
     public func deleteFolder(id: UUID) {
         try? store.deleteNoteFolder(id: id)
         reloadFromStore()

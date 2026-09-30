@@ -49,7 +49,7 @@ as it lands — so a reel stands tall beside a landscape clip, and the grid
 deals cards into whichever of its two columns is shorter. A card always says where its link stands: waiting to be handed over,
 fetching, or failed with the reason and a way to try again. Every attempt that
 fails writes that reason on the item, so a card can never spin on a request
-nothing is making any more. Notes merge by edit stamp; tombstones carry offline deletions. Folder ids come from the creating device, parents sync first, and deleting a folder moves its contents up one level. Labels travel with each note; deleted labels disappear everywhere, and writes above twenty labels fail.
+nothing is making any more. Notes merge by edit stamp; tombstones carry offline deletions. Folder ids come from the creating device, parents sync first, and deleting a folder deletes everything in it. Labels travel with each note; deleted labels disappear everywhere, and writes above twenty labels fail.
 
 The desktop Library creates notes through its context menu and existing note editor; notes stay cloud-synced, with Library placement stored independently of phone folders and preserved when a phone edits their text.
 

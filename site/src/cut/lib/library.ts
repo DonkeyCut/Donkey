@@ -512,17 +512,18 @@ export function folderDeleteTakes(
   };
 }
 
-/** Delete a folder and everything in it, folders and items alike. */
+/** Delete a folder and everything in it: folders, items and the notes filed
+ * there. The cloud shelf takes its notes itself; on the others the notes go
+ * once the folder has, so a delete that fails leaves them in place. */
 export async function deleteLibraryFolder(
   residency: Residency,
   id: string,
 ): Promise<void> {
+  let tree: string[] = [];
   if (residency !== "cloud") {
     const listing = await backendFor(residency).fetch("/api/cut/library");
     if (!listing.ok) throw new Error("Could not read the folder.");
-    const data = await listing.json() as LibraryData;
-    const { unfileLibraryNotes } = await import("@/cut/lib/notes");
-    await unfileLibraryNotes(residency, subtreeOf(data.folders, id));
+    tree = subtreeOf((await listing.json() as LibraryData).folders, id);
   }
   const res = await backendFor(residency).fetch(
     `/api/cut/library/folders/${id}`,
@@ -531,6 +532,10 @@ export async function deleteLibraryFolder(
     },
   );
   if (!res.ok) throw new Error("Could not delete folder.");
+  if (residency !== "cloud") {
+    const { deleteLibraryFolderNotes } = await import("@/cut/lib/notes");
+    await deleteLibraryFolderNotes(residency, tree);
+  }
 }
 
 /** File a library item — an asset or a template — into a folder on its own
