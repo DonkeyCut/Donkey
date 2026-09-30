@@ -1,4 +1,4 @@
-// Server-side access to the stored rollup. The su routes fold it into what a
+// Server-side access to the stored rollup. The analytics routes fold it into what a
 // caller asked for — a summary, or one page of people — so the file itself
 // never goes over the wire.
 import { NextResponse } from "next/server";

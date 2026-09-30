@@ -15,10 +15,6 @@ export function describeCreditLifetime(days: number | null): string | null {
   return days === 1 ? "a day" : `${days} days`;
 }
 
-export function creditsOfferedIdempotencyKey(offerId: string): string {
-  return `credits-offered:${offerId}`;
-}
-
 // Tells the account credit is waiting and hands it the claim link. Credit
 // given by hand is account mail, so it goes whatever the marketing choice;
 // the footer still offers the opt-out.

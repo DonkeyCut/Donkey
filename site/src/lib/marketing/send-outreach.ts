@@ -42,10 +42,6 @@ export const outreachPayloadSchema = z
 
 export type OutreachPayload = z.output<typeof outreachPayloadSchema>;
 
-export function outreachIdempotencyKey(outreachId: string, attempt: number): string {
-  return `outreach:${outreachId}:${attempt}`;
-}
-
 // Every note carries a plain-text version, including its optional opt-out footer.
 function outreachText(body: string, unsubscribeUrl: string | null): string {
   const trimmed = body.trim();

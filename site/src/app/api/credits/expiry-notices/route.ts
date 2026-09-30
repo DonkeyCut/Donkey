@@ -8,7 +8,7 @@ import { enqueueJob } from "@/lib/jobs/queue";
 export const maxDuration = 300;
 
 // The daily credit-expiry notice. Vercel's cron authenticates with the
-// CRON_SECRET bearer token; a manual run goes through POST /api/jobs.
+// CRON_SECRET bearer token; a manual run starts from su.
 export const GET = async (request: NextRequest) => {
   if (!(await isVercelCron(request))) return notFoundResponse();
   return NextResponse.json(await enqueueJob("credit-expiry-notice", {}, "vercel-cron"));

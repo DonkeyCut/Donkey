@@ -156,9 +156,7 @@ balance short of one flat-priced generation also returns the price it could not
 cover, and that account can still run chat and the other metered calls, so a
 client knows to keep the rest of the surface working.
 
-Credit given by hand is an offer. The caller must be signed in with
-`user.superUser` set, and the target user is addressed by internal id or by
-email. The route records the offer and emails a claim link; the grant and its
+Credit given by hand is an offer su emails as a claim link; the grant and its
 ledger entry are written when the person claims, with the credit's lifetime
 counted from that moment.
 

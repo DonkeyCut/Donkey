@@ -11,18 +11,11 @@ import { JobDeferred, JobFailure, jobKinds } from "@/lib/jobs/registry";
 import { prisma } from "@/lib/prisma";
 
 const JOBS_QUEUE_NAME = "donkey-jobs";
-// A queued job untouched this long has likely lost its message (a failed
-// publish, a dropped delivery) — the status poll re-publishes. Double delivery
-// is safe: execution claims the row atomically.
-const STALE_QUEUED_MS = 30_000;
 // A running job untouched this long is a crashed or killed execution. The
-// claim treats such a row as reclaimable so a queue retry can run it again,
-// and the status poll surfaces it as an error instead of spinning forever.
+// claim treats such a row as reclaimable so a queue retry can run it again.
 const STALE_RUNNING_MS = 15 * 60_000;
 // The longest the queue will hold a message before delivery.
 const MAX_QUEUE_DELAY_S = 12 * 60 * 60;
-
-type JobRow = NonNullable<Awaited<ReturnType<typeof prisma.asyncJob.findUnique>>>;
 
 // --- Queue publish (Cloudflare Queues REST API; producers outside Workers
 // publish over HTTP). The queue id is looked up from the name once per
@@ -119,36 +112,6 @@ export async function ensureJob(
     await publishJob(pending.id, delaySeconds);
   }
   return { jobId: pending.id };
-}
-
-/** Self-heal one polled row: a stale queued job re-publishes its message, and
- * a stale running job (crashed execution) becomes an error instead of spinning
- * the poller forever. A job held back until later is left to its delayed
- * message. Returns the row, refreshed when it changed. */
-export async function healJob(job: JobRow): Promise<JobRow> {
-  const idleMs = Date.now() - job.updatedAt.getTime();
-  const held = job.notBefore !== null && job.notBefore.getTime() > Date.now();
-  if (job.state === "queued" && idleMs > STALE_QUEUED_MS && !held) {
-    await publishJob(job.id);
-  } else if (job.state === "running" && idleMs > STALE_RUNNING_MS) {
-    await prisma.asyncJob.updateMany({
-      where: { id: job.id, state: "running" },
-      data: { state: "error", error: "The job stalled — try again." },
-    });
-    return (await prisma.asyncJob.findUnique({ where: { id: job.id } })) ?? job;
-  }
-  return job;
-}
-
-/** Report a job's state (healed first — see healJob). */
-export async function jobStatusResponse(job: JobRow): Promise<Response> {
-  job = await healJob(job);
-  return NextResponse.json({
-    kind: job.kind,
-    state: job.state,
-    result: job.result ?? undefined,
-    error: job.error ?? undefined,
-  });
 }
 
 /** Execute one job (called by the queue consumer through /api/jobs/worker).

@@ -16,12 +16,12 @@ import { sendVerificationEmail } from "@/lib/email/send-verification";
 // it from the localhost request.
 const baseURL = process.env.VERCEL ? DONKEYCUT_CANONICAL : undefined;
 
-// The session is shared with the apex's subdomains: the super-user surface is
-// its own host, and a host-only cookie would never reach it. Scoping the auth
-// cookies to the registrable host lets the session ride across, and listing the
-// subdomain as a trusted origin lets a sign-in started there name its own
-// address as the post-auth callback. Hosted only — localhost can't carry a
-// Domain attribute, and dev serves both surfaces from one origin anyway.
+// The session is shared with the apex's subdomains: the super-user app (a
+// private repo) is its own host, and a host-only cookie would never reach it.
+// Scoping the auth cookies to the registrable host lets the session ride
+// across, and listing the subdomain as a trusted origin lets a sign-in started
+// there name its own address as the post-auth callback. Hosted only —
+// localhost can't carry a Domain attribute.
 const crossSubDomain = process.env.VERCEL
   ? {
       advanced: {

@@ -28,15 +28,8 @@ export function dollarsToStripeCents(amountDollars: number): number {
   return Math.round(amountDollars * 100);
 }
 
-// How long a grant lives. The su grant form offers these picks beside a custom
-// day count; the grant API and the signup-credits setting cap the count at the
-// same ceiling. null stands for a grant that never expires.
-export const creditGrantExpiryPresets = [
-  { label: "1 day", days: 1 },
-  { label: "1 week", days: 7 },
-  { label: "1 month", days: 30 },
-  { label: "1 year", days: 365 },
-] as const;
+// How long a grant lives, capped at the same ceiling everywhere. null stands
+// for a grant that never expires.
 export const maxCreditGrantExpiryDays = 3650;
 
 /** The moment a grant made now stops being spendable, or undefined for never. */

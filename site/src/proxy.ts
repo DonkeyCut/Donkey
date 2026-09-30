@@ -1,14 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
-import {
-  DONKEYCUT_CANONICAL,
-  SU_APP_ORIGIN,
-  SU_ORIGIN,
-  isDonkeycutHost,
-  isSuHost,
-} from "@/cut/lib/hosts";
-import { suSectionHome } from "@/app/su/nav";
+import { DONKEYCUT_CANONICAL, isDonkeycutHost } from "@/cut/lib/hosts";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
 // site app: the marketing landing at /cut and the app under /cut/app. The
@@ -17,10 +10,6 @@ import { suSectionHome } from "@/app/su/nav";
 // host. The auth pages (/sign-in, /sign-up), "/install", and the legal pages
 // are real root-level routes and pass through the rewrite.
 //
-// su.donkeycut.com is the second surface this file routes: the super-user
-// section under /su, served at bare addresses ("/analytics") on that host
-// alone. It shares the deployment and its /api handlers, and it shares the
-// session, because auth cookies are scoped to donkeycut.com (src/lib/auth.ts).
 // www. 308s to the apex; retired domains redirect to donkeycut.com at the
 // edge (Cloudflare) and never reach this app.
 //
@@ -81,96 +70,11 @@ const underPath = (pathname: string, prefix: string) =>
 const passesThrough = (pathname: string) =>
   PASSTHROUGH.some((p) => underPath(pathname, p));
 
-// The super-user host serves one section and nothing else: /su/… for pages,
-// the shared /api handlers for their data.
-//
-// The role gate lives here, ahead of the route. A page's document preloads
-// the client code of every segment on its path whether or not that segment
-// renders, so a gate inside the route tree would still hand the section's
-// bundle — the charts, the tables, the shell — to whoever asked for the
-// address. Here the proxy asks the account route who is calling (the session
-// cookie is scoped to the apex, so it reads the same on this host) and only a
-// super user reaches a page; everyone else gets a redirect and no document.
-// Sign-in lives on the app's host, so a signed-out visitor leaves for it with
-// this address as the post-auth callback, and a signed-in visitor without the
-// role is sent to the app. The routes the pages call are withSuperUser and
-// enforce the role again on every request.
-//
-// Nothing here belongs in a search index, so every page response carries the
-// header that says so.
-const SU_ROOT = "/su";
-
-// The gate's answer is held per cookie for a short while. A page visit is
-// several requests — the document, then the router's prefetch of every page
-// on the rail, each a handful of segment fetches — and every one of them
-// passed through the gate, so a visit cost dozens of session lookups and
-// each prefetch waited on one. The hold is short because the answer decides
-// who is served the section's code; the data routes check the role on every
-// request regardless.
-const GATE_HOLD_MS = 30_000;
-const GATE_HOLD_MAX = 256;
-const gateHeld = new Map<string, { superUser: boolean; until: number }>();
-
-async function gateAnswer(cookie: string): Promise<{ status: number; superUser: boolean }> {
-  const held = gateHeld.get(cookie);
-  if (held && held.until > Date.now()) return { status: 200, superUser: held.superUser };
-  const account = await fetch(`${SU_APP_ORIGIN}/api/account/me`, {
-    cache: "no-store",
-    headers: { cookie },
-  });
-  if (!account.ok) return { status: account.status, superUser: false };
-  const { superUser } = (await account.json()) as { superUser: boolean };
-  if (cookie) {
-    if (gateHeld.size >= GATE_HOLD_MAX) gateHeld.delete(gateHeld.keys().next().value!);
-    gateHeld.set(cookie, { superUser: superUser === true, until: Date.now() + GATE_HOLD_MS });
-  }
-  return { status: 200, superUser: superUser === true };
-}
-
-async function suHost(req: NextRequest, pathname: string): Promise<NextResponse> {
-  if (underPath(pathname, "/api")) return NextResponse.next();
-
-  // The host root and a section address open a page, answered here so no
-  // page ever renders a redirect. One thrown from a page reaches the browser
-  // as a meta tag behind the streamed shell, and the page's slot paints empty
-  // until the router follows it.
-  const home = suSectionHome(pathname);
-  if (home) {
-    const url = new URL(req.url);
-    url.pathname = home;
-    return NextResponse.redirect(url, 307);
-  }
-
-  const account = await gateAnswer(req.headers.get("cookie") ?? "");
-  if (account.status === 401) {
-    // The callback has to carry the exact origin sign-in trusts (src/lib/auth.ts),
-    // so hosted names it from the constant; dev's su.localhost is plain http on
-    // whatever host the browser asked for.
-    const origin = HOSTED ? SU_ORIGIN : `http://${req.headers.get("host")}`;
-    const here = `${origin}${pathname}${req.nextUrl.search}`;
-    return NextResponse.redirect(
-      `${SU_APP_ORIGIN}/sign-in?callbackURL=${encodeURIComponent(here)}`,
-    );
-  }
-  if (account.status !== 200) {
-    return new NextResponse("The super-user gate is unavailable.", { status: 503 });
-  }
-  if (!account.superUser) return NextResponse.redirect(`${SU_APP_ORIGIN}/app`);
-
-  const url = new URL(req.url);
-  url.pathname = `${SU_ROOT}${pathname === "/" ? "" : pathname}`;
-  const res = NextResponse.rewrite(url);
-  res.headers.set("X-Robots-Tag", "noindex, nofollow");
-  return res;
-}
-
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isCutApi(pathname)) return cutApi(req);
 
   const host = req.headers.get("host");
-
-  if (isSuHost(host)) return suHost(req, pathname);
 
   // Aliases (www.) canonicalize to the apex.
   if (isDonkeycutHost(host) && host?.split(":")[0] !== "donkeycut.com") {

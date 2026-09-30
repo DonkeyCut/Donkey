@@ -125,14 +125,6 @@ export async function scheduleDrain(delaySeconds: number): Promise<void> {
   await ensureJob("email-drain", {}, "system", { delaySeconds });
 }
 
-/** Starts a drainer for one kind now, on an operator's say-so. Its own job,
- * so a drainer held back by another kind's budget wait does not stand in
- * for it. */
-export async function drainKindNow(kind: EmailKindId, createdBy: string): Promise<void> {
-  const { enqueueJob } = await import("@/lib/jobs/queue");
-  await enqueueJob("email-drain", { kind }, createdBy);
-}
-
 type DrainableRow = Awaited<ReturnType<typeof prisma.emailSend.findMany>>[number];
 
 async function sendRow(row: DrainableRow, now: Date): Promise<Outcome> {

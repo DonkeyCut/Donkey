@@ -119,27 +119,6 @@ export function useUpdateCreditAutoReload() {
   });
 }
 
-// Super-user only: offer credits to a user (by email) or to self (by userId).
-// The credit lands when the person claims it from the email.
-export function useOfferCredits() {
-  return useMutation({
-    mutationFn: (input: {
-      amountDollars: number;
-      email?: string;
-      // Days the credit lives once claimed; null keeps it forever.
-      expiresAfterDays: number | null;
-      userId?: string;
-    }) =>
-      apiFetch<{
-        offer: { closesAt: string | null; expiresAfterDays: number | null; id: string };
-        targetUser: { email: string };
-      }>(
-        "/api/credits/offers",
-        { body: JSON.stringify(input), method: "POST" },
-      ),
-  });
-}
-
 export const creditOfferQueryKey = (token: string) => ["credits", "offer", token] as const;
 
 export type CreditOffer = {

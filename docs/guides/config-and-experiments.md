@@ -32,9 +32,8 @@ variant (the experiment the account is assigned to)
 The registry parses every default against its schema when the module loads,
 so a wrong default fails the process at boot. A stored override that no longer
 parses after a schema change is skipped, logged, and shown on su as invalid so
-it can be reset. The su settings tab draws its form from the schema, so a new
-setting needs no form code. The Product tab on su shows the settings that shape
-what an account gets, such as the signup credit grant, with the same cards.
+it can be reset. su is an internal app in a private repo; the overrides it
+writes live in the database.
 
 **Every tunable is a setting.** A threshold, a switch, a mode: if an operator
 might want it different, it is a registry entry, and a feature that people
@@ -164,5 +163,4 @@ shape and resolution, audience, assignment, the experiment schema, and the
 statistics and verdict, with no host code inside. The site binds it in its
 config library, which holds the product's registry, collects the audience
 facts, and stores assignments; the results job sits with the other background
-jobs; the su surface is the experiments section with its list and settings
-tabs.
+jobs.

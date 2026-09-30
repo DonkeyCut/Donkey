@@ -54,28 +54,3 @@ export const OUTREACH_REASONS = [
 
 export type OutreachReason = (typeof OUTREACH_REASONS)[number];
 
-export const OUTREACH_REASON_LABELS: Record<OutreachReason, string> = {
-  canceled: "Canceled Pro",
-  canceling: "Canceling Pro",
-  no_credits: "Out of credits",
-  past_due: "Payment past due",
-  payment_failed: "Payment declined",
-  picked: "Added by hand",
-  spent: "Spending credits",
-  storage: "Holding media",
-  storage_full: "Storage full",
-};
-
-/** The reasons that are a wall the person ran into, shown in the warning tone. */
-export const OUTREACH_WALL_REASONS: readonly OutreachReason[] = [
-  "no_credits",
-  "storage_full",
-  "payment_failed",
-  "past_due",
-  "canceling",
-  "canceled",
-];
-
-export const OUTREACH_STATUSES = ["todo", "sent", "replied", "ignored"] as const;
-
-export type OutreachStatus = (typeof OUTREACH_STATUSES)[number];

@@ -8,8 +8,7 @@ import { enqueueJob } from "@/lib/jobs/queue";
 export const maxDuration = 300;
 
 // The nightly outreach scan. Vercel's cron authenticates with the CRON_SECRET
-// bearer token; the Outreach tab's Scan now button goes through the super-user
-// POST /api/jobs instead.
+// bearer token; a manual scan starts from su.
 export const GET = async (request: NextRequest) => {
   if (!(await isVercelCron(request))) return notFoundResponse();
   return NextResponse.json(await enqueueJob("outreach-scan", {}, "vercel-cron"));

@@ -10,19 +10,14 @@ import { unsubscribeActionUrl, unsubscribePageUrl } from "@/lib/email/unsubscrib
 import { renderPromotion, type PromotionCopy } from "@/lib/marketing/promotionCopy";
 import {
   PROMOTION_SENDERS,
-  PROMOTION_STATUSES,
   type PromotionSender,
-  type PromotionStatus,
-  type PromotionSummary,
   type SegmentCount,
 } from "@/lib/marketing/promotionInput";
 import { prisma } from "@/lib/prisma";
-import { PROMOTION_OFFER_KINDS } from "@/lib/credits/offerKinds";
 import type { OfferVars } from "@/lib/credits/offerTerms";
-import { creditOfferDraftOf } from "@/lib/credits/offerTerms";
 
 // Promotions on the server: which address each sender is, who a segment
-// resolves to, one send, and the list su reads.
+// resolves to, and one send.
 
 /** The address each sender name stands for. Empty when unconfigured. */
 export function promotionSenders(): Record<PromotionSender, string> {
@@ -30,15 +25,9 @@ export function promotionSenders(): Record<PromotionSender, string> {
 }
 
 const isSender = (s: string): s is PromotionSender => (PROMOTION_SENDERS as readonly string[]).includes(s);
-const isStatus = (s: string): s is PromotionStatus => (PROMOTION_STATUSES as readonly string[]).includes(s);
 
 function senderOf(value: string): PromotionSender {
   if (!isSender(value)) throw new Error(`Unknown promotion sender "${value}".`);
-  return value;
-}
-
-function statusOf(value: string): PromotionStatus {
-  if (!isStatus(value)) throw new Error(`Unknown promotion status "${value}".`);
   return value;
 }
 
@@ -184,72 +173,4 @@ export async function resolvePromotionSegment(
     }
   }
   return result;
-}
-
-type PromotionRow = NonNullable<Awaited<ReturnType<typeof prisma.promotion.findUnique>>>;
-
-function summarize(row: PromotionRow, counts: PromotionSummary["counts"]): PromotionSummary {
-  return {
-    id: row.id,
-    creditOffer: creditOfferDraftOf(row.creditOffer),
-    name: row.name,
-    subject: row.subject,
-    body: row.body,
-    ctaLabel: row.ctaLabel,
-    ctaUrl: row.ctaUrl,
-    sender: senderOf(row.sender),
-    audience: promotionAudienceOf(row.audience),
-    excludePromotionIds: row.excludePromotionIds,
-    status: statusOf(row.status),
-    startedAt: row.startedAt?.toISOString() ?? null,
-    finishedAt: row.finishedAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-    counts,
-  };
-}
-
-/** Every promotion, newest first, with how far its send got and what came
- * of it: buttons followed, and credit offers claimed. */
-export async function listPromotions(): Promise<PromotionSummary[]> {
-  const [rows, all, sent, failed, clicked, claimedOffers] = await Promise.all([
-    prisma.promotion.findMany({ orderBy: { createdAt: "desc" } }),
-    prisma.emailSend.groupBy({ _count: true, by: ["promotionId"], where: { promotionId: { not: null } } }),
-    prisma.emailSend.groupBy({ _count: true, by: ["promotionId"], where: { promotionId: { not: null }, state: "sent" } }),
-    prisma.emailSend.groupBy({
-      _count: true,
-      by: ["promotionId"],
-      where: { promotionId: { not: null }, state: { in: ["failed", "skipped"] } },
-    }),
-    prisma.emailSend.groupBy({
-      _count: true,
-      by: ["promotionId"],
-      where: { clickedAt: { not: null }, promotionId: { not: null } },
-    }),
-    // A promotion's offers are keyed `${promotionId}:${userId}`.
-    prisma.creditOffer.findMany({
-      select: { id: true },
-      where: { claimedAt: { not: null }, kind: { in: [...PROMOTION_OFFER_KINDS] } },
-    }),
-  ]);
-  const countOf = (groups: { promotionId: string | null; _count: number }[]) =>
-    new Map(groups.flatMap((g) => (g.promotionId ? [[g.promotionId, g._count] as const] : [])));
-  const recipients = countOf(all);
-  const sentBy = countOf(sent);
-  const failedBy = countOf(failed);
-  const clickedBy = countOf(clicked);
-  const claimedBy = new Map<string, number>();
-  for (const offer of claimedOffers) {
-    const promotionId = offer.id.slice(0, offer.id.indexOf(":"));
-    claimedBy.set(promotionId, (claimedBy.get(promotionId) ?? 0) + 1);
-  }
-  return rows.map((row) =>
-    summarize(row, {
-      recipients: recipients.get(row.id) ?? 0,
-      sent: sentBy.get(row.id) ?? 0,
-      failed: failedBy.get(row.id) ?? 0,
-      clicked: clickedBy.get(row.id) ?? 0,
-      claimed: claimedBy.get(row.id) ?? 0,
-    }),
-  );
 }

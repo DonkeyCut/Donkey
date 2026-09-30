@@ -4,11 +4,6 @@ import { OFFER_PLACEHOLDERS, type OfferVars } from "@/lib/credits/offerTerms";
 // templates and hand-typed notes go through the same fill, so a placeholder
 // means the same thing either way.
 
-/** Whether a placeholder names the offer, so a note without one can say so. */
-export function isOfferPlaceholder(name: string): boolean {
-  return (OFFER_PLACEHOLDERS as readonly string[]).includes(name);
-}
-
 /** The values a placeholder resolves to, for one recipient. */
 export type OutreachVars = {
   /** First word of the account name. */

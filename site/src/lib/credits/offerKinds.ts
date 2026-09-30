@@ -10,7 +10,6 @@ export const MANUAL_OFFER_KIND = "manual";
 // email's scope and the account.
 export const PROMOTION_OFFER_KIND = "promotion_email";
 export const PROMOTION_SUBSCRIBE_OFFER_KIND = "promotion_subscribe";
-export const PROMOTION_OFFER_KINDS = [PROMOTION_OFFER_KIND, PROMOTION_SUBSCRIBE_OFFER_KIND] as const;
 // The subscribe bonus the app opens on its own; landed by subscribing.
 export const SUBSCRIBE_BONUS_KIND = "subscribe_bonus";
 

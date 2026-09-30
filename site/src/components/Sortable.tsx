@@ -1,9 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { GripVertical } from "lucide-react";
-
-import { cn } from "@/lib/utils";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 /** How long a displaced item takes to slide into its new slot. */
 const SLIDE_MS = 180;
@@ -224,97 +221,4 @@ function useSlide(
     }
     return cb;
   };
-}
-
-/** Longest side of a drag ghost, px. */
-const GHOST_MAX = 260;
-
-/**
- * The item itself as the drag ghost, snapshotted before it turns into a hole.
- * A large card shrinks so the thing in hand does not blanket the list it is
- * carried across.
- */
-export function setSortDragImage(e: React.DragEvent, el: HTMLElement) {
-  const rect = el.getBoundingClientRect();
-  const scale = Math.min(1, GHOST_MAX / Math.max(rect.width, rect.height));
-  const clone = el.cloneNode(true) as HTMLElement;
-  clone.style.width = `${rect.width}px`;
-  clone.style.height = `${rect.height}px`;
-  clone.style.margin = "0";
-  clone.style.opacity = "0.9";
-  clone.style.transform = `scale(${scale})`;
-  clone.style.transformOrigin = "top left";
-  const wrap = document.createElement("div");
-  wrap.style.cssText =
-    "position:absolute;top:-1000px;left:-1000px;pointer-events:none;" +
-    `width:${rect.width * scale}px;height:${rect.height * scale}px;`;
-  wrap.appendChild(clone);
-  document.body.appendChild(wrap);
-  e.dataTransfer.setDragImage(
-    wrap,
-    Math.min(Math.max(e.clientX - rect.left, 0), rect.width) * scale,
-    Math.min(Math.max(e.clientY - rect.top, 0), rect.height) * scale,
-  );
-  setTimeout(() => wrap.remove(), 0);
-}
-
-/**
- * One card in a sorted grid. The card becomes draggable only while its grip is
- * held, so charts keep their own pointer handling, and it empties to a dashed
- * outline for the length of the drag — the hole travels with the pointer and
- * shows where the card lands.
- */
-export function SortCard({
-  children,
-  className,
-  dragging,
-  onDragEnd,
-  onDragStart,
-  ref,
-  ...handlers
-}: {
-  children: ReactNode;
-  className?: string;
-  dragging: boolean;
-  ref: (el: HTMLElement | null) => void;
-} & ItemHandlers) {
-  const host = useRef<HTMLDivElement | null>(null);
-  const [armed, setArmed] = useState(false);
-  return (
-    <div
-      {...handlers}
-      draggable={armed}
-      ref={(el) => {
-        host.current = el;
-        ref(el);
-      }}
-      onDragEnd={() => {
-        setArmed(false);
-        onDragEnd();
-      }}
-      onDragStart={(e) => {
-        if (host.current) setSortDragImage(e, host.current);
-        onDragStart(e);
-      }}
-      className={cn(
-        "group relative h-full min-w-0 rounded-xl [&>div]:h-full",
-        dragging &&
-          "bg-muted/40 outline-2 outline-dashed -outline-offset-2 outline-muted-foreground/30 [&>*]:invisible",
-        className,
-      )}
-    >
-      <button
-        type="button"
-        aria-label="Drag to reorder"
-        title="Drag to reorder"
-        onPointerDown={() => setArmed(true)}
-        onPointerUp={() => setArmed(false)}
-        onPointerCancel={() => setArmed(false)}
-        className="absolute top-2 right-2 z-20 cursor-grab rounded-md p-1 text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted focus-visible:opacity-100 active:cursor-grabbing group-hover:opacity-100"
-      >
-        <GripVertical className="size-4" />
-      </button>
-      {children}
-    </div>
-  );
 }
