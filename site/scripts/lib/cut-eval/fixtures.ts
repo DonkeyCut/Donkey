@@ -184,6 +184,19 @@ export const TWO_CLIP_STATE = {
   ],
 };
 
+/** The pair with a Library LUT on the first clip and the shelf's LUT list,
+ * for the copy-to-all case; the source is listed as plain Rec.709 with no
+ * header reading, for the source-colour case. */
+export const LUT_STATE = {
+  ...TWO_CLIP_STATE,
+  luts: [{ id: "lut:kodak2383", label: "Kodak 2383" }],
+  savedGrades: [],
+  videoTrack: [
+    { ...TWO_CLIP_STATE.videoTrack[0], lut: { id: "lut:kodak2383", amount: 1 } },
+    TWO_CLIP_STATE.videoTrack[1],
+  ],
+};
+
 /** The same pair already joined by a crossfade, for the edge-override case. */
 export const CROSSFADED_STATE = {
   ...TWO_CLIP_STATE,

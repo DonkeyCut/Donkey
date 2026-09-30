@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { AssetType } from "./types";
 
 export const LIBRARY_SHARE_KINDS = ["folder", "asset"] as const;
 export const SHARE_ACCESS = ["restricted", "public"] as const;
@@ -19,7 +20,7 @@ export type LibraryShareState = ShareSettings & { id: string };
 export type SharedLibraryAsset = {
   id: string;
   name: string;
-  type: "video" | "audio" | "image" | "font";
+  type: AssetType;
   duration: number;
   fileName: string;
   width?: number;

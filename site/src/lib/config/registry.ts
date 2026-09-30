@@ -292,6 +292,37 @@ export const SETTINGS = defineSettings({
     description:
       "How a talk or an interview is read for the moments worth cutting a short from: what a clip may run, how widely the first sweep looks, how many moments earn the close read, and what the ranking weighs.",
   },
+  cutColor: {
+    schema: z
+      .object({
+        // Lattice nodes per axis of a clip's color LUT: Rec.709 and sRGB
+        // sources take the smaller cube, log and HDR sources the wider one.
+        lutSize: z.number().int().min(9).max(129),
+        lutSizeWide: z.number().int().min(9).max(129),
+        // The cube drawn while a slider is moving; the full cube follows.
+        draftLutSize: z.number().int().min(5).max(65),
+        // The preview proxy's largest height, and its HEVC quality (x265 crf;
+        // the VideoToolbox quality maps from it). 18 is visually lossless for
+        // 10-bit footage that is only ever previewed.
+        proxyMaxHeight: z.number().int().min(360).max(4320),
+        proxyCrf: z.number().int().min(0).max(51),
+        // A LUT file past this is something else.
+        lutFileMaxBytes: z.number().int().min(1024).max(1024 ** 3),
+      })
+      .strict(),
+    default: {
+      lutSize: 33,
+      lutSizeWide: 65,
+      draftLutSize: 17,
+      proxyMaxHeight: 2160,
+      proxyCrf: 18,
+      lutFileMaxBytes: 64 * 1024 ** 2,
+    },
+    public: true,
+    title: "Color pipeline",
+    description:
+      "The color LUT sizes a clip is rendered through (standard, wide-gamut and the draft drawn mid-drag), the preview proxy's size and quality, and the largest LUT file the library takes.",
+  },
   experimentResults: {
     schema: z
       .object({

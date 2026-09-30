@@ -26,6 +26,8 @@ const TYPES: Record<string, string> = {
   ".otf": "font/otf",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".cube": "text/plain",
+  ".3dl": "text/plain",
 };
 
 export function contentTypeFor(p: string) {

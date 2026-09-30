@@ -85,6 +85,13 @@ export function hasLibraryDrag(e: React.DragEvent | DragEvent): boolean {
   return !!dt && Array.from(dt.types).includes(LIBRARY_MIME);
 }
 
+/** The content key of the LUT file a library drag carries, or null when the
+ * drag holds anything else. */
+export function draggedLutKey(e: React.DragEvent | DragEvent): string | null {
+  if (!hasLibraryDrag(e)) return null;
+  return inFlightLibrary?.type === "lut" ? inFlightLibrary.contentKey ?? null : null;
+}
+
 export function draggedLibraryId(e: React.DragEvent | DragEvent): string | null {
   const dt = "dataTransfer" in e ? e.dataTransfer : null;
   if (!dt || !Array.from(dt.types).includes(LIBRARY_MIME)) return null;
@@ -276,7 +283,10 @@ export function setCardDragImage(e: React.DragEvent, host: HTMLElement) {
  * grabbed tile's picture covering it edge to edge — center-cropped to fill,
  * so no aspect leaves bars. A node marked `data-drag-object="bare"` — a
  * folder glyph — is the marker itself: fitted whole into the unit, with no
- * frame, fill or shadow around it. */
+ * frame, fill or shadow around it. A node that also carries
+ * `data-drag-ghost="<url>"` rides that picture instead of a clone of itself,
+ * fitted whole the same way: a LUT tile wears its wordmark at rest and its
+ * bare mark in hand. */
 const OBJECT_GHOST_UNIT = 48;
 
 export function setObjectDragImage(
@@ -293,7 +303,8 @@ export function setObjectDragImage(
   const rect = el.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   const unit = OBJECT_GHOST_UNIT;
-  const bare = el.dataset.dragObject === "bare";
+  const ghostSrc = el.dataset.dragGhost;
+  const bare = el.dataset.dragObject === "bare" || !!ghostSrc;
 
   const blank = document.createElement("canvas");
   blank.width = blank.height = 1;
@@ -305,8 +316,17 @@ export function setObjectDragImage(
   const root = document.createElement("div");
   root.style.cssText =
     "position:fixed;left:0;top:0;z-index:1000;pointer-events:none;will-change:transform;";
-  const object = el.cloneNode(true) as HTMLElement;
-  bakeGhostClone(el, object);
+  let object: HTMLElement;
+  if (ghostSrc) {
+    const img = document.createElement("img");
+    img.src = ghostSrc;
+    img.alt = "";
+    img.style.objectFit = "contain";
+    object = img;
+  } else {
+    object = el.cloneNode(true) as HTMLElement;
+    bakeGhostClone(el, object);
+  }
   object.style.width = `${rect.width}px`;
   object.style.height = `${rect.height}px`;
   object.style.margin = "0";

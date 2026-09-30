@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { groupRemap } from "@donkeycut/effects-kit";
-import { adoptTransitionFields, assetIdsInUse, clipLen, closeMicroGaps, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, rippleInsert, separateOverlaps, serializeDoc, useEditor } from "./store";
+import { adoptTransitionFields, assetIdsInUse, clipLen, closeMicroGaps, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, rippleInsert, separateOverlaps, serializeDoc, useEditor, DOC_KEYS, docFieldsEdited } from "./store";
 import type React from "react";
 import { runAiTool } from "./aiTools";
 import { selectedMembers, startLaneMove } from "./laneTracks";
@@ -183,6 +183,21 @@ describe("the document projection", () => {
     expect(after.overlays).not.toBe(before.overlays!);
     // Text elements still serialize without the loader's stamp.
     expect("kind" in after.overlays![0]).toBe(false);
+  });
+
+  test("a project color change alone is an edit the autosave sees", () => {
+    const last = serializeDoc(s() as Parameters<typeof serializeDoc>[0]);
+    expect(docFieldsEdited(s(), last, s().transitions)).toBe(false);
+    s().setColorSpace(s().colorSpace === "hlg" ? "pq" : "hlg");
+    expect(docFieldsEdited(s(), last, s().transitions)).toBe(true);
+  });
+
+  test("every serialized document field is a doc key the autosave compares", () => {
+    const doc = serializeDoc(s() as Parameters<typeof serializeDoc>[0]);
+    const keys = Object.keys(doc)
+      .filter((k) => k !== "firstOpen")
+      .map((k) => (k === "name" ? "projectName" : k));
+    for (const k of keys) expect(DOC_KEYS as readonly string[]).toContain(k);
   });
 
   test("a document with nothing to strip is passed straight through", () => {

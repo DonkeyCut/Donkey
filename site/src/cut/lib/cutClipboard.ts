@@ -11,6 +11,7 @@
 // finds it, and then lands the items on the copies.
 
 import { clearCopiedFrame } from "./stageFrame";
+import { isLinkedAssetType } from "./types";
 import { reportSwallowed } from "./report";
 import { refFromAsset, selectionRefTokens } from "./assetRef";
 import { trackEditorTool } from "./editorWork";
@@ -144,7 +145,7 @@ export async function pasteCutPayload(
   if (payload.items.length === 0) {
     let placed = false;
     for (const l of landed) {
-      if (l.asset.type === "font") continue;
+      if (isLinkedAssetType(l.asset.type)) continue;
       if (await placeRefAtPlayhead(refFromAsset(l.asset), { projectId, library, at })) placed = true;
     }
     return placed || landed.length > 0;

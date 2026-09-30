@@ -17,7 +17,7 @@ function Asset({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
   const poster = asset.hasPoster ? `${src}?poster=1` : undefined;
   return <LibraryCard
     asset={{ ...asset, addedAt: 0, residency: "cloud" }}
-    area={asset.type === "audio" ? LIBRARY_AUDIO_TILE_AREA : LIBRARY_TILE_AREA}
+    area={asset.type === "video" || asset.type === "image" ? LIBRARY_TILE_AREA : LIBRARY_AUDIO_TILE_AREA}
     sharedMedia={{ src, poster, downloadHref: `${src}?download=1` }}
   />;
 }

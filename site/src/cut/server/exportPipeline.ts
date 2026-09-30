@@ -1,15 +1,18 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { exportSourceFiles } from "./sourceExport";
 import type { SourceSegment } from "../lib/sourceExportPlan";
-import { deliveryCodec, deliveryContainer, deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor, type ExportCodec, type ExportRange } from "../lib/exportDelivery";
+import { deliveryCodec, deliveryContainer, deliverySpan, KEYFRAME_INTERVAL_S, videoBitrateFor, type ExportCodec, type ExportRange, type SpecClipColor } from "../lib/exportDelivery";
+
+export type { SpecClipColor };
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoColorInfo, videoDecodeCost } from "./util";
+import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions } from "./util";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
+import { withSpecColors } from "./fileColor";
 import { CLIP_MAX_ZOOM, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { audioFxFilters, buildGradeLut, effectFilterLines, gradeKey, gradeNeedsLut, gradeToFfmpegFilter, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ClipSound, type OverlayKey, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildClipLut, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipSound, type CodeFormat, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -56,6 +59,12 @@ const soundChain = (sound: ClipSound | undefined): string => {
 export interface ExportSpec {
   sourceSegments?: SourceSegment[];
   projectId: string;
+  /** The delivery's color space; absent = SDR. */
+  colorSpace?: OutputSpace;
+  /** Lattice nodes per axis of the clip color LUTs: `lutSize` for Rec.709
+   * and sRGB sources, `lutSizeWide` for log and HDR. */
+  lutSize?: number;
+  lutSizeWide?: number;
   /** Where the render lands instead of a stamped file in exports/: "hls" is the
    * share's streaming ladder, "preview"
    * writes the project's low-res hover proxy, "card" the opening seconds the
@@ -152,6 +161,8 @@ export interface ExportSpec {
     staged?: boolean;
     /** Manual color adjustments, baked into this clip's segment. */
     grade?: ColorGrade;
+    /** The source's color, which the grade is built over. Absent = Rec.709. */
+    color?: SpecClipColor;
     /** Client-painted grayscale coverage trimming this clip's picture (white
      * keeps the pixel; feather and invert are baked into the pictures): one
      * full-frame still, or a sampled `frames` sequence for a keyframed mask
@@ -237,6 +248,8 @@ export interface ExportSpec {
     image?: boolean;
     /** Manual color adjustments, baked into this overlay's segment. */
     grade?: ColorGrade;
+    /** The source's color, which the grade is built over. Absent = Rec.709. */
+    color?: SpecClipColor;
     /** Preset filter look id + strength (footage overlays only — image
      * overlays may carry alpha the look chain would flatten). */
     look?: string;
@@ -420,21 +433,52 @@ export function targetBitrate(width: number, height: number, fps: number, crf: n
  */
 export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
   const codec = spec.codec ?? "h264";
+  const hdr = (spec.colorSpace ?? "sdr") !== "sdr";
   const bitrate = videoBitrateFor({ ...spec, codec });
   const rate = ["-b:v", String(bitrate), "-maxrate", String(Math.round(bitrate * 1.5)), "-bufsize", String(bitrate * 3)];
   // A key frame every two seconds, the cadence the platforms ask for and the
   // one the tab's encoder writes.
   const gop = ["-g", String(Math.max(1, Math.round(spec.fps * KEYFRAME_INTERVAL_S)))];
+  // The HEVC bitstream's own color signalling, written into its VUI whatever
+  // the encoder put there: Rec.2020 primaries (9), the HLG (18) or PQ (16)
+  // transfer, the Rec.2020 non-constant matrix (9), limited range.
+  const hevcVui = hdr
+    ? ["-bsf:v", `hevc_metadata=colour_primaries=9:transfer_characteristics=${spec.colorSpace === "pq" ? 16 : 18}:matrix_coefficients=9:video_full_range_flag=0`]
+    : [];
   switch (enc) {
     case "libx264":
+      if (hdr) throw new Error("H.264 is 8-bit. Export HDR as HEVC or ProRes.");
       return ["-c:v", "libx264", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf)]), ...gop, "-profile:v", "high", "-pix_fmt", "yuv420p"];
     case "h264_videotoolbox":
+      if (hdr) throw new Error("H.264 is 8-bit. Export HDR as HEVC or ProRes.");
       return ["-c:v", "h264_videotoolbox", ...rate, ...gop, "-profile:v", "high", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
-    case "libx265":
+    case "libx265": {
       // x265's CRF scale sits about four points above x264's for the same picture.
-      return ["-c:v", "libx265", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf + 4)]), ...gop, "-x265-params", "log-level=error", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"];
+      // An HDR file is Main 10 with its color in the stream; a PQ file also
+      // carries HDR10 static metadata — the Rec.2020 mastering display at
+      // 1000 nits and the content light it implies — which players read for
+      // their tone mapping.
+      const params = hdr
+        ? [
+            "log-level=error",
+            "colorprim=bt2020",
+            `transfer=${spec.colorSpace === "pq" ? "smpte2084" : "arib-std-b67"}`,
+            "colormatrix=bt2020nc",
+            "range=limited",
+            ...(spec.colorSpace === "pq"
+              ? ["hdr10=1", "hdr10-opt=1", "master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(10000000,1)", "max-cll=1000,400"]
+              : []),
+          ].join(":")
+        : "log-level=error";
+      return ["-c:v", "libx265", "-preset", spec.preset, ...(spec.bitrate ? rate : ["-crf", String(spec.crf + 4)]), ...gop, "-x265-params", params, "-tag:v", "hvc1", "-pix_fmt", hdr ? "yuv420p10le" : "yuv420p", ...(hdr ? ["-profile:v", "main10"] : []), ...hevcVui];
+    }
     case "hevc_videotoolbox":
-      return ["-c:v", "hevc_videotoolbox", ...rate, ...gop, "-profile:v", "main", "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
+      // Main 10 takes its 10-bit planes as p010; the color signalling rides
+      // the stream's own tags and the VUI rewrite. A PQ file from this Mac
+      // carries no static metadata: players take the 1000-nit reference.
+      return hdr
+        ? ["-c:v", "hevc_videotoolbox", ...rate, ...gop, "-profile:v", "main10", "-tag:v", "hvc1", "-pix_fmt", "p010le", "-allow_sw", "1", ...hevcVui]
+        : ["-c:v", "hevc_videotoolbox", ...rate, ...gop, "-profile:v", "main", "-tag:v", "hvc1", "-pix_fmt", "yuv420p", "-allow_sw", "1"];
     case "prores_ks": {
       // Profile 3 is 422 HQ, profile 4 is 4444. 4444 keeps the chroma the
       // graph composited at — every pixel its own color, which is what the
@@ -447,6 +491,24 @@ export function videoCodecArgs(enc: string, spec: ExportSpec): string[] {
     default:
       throw new Error(`No encoder for ${codec}.`);
   }
+}
+
+/** The color tags a delivered file carries, container and stream alike:
+ * BT.709 for SDR; Rec.2020 primaries and matrix with the HLG or PQ transfer
+ * for HDR. */
+export function colorTagArgs(spec: Pick<ExportSpec, "colorSpace">): string[] {
+  const space = spec.colorSpace ?? "sdr";
+  if (space === "sdr") return ["-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"];
+  return ["-color_range", "tv", "-colorspace", "bt2020nc", "-color_primaries", "bt2020", "-color_trc", space === "pq" ? "smpte2084" : "arib-std-b67"];
+}
+
+/** The same signalling stamped on the finished frames. The MOV muxer writes
+ * ProRes's colr atom from what the frames carry, and the encoder options
+ * alone leave that file untagged. */
+export function colorParamsFilter(spec: Pick<ExportSpec, "colorSpace">): string {
+  const space = spec.colorSpace ?? "sdr";
+  if (space === "sdr") return "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709";
+  return `setparams=range=tv:colorspace=bt2020nc:color_primaries=bt2020:color_trc=${space === "pq" ? "smpte2084" : "arib-std-b67"}`;
 }
 
 /** The audio arguments for a spec's delivery. */
@@ -470,37 +532,6 @@ async function resolveMedia(
   const info = await statFn(p).catch(() => null);
   if (!info?.isFile()) throw new Error(`Media file missing from project: ${file}`);
   return p;
-}
-
-/**
- * Filter prefix converting a wide-gamut/HDR source (phone footage: BT.2020
- * primaries with an HLG or PQ transfer) down to the BT.709 SDR the export is
- * tagged as, or "" for an SDR source. The blind `format=yuv420p` squeeze keeps
- * BT.2020 code values, and players reading them as 709 wash the clip out —
- * visible whenever phone footage sits next to Cut-rendered (already-709)
- * clips. The native `colorspace` filter has no HLG/PQ transfer, so the input
- * is pinned to bt2020-10, a close stand-in over HLG's SDR-compatible range;
- * the 10-bit format hop feeds it a planar format it accepts (decoders hand
- * HDR frames over as p010, which it rejects).
- *
- * The matrix decides, the way players decide. Social-app transcodes (8-bit
- * H.264) keep BT.2020 primaries + HLG transfer tags from the phone original
- * but write an explicit bt709 matrix — players read those as plain 709 SDR,
- * so converting them shifts hue and saturation against what every player
- * shows (verified frame-for-frame against WebKit playback). Convert only
- * when the matrix itself is BT.2020, or when it's untagged and the wide
- * primaries/transfer tags are the only signal there is.
- */
-export function sdrConvert(c: Awaited<ReturnType<typeof videoColorInfo>>, fmt: string) {
-  if (c == null) return "";
-  const matrix = c.matrix && c.matrix !== "unknown" ? c.matrix : null;
-  const wide =
-    matrix?.startsWith("bt2020") === true ||
-    (matrix === null &&
-      (c.primaries === "bt2020" ||
-        c.transfer === "arib-std-b67" ||
-        c.transfer === "smpte2084"));
-  return wide ? `format=yuv420p10le,colorspace=all=bt709:iall=bt2020:format=${fmt},` : "";
 }
 
 /** A clip's effective playback rate (>0, default 1). */
@@ -692,8 +723,8 @@ export interface ExportPipelineIO {
   unlink: typeof unlink;
   hasStream: typeof hasStream;
   audioChannels: typeof audioChannels;
-  videoColorInfo: typeof videoColorInfo;
   videoDecodeCost: typeof videoDecodeCost;
+  videoDimensions: typeof videoDimensions;
   mediaDuration: typeof mediaDuration;
   videoEncoder: (codec: ExportVideoCodec) => Promise<string>;
   runFfmpeg: typeof runFfmpeg;
@@ -707,8 +738,8 @@ const realIO: ExportPipelineIO = {
   unlink,
   hasStream,
   audioChannels,
-  videoColorInfo,
   videoDecodeCost,
+  videoDimensions,
   mediaDuration,
   videoEncoder,
   runFfmpeg,
@@ -738,8 +769,17 @@ export async function runExport(
     }
     if (await io.exportSourceFiles(job, mediaPathFor, given.sourceSegments, codec, given.audioBitrate)) return;
   }
-  let spec = narrowSpecToRange(given);
+  let spec = await withSpecColors(narrowSpecToRange(given), mediaPathFor);
   const { width: W, height: H, fps } = spec;
+
+  // The delivery's color space. An HDR file composites in HLG signal space
+  // — every clip converts into it, every graphic maps into it, the effects
+  // scale their constants to it — and a PQ file is one fixed pass over the
+  // finished picture. H.264 is 8-bit and never carries it.
+  const output: OutputSpace = spec.colorSpace ?? "sdr";
+  const hdr = output !== "sdr";
+  const compositeSpace = compositeSpaceFor(output);
+  if (hdr && codec === "h264") throw new Error("H.264 is 8-bit. Export HDR as HEVC or ProRes.");
 
   // The chroma the composite is built at. A full-chroma delivery composites
   // at 4:4:4, so the titles, captions, stickers and masks the graph draws in
@@ -748,17 +788,45 @@ export async function runExport(
   // as afterward. H.264 and HEVC subsample at the encoder regardless, so their
   // graph stays 4:2:0 and costs what it always did.
   //
-  // Eight bits a plane either way: the looks and effects carry 0–255
-  // constants (`geq`, `lutyuv`), the sources decode to eight, and ProRes 4444
-  // takes the exact widening to ten at the encoder.
+  // Eight bits a plane for SDR: the sources decode to eight, and ProRes 4444
+  // takes the exact widening to ten at the encoder. An HDR composite holds
+  // ten, and the looks and effects scale their 8-bit constants to it.
   const full = deliveryCodec(spec.codec).chroma444 === true;
-  const clipFmt = full ? "yuv444p" : "yuv420p";
-  const alphaFmt = full ? "yuva444p" : "yuva420p";
+  const depth: 8 | 10 = hdr ? 10 : 8;
+  const bits = hdr ? "10le" : "";
+  const clipFmt = full ? `yuv444p${bits}` : `yuv420p${bits}`;
+  const alphaFmt = full ? `yuva444p${bits}` : `yuva420p${bits}`;
   // `overlay` blends in its own pixel family, and its default is yuv420 —
   // left alone it would undo the graph's chroma at every composite.
-  const ovl = full ? ":format=yuv444" : "";
+  const ovl = full ? (hdr ? ":format=yuv444p10" : ":format=yuv444") : hdr ? ":format=yuv420p10" : "";
   /** The same family, for the effect chains the kit writes. */
-  const chroma = { pixFmt: clipFmt, overlay: ovl };
+  const chroma: ChainChroma = { pixFmt: clipFmt, overlay: ovl, depth };
+  /** The matrix the composite's video carries, as ffmpeg spells it for the
+   * scale filter and as a file's header names it. */
+  const outMatrix = hdr ? "bt2020" : "bt709";
+  const outMatrixName: CodeFormat["matrix"] = hdr ? "bt2020nc" : "bt709";
+  // A segment that carries alpha — a painted or subject mask, a keyed pose,
+  // a removal clip's keyed pair — rides RGBA through an SDR composite. An
+  // HDR composite keeps it at ten bits in the video's own family, tagged
+  // like the video so no negotiation converts it on the way: a mask reaches
+  // the alpha plane through mergeplanes (alphamerge is an 8-bit filter) and
+  // a mask multiply is a per-plane blend.
+  const alphaHi = hdr ? "yuva444p10le" : "rgba";
+  // Masks are 8-bit files. They widen to ten bits through 8-bit gray, which
+  // is exact; a direct conversion lands white short of opaque (1020 of 1023).
+  const maskFmt = hdr ? "gray,format=gray10le" : "gray";
+  /** A format without its alpha plane. ffmpeg's ten-bit overlay onto a main
+   * that carries alpha unpremultiplies with eight-bit constants and darkens
+   * everything short of opaque, so an HDR composite never overlays onto one:
+   * an opaque backdrop is opaque in format too. */
+  const opaqueFmt = (fmt: string): string => (hdr ? fmt.replace(/^yuva/, "yuv") : fmt);
+  /** The format an alpha-carrying segment holds through its edge effects. */
+  const segAlpha = hdr ? alphaHi : alphaFmt;
+  /** Into the alpha family from the composite's video. */
+  const videoToAlpha = hdr ? `format=${alphaHi},setparams=range=tv:colorspace=${outMatrixName}` : "format=rgba";
+  /** Into the alpha family from an RGB graphic (a mapped PNG, a keyed
+   * pair's color piece), converted with the composite's matrix. */
+  const rgbToAlpha = hdr ? `scale=out_color_matrix=${outMatrix}:out_range=tv,format=${alphaHi}` : "format=rgba";
 
   // A clip that plays backward is rendered off a turned copy of its span,
   // baked ahead of the graph in bounded chunks (turnMedia.ts): the clip
@@ -798,7 +866,6 @@ export async function runExport(
     const video = !soundOnly && (await io.hasStream(src, "v"));
     const audio = await io.hasStream(src, "a");
     const mono = audio && (await io.audioChannels(src)) === 1;
-    const colorFix = video ? sdrConvert(await io.videoColorInfo(src), clipFmt) : "";
     const decodeCost = video ? ((await io.videoDecodeCost(src)) ?? 0) : 0;
     const file = path.join(job.tmpDir, `turned_${tag}.${video ? "mov" : "wav"}`);
     const pivot = await bakeTurnedMedia(
@@ -809,7 +876,7 @@ export async function runExport(
         duration: io.mediaDuration,
       },
       src,
-      { lo, hi, video, audio, colorFix, decodeCost, fmt: clipFmt, master: full },
+      { lo, hi, video, audio, decodeCost, fmt: clipFmt, master: full || hdr },
       file
     );
     turned.set(file, { video, audio, mono });
@@ -833,7 +900,7 @@ export async function runExport(
   // Every bare patch of frame in the graph — the letterbox around a fitted
   // clip, a gap on track 0, the backdrop behind an edge animation — is the
   // project's own background color. ffmpeg takes it as 0xRRGGBB.
-  const padColor = ffColor(spec.background);
+  const padColor = ffColor(hdr && spec.background ? hexToHlgHex(spec.background) : spec.background);
   /**
    * The chain that meets a clip's picture with its box: covering it (cropping
    * the overflow) or fitted inside it, zoomed, with the pan choosing what the
@@ -847,20 +914,35 @@ export async function runExport(
     cover: boolean,
     zoom?: number,
     panX?: number,
-    panY?: number
+    panY?: number,
+    /** The source's matrix and range, so the scale that first touches the
+     * code values converts them the way the file meant (see colorPlanFor). */
+    flags = ""
   ): string => {
     const z = Math.max(1, Math.min(CLIP_MAX_ZOOM, zoom ?? 1));
     const even = (n: number) => 2 * Math.round(n / 2);
     const tw = even(bw * z);
     const th = even(bh * z);
     const scale = cover
-      ? `scale=${tw}:${th}:force_original_aspect_ratio=increase`
-      : `scale=${tw}:${th}:force_original_aspect_ratio=decrease:force_divisible_by=2`;
+      ? `scale=${tw}:${th}:force_original_aspect_ratio=increase${flags}`
+      : `scale=${tw}:${th}:force_original_aspect_ratio=decrease:force_divisible_by=2${flags}`;
     // A fitted picture at rest overflows nothing, so it needs no crop at all.
     if (!cover && z <= 1.0001) return scale;
     const kx = num(0.5 + Math.max(-1, Math.min(1, panX ?? 0)) / 2);
     const ky = num(0.5 + Math.max(-1, Math.min(1, panY ?? 0)) / 2);
     return `${scale},crop=${fexpr(`min(iw,${bw})`)}:${fexpr(`min(ih,${bh})`)}:(iw-ow)*${kx}:(ih-oh)*${ky}`;
+  };
+  /** The height of the whole picture as `boxFraming` scales it into its box,
+   * before any crop: the size the preview's detail pass sizes its radii to.
+   * The zoomed box's height when the source size is unknown. */
+  const framedPictureHeight = (file: string, bw: number, bh: number, cover: boolean, zoom?: number): number => {
+    const z = Math.max(1, Math.min(CLIP_MAX_ZOOM, zoom ?? 1));
+    const tw = 2 * Math.round((bw * z) / 2);
+    const th = 2 * Math.round((bh * z) / 2);
+    const dims = pictureDims.get(file);
+    if (!dims) return th;
+    const fitted = (tw * dims.height) / dims.width;
+    return cover ? Math.max(th, fitted) : Math.min(th, fitted);
   };
   /** The mirror after the framing: the picture flips inside its box, the
    * way the canvas turns it about the box center. */
@@ -892,8 +974,6 @@ export async function runExport(
   const toStereo = (file: string) =>
     `aresample=44100,${monoFiles.has(file) ? "pan=stereo|c0=c0|c1=c0," : ""}` +
     "aformat=sample_fmts=fltp:channel_layouts=stereo,";
-  // file → filter prefix folding a wide-gamut/HDR source down to BT.709 (or "").
-  const colorFix = new Map<string, string>();
   const inputs: string[] = [];
   const inputIndex = new Map<string, number>();
   // Counted explicitly: the concat input below carries extra flags, so the
@@ -919,18 +999,29 @@ export async function runExport(
       let videoProbeFailed = false;
       const hasVideo = await io.hasStream(paths[i], "v", () => (videoProbeFailed = true));
       videoPresence.set(f, hasVideo || videoProbeFailed);
-      // A failed color probe (null) means no conversion — SDR passthrough.
-      colorFix.set(f, sdrConvert(await io.videoColorInfo(paths[i]), clipFmt));
     })
   );
-  // The turned copies: already probed at the bake, already folded to SDR.
+  // The source size of every picture a detail pass runs on: its radii follow
+  // the whole picture's height as framed, which the size and the box decide.
+  const pictureDims = new Map<string, { width: number; height: number } | null>();
+  const detailed = [...spec.clips, ...overlayVideos].filter((c) => c.file && detailActive(c.grade));
+  await Promise.all(
+    [...new Map(detailed.map((c) => [c.file, c])).values()].map(async (c) => {
+      const at = turned.has(c.file)
+        ? c.file
+        : c.image && "staged" in c && c.staged
+          ? path.join(job.tmpDir, path.basename(c.file))
+          : await resolveMedia(io.stat, mediaPathFor, c.file);
+      pictureDims.set(c.file, await io.videoDimensions(at));
+    })
+  );
+  // The turned copies: already probed at the bake.
   for (const [file, streams] of turned) {
     inputIndex.set(file, nInputs++);
     inputs.push("-i", file);
     audioPresence.set(file, streams.audio);
     videoPresence.set(file, streams.video);
     if (streams.mono) monoFiles.add(file);
-    colorFix.set(file, "");
   }
   // Animated overlays: each is its own concat-demuxer slideshow (region-sized
   // frames with transparent filler around the element's window), the exact
@@ -1134,29 +1225,243 @@ export async function runExport(
 
   const filters: string[] = [];
 
-  // Grades that use the extended primitives (curves, wheels, HSL, presets…)
-  // bake through the shared 3D LUT: one .cube per distinct grade, written to
-  // the job dir and applied with lut3d at the exact chain position the
-  // fast-path lutrgb/hue chain occupies. Scalar-only grades keep that
-  // original chain byte for byte.
-  const gradeLutChain = new Map<string, string>();
+  // One color mapping per clip: the source conversion, the library LUT and
+  // the grade baked into one 3D LUT (effects-kit colorPipeline.ts), written
+  // to the job dir as .cube once per distinct recipe and applied with lut3d.
+  // The clip's picture goes through it in 16-bit RGB with the file's own
+  // matrix and range spelled out, so what the file meant is what the LUT
+  // sees, and comes back to BT.709 video for the rest of the chain.
+  type ColorOwner = { color?: SpecClipColor; grade?: ColorGrade; image?: boolean };
+  const REC709: SpecClipColor = { profile: "rec709", matrix: "bt709", fullRange: false };
+  const SRGB: SpecClipColor = { profile: "srgb", matrix: "bt709", fullRange: true };
+  const colorOf = (o: ColorOwner): SpecClipColor => o.color ?? (o.image ? SRGB : REC709);
+  const recipeOf = (o: ColorOwner): ClipColorRecipe => {
+    const profile = colorOf(o).profile;
+    const wide = profile !== "rec709" && profile !== "srgb";
+    return { profile, grade: o.grade, output: compositeSpace, size: wide ? spec.lutSizeWide ?? 65 : spec.lutSize ?? 33 };
+  };
+  const recipeId = (o: ColorOwner): string => {
+    const key = recipeKey(recipeOf(o));
+    return key ? `${key}|${colorOf(o).lutFile ?? ""}` : "";
+  };
+  const userLuts = new Map<string, ParsedLut>();
+  const userLutFor = async (file: string): Promise<ParsedLut> => {
+    const held = userLuts.get(file);
+    if (held) return held;
+    let parsed: ParsedLut;
+    try {
+      const text = Buffer.from(await io.readFile(path.join(job.tmpDir, path.basename(file)))).toString("utf8");
+      parsed = parseLutFile(file, text);
+    } catch (e) {
+      throw new Error(`The LUT ${file} could not be read: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    userLuts.set(file, parsed);
+    return parsed;
+  };
+  /** Recipe identity → the lut3d filter over its .cube, or "" for identity. */
+  const lutFilters = new Map<string, string>();
   for (const owner of [...spec.clips, ...(spec.overlayVideos ?? [])]) {
-    if (!gradeNeedsLut(owner.grade)) continue;
-    const key = gradeKey(owner.grade);
-    if (!key || gradeLutChain.has(key)) continue;
-    const lut = buildGradeLut(owner.grade);
+    const id = recipeId(owner);
+    if (!id || lutFilters.has(id)) continue;
+    const lutFile = colorOf(owner).lutFile;
+    const lut = buildClipLut(recipeOf(owner), lutFile ? await userLutFor(lutFile) : undefined);
     if (!lut) {
-      gradeLutChain.set(key, "");
+      lutFilters.set(id, "");
       continue;
     }
-    const file = path.join(job.tmpDir, `grade_${gradeLutChain.size}.cube`);
+    const file = path.join(job.tmpDir, `clip_${lutFilters.size}.cube`);
     await io.writeFile(file, lutToCube(lut));
-    gradeLutChain.set(key, `lut3d=file=${fexpr(file)}:interp=tetrahedral,`);
+    lutFilters.set(id, `lut3d=file=${fexpr(file)}:interp=tetrahedral`);
   }
-  const gradeChain = (grade: ExportSpec["clips"][number]["grade"]): string =>
-    gradeNeedsLut(grade)
-      ? gradeLutChain.get(gradeKey(grade)) ?? ""
-      : gradeToFfmpegFilter(grade);
+  // Every graphic the graph lays over the picture — titles, captions,
+  // stickers, border rings, shadows, the keyed pieces a removal clip ships
+  // — is drawn in sRGB. An HDR composite takes each one through the same
+  // BT.2408 mapping the SDR clips take, so a white title sits at reference
+  // white beside them.
+  let graphicsLut = "";
+  if (hdr) {
+    const file = path.join(job.tmpDir, "graphics.cube");
+    await io.writeFile(file, lutToCube(buildTransferLut(spec.lutSize ?? 33, graphicsToHlg), "sRGB to HLG"));
+    graphicsLut = `lut3d=file=${fexpr(file)}:interp=tetrahedral`;
+  }
+  let gfxN = 0;
+  /** A graphic input's stream mapped into the composite: the input label as
+   * is for SDR, a mapped copy in HDR. */
+  const gfx = (src: string): string => {
+    if (!graphicsLut) return src;
+    const out = `gfx${gfxN++}`;
+    filters.push(`[${src}]format=gbrap16le,${graphicsLut}[${out}]`);
+    return out;
+  };
+  /** A gray mask as the operand the HDR alpha filters take: a four-plane
+   * copy of it in the alpha family, stamped with the video's tags. */
+  const maskCarrier = (mask: string, out: string): string => {
+    filters.push(
+      `[${mask}]mergeplanes=0x00000000:format=${alphaHi},setparams=range=tv:colorspace=${outMatrixName}[${out}]`
+    );
+    return out;
+  };
+  /** `[cur]` with its alpha multiplied by the gray mask `[mask]`, into
+   * `[out]`; `tail` follows the merge and `tag` names the intermediates. */
+  const alphaMultiply = (cur: string, mask: string, out: string, tag: string, tail = "") => {
+    if (hdr) {
+      const m = maskCarrier(mask, `${tag}k`);
+      filters.push(`[${cur}]${videoToAlpha}[${tag}c]`);
+      filters.push(
+        `[${tag}c][${m}]blend=c0_mode=normal:c1_mode=normal:c2_mode=normal:c3_mode=multiply${tail}[${out}]`
+      );
+      return;
+    }
+    filters.push(`[${cur}]format=rgba,split[${tag}0][${tag}1]`);
+    filters.push(`[${tag}1]alphaextract[${tag}a]`);
+    filters.push(`[${tag}a][${mask}]blend=all_mode=multiply[${tag}m]`);
+    filters.push(`[${tag}0][${tag}m]alphamerge${tail}[${out}]`);
+  };
+  /** `[cur]` with its alpha set to the gray `[mask]` (a keyed pair's luma
+   * piece), into `[out]`; `tail` follows the merge. */
+  const alphaSet = (cur: string, mask: string, out: string, tag: string, tail = "") => {
+    if (hdr) {
+      const m = maskCarrier(mask, `${tag}k`);
+      filters.push(`[${cur}][${m}]mergeplanes=0x00010210:format=${alphaHi}${tail}[${out}]`);
+      return;
+    }
+    filters.push(`[${cur}][${mask}]alphamerge${tail}[${out}]`);
+  };
+  /**
+   * `[top]` placed at (`x`, `y`) on a clear W×H frame `dur` seconds long,
+   * into `[out]`; `base` names the clear frame. An HDR composite overlays
+   * only onto opaque frames (see `opaqueFmt`), and the posed picture may
+   * change size every frame, which only `overlay` takes: the color lands with
+   * its alpha dropped, and the alpha is read back off the picture laid on a
+   * zero frame and on a full one, whose difference is `1 − alpha`.
+   */
+  const placeOnClear = (top: string, x: string, y: string, dur: number, base: string, out: string) => {
+    const frame = `s=${W}x${H}:r=${fps}:d=${num(dur)}`;
+    if (!hdr) {
+      filters.push(`color=c=black@0.0:${frame},format=${alphaFmt}[${base}]`);
+      filters.push(`[${base}][${top}]overlay=x=${x}:y=${y}:eof_action=pass${ovl}[${out}]`);
+      return;
+    }
+    const plain = "yuv444p10le";
+    const tags = `setparams=range=tv:colorspace=${outMatrixName}`;
+    const place = `overlay=x=${x}:y=${y}:eof_action=pass:format=yuv444p10`;
+    /** A constant frame with every plane at `level`'s gray value. */
+    const flat = (level: "black" | "white") => `color=c=${level}:${frame},format=gray10le,mergeplanes=0x00000000:format=${plain},${tags}`;
+    filters.push(`[${top}]format=${alphaHi},split=3[${base}c][${base}z][${base}f]`);
+    filters.push(`color=c=black:${frame},format=${plain},${tags}[${base}cb]`);
+    filters.push(`[${base}c]format=${plain},${tags}[${base}co]`);
+    filters.push(`[${base}cb][${base}co]${place}[${base}cp]`);
+    filters.push(`${flat("black")}[${base}zb]`);
+    filters.push(`${flat("white")},split[${base}fb][${base}ff]`);
+    filters.push(`[${base}zb][${base}z]${place}[${base}zp]`);
+    filters.push(`[${base}fb][${base}f]${place}[${base}fp]`);
+    filters.push(`[${base}fp][${base}zp]blend=all_mode=subtract[${base}inv]`);
+    filters.push(`[${base}ff][${base}inv]blend=all_mode=subtract[${base}ap]`);
+    filters.push(`[${base}cp][${base}ap]mergeplanes=0x00010210:format=${alphaHi}[${out}]`);
+  };
+  const ffMatrix = (m: CodeFormat["matrix"]): string => (m === "bt601" ? "bt601" : m === "bt2020nc" ? "bt2020" : "bt709");
+  /** The sharpen and clarity pass on 16-bit 4:4:4 video, luma only: each
+   * detail is the luma against its own base (a Gaussian blur, or the guided
+   * filter over its window — sized to the picture, run on a reduced copy
+   * when the window outgrows the filter's reach), gained and merged back.
+   * Both bases read the input luma, so the two controls never feed each
+   * other (detail.ts). */
+  const detailLines = (inLabel: string, outLabel: string, g: ColorGrade, hPx: number, tag: string): string[] => {
+    const ks = detailGain("sharpen", g.sharpen || 0);
+    const kc = detailGain("clarity", g.clarity || 0);
+    const t = `dt${tag}`;
+    const lines: string[] = [];
+    const radius = kc > 0 ? detailRadius("clarity", hPx) : 0;
+    // guided takes a window up to 20; a wider one runs on a copy reduced to
+    // fit and is read back at the picture's own size, off one more copy.
+    const sub = Math.ceil(radius / 20);
+    const copies = 1 + (ks > 0 ? 2 : 0) + (kc > 0 ? (sub > 1 ? 3 : 2) : 0);
+    lines.push(
+      `[${inLabel}]split=${copies}[${t}o]${ks > 0 ? `[${t}ss][${t}sr]` : ""}${kc > 0 ? `[${t}cs][${t}cr]${sub > 1 ? `[${t}cx]` : ""}` : ""}`
+    );
+    const gain = (k: number) => `lutyuv=y=${fexpr(`clip((val-32768)*${num(k)}+32768,0,65535)`)}`;
+    const extract = "blend=c0_mode=grainextract";
+    const merge = "blend=c0_mode=grainmerge";
+    if (ks > 0) {
+      lines.push(`[${t}ss]gblur=sigma=${num(detailRadius("sharpen", hPx))}:planes=1[${t}sb]`);
+      lines.push(`[${t}sr][${t}sb]${extract},${gain(ks)}[${t}sd]`);
+    }
+    if (kc > 0) {
+      if (sub <= 1) {
+        lines.push(`[${t}cs]guided=radius=${radius}:eps=${num(CLARITY_EPS)}:planes=1[${t}cb]`);
+        lines.push(`[${t}cr][${t}cb]${extract},${gain(kc)}[${t}cd]`);
+      } else {
+        const r = Math.max(1, Math.round(radius / sub));
+        lines.push(
+          `[${t}cs]scale=${fexpr(`ceil(iw/${sub})`)}:${fexpr(`ceil(ih/${sub})`)}:flags=bilinear,` +
+            `guided=radius=${r}:eps=${num(CLARITY_EPS)}:planes=1[${t}cq]`
+        );
+        lines.push(`[${t}cq][${t}cx]scale=rw:rh:flags=bilinear[${t}cb]`);
+        lines.push(`[${t}cr][${t}cb]${extract},${gain(kc)}[${t}cd]`);
+      }
+    }
+    let cur = `${t}o`;
+    if (ks > 0) {
+      const next = kc > 0 ? `${t}m1` : outLabel;
+      lines.push(`[${cur}][${t}sd]${merge}[${next}]`);
+      cur = next;
+    }
+    if (kc > 0) lines.push(`[${cur}][${t}cd]${merge}[${outLabel}]`);
+    return lines;
+  };
+  /**
+   * How a picture's color runs: the flags its framing scale takes, and the
+   * chain that follows the framing — into 16-bit RGB with the file's matrix
+   * and range, through the LUT, the detail pass, and back to BT.709 video.
+   * Null when the picture is Rec.709 video already and carries no color.
+   */
+  interface ColorPlan {
+    flags: string;
+    /** Extend `core` (a chain ending in the framed picture) with the color
+     * chain, pushing any multi-input lines; returns the new chain. */
+    run: (core: string, tag: string) => string;
+  }
+  const colorPlanFor = (
+    o: ColorOwner,
+    opts: { alpha: boolean; hPx: number; interpolated: boolean }
+  ): ColorPlan | null => {
+    const color = colorOf(o);
+    const lut = lutFilters.get(recipeId(o)) ?? "";
+    const det = o.grade && detailActive(o.grade) ? o.grade : null;
+    // A still decodes to RGB, where a matrix means nothing.
+    const yuv = !o.image;
+    const inFlags = yuv ? `:in_color_matrix=${ffMatrix(color.matrix)}:in_range=${color.fullRange ? "pc" : "tv"}` : "";
+    if (!lut && !det) {
+      // Nothing to bake: a file whose code values are not the composite's
+      // video still converts to it, in video, so the delivery's tags tell
+      // the truth.
+      if (yuv && (color.matrix !== outMatrixName || color.fullRange)) {
+        return { flags: inFlags, run: (core) => `${core},scale${inFlags}:out_color_matrix=${outMatrix}:out_range=tv` };
+      }
+      return null;
+    }
+    const rgb16 = opts.alpha ? "gbrap16le" : "gbrp16le";
+    const yuv16 = opts.alpha ? "yuva444p16le" : "yuv444p16le";
+    return {
+      flags: inFlags,
+      run: (core, tag) => {
+        // Motion interpolation between the framing and here works in video,
+        // so the conversion is spelled out again where it actually happens.
+        let chain = core + (yuv && opts.interpolated ? `,scale${inFlags},format=${rgb16}` : `,format=${rgb16}`);
+        if (lut) chain += `,${lut}`;
+        if (det) {
+          chain += `,scale=out_color_matrix=${outMatrix}:out_range=pc,format=${yuv16}`;
+          filters.push(`${chain}[dti${tag}]`);
+          filters.push(...detailLines(`dti${tag}`, `dto${tag}`, det, opts.hPx, tag));
+          return `[dto${tag}]null,scale=in_color_matrix=${outMatrix}:in_range=pc:out_color_matrix=${outMatrix}:out_range=tv`;
+        }
+        return `${chain},scale=out_color_matrix=${outMatrix}:out_range=tv`;
+      },
+    };
+  };
+  /** Whether a clip's framing is followed by motion interpolation. */
+  const interpolates = (c: { smoothSlow?: boolean; image?: boolean }, rt: Retime): boolean =>
+    !c.image && !!c.smoothSlow && slowRuns(rt, 1 / fps).length > 0;
 
   // Per-clip timeline length (source span compressed/expanded by speed). A
   // gap spacer (no file) keeps its exact length: flooring it at 0.1s would
@@ -1257,7 +1562,7 @@ export async function runExport(
   let matteN = 0;
   if (subjectActive && matteConsumers > 0) {
     filters.push(
-      `[${behindMaskInput}:v]fps=${fps},scale=${W}:${H},setsar=1,format=gray,` +
+      `[${behindMaskInput}:v]fps=${fps},scale=${W}:${H},setsar=1,format=${maskFmt},` +
         `tpad=start_duration=${num(Math.max(0, spec.behindMask!.from))}:color=black[bh_src]`
     );
     filters.push(
@@ -1400,7 +1705,7 @@ export async function runExport(
       let bg = fx.bg;
       if (!bg) {
         bg = `xb${tag}_${side}`;
-        filters.push(`color=c=${padColor}:s=${w}x${h}:r=${fps}:d=${d},format=${fmt}[${bg}]`);
+        filters.push(`color=c=${padColor}:s=${w}x${h}:r=${fps}:d=${d},format=${opaqueFmt(fmt)}[${bg}]`);
       }
       if (fx.kind === "xfade") {
         // Entering: the backdrop hands off to the picture; exiting: the
@@ -1584,9 +1889,9 @@ export async function runExport(
     // never shortens the join, and rides the same framing chain in rgba.
     let timebase: string;
     if (rmIn) {
-      filters.push(`[${rmIn.a}:v]setpts=PTS-STARTPTS,format=gray[rva${j}]`);
-      filters.push(`[${rmIn.rgb}:v]setpts=PTS-STARTPTS,format=rgba[rvc${j}]`);
-      filters.push(`[rvc${j}][rva${j}]alphamerge,tpad=stop_mode=clone:stop_duration=1[rvs${j}]`);
+      filters.push(`[${rmIn.a}:v]setpts=PTS-STARTPTS,format=${maskFmt}[rva${j}]`);
+      filters.push(`[${gfx(`${rmIn.rgb}:v`)}]setpts=PTS-STARTPTS,${rgbToAlpha}[rvc${j}]`);
+      alphaSet(`rvc${j}`, `rva${j}`, `rvs${j}`, `rv${j}`, ",tpad=stop_mode=clone:stop_duration=1");
       timebase = `[rvs${j}]null`;
     } else {
       timebase = c.image
@@ -1598,8 +1903,16 @@ export async function runExport(
       // The keyed layer's letterbox stays transparent (the flatten below lays
       // the frame color behind it), and its alpha survives the chain.
       const segPad = rmIn ? "black@0.0" : padColor;
-      const segFmt = rmIn ? "rgba" : clipFmt;
+      const segFmt = rmIn ? alphaHi : clipFmt;
+      const plan = rmIn
+        ? null
+        : colorPlanFor(c, {
+            alpha: false,
+            hPx: framedPictureHeight(c.file, region ? region.rw : W, region ? region.rh : H, c.fit === "fill", c.zoom),
+            interpolated: interpolates(c, rt),
+          });
       let frame: string;
+      let padding: string;
       if (region) {
         // A regioned track-0 clip (split-screen half) scales into its rect,
         // then pads out to the full frame with black around it. The rect may
@@ -1614,28 +1927,26 @@ export async function runExport(
         const win = bw > W || bh > H ? `,crop=${W}:${H}:${-bx}:${-by}` : "";
         // The framed picture lands centered in its rect: a covering one fills
         // the rect exactly, a fitted one keeps its margins.
-        frame =
-          `${boxFraming(rw, rh, c.fit === "fill", c.zoom, c.panX, c.panY)}${mirror(c)},` +
-          `pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${segPad}${win}`;
+        frame = `${boxFraming(rw, rh, c.fit === "fill", c.zoom, c.panX, c.panY, plan?.flags)}${mirror(c)}`;
+        padding = `,pad=${bw}:${bh}:${rx - bx}+(${rw}-iw)/2:${ry - by}+(${rh}-ih)/2:color=${segPad}${win}`;
       } else {
         const cover = c.fit === "fill";
-        frame =
-          boxFraming(W, H, cover, c.zoom, c.panX, c.panY) +
-          mirror(c) +
-          // A covering picture already spans the frame; a fitted one letterboxes.
-          (cover ? "" : `,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${segPad}`);
+        frame = boxFraming(W, H, cover, c.zoom, c.panX, c.panY, plan?.flags) + mirror(c);
+        // A covering picture already spans the frame; a fitted one letterboxes.
+        padding = cover ? "" : `,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:color=${segPad}`;
       }
       // setpts/speed rescales the clip's duration on the timeline (footage);
-      // a still just replays its looped input.
-      // The grade sits after the color conversion (so it acts on the same
-      // BT.709 values the preview shows) and before the terminal format.
-      let core = `${framedTimebase(timebase, frame, `c${j}`, rmIn ? {} : c, rt, fps, filters)},${rmIn ? "" : colorFix.get(c.file) ?? ""}${gradeChain(rmIn ? undefined : c.grade)}format=${segFmt}`;
+      // a still just replays its looped input. The color runs on the framed
+      // picture before the letterbox pad, so the bars stay the frame color.
+      let core = framedTimebase(timebase, frame, `c${j}`, rmIn ? {} : c, rt, fps, filters);
+      if (plan) core = plan.run(core, `c${j}`);
+      core += `,format=${segFmt}${padding}`;
       // The look bakes in after grade + framing, before the edge effects, so
       // animations move already-graded pixels (matching the preview order). A
       // removal clip's look runs after the flatten below instead — the chain's
       // internal blends would drop the keyed layer's alpha.
       if (c.look && !rmIn) {
-        const lines = lookFilterLines(`lki${j}`, `lko${j}`, c.look, c.lookAmount, H, clipFmt, `c${j}`);
+        const lines = lookFilterLines(`lki${j}`, `lko${j}`, c.look, c.lookAmount, H, clipFmt, `c${j}`, depth);
         if (lines) {
           filters.push(`${core}[lki${j}]`);
           filters.push(...lines);
@@ -1647,7 +1958,7 @@ export async function runExport(
       const brIdx = clipBorderInput.get(j);
       if (brIdx !== undefined) {
         filters.push(`${core}[cbi${j}]`);
-        filters.push(`[cbi${j}][${brIdx}:v]overlay=0:0:eof_action=pass${ovl},format=${segFmt}[cbo${j}]`);
+        filters.push(`[cbi${j}][${gfx(`${brIdx}:v`)}]overlay=0:0:eof_action=pass${ovl},format=${segFmt}[cbo${j}]`);
         core = `[cbo${j}]null`;
       }
       // A removal segment carries alpha, so its fades must ramp the alpha
@@ -1678,17 +1989,14 @@ export async function runExport(
         // restores the constant-size opaque frame the join expects. The
         // multiply chains (alphaextract → blend → alphamerge) compose with
         // any alpha the segment carries.
-        pushEdgeFx(core, dur, headFx, tailFx, W, H, rmIn ? alphaFmt : clipFmt, fades, `vmr${j}`, `c${j}`);
+        pushEdgeFx(core, dur, headFx, tailFx, W, H, rmIn ? segAlpha : clipFmt, fades, `vmr${j}`, `c${j}`);
         let cur = `vmr${j}`;
         if (mkIdx !== undefined) {
-          filters.push(`[${mkIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=gray[cmk${j}]`);
-          filters.push(`[${cur}]format=rgba,split[cm0_${j}][cm1_${j}]`);
-          filters.push(`[cm1_${j}]alphaextract[cma${j}]`);
-          filters.push(`[cma${j}][cmk${j}]blend=all_mode=multiply[cmm${j}]`);
-          filters.push(`[cm0_${j}][cmm${j}]alphamerge[cmc${j}]`);
+          filters.push(`[${mkIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=${maskFmt}[cmk${j}]`);
+          alphaMultiply(cur, `cmk${j}`, `cmc${j}`, `cm${j}`);
           cur = `cmc${j}`;
         } else {
-          filters.push(`[${cur}]format=rgba[cmc${j}]`);
+          filters.push(`[${cur}]${videoToAlpha}[cmc${j}]`);
           cur = `cmc${j}`;
         }
         if (keyed) {
@@ -1698,12 +2006,7 @@ export async function runExport(
             cur = `ckt${j}`;
           }
           const pos = posePositionExprs(c.kf!, 0);
-          filters.push(
-            `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${num(dur)},format=${alphaFmt}[ckb${j}]`
-          );
-          filters.push(
-            `[ckb${j}][${cur}]overlay=x=${pos.x}:y=${pos.y}:eof_action=pass${ovl}[ckp${j}]`
-          );
+          placeOnClear(cur, pos.x, pos.y, dur, `ckb${j}`, `ckp${j}`);
           cur = `ckp${j}`;
         }
         if (subjMask) {
@@ -1715,10 +2018,7 @@ export async function runExport(
               `setpts=PTS-STARTPTS,fps=${fps},tpad=stop_mode=clone:stop_duration=${num(dur)},` +
               `trim=0:${num(dur)},setpts=PTS-STARTPTS,fps=${fps}[cms${j}]`
           );
-          filters.push(`[${cur}]format=rgba,split[cs0_${j}][cs1_${j}]`);
-          filters.push(`[cs1_${j}]alphaextract[csa${j}]`);
-          filters.push(`[csa${j}][cms${j}]blend=all_mode=multiply[csm${j}]`);
-          filters.push(`[cs0_${j}][csm${j}]alphamerge[csc${j}]`);
+          alphaMultiply(cur, `cms${j}`, `csc${j}`, `cs${j}`);
           cur = `csc${j}`;
         }
         // A keyed layer flattens onto the frame color — where the removal
@@ -1733,7 +2033,7 @@ export async function runExport(
         );
         if (flatOut !== segCore) {
           // The removal clip's look, over the flattened opaque segment.
-          const lines = lookFilterLines(`vrl${j}`, segCore, c.look!, c.lookAmount, H, clipFmt, `cr${j}`);
+          const lines = lookFilterLines(`vrl${j}`, segCore, c.look!, c.lookAmount, H, clipFmt, `cr${j}`, depth);
           if (lines) filters.push(...lines);
           else filters.push(`[vrl${j}]null[${segCore}]`);
         }
@@ -1741,7 +2041,7 @@ export async function runExport(
         pushEdgeFx(core, dur, headFx, tailFx, W, H, clipFmt, fades, segCore, `c${j}`);
       }
       if (shIdx !== undefined) {
-        filters.push(`[${shIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=rgba[csh${j}]`);
+        filters.push(`[${gfx(`${shIdx}:v`)}]fps=${fps},scale=${W}:${H},setsar=1,${rgbToAlpha}[csh${j}]`);
         filters.push(
           `[${segCore}][csh${j}]overlay=0:0:eof_action=pass${ovl},format=${clipFmt},fps=${fps}[${segOut}]`
         );
@@ -1987,7 +2287,14 @@ export async function runExport(
     const boxH = region ? region.rh : H;
     // The overlay's picture meets its box the same way a track-0 clip meets
     // the frame; whatever the box does not swallow sits centered in it.
-    const framing = boxFraming(boxW, boxH, cover, oc.zoom, oc.panX, oc.panY) + mirror(oc);
+    const plan = orIn
+      ? null
+      : colorPlanFor(oc, {
+          alpha: !!oc.image,
+          hPx: framedPictureHeight(oc.file, boxW, boxH, cover, oc.zoom),
+          interpolated: interpolates(oc, ort),
+        });
+    const framing = boxFraming(boxW, boxH, cover, oc.zoom, oc.panX, oc.panY, plan?.flags) + mirror(oc);
     let pos: string;
     if (!region) {
       pos = cover ? "0:0" : `x=(${W}-w)/2:y=(${H}-h)/2`;
@@ -2023,21 +2330,23 @@ export async function runExport(
     // and clone-padded, grade and look already baked into the pixels.
     let timebase: string;
     if (orIn) {
-      filters.push(`[${orIn.a}:v]setpts=PTS-STARTPTS,format=gray[ova${k}]`);
-      filters.push(`[${orIn.rgb}:v]setpts=PTS-STARTPTS,format=rgba[ovc${k}]`);
-      filters.push(`[ovc${k}][ova${k}]alphamerge,tpad=stop_mode=clone:stop_duration=1[ovr${k}]`);
+      filters.push(`[${orIn.a}:v]setpts=PTS-STARTPTS,format=${maskFmt}[ova${k}]`);
+      filters.push(`[${gfx(`${orIn.rgb}:v`)}]setpts=PTS-STARTPTS,${rgbToAlpha}[ovc${k}]`);
+      alphaSet(`ovc${k}`, `ova${k}`, `ovr${k}`, `ov${k}`, ",tpad=stop_mode=clone:stop_duration=1");
       timebase = `[ovr${k}]null`;
     } else {
       timebase = oc.image
         ? `[${idx}:v]setpts=PTS-STARTPTS`
         : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=${retimedPts(ort)}`;
     }
-    let core = `${framedTimebase(timebase, framing, `o${k}`, orIn ? {} : oc, ort, fps, filters)},${orIn ? "" : colorFix.get(oc.file) ?? ""}${gradeChain(orIn ? undefined : oc.grade)}format=${orIn ? alphaFmt : lookFmt}`;
+    let core = framedTimebase(timebase, framing, `o${k}`, orIn ? {} : oc, ort, fps, filters);
+    if (plan) core = plan.run(core, `o${k}`);
+    core += `,format=${orIn ? alphaFmt : lookFmt}`;
     // Looks bake into footage overlays only: an image may carry alpha, which
     // the look chain's internal filters would flatten onto black over the
     // tracks beneath. The alpha fades stay safe: they apply after the look.
     if (oc.look && !oc.image && !orIn) {
-      const lines = lookFilterLines(`olki${k}`, `olko${k}`, oc.look, oc.lookAmount, H, lookFmt, `o${k}`);
+      const lines = lookFilterLines(`olki${k}`, `olko${k}`, oc.look, oc.lookAmount, H, lookFmt, `o${k}`, depth);
       if (lines) {
         filters.push(`${core}[olki${k}]`);
         filters.push(...lines);
@@ -2050,7 +2359,7 @@ export async function runExport(
     const obIdx = overlayBorderInput.get(oc);
     if (obIdx !== undefined) {
       filters.push(`${core}[obi${k}]`);
-      filters.push(`[obi${k}][${obIdx}:v]overlay=0:0:eof_action=pass${ovl},format=${fmt}[obo${k}]`);
+      filters.push(`[obi${k}][${gfx(`${obIdx}:v`)}]overlay=0:0:eof_action=pass${ovl},format=${fmt}[obo${k}]`);
       core = `[obo${k}]null`;
     }
     const pre = `ovp${k}`;
@@ -2072,17 +2381,14 @@ export async function runExport(
     // scales on the segment's local clock before the delay.
     let masked = pre;
     if (maskIdx !== undefined) {
-      filters.push(`[${maskIdx}:v]fps=${fps},scale=${boxW}:${boxH},setsar=1,format=gray[omk${k}]`);
-      filters.push(`[${pre}]format=rgba,split[om0${k}][om1${k}]`);
-      filters.push(`[om1${k}]alphaextract[oma${k}]`);
-      filters.push(`[oma${k}][omk${k}]blend=all_mode=multiply[omm${k}]`);
-      filters.push(`[om0${k}][omm${k}]alphamerge,format=${alphaFmt}[omc${k}]`);
+      filters.push(`[${maskIdx}:v]fps=${fps},scale=${boxW}:${boxH},setsar=1,format=${maskFmt}[omk${k}]`);
+      alphaMultiply(pre, `omk${k}`, `omc${k}`, `om${k}`, `,format=${alphaFmt}`);
       masked = `omc${k}`;
     }
     if (keyed) {
       const tf = poseTransformFilters(oc.kf!, boxW, boxH);
       if (tf) {
-        filters.push(`[${masked}]format=rgba${tf},format=${alphaFmt}[okt${k}]`);
+        filters.push(`[${masked}]${videoToAlpha}${tf},format=${alphaFmt}[okt${k}]`);
         masked = `okt${k}`;
       }
     }
@@ -2098,7 +2404,7 @@ export async function runExport(
     if (oshIdx !== undefined) {
       const lit = `ovsh${k}`;
       filters.push(
-        `[${oshIdx}:v]fps=${fps},scale=${W}:${H},setsar=1,format=rgba,` +
+        `[${gfx(`${oshIdx}:v`)}]fps=${fps},scale=${W}:${H},setsar=1,${rgbToAlpha},` +
           `tpad=start_duration=${num(oc.start)}:color=black@0.0[${lit}]`
       );
       const shOnto = `vovs${k}`;
@@ -2113,12 +2419,7 @@ export async function runExport(
       const matte = nextMatte(`bso${k}`, subjMask);
       if (keyed) {
         const kpos = posePositionExprs(oc.kf!, oc.start);
-        filters.push(
-          `color=c=black@0.0:s=${W}x${H}:r=${fps}:d=${num(spec.duration)},format=${alphaFmt}[osb${k}]`
-        );
-        filters.push(
-          `[osb${k}][${seg}]overlay=x=${kpos.x}:y=${kpos.y}:eof_action=pass${ovl}[osp${k}]`
-        );
+        placeOnClear(seg, kpos.x, kpos.y, spec.duration, `osb${k}`, `osp${k}`);
       } else {
         // The box may reach past the frame; pad to the box holding both and
         // crop the frame window back out (pad rejects placement outside its
@@ -2131,13 +2432,10 @@ export async function runExport(
         const bh = Math.max(H, padY + boxH) - by;
         const win = bw > W || bh > H ? `,crop=${W}:${H}:${-bx}:${-by}` : "";
         filters.push(
-          `[${seg}]format=rgba,pad=${bw}:${bh}:${padX - bx}:${padY - by}:color=black@0.0${win}[osp${k}]`
+          `[${seg}]${videoToAlpha},pad=${bw}:${bh}:${padX - bx}:${padY - by}:color=black@0.0${win}[osp${k}]`
         );
       }
-      filters.push(`[osp${k}]format=rgba,split[os0${k}][os1${k}]`);
-      filters.push(`[os1${k}]alphaextract[osa${k}]`);
-      filters.push(`[osa${k}][${matte}]blend=all_mode=multiply[osm${k}]`);
-      filters.push(`[os0${k}][osm${k}]alphamerge,format=${alphaFmt}[osc${k}]`);
+      alphaMultiply(`osp${k}`, matte, `osc${k}`, `os${k}`, `,format=${alphaFmt}`);
       filters.push(`[${onto}][osc${k}]overlay=0:0:${enable}:eof_action=pass${ovl}[${next}]`);
     } else if (keyed) {
       const kpos = posePositionExprs(oc.kf!, oc.start);
@@ -2203,25 +2501,30 @@ export async function runExport(
         // by the matte.
         const matte = nextMatte(`bse${k}`, o.subject);
         filters.push(
-          `[${animIdx}:v]format=rgba,` +
+          `[${gfx(`${animIdx}:v`)}]${rgbToAlpha},` +
             `pad=${W}:${H}:${num(o.x ?? 0)}:${num(o.y ?? 0)}:color=black@0.0,setsar=1[oep${k}]`
         );
-        filters.push(`[oep${k}]split[oe0${k}][oe1${k}]`);
-        filters.push(`[oe0${k}]fps=${fps}[oef${k}]`);
-        filters.push(`[oe1${k}]alphaextract,fps=${fps}[oea${k}]`);
-        filters.push(`[oea${k}][${matte}]blend=all_mode=multiply[oem${k}]`);
-        filters.push(`[oef${k}][oem${k}]alphamerge,format=${alphaFmt}[oes${k}]`);
+        if (hdr) {
+          filters.push(`[oep${k}]fps=${fps}[oef${k}]`);
+          alphaMultiply(`oef${k}`, matte, `oes${k}`, `oe${k}`, `,format=${alphaFmt}`);
+        } else {
+          filters.push(`[oep${k}]split[oe0${k}][oe1${k}]`);
+          filters.push(`[oe0${k}]fps=${fps}[oef${k}]`);
+          filters.push(`[oe1${k}]alphaextract,fps=${fps}[oea${k}]`);
+          filters.push(`[oea${k}][${matte}]blend=all_mode=multiply[oem${k}]`);
+          filters.push(`[oef${k}][oem${k}]alphamerge,format=${alphaFmt}[oes${k}]`);
+        }
         filters.push(`[${onto}][oes${k}]overlay=0:0:eof_action=pass${ovl}[${next}]`);
         return next;
       }
-      filters.push(`[${animIdx}:v]format=${alphaFmt},fps=${fps},setsar=1[oanim${k}]`);
+      filters.push(`[${gfx(`${animIdx}:v`)}]format=${alphaFmt},fps=${fps},setsar=1[oanim${k}]`);
       filters.push(
         `[${onto}][oanim${k}]overlay=${num(o.x ?? 0)}:${num(o.y ?? 0)}:eof_action=pass${ovl}[${next}]`
       );
     } else if (o.file) {
       const idx = inputIndex.get(o.file)!;
       filters.push(
-        `[${onto}][${idx}:v]overlay=0:0:enable='gte(t,${num(o.start)})*lt(t,${num(o.end)})'${ovl}[${next}]`
+        `[${onto}][${gfx(`${idx}:v`)}]overlay=0:0:enable='gte(t,${num(o.start)})*lt(t,${num(o.end)})'${ovl}[${next}]`
       );
     } else {
       return onto;
@@ -2277,7 +2580,7 @@ export async function runExport(
   // costs one ffmpeg input per language instead of one per still. They sit
   // over every element and every effect.
   captionInputs.forEach((idx, k) => {
-    filters.push(`[${idx}:v]format=${alphaFmt},fps=${fps},setsar=1[caps${k}]`);
+    filters.push(`[${gfx(`${idx}:v`)}]format=${alphaFmt},fps=${fps},setsar=1[caps${k}]`);
     filters.push(`[${vLabel}][caps${k}]overlay=0:0:eof_action=pass${ovl}[vcaps${k}]`);
     vLabel = `vcaps${k}`;
   });
@@ -2409,6 +2712,20 @@ export async function runExport(
       aLabel = `afx${k}`;
     });
 
+  // A PQ delivery: the finished HLG composite through the BT.2100 OOTF at
+  // 1000 nits and the ST 2084 curve, one fixed lattice, then back to video.
+  if (output === "pq") {
+    const file = path.join(job.tmpDir, "hlg_to_pq.cube");
+    await io.writeFile(file, lutToCube(buildTransferLut(spec.lutSizeWide ?? 65, hlgToPq), "HLG to PQ"));
+    filters.push(
+      `[${vLabel}]scale=in_color_matrix=bt2020:in_range=tv,format=gbrp16le,lut3d=file=${fexpr(file)}:interp=tetrahedral,` +
+        `scale=out_color_matrix=bt2020:out_range=tv,format=${clipFmt}[vpq]`
+    );
+    vLabel = "vpq";
+  }
+  filters.push(`[${vLabel}]${colorParamsFilter(spec)}[vtag]`);
+  vLabel = "vtag";
+
   // A range is cut from the finished composite, so it carries what the
   // timeline shows there — fades, captions, and elements in place.
   const span = deliverySpan(spec.range, spec.duration);
@@ -2436,10 +2753,7 @@ export async function runExport(
       "-map", `[${vLabel}]`,
       "-map", `[${aLabel}]`,
       ...videoCodecArgs(enc, spec),
-      "-color_range", "tv",
-      "-colorspace", "bt709",
-      "-color_primaries", "bt709",
-      "-color_trc", "bt709",
+      ...colorTagArgs(spec),
       ...audioCodecArgs(spec),
       "-t", num(span),
       encodePath,

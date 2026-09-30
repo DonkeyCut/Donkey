@@ -30,6 +30,7 @@ import {
   STRANDED_TITLE_STATE,
   TWEET_ASSET,
   TWEET_STATE,
+  LUT_STATE,
   TWO_CLIP_STATE,
   type EvalMessage,
   assistantToolTurn,
@@ -302,6 +303,57 @@ export function cases(audio: { dataBase64: string; mimeType: string }): EvalCase
           note:
             "Rendering a new take — it previews in this chat when it lands, in a minute or two. Your current clip stays put.",
         },
+      },
+    },
+    {
+      // A LUT already on one clip, asked onto every clip: one copy of the
+      // grade (or one LUT sweep over the whole timeline), no clip-by-clip
+      // walk and no fresh LUT invented.
+      name: "lut-to-all-clips",
+      instant: null,
+      bucket: "single-tool",
+      state: LUT_STATE,
+      input: () => [userTurn("apply this LUT to all clips")],
+      reply: /LUT|look|all|both|every|clips/i,
+      anyTools: ["copy_color_grade", "set_color_lut"],
+      maxToolCalls: 4,
+      simulate: () => (name, args) => {
+        if (name === "set_color_lut") {
+          if (args.lut !== "lut:kodak2383")
+            throw new Error(`set_color_lut must name the shelf LUT, got ${JSON.stringify(args.lut)}`);
+          if (args.all_clips !== true && !Array.isArray(args.ids))
+            throw new Error("set_color_lut must land on all clips (all_clips or ids), not one at a time");
+          return { ran: 2, ids: ["c1", "c2"], results: [] };
+        }
+        if (name === "copy_color_grade") {
+          if (args.clipId !== "c1") throw new Error(`copy_color_grade must copy from c1, got ${JSON.stringify(args.clipId)}`);
+          if (args.all_clips !== true && !Array.isArray(args.ids))
+            throw new Error("copy_color_grade must land on all clips (all_clips or ids)");
+          return { from: "c1", ids: ["c2"], grade: { lut: { id: "lut:kodak2383" } } };
+        }
+        return undefined;
+      },
+    },
+    {
+      // Footage the header did not settle, named by the user: the source
+      // colour switch, not a grade that fights the log curve by hand.
+      name: "convert-apple-log-source",
+      instant: null,
+      bucket: "single-tool",
+      state: LUT_STATE,
+      input: () => [userTurn("this beach footage is Apple Log, convert it")],
+      reply: /Apple Log|converted|Rec\.?709|source/i,
+      requiredTools: ["set_source_color"],
+      maxToolCalls: 4,
+      simulate: () => (name, args) => {
+        if (name === "set_source_color") {
+          if (args.profile !== "apple-log")
+            throw new Error(`set_source_color must pick apple-log, got ${JSON.stringify(args.profile)}`);
+          return { assetId: "a-v1", profile: "apple-log", detected: "rec709", clips: ["c1", "c2"] };
+        }
+        if (name === "set_color_grade" || name === "set_color_lut")
+          throw new Error(`${name} — a log source is converted with set_source_color, never graded by hand`);
+        return undefined;
       },
     },
     {

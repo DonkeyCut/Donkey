@@ -71,6 +71,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   { method: "POST", path: "/api/cut-cloud/projects/:id/media/complete", handler: (r, u) => mediaCloud.complete(u, r) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/import-url", handler: (r, u, p) => jobsCloud.importUrl(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/projects/:id/convert", handler: (r, u, p) => jobsCloud.convert(u, p.id, r) },
+  { method: "POST", path: "/api/cut-cloud/projects/:id/proxy", handler: (r, u, p) => jobsCloud.proxy(u, p.id, r) },
   { method: "POST", path: "/api/cut-cloud/media/presign-get", handler: (r, u) => mediaCloud.presignGetBatch(u, r) },
 
   { method: "GET", path: "/api/cut-cloud/library/shares/:kind/:id", handler: (r, u, p) => librarySharing.manage(r, u, p.kind, p.id) },

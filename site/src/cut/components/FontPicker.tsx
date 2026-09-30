@@ -40,7 +40,7 @@ const PANEL_INSET = 24;
 /** Picking this row opens the file dialog; it never becomes the value. */
 const UPLOAD = "__upload";
 
-const ACCEPT = linkedAccept();
+const ACCEPT = linkedAccept("font");
 
 /** The row's text size, and the cap height it is drawn to. */
 const ROW_PX = 14;

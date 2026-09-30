@@ -16,6 +16,8 @@ import { assetIsSilent, clipCovers, rectOf } from "@/cut/lib/types";
 import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
+import { hdrCanvasSupport } from "@/cut/lib/hdrCanvas";
+import { displayIsHdr, HdrPresenter, onDisplayRangeChange, setHdrPreviewState } from "@/cut/lib/hdrPresent";
 import { crossHandles, duckGainAt, overlayPlan, soundCrossGain, trackZeroPlan } from "@/cut/lib/framePlan";
 import { type ClipFrameSource, FrameSourcePool, mappingKey, walkCostMs } from "@/cut/lib/frameSource";
 import { liveAudioFxAt } from "@/cut/lib/audioEffects";
@@ -33,9 +35,11 @@ import {
   markTick,
   tracing,
 } from "@/cut/lib/perfTrace";
-import { registerSourceSampler } from "@/cut/lib/previewCanvas";
+import { registerSourceColor, registerSourceSampler } from "@/cut/lib/previewCanvas";
+import { colorRead, previewFile, type ColorRead } from "@/cut/lib/sourceColor";
 import { backdropStill } from "@/cut/lib/backdropStills";
 import { createRasterCanvas, type RasterSurface } from "@/cut/lib/raster";
+import { disposeDetailGpu } from "@/cut/lib/detailGpu";
 
 /**
  * The preview engine.
@@ -113,6 +117,14 @@ const PLAY_SETTLE_MS = 6_000;
 /** The decode identity of a clip — see `mappingKey`. */
 const keyOf = (clip: VideoClip, asset: MediaAsset) =>
   mappingKey(asset.id, retimeOf(clip), clip.start);
+
+/** Assets by id, built once per assets array. */
+const assetIndexes = new WeakMap<readonly MediaAsset[], Map<string, MediaAsset>>();
+function assetIndex(assets: readonly MediaAsset[]): Map<string, MediaAsset> {
+  let index = assetIndexes.get(assets);
+  if (!index) assetIndexes.set(assets, (index = new Map(assets.map((a) => [a.id, a]))));
+  return index;
+}
 
 /**
  * Which way a clip's source is read at this moment: playing, a reversed clip
@@ -241,10 +253,30 @@ class Engine {
   private unwatch: () => void;
   private sizeWatch: MutationObserver;
   private onHidden: () => void;
+  private unwatchDisplay: () => void;
 
-  constructor(private canvas: HTMLCanvasElement) {
+  /** The HDR present pass over the composite, once the browser has handed
+   * over an extended-range canvas; null until then and where it cannot. */
+  private presenter: HdrPresenter | null = null;
+  /** Whether the presenter is still being made — a project that turns HDR
+   * later asks once. */
+  private presenting = false;
+  /** Whether the browser hands over an extended-range canvas: unknown until
+   * the first HDR frame asks, so an SDR project never probes the GPU. */
+  private canPresent: boolean | null = null;
+
+  constructor(
+    private canvas: HTMLCanvasElement,
+    /** The extended-range canvas over the stage the HDR picture lands on. */
+    private presentCanvas: HTMLCanvasElement | null
+  ) {
     this.comp = new FrameCompositor(canvas);
     this.comp.removalMatteProvider = (clip, at) => this.matteFor(clip, at);
+    // A clip's color recipe describes the frames its source hands over — the
+    // file that source reads, read the way it reads it; a LUT built off the
+    // thread repaints when it lands.
+    this.comp.sourceProvider = (clip) => this.colorOf(clip)?.recipe() ?? { profile: "rec709" };
+    this.comp.wake = () => this.wake();
     // A backdrop still decodes out of band; the frame that finds it missing
     // draws without it and the landing repaints.
     this.comp.backdropImageProvider = (assetId) =>
@@ -281,8 +313,53 @@ class Engine {
       this.wake();
     };
     document.addEventListener("visibilitychange", this.onHidden);
+    // A window dragged onto or off an HDR display changes what the stage can
+    // show; the answer is read per frame and the change wakes a repaint.
+    this.unwatchDisplay = onDisplayRangeChange(() => this.wake());
     engineLog(`engine ${this.serial} constructed`);
     this.wake();
+  }
+
+  /**
+   * Whether this frame draws the HDR picture: the project delivers HDR, the
+   * display carries it, and the extended-range canvas is in hand. The
+   * presenter is made on the first HDR frame asked for, off the loop; until
+   * it lands the stage shows the grade rendered as SDR.
+   */
+  private hdrFrame(colorSpace: string): boolean {
+    if (colorSpace === "sdr" || !this.presentCanvas || !displayIsHdr()) return false;
+    if (this.canPresent === null) {
+      if (!this.presenting) {
+        this.presenting = true;
+        void hdrCanvasSupport().then((support) => {
+          this.presenting = false;
+          if (this.disposed) return;
+          this.canPresent = support.webgpu;
+          this.wake();
+        });
+      }
+      return false;
+    }
+    if (!this.canPresent) return false;
+    if (this.presenter?.gone) {
+      this.presenter.dispose();
+      this.presenter = null;
+    }
+    if (this.presenter) return true;
+    if (!this.presenting) {
+      this.presenting = true;
+      void HdrPresenter.create(this.presentCanvas).then((p) => {
+        this.presenting = false;
+        if (this.disposed) {
+          p?.dispose();
+          return;
+        }
+        if (p) this.presenter = p;
+        else this.canPresent = false;
+        this.wake();
+      });
+    }
+    return false;
   }
 
   dispose() {
@@ -294,9 +371,14 @@ class Engine {
     this.unwatch();
     this.sizeWatch.disconnect();
     document.removeEventListener("visibilitychange", this.onHidden);
+    this.unwatchDisplay();
+    this.presenter?.dispose();
+    this.presenter = null;
+    setHdrPreviewState("off");
     this.pool.dispose();
     this.behind.dispose();
     this.mixer.dispose();
+    disposeDetailGpu();
   }
 
   /**
@@ -391,6 +473,15 @@ class Engine {
       { serial: this.serial, disposed: this.disposed, raf: this.raf, dirty: this.dirty },
       ...this.pool.debugState(),
     ];
+  }
+
+  /** How the clip's frames are read: the frame its open source last handed
+   * out, else the file the preview would open for it. */
+  colorOf(clip: VideoClip): ColorRead | null {
+    const asset = assetIndex(useEditor.getState().assets).get(clip.assetId);
+    if (!asset) return null;
+    const src = this.pool.peek(keyOf(clip, asset), this.decodeHeight());
+    return src ? src.shownColorRead : colorRead(asset, previewFile(asset));
   }
 
   /** The clip's raw, ungraded decoder frame for analysis (the color panel's
@@ -495,7 +586,7 @@ class Engine {
       if (metering()) meterFrame(lag, !frame);
     }
     if (frame)
-      return { kind: "ready", image: frame.image, width: frame.width, height: frame.height };
+      return { kind: "ready", image: frame.image, width: frame.width, height: frame.height, source: frame.read?.recipe() };
     return src.failed ? MISSING_FRAME : PENDING_FRAME;
   }
 
@@ -528,7 +619,7 @@ class Engine {
       if (oldest !== undefined) this.smoothed.delete(oldest);
     }
     blendInto(canvas, pair.a.image, pair.b.image, w);
-    return { image: canvas as CanvasImageSource, width, height, timestamp: pair.a.timestamp };
+    return { image: canvas as CanvasImageSource, width, height, timestamp: pair.a.timestamp, read: pair.a.read };
   }
 
   /** Open and start the decoders for clips about to arrive — on track 0 and
@@ -752,7 +843,7 @@ class Engine {
       src.want(b.at, false);
       const f = src.frameAt(b.at, b.span.clip.in, b.span.clip.out);
       this.comp.drawLayer(
-        f ? { kind: "ready", image: f.image, width: f.width, height: f.height } : PENDING_FRAME,
+        f ? { kind: "ready", image: f.image, width: f.width, height: f.height, source: f.read?.recipe() } : PENDING_FRAME,
         b.span.clip,
         false,
         1,
@@ -843,6 +934,12 @@ class Engine {
     // and every letterbox below paints it, so a cut with no footage at all
     // still plays a picture.
     this.comp.background = s.background;
+    // An HDR project composites in HLG, the space its export composites in,
+    // and the present pass decodes that for the display; without the
+    // display or the canvas for it, the same grade renders as SDR.
+    const hdr = this.hdrFrame(s.colorSpace);
+    this.comp.output = hdr ? "hlg" : "sdr";
+    setHdrPreviewState(s.colorSpace === "sdr" ? "off" : hdr ? "hdr" : "sdr");
     this.comp.removalBypass = s.removalPeek;
     this.renderPlaying = playing;
     this.pool.beginFrame();
@@ -957,6 +1054,9 @@ class Engine {
       // publishes the matte the DOM's front subject-masked elements read.
       this.comp.subjectMatteProvider = (at) => this.behind.clipMatteOf(this.canvas, at);
       this.behind.draw(this.canvas, s.overlays, s.assets, t);
+      // The HDR picture: the HLG composite decoded onto the extended-range
+      // canvas over the stage. One pass, on the frame just drawn.
+      if (hdr) this.presenter!.present(this.canvas);
       // A paused draw is the picture standing still, which is when a
       // readback of it costs nothing anyone is watching; a play's first
       // frame is read back once the play stops and the frame is redrawn.
@@ -1047,20 +1147,28 @@ class Engine {
   }
 }
 
-export function usePlayback(canvasRef: RefObject<HTMLCanvasElement | null>) {
+export function usePlayback(
+  canvasRef: RefObject<HTMLCanvasElement | null>,
+  presentRef?: RefObject<HTMLCanvasElement | null>
+) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const engine = new Engine(canvas);
+    const engine = new Engine(canvas, presentRef?.current ?? null);
     // Dev-only automation hook, like installDevHooks: lets a headless run (or a
     // debugging session) reach the live engine.
     if (process.env.NODE_ENV !== "production") {
       (window as unknown as Record<string, unknown>).__cutDevEngine = engine;
     }
     registerSourceSampler((clipId) => engine.sourceFor(clipId));
+    registerSourceColor((clipId) => {
+      const clip = useEditor.getState().clips.find((c) => c.id === clipId);
+      return clip ? engine.colorOf(clip) : null;
+    });
     return () => {
       registerSourceSampler(null);
+      registerSourceColor(null);
       engine.dispose();
     };
-  }, [canvasRef]);
+  }, [canvasRef, presentRef]);
 }

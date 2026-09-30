@@ -25,6 +25,7 @@ import {
   writeProject,
 } from "../projects";
 import { convertToMp4, mp4NameFor } from "../convert";
+import { makeProxy, proxyNameFor } from "../proxy";
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importUrlToProject } from "../urlImport";
 import { createTranscribeJob, getTranscribeJob, type TranscribeSpec } from "../transcribe";
@@ -450,6 +451,28 @@ export const projectsApi = {
       });
     } catch (e) {
       return caught(e, "Could not convert that file.");
+    }
+  },
+
+  /** Build the preview proxy of a ProRes master in this project (see
+   * server/proxy.ts). The proxy lands beside the master; writing it onto the
+   * asset is the client's call. The page sends the size and quality it was
+   * configured with. */
+  async proxy(req: Request, { id }: { id: string }) {
+    try {
+      if (!(await readProject(id))) return err("Project not found.", 404);
+      const body = (await req.json()) as { file?: string; maxHeight?: number; crf?: number };
+      if (!body.file) return err("file is required.", 400);
+      if (typeof body.maxHeight !== "number" || typeof body.crf !== "number") return err("maxHeight and crf are required.", 400);
+      const src = mediaPath(id, body.file);
+      if (!(await exists(src))) return err("Media file missing from project.", 404);
+      const fileName = await uniqueName(proxyNameFor(body.file), (n) => mediaPath(id, n));
+      const outPath = mediaPath(id, fileName);
+      const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
+      const outcome = await makeProxy(handle, src, outPath, { maxHeight: body.maxHeight, crf: body.crf });
+      return Response.json({ fileName, ...outcome });
+    } catch (e) {
+      return caught(e, "Could not make the preview proxy.");
     }
   },
 

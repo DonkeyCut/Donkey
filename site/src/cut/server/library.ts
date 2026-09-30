@@ -4,6 +4,8 @@ import { copyFile, constants, mkdir, readFile, rm, writeFile } from "node:fs/pro
 import path from "node:path";
 import type { ClipSound } from "@donkeycut/effects-kit";
 import { resolveParent, settleParents, subtreeOf } from "@/cut/lib/folderTree";
+import { IMAGE_RE, libraryTypeOf, VIDEO_RE } from "@/cut/lib/libraryFileType";
+import { isLinkedAssetType, type AssetType } from "@/cut/lib/types";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { mediaPath as projectMediaPath, readProject } from "./projects";
@@ -24,13 +26,20 @@ export interface LibrarySource {
   uploadDate?: string; // yt-dlp YYYYMMDD
 }
 
-export interface LibraryAsset {
+/** What a linked item carries on its row instead of streams: the content key
+ * every project names it by, and for a LUT what kind of table it holds. */
+export interface LinkedMeta {
+  contentKey?: string;
+  lut?: { kind: "1d" | "3d" | "shaper+3d"; size: number };
+}
+
+export interface LibraryAsset extends LinkedMeta {
   id: string;
   fileName: string;
   /** Uploaded source retained when playback needs conversion. */
   originalFile?: string;
   name: string;
-  type: "video" | "audio" | "image" | "font";
+  type: AssetType;
   duration: number;
   width?: number;
   height?: number;
@@ -67,7 +76,7 @@ export interface LibraryFolder {
 export interface TemplateMedia {
   fileName: string; // private copy inside the library media folder
   name: string;
-  type: "video" | "audio" | "image" | "font";
+  type: AssetType;
   duration: number;
   width?: number;
   height?: number;
@@ -119,6 +128,8 @@ export interface LibraryTemplate {
   cues: unknown[]; // opaque SubtitleCue[]
   /** A template carrying only this is a saved sound preset. */
   sound?: ClipSound;
+  /** A template carrying only this is a saved colour grade. */
+  grade?: unknown;
   /** Opaque, round-tripped for the client: transition bars, which texts are
    * stickers drawn from media, the caption look, the source's frame. */
   transitions?: unknown[];
@@ -197,11 +208,6 @@ export async function listLibrary(): Promise<LibraryAsset[]> {
   return idx.assets.sort((a, b) => b.addedAt - a.addedAt);
 }
 
-const VIDEO_RE = /\.(mp4|mov|m4v|webm|mkv)$/i;
-const AUDIO_RE = /\.(mp3|m4a|aac|wav|ogg|flac)$/i;
-const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
-const FONT_RE = /\.(ttf|otf|woff2?)$/i;
-
 function ffprobe(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const p = spawn("ffprobe", ["-v", "error", ...args]);
@@ -260,25 +266,20 @@ async function freeName(original: string) {
   return uniqueName(base, libMediaPath);
 }
 
-function typeOf(fileName: string): "video" | "audio" | "image" | "font" | null {
-  if (VIDEO_RE.test(fileName)) return "video";
-  if (AUDIO_RE.test(fileName)) return "audio";
-  if (IMAGE_RE.test(fileName)) return "image";
-  if (FONT_RE.test(fileName)) return "font";
-  return null;
-}
-
 export async function register(
   fileName: string,
   name: string,
   source?: LibrarySource,
   posterFile?: string,
+  linked?: LinkedMeta,
   originalFile?: string,
 ): Promise<LibraryAsset> {
-  const type = typeOf(fileName);
+  const type = libraryTypeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
+  // A linked item has no streams to measure; the page that checked it sends
+  // what its row carries instead.
   const meta: { duration: number; width?: number; height?: number } =
-    type === "font" ? { duration: 0 } : await probe(libMediaPath(fileName));
+    isLinkedAssetType(type) ? { duration: 0 } : await probe(libMediaPath(fileName));
   const asset: LibraryAsset = {
     id: crypto.randomUUID().slice(0, 8),
     fileName,
@@ -291,6 +292,8 @@ export async function register(
     folderId: null,
     ...(source ? { source } : {}),
     ...(posterFile ? { posterFile } : {}),
+    ...(linked?.contentKey ? { contentKey: linked.contentKey } : {}),
+    ...(linked?.lut ? { lut: linked.lut } : {}),
   };
   await mutateIndex((idx) => {
     idx.assets.push(asset);
@@ -304,9 +307,10 @@ export async function addUpload(
   name?: string,
   source?: LibrarySource,
   poster?: File,
+  linked?: LinkedMeta,
   prepare = false,
 ): Promise<LibraryAsset> {
-  if (!typeOf(file.name)) throw new Error("Unsupported file type.");
+  if (!libraryTypeOf(file.name)) throw new Error("Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
   const fileName = await freeName(file.name);
   await writeFile(
@@ -334,7 +338,7 @@ export async function addUpload(
       const outcome = await convertToMp4(handle, libMediaPath(fileName), libMediaPath(playback));
       if (outcome.unchanged) playback = fileName;
     }
-    return await register(playback, name?.trim() || file.name, source, posterFile,
+    return await register(playback, name?.trim() || file.name, source, posterFile, linked,
       playback === fileName ? undefined : fileName);
   } catch (error) {
     await removeFiles([...new Set([fileName, playback, ...(posterFile ? [posterFile] : [])])]);
@@ -364,7 +368,7 @@ export async function addDownloaded(
   source?: LibrarySource,
   posterPath?: string,
 ): Promise<LibraryAsset> {
-  if (!typeOf(srcPath)) throw new Error("Unsupported file type.");
+  if (!libraryTypeOf(srcPath)) throw new Error("Unsupported file type.");
   await mkdir(libMedia(), { recursive: true });
   const dest = await freeName(path.basename(srcPath));
   await copyFile(srcPath, libMediaPath(dest));
@@ -545,16 +549,17 @@ export interface TemplateInput {
   texts: unknown[];
   cues: unknown[];
   sound?: LibraryTemplate["sound"];
+  grade?: unknown;
   transitions?: unknown[];
   stickers?: unknown[];
   captions?: unknown;
   project?: unknown;
 }
 
-/** A template with nothing on it saves nothing; a sound preset is a template
- * carrying only its treatment. */
+/** A template with nothing on it saves nothing; a sound preset or a saved
+ * grade is a template carrying only its treatment. */
 const templateEmpty = (input: TemplateInput) =>
-  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound;
+  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound && !input.grade;
 
 export async function listTemplates(): Promise<LibraryTemplate[]> {
   const idx = await readIndex();

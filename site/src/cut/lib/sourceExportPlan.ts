@@ -1,3 +1,4 @@
+import { recipeIsIdentity } from "@donkeycut/effects-kit";
 import type { ExportDoc } from "@/cut/lib/renderSnapshot";
 import type { ExportSettings } from "@/cut/lib/exportClient";
 import type { VideoClip } from "@/cut/lib/types";
@@ -26,6 +27,11 @@ export function sourceSequence(doc: ExportDoc) {
     const asset = doc.assets.find((a) => a.id === clip.assetId);
     if (!asset || asset.type !== "video" || asset.block || !asset.width || !asset.height ||
         !Number.isFinite(clip.in) || !Number.isFinite(clip.out) || clip.in < 0 || clip.out <= clip.in || clip.out > asset.duration + 0.000001) return null;
+    // A file whose code values need converting (a log source, or an HDR file
+    // into another delivery) has to render; an ungraded file already in the
+    // delivery's own encoding copies as is.
+    const profile = asset.colorProfile ?? asset.color?.detected ?? "rec709";
+    if (!recipeIsIdentity(profile, doc.colorSpace ?? "sdr")) return null;
     if (segments.length && (asset.width !== segments[0].asset.width || asset.height !== segments[0].asset.height)) return null;
     const previous = segments.at(-1);
     if (previous?.asset.id === asset.id && Math.abs(previous.to - clip.in) < 0.000001) previous.to = clip.out;

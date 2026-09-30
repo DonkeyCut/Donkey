@@ -24,6 +24,7 @@
  */
 
 import { readSnapshot, writeSnapshot } from "../cache";
+import { contentKey } from "../contentKey";
 import {
   fetchLibrary,
   moveLibraryItem,
@@ -59,6 +60,11 @@ export interface LinkedKind {
   prefix: string;
   /** The library asset type carrying it. */
   type: LibraryAsset["type"];
+  /** A kind keyed off its shelf row: the page that shelved the file wrote its
+   * content key onto the row (`LibraryAsset.contentKey`), so a sync lists it
+   * without reading a byte. Its bytes are read when something uses it. A row
+   * without a key is left out of the listing. */
+  lazy?: true;
   /** The ids of this kind a document is set in, so a project move can carry
    * them. */
   extract: (doc: ProjectDoc) => string[];
@@ -67,6 +73,8 @@ export interface LinkedKind {
   use?: (key: string, label: string, bytes: ArrayBuffer) => Promise<void>;
   /** Keys that have left the shelf, so the feature can drop them. */
   drop?: (keys: string[]) => void;
+  /** What an item is called, when that is not the shelf row's name. */
+  labelOf?: (a: LibraryAsset) => string;
   /** Folder a new one is filed into when the shelf has one by that name. */
   homeFolder?: string;
   /** Whether a dropped OS file is one of these. */
@@ -97,9 +105,13 @@ export const isLinkedType = (type: LibraryAsset["type"]): boolean =>
 export const isLinkedFile = (file: File): boolean =>
   [...kinds.values()].some((k) => k.matches(file));
 
-/** What every linked kind takes, for a file input's `accept`. */
-export const linkedAccept = (): string =>
-  [...kinds.values()].flatMap((k) => (k.accept ? [k.accept] : [])).join(",");
+/** What every linked kind takes, for a file input's `accept` — or one kind's,
+ * for a picker that offers only that. */
+export const linkedAccept = (prefix?: string): string =>
+  [...kinds.values()]
+    .filter((k) => !prefix || k.prefix === prefix)
+    .flatMap((k) => (k.accept ? [k.accept] : []))
+    .join(",");
 
 /** The library asset type a dropped OS file would shelve as, when a linked
  * kind claims it. */
@@ -169,13 +181,7 @@ function publish(next: LinkedItem[]): void {
   for (const cb of listeners) cb();
 }
 
-/** An item's identity: enough SHA-256 to never collide in one account's shelf. */
-export async function contentKey(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest).slice(0, 8)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+export { contentKey };
 
 const bytesKey = (assetId: string) => `linked/${assetId}`;
 
@@ -186,7 +192,9 @@ const bytesKey = (assetId: string) => `linked/${assetId}`;
  * Read through the shelf's own backend rather than its URL: a render job
  * carries its auth in headers the page gets from a cookie, and the browser
  * shelf answers in the page rather than over the network. */
-export async function linkedBytes(a: LibraryAsset): Promise<ArrayBuffer> {
+export async function linkedBytes(
+  a: Pick<LibraryAsset, "id" | "fileName" | "residency">,
+): Promise<ArrayBuffer> {
   try {
     const res = await backendFor(a.residency).fetch(
       `/api/cut/library/media/${encodeURIComponent(a.fileName)}`,
@@ -206,12 +214,12 @@ function put(
   kind: LinkedKind,
   key: string,
   label: string,
-  bytes: ArrayBuffer,
+  bytes: ArrayBuffer | null,
 ): Promise<void> {
   const id = linkId(kind.prefix, key);
   let hit = used.get(id);
   if (hit) return hit;
-  hit = (kind.use ? kind.use(key, label, bytes) : Promise.resolve()).catch(
+  hit = (kind.use && bytes ? kind.use(key, label, bytes) : Promise.resolve()).catch(
     () => {
       // Bytes that will not load: drop the marker so a later pass retries, and
       // let whatever points at them fall back.
@@ -246,10 +254,12 @@ export async function syncLinkedLibrary(): Promise<void> {
   // order: two shelves holding one item may have stored it under different
   // names, and a menu should not label it differently from one session to the
   // next. The cloud copy's name wins, since that is the one every surface reads.
+  // A lazy kind is keyed off its row and read only when used.
   const read = await Promise.all(
     shelf.map(async (a) => {
       const kind = kindFor(a);
       if (!kind) return null;
+      if (kind.lazy) return a.contentKey ? { a, kind, bytes: null, key: a.contentKey } : null;
       try {
         const bytes = await linkedBytes(a);
         return { a, kind, bytes, key: await contentKey(bytes) };
@@ -267,7 +277,8 @@ export async function syncLinkedLibrary(): Promise<void> {
     );
   const found = new Map<string, LinkedItem>();
   for (const { a, kind, bytes, key } of ordered) {
-    await put(kind, key, a.name, bytes);
+    const label = kind.labelOf?.(a) ?? a.name;
+    await put(kind, key, label, bytes);
     const copy: LinkedCopy = {
       assetId: a.id,
       residency: a.residency,
@@ -281,7 +292,7 @@ export async function syncLinkedLibrary(): Promise<void> {
       found.set(id, {
         key,
         prefix: kind.prefix,
-        label: a.name,
+        label,
         copies: [copy],
       });
   }

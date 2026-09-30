@@ -11,6 +11,8 @@ import { overlayKey } from "../server/cloud/r2";
 import { STORAGE_FULL } from "../lib/operationFailure";
 import { specMediaFiles } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
+import { bindCutColor } from "../lib/colorSettings";
+import { getGlobalSetting } from "@/lib/config/effective";
 
 /** The stored spec of an export/preview CutRenderJob: the engine export spec
  * plus the R2 keys of the browser-rendered overlay PNGs (title/caption stills
@@ -136,6 +138,8 @@ export async function runExportJob(
     // own straight into it, so it exists before the spec does.
     handle.tmpDir = path.join(work, "overlays");
     await mkdir(handle.tmpDir, { recursive: true });
+    // A doc-built spec sizes its LUTs from the same setting the tab binds.
+    if (stored.fromDoc) bindCutColor(await getGlobalSetting("cutColor"));
     const body: ExportJobSpec = stored.fromDoc
       ? {
           ...stored,

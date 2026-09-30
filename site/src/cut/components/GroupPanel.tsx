@@ -342,7 +342,7 @@ function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoCl
 }
 
 /** A title's whole look over a selection of titles: saved styles, face,
- * weight and slant, alignment, size, spacing, stretch, color, outline,
+ * weight and slant, alignment, size, spacing, text box width, color, outline,
  * shadow and backdrop. */
 function TextRows({ texts }: { texts: TextOverlay[] }) {
   const write = useGroupWrite();

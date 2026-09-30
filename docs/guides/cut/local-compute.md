@@ -51,13 +51,11 @@ A client with no compositor at all asks by project id instead. The phone sends t
 
 ## Converting footage
 
-Imports and the assistant's conversion tool prepare playable H.264/AAC media through the backend that holds the file. Compatible streams copy into the new container. Unsupported streams are encoded, and a playable audio rendition takes precedence over optional spatial audio.
+Imports and the assistant's conversion tool prepare playable H.264/AAC media through the backend that holds the file. Compatible streams copy into the new container; the rest are encoded, and a playable audio rendition takes precedence over optional spatial audio. The Library uploads originals even when browser probing fails; the worker prepares playback and retains the source. A browser-local project or shelf without the codec borrows hosted preparation, saves the result into its own storage, and removes the cloud copy. Project conversion keeps the asset id, so clips keep pointing at it.
 
-The Library uploads originals even when browser probing fails; the worker prepares playback and retains the source for download. A browser-local project or shelf without the required codec borrows preparation, saves the result into its own storage, and removes the temporary cloud copy. The engine shelf uses the same worker when its tools fail. Hosted preparation requires a signed-in account with available storage and worker capacity.
+## ProRes masters and preview proxies
 
-Library drops share local previews and background storage across folders and panels; cards show “Importing”, and retries reuse uploaded bytes and jobs.
-
-Project conversion keeps the asset id, so existing clips continue to reference it. The same tools run in the editor and headless clients.
+ProRes is the one format kept as shot. The master stays in the project and is what every export reads; beside it lands a 10-bit HEVC preview proxy, carried into the Rec.709 matrix and tagged so that every decoder draws its values untouched. The asset's color record still describes the master, so the grade is the same picture either way. The proxy is built where the project lives — the engine for a Mac project, the worker for a cloud one (quota-exempt; the master counts), and for a browser project the page itself when it can encode 10-bit frames (Chrome; WebKit cannot), else the Mac when the app is there. Until it lands, and on a browser that can make none, the preview decodes the master through a WASM decoder: the same picture, slower. That is the one fallback, and the Color panel says so.
 
 ## Rules
 
@@ -74,6 +72,7 @@ Project conversion keeps the asset id, so existing clips continue to reference i
 | Export | the Mac for its own projects, the browser for cloud and browser ones, the worker when the tab can't encode the choice | see Export above |
 | Thumbnails, waveforms, media probing | the browser, always | it decodes the media itself |
 | Converting media to MP4 | the backend holding the bytes, with hosted preparation when the browser lacks a codec | see Converting footage above |
+| Preview proxies of ProRes masters | the backend holding the bytes; a browser project encodes in the tab or on the Mac | see ProRes masters above |
 | Image, video, and voice generation | hosted, always | no local counterpart |
 | Cutout mattes | the quick person matte in the tab, on-device and free; the quality and tracked bakes hosted (credits), driven by the tab | the tab decodes the clip and owns the session; the engine and the worker only consume the stored matte asset |
 | The assistant's Gemini models | hosted, always | credits and the user's session |

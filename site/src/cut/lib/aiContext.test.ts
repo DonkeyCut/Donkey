@@ -60,4 +60,29 @@ describe("describeDoc", () => {
     expect(other.media.some((m) => m.id === "g1")).toBe(false);
     expect(describeDoc(doc, { fullCues: true }).media.some((m) => m.id === "g1")).toBe(false);
   });
+
+  test("colour reads as the grading tools take it: source colour, LUT, wheels by name", async () => {
+    const doc = richDoc();
+    doc.assets[0] = {
+      ...doc.assets[0],
+      color: { matrix: "bt2020nc", fullRange: false, bitDepth: 10, detected: "apple-log" },
+      colorProfile: "rec709",
+    };
+    doc.clips[1] = {
+      ...doc.clips[1],
+      grade: { exposure: 4, fade: 10, lut: { id: "lut:abc", amount: 0.5 }, wheels: { s: [1, 2, 0], o: [0, 0, 3] } },
+    };
+    const assets = doc.assets.map((a) => ({ ...a, url: "" }));
+    await useEditor.getState().openProjectDoc("colour", doc, assets);
+    const live = buildAiContext({ chatId: null });
+    expect(live.media[0]).toMatchObject({ sourceColor: { profile: "rec709", detected: "apple-log" } });
+    expect(live.videoTrack[1]).toMatchObject({
+      lut: { id: "lut:abc", amount: 0.5 },
+      grade: { exposure: 4, fade: 10 },
+      wheels: ["lift", "offset"],
+    });
+    expect(Array.isArray(live.luts)).toBe(true);
+    expect(Array.isArray(live.savedGrades)).toBe(true);
+    expect(describeDoc(doc).media[0]).toMatchObject({ sourceColor: { profile: "rec709", detected: "apple-log" } });
+  });
 });

@@ -4,7 +4,20 @@
  * cloud routes and the worker all read the one table.
  */
 
+import type { CodeFormat, SourceProfile } from "@donkeycut/effects-kit";
+
 export type ExportCodec = "h264" | "hevc" | "prores" | "prores4444";
+
+/** What a clip's code values mean, as the tab settled it from the file's
+ * header (and the person's override): the profile the color pipeline
+ * converts from, and the matrix and range ffmpeg decodes the Y'CbCr with. */
+export interface SpecClipColor {
+  profile: SourceProfile;
+  matrix: CodeFormat["matrix"];
+  fullRange: boolean;
+  /** The library LUT the grade names, staged in the job dir by base name. */
+  lutFile?: string;
+}
 export type ExportContainer = "mp4" | "mov";
 export type ExportAudioCodec = "aac" | "pcm";
 

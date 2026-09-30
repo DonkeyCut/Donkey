@@ -14,6 +14,10 @@ import { containerOfName, deliveryContainer, exportBaseName, specMediaFiles, typ
 import { addUsage, outputByteCeiling, quotaCheck } from "./usage";
 import { caught, err, redirect } from "./util";
 
+/** A master's file name without its extension: what its proxy's name starts
+ * with (server/proxy.ts `proxyNameFor`). */
+const proxyStem = (fileName: string) => fileName.replace(/\.[^./\\]+$/, "") || "media";
+
 /** How long finished jobs stay in the export-jobs feed — the engine's registry
  * keeps a bounded terminal backlog; the cloud keeps a day. */
 const FEED_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -868,7 +872,47 @@ export const jobsCloud = {
     }
   },
 
-  /** Generic job poll for non-export kinds (import_url, convert). */
+  /** Queue a preview proxy of a ProRes master: the worker builds it and
+   * registers it beside the master as a quota-exempt object. A proxy already
+   * built answers at once, and a job already on its way answers with that
+   * job, so a project copied to the cloud and then opened queues one. */
+  async proxy(userId: string, projectId: string, req: Request) {
+    try {
+      const { file } = (await req.json()) as { file?: string };
+      if (!file) return err("file is required.", 400);
+      if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
+      const source = await prisma.cutMediaObject.findFirst({
+        where: { userId, projectId, fileName: file, kind: "media", uploadState: "complete" },
+        select: { id: true },
+      });
+      if (!source) return err("Media file missing from project.", 404);
+      const built = await prisma.cutMediaObject.findFirst({
+        where: { userId, projectId, kind: "proxy", uploadState: "complete", fileName: { startsWith: `${proxyStem(file)}.proxy` } },
+        select: { fileName: true, bytes: true },
+        orderBy: { createdAt: "desc" },
+      });
+      if (built) return Response.json({ fileName: built.fileName, sizeBytes: Number(built.bytes) });
+      const running = await prisma.cutRenderJob.findFirst({
+        where: { userId, projectId, kind: "proxy", state: { in: ["queued", "running"] }, spec: { path: ["file"], equals: file } },
+        select: { id: true },
+      });
+      if (running) {
+        wakeRenderWorker();
+        return Response.json({ jobId: running.id });
+      }
+      const capped = await renderJobCheck(userId);
+      if (capped) return capped;
+      const row = await prisma.cutRenderJob.create({
+        data: { userId, projectId, kind: "proxy", spec: { file } as unknown as Prisma.InputJsonValue },
+      });
+      wakeRenderWorker();
+      return Response.json({ jobId: row.id });
+    } catch (e) {
+      return caught(e, "Could not make the preview proxy.");
+    }
+  },
+
+  /** Generic job poll for non-export kinds (import_url, convert, proxy). */
   async status(userId: string, jobId: string) {
     const row = await findJob(userId, jobId);
     if (!row) return err("Unknown job.", 404);

@@ -14,6 +14,16 @@
  */
 
 import "./fonts";
+import "./luts";
 
 export * from "./registry";
 export { libraryFontId, listLibraryFonts, uploadLibraryFont } from "./fonts";
+export {
+  cachedLut,
+  libraryLutId,
+  listLibraryLuts,
+  loadLibraryLut,
+  LUT_FILE_ICON,
+  LUT_MARK_ICON,
+  lutIdOf,
+} from "./luts";

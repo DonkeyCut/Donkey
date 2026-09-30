@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
-import { LibraryCard, LIBRARY_TILE_AREA, LIBRARY_AUDIO_TILE_AREA } from "@/cut/components/LibraryCard";
+import { LibraryCard, LIBRARY_TILE_AREA, LIBRARY_AUDIO_TILE_AREA, LIBRARY_SQUARE } from "@/cut/components/LibraryCard";
 import { ShelfBadge } from "@/cut/components/ShelfBadge";
 import { MEDIA_ACCEPT } from "@/cut/lib/media";
 import { saveNote } from "@/cut/lib/notes";
@@ -638,7 +638,8 @@ export function LibraryView() {
       pending: p,
     });
   for (const a of shown) band(shapeOf(a)).push({ asset: a });
-  // Sound tiles are 70% of the shared tile's width and height.
+  // Sound tiles, and every other file that is no picture, are 70% of the
+  // shared tile's width and height.
   const TILE_AREA = LIBRARY_TILE_AREA;
   const audioArea = LIBRARY_AUDIO_TILE_AREA;
   // Where a new folder goes: inside the open folder on its shelf, or at the
@@ -826,10 +827,11 @@ export function LibraryView() {
             setSelected={setSelected}
           >
             {shownTemplates.length > 0 && (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+              <div className="flex flex-wrap items-start gap-4">
                 {shownTemplates.map((t) => (
                   <TemplateCard
                     key={t.id}
+                    tile={LIBRARY_SQUARE}
                     template={t}
                     mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
                     drag={
@@ -873,7 +875,7 @@ export function LibraryView() {
                       key={a.id}
                       asset={a}
                       onShare={() => setSharing({ kind: "asset", id: a.id, residency: a.residency })}
-                      area={a.type === "audio" ? audioArea : TILE_AREA}
+                      area={a.type === "video" || a.type === "image" ? TILE_AREA : audioArea}
                       selected={selected.has(a.id)}
                       dragGroup={pickedRun}
                       offline={!live(a.residency)}

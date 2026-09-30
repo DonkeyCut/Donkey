@@ -10,24 +10,26 @@ import { encodeWav } from "./cloudTranscribe";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { normalizeLink } from "./link";
 import { downloadFromUrl } from "./download";
+import { FONT_RE, LUT_RE } from "./libraryFileType";
 import { markUploadStored, startUpload, uploadInFlight } from "./importQueue";
 import { convertProjectFile, dropProjectFile, mp4DisplayName } from "./mediaConvert";
+import { ensureProxy, needsProxy } from "./mediaProxy";
 import {
   audioChunks,
   audioPeaks,
   audioTrackOf,
   decodeAudioSpan,
-  frameAt,
-  framesAt,
   frameSink,
   openMedia,
   openMediaShared,
+  probeMediaColor,
   probeMediaFile,
   readMediaFileSize,
   UnreadableMediaError,
   videoTrackOf,
   type IdleGate,
   type MediaHandle,
+  type MediaProbe,
 } from "./mediaRead";
 import type { WrappedCanvas } from "mediabunny";
 import {
@@ -51,6 +53,9 @@ import {
 } from "./raster";
 import { pickThumbTimes, type ThumbProbe } from "./filmstrip";
 import { reportSwallowed } from "./report";
+import { baseFrameAt, baseFramesAt, baseFrameSink, colorReadAt } from "./baseFrame";
+import { colorRecord } from "./colorProbe";
+import { previewFile, sameColorRead } from "./sourceColor";
 import { assetIdsInUse, useEditor } from "./store";
 import type { AssetBeats, AssetType, AudioClip, MediaAsset, ProjectSummary, StoredAsset, VideoClip, WatchDetail, WatchKeepReason } from "./types";
 import { contentRect, IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
@@ -179,8 +184,17 @@ export function isTextFile(file: File) {
 /** A font file the Library takes. Browsers often report an empty type for
  * .otf, so the extension has the final say. */
 export function isFontFile(file: File) {
-  return file.type.startsWith("font/") || /\.(ttf|otf|woff2?)$/i.test(file.name);
+  return file.type.startsWith("font/") || FONT_RE.test(file.name);
 }
+
+/** A colour LUT file the Library takes. Browsers report no type for .cube or
+ * .3dl, so the extension is the whole test. */
+export function isLutFile(file: File) {
+  return LUT_RE.test(file.name);
+}
+
+/** What a file picker offers for LUTs. */
+export const LUT_ACCEPT = ".cube,.3dl";
 
 /** The kind mark a card wears for a file: its extension, uppercased. Empty for
  * a name that carries none. */
@@ -403,7 +417,9 @@ export async function uploadProjectImage(
 }
 
 /** The kind of asset a dropped file becomes, or null if Cut can't use it.
- * MIME wins over extension: recordings are .webm for both video and audio. */
+ * MIME wins over extension: recordings are .webm for both video and audio.
+ * Linked kinds (fonts, LUTs) are not project assets: they land on the Library
+ * shelf through `linkedLibrary`, so they answer null here. */
 export function assetTypeOf(file: File): AssetType | null {
   if (file.type.startsWith("video/")) return "video";
   if (file.type.startsWith("audio/")) return "audio";
@@ -420,7 +436,56 @@ type ProbedMeta = {
   sizeBytes?: number;
   width?: number;
   height?: number;
+  /** What a video's code values mean, from its header. */
+  color?: StoredAsset["color"];
 };
+
+/** The asset's `color` field from a header probe. */
+const assetColor = (probe: MediaProbe["color"]): StoredAsset["color"] | undefined =>
+  probe ? colorRecord(probe) : undefined;
+
+/**
+ * Write what a header probe learned about an asset.
+ *
+ * Every asset write re-renders what reads the assets, and on a slow machine
+ * that is a long beat of the main thread. A probe lands a few reads after the
+ * drop, which is often inside the play that followed it, so a write that
+ * leaves the picture as it is — the size the shelf already said, the color
+ * the preview already draws — waits for the play to stop, and one that
+ * changes what is drawn lands now.
+ *
+ * The probe writes the header's facts into `color`; the person's profile
+ * override lives beside it in `colorProfile`, so a header write never
+ * touches it. The decision reads the live asset, so an override set while
+ * the probe or the play ran is weighed with it.
+ */
+export async function landProbedFacts(id: string, patch: Pick<Partial<MediaAsset>, "width" | "height" | "color">): Promise<void> {
+  const live = () => useEditor.getState().assets.find((a) => a.id === id);
+  let asset = live();
+  if (!asset) return;
+  if (!probeChangesPicture(asset, patch)) {
+    await idlePlayback();
+    asset = live();
+    if (!asset) return;
+  }
+  useEditor.getState().updateAsset(id, patch);
+}
+
+/** Whether a probe's facts change what `asset` draws: its size, or the read
+ * its color record makes under the asset's profile override. */
+export function probeChangesPicture(
+  asset: MediaAsset,
+  patch: Pick<Partial<MediaAsset>, "width" | "height" | "color">
+): boolean {
+  const resized =
+    (patch.width !== undefined && patch.width !== asset.width) ||
+    (patch.height !== undefined && patch.height !== asset.height);
+  return (
+    resized ||
+    (patch.color !== undefined &&
+      !sameColorRead(asset, { color: patch.color, colorProfile: asset.colorProfile }, previewFile(asset)))
+  );
+}
 
 /** Read a media source's kind/duration/dimensions from its container. The
  * probe can correct the guessed kind: a "video" container with no video track
@@ -455,7 +520,14 @@ async function probeMedia(type: AssetType, src: string | Blob): Promise<ProbedMe
   // the import kept, so a song is on the timeline the moment its container
   // has been read.
   if (!meta.hasVideo) return { type: "audio", duration: meta.duration, sizeBytes: meta.sizeBytes };
-  return { type: "video", duration: meta.duration, sizeBytes: meta.sizeBytes, width: meta.width, height: meta.height };
+  return {
+    type: "video",
+    duration: meta.duration,
+    sizeBytes: meta.sizeBytes,
+    width: meta.width,
+    height: meta.height,
+    color: assetColor(meta.color),
+  };
 }
 
 /** Probe a media file's kind/duration/dimensions from the bytes in hand — for
@@ -528,6 +600,7 @@ export async function prepareImport(
     sizeBytes: file.size,
     ...(meta.width !== undefined ? { width: meta.width } : {}),
     ...(meta.height !== undefined ? { height: meta.height } : {}),
+    ...(meta.color !== undefined ? { color: meta.color } : {}),
     url: localUrl,
     upload: { progress: 0 },
   };
@@ -771,6 +844,7 @@ export async function importFileToProject(
     sizeBytes: meta.sizeBytes,
     ...(meta.width !== undefined ? { width: meta.width } : {}),
     ...(meta.height !== undefined ? { height: meta.height } : {}),
+    ...(meta.color !== undefined ? { color: meta.color } : {}),
     url,
   };
 }
@@ -861,9 +935,7 @@ export function importRemote(
             height: m.height,
           });
         }
-        if (m.hasVideo) {
-          useEditor.getState().updateAsset(asset.id, { width: m.width, height: m.height });
-        }
+        if (m.hasVideo) void landProbedFacts(asset.id, { width: m.width, height: m.height, color: assetColor(m.color) });
       })
       .catch(() => {});
   }
@@ -922,9 +994,7 @@ export async function registerLandedAsset(
   if (init.type === "video") {
     void probeMediaFile(asset.url)
       .then((m) => {
-        if (m.hasVideo) {
-          useEditor.getState().updateAsset(asset.id, { width: m.width, height: m.height });
-        }
+        if (m.hasVideo) void landProbedFacts(asset.id, { width: m.width, height: m.height, color: assetColor(m.color) });
       })
       .catch(() => {});
   }
@@ -1156,6 +1226,8 @@ export async function assetFromProjectFile(
   } else {
     asset.width = meta.width;
     asset.height = meta.height;
+    const color = assetColor(meta.color);
+    if (color) asset.color = color;
   }
   return asset;
 }
@@ -1184,7 +1256,7 @@ export async function captureFreezeFrame(
     flipV?: boolean;
   }
 ): Promise<MediaAsset> {
-  const frame = await frameAt(sourceUrl, srcTime);
+  const frame = await baseFrameAt(sourceUrl, srcTime);
   if (!frame) throw new Error("Could not render the freeze frame.");
   let picture = frame.canvas;
   if (framed) {
@@ -1491,6 +1563,7 @@ export async function sampleWatchFrames(
   try {
     const track = await videoTrackOf(input);
     if (!track) throw new Error("Could not sample the video.");
+    const reading = colorReadAt(sourceUrl);
     const from = Math.max(0, opts.from);
     const wanted = opts.to ?? (await input.computeDuration());
     if (opts.to === undefined && !(wanted > 0))
@@ -1533,7 +1606,7 @@ export async function sampleWatchFrames(
     const deadline = Date.now() + (opts.budgetMs ?? Infinity);
     const outOfTime = () => Date.now() > deadline;
     const sigG16At = async (t: number): Promise<Float32Array | null> => {
-      const one = await frameSink(track, { width: cw, height: ch, fit: "fill" }).getCanvas(t);
+      const one = await baseFrameSink(track, { width: cw, height: ch, fit: "fill" }, reading).getCanvas(t);
       if (!one) return null;
       sigCtx.imageSmoothingQuality = "high";
       sigCtx.drawImage(one.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
@@ -1542,9 +1615,7 @@ export async function sampleWatchFrames(
     };
 
     // The times are ascending, so the whole span decodes once, in order.
-    const cells = frameSink(track, { width: cw, height: ch, fit: "fill" }).canvasesAtTimestamps(
-      times
-    );
+    const cells = baseFrameSink(track, { width: cw, height: ch, fit: "fill" }, reading).canvasesAtTimestamps(times);
     let paused = false;
     let capped = false;
     try {
@@ -1604,7 +1675,7 @@ export async function sampleWatchFrames(
       const shot = createRasterCanvas(nw, nh);
       const shotCtx = shot.getContext("2d") as CanvasRenderingContext2D | null;
       if (!shotCtx) throw new Error("Could not sample the video.");
-      const walk = frameSink(track, { width: nw, height: nh, fit: "fill" }).canvasesAtTimestamps(
+      const walk = baseFrameSink(track, { width: nw, height: nh, fit: "fill" }, reading).canvasesAtTimestamps(
         keptAll.map((i) => candTimes[i])
       );
       try {
@@ -1971,7 +2042,7 @@ async function* idleFramesAt(
   while (from < times.length) {
     await idlePlayback();
     const before = from;
-    for await (const frame of framesAt(url, times.slice(from), size)) {
+    for await (const frame of baseFramesAt(url, times.slice(from), size)) {
       yield frame;
       from++;
       if (useEditor.getState().playing) break;
@@ -2008,6 +2079,24 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       // A play is long enough to leave the project in it. Nothing this sweep
       // writes belongs to whatever is open now.
       if (useEditor.getState().projectId !== openProject) return;
+      // Footage imported before its color was read at import settles it now,
+      // from the header alone: the grade pipeline and the preview's decoder
+      // both read `color`, and a file without it would draw as Rec.709.
+      // The asset's live record decides: the import's own probe may have
+      // written it while this sweep waited, and that walk is shared.
+      asset = useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset;
+      if (!asset.color && !asset.upload) {
+        const color = await probeMediaColor(held ?? src).catch(() => null);
+        if (useEditor.getState().projectId !== openProject) return;
+        if (color) {
+          await landProbedFacts(asset.id, { color: assetColor(color) });
+          asset = useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset;
+        }
+      }
+      // A ProRes master previews through the WASM decoder until its proxy
+      // lands; the proxy is built behind the editor, once the bytes are at
+      // rest in the project's own storage.
+      if (openProject && !asset.upload && needsProxy(asset)) void ensureProxy(openProject, asset);
       // Footage stored without a length — a shelf row that was never measured
       // — reads its own before anything is swept from it: a zero-length sweep
       // has no tiles to place and no buckets to fill, and the clips cut from
@@ -2781,6 +2870,7 @@ function edgeReader(url: string): Promise<EdgeReader> {
     // holds its own pool of canvases, and a drag through a dozen zoom levels
     // would otherwise leave a dozen pools behind it.
     const sinks = new Map<number, ReturnType<typeof frameSink>>();
+    const reading = colorReadAt(url);
     const sinkFor = (height: number) => {
       let sink = sinks.get(height);
       if (sink) {
@@ -2788,7 +2878,7 @@ function edgeReader(url: string): Promise<EdgeReader> {
         sinks.set(height, sink);
         return sink;
       }
-      sink = frameSink(track, { height }, { poolSize: EDGE_SINK_POOL, lowLatency: true });
+      sink = baseFrameSink(track, { height }, reading, { poolSize: EDGE_SINK_POOL, lowLatency: true });
       sinks.set(height, sink);
       while (sinks.size > EDGE_SINK_HEIGHTS) sinks.delete(sinks.keys().next().value!);
       return sink;

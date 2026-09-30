@@ -8,6 +8,7 @@
 
 import type { GradeLut } from "@donkeycut/effects-kit";
 import { gpuPassSingleton, uploadPassSource, type GpuPass } from "./gpuPass";
+import { allowance, holdMemory } from "./memoryBudget";
 import type { RasterSurface } from "./raster";
 
 const FRAG = `#version 300 es
@@ -48,18 +49,23 @@ void main() {
 
 interface GradeExt {
   sizeLoc: WebGLUniformLocation;
-  /** One uploaded texture per grade, so two graded clips in the same frame
-   * take turns binding instead of re-uploading 33³ floats twice a frame. */
-  luts: Map<string, WebGLTexture>;
+  /** One uploaded texture per LUT, so two graded clips in the same frame
+   * take turns binding instead of re-uploading the lattice twice a frame. */
+  luts: Map<string, { tex: WebGLTexture; bytes: number }>;
 }
 
-/** Uploaded LUT textures kept at once; a 33³ RGBA32F texture is ~0.6MB. */
-const LUT_TEXTURE_MAX = 6;
+/** Bytes of uploaded textures kept before the budget has its say: a 33³
+ * RGBA32F texture is ~0.6MB, a 65³ one ~4.4MB. */
+const TUNED_TEXTURE_BYTES = 24 * 2 ** 20;
+let textureBytes = 0;
+holdMemory("gradeLutTextures", () => textureBytes);
 
 const acquire = gpuPassSingleton(FRAG, ({ gl, program }): GradeExt | null => {
   gl.uniform1i(gl.getUniformLocation(program, "uLut"), 1);
   const sizeLoc = gl.getUniformLocation(program, "uSize");
   if (!sizeLoc) return null;
+  // A rebuilt pass (context loss) starts with no textures.
+  textureBytes = 0;
   return { sizeLoc, luts: new Map() };
 });
 
@@ -69,8 +75,8 @@ function bindLut(s: { pass: GpuPass; ext: GradeExt }, lut: GradeLut, key: string
   gl.activeTexture(gl.TEXTURE1);
   const held = s.ext.luts.get(key);
   if (held) {
-    gl.bindTexture(gl.TEXTURE_3D, held);
-    // Re-insert so the cap drops the grade least recently drawn.
+    gl.bindTexture(gl.TEXTURE_3D, held.tex);
+    // Re-insert so the cap drops the LUT least recently drawn.
     s.ext.luts.delete(key);
     s.ext.luts.set(key, held);
     return;
@@ -91,15 +97,17 @@ function bindLut(s: { pass: GpuPass; ext: GradeExt }, lut: GradeLut, key: string
     rgba[i * 4 + 3] = 1;
   }
   gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGBA32F, lut.size, lut.size, lut.size, 0, gl.RGBA, gl.FLOAT, rgba);
-  s.ext.luts.set(key, tex);
-  if (s.ext.luts.size > LUT_TEXTURE_MAX) {
-    const oldest = s.ext.luts.keys().next().value;
-    if (oldest !== undefined && oldest !== key) {
-      const stale = s.ext.luts.get(oldest);
-      if (stale) gl.deleteTexture(stale);
-      s.ext.luts.delete(oldest);
-    }
+  const bytes = rgba.byteLength;
+  // Make room first, in bytes: the LUTs least recently drawn go.
+  const cap = allowance("gradeLutTextures", TUNED_TEXTURE_BYTES);
+  for (const [oldest, stale] of s.ext.luts) {
+    if (textureBytes + bytes <= cap) break;
+    gl.deleteTexture(stale.tex);
+    s.ext.luts.delete(oldest);
+    textureBytes -= stale.bytes;
   }
+  s.ext.luts.set(key, { tex, bytes });
+  textureBytes += bytes;
 }
 
 /**

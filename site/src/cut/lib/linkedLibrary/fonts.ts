@@ -24,6 +24,7 @@ import {
   registerLinkedKind,
   uploadLinkedItem,
   type LinkedItem,
+  type LinkedKind,
 } from "./registry";
 import type { ProjectDoc } from "../types";
 import { registerFonts, unregisterFonts } from "../types";
@@ -37,7 +38,8 @@ export const libraryFontId = (key: string) => linkId(PREFIX, key);
 /** The CSS/skia family name its bytes are installed under. */
 const familyOf = (key: string) => `lf-${key}`;
 
-registerLinkedKind({
+/** The font kind as the registry holds it. */
+export const fontKind: LinkedKind = {
   prefix: PREFIX,
   type: "font",
   homeFolder: "Fonts",
@@ -62,7 +64,8 @@ registerLinkedKind({
     unregisterFonts(keys.map(libraryFontId));
     forgetTextWidths();
   },
-});
+};
+registerLinkedKind(fontKind);
 
 /** The account's fonts, one entry per typeface however many shelves hold it. */
 export const listLibraryFonts = (): LinkedItem[] => listLinked(PREFIX);

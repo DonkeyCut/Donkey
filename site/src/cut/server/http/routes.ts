@@ -2,6 +2,7 @@ import { matchRouteTable } from "./match";
 import { aiApi } from "./ai";
 import { localSceneLease } from "../ai/sceneLease";
 import { convertApi } from "./convert";
+import { proxyApi } from "./proxy";
 import { engineApi } from "./engine";
 import { exportApi } from "./export";
 import { libraryApi } from "./library";
@@ -50,6 +51,7 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "POST", path: "/api/cut/projects/:id/image", handler: (req, p) => projectsApi.importImage(req, { id: p.id }) },
   { method: "POST", path: "/api/cut/projects/:id/freeze", handler: (req, p) => projectsApi.freeze(req, { id: p.id }) },
   { method: "POST", path: "/api/cut/projects/:id/convert", handler: (req, p) => projectsApi.convert(req, { id: p.id }) },
+  { method: "POST", path: "/api/cut/projects/:id/proxy", handler: (req, p) => projectsApi.proxy(req, { id: p.id }) },
   { method: "POST", path: "/api/cut/projects/:id/silence", handler: (req, p) => projectsApi.silence(req, { id: p.id }) },
   { method: "POST", path: "/api/cut/projects/:id/audio", handler: (req, p) => projectsApi.audio(req, { id: p.id }) },
   { method: "POST", path: "/api/cut/projects/:id/duplicate", handler: (req, p) => projectsApi.duplicate(req, { id: p.id }) },
@@ -101,6 +103,7 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "GET", path: "/api/cut/export/:jobId/file", handler: (req, p) => exportApi.file(req, { jobId: p.jobId }) },
 
   { method: "POST", path: "/api/cut/convert", handler: (req) => convertApi.create(req) },
+  { method: "POST", path: "/api/cut/proxy", handler: (req) => proxyApi.create(req) },
 
   { method: "POST", path: "/api/cut/stt", handler: (req) => sttApi.create(req) },
   { method: "GET", path: "/api/cut/stt/:jobId", handler: (req, p) => sttApi.status(req, { jobId: p.jobId }) },

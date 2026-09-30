@@ -43,7 +43,7 @@ export async function getProject(userId: string, id: string): Promise<ProjectRow
  * their name too, so a racing presign can't hand out the same one. */
 export async function takenMediaNames(userId: string, projectId: string): Promise<Set<string>> {
   const rows = await prisma.cutMediaObject.findMany({
-    where: { userId, projectId, kind: "media" },
+    where: { userId, projectId, kind: { in: ["media", "proxy"] } },
     select: { fileName: true },
   });
   return new Set(rows.map((r) => r.fileName));
@@ -385,7 +385,7 @@ export const projectsCloud = {
     try {
       const fileName = decodeFileParam(file);
       const row = await prisma.cutMediaObject.findFirst({
-        where: { userId, projectId: id, kind: "media", fileName },
+        where: { userId, projectId: id, kind: { in: ["media", "proxy"] }, fileName },
         select: { updatedAt: true },
       });
       if (!row) return err("Not found.", 404);
@@ -404,7 +404,7 @@ export const projectsCloud = {
     try {
       const fileName = decodeFileParam(file);
       const row = await prisma.cutMediaObject.findFirst({
-        where: { userId, projectId: id, kind: "media", fileName },
+        where: { userId, projectId: id, kind: { in: ["media", "proxy"] }, fileName },
       });
       if (row) {
         await prisma.$transaction(async (tx) => {

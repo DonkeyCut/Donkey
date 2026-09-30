@@ -54,6 +54,34 @@ const HLS_PENDING_TIMEOUT_MS = 6 * 60 * 60 * 1000;
 
 type ReclaimPlan = { projects: string[]; assets: string[]; bytes: number };
 
+/** The proxy file names a stored document's assets carry — what keeps a
+ * kind "proxy" object alive. */
+export function proxyNamesIn(doc: unknown): Set<string> {
+  const assets = (doc as { assets?: { proxy?: { fileName?: string } }[] } | null)?.assets ?? [];
+  return new Set(assets.flatMap((a) => (a.proxy?.fileName ? [a.proxy.fileName] : [])));
+}
+
+/** Delete stored objects and their rows, one transaction per account.
+ * Quota-exempt rows never added usage, so only the counted ones subtract. */
+async function dropMediaRows(
+  rows: { id: string; userId: string; r2Key: string; bytes: bigint; quotaExempt: boolean }[]
+): Promise<void> {
+  const byUser = new Map<string, typeof rows>();
+  for (const o of rows) {
+    const list = byUser.get(o.userId) ?? [];
+    list.push(o);
+    byUser.set(o.userId, list);
+  }
+  for (const [userId, list] of byUser) {
+    const counted = list.filter((r) => !r.quotaExempt);
+    await prisma.$transaction(async (tx) => {
+      await tx.cutMediaObject.deleteMany({ where: { id: { in: list.map((r) => r.id) } } });
+      await addUsage(tx, userId, -counted.reduce((sum, r) => sum + Number(r.bytes), 0));
+    });
+    await del(list.map((r) => r.r2Key));
+  }
+}
+
 /**
  * Drop ladder versions a project has moved on from, and the leftovers of
  * renders that died partway.
@@ -358,21 +386,27 @@ export async function runGc(): Promise<Response> {
     referenced.set(job.projectId, files);
   }
   const orphans = mediaCandidates.filter((c) => !referenced.get(c.projectId!)?.has(c.fileName));
-  const byUser = new Map<string, typeof orphans>();
-  for (const o of orphans) {
-    const list = byUser.get(o.userId) ?? [];
-    list.push(o);
-    byUser.set(o.userId, list);
-  }
-  for (const [userId, rows] of byUser) {
-    // Quota-exempt rows never added usage, so only the counted ones subtract.
-    const counted = rows.filter((r) => !r.quotaExempt);
-    await prisma.$transaction(async (tx) => {
-      await tx.cutMediaObject.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
-      await addUsage(tx, userId, -counted.reduce((sum, r) => sum + Number(r.bytes), 0));
-    });
-    await del(rows.map((r) => r.r2Key));
-  }
+  await dropMediaRows(orphans);
+
+  // Preview proxies no asset names any more — the master's asset was deleted
+  // by a client that never got to drop the proxy, or the doc is gone. An
+  // asset carries its proxy's file name, so that is the reference.
+  const proxyCandidates = await prisma.cutMediaObject.findMany({
+    where: {
+      kind: "proxy",
+      uploadState: "complete",
+      projectId: { not: null },
+      updatedAt: { lt: new Date(Date.now() - ORPHAN_MAX_AGE_MS) },
+    },
+    select: { id: true, userId: true, projectId: true, fileName: true, r2Key: true, bytes: true, quotaExempt: true },
+  });
+  const proxyProjects = await prisma.cutProject.findMany({
+    where: { id: { in: [...new Set(proxyCandidates.map((c) => c.projectId!))] } },
+    select: { id: true, doc: true },
+  });
+  const referencedProxies = new Map(proxyProjects.map((p) => [p.id, proxyNamesIn(p.doc)]));
+  const orphanProxies = proxyCandidates.filter((c) => !referencedProxies.get(c.projectId!)?.has(c.fileName));
+  await dropMediaRows(orphanProxies);
 
   // Retired preview revisions get the same grace as other unreferenced media.
   // The current preview remains available for an idle project indefinitely.
@@ -452,6 +486,7 @@ export async function runGc(): Promise<Response> {
   return Response.json({
     pendingObjects: pending.length,
     orphanedMedia: orphans.length,
+    orphanedProxies: orphanProxies.length,
     inferenceScratch: scratch.length,
     staleOverlays: overlays,
     renderJobs: jobs.count,

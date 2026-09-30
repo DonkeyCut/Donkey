@@ -12,6 +12,7 @@
 // adopted afterwards (`lib/library.ts`); those paths fall through to the
 // hosted twin.
 import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
+import { libraryTypeOf } from "../../libraryFileType";
 import type {
   AssetType,
   LibraryTemplate,
@@ -53,6 +54,10 @@ type StoredAsset = {
   /** The source's cover image, stored beside the media and served by the same
    * route — an import from a site that publishes one carries it. */
   posterFile?: string;
+  /** A linked item's identity, computed by the page before the file was
+   * shelved; a LUT's row also says what kind of table it holds. */
+  contentKey?: string;
+  lut?: { kind: "1d" | "3d" | "shaper+3d"; size: number };
 };
 
 type StoredFolder = {
@@ -105,19 +110,6 @@ async function mutateIndex<T>(fn: (idx: LibraryIndex) => T): Promise<T> {
   });
 }
 
-const VIDEO_RE = /\.(mp4|mov|m4v|webm|mkv)$/i;
-const AUDIO_RE = /\.(mp3|m4a|aac|wav|ogg|flac)$/i;
-const IMAGE_RE = /\.(png|jpe?g|webp|gif|avif|bmp)$/i;
-const FONT_RE = /\.(ttf|otf|woff2?)$/i;
-
-function typeOf(fileName: string): AssetType | null {
-  if (VIDEO_RE.test(fileName)) return "video";
-  if (AUDIO_RE.test(fileName)) return "audio";
-  if (IMAGE_RE.test(fileName)) return "image";
-  if (FONT_RE.test(fileName)) return "font";
-  return null;
-}
-
 function parseField<T>(value: FormDataEntryValue | null): T | null {
   if (typeof value !== "string" || !value) return null;
   try {
@@ -155,20 +147,25 @@ async function list(): Promise<Response> {
   });
 }
 
+/** What the page sends alongside a file it has already measured or checked. */
+type UploadMeta = {
+  type?: AssetType;
+  duration?: number;
+  width?: number;
+  height?: number;
+  contentKey?: string;
+  lut?: StoredAsset["lut"];
+};
+
 /** Write the row for a file already stored in the library. */
 async function addAsset(
   fileName: string,
   name: string,
-  meta: {
-    type?: AssetType;
-    duration?: number;
-    width?: number;
-    height?: number;
-  } | null,
+  meta: UploadMeta | null,
   source?: LibrarySource | null,
   posterFile?: string,
 ): Promise<StoredAsset> {
-  const type = meta?.type ?? typeOf(fileName);
+  const type = meta?.type ?? libraryTypeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
   const asset: StoredAsset = {
     id: crypto.randomUUID().slice(0, 8),
@@ -183,6 +180,8 @@ async function addAsset(
     folderId: null,
     ...(source ? { source } : {}),
     ...(posterFile ? { posterFile } : {}),
+    ...(typeof meta?.contentKey === "string" ? { contentKey: meta.contentKey } : {}),
+    ...(meta?.lut ? { lut: meta.lut } : {}),
   };
   await mutateIndex((idx) => {
     idx.assets.push(asset);
@@ -205,14 +204,9 @@ async function upload(req: Request): Promise<Response> {
       typeof nameField === "string" && nameField.trim()
         ? nameField.trim()
         : file.name;
-    const meta = parseField<{
-      type?: AssetType;
-      duration?: number;
-      width?: number;
-      height?: number;
-    }>(form.get("meta"));
+    const meta = parseField<UploadMeta>(form.get("meta"));
     const source = parseField<LibrarySource>(form.get("source"));
-    if (!(meta?.type ?? typeOf(file.name)))
+    if (!(meta?.type ?? libraryTypeOf(file.name)))
       return err("Unsupported file type.", 400);
     const fileName = await store.saveLibraryMedia(file, file.name);
     await register(fileName, file);
@@ -468,12 +462,13 @@ type TemplateInput = {
   texts: LibraryTemplate["texts"];
   cues: LibraryTemplate["cues"];
   sound?: LibraryTemplate["sound"];
+  grade?: LibraryTemplate["grade"];
 };
 
-/** A template with nothing on it saves nothing; a sound preset is a template
- * carrying only its treatment. */
+/** A template with nothing on it saves nothing; a sound preset or a saved
+ * grade is a template carrying only its treatment. */
 const templateEmpty = (input: TemplateInput) =>
-  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound;
+  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound && !input.grade;
 
 async function saveTemplate(req: Request): Promise<Response> {
   try {
@@ -501,6 +496,7 @@ async function saveTemplate(req: Request): Promise<Response> {
       texts: input.texts ?? [],
       cues: input.cues ?? [],
       ...(input.sound ? { sound: input.sound } : {}),
+      ...(input.grade ? { grade: input.grade } : {}),
     };
     await mutateIndex((idx) => {
       idx.templates.push(template);
@@ -546,6 +542,7 @@ async function importTemplate(req: Request): Promise<Response> {
       texts: input.texts ?? [],
       cues: input.cues ?? [],
       ...(input.sound ? { sound: input.sound } : {}),
+      ...(input.grade ? { grade: input.grade } : {}),
       folderId: input.folderId ?? null,
     };
     await mutateIndex((idx) => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { ProjectDoc, ShareFeatures } from "@/cut/lib/types";
-import { filterDocForShare } from "./sharedView";
+import { filterDocForShare, sharedFileNames } from "./sharedView";
 
 // The doc a viewer receives is also the copy's manifest: a share copy moves the
 // media of exactly the assets that survive this filter, so what a shared project
@@ -94,5 +94,16 @@ describe("filterDocForShare", () => {
       "placed",
     ]);
     expect(ids(filterDocForShare(captioned, features()))).toEqual(["placed"]);
+  });
+
+  test("a shared master's preview proxy is fetchable with it", () => {
+    const proxied = {
+      ...doc,
+      assets: [
+        { ...doc.assets[1], proxy: { fileName: "placed.proxy.mp4", sizeBytes: 5 } },
+        { ...doc.assets[0], proxy: { fileName: "imported.proxy.mp4", sizeBytes: 5 } },
+      ],
+    } as unknown as ProjectDoc;
+    expect([...sharedFileNames(proxied, features())].sort()).toEqual(["placed.mp4", "placed.proxy.mp4"]);
   });
 });

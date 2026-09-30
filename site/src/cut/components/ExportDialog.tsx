@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { OUTPUT_SPACES, type OutputSpace } from "@donkeycut/effects-kit";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -76,6 +77,12 @@ export function ExportDialog() {
   const subtitles = useEditor((s) => s.subtitles);
   const multiSelection = useEditor((s) => s.multiSelection);
   const projectName = useEditor((s) => s.projectName);
+  // The delivery's color space is the project's own setting: it decides what
+  // every clip converts to, so it lives on the document rather than in this
+  // dialog's choice.
+  const colorSpace = useEditor((s) => s.colorSpace);
+  const setColorSpace = useEditor((s) => s.setColorSpace);
+  const hdr = colorSpace !== "sdr";
   const duration = useMemo(
     () => projectDuration({ clips, audioClips, overlays }),
     [clips, audioClips, overlays]
@@ -132,13 +139,19 @@ export function ExportDialog() {
   const baseName = exportBaseName(name || projectName);
   const typedName = baseName !== exportBaseName(projectName);
   const settings = useMemo<ExportSettings>(
-    () => ({
-      ...choiceSettings(choice, resolutions, sourceFps ?? DEFAULT_EXPORT_FPS,
-        !probing && probe ? { ...probe, ...(audioClips.length > 0 ? { audioBitrate: undefined, audioSampleRate: undefined, audioChannels: undefined } : {}) } : undefined),
-      ...(typedName ? { name: baseName } : {}),
-      ...(range ? { range } : {}),
-    }),
-    [choice, resolutions, sourceFps, probe, probing, audioClips.length, typedName, baseName, range]
+    () => {
+      const chosen = choiceSettings(choice, resolutions, sourceFps ?? DEFAULT_EXPORT_FPS,
+        !probing && probe ? { ...probe, ...(audioClips.length > 0 ? { audioBitrate: undefined, audioSampleRate: undefined, audioChannels: undefined } : {}) } : undefined);
+      return {
+        ...chosen,
+        // H.264 is 8-bit: an HDR delivery takes HEVC in its place, whatever
+        // the preset or the probe asked for.
+        ...(hdr && chosen.codec === "h264" ? { codec: "hevc" as const, copySource: false } : {}),
+        ...(typedName ? { name: baseName } : {}),
+        ...(range ? { range } : {}),
+      };
+    },
+    [choice, resolutions, sourceFps, probe, probing, audioClips.length, typedName, baseName, range, hdr]
   );
   const set = (patch: Partial<ExportChoice>) => setChoice((c) => ({ ...c, ...patch }));
   const captionFiles = useMemo(
@@ -167,8 +180,10 @@ export function ExportDialog() {
         overlays: s.overlays,
         subtitles: s.subtitles,
         background: s.background,
+        colorSpace: s.colorSpace,
       },
-      settings
+      settings,
+      s.colorSpace ?? "sdr"
     ).then((ok) => {
       if (alive) setBrowserFits(ok);
     });
@@ -190,6 +205,7 @@ export function ExportDialog() {
         overlays: s.overlays,
         subtitles: s.subtitles,
         background: s.background,
+        colorSpace: s.colorSpace,
       },
       settings,
       baseName
@@ -338,8 +354,23 @@ export function ExportDialog() {
                 </SelectTrigger>
                 <SelectContent align="end">
                   {FORMATS.map((f) => (
-                    <SelectItem key={f.id} value={f.id} title={f.detail}>
+                    <SelectItem key={f.id} value={f.id} title={f.detail} disabled={hdr && f.codec === "h264"}>
                       {f.label}
+                      {hdr && f.codec === "h264" ? " · 8-bit" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Color">
+              <Select value={colorSpace} onValueChange={(v) => setColorSpace(v as OutputSpace)}>
+                <SelectTrigger className="w-fit min-w-32" aria-label="Color">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {OUTPUT_SPACES.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -422,7 +453,7 @@ export function ExportDialog() {
 
           {!inTab && (
             <p className="text-xs leading-relaxed text-muted-foreground">
-              This browser can&apos;t encode {prores ? "ProRes" : "this"} itself, so it renders in the
+              This browser can&apos;t encode {prores ? "ProRes" : hdr ? "HDR" : "this"} itself, so it renders in the
               cloud and lands here when done.
             </p>
           )}
@@ -433,6 +464,7 @@ export function ExportDialog() {
             <span className="truncate">
               {settings.width} × {settings.height} · {settings.fps} fps ·{" "}
               {FORMATS.find((f) => f.id === formatId)?.label ?? formatId} · {settings.audioCodec.toUpperCase()}
+              {hdr ? ` · ${OUTPUT_SPACES.find((o) => o.id === colorSpace)?.label}` : ""}
               {range ? ` · ${formatTime(span)}` : ""}
             </span>
             <span className="shrink-0 tabular-nums">{sizeEstimate}</span>

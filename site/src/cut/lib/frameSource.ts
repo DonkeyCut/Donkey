@@ -37,7 +37,12 @@ import {
 import { allowance, canvasBytes, decodedFrameBytes, holdMemory } from "./memoryBudget";
 import { meterPull, meterSource, meterWalk } from "./perfTrace";
 import { drawBlock } from "./blockSource";
-import type { MediaAsset } from "./types";
+import { colorRead, fileAt, type ColorRead, type ReadFile } from "./sourceColor";
+import { previewUrl, type MediaAsset } from "./types";
+
+const sameColorSpace = (a: VideoColorSpaceInit | undefined, b: VideoColorSpaceInit | undefined): boolean =>
+  a === b ||
+  (!!a && !!b && a.primaries === b.primaries && a.transfer === b.transfer && a.matrix === b.matrix && a.fullRange === b.fullRange);
 
 /** Dev-only: pool lifecycle events, into the same log the engine writes.
  * Bounded so an ordinary dev session never accumulates it. */
@@ -350,14 +355,28 @@ export interface SourceFrame {
   /** The frame's own timestamp in the source, for telling a held frame from a
    * fresh one. */
   timestamp: number;
+  /** How this frame's code values are read: the read of the file and sink
+   * it was decoded on, which a held frame keeps across a change of file. */
+  read?: ColorRead;
 }
 
-const frameOfCanvas = (c: WrappedCanvas): SourceFrame => ({
-  image: c.canvas,
-  width: c.canvas.width,
-  height: c.canvas.height,
-  timestamp: c.timestamp,
-});
+/** The stack a frame was decoded on: which of the asset's files, the tag its
+ * sink read it under, and the asset record the stack opened with. */
+interface DecodedAs {
+  file: ReadFile;
+  colorSpace: VideoColorSpaceInit | undefined;
+  asset: MediaAsset;
+}
+
+/** A decoded canvas as the rings hold it, tagged with the stack it came off. */
+type HeldCanvas = WrappedCanvas & { as?: DecodedAs | null };
+
+/** Tag a frame with the stack it came off, in place: the rings hold the
+ * sink's own objects, so the tag costs no allocation. */
+const tagged = (c: WrappedCanvas, as: DecodedAs | null): HeldCanvas => {
+  (c as HeldCanvas).as = as;
+  return c;
+};
 
 /** What the ring stores: a frame and the stretch of source it stands for. */
 export interface Timed {
@@ -509,9 +528,9 @@ export class FrameRing<T extends Timed> {
 interface BackWalk {
   /** The fine windows landed, newest at the bottom. Bounded by arrival to
    * what the backward sink's pool still holds. */
-  fine: FrameRing<WrappedCanvas>;
+  fine: FrameRing<HeldCanvas>;
   /** The coarse spread over the keyframe span, at half size. */
-  coarse: FrameRing<WrappedCanvas>;
+  coarse: FrameRing<HeldCanvas>;
   /** The lowest fine frame landed. */
   floor: number;
   /** The moment the pointer last asked for. */
@@ -544,7 +563,17 @@ export class ClipFrameSource {
   private reader: MediaHandle | null = null;
   private track: InputVideoTrack | null = null;
   private sink: FrameCanvasSink | null = null;
-  private ring = new FrameRing<WrappedCanvas>(RING);
+  private ring = new FrameRing<HeldCanvas>(RING);
+  /** The stack the installed track and sink belong to. Frames decoded on it
+   * carry it, so a frame held across a move to another file keeps the read
+   * it was decoded under. */
+  private decodedAs: DecodedAs | null = null;
+  /** The stack the forward walk and the backward sinks decode on. */
+  private streamAs: DecodedAs | null = null;
+  private backAs: DecodedAs | null = null;
+  private backCoarseAs: DecodedAs | null = null;
+  /** The stack of the frame `frameAt` last handed out. */
+  private shownAs: DecodedAs | null = null;
   /** A still's single frame; stills never stream. */
   private still: SourceFrame | null = null;
   private opening: Promise<void> | null = null;
@@ -557,6 +586,8 @@ export class ClipFrameSource {
   private ahead = DECODE_AHEAD_S;
   /** Set when the file turns out to hold no picture this browser can read. */
   private unreadable = false;
+  /** Parked on a proxy that would not open, until the store drops it. */
+  private proxyDown = false;
   /** Failed opens so far, and the timer that will clear `unreadable` for the
    * next try. */
   private attempts = 0;
@@ -725,10 +756,65 @@ export class ClipFrameSource {
     return this.asleep ? 0 : decodedFrameBytes(this.decodePixels) * DECODER_FRAMES;
   }
 
-  /** The URL this source is reading. The pool compares it against the store's
-   * current one, so a re-minted signed URL replaces the source under it. */
+  /** The URL this source is reading — the proxy when the asset has one. The
+   * pool compares it against the store's current one, so a re-minted signed
+   * URL, or a proxy that just landed, replaces the source under it. */
   get url(): string {
-    return this.asset.url;
+    return previewUrl(this.asset);
+  }
+
+  /** Which of the asset's files this source reads. */
+  get file(): ReadFile {
+    return fileAt(this.asset, this.url);
+  }
+
+  /** How this source's frames are read and what they mean: the sink's color
+   * space, and the recipe the compositor draws them through
+   * (`colorRead`, sourceColor.ts). Both come from the file this source
+   * reads, so they follow it wherever it moves. */
+  get colorRead(): ColorRead {
+    return colorRead(this.asset, this.file);
+  }
+
+  private get decodeColorSpace(): VideoColorSpaceInit | undefined {
+    return this.colorRead.colorSpace;
+  }
+
+  /** The stack a reader opened now would be: this address, read this way. */
+  private stackNow(): DecodedAs {
+    return { file: this.file, colorSpace: this.decodeColorSpace, asset: this.asset };
+  }
+
+  /** How frames decoded on `as` are read. The asset's live record decides
+   * while it tags the sink the same way — a profile override reaches a held
+   * frame at once — and the record the stack opened with otherwise, since
+   * the pixels were decoded under that tag. */
+  private readOf(as: DecodedAs | null | undefined): ColorRead {
+    if (!as) return this.colorRead;
+    const live = colorRead(this.asset, as.file);
+    return sameColorSpace(live.colorSpace, as.colorSpace) ? live : colorRead(as.asset, as.file);
+  }
+
+  /** How the frame this source last handed out is read: what an analysis of
+   * that frame (the color panel's scopes and Auto) reads it through. */
+  get shownColorRead(): ColorRead {
+    return this.still ? this.colorRead : this.readOf(this.shownAs);
+  }
+
+  private frameOf(c: HeldCanvas): SourceFrame {
+    return { image: c.canvas, width: c.canvas.width, height: c.canvas.height, timestamp: c.timestamp, read: this.readOf(c.as) };
+  }
+
+  /** Take the store's newer record of the asset at the same address. A
+   * color record that changes how the file is decoded — a master's color
+   * read after it opened — reopens the reader behind the frames it holds;
+   * any other change (a profile override, a new strip) is picked up as is,
+   * and the next recipe follows it. */
+  follow(asset: MediaAsset): void {
+    if (asset === this.asset) return;
+    const next = colorRead(asset, fileAt(asset, this.url)).colorSpace;
+    if (sameColorSpace(next, this.decodeColorSpace)) this.asset = asset;
+    else this.retarget(asset);
   }
 
   constructor(
@@ -767,7 +853,7 @@ export class ClipFrameSource {
   /** What this source is doing, for the perf eval's pool dump. */
   debugState(): Record<string, unknown> {
     return {
-      url: this.asset.url.slice(-24),
+      url: this.url.slice(-24),
       ring: this.ring.size,
       oldest: this.ring.size ? +this.ring.oldest.toFixed(2) : null,
       newest: this.ring.size ? +this.ring.newest.toFixed(2) : null,
@@ -853,7 +939,9 @@ export class ClipFrameSource {
       const rough = b.coarse.atNearest(t, from, to);
       if (rough && (!c || Math.abs(rough.timestamp - t) < Math.abs(c.timestamp - t))) c = rough;
     }
-    return c ? frameOfCanvas(c) : null;
+    if (!c) return null;
+    this.shownAs = c.as ?? null;
+    return this.frameOf(c);
   }
 
   /**
@@ -875,7 +963,9 @@ export class ClipFrameSource {
     let next = this.ring.after(a.timestamp, to);
     const other = fine?.after(a.timestamp, to) ?? null;
     if (other && (!next || other.timestamp < next.timestamp)) next = other;
-    return { a, b: next ? frameOfCanvas(next) : null };
+    // A blend is drawn through one recipe, so both frames come off one stack.
+    if (next && next.as !== sharp.as) next = null;
+    return { a, b: next ? this.frameOf(next) : null };
   }
 
   /** Whether a frame covering `t` exactly is already held. Coarse frames do
@@ -1014,6 +1104,7 @@ export class ClipFrameSource {
     this.streamDone = false;
     this.hopping = false;
     this.ring.clear();
+    this.shownAs = null;
     this.dropBack(true);
     this.wanted = null;
     this.lastAsk = null;
@@ -1055,7 +1146,17 @@ export class ClipFrameSource {
     if (this.closed || asset.type === "image") return;
     const aim = ++this.aim;
     // Nothing open and nothing opening: the next ask opens the new address.
-    if (!this.reader && !this.opening) return;
+    // A source parked on a proxy that would not open is willing again, since
+    // the address it failed on is gone.
+    if (!this.reader && !this.opening) {
+      if (this.proxyDown) {
+        this.proxyDown = false;
+        this.unreadable = false;
+        this.attempts = 0;
+        this.onFrame();
+      }
+      return;
+    }
     void (async () => {
       // An open in flight built its stack for the old address; it settles
       // first, so the swap below replaces a stack that has stopped moving.
@@ -1063,16 +1164,21 @@ export class ClipFrameSource {
         await this.opening;
       } catch {}
       if (this.closed || this.aim !== aim) return;
-      const reader = openMediaShared(this.asset.url);
+      const as = this.stackNow();
+      const reader = openMediaShared(this.url);
       try {
         const track = await videoTrackOf(reader.input);
         if (this.closed || this.aim !== aim) return reader.release();
         if (!track) {
           reader.release();
-          this.fail();
+          if (!this.proxyFailed()) this.fail();
           return;
         }
-        const sink = frameSink(track, { height: this.height }, { poolSize: POOL, lowLatency: true });
+        const sink = frameSink(
+          track,
+          { height: this.height },
+          { poolSize: POOL, lowLatency: true, colorSpace: as.colorSpace }
+        );
         // The new stack installs first, so a walk starting this instant is
         // already on it; the walk still running was on the old one and ends
         // now. Its frames stay: the old sink has stopped cycling its
@@ -1083,6 +1189,7 @@ export class ClipFrameSource {
         this.reader = reader;
         this.track = track;
         this.sink = sink;
+        this.decodedAs = as;
         this.opening = Promise.resolve();
         this.dropBack(true);
         this.stopStream();
@@ -1095,6 +1202,7 @@ export class ClipFrameSource {
         this.shortEndAt = -1;
         this.failStreak = 0;
         this.unreadable = false;
+        this.proxyDown = false;
         this.attempts = 0;
         // A paused reader is only asked again on a repaint; the nudge is what
         // sends its ask to the new stack.
@@ -1104,9 +1212,25 @@ export class ClipFrameSource {
         // The old stack stays installed and keeps serving its ring; the
         // failure books the usual retries, and the retry's open reads the
         // current address.
-        if (this.aim === aim && !this.closed) this.fail();
+        if (this.aim === aim && !this.closed && !this.proxyFailed()) this.fail();
       }
     })();
+  }
+
+  /**
+   * A preview proxy would not open. The master is the same picture, so the
+   * source parks until the store drops the proxy (`proxyUnreadable`), and the
+   * pool then retargets it onto the master. False when the master itself is
+   * what failed.
+   */
+  private proxyFailed(): boolean {
+    const asset = this.asset;
+    if (!asset.proxyUrl || this.url === asset.url) return false;
+    this.opening = null;
+    this.unreadable = true;
+    this.proxyDown = true;
+    void import("./mediaProxy").then((m) => m.proxyUnreadable(asset));
+    return true;
   }
 
   /**
@@ -1139,12 +1263,13 @@ export class ClipFrameSource {
   private open(): Promise<void> {
     if (this.opening) return this.opening;
     this.opening = (async () => {
-      const reader = openMediaShared(this.asset.url);
+      const as = this.stackNow();
+      const reader = openMediaShared(this.url);
       try {
         const track = await videoTrackOf(reader.input);
         if (!track) {
           reader.release();
-          this.unreadable = true;
+          if (!this.proxyFailed()) this.unreadable = true;
           return;
         }
         if (this.closed) {
@@ -1166,13 +1291,18 @@ export class ClipFrameSource {
         // Height alone: the sink keeps the source's aspect and applies the
         // file's rotation, so a phone clip arrives upright at preview size and
         // no caller has to know it was ever sideways.
-        this.sink = frameSink(track, { height: this.height }, { poolSize: POOL, lowLatency: true });
+        this.sink = frameSink(
+          track,
+          { height: this.height },
+          { poolSize: POOL, lowLatency: true, colorSpace: as.colorSpace }
+        );
+        this.decodedAs = as;
         // A clean open ends any failure streak: the next outage starts from
         // the quick retries again.
         this.attempts = 0;
       } catch {
         reader.release();
-        this.fail();
+        if (!this.proxyFailed()) this.fail();
       }
     })();
     return this.opening;
@@ -1335,6 +1465,7 @@ export class ClipFrameSource {
     // The read may have been overtaken while the file was opening.
     if (Math.abs(this.streamFrom - from) > SAME) return;
     this.stream = this.sink.canvases(Math.max(0, from));
+    this.streamAs = this.decodedAs;
     void this.drain(from);
   }
 
@@ -1351,9 +1482,10 @@ export class ClipFrameSource {
     const kt = await keyframeTimeAt(this.track, Math.max(0, t)).catch(() => null);
     if (kt === null || this.closed) return;
     if (this.ring.between(kt, t) > 0) return;
+    const as = this.decodedAs;
     const c = await this.sink.getCanvas(kt).catch(() => null);
     if (!c || this.closed) return;
-    this.ring.push(c);
+    this.ring.push(tagged(c, as));
     this.onFrame();
   }
 
@@ -1371,8 +1503,8 @@ export class ClipFrameSource {
     } else {
       this.onBack();
       this.back = {
-        fine: new FrameRing<WrappedCanvas>(BACK_POOL - 2),
-        coarse: new FrameRing<WrappedCanvas>(BACK_COARSE),
+        fine: new FrameRing<HeldCanvas>(BACK_POOL - 2),
+        coarse: new FrameRing<HeldCanvas>(BACK_COARSE),
         floor: Infinity,
         want: t,
         sentFor: null,
@@ -1479,11 +1611,15 @@ export class ClipFrameSource {
       // over that prefix goes out from `backSpread` if the pointer gets there
       // before the windows do.
       if (b.prefix?.kt !== kt) b.prefix = start - kt > 2 * dt ? { kt, to: start - dt } : null;
-      this.backSink ??= frameSink(
-        this.track,
-        { height: this.height },
-        { poolSize: BACK_POOL, lowLatency: true }
-      );
+      if (!this.backSink) {
+        this.backAs = this.decodedAs;
+        this.backSink = frameSink(
+          this.track,
+          { height: this.height },
+          { poolSize: BACK_POOL, lowLatency: true, colorSpace: this.backAs?.colorSpace }
+        );
+      }
+      const as = this.backAs;
       const stream = this.backSink.canvases(start);
       try {
         // The pass opens on the frame covering `start`, which can sit a frame
@@ -1495,7 +1631,7 @@ export class ClipFrameSource {
           if (done || !value || this.closed || this.back !== b) break;
           if (value.duration > 0) this.frameDt = value.duration;
           if (value.timestamp > top + SAME) break;
-          b.fine.push(value);
+          b.fine.push(tagged(value, as));
           b.floor = Math.min(b.floor, value.timestamp);
           b.landed++;
           n++;
@@ -1525,11 +1661,15 @@ export class ClipFrameSource {
     if (n <= 0) return;
     const step = n > 1 ? (to - from) / (n - 1) : 0;
     const asks = Array.from({ length: n }, (_, i) => from + i * step);
-    this.backCoarseSink ??= frameSink(
-      this.track,
-      { height: Math.max(180, Math.round(this.height / 2)) },
-      { poolSize: BACK_COARSE_POOL, lowLatency: true }
-    );
+    if (!this.backCoarseSink) {
+      this.backCoarseAs = this.decodedAs;
+      this.backCoarseSink = frameSink(
+        this.track,
+        { height: Math.max(180, Math.round(this.height / 2)) },
+        { poolSize: BACK_COARSE_POOL, lowLatency: true, colorSpace: this.backCoarseAs?.colorSpace }
+      );
+    }
+    const as = this.backCoarseAs;
     const stream = this.backCoarseSink.canvasesAtTimestamps(asks);
     try {
       let last = -1;
@@ -1538,7 +1678,7 @@ export class ClipFrameSource {
         if (done || this.closed || this.back !== b) break;
         if (!value || value.timestamp === last) continue;
         last = value.timestamp;
-        b.coarse.push(value);
+        b.coarse.push(tagged(value, as));
         this.onFrame();
       }
     } catch {
@@ -1659,7 +1799,7 @@ export class ClipFrameSource {
               );
             }
           }
-          this.ring.push(value);
+          this.ring.push(tagged(value, this.streamAs));
           this.onFrame();
         }
       } catch {
@@ -1730,6 +1870,7 @@ export class ClipFrameSource {
         this.hopping = false;
         this.walkFor = t;
         this.stream = this.sink.canvases(Math.max(0, t));
+        this.streamAs = this.decodedAs;
         await this.drain(t);
         // The walk ended before it reached the ask. Whatever ended it — bytes
         // that never came, a decoder closed under it — the pointer is left on
@@ -1796,6 +1937,12 @@ export class FrameSourcePool {
    * `key` must identify a mapping — same file, speed and source-time offset —
    * so clips showing identical pictures share one decoder.
    */
+  /** The source for one clip mapping when it is open, without opening it or
+   * touching its place in the eviction order. */
+  peek(key: string, height: number): ClipFrameSource | undefined {
+    return this.sources.get(`${key}|${height}`);
+  }
+
   get(key: string, asset: MediaAsset, height: number): ClipFrameSource {
     const id = `${key}|${height}`;
     let src = this.sources.get(id);
@@ -1804,7 +1951,8 @@ export class FrameSourcePool {
     // re-mints. The source follows the move in place, holding every frame it
     // has decoded, so a clip mid-play rides across the swap on its ring while
     // the new address opens behind it.
-    if (src && src.url !== asset.url) src.retarget(asset);
+    if (src && src.url !== previewUrl(asset)) src.retarget(asset);
+    else src?.follow(asset);
     if (!src) {
       poolLog(`pool open ${id}`);
       const own = new ClipFrameSource(asset, height, this.onFrame, () => this.backOwner(own));

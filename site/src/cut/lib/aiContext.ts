@@ -1,8 +1,9 @@
 "use client";
 
 import { formatBytes } from "@/lib/bytes";
+import { isLinkedAssetType } from "./types";
 import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
-import { hasOverlayAnim, retimeOf, speedCurveOf, type ClipSound, type SpeedNode } from "@donkeycut/effects-kit";
+import { hasOverlayAnim, retimeOf, speedCurveOf, WHEEL_LABELS, WHEEL_ZONES, type ClipSound, type OutputSpace, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { useMatteBakes } from "./removal/bakeJobs";
@@ -12,7 +13,9 @@ import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
 import { laneCues, subtitleLaneCount } from "./subtitles";
 import { watchSweepActive } from "./watch/sweep";
-import { libraryFontId, listLibraryFonts } from "./linkedLibrary";
+import { libraryFontId, libraryLutId, listLibraryFonts, listLibraryLuts } from "./linkedLibrary";
+import { savedGradesKnown } from "./gradePresets";
+import { sourceProfileOf } from "./baseFrame";
 import {
   clipZoom,
   frameOf,
@@ -45,9 +48,10 @@ function transitionToNext(sp: ClipSpan, index: number, spans: ClipSpan[]) {
 }
 
 /** The clip's own effects — entrance/exit animations, box styling, and its
- * color state in the shape the grading tools take: the preset ref plus a
- * compact summary of the manual grade (nonzero sliders verbatim; curves and
- * wheels as presence flags; the touched hue bands by name). */
+ * color state in the shape the grading tools take: the LUT and the preset
+ * refs plus a compact summary of the manual grade (nonzero sliders verbatim;
+ * curves as presence flags; the wheels by their tool names; the touched hue
+ * bands by name). */
 function clipEffects(clip: VideoClip, live: boolean) {
   const grade = clip.grade;
   const sliders: Record<string, number> = {};
@@ -56,6 +60,7 @@ function clipEffects(clip: VideoClip, live: boolean) {
   }
   const color = grade
     ? {
+        ...(grade.lut ? { lut: { id: grade.lut.id, amount: r(grade.lut.amount ?? 1) } } : {}),
         ...(grade.preset
           ? {
               colorPreset: {
@@ -67,7 +72,9 @@ function clipEffects(clip: VideoClip, live: boolean) {
           : {}),
         ...(Object.keys(sliders).length ? { grade: sliders } : {}),
         ...(grade.curves ? { curves: Object.keys(grade.curves) } : {}),
-        ...(grade.wheels ? { wheels: Object.keys(grade.wheels) } : {}),
+        ...(grade.wheels
+          ? { wheels: WHEEL_ZONES.filter((z) => grade.wheels?.[z]).map((z) => WHEEL_LABELS[z].toLowerCase()) }
+          : {}),
         ...(grade.hsl ? { hslBands: Object.keys(grade.hsl) } : {}),
       }
     : {};
@@ -223,6 +230,10 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
         .filter((a) => a.type === "font")
         .map((a) => ({ id: uploadedFontId(a.id), label: a.name })),
     ],
+    // The LUT files in the Library, by the id set_color_lut takes, and the
+    // grades saved there by name for apply_saved_grade.
+    luts: listLibraryLuts().map((l) => ({ id: libraryLutId(l.key), label: l.label })),
+    savedGrades: savedGradesKnown().map((g) => ({ id: g.id, name: g.name })),
     ...(core.mediaFolders ? { mediaFolders: core.mediaFolders } : {}),
     media: core.media,
     mediaTruncated: core.mediaTruncated,
@@ -290,6 +301,7 @@ export function describeDoc(doc: ProjectDoc, opts?: { fullCues?: boolean; chatId
       subtitleStatus: state.subtitles.cues.length > 0 ? "ready" : "idle",
       aspect: state.aspect ?? "9:16",
       background: state.background,
+      colorSpace: state.colorSpace,
       guides: sanitizeGuides(doc.guides),
       guideLines: sanitizeGuideLines(doc.guideLines),
       genvideo: doc.genvideo ?? undefined,
@@ -316,6 +328,7 @@ interface DescribedState {
   subtitleStatus: string;
   aspect: Aspect;
   background: string;
+  colorSpace: OutputSpace;
   guides: GuideId[];
   guideLines: GuideLines;
   genvideo?: VideoProject | null;
@@ -351,7 +364,7 @@ function describeState(
     hiddenFromChat(a, chatId, placed);
   // A font asset is a typeface, not footage: it is listed under `fonts` with
   // the account's shelf fonts, where a font id is what the model needs.
-  const visibleAssets = s.assets.filter((a) => a.type !== "font" && !ownedByOtherChat(a));
+  const visibleAssets = s.assets.filter((a) => !isLinkedAssetType(a.type) && !ownedByOtherChat(a));
   // The cap trims the tail of a huge media list, and a source someone has
   // watched and written up stays regardless of where it sits: the record is
   // what later decisions are made from.
@@ -380,6 +393,9 @@ function describeState(
       aspect: s.aspect,
       frame: `${frameOf(s.aspect).w}x${frameOf(s.aspect).h}`,
       background: s.background,
+      // The delivery's color space (set_project_color): sdr, or hlg / pq
+      // for an HDR export and an HDR preview where the display carries it.
+      colorSpace: s.colorSpace,
       // Every guide preset's safe area for this frame, whether or not it
       // shows, so placement can respect a platform's UI without a guide on:
       // safeArea and keepOut are frame fractions (x, y, w, h).
@@ -426,6 +442,17 @@ function describeState(
       duration: r(a.duration),
       ...(a.origin ? { origin: a.origin } : {}),
       ...(a.folderId != null ? { folderId: a.folderId } : {}),
+      // What the file's code values mean, for footage that is not plain
+      // Rec.709: the profile in force and, when the person overrode it, what
+      // the header read (set_source_color changes it).
+      ...(sourceProfileOf(a) !== "rec709" || (a.color && a.color.detected !== "rec709")
+        ? {
+            sourceColor: {
+              profile: sourceProfileOf(a),
+              ...(a.color && a.colorProfile && a.colorProfile !== a.color.detected ? { detected: a.color.detected } : {}),
+            },
+          }
+        : {}),
       // Source spans whose frame map exists (persisted with the project):
       // distinct-moment times and cut candidates recorded by an earlier watch
       // or by the background sweep. The map aims a watch — it is not seen

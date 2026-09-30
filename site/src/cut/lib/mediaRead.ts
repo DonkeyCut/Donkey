@@ -44,7 +44,10 @@ import {
 import { confirmEngine, engineConnected, isEngineUrl } from "./api";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
 import { CHUNK_SIZE, chunkSourceOptions } from "./chunkCache";
+import { probeColor, probeMissingColors, rangeOfBlob, withFoundColors, type ColorProbe, type ReadRange } from "./colorProbe";
+import { pictureAssetIds, type ItemLists } from "./itemKinds";
 import { allowance, holdMemory } from "./memoryBudget";
+import { SpsColorRewriter, descriptionLengthSize, spsCodecOf, tagsOfColorSpace } from "./spsColor";
 
 /** What a file turns out to be, read from its container. */
 export interface MediaProbe {
@@ -58,6 +61,8 @@ export interface MediaProbe {
   width?: number;
   height?: number;
   rotation?: Rotation;
+  /** What the video's code values mean, from its header (video only). */
+  color?: ColorProbe;
 }
 
 /** Frames read back at a target size. Height alone preserves aspect. */
@@ -343,7 +348,19 @@ async function tracked<T>(read: Promise<T>): Promise<T> {
 export async function videoTrackOf(input: Input): Promise<InputVideoTrack | null> {
   const track = await tracked(input.getPrimaryVideoTrack());
   if (!track) return null;
-  return headless() || (await track.canDecode()) ? track : null;
+  return (await decodable(track)) ? track : null;
+}
+
+/** Whether this runtime decodes the track. A ProRes track has no WebCodecs
+ * decoder anywhere; the WASM one is registered on the first ask and answers
+ * for every reader after — the preview of a master whose proxy has not
+ * landed, the in-tab export, which always reads the master. */
+async function decodable(track: InputVideoTrack): Promise<boolean> {
+  if (headless()) return true;
+  if (await track.canDecode()) return true;
+  if (track.codec !== "prores") return false;
+  await (await import("./proresDecoder")).ensureProresDecoder();
+  return track.canDecode();
 }
 
 /** True when the file carries video this browser cannot decode.
@@ -355,7 +372,7 @@ export async function videoTrackOf(input: Input): Promise<InputVideoTrack | null
 export async function hasUndecodableVideo(input: Input): Promise<boolean> {
   if (headless()) return false;
   const track = await tracked(input.getPrimaryVideoTrack());
-  return !!track && !(await track.canDecode());
+  return !!track && !(await decodable(track));
 }
 
 /** The primary audio track, or null — same decodability rule as video. */
@@ -386,16 +403,71 @@ export async function probeMediaFile(src: string | Blob): Promise<MediaProbe> {
       throw new UnreadableMediaError("This file's audio needs conversion.", true);
     }
     if (!video && !audio) throw new UnreadableMediaError();
+    // The color walk runs beside the rest of the probe: it is a few ranged
+    // reads of its own, and waiting on them in turn would hold every caller
+    // that writes what the probe found.
+    const color = video ? input.source.getSizeOrNull().then((bytes) => probeMediaColorOnce(src, bytes)) : null;
+    // Awaited below; a probe that fails before then fails on its own.
+    color?.catch(() => {});
     const [duration, bytes] = await Promise.all([input.computeDuration(), input.source.getSizeOrNull()]);
     const size = bytes === null ? {} : { sizeBytes: bytes };
-    if (!video) return { ...size, duration, hasVideo: false, hasAudio: true };
+    if (!video || !color) return { ...size, duration, hasVideo: false, hasAudio: true };
     const [width, height, rotation] = await Promise.all([
       video.getDisplayWidth(),
       video.getDisplayHeight(),
       video.getRotation(),
     ]);
-    return { ...size, duration, hasVideo: true, hasAudio: !!audio, width, height, rotation };
+    return { ...size, duration, hasVideo: true, hasAudio: !!audio, width, height, rotation, color: await color };
   });
+}
+
+/** Color walks in flight, by source: an import's probe and the lazy fill of
+ * the same file share one walk, and so one write of what it found. */
+const colorWalks = new Map<string | Blob, Promise<ColorProbe>>();
+
+function probeMediaColorOnce(src: string | Blob, bytes?: number | null): Promise<ColorProbe> {
+  let walk = colorWalks.get(src);
+  if (!walk) {
+    const size = bytes ?? (typeof src === "string" ? Infinity : src.size);
+    walk = probeColor(rangeReader(src), size).finally(() => colorWalks.delete(src));
+    colorWalks.set(src, walk);
+  }
+  return walk;
+}
+
+/** Read a video's color from its header alone: the same walk the import
+ * probe makes, for media imported before the probe existed. */
+export function probeMediaColor(src: string | Blob): Promise<ColorProbe> {
+  return probeMediaColorOnce(src);
+}
+
+/** `assets` with the color record of every video the timeline draws filled
+ * from its header: what a render or an export spec reads before its first
+ * frame, so footage the lazy fill has not reached yet is not drawn as
+ * Rec.709. A drawn file whose header cannot be read fails the call, naming
+ * it; files nothing on the timeline uses are not read. */
+export async function withAssetColors<
+  A extends { id: string; type: string; fileName: string; url: string; color?: unknown; block?: unknown },
+>(assets: A[], lists: Pick<ItemLists, "clips" | "overlays">, urlOf: (asset: A) => string = (a) => a.url): Promise<A[]> {
+  return withFoundColors(assets, await probeMissingColors(assets, pictureAssetIds(lists), (a) => probeMediaColor(urlOf(a))));
+}
+
+/** Ranged byte reads over what `openMedia` reads: a Blob (or the File behind
+ * a store-minted URL) by slicing, a URL by a Range request through the same
+ * fetch the readers use. A server that answers the whole file is sliced. */
+function rangeReader(src: string | Blob): ReadRange {
+  const blob = typeof src === "string" ? (resolveRegisteredBlob(src) ?? src) : src;
+  if (typeof blob !== "string") return rangeOfBlob(blob);
+  const read = trackedFetch(blob);
+  return async (offset, length) => {
+    const res = await read(blob, {
+      mode: "cors",
+      headers: { Range: `bytes=${offset}-${offset + length - 1}` },
+    });
+    if (!res.ok) throw new MediaFetchError(`Cut couldn't read the media header (${res.status}).`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    return res.status === 206 ? bytes : bytes.subarray(offset, offset + length);
+  };
 }
 
 /** What every frame reader in Cut asks of a video track: one frame at a
@@ -422,7 +494,45 @@ export interface FrameSinkOptions {
    * machine resource; a reader rebuilt after losing one asks for software,
    * which always opens. */
   software?: boolean;
+  /** Tag the decoded frames with this color space in place of the file's own,
+   * so the browser draws the code values untouched: no tone mapping of an
+   * HDR file, no gamut conversion of a wide one. The grade pipeline then
+   * reads the meaning from the asset's `color`. Reaches WebCodecs as the
+   * decoder config's `colorSpace` and is stamped on the frames a WASM decoder
+   * produces. An H.264 or HEVC decoder reads its tags from the bitstream's
+   * own SPS, so the same tags are written into the SPS inside the codec
+   * description and into any SPS a sample carries in-band, the way ffmpeg's
+   * metadata filters do. What a route then draws is measured once per session
+   * by `decodePath` (decoderCheck.ts). */
+  colorSpace?: VideoColorSpaceInit;
 }
+
+/** Decoder hooks that write `colorSpace` into the bitstream's own SPS tags
+ * for H.264 and HEVC; empty for every other codec. */
+function spsHooks(colorSpace: VideoColorSpaceInit): {
+  transformConfig?: (config: VideoDecoderConfig) => VideoDecoderConfig;
+  transformPacket?: (data: Uint8Array, config: VideoDecoderConfig) => Uint8Array | null;
+} {
+  const tags = tagsOfColorSpace(colorSpace);
+  let rewriter: SpsColorRewriter | null = null;
+  let lengthSize = 4;
+  return {
+    transformConfig: (config) => {
+      const codec = spsCodecOf(config.codec);
+      if (!codec || !config.description) return config;
+      rewriter = new SpsColorRewriter(codec, tags);
+      const desc = bytesOf(config.description);
+      lengthSize = descriptionLengthSize(codec, desc);
+      return { ...config, description: rewriter.description(desc) };
+    },
+    transformPacket: (data) => rewriter?.sample(data, lengthSize) ?? null,
+  };
+}
+
+const bytesOf = (buffer: AllowSharedBufferSource): Uint8Array =>
+  buffer instanceof ArrayBuffer || buffer instanceof SharedArrayBuffer
+    ? new Uint8Array(buffer)
+    : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
 export type FrameSinkFactory = (
   track: InputVideoTrack,
@@ -434,6 +544,7 @@ const canvasSinkFactory: FrameSinkFactory = (track, size, opts) => {
   const decoderOptions = {
     ...(opts?.lowLatency ? { optimizeForLatency: true } : {}),
     ...(opts?.software ? { hardwareAcceleration: "prefer-software" as const } : {}),
+    ...(opts?.colorSpace ? { colorSpace: opts.colorSpace, ...spsHooks(opts.colorSpace) } : {}),
   };
   return new CanvasSink(track, {
     ...size,
@@ -445,9 +556,16 @@ const canvasSinkFactory: FrameSinkFactory = (track, size, opts) => {
 let sinkFactory: FrameSinkFactory = canvasSinkFactory;
 
 /** Install a replacement frame reader, e.g. the skia-backed one a headless
- * process uses. Affects every later `frameSink` call. */
-export function setFrameSinkFactory(f: FrameSinkFactory): void {
-  sinkFactory = f;
+ * process uses; null puts the page's own back. Affects every later
+ * `frameSink` call. */
+export function setFrameSinkFactory(f: FrameSinkFactory | null): void {
+  sinkFactory = f ?? canvasSinkFactory;
+}
+
+/** True once a replacement frame reader is installed: frames then come from
+ * the process's own decoder, drawn through the file's own matrix. */
+export function frameSinkIsCustom(): boolean {
+  return sinkFactory !== canvasSinkFactory;
 }
 
 /** A sink that draws this track's frames at `size`. Rotation from the file's

@@ -130,10 +130,13 @@ const HOLDERS = {
   previewDecoders: { bucket: "decoders", portion: 1 },
   /** The preview pool: the ring each live source lands frames on, and the
    * shelf of canvases kept for the sources that have stood down. */
-  previewCanvases: { bucket: "canvases", portion: 0.75 },
+  previewCanvases: { bucket: "canvases", portion: 0.72 },
   /** Readers a render keeps open between frames, each with its own pool of
    * canvases at the source's size. */
-  exportReaders: { bucket: "canvases", portion: 0.25 },
+  exportReaders: { bucket: "canvases", portion: 0.2 },
+  /** The sharpen and clarity pass's float framebuffers, at the picture's
+   * size while detail is in use. */
+  detailTargets: { bucket: "canvases", portion: 0.08 },
   /** File bytes held once for every reader on a cloud file. */
   chunkMemory: { bucket: "reads", portion: 0.5 },
   /** What each open reader keeps of its own walk through a file. */
@@ -141,7 +144,16 @@ const HOLDERS = {
   /** Decoded sound waiting for the mixer to schedule it. */
   mixerAudio: { bucket: "audio", portion: 1 },
   /** Filmstrips and waveforms drawn for shelf entries. */
-  libraryPictures: { bucket: "pictures", portion: 0.45 },
+  libraryPictures: { bucket: "pictures", portion: 0.25 },
+  /** Parsed LUT files off the Library shelf, held for the clips that use them. */
+  lutTables: { bucket: "pictures", portion: 0.05 },
+  /** The same tables held again by the LUT build worker, which bakes from
+   * its own copies. */
+  lutWorkerTables: { bucket: "pictures", portion: 0.05 },
+  /** Baked clip color LUTs: the lattices the compositor samples. */
+  gradeLuts: { bucket: "pictures", portion: 0.06 },
+  /** The same LUTs uploaded as 3D textures for the GPU pass. */
+  gradeLutTextures: { bucket: "pictures", portion: 0.04 },
   /** Captured frames behind trim edges and filmstrip tiles. */
   edgeFrames: { bucket: "pictures", portion: 0.3 },
   /** Decoded sticker images, shared across the page's renders. */

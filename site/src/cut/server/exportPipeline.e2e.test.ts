@@ -20,7 +20,7 @@ import { runExport, type ExportSpec, type RenderHandle } from "./exportPipeline"
 // filter and every `overlay` negotiates a different pixel family than the
 // 4:2:0 the H.264 file is built in.
 const DELIVERIES = [
-  { name: "an H.264 MP4", ext: "mp4", codec: "h264", pixFmt: "yuv420p", over: {} },
+  { name: "an H.264 MP4", ext: "mp4", codec: "h264", pixFmt: "yuv420p", trc: "bt709", over: {} },
   {
     // ProRes 4444's bitstream carries twelve bits, so the file reads back as
     // yuv444p12le whatever the encoder was handed.
@@ -28,7 +28,19 @@ const DELIVERIES = [
     ext: "mov",
     codec: "prores",
     pixFmt: "yuv444p12le",
+    trc: "bt709",
     over: { codec: "prores4444", container: "mov", audioCodec: "pcm" },
+  },
+  {
+    // An HDR delivery composites at ten bits; every alpha segment (the
+    // masked keyed clip, the subject matte, the masked overlay) must reach
+    // the Main 10 file without an 8-bit hop.
+    name: "an HLG HEVC file",
+    ext: "mp4",
+    codec: "hevc",
+    pixFmt: "yuv420p10le",
+    trc: "arib-std-b67",
+    over: { codec: "hevc", colorSpace: "hlg" },
   },
 ] as const satisfies readonly {
   name: string;
@@ -36,6 +48,8 @@ const DELIVERIES = [
   codec: string;
   /** What the finished file decodes as. */
   pixFmt: string;
+  /** The transfer the file's header signals. */
+  trc: string;
   over: Partial<ExportSpec>;
 }[];
 
@@ -56,7 +70,7 @@ const probe = (file: string) => {
     [
       "-v", "error",
       "-show_entries", "format=duration",
-      "-show_entries", "stream=codec_type,codec_name,pix_fmt,width,height",
+      "-show_entries", "stream=codec_type,codec_name,pix_fmt,width,height,color_transfer",
       "-of", "json",
       file,
     ],
@@ -65,7 +79,14 @@ const probe = (file: string) => {
   if (r.status !== 0) throw new Error(`ffprobe failed:\n${r.stderr}`);
   return JSON.parse(r.stdout) as {
     format: { duration: string };
-    streams: { codec_type: string; codec_name: string; pix_fmt?: string; width?: number; height?: number }[];
+    streams: {
+      codec_type: string;
+      codec_name: string;
+      pix_fmt?: string;
+      width?: number;
+      height?: number;
+      color_transfer?: string;
+    }[];
   };
 };
 
@@ -221,6 +242,9 @@ for (const delivery of DELIVERIES) describe("export pipeline end to end", () => 
         // The chroma the composite was built in is the chroma the file holds:
         // 4:4:4 all the way through for the master, 4:2:0 for the MP4.
         expect(video?.pix_fmt).toBe(delivery.pixFmt);
+        // The header signals the delivery's transfer whatever the container:
+        // a MOV takes it from the frames, an MP4 from the bitstream.
+        expect(video?.color_transfer).toBe(delivery.trc);
         expect(meta.streams.some((s) => s.codec_type === "audio")).toBe(true);
       } finally {
         await rm(mediaDir, { recursive: true, force: true });

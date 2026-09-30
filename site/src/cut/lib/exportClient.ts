@@ -9,6 +9,8 @@ import { projectOperation } from "./projectOperation";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { engineFeatures } from "./api";
 import type { EngineFeature } from "./engineFeatures";
+import { cutColor } from "./colorSettings";
+import { loadLibraryLutFile, lutIdOf } from "./linkedLibrary/luts";
 import {
   removeBrowserExportJob,
   reserveBrowserExportJob,
@@ -20,6 +22,7 @@ import { captureCloudBackend } from "./backend/cloud";
 import { downloadFile, downloadFromUrl } from "./download";
 import { bitrateFor, canRenderInBrowser, renderProjectToMp4, type SourceExportProfile } from "./exportRender";
 import { putSigned } from "./media";
+import { withAssetColors } from "./mediaRead";
 import { renderRemovalPieces } from "./removalVideo";
 import { drawBlock } from "./blockSource";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
@@ -48,6 +51,7 @@ import {
   EXPORT_CONTAINERS,
   exportBaseName,
   fixedRate,
+  type SpecClipColor,
   specMediaFiles,
   type ExportAudioCodec,
   type ExportCodec,
@@ -780,6 +784,21 @@ function renderClipBorderPng(
   return rasterCanvasToPng(canvas);
 }
 
+/** What a source's code values mean, for the spec: the profile the header
+ * settled (with the person's override), and the matrix and range the file
+ * decodes with. A still is sRGB, decoded to full-range RGB, and a block is
+ * painted in Rec.709. The spec builder reads every video's header first
+ * (`withAssetColors`), so a video without a record is a caller's bug. */
+export function specColor(
+  asset: Pick<MediaAsset, "type" | "color" | "colorProfile" | "block" | "fileName"> | undefined
+): SpecClipColor {
+  if (!asset || asset.type === "image") return { profile: "srgb", matrix: "bt709", fullRange: true };
+  if (asset.block) return { profile: "rec709", matrix: "bt709", fullRange: false };
+  const c = asset.color;
+  if (!c) throw new Error(`The color of ${asset.fileName} was never read.`);
+  return { profile: asset.colorProfile ?? c.detected, matrix: c.matrix, fullRange: c.fullRange };
+}
+
 /** Build the export spec + overlay PNGs from the cut. Media already lives in
  * the project folder — the spec references it by file name; only overlay PNGs
  * travel with the request. Shared by full exports and the low-res hover proxy. */
@@ -789,6 +808,13 @@ export async function buildExportPayload(
   settings: ExportSettings,
   target: "export" | "preview" | "card" | "hls"
 ): Promise<ExportPayload> {
+  // H.264 is an 8-bit delivery; an HDR picture takes HEVC Main 10 or ProRes.
+  if ((doc.colorSpace ?? "sdr") !== "sdr" && settings.codec === "h264" && target === "export") {
+    throw new Error("H.264 is 8-bit. Export HDR as HEVC or ProRes.");
+  }
+  // Every video's color is read before the spec is: footage the lazy fill
+  // has not reached would otherwise go out as Rec.709.
+  doc = { ...doc, assets: await withAssetColors(doc.assets, doc) };
   const spans = getClipSpans(doc.clips, doc.assets);
   const duration = projectDuration(doc);
   const pngs: ExportPayload["pngs"] = [];
@@ -890,6 +916,7 @@ export async function buildExportPayload(
     // trimming a source span.
     image: sp.asset.type === "image",
     grade: normalizeGrade(sp.clip.grade),
+    color: specColor(sp.asset),
     mask: undefined as SpecMask | undefined,
     shadow: undefined as SpecMask | undefined,
     kf: posed(sp.clip).kf,
@@ -1093,6 +1120,7 @@ export async function buildExportPayload(
           smoothSlow: c.smoothSlow,
           image: assetById.get(c.assetId)!.type === "image",
           grade: normalizeGrade(c.grade),
+          color: specColor(assetById.get(c.assetId)),
           look: c.look,
           lookAmount: c.lookAmount,
           mask: undefined as SpecMask | undefined,
@@ -1174,6 +1202,24 @@ export async function buildExportPayload(
         entry.look = undefined;
       }
     }
+  }
+
+  // The library LUTs the grades name travel with the job, once per file, so
+  // the engine parses the same bytes the tab drew through. One that cannot
+  // be read fails the export here, naming it.
+  const lutFiles = new Map<string, string>();
+  for (const entry of [...clipEntries, ...overlayVideos]) {
+    const id = lutIdOf(entry.grade);
+    if (!id) continue;
+    let file = lutFiles.get(id);
+    if (!file) {
+      const { fileName, bytes } = await loadLibraryLutFile(id);
+      const ext = /\.([a-z0-9]+)$/i.exec(fileName)?.[1]?.toLowerCase() ?? "cube";
+      file = `lut_${id.replace(/^lut:/, "").replace(/[^a-z0-9]/gi, "")}.${ext}`;
+      pngs.push({ name: file, blob: new Blob([bytes as BlobPart]) });
+      lutFiles.set(id, file);
+    }
+    entry.color = { ...entry.color, lutFile: file };
   }
 
   const audio = doc.audioClips
@@ -1333,6 +1379,11 @@ export async function buildExportPayload(
       target,
       ...settings,
       ...(target === "export" ? { sourceSegments: sourceExportPlan(doc, settings) ?? undefined } : {}),
+      // The hover proxy, the share card and the streaming ladder are SDR web
+      // pictures whatever the project delivers.
+      colorSpace: target === "export" ? doc.colorSpace ?? "sdr" : "sdr",
+      lutSize: cutColor().lutSize,
+      lutSizeWide: cutColor().lutSizeWide,
       duration,
       background: projectBackground(doc.background),
       clips,
@@ -1479,14 +1530,20 @@ export function downloadExport(jobId: string, outName: string, backend: CutBacke
  * not know — a range export would come back as the whole cut, a typed name
  * as the project's — so what the settings ask of the engine is checked
  * against what it says it carries, and the export refuses with the fix. */
-async function assertEngineCarries(settings: ExportSettings): Promise<void> {
+async function assertEngineCarries(settings: ExportSettings, doc: ExportDoc): Promise<void> {
   const wants: [EngineFeature, boolean, string][] = [
+    // The color pipeline: an engine from before it grades nothing and folds
+    // a log or HDR file the old way, so every export needs it.
+    ["color.v2", true, "export this cut"],
     ["export.range", !!settings.range, "export a range"],
     ["export.name", !!settings.name, "name the file"],
     // An engine that does not know the codec falls through to H.264, which
     // would hand back a .mov of exactly the picture the master was chosen to
     // avoid.
     ["export.prores4444", settings.codec === "prores4444", "export a ProRes 4444 master"],
+    // An engine from before HDR composites at 8 bits in BT.709 and tags the
+    // file so; the HLG or PQ picture would land as a wrong SDR file.
+    ["export.hdr", (doc.colorSpace ?? "sdr") !== "sdr", "export HDR"],
   ];
   const has = await engineFeatures();
   for (const [feature, wanted, what] of wants) {
@@ -1507,7 +1564,7 @@ export async function createExportJob(
 ): Promise<string> {
   const backend = projectOperation(projectId).backend;
   const outName = exportOutName(settings);
-  if (backend.kind === "local") await assertEngineCarries(settings);
+  if (backend.kind === "local") await assertEngineCarries(settings, doc);
   const payload = await buildExportPayload(projectId, doc, settings, "export");
   const res = await postExport(projectId, payload, outName, backend);
   const body = await apiJson<{ id?: string }>(res);
@@ -1644,7 +1701,7 @@ async function runEngineExport(
   opts: NonNullable<Parameters<typeof runBrowserExport>[3]>,
   backend: CutBackend
 ): Promise<string> {
-  await assertEngineCarries(settings);
+  await assertEngineCarries(settings, doc);
   const claim = await backend.fetch("/api/cut/export/client", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1934,7 +1991,8 @@ export async function submitPreviewSnapshot(
     if (!directory) throw new Error("Project not found in browser storage.");
     holdRegistered(`/api/cut/projects/${projectId}/`);
     try {
-      const rendered = await canRenderInBrowser(doc, settings)
+      // The hover preview is an SDR web picture whatever the project delivers.
+      const rendered = await canRenderInBrowser(doc, settings, "sdr")
         ? await renderProjectToMp4(doc, settings, {
             resolve: (asset) => asset.url, signal,
             onProgress: ({ ratio }) => onProgress("Rendering", ratio),

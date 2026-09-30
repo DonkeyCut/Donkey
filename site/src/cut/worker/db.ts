@@ -39,7 +39,7 @@ export interface ClaimedJob {
 /** The kinds someone is watching happen: an export, a URL import, or a chat
  * turn has a progress surface on screen, while a hover proxy and a share card
  * are background polish nobody is waiting on. */
-const WATCHED_KINDS = ["export", "import_url", "convert", "agent_turn"];
+const WATCHED_KINDS = ["export", "import_url", "convert", "proxy", "agent_turn"];
 
 /** Atomically claim the next queued job: the updateMany's state guard makes
  * exactly one worker win each row, so replicas never double-run a job.

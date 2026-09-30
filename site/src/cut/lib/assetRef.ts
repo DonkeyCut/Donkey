@@ -4,8 +4,10 @@ import { noteRef, noteIdSchema } from "@/cut/lib/noteReference";
 import { folderRef, folderReferenceSchema, projectFolderRef, libraryFolderRefs, type FolderReference } from "@/cut/lib/folderReference";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isLinkedAssetType } from "./types";
 import type React from "react";
-import { libraryRouteUrl, type LibraryAsset, type LibraryData } from "./library";
+import { libraryAssetName, libraryRouteUrl, type LibraryAsset, type LibraryData } from "./library";
+import { libraryLutId, LUT_MARK_ICON } from "./linkedLibrary/luts";
 import { useLibrary, useNotes } from "./queries";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockSfx, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
@@ -30,6 +32,7 @@ import {
   type ShapeKind,
   type TransitionStyle, type LibraryTemplate } from "./types";
 import type {
+  AssetType,
   AudioClip,
   MediaAsset,
   Overlay,
@@ -122,15 +125,51 @@ export interface AssetRef {
   keyTrack?: "pose" | "mask";
   /** Tiny image the pill shows instead of an icon — the sticker's own art. */
   preview?: string;
+  /** The Library file type a linked item (font, LUT) came from. */
+  fileType?: AssetType;
+  /** For a Library file chat acts on by id: the tool and the arguments that
+   * name it, and what to call it in the model's text. */
+  use?: { noun: string; tool: string; args: Record<string, string> };
+}
+
+/** How reference menus offer a Library file of each type. "media" rides every
+ * menu and reaches the model as the file itself. "chat" rides only chat's
+ * menu, next to notes and folders, and reaches the model as the tool call
+ * that uses it. "none" stays out. Keyed by every asset type, so a new type
+ * does not compile until it says how it is referenced. */
+type LibraryMention =
+  | { menu: "media" | "none" }
+  | { menu: "chat"; noun: string; icon: string; use: (a: LibraryAsset) => { tool: string; args: Record<string, string> } | null };
+
+export const LIBRARY_MENTION: { [T in AssetType]: LibraryMention } = {
+  video: { menu: "media" },
+  audio: { menu: "media" },
+  image: { menu: "media" },
+  // A font is used from the font menu, so there is nothing to point a tool at.
+  font: { menu: "none" },
+  lut: {
+    menu: "chat",
+    noun: "LUT file",
+    icon: LUT_MARK_ICON,
+    use: (a) => (a.contentKey ? { tool: "set_color_lut", args: { lut: libraryLutId(a.contentKey) } } : null),
+  },
+};
+
+/** The chat use of a Library file, when its type is one chat acts on. */
+function libraryUse(a: LibraryAsset): Pick<AssetRef, "use" | "preview"> {
+  const mention = LIBRARY_MENTION[a.type];
+  if (mention.menu !== "chat") return {};
+  const use = mention.use(a);
+  return use ? { use: { noun: mention.noun, ...use }, preview: mention.icon } : {};
 }
 
 export const refFromAsset = (a: MediaAsset): AssetRef => ({
   scope: "project",
   id: a.id,
   name: a.name,
-  // Fonts have no card and no drag source, and `projectRefs` keeps them out
-  // of the @-mention candidates; the arm only keeps the mapping total.
-  kind: a.type === "font" ? "text" : a.type,
+  // Linked kinds have no card and no drag source, and `projectRefs` keeps
+  // them out of the @-mention candidates; the arm only keeps the mapping total.
+  kind: isLinkedAssetType(a.type) ? "text" : a.type,
   url: a.url,
   duration: a.duration,
 });
@@ -138,9 +177,9 @@ export const refFromAsset = (a: MediaAsset): AssetRef => ({
 export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   scope: "library",
   id: a.id,
-  name: a.name,
-  // A font is not media to point a tool at; the mapping only stays total.
-  kind: a.type === "font" ? "text" : a.type,
+  name: a.type === "lut" ? libraryAssetName(a) : a.name,
+  // A linked item is no media to point a tool at; the mapping only stays total.
+  kind: isLinkedAssetType(a.type) ? "text" : a.type,
   // A ref outlives the session it was made in — it is saved with the chat
   // thread — so it carries the shelf route rather than a minted URL that
   // expires inside the hour.
@@ -149,6 +188,8 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   ...(a.width !== undefined ? { width: a.width } : {}),
   ...(a.height !== undefined ? { height: a.height } : {}),
   ...(a.posterFile ? { thumb: libraryRouteUrl(a.posterFile, a.residency) } : {}),
+  ...(isLinkedAssetType(a.type) ? { fileType: a.type } : {}),
+  ...libraryUse(a),
 });
 
 export const refFromStock = (i: StockImage): AssetRef => ({
@@ -478,7 +519,7 @@ export function unlistedRefs(assets: MediaAsset[]): AssetRef[] {
 export function projectRefs(assets: MediaAsset[]): AssetRef[] {
   const counters = { v: 0, i: 0, a: 0 };
   return assets
-    .filter((a) => a.origin !== "chat" && a.origin !== "matte" && a.type !== "font")
+    .filter((a) => a.origin !== "chat" && a.origin !== "matte" && !isLinkedAssetType(a.type))
     .map((a) => {
       const prefix = a.type === "image" ? "i" : a.type === "video" ? "v" : "a";
       counters[prefix] += 1;
@@ -905,12 +946,16 @@ export function useRefCandidates(enabled = true, includeCollections = false): As
       ...(projectId ? (folders ?? []).map((f) => projectFolderRef(f, projectId)) : []),
       ...libraryFolderRefs(lib.folders),
       ...(notes?.notes ?? []).map(noteRef),
+      ...lib.assets
+        .filter((a) => LIBRARY_MENTION[a.type].menu === "chat")
+        .map(refFromLibrary)
+        .filter((r) => r.use),
     ];
     const counts = new Map<string, number>();
     for (const ref of refs) counts.set(ref.name.toLowerCase(), (counts.get(ref.name.toLowerCase()) ?? 0) + 1);
     return refs.map((ref) => (counts.get(ref.name.toLowerCase()) ?? 0) > 1
       ? { ...ref, name: `${ref.name} [${ref.id}]` } : ref);
-  }, [includeCollections, projectId, folders, lib.folders, notes]);
+  }, [includeCollections, projectId, folders, lib.folders, lib.assets, notes]);
 
   return useMemo(() => {
     if (!assets || !clips || !audioClips || !overlays || !transitions || !subtitles || !projectTemplates) return [];
@@ -937,9 +982,7 @@ export function refCandidatesOf(
     ...entityRefs({ clips, assets, overlays, transitions, subtitles }),
     ...project,
     ...templates.map(refFromTemplate),
-    // A font is used from the font menu, so there is nothing to point a tool
-    // at; library fonts stay out of the candidates the way project fonts do.
-    ...lib.assets.filter((a) => a.type !== "font").map(refFromLibrary),
+    ...lib.assets.filter((a) => LIBRARY_MENTION[a.type].menu === "media").map(refFromLibrary),
     ...lib.templates.map(refFromTemplate),
     ...STOCK_IMAGES.map(refFromStock),
     ...STOCK_VIDEOS.map(refFromStockVideo),

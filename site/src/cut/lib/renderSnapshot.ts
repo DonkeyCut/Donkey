@@ -1,3 +1,4 @@
+import type { OutputSpace } from "@donkeycut/effects-kit";
 import type { Aspect, MediaAsset, VideoClip, AudioClip, Overlay, SubtitlesBlock } from "@/cut/lib/types";
 import type { ProjectOperation } from "@/cut/lib/projectOperation";
 
@@ -13,6 +14,8 @@ export type ExportDoc = {
   subtitles: SubtitlesBlock;
   /** The frame's own color behind every clip and element (hex); absent = black. */
   background?: string;
+  /** The delivery's color space; absent = SDR. */
+  colorSpace?: OutputSpace;
 };
 
 export type RenderSnapshot = {
@@ -30,5 +33,6 @@ export function renderDoc(doc: ExportDoc): ExportDoc {
   return {
     aspect: doc.aspect, assets: doc.assets, clips: doc.clips, audioClips: doc.audioClips,
     overlays: doc.overlays, subtitles: doc.subtitles, background: doc.background,
+    ...(doc.colorSpace ? { colorSpace: doc.colorSpace } : {}),
   };
 }

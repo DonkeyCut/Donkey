@@ -1,6 +1,57 @@
 import { VideoSampleSink, type InputVideoTrack, type VideoSample, type WrappedCanvas } from "mediabunny";
+import type { toAvFrame as ToAvFrame } from "@mediabunny/server";
 import { setFrameSinkFactory, type FrameCanvasSink, type FrameSize } from "../mediaRead";
 import { createRasterCanvas } from "../raster";
+
+type NodeAv = typeof import("node-av");
+let nodeAvModule: Promise<NodeAv> | null = null;
+const nodeAv = (): Promise<NodeAv> => (nodeAvModule ??= import("node-av"));
+
+/** Tight RGBA of `sample`, converted with the matrix and range the sample
+ * carries. The server package's own RGBA copy runs the legacy scaler, which
+ * converts every file as BT.601 whatever its tags say, so a 2020-tagged
+ * frame came out with the wrong chroma; a filter graph reads the frame's
+ * color fields and converts by them. */
+async function rgbaOf(sample: VideoSample, toAvFrame: typeof ToAvFrame): Promise<Uint8Array> {
+  const av = await nodeAv();
+  const src = new av.Frame();
+  src.alloc();
+  const dst = new av.Frame();
+  dst.alloc();
+  const graph = new av.FilterGraph();
+  graph.alloc();
+  try {
+    await toAvFrame(sample, src);
+    const args =
+      `video_size=${src.width}x${src.height}:pix_fmt=${src.format}:time_base=1/1000000` +
+      `:pixel_aspect=1/1:colorspace=${src.colorSpace}:range=${src.colorRange}`;
+    const bufferSrc = graph.createFilter(av.Filter.getByName("buffer")!, "src", args);
+    const bufferSink = graph.createFilter(av.Filter.getByName("buffersink")!, "sink");
+    if (!bufferSrc || !bufferSink) throw new Error("Could not build the frame converter.");
+    const outputs = av.FilterInOut.createList([{ name: "in", filterCtx: bufferSrc, padIdx: 0 }]);
+    const inputs = av.FilterInOut.createList([{ name: "out", filterCtx: bufferSink, padIdx: 0 }]);
+    av.FFmpegError.throwIfError(graph.parsePtr("[in]format=rgba[out]", inputs, outputs), "FilterGraph.parsePtr");
+    av.FFmpegError.throwIfError(await graph.config(), "FilterGraph.config");
+    av.FFmpegError.throwIfError(await bufferSrc.buffersrcAddFrame(src), "buffersrcAddFrame");
+    await bufferSrc.buffersrcAddFrame(null);
+    av.FFmpegError.throwIfError(await bufferSink.buffersinkGetFrame(dst), "buffersinkGetFrame");
+    const plane = dst.data?.[0];
+    if (!plane) throw new Error("The frame converter returned no pixels.");
+    const row = dst.width * 4;
+    const stride = dst.linesize[0];
+    const out = new Uint8Array(row * dst.height);
+    if (stride === row) {
+      out.set(plane.subarray(0, out.length));
+    } else {
+      for (let y = 0; y < dst.height; y++) out.set(plane.subarray(y * stride, y * stride + row), y * row);
+    }
+    return out;
+  } finally {
+    graph.free();
+    src.free();
+    dst.free();
+  }
+}
 
 /**
  * The media runtime a headless process needs to read what the page reads.
@@ -30,7 +81,8 @@ export class NodeFrameSink implements FrameCanvasSink {
   constructor(
     private readonly imageData: new (data: Uint8ClampedArray, w: number, h: number) => ImageData,
     track: InputVideoTrack,
-    private readonly size?: FrameSize
+    private readonly size: FrameSize | undefined,
+    private readonly toAvFrame: typeof ToAvFrame
   ) {
     this.samples = new VideoSampleSink(track);
   }
@@ -50,8 +102,7 @@ export class NodeFrameSink implements FrameCanvasSink {
       sample.close();
     }
     try {
-      const pixels = new Uint8Array(out.allocationSize({ format: "RGBA" }));
-      await out.copyTo(pixels, { format: "RGBA" });
+      const pixels = await rgbaOf(out, this.toAvFrame);
       const image = new this.imageData(
         new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength),
         out.codedWidth,
@@ -123,7 +174,7 @@ export async function installNodeMedia(): Promise<boolean> {
       w: number,
       h: number
     ) => ImageData;
-    setFrameSinkFactory((track, size) => new NodeFrameSink(imageData, track, size));
+    setFrameSinkFactory((track, size) => new NodeFrameSink(imageData, track, size, server.toAvFrame));
     return true;
   } catch {
     return false;

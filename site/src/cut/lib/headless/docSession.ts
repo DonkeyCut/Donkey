@@ -3,6 +3,8 @@ import { noteProjectRevision } from "../projectRevision";
 import { fetchWithRetry } from "./http";
 import { syncFontAssets } from "../fontAssets";
 import { syncLinkedLibrary } from "../linkedLibrary";
+import { withAssetColors } from "../mediaRead";
+import { drawnLists } from "../itemKinds";
 import { serializeDoc, useEditor } from "../store";
 import type { MediaAsset, ProjectDoc } from "../types";
 
@@ -71,10 +73,15 @@ export async function openCloudSnapshot(
       for (const u of body.urls ?? []) signed.set(u.fileName, u.url);
     }
   }
-  const assets: MediaAsset[] = (doc.assets ?? []).map((a) => ({
-    ...a,
-    url: signed.get(a.fileName) ?? `${projectPath(s, projectId)}/media/${encodeURIComponent(a.fileName)}`,
-  }));
+  // Footage imported before its color was read gets it here, from the
+  // header, so what a run renders and what it saves both read it right.
+  const assets: MediaAsset[] = await withAssetColors(
+    (doc.assets ?? []).map((a) => ({
+      ...a,
+      url: signed.get(a.fileName) ?? `${projectPath(s, projectId)}/media/${encodeURIComponent(a.fileName)}`,
+    })),
+    drawnLists(doc)
+  );
   await useEditor.getState().openProjectDoc(projectId, doc, assets);
   noteProjectRevision(projectId, version);
   // The page does this from the editor; a run has to do it before it draws,

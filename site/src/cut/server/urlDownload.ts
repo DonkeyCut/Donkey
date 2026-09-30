@@ -203,7 +203,7 @@ export async function playableMedia(file: string): Promise<string> {
   const codecs = await streamCodecs(file);
   // Sound alone decodes everywhere the import goes.
   if (!codecs.video) return file;
-  if (fitsAlready(file, codecs, { shrink: false, sdr: false })) return file;
+  if (fitsAlready(file, codecs, { shrink: false })) return file;
   const out = path.join(path.dirname(file), `${path.parse(file).name}.h264.mp4`);
   try {
     await convertToMp4({ log: [], outPath: out, progress: 0, tmpDir: path.dirname(file) }, file, out);

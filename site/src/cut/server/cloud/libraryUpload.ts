@@ -1,5 +1,5 @@
 import { libraryUploadId, libraryUploadSchema } from "@/cut/lib/libraryUpload";
-import { typeOf as libraryTypeOf } from "./util";
+import { libraryTypeOf } from "@/cut/lib/libraryFileType";
 import { assetView } from "@/cut/server/cloud/library";
 import { renderJobCheck } from "@/cut/server/cloud/limits";
 import { head } from "@/cut/server/cloud/r2";

@@ -5,7 +5,8 @@ import type { ExportDoc } from "@/cut/lib/renderSnapshot";
 import type { VideoClip } from "@/cut/lib/types";
 
 const doc: ExportDoc = {
-  aspect: "16:9", assets: [{ id: "source", fileName: "source.mp4", name: "Source", type: "video", duration: 904, width: 320, height: 240, url: "" }],
+  aspect: "16:9", assets: [{ id: "source", fileName: "source.mp4", name: "Source", type: "video", duration: 904, width: 320, height: 240, url: "",
+    color: { matrix: "bt709", fullRange: false, bitDepth: 8, detected: "rec709" } }],
   clips: [{ id: "clip", assetId: "source", track: 0, start: 0, in: 15.137, out: 870.437, muted: false }],
   audioClips: [], overlays: [], subtitles: { cues: [], showOnVideo: false, showOnTimeline: false },
 };
@@ -54,4 +55,20 @@ test("whole files, contiguous splits and reordered sequences produce source plan
   const sequence = { ...doc, clips: [{ ...clip, in: 4, out: 8 }, { ...clip, id: "second", start: 4, out: 2 }] };
   expect(sourceExportPlan(sequence, settings)).toEqual([{ file: "source.mp4", from: 4, to: 8 }, { file: "source.mp4", from: 0, to: 2 }]);
   expect(sourceExportPlan(sequence, { ...settings, range: { start: 2, end: 5 } })).toEqual([{ file: "source.mp4", from: 6, to: 8 }, { file: "source.mp4", from: 0, to: 1 }]);
+});
+
+test("a source whose code values need converting renders; a Rec.709 override copies again", () => {
+  const log = { ...doc.assets[0], color: { matrix: "bt2020nc" as const, fullRange: false, bitDepth: 10, detected: "apple-log" as const } };
+  expect(sourceSequence({ ...doc, assets: [log] })).toBeNull();
+  expect(sourceSequence({ ...doc, assets: [{ ...log, colorProfile: "rec709" as const }] })).not.toBeNull();
+  expect(sourceSequence({ ...doc, assets: [{ ...log, color: { ...log.color, detected: "hlg" as const } }] })).toBeNull();
+});
+
+test("an HLG file copies into an HLG delivery and renders into a PQ or SDR one", () => {
+  const hlg = { ...doc.assets[0], color: { matrix: "bt2020nc" as const, fullRange: false, bitDepth: 10, detected: "hlg" as const } };
+  expect(sourceSequence({ ...doc, assets: [hlg], colorSpace: "hlg" })).not.toBeNull();
+  expect(sourceSequence({ ...doc, assets: [hlg], colorSpace: "pq" })).toBeNull();
+  expect(sourceSequence({ ...doc, assets: [hlg] })).toBeNull();
+  // A Rec.709 file into an HDR delivery is a conversion, so it renders.
+  expect(sourceSequence({ ...doc, colorSpace: "hlg" })).toBeNull();
 });

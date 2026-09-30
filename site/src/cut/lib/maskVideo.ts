@@ -24,8 +24,9 @@ import {
 } from "mediabunny";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { FrameCompositor, MISSING_FRAME } from "./composite";
+import { ensureClipLuts, sourceLookup } from "./lutBuild";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
-import { ClipReader, WORKING_VIDEO_CODECS } from "./exportRender";
+import { ClipReader, renderFile, settleRenderColor, WORKING_VIDEO_CODECS } from "./exportRender";
 import type { ExportDoc } from "./renderSnapshot";
 import { createRasterCanvas } from "./raster";
 import { getClipSpans } from "./store";
@@ -90,6 +91,12 @@ export async function renderSubjectMask(
   // A small compositor: the video layers only, at mask resolution.
   const compose = createRasterCanvas(W, H);
   const comp = new FrameCompositor(compose);
+  comp.colorMode = "exact";
+  // The matte composites what the readers below read: every master, through
+  // the recipe of that read.
+  comp.sourceProvider = sourceLookup(doc.assets, renderFile);
+  await settleRenderColor(doc.assets);
+  await ensureClipLuts(doc.clips.map((c) => comp.recipeFor(c)));
   const mask = createRasterCanvas(W, H);
   const mctx = mask.getContext("2d") as CanvasRenderingContext2D;
 

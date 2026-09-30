@@ -21,7 +21,9 @@ import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./medi
 import { getProject, takenMediaNames } from "./projects";
 import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
-import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspirationFolderId, redirect, safeFileName, typeOf } from "./util";
+import { libraryTypeOf } from "@/cut/lib/libraryFileType";
+import type { AssetType } from "@/cut/lib/types";
+import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspirationFolderId, redirect, safeFileName } from "./util";
 
 /** Cap on one signed-URL batch, matching the project media batch. */
 const PRESIGN_GET_BATCH_MAX = 500;
@@ -36,7 +38,7 @@ interface AssetMeta {
    * for the file's own name wherever the asset is shown. Written once, by
    * cloud/clipTitle.ts. */
   title?: string;
-  type?: "video" | "audio" | "image" | "font";
+  type?: AssetType;
   duration?: number;
   width?: number;
   height?: number;
@@ -44,6 +46,11 @@ interface AssetMeta {
   /** File name of the source's cover image, an object of its own under this
    * account's library prefix. */
   posterFile?: string;
+  /** A linked item's identity: the hash every project names it by. The
+   * page computes it before the upload, so a sync never reads the bytes. */
+  contentKey?: string;
+  /** What kind of table a LUT holds. */
+  lut?: { kind: "1d" | "3d" | "shaper+3d"; size: number };
   /** How the asset entered the account from the iOS app: a phone camera
    * recording (the desktop's Camera Roll) or an inspiration item. */
   origin?: "camera" | "inspiration";
@@ -58,16 +65,17 @@ interface TemplateDoc {
   texts: unknown[];
   cues: unknown[];
   sound?: LibraryTemplate["sound"];
+  grade?: LibraryTemplate["grade"];
   transitions?: unknown[];
   stickers?: unknown[];
   captions?: unknown;
   project?: unknown;
 }
 
-/** A template with nothing on it saves nothing; a sound preset is a template
- * carrying only its treatment. */
+/** A template with nothing on it saves nothing; a sound preset or a saved
+ * grade is a template carrying only its treatment. */
 const templateEmpty = (input: TemplateInput) =>
-  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound;
+  !input.media?.length && !input.texts?.length && !input.cues?.length && !input.sound && !input.grade;
 
 type MediaObjectRow = {
   id: string;
@@ -96,7 +104,7 @@ export function assetView(
     fileName: obj.fileName,
     ...(meta.originalFile ? { originalFile: meta.originalFile } : {}),
     name: meta.name ?? obj.fileName,
-    type: meta.type ?? typeOf(obj.fileName) ?? "video",
+    type: meta.type ?? libraryTypeOf(obj.fileName) ?? "video",
     duration: meta.duration ?? 0,
     ...(meta.width ? { width: meta.width, height: meta.height } : {}),
     addedAt: row.createdAt.getTime(),
@@ -105,6 +113,8 @@ export function assetView(
     ...(meta.posterFile ? { posterFile: meta.posterFile } : {}),
     ...(meta.title ? { title: meta.title } : {}),
     ...(meta.origin ? { origin: meta.origin } : {}),
+    ...(meta.contentKey ? { contentKey: meta.contentKey } : {}),
+    ...(meta.lut ? { lut: meta.lut } : {}),
   };
 }
 
@@ -127,7 +137,7 @@ export function templateView(row: {
     texts: doc.texts ?? [],
     cues: doc.cues ?? [],
     ...(doc.sound ? { sound: doc.sound } : {}),
-    ...(templateExtras(doc) as Pick<LibraryTemplate, "transitions" | "stickers" | "captions" | "project">),
+    ...(templateExtras(doc) as Pick<LibraryTemplate, "transitions" | "stickers" | "captions" | "project" | "grade">),
   };
 }
 
@@ -367,7 +377,7 @@ export const libraryCloud = {
       if (!body.fileName || typeof body.bytes !== "number" || body.bytes <= 0) {
         return err("fileName and bytes are required.", 400);
       }
-      if (!typeOf(body.fileName)) return err("Unsupported file type.", 400);
+      if (!libraryTypeOf(body.fileName)) return err("Unsupported file type.", 400);
       // A resumed upload already holds its claim: the client kept the bytes
       // (the iOS app's journal) and asks for a fresh URL under the same name.
       // A claim that completed in the meantime reports done and uploads
@@ -492,7 +502,7 @@ export const libraryCloud = {
             folderId: destFolder,
             meta: {
               name: meta?.name ?? obj.fileName,
-              type: meta?.type ?? typeOf(obj.fileName) ?? "video",
+              type: meta?.type ?? libraryTypeOf(obj.fileName) ?? "video",
               duration: meta?.duration ?? 0,
               ...(meta?.width
                 ? { width: meta.width, height: meta.height }
@@ -504,6 +514,8 @@ export const libraryCloud = {
               ...(meta?.origin === "camera" || meta?.origin === "inspiration"
                 ? { origin: meta.origin }
                 : {}),
+              ...(typeof meta?.contentKey === "string" ? { contentKey: meta.contentKey } : {}),
+              ...(meta?.lut ? { lut: meta.lut } : {}),
             } as unknown as Prisma.InputJsonValue,
           },
         });
@@ -570,7 +582,7 @@ export const libraryCloud = {
           mediaObjectId: obj.id,
           meta: {
             name: name || fileName,
-            type: docAsset?.type ?? typeOf(dest) ?? "video",
+            type: docAsset?.type ?? libraryTypeOf(dest) ?? "video",
             duration: docAsset?.duration ?? 0,
             ...(docAsset?.width
               ? { width: docAsset.width, height: docAsset.height }

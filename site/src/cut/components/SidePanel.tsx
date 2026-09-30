@@ -90,14 +90,17 @@ import {
   type Residency,
 } from "@/cut/lib/residency";
 import { isSoundPresetTemplate } from "@/cut/lib/soundPresets";
+import { isGradePresetTemplate } from "@/cut/lib/gradePresets";
 import { isStylePresetTemplate } from "@/cut/lib/stylePresets";
 import { retryUpload } from "@/cut/lib/importQueue";
 import {
   forgetLinkedCopies,
   linkedAccept,
+  LUT_FILE_ICON,
 } from "@/cut/lib/linkedLibrary";
 import { downloadMedia, MEDIA_ACCEPT, revealMedia } from "@/cut/lib/media";
-import { mediaUrl } from "@/cut/lib/types";
+import { useProxyJobs } from "@/cut/lib/mediaProxy";
+import { isLinkedAssetType, mediaUrl } from "@/cut/lib/types";
 import {
   genPulseOverlay,
   isGenTab,
@@ -803,7 +806,7 @@ function ProjectFilesPanel({
   // `origin` and stays where it was made.
   // Fonts are project assets (their bytes live in media/) but they belong to
   // the text inspector's font menu, never the Media grid.
-  const assets = useEditor((s) => s.assets).filter((a) => a.origin == null && a.type !== "font");
+  const assets = useEditor((s) => s.assets).filter((a) => a.origin == null && !isLinkedAssetType(a.type));
   // The panel's folders, plus which one is open; the grid shows the open
   // folder's files, or the unfiled ones at the root.
   const folders = useEditor((s) => s.mediaFolders);
@@ -1101,10 +1104,11 @@ function ProjectFilesPanel({
         )}
 
         {openFolder === null && templates.length > 0 && (
-          <div className="flex flex-col gap-1.5 px-3.5 pb-3">
+          <div className="grid grid-cols-2 gap-2.5 px-3.5 pb-3">
             {templates.map((t) => (
               <TemplateCard
                 key={t.id}
+                tile="fill"
                 template={t}
                 mediaSrc={(f) => mediaUrl(projectId, f)}
                 drag={{ scope: "project", template: t }}
@@ -1382,6 +1386,22 @@ function UploadState({ asset }: { asset: MediaAsset }) {
   );
 }
 
+/** The line across the bottom of a ProRes tile while its preview proxy is
+ * being made. The clip already plays, off the master, so this stays as quiet
+ * as an upload's. */
+function ProxyState({ asset }: { asset: MediaAsset }) {
+  const job = useProxyJobs((s) => s.jobs[asset.id]);
+  if (!job || job.kind !== "making") return null;
+  return (
+    <span className="absolute inset-x-0 bottom-0 h-[3px] bg-black/25">
+      <span
+        className="block h-full bg-primary transition-[width] duration-150"
+        style={{ width: `${Math.round(job.progress * 100)}%` }}
+      />
+    </span>
+  );
+}
+
 function AssetCard({
   asset,
   projectId,
@@ -1395,7 +1415,7 @@ function AssetCard({
   selected?: boolean;
   /** Clicking the card picks it — plain replaces the selection, ⇧/⌘ adds to
    * it. A pick never places anything; the timeline gets media by drag or by
-   * the card's own + button. */
+   * the card's "Add to timeline" menu item. */
   onSelect?: (e: React.MouseEvent) => void;
   /** Everything picked right now, so dragging one card drags them all. */
   dragGroup?: string[];
@@ -1458,7 +1478,6 @@ function AssetCard({
       view={asset.upload ? undefined : () => lightboxItemFromAsset(asset)}
       restTime={0.1}
       className="asset-card group flex flex-col gap-1.5 text-left"
-      title="Drag onto the timeline, or click + to add"
       onClick={onSelect}
       onDragStart={(e) => {
         setAssetDragData(e, asset.id, dragGroup);
@@ -1480,7 +1499,7 @@ function AssetCard({
             ref={tileRef}
             data-drag-object
             className={cn(
-              "relative aspect-square overflow-hidden rounded-lg border border-border bg-muted transition-colors group-hover:border-input",
+              "relative aspect-square overflow-hidden rounded-xl border border-border bg-muted shadow-sm transition-colors group-hover:border-input",
               (flash || selected) && PICKED_RING
             )}
           >
@@ -1501,13 +1520,14 @@ function AssetCard({
             ) : asset.type === "image" ? (
               // eslint-disable-next-line @next/next/no-img-element -- engine/static file, not Next-optimizable
               <img crossOrigin={MEDIA_CORS} src={asset.url} alt={asset.name} loading="lazy" className="size-full object-cover" />
+            ) : asset.type === "lut" ? (
+              // eslint-disable-next-line @next/next/no-img-element -- static icon
+              <img src={LUT_FILE_ICON} alt={asset.name} className="size-full object-contain p-2" />
             ) : (
               <AudioCardFace
                 url={asset.url}
                 duration={asset.duration}
                 peaks={asset.peaks}
-                // On hover the + button takes the pill's corner, as on Library cards.
-                durationClassName="transition-opacity group-hover:opacity-0"
               />
             )}
             {asset.type === "video" && (
@@ -1531,35 +1551,19 @@ function AssetCard({
                 {formatBytes(sizeBytes)}
               </span>
             )}
-            <span
-              className={cn(
-                "absolute flex gap-1 opacity-0 transition-opacity group-hover:opacity-100",
-                // Audio keeps play bottom-left; + swaps in where the duration pill hides.
-                asset.type === "audio" ? "right-1.5 bottom-2.5" : "top-1 left-1"
-              )}
-            >
-              <span
-                role="button"
-                title="Add to timeline"
-                className="grid size-5 scale-75 cursor-pointer place-items-center rounded-full bg-primary text-primary-foreground transition-transform group-hover:scale-100 hover:brightness-110"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  add();
-                }}
-              >
-                <Plus className="size-3" />
-              </span>
-            </span>
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="More actions"
-                title="More actions"
                 className="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65 data-[state=open]:opacity-100"
                 onClick={(e) => e.stopPropagation()}
               >
                 {saved ? <Check className="size-3" /> : <Ellipsis className="size-3" />}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenuItem onClick={add}>
+                  <Plus /> Add to timeline
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
                   <FolderPlus /> Save to library
                 </DropdownMenuItem>
@@ -1590,6 +1594,7 @@ function AssetCard({
               />
             )}
             {asset.upload && <UploadState asset={asset} />}
+            {!asset.upload && <ProxyState asset={asset} />}
           </div>
           {asset.type !== "audio" && (
             <CopyNameLabel name={asset.name} className="text-[11px] text-muted-foreground" />
@@ -1652,7 +1657,7 @@ function LibraryPanel({ projectId, onImport }: {
   // Saved text styles and sound presets ride the template rails but are not
   // templates: they belong to their inspectors, not this shelf.
   const templates = (library.data?.templates ?? []).filter(
-    (t) => reachable(t.residency) && !isStylePresetTemplate(t) && !isSoundPresetTemplate(t)
+    (t) => reachable(t.residency) && !isStylePresetTemplate(t) && !isSoundPresetTemplate(t) && !isGradePresetTemplate(t)
   );
   const listing: LibraryData = { assets, folders, templates };
   const patch = useCallback(
@@ -2000,10 +2005,11 @@ function LibraryPanel({ projectId, onImport }: {
           ) : null}
           {shownTemplates.length > 0 && (
             <div className="shrink-0 px-3.5 pb-3">
-              <div className="flex flex-col gap-1.5">
+              <div className="grid grid-cols-2 gap-2.5">
                 {shownTemplates.map((t) => (
                   <TemplateCard
                     key={t.id}
+                    tile="fill"
                     template={t}
                     mediaSrc={(f) => libraryMediaUrl(f, t.residency)}
                     drag={{ scope: "library", template: t }}
@@ -2064,9 +2070,9 @@ function LibraryPanel({ projectId, onImport }: {
                     selected={picked.has(a.id)}
                     onClick={(e) => pick(e, a.id, order)}
                     dragGroup={pickedRun}
-                    // A font is used from the font menu; there is nothing to place.
+                    // A linked item is used from its own menu; there is nothing to place.
                     onUse={
-                      a.type === "font" ? undefined : () => void addLibraryAssetToProject(projectId, a)
+                      isLinkedAssetType(a.type) ? undefined : () => void addLibraryAssetToProject(projectId, a)
                     }
                     onDelete={() => setDeleting(setOf(a))}
                     onDragStartExtra={(e) => onCardDragExtra(e, a)}

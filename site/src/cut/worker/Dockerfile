@@ -32,6 +32,22 @@ RUN ffmpeg -hide_banner -encoders 2>&1 | grep -q '\blibx264\b' \
 # only encoder on this image.
 RUN ffmpeg -hide_banner -encoders 2>&1 | grep -q '\blibx265\b' \
   || { echo "ffmpeg has no libx265: HEVC exports cannot encode." >&2; exit 1; }
+# The color pipeline: every graded clip runs through lut3d in 16-bit RGB, and
+# sharpen and clarity through gblur, guided and blend. A build missing one
+# of them fails the graph at render time, so it fails here.
+RUN for f in lut3d guided gblur blend split lutyuv; do \
+      ffmpeg -hide_banner -filters 2>&1 | grep -q " $f " \
+        || { echo "ffmpeg has no $f filter: the color pipeline cannot render." >&2; exit 1; }; \
+    done
+# Clarity's reduced copy comes back to the picture's size through scale's
+# reference input (rw/rh), which ffmpeg gained in 7.1.
+RUN ffmpeg -hide_banner -loglevel error -f lavfi -i color=s=8x8:d=0.1 -f lavfi -i color=s=4x4:d=0.1 \
+      -filter_complex '[1:v][0:v]scale=rw:rh' -f null - \
+  || { echo "ffmpeg's scale takes no reference input: the clarity pass cannot render." >&2; exit 1; }
+# 10-bit input into libx265: the graded picture is sampled at 16 bits and
+# handed to the encoder as 10-bit planes.
+RUN ffmpeg -hide_banner -h encoder=libx265 2>&1 | grep -q 'yuv420p10le' \
+  || { echo "libx265 takes no 10-bit input: HDR and 10-bit exports cannot encode." >&2; exit 1; }
 
 WORKDIR /app
 # The browser primitives a job draws and decodes with: the server canvas, the

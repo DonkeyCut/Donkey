@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import type { AssetRef } from "./assetRef";
-import { libraryMediaUrl, libraryPosterUrl, type LibraryAsset } from "./library";
+import { libraryAssetName, libraryMediaUrl, libraryPosterUrl, type LibraryAsset } from "./library";
 import type { MediaAsset } from "./types";
 
 // The asset lightbox: a full-screen viewer opened from stock tiles, generated
@@ -10,7 +10,7 @@ import type { MediaAsset } from "./types";
 // surface can open it and a single mounted overlay renders it.
 
 export interface LightboxItem {
-  kind: "video" | "image" | "audio" | "text" | "font";
+  kind: "video" | "image" | "audio" | "text" | "font" | "lut";
   /** Fetchable source for the media or file. */
   src: string;
   name: string;
@@ -40,7 +40,7 @@ export interface LightboxItem {
 /** The lightbox view of an asset ref — how chat cards and attachment chips
  * open the big version of whatever they show. */
 export const lightboxItemFromRef = (ref: AssetRef): LightboxItem => ({
-  kind: ref.kind,
+  kind: ref.fileType ?? ref.kind,
   src: ref.url,
   name: ref.name,
   prompt: "",
@@ -75,7 +75,7 @@ export const lightboxItemFromLibrary = (
   src: libraryMediaUrl(a.fileName, a.residency),
   // The title read off the clip is what it is called wherever it is shown, so
   // the viewer captions it that way and an import from here lands under it.
-  name: a.title || a.name,
+  name: libraryAssetName(a),
   prompt: "",
   assetId: null,
   libraryId: a.id,

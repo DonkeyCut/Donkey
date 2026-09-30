@@ -124,7 +124,7 @@ export const useExports = create<ExportsState>((set, get) => ({
     // worker for a cloud one, and the worker again for a browser project,
     // whose media goes up with the job and whose file comes back into its own
     // storage. Whatever the user chose, something renders it.
-    const inBrowser = await canRenderInBrowser(doc, settings);
+    const inBrowser = await canRenderInBrowser(doc, settings, doc.colorSpace ?? "sdr");
     const tabOwned = backend.kind !== "local" || inBrowser;
     const abort = tabOwned ? new AbortController() : undefined;
     set((s) => ({

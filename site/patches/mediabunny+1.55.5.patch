@@ -1,8 +1,8 @@
 diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.cjs b/node_modules/mediabunny/dist/bundles/mediabunny.cjs
-index 3c514ad..66faf6a 100644
+index 3c514ad..c225790 100644
 --- a/node_modules/mediabunny/dist/bundles/mediabunny.cjs
 +++ b/node_modules/mediabunny/dist/bundles/mediabunny.cjs
-@@ -23941,7 +23941,7 @@ var Mediabunny = (() => {
+@@ -23941,11 +23941,13 @@ var Mediabunny = (() => {
      }
    };
    var computeMaxQueueSize = (decodedSampleQueueSize) => {
@@ -10,16 +10,47 @@ index 3c514ad..66faf6a 100644
 +    return decodedSampleQueueSize === 0 ? 16 : 8;
    };
    var VideoDecoderWrapper = class extends DecoderWrapper {
-     constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
-@@ -23954,6 +23954,7 @@ var Mediabunny = (() => {
+-    constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
++    constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution, colorSpaceOverride = null, transformPacket = null) {
+       super(onSample, onError);
++      // The sink's packet hook: rewrites packet bytes before they reach the WebCodecs decoder.
++      this.transformPacket = transformPacket;
+       this.codec = codec;
+       this.decoderConfig = decoderConfig;
+       this.rotation = rotation;
+@@ -23954,6 +23956,13 @@ var Mediabunny = (() => {
        this.customDecoder = null;
        this.customDecoderCallSerializer = new CallSerializer();
        this.customDecoderQueueSize = 0;
++      // The sink's color space override: already merged into `decoderConfig` for WebCodecs, and stamped onto the
++      // samples a custom decoder produces (see restampSample).
++      this.colorSpaceOverride = colorSpaceOverride;
++      this.restampBuffer = null; // Reused across restamps, sized on the first frame.
++      this.restampChain = Promise.resolve(); // Restamps in emission order.
++      this.restampsInFlight = 0;
 +      this.inFlight = 0; // Packets sent to the decoder whose frames have not come back yet.
        this.inputTimestamps = [];
        // Timestamps input into the decoder, sorted.
        this.sampleQueue = [];
-@@ -24031,6 +24032,7 @@ var Mediabunny = (() => {
+@@ -23985,6 +23994,17 @@ var Mediabunny = (() => {
+           if (!(sample instanceof VideoSample)) {
+             throw new TypeError("The argument passed to onSample must be a VideoSample.");
+           }
++          if (this.colorSpaceOverride) {
++            // A custom decoder tags its samples from the bitstream. The override replaces that tag so the
++            // sample draws the way a WebCodecs frame configured with the same color space does. The restamp
++            // copies frame data, so it runs on its own chain: samples stay in order, the pump counts the
++            // ones still copying, and a flush waits for the chain to drain.
++            this.restampsInFlight++;
++            this.restampChain = this.restampChain.then(() => this.restampSample(sample)).then((restamped) => this.finalizeAndEmitSample(restamped), (error) => onError(error)).finally(() => {
++              this.restampsInFlight--;
++            });
++            return;
++          }
+           this.finalizeAndEmitSample(sample);
+         };
+         this.customDecoder.onError = (error) => {
+@@ -24031,6 +24051,7 @@ var Mediabunny = (() => {
          const stack = new Error("Decoding error").stack;
          this.decoder = new VideoDecoder({
            output: (frame) => {
@@ -27,8 +58,12 @@ index 3c514ad..66faf6a 100644
              try {
                colorHandler(frame);
              } catch (error) {
-@@ -24050,10 +24052,7 @@ var Mediabunny = (() => {
-         return this.customDecoderQueueSize;
+@@ -24047,13 +24068,10 @@ var Mediabunny = (() => {
+     }
+     getDecodeQueueSize() {
+       if (this.customDecoder) {
+-        return this.customDecoderQueueSize;
++        return this.customDecoderQueueSize + this.restampsInFlight;
        } else {
          assert(this.decoder);
 -        return Math.max(
@@ -39,15 +74,83 @@ index 3c514ad..66faf6a 100644
        }
      }
      decode(packet) {
-@@ -24098,6 +24097,7 @@ var Mediabunny = (() => {
+@@ -24098,6 +24116,13 @@ var Mediabunny = (() => {
              }
            }
          }
++        if (this.transformPacket) {
++            const transformed = this.transformPacket(packet.data, this.decoderConfig);
++            if (transformed) {
++                packet = new EncodedPacket(transformed, packet.type, packet.timestamp, packet.duration);
++            }
++        }
 +        this.inFlight++;
          this.decoder.decode(packet.toEncodedVideoChunk());
          this.decodeAlphaData(packet);
        }
-@@ -24265,6 +24265,7 @@ var Mediabunny = (() => {
+@@ -24213,6 +24238,49 @@ var Mediabunny = (() => {
+       sample.setRotation(this.rotation);
+       this.onSample(sample);
+     }
++    /**
++     * Returns `sample` carrying the sink's color space override. A sample over raw planes takes the tag directly:
++     * the VideoFrame it later builds reads `sample.colorSpace`. A sample already wrapping a VideoFrame is rebuilt,
++     * since a VideoFrame's color space is fixed at construction and is what the browser draws it by.
++     */
++    async restampSample(sample) {
++      const override = this.colorSpaceOverride;
++      assert(override);
++      const data = sample._data;
++      if (!(typeof VideoFrame !== "undefined" && data instanceof VideoFrame)) {
++        sample.colorSpace = new VideoSampleColorSpace(override);
++        return sample;
++      }
++      if (data.format === null) {
++        return sample;
++      }
++      const rect = { x: 0, y: 0, width: data.codedWidth, height: data.codedHeight };
++      const size = data.allocationSize({ rect });
++      if (!this.restampBuffer || this.restampBuffer.byteLength < size) {
++        this.restampBuffer = new ArrayBuffer(size);
++      }
++      // The sample is closed on every path: a failed copy or frame build must not leak the decoder's frame.
++      const { timestamp, duration, rotation } = sample;
++      let restamped;
++      try {
++        const layout = await data.copyTo(this.restampBuffer, { rect });
++        restamped = new VideoFrame(new Uint8Array(this.restampBuffer, 0, size), {
++          format: data.format,
++          codedWidth: data.codedWidth,
++          codedHeight: data.codedHeight,
++          layout,
++          visibleRect: data.visibleRect ?? void 0,
++          displayWidth: data.displayWidth,
++          displayHeight: data.displayHeight,
++          timestamp: data.timestamp,
++          duration: data.duration ?? void 0,
++          colorSpace: override
++        });
++      } finally {
++        sample.close();
++      }
++      return new VideoSample(restamped, { timestamp, duration, rotation });
++    }
+     async mergeAlpha(color, alpha) {
+       const resolver = promiseWithResolvers();
+       this.mergeAlphaPromises.push(resolver.promise);
+@@ -24241,6 +24309,11 @@ var Mediabunny = (() => {
+     async flush() {
+       if (this.customDecoder) {
+         await this.customDecoderCallSerializer.call(() => this.customDecoder.flush());
++        // A custom decoder may hand out its last samples a microtask after its flush resolves (the same
++        // ordering the sink's own flush relies on), so drain the chain until nothing is still copying.
++        do {
++          await this.restampChain;
++        } while (this.restampsInFlight > 0);
+       } else {
+         assert(this.decoder);
+         await Promise.all([
+@@ -24265,6 +24338,7 @@ var Mediabunny = (() => {
          }
          this.sampleQueue.length = 0;
        }
@@ -55,11 +158,52 @@ index 3c514ad..66faf6a 100644
        this.currentPacketIndex = 0;
        this.raslSkipped = false;
      }
+@@ -24521,6 +24595,18 @@ var Mediabunny = (() => {
+     if (decoderOptions.optimizeForLatency !== void 0 && typeof decoderOptions.optimizeForLatency !== "boolean") {
+       throw new TypeError("decoderOptions.optimizeForLatency, when provided, must be a boolean.");
+     }
++    if (decoderOptions.colorSpace !== void 0) {
++      if (!decoderOptions.colorSpace || typeof decoderOptions.colorSpace !== "object") {
++        throw new TypeError("decoderOptions.colorSpace, when provided, must be an object.");
++      }
++      new VideoSampleColorSpace(decoderOptions.colorSpace);
++    }
++    if (decoderOptions.transformConfig !== undefined && typeof decoderOptions.transformConfig !== "function") {
++        throw new TypeError("decoderOptions.transformConfig, when provided, must be a function.");
++    }
++    if (decoderOptions.transformPacket !== undefined && typeof decoderOptions.transformPacket !== "function") {
++        throw new TypeError("decoderOptions.transformPacket, when provided, must be a function.");
++    }
+   };
+   var VideoSampleSink = class extends BaseMediaSampleSink {
+     /** Creates a new {@link VideoSampleSink} for the given {@link InputVideoTrack}. */
+@@ -24548,12 +24634,19 @@ var Mediabunny = (() => {
+       let decoderConfig = await this._track.getDecoderConfig();
+       const timeResolution = await this._track.getTimeResolution();
+       assert(codec && decoderConfig);
++      const colorSpaceOverride = this._decoderOptions.colorSpace ?? null;
+       decoderConfig = {
+         ...decoderConfig,
+         hardwareAcceleration: this._decoderOptions.hardwareAcceleration,
+-        optimizeForLatency: this._decoderOptions.optimizeForLatency
++        optimizeForLatency: this._decoderOptions.optimizeForLatency,
++        // The override replaces whatever the track carries, so the decoder emits frames tagged the way the
++        // caller asked, in-band tags included.
++        ...colorSpaceOverride ? { colorSpace: colorSpaceOverride } : {}
+       };
+-      return new VideoDecoderWrapper(onSample, onError, codec, decoderConfig, rotation, timeResolution);
++      if (this._decoderOptions.transformConfig) {
++          decoderConfig = this._decoderOptions.transformConfig(decoderConfig);
++      }
++      return new VideoDecoderWrapper(onSample, onError, codec, decoderConfig, rotation, timeResolution, colorSpaceOverride, this._decoderOptions.transformPacket ?? null);
+     }
+     /** @internal */
+     _createPacketSink() {
 diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.mjs b/node_modules/mediabunny/dist/bundles/mediabunny.mjs
-index 9a62e92..5abfb37 100644
+index 9a62e92..9da68cc 100644
 --- a/node_modules/mediabunny/dist/bundles/mediabunny.mjs
 +++ b/node_modules/mediabunny/dist/bundles/mediabunny.mjs
-@@ -23784,7 +23784,7 @@ var BaseMediaSampleSink = class {
+@@ -23784,11 +23784,13 @@ var BaseMediaSampleSink = class {
    }
  };
  var computeMaxQueueSize = (decodedSampleQueueSize) => {
@@ -67,16 +211,47 @@ index 9a62e92..5abfb37 100644
 +  return decodedSampleQueueSize === 0 ? 16 : 8;
  };
  var VideoDecoderWrapper = class extends DecoderWrapper {
-   constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
-@@ -23797,6 +23797,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+-  constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
++  constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution, colorSpaceOverride = null, transformPacket = null) {
+     super(onSample, onError);
++    // The sink's packet hook: rewrites packet bytes before they reach the WebCodecs decoder.
++    this.transformPacket = transformPacket;
+     this.codec = codec;
+     this.decoderConfig = decoderConfig;
+     this.rotation = rotation;
+@@ -23797,6 +23799,13 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
      this.customDecoder = null;
      this.customDecoderCallSerializer = new CallSerializer();
      this.customDecoderQueueSize = 0;
++    // The sink's color space override: already merged into `decoderConfig` for WebCodecs, and stamped onto the
++    // samples a custom decoder produces (see restampSample).
++    this.colorSpaceOverride = colorSpaceOverride;
++    this.restampBuffer = null; // Reused across restamps, sized on the first frame.
++    this.restampChain = Promise.resolve(); // Restamps in emission order.
++    this.restampsInFlight = 0;
 +    this.inFlight = 0; // Packets sent to the decoder whose frames have not come back yet.
      this.inputTimestamps = [];
      // Timestamps input into the decoder, sorted.
      this.sampleQueue = [];
-@@ -23874,6 +23875,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -23828,6 +23837,17 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+         if (!(sample instanceof VideoSample)) {
+           throw new TypeError("The argument passed to onSample must be a VideoSample.");
+         }
++        if (this.colorSpaceOverride) {
++          // A custom decoder tags its samples from the bitstream. The override replaces that tag so the
++          // sample draws the way a WebCodecs frame configured with the same color space does. The restamp
++          // copies frame data, so it runs on its own chain: samples stay in order, the pump counts the
++          // ones still copying, and a flush waits for the chain to drain.
++          this.restampsInFlight++;
++          this.restampChain = this.restampChain.then(() => this.restampSample(sample)).then((restamped) => this.finalizeAndEmitSample(restamped), (error) => onError(error)).finally(() => {
++            this.restampsInFlight--;
++          });
++          return;
++        }
+         this.finalizeAndEmitSample(sample);
+       };
+       this.customDecoder.onError = (error) => {
+@@ -23874,6 +23894,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
        const stack = new Error("Decoding error").stack;
        this.decoder = new VideoDecoder({
          output: (frame) => {
@@ -84,8 +259,12 @@ index 9a62e92..5abfb37 100644
            try {
              colorHandler(frame);
            } catch (error) {
-@@ -23893,10 +23895,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
-       return this.customDecoderQueueSize;
+@@ -23890,13 +23911,10 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+   }
+   getDecodeQueueSize() {
+     if (this.customDecoder) {
+-      return this.customDecoderQueueSize;
++      return this.customDecoderQueueSize + this.restampsInFlight;
      } else {
        assert(this.decoder);
 -      return Math.max(
@@ -96,15 +275,83 @@ index 9a62e92..5abfb37 100644
      }
    }
    decode(packet) {
-@@ -23941,6 +23940,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -23941,6 +23959,13 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
            }
          }
        }
++      if (this.transformPacket) {
++          const transformed = this.transformPacket(packet.data, this.decoderConfig);
++          if (transformed) {
++              packet = new EncodedPacket(transformed, packet.type, packet.timestamp, packet.duration);
++          }
++      }
 +      this.inFlight++;
        this.decoder.decode(packet.toEncodedVideoChunk());
        this.decodeAlphaData(packet);
      }
-@@ -24108,6 +24108,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24056,6 +24081,49 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+     sample.setRotation(this.rotation);
+     this.onSample(sample);
+   }
++  /**
++   * Returns `sample` carrying the sink's color space override. A sample over raw planes takes the tag directly:
++   * the VideoFrame it later builds reads `sample.colorSpace`. A sample already wrapping a VideoFrame is rebuilt,
++   * since a VideoFrame's color space is fixed at construction and is what the browser draws it by.
++   */
++  async restampSample(sample) {
++    const override = this.colorSpaceOverride;
++    assert(override);
++    const data = sample._data;
++    if (!(typeof VideoFrame !== "undefined" && data instanceof VideoFrame)) {
++      sample.colorSpace = new VideoSampleColorSpace(override);
++      return sample;
++    }
++    if (data.format === null) {
++      return sample;
++    }
++    const rect = { x: 0, y: 0, width: data.codedWidth, height: data.codedHeight };
++    const size = data.allocationSize({ rect });
++    if (!this.restampBuffer || this.restampBuffer.byteLength < size) {
++      this.restampBuffer = new ArrayBuffer(size);
++    }
++    // The sample is closed on every path: a failed copy or frame build must not leak the decoder's frame.
++    const { timestamp, duration, rotation } = sample;
++    let restamped;
++    try {
++      const layout = await data.copyTo(this.restampBuffer, { rect });
++      restamped = new VideoFrame(new Uint8Array(this.restampBuffer, 0, size), {
++        format: data.format,
++        codedWidth: data.codedWidth,
++        codedHeight: data.codedHeight,
++        layout,
++        visibleRect: data.visibleRect ?? void 0,
++        displayWidth: data.displayWidth,
++        displayHeight: data.displayHeight,
++        timestamp: data.timestamp,
++        duration: data.duration ?? void 0,
++        colorSpace: override
++      });
++    } finally {
++      sample.close();
++    }
++    return new VideoSample(restamped, { timestamp, duration, rotation });
++  }
+   async mergeAlpha(color, alpha) {
+     const resolver = promiseWithResolvers();
+     this.mergeAlphaPromises.push(resolver.promise);
+@@ -24084,6 +24152,11 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+   async flush() {
+     if (this.customDecoder) {
+       await this.customDecoderCallSerializer.call(() => this.customDecoder.flush());
++      // A custom decoder may hand out its last samples a microtask after its flush resolves (the same
++      // ordering the sink's own flush relies on), so drain the chain until nothing is still copying.
++      do {
++        await this.restampChain;
++      } while (this.restampsInFlight > 0);
+     } else {
+       assert(this.decoder);
+       await Promise.all([
+@@ -24108,6 +24181,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
        }
        this.sampleQueue.length = 0;
      }
@@ -112,11 +359,285 @@ index 9a62e92..5abfb37 100644
      this.currentPacketIndex = 0;
      this.raslSkipped = false;
    }
+@@ -24364,6 +24438,18 @@ var validateVideoSinkDecoderOptions = (decoderOptions) => {
+   if (decoderOptions.optimizeForLatency !== void 0 && typeof decoderOptions.optimizeForLatency !== "boolean") {
+     throw new TypeError("decoderOptions.optimizeForLatency, when provided, must be a boolean.");
+   }
++  if (decoderOptions.colorSpace !== void 0) {
++    if (!decoderOptions.colorSpace || typeof decoderOptions.colorSpace !== "object") {
++      throw new TypeError("decoderOptions.colorSpace, when provided, must be an object.");
++    }
++    new VideoSampleColorSpace(decoderOptions.colorSpace);
++  }
++  if (decoderOptions.transformConfig !== undefined && typeof decoderOptions.transformConfig !== "function") {
++      throw new TypeError("decoderOptions.transformConfig, when provided, must be a function.");
++  }
++  if (decoderOptions.transformPacket !== undefined && typeof decoderOptions.transformPacket !== "function") {
++      throw new TypeError("decoderOptions.transformPacket, when provided, must be a function.");
++  }
+ };
+ var VideoSampleSink = class extends BaseMediaSampleSink {
+   /** Creates a new {@link VideoSampleSink} for the given {@link InputVideoTrack}. */
+@@ -24391,12 +24477,19 @@ var VideoSampleSink = class extends BaseMediaSampleSink {
+     let decoderConfig = await this._track.getDecoderConfig();
+     const timeResolution = await this._track.getTimeResolution();
+     assert(codec && decoderConfig);
++    const colorSpaceOverride = this._decoderOptions.colorSpace ?? null;
+     decoderConfig = {
+       ...decoderConfig,
+       hardwareAcceleration: this._decoderOptions.hardwareAcceleration,
+-      optimizeForLatency: this._decoderOptions.optimizeForLatency
++      optimizeForLatency: this._decoderOptions.optimizeForLatency,
++      // The override replaces whatever the track carries, so the decoder emits frames tagged the way the
++      // caller asked, in-band tags included.
++      ...colorSpaceOverride ? { colorSpace: colorSpaceOverride } : {}
+     };
+-    return new VideoDecoderWrapper(onSample, onError, codec, decoderConfig, rotation, timeResolution);
++    if (this._decoderOptions.transformConfig) {
++        decoderConfig = this._decoderOptions.transformConfig(decoderConfig);
++    }
++    return new VideoDecoderWrapper(onSample, onError, codec, decoderConfig, rotation, timeResolution, colorSpaceOverride, this._decoderOptions.transformPacket ?? null);
+   }
+   /** @internal */
+   _createPacketSink() {
+diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs b/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
+index 10786e4..6fe91dd 100644
+--- a/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
++++ b/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
+@@ -23947,8 +23947,10 @@ var Mediabunny = (() => {
+     return decodedSampleQueueSize === 0 ? 40 : 8;
+   };
+   var VideoDecoderWrapper = class extends DecoderWrapper {
+-    constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
++    constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution, colorSpaceOverride = null, transformPacket = null) {
+       super(onSample, onError);
++      // The sink's packet hook: rewrites packet bytes before they reach the WebCodecs decoder.
++      this.transformPacket = transformPacket;
+       this.codec = codec;
+       this.decoderConfig = decoderConfig;
+       this.rotation = rotation;
+@@ -23957,6 +23959,12 @@ var Mediabunny = (() => {
+       this.customDecoder = null;
+       this.customDecoderCallSerializer = new CallSerializer();
+       this.customDecoderQueueSize = 0;
++      // The sink's color space override: already merged into `decoderConfig` for WebCodecs, and stamped onto the
++      // samples a custom decoder produces (see restampSample).
++      this.colorSpaceOverride = colorSpaceOverride;
++      this.restampBuffer = null; // Reused across restamps, sized on the first frame.
++      this.restampChain = Promise.resolve(); // Restamps in emission order.
++      this.restampsInFlight = 0;
+       this.inputTimestamps = [];
+       // Timestamps input into the decoder, sorted.
+       this.sampleQueue = [];
+@@ -23988,6 +23996,17 @@ var Mediabunny = (() => {
+           if (!(sample instanceof VideoSample)) {
+             throw new TypeError("The argument passed to onSample must be a VideoSample.");
+           }
++          if (this.colorSpaceOverride) {
++            // A custom decoder tags its samples from the bitstream. The override replaces that tag so the
++            // sample draws the way a WebCodecs frame configured with the same color space does. The restamp
++            // copies frame data, so it runs on its own chain: samples stay in order, the pump counts the
++            // ones still copying, and a flush waits for the chain to drain.
++            this.restampsInFlight++;
++            this.restampChain = this.restampChain.then(() => this.restampSample(sample)).then((restamped) => this.finalizeAndEmitSample(restamped), (error) => onError(error)).finally(() => {
++              this.restampsInFlight--;
++            });
++            return;
++          }
+           this.finalizeAndEmitSample(sample);
+         };
+         this.customDecoder.onError = (error) => {
+@@ -24050,7 +24069,7 @@ var Mediabunny = (() => {
+     }
+     getDecodeQueueSize() {
+       if (this.customDecoder) {
+-        return this.customDecoderQueueSize;
++        return this.customDecoderQueueSize + this.restampsInFlight;
+       } else {
+         assert(this.decoder);
+         return Math.max(
+@@ -24101,6 +24120,12 @@ var Mediabunny = (() => {
+             }
+           }
+         }
++        if (this.transformPacket) {
++            const transformed = this.transformPacket(packet.data, this.decoderConfig);
++            if (transformed) {
++                packet = new EncodedPacket(transformed, packet.type, packet.timestamp, packet.duration);
++            }
++        }
+         this.decoder.decode(packet.toEncodedVideoChunk());
+         this.decodeAlphaData(packet);
+       }
+@@ -24216,6 +24241,49 @@ var Mediabunny = (() => {
+       sample.setRotation(this.rotation);
+       this.onSample(sample);
+     }
++    /**
++     * Returns `sample` carrying the sink's color space override. A sample over raw planes takes the tag directly:
++     * the VideoFrame it later builds reads `sample.colorSpace`. A sample already wrapping a VideoFrame is rebuilt,
++     * since a VideoFrame's color space is fixed at construction and is what the browser draws it by.
++     */
++    async restampSample(sample) {
++      const override = this.colorSpaceOverride;
++      assert(override);
++      const data = sample._data;
++      if (!(typeof VideoFrame !== "undefined" && data instanceof VideoFrame)) {
++        sample.colorSpace = new VideoSampleColorSpace(override);
++        return sample;
++      }
++      if (data.format === null) {
++        return sample;
++      }
++      const rect = { x: 0, y: 0, width: data.codedWidth, height: data.codedHeight };
++      const size = data.allocationSize({ rect });
++      if (!this.restampBuffer || this.restampBuffer.byteLength < size) {
++        this.restampBuffer = new ArrayBuffer(size);
++      }
++      // The sample is closed on every path: a failed copy or frame build must not leak the decoder's frame.
++      const { timestamp, duration, rotation } = sample;
++      let restamped;
++      try {
++        const layout = await data.copyTo(this.restampBuffer, { rect });
++        restamped = new VideoFrame(new Uint8Array(this.restampBuffer, 0, size), {
++          format: data.format,
++          codedWidth: data.codedWidth,
++          codedHeight: data.codedHeight,
++          layout,
++          visibleRect: data.visibleRect ?? void 0,
++          displayWidth: data.displayWidth,
++          displayHeight: data.displayHeight,
++          timestamp: data.timestamp,
++          duration: data.duration ?? void 0,
++          colorSpace: override
++        });
++      } finally {
++        sample.close();
++      }
++      return new VideoSample(restamped, { timestamp, duration, rotation });
++    }
+     async mergeAlpha(color, alpha) {
+       const resolver = promiseWithResolvers();
+       this.mergeAlphaPromises.push(resolver.promise);
+@@ -24244,6 +24312,11 @@ var Mediabunny = (() => {
+     async flush() {
+       if (this.customDecoder) {
+         await this.customDecoderCallSerializer.call(() => this.customDecoder.flush());
++        // A custom decoder may hand out its last samples a microtask after its flush resolves (the same
++        // ordering the sink's own flush relies on), so drain the chain until nothing is still copying.
++        do {
++          await this.restampChain;
++        } while (this.restampsInFlight > 0);
+       } else {
+         assert(this.decoder);
+         await Promise.all([
+@@ -24524,6 +24597,18 @@ var Mediabunny = (() => {
+     if (decoderOptions.optimizeForLatency !== void 0 && typeof decoderOptions.optimizeForLatency !== "boolean") {
+       throw new TypeError("decoderOptions.optimizeForLatency, when provided, must be a boolean.");
+     }
++    if (decoderOptions.colorSpace !== void 0) {
++      if (!decoderOptions.colorSpace || typeof decoderOptions.colorSpace !== "object") {
++        throw new TypeError("decoderOptions.colorSpace, when provided, must be an object.");
++      }
++      new VideoSampleColorSpace(decoderOptions.colorSpace);
++    }
++    if (decoderOptions.transformConfig !== undefined && typeof decoderOptions.transformConfig !== "function") {
++        throw new TypeError("decoderOptions.transformConfig, when provided, must be a function.");
++    }
++    if (decoderOptions.transformPacket !== undefined && typeof decoderOptions.transformPacket !== "function") {
++        throw new TypeError("decoderOptions.transformPacket, when provided, must be a function.");
++    }
+   };
+   var VideoSampleSink = class extends BaseMediaSampleSink {
+     /** Creates a new {@link VideoSampleSink} for the given {@link InputVideoTrack}. */
+@@ -24551,12 +24636,19 @@ var Mediabunny = (() => {
+       let decoderConfig = await this._track.getDecoderConfig();
+       const timeResolution = await this._track.getTimeResolution();
+       assert(codec && decoderConfig);
++      const colorSpaceOverride = this._decoderOptions.colorSpace ?? null;
+       decoderConfig = {
+         ...decoderConfig,
+         hardwareAcceleration: this._decoderOptions.hardwareAcceleration,
+-        optimizeForLatency: this._decoderOptions.optimizeForLatency
++        optimizeForLatency: this._decoderOptions.optimizeForLatency,
++        // The override replaces whatever the track carries, so the decoder emits frames tagged the way the
++        // caller asked, in-band tags included.
++        ...colorSpaceOverride ? { colorSpace: colorSpaceOverride } : {}
+       };
+-      return new VideoDecoderWrapper(onSample, onError, codec, decoderConfig, rotation, timeResolution);
++      if (this._decoderOptions.transformConfig) {
++          decoderConfig = this._decoderOptions.transformConfig(decoderConfig);
++      }
++      return new VideoDecoderWrapper(onSample, onError, codec, decoderConfig, rotation, timeResolution, colorSpaceOverride, this._decoderOptions.transformPacket ?? null);
+     }
+     /** @internal */
+     _createPacketSink() {
+diff --git a/node_modules/mediabunny/dist/mediabunny.d.ts b/node_modules/mediabunny/dist/mediabunny.d.ts
+index f0667c1..b556ba8 100644
+--- a/node_modules/mediabunny/dist/mediabunny.d.ts
++++ b/node_modules/mediabunny/dist/mediabunny.d.ts
+@@ -5090,6 +5090,21 @@ export declare type VideoSinkDecoderOptions = {
+      * before video frames are output.
+      */
+     optimizeForLatency?: boolean;
++    /**
++     * The color space the decoded frames are tagged with, replacing whatever the track carries. Merged into the
++     * WebCodecs decoder config, and stamped onto the samples a custom decoder produces. Use it to read a file whose
++     * tags the browser would otherwise convert or tone-map, so the drawn pixels are the untouched code values.
++     */
++    colorSpace?: VideoColorSpaceInit;
++    /**
++     * Rewrites the WebCodecs decoder config before the decoder is configured, after the sink's own fields are
++     * merged in. Use it to edit codec-specific data such as the bitstream's in-band color tags.
++     */
++    transformConfig?: (config: VideoDecoderConfig) => VideoDecoderConfig;
++    /**
++     * Rewrites a packet's bytes before they reach the WebCodecs decoder. Return null to send the packet as is.
++     */
++    transformPacket?: (data: Uint8Array, config: VideoDecoderConfig) => Uint8Array | null;
+ };
+ 
+ /**
+diff --git a/node_modules/mediabunny/dist/modules/src/media-sink.d.ts b/node_modules/mediabunny/dist/modules/src/media-sink.d.ts
+index c830d17..1308a21 100644
+--- a/node_modules/mediabunny/dist/modules/src/media-sink.d.ts
++++ b/node_modules/mediabunny/dist/modules/src/media-sink.d.ts
+@@ -129,6 +129,21 @@ export type VideoSinkDecoderOptions = {
+      * before video frames are output.
+      */
+     optimizeForLatency?: boolean;
++    /**
++     * The color space the decoded frames are tagged with, replacing whatever the track carries. Merged into the
++     * WebCodecs decoder config, and stamped onto the samples a custom decoder produces. Use it to read a file whose
++     * tags the browser would otherwise convert or tone-map, so the drawn pixels are the untouched code values.
++     */
++    colorSpace?: VideoColorSpaceInit;
++    /**
++     * Rewrites the WebCodecs decoder config before the decoder is configured, after the sink's own fields are
++     * merged in. Use it to edit codec-specific data such as the bitstream's in-band color tags.
++     */
++    transformConfig?: (config: VideoDecoderConfig) => VideoDecoderConfig;
++    /**
++     * Rewrites a packet's bytes before they reach the WebCodecs decoder. Return null to send the packet as is.
++     */
++    transformPacket?: (data: Uint8Array, config: VideoDecoderConfig) => Uint8Array | null;
+ };
+ /**
+  * A sink that retrieves decoded video samples (video frames) from a video track.
 diff --git a/node_modules/mediabunny/dist/modules/src/media-sink.js b/node_modules/mediabunny/dist/modules/src/media-sink.js
-index da1cc3a..28c15d3 100644
+index da1cc3a..a3bdd0c 100644
 --- a/node_modules/mediabunny/dist/modules/src/media-sink.js
 +++ b/node_modules/mediabunny/dist/modules/src/media-sink.js
-@@ -650,10 +650,11 @@ export class BaseMediaSampleSink {
+@@ -13,7 +13,7 @@ import { InputAudioTrack, InputTrack, InputVideoTrack } from './input-track.js';
+ import { assert, assertNever, CallSerializer, clamp, colorSpaceIsComplete, getInt24, getUint24, insertSorted, isChromium, isFirefox, isNumber, isWebKit, last, mapAsyncGenerator, missingWebCodecsClassMessage, promiseWithResolvers, removeItem, toAsyncIterator, toDataView, toUint8Array, validateAnyIterable, } from './misc.js';
+ import { EncodedPacket } from './packet.js';
+ import { fromAlaw, fromUlaw } from './pcm.js';
+-import { AudioSample, clampCropRectangle, validateCropRectangle, VideoSample, } from './sample.js';
++import { AudioSample, clampCropRectangle, validateCropRectangle, VideoSample, VideoSampleColorSpace, } from './sample.js';
+ const validatePacketRetrievalOptions = (options) => {
+     if (!options || typeof options !== 'object') {
+         throw new TypeError('options must be an object.');
+@@ -650,14 +650,17 @@ export class BaseMediaSampleSink {
      }
  }
  const computeMaxQueueSize = (decodedSampleQueueSize) => {
@@ -131,16 +652,50 @@ index da1cc3a..28c15d3 100644
 +    return decodedSampleQueueSize === 0 ? 16 : 8;
  };
  class VideoDecoderWrapper extends DecoderWrapper {
-     constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
-@@ -666,6 +667,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+-    constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution) {
++    constructor(onSample, onError, codec, decoderConfig, rotation, timeResolution, colorSpaceOverride = null, transformPacket = null) {
+         super(onSample, onError);
++        // The sink's packet hook: rewrites packet bytes before they reach the WebCodecs decoder.
++        this.transformPacket = transformPacket;
+         this.codec = codec;
+         this.decoderConfig = decoderConfig;
+         this.rotation = rotation;
+@@ -666,6 +669,13 @@ class VideoDecoderWrapper extends DecoderWrapper {
          this.customDecoder = null;
          this.customDecoderCallSerializer = new CallSerializer();
          this.customDecoderQueueSize = 0;
++        // The sink's color space override: already merged into `decoderConfig` for WebCodecs, and stamped onto the
++        // samples a custom decoder produces (see restampSample).
++        this.colorSpaceOverride = colorSpaceOverride;
++        this.restampBuffer = null; // Reused across restamps, sized on the first frame.
++        this.restampChain = Promise.resolve(); // Restamps in emission order.
++        this.restampsInFlight = 0;
 +        this.inFlight = 0; // Packets sent to the decoder whose frames have not come back yet.
          this.inputTimestamps = []; // Timestamps input into the decoder, sorted.
          this.sampleQueue = []; // Safari-specific thing, check usage.
          this.currentPacketIndex = 0;
-@@ -756,6 +758,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+@@ -697,6 +707,20 @@ class VideoDecoderWrapper extends DecoderWrapper {
+                 if (!(sample instanceof VideoSample)) {
+                     throw new TypeError('The argument passed to onSample must be a VideoSample.');
+                 }
++                if (this.colorSpaceOverride) {
++                    // A custom decoder tags its samples from the bitstream. The override replaces that tag so the
++                    // sample draws the way a WebCodecs frame configured with the same color space does. The restamp
++                    // copies frame data, so it runs on its own chain: samples stay in order, the pump counts the
++                    // ones still copying, and a flush waits for the chain to drain.
++                    this.restampsInFlight++;
++                    this.restampChain = this.restampChain
++                        .then(() => this.restampSample(sample))
++                        .then(restamped => this.finalizeAndEmitSample(restamped), error => onError(error))
++                        .finally(() => {
++                            this.restampsInFlight--;
++                        });
++                    return;
++                }
+                 this.finalizeAndEmitSample(sample);
+             };
+             // @ts-expect-error It's technically readonly
+@@ -756,6 +780,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
              const stack = new Error('Decoding error').stack;
              this.decoder = new VideoDecoder({
                  output: (frame) => {
@@ -148,7 +703,12 @@ index da1cc3a..28c15d3 100644
                      try {
                          colorHandler(frame);
                      }
-@@ -777,7 +780,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+@@ -773,11 +798,11 @@ class VideoDecoderWrapper extends DecoderWrapper {
+     }
+     getDecodeQueueSize() {
+         if (this.customDecoder) {
+-            return this.customDecoderQueueSize;
++            return this.customDecoderQueueSize + this.restampsInFlight;
          }
          else {
              assert(this.decoder);
@@ -157,15 +717,83 @@ index da1cc3a..28c15d3 100644
          }
      }
      decode(packet) {
-@@ -835,6 +838,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+@@ -835,6 +860,13 @@ class VideoDecoderWrapper extends DecoderWrapper {
                      }
                  }
              }
++            if (this.transformPacket) {
++                const transformed = this.transformPacket(packet.data, this.decoderConfig);
++                if (transformed) {
++                    packet = new EncodedPacket(transformed, packet.type, packet.timestamp, packet.duration);
++                }
++            }
 +            this.inFlight++;
              this.decoder.decode(packet.toEncodedVideoChunk());
              this.decodeAlphaData(packet);
          }
-@@ -1042,6 +1046,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
+@@ -981,6 +1013,49 @@ class VideoDecoderWrapper extends DecoderWrapper {
+         sample.setRotation(this.rotation);
+         this.onSample(sample);
+     }
++    /**
++     * Returns `sample` carrying the sink's color space override. A sample over raw planes takes the tag directly:
++     * the VideoFrame it later builds reads `sample.colorSpace`. A sample already wrapping a VideoFrame is rebuilt,
++     * since a VideoFrame's color space is fixed at construction and is what the browser draws it by.
++     */
++    async restampSample(sample) {
++        const override = this.colorSpaceOverride;
++        assert(override);
++        const data = sample._data;
++        if (!(typeof VideoFrame !== 'undefined' && data instanceof VideoFrame)) {
++            sample.colorSpace = new VideoSampleColorSpace(override);
++            return sample;
++        }
++        if (data.format === null) {
++            return sample; // Opaque frame; nothing to copy.
++        }
++        const rect = { x: 0, y: 0, width: data.codedWidth, height: data.codedHeight };
++        const size = data.allocationSize({ rect });
++        if (!this.restampBuffer || this.restampBuffer.byteLength < size) {
++            this.restampBuffer = new ArrayBuffer(size);
++        }
++        // The sample is closed on every path: a failed copy or frame build must not leak the decoder's frame.
++        const { timestamp, duration, rotation } = sample;
++        let restamped;
++        try {
++            const layout = await data.copyTo(this.restampBuffer, { rect });
++            restamped = new VideoFrame(new Uint8Array(this.restampBuffer, 0, size), {
++                format: data.format,
++                codedWidth: data.codedWidth,
++                codedHeight: data.codedHeight,
++                layout,
++                visibleRect: data.visibleRect ?? undefined,
++                displayWidth: data.displayWidth,
++                displayHeight: data.displayHeight,
++                timestamp: data.timestamp,
++                duration: data.duration ?? undefined,
++                colorSpace: override,
++            });
++        } finally {
++            sample.close();
++        }
++        return new VideoSample(restamped, { timestamp, duration, rotation });
++    }
+     async mergeAlpha(color, alpha) {
+         const resolver = promiseWithResolvers();
+         this.mergeAlphaPromises.push(resolver.promise);
+@@ -1017,6 +1092,11 @@ class VideoDecoderWrapper extends DecoderWrapper {
+     async flush() {
+         if (this.customDecoder) {
+             await this.customDecoderCallSerializer.call(() => this.customDecoder.flush());
++            // A custom decoder may hand out its last samples a microtask after its flush resolves (the same
++            // ordering the sink's own flush relies on), so drain the chain until nothing is still copying.
++            do {
++                await this.restampChain;
++            } while (this.restampsInFlight > 0);
+         }
+         else {
+             assert(this.decoder);
+@@ -1042,6 +1122,7 @@ class VideoDecoderWrapper extends DecoderWrapper {
              }
              this.sampleQueue.length = 0;
          }
@@ -173,3 +801,43 @@ index da1cc3a..28c15d3 100644
          this.currentPacketIndex = 0;
          this.raslSkipped = false;
      }
+@@ -1319,6 +1400,18 @@ const validateVideoSinkDecoderOptions = (decoderOptions) => {
+     if (decoderOptions.optimizeForLatency !== undefined && typeof decoderOptions.optimizeForLatency !== 'boolean') {
+         throw new TypeError('decoderOptions.optimizeForLatency, when provided, must be a boolean.');
+     }
++    if (decoderOptions.colorSpace !== undefined) {
++        if (!decoderOptions.colorSpace || typeof decoderOptions.colorSpace !== 'object') {
++            throw new TypeError('decoderOptions.colorSpace, when provided, must be an object.');
++        }
++        new VideoSampleColorSpace(decoderOptions.colorSpace); // Validates the fields
++    }
++    if (decoderOptions.transformConfig !== undefined && typeof decoderOptions.transformConfig !== 'function') {
++        throw new TypeError('decoderOptions.transformConfig, when provided, must be a function.');
++    }
++    if (decoderOptions.transformPacket !== undefined && typeof decoderOptions.transformPacket !== 'function') {
++        throw new TypeError('decoderOptions.transformPacket, when provided, must be a function.');
++    }
+ };
+ /**
+  * A sink that retrieves decoded video samples (video frames) from a video track.
+@@ -1350,12 +1443,19 @@ export class VideoSampleSink extends BaseMediaSampleSink {
+         let decoderConfig = await this._track.getDecoderConfig();
+         const timeResolution = await this._track.getTimeResolution();
+         assert(codec && decoderConfig);
++        const colorSpaceOverride = this._decoderOptions.colorSpace ?? null;
+         decoderConfig = {
+             ...decoderConfig,
+             hardwareAcceleration: this._decoderOptions.hardwareAcceleration,
+             optimizeForLatency: this._decoderOptions.optimizeForLatency,
++            // The override replaces whatever the track carries, so the decoder emits frames tagged the way the
++            // caller asked, in-band tags included.
++            ...(colorSpaceOverride ? { colorSpace: colorSpaceOverride } : {}),
+         };
+-        return new VideoDecoderWrapper(onSample, onError, codec, decoderConfig, rotation, timeResolution);
++        if (this._decoderOptions.transformConfig) {
++            decoderConfig = this._decoderOptions.transformConfig(decoderConfig);
++        }
++        return new VideoDecoderWrapper(onSample, onError, codec, decoderConfig, rotation, timeResolution, colorSpaceOverride, this._decoderOptions.transformPacket ?? null);
+     }
+     /** @internal */
+     _createPacketSink() {

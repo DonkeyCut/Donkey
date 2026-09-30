@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { GRADE_BASIC_FIELDS } from "@donkeycut/effects-kit";
+import { GRADE_BASIC_FIELDS, GRADE_DETAIL_FIELDS, WHEEL_LABELS, WHEEL_ZONES } from "@donkeycut/effects-kit";
 import { OVERLAY_ANIMATION_TOOLS } from "./AnimationTiles.tools";
 import { EFFECTS_TOOLS } from "./EffectsPanel.tools";
 import { INSPECTOR_TOOLS } from "./Inspector.tools";
@@ -34,6 +34,11 @@ const ITEM_TOOLS = new Set([
   "set_color_curves",
   "set_color_wheels",
   "set_color_hsl",
+  "set_color_lut",
+  "copy_color_grade",
+  "set_source_color",
+  "save_color_grade",
+  "apply_saved_grade",
   "set_overlay_animation",
   "set_overlay_keyframes",
   "set_animation",
@@ -61,7 +66,7 @@ const PLACEMENT = new Set([
   "id", "ids", "clipId", "transitionId", "which", "kind", "effect",
   "start", "end", "in", "out", "at", "t", "track", "lane", "layout",
   "region", "region.x", "region.y", "region.w", "region.h",
-  "clear", "reset", "reset_all", "auto",
+  "clear", "reset", "reset_all", "auto", "assetId",
 ]);
 
 /** A parameter whose panel control reads the document under another name:
@@ -101,23 +106,29 @@ const PANEL_NAME: Record<string, string> = {
   green: "CurveEditor",
   blue: "CurveEditor",
   curve_contrast: "CurveEditor",
-  "shadows.dx": "WheelsTool",
-  "shadows.dy": "WheelsTool",
-  "shadows.luma": "WheelsTool",
-  "midtones.dx": "WheelsTool",
-  "midtones.dy": "WheelsTool",
-  "midtones.luma": "WheelsTool",
-  "highlights.dx": "WheelsTool",
-  "highlights.dy": "WheelsTool",
-  "highlights.luma": "WheelsTool",
-  midtones: "WheelsTool",
+  // The four wheels and their puck/luma parts are the wheel tool.
+  ...Object.fromEntries(
+    WHEEL_ZONES.flatMap((z) => {
+      const name = WHEEL_LABELS[z].toLowerCase();
+      return [name, `${name}.dx`, `${name}.dy`, `${name}.luma`].map((k) => [k, "WheelsTool"]);
+    })
+  ),
   band: "HslTool",
   sat: "HslTool",
+  // The whole-timeline switch is the footer's "Apply to All".
+  all_clips: "clip-grade-apply-all",
+  // A saved grade is picked from the Saved category.
+  preset_id: "clip-grade-category-saved",
+  // The source-colour select.
+  profile: "clip-source-color",
 };
 
-/** The basic grade sliders draw from the registry the tool's parameters are
- * built from, so the panel renders the registry itself. */
-const GRADE_FIELD_IDS = new Set<string>(GRADE_BASIC_FIELDS.map((f) => f.key));
+/** The basic and detail grade sliders draw from the registries the tool's
+ * parameters are built from, so the panel renders the registries themselves. */
+const GRADE_FIELD_IDS = new Map<string, string>([
+  ...GRADE_BASIC_FIELDS.map((f) => [f.key, "GRADE_BASIC_FIELDS"] as const),
+  ...GRADE_DETAIL_FIELDS.map((f) => [f.key, "GRADE_DETAIL_FIELDS"] as const),
+]);
 
 const camel = (name: string) => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
 
@@ -155,7 +166,7 @@ describe("inspector tool fields", () => {
         if (PLACEMENT.has(path) || PLACEMENT.has(leaf)) continue;
         const token =
           PANEL_NAME[path] ??
-          (GRADE_FIELD_IDS.has(path) ? "GRADE_BASIC_FIELDS" : undefined) ??
+          GRADE_FIELD_IDS.get(path) ??
           PANEL_NAME[leaf] ??
           camel(leaf);
         if (!rendered(token)) missing.push(`${tool.name}.${path} (${token})`);

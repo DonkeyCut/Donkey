@@ -38,7 +38,7 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_list",
     description:
-      CLOUD_LIBRARY_IMPORT_DESCRIPTION + " " + "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, and the account's own font files), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
+      CLOUD_LIBRARY_IMPORT_DESCRIPTION + " " + "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, the account's own font files, and its LUT files — .cube/.3dl, offered to every clip as \"lut:<key>\" via set_color_lut), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
     inputSchema: obj({}),
   },
   {

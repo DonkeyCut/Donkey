@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import path from "node:path";
 import { retimeOf } from "@donkeycut/effects-kit";
 import {
+  colorParamsFilter,
+  colorTagArgs,
   narrowSpecToRange,
   runExport,
+  videoCodecArgs,
   type ExportPipelineIO,
   type ExportSpec,
   type RenderHandle,
@@ -13,21 +17,33 @@ import {
 // software encoders, and every ffmpeg run is captured for the assertions.
 /** Every ffmpeg run the pipeline made for a spec, in order; the graph is the
  * one carrying `-filter_complex`. */
+/** Every file the pipeline wrote in the last run, in order. */
+let written: { file: string; data: string }[] = [];
+/** Files staged in the job dir by base name, as an upload would leave them. */
+const stagedFiles = new Map<string, string>();
+/** Source sizes the probe reports, by staged path; absent probes as unknown. */
+const probedDims = new Map<string, { width: number; height: number }>();
+
 const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
   const ffmpegCalls: string[][] = [];
+  written = [];
   // Seconds each turned file was asked to produce, summed off the `-t` of the
   // chunk runs that wrote its pieces, so the bake reads back a whole file.
   const produced = new Map<string, number>();
   const io: ExportPipelineIO = {
     exportSourceFiles: async () => false,
     stat: (async () => ({ isFile: () => true })) as unknown as ExportPipelineIO["stat"],
-    writeFile: (async () => {}) as unknown as ExportPipelineIO["writeFile"],
-    readFile: (async () => new Uint8Array(0)) as unknown as ExportPipelineIO["readFile"],
+    writeFile: (async (file: string, data: string) => {
+      written.push({ file, data });
+    }) as unknown as ExportPipelineIO["writeFile"],
+    readFile: (async (file: string) => {
+      return new TextEncoder().encode(stagedFiles.get(path.basename(file)) ?? "");
+    }) as unknown as ExportPipelineIO["readFile"],
     unlink: (async () => {}) as unknown as ExportPipelineIO["unlink"],
     hasStream: async () => true,
     audioChannels: async (file) => (file.includes("mono") ? 1 : 2),
-    videoColorInfo: async () => null,
     videoDecodeCost: async () => null,
+    videoDimensions: async (file) => probedDims.get(file) ?? null,
     mediaDuration: async (file) => produced.get(file) ?? 0,
     videoEncoder: async (codec) =>
       codec === "hevc" ? "libx265" : codec.startsWith("prores") ? "prores_ks" : "libx264",
@@ -61,6 +77,10 @@ const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
   await runExport(job, spec, (f) => `/media/${f}`, io);
   return ffmpegCalls;
 };
+
+/** The graph without its last line, the delivery's signalling stamped on the
+ * finished frames (colorParamsFilter), for assertions about the chains. */
+const untagged = (g: string[]): string[] => g.filter((l) => !l.endsWith("[vtag]"));
 
 const graphFor = async (over: Partial<ExportSpec>): Promise<string[]> => {
   const runs = await runsFor(over);
@@ -698,7 +718,7 @@ describe("the project background in the filtergraph", () => {
     const g = await graphFor({ clips: [clip("a.mp4", { fit: "fill", flipH: true })] });
     expect(g.join(";")).toContain(":(ih-oh)*0.500,hflip,setsar=1");
     const v = await graphFor({ clips: [clip("a.mp4", { flipV: true })] });
-    expect(v.join(";")).toContain(",vflip,pad=");
+    expect(v.join(";")).toContain(",vflip,setsar=1,format=yuv420p,pad=");
   });
 
   test("no background named keeps the black frame every cut had before", async () => {
@@ -997,5 +1017,460 @@ describe("channel layout", () => {
     expect(stanza("mono-bed.m4a")).toContain("aresample=44100,pan=stereo|c0=c0|c1=c0,aformat=");
     expect(stanza("stereo.mp4")).toContain("aresample=44100,aformat=");
     expect(stanza("stereo.mp4")).not.toContain("pan=");
+  });
+});
+
+describe("clip color in the filtergraph", () => {
+  const graphText = async (over: Partial<ExportSpec>) => untagged(await graphFor(over)).join(";");
+
+  test("an ungraded Rec.709 clip runs no color at all", async () => {
+    const g = await graphText({ clips: [clip("a.mp4")] });
+    expect(g).not.toContain("lut3d");
+    expect(g).not.toContain("gbrp16le");
+    expect(g).not.toContain("colorspace=");
+    expect(g).not.toContain("in_color_matrix");
+  });
+
+  test("a graded clip bakes one LUT and runs it in 16-bit RGB before the pad, then back to BT.709 video", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { grade: { exposure: 10 } }), clip("b.mp4", { grade: { exposure: 10 } })],
+    });
+    const joined = g.join(";");
+    // One .cube for the two clips sharing a recipe.
+    const cubes = written.filter((w) => w.file.endsWith(".cube"));
+    expect(cubes).toHaveLength(1);
+    expect(cubes[0].file).toBe(path.join("/tmp/graph-test", "clip_0.cube"));
+    expect(cubes[0].data).toContain("LUT_3D_SIZE 33");
+    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    // The framing scale spells the file's matrix and range; the picture goes
+    // to 16-bit RGB, through the LUT, and comes back as BT.709 video before
+    // the letterbox pad.
+    expect(line).toMatch(/scale=[^,]*in_color_matrix=bt709:in_range=tv/);
+    const at = (needle: string) => {
+      const i = line.indexOf(needle);
+      expect(i).toBeGreaterThanOrEqual(0);
+      return i;
+    };
+    expect(at("format=gbrp16le")).toBeLessThan(at("lut3d=file="));
+    expect(line).toContain(`lut3d=file='${path.join("/tmp/graph-test", "clip_0.cube")}':interp=tetrahedral`);
+    expect(at("lut3d=file=")).toBeLessThan(at("scale=out_color_matrix=bt709:out_range=tv"));
+    expect(at("scale=out_color_matrix=bt709:out_range=tv")).toBeLessThan(at("format=yuv420p"));
+    expect(at("format=yuv420p")).toBeLessThan(at("pad=1080:1920"));
+    expect(untagged(g).join(";")).not.toContain("colorspace=");
+    expect(joined).not.toContain("lutrgb");
+    expect(joined).not.toContain("hue=");
+  });
+
+  test("a log source converts through the wide LUT with its own matrix, graded or not", async () => {
+    const g = await graphFor({
+      lutSize: 33,
+      lutSizeWide: 65,
+      clips: [clip("log.mov", { color: { profile: "apple-log", matrix: "bt2020nc", fullRange: false } })],
+    });
+    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    expect(line).toMatch(/scale=[^,]*in_color_matrix=bt2020:in_range=tv/);
+    expect(line).toContain("format=gbrp16le,lut3d=file=");
+    expect(written.find((w) => w.file.endsWith(".cube"))!.data).toContain("LUT_3D_SIZE 65");
+  });
+
+  test("an ungraded file in another matrix or range converts in video, with no LUT", async () => {
+    const g = await graphFor({
+      clips: [clip("sd.mp4", { color: { profile: "rec709", matrix: "bt601", fullRange: true } })],
+    });
+    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    expect(line).not.toContain("lut3d");
+    expect(line).toContain("scale:in_color_matrix=bt601:in_range=pc:out_color_matrix=bt709:out_range=tv");
+    expect(line.indexOf("out_range=tv")).toBeLessThan(line.indexOf("pad=1080:1920"));
+  });
+
+  test("sharpen and clarity run on 16-bit luma after the LUT and before the pad", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { grade: { exposure: 5, sharpen: 25, clarity: 30 } })],
+    });
+    const joined = g.join(";");
+    const head = g.find((l) => l.startsWith("[0:v]"))!;
+    expect(head).toContain("lut3d=file=");
+    expect(head).toMatch(/scale=out_color_matrix=bt709:out_range=pc,format=yuv444p16le\[dtic0\]$/);
+    // The detail pass: bases from the input luma, gained detail merged back.
+    expect(joined).toContain("[dtic0]split=6[dtc0o][dtc0ss][dtc0sr][dtc0cs][dtc0cr][dtc0cx]");
+    expect(joined).toMatch(/\[dtc0ss\]gblur=sigma=1\.77\d*:planes=1\[dtc0sb\]/);
+    expect(joined).toContain("[dtc0sr][dtc0sb]blend=c0_mode=grainextract,lutyuv=y='clip((val-32768)*0.750+32768,0,65535)'[dtc0sd]");
+    // Clarity's window at 1920 tall is 43, past guided's reach: a reduced copy.
+    expect(joined).toContain("[dtc0cs]scale='ceil(iw/3)':'ceil(ih/3)':flags=bilinear,guided=radius=14:eps=0.010:planes=1[dtc0cq]");
+    expect(joined).toContain("[dtc0cq][dtc0cx]scale=rw:rh:flags=bilinear[dtc0cb]");
+    expect(joined).toContain("[dtc0cr][dtc0cb]blend=c0_mode=grainextract,lutyuv=y='clip((val-32768)*0.900+32768,0,65535)'[dtc0cd]");
+    expect(joined).toContain("[dtc0o][dtc0sd]blend=c0_mode=grainmerge[dtc0m1]");
+    expect(joined).toContain("[dtc0m1][dtc0cd]blend=c0_mode=grainmerge[dtoc0]");
+    const tail = g.find((l) => l.startsWith("[dtoc0]"))!;
+    expect(tail).toContain("null,scale=in_color_matrix=bt709:in_range=pc:out_color_matrix=bt709:out_range=tv,format=yuv420p,pad=1080:1920");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a fitted 16:9 clip in a 9:16 frame sizes its detail to its own picture", async () => {
+    // The preview runs sharpen and clarity on the whole decoded picture, so
+    // the radii follow the picture's height: 1080 wide at 16:9 is 607.5 tall,
+    // not the 1920 of the frame it letterboxes into.
+    probedDims.set("/media/wide.mp4", { width: 1920, height: 1080 });
+    try {
+      const g = await graphFor({
+        clips: [clip("wide.mp4", { fit: "fit", grade: { sharpen: 25, clarity: 30 } })],
+      });
+      const joined = g.join(";");
+      expect(joined).toMatch(/\[dtc0ss\]gblur=sigma=0\.56\d*:planes=1\[dtc0sb\]/);
+      // A window of 14 fits guided's reach: no reduced copy.
+      expect(joined).toContain("[dtc0cs]guided=radius=14:eps=0.010:planes=1[dtc0cb]");
+      // Covering the frame, the picture is 1920 tall and 3413 wide.
+      const covered = (
+        await graphFor({ clips: [clip("wide.mp4", { fit: "fill", grade: { sharpen: 25 } })] })
+      ).join(";");
+      expect(covered).toMatch(/\[dtc0ss\]gblur=sigma=1\.77\d*:planes=1\[dtc0sb\]/);
+    } finally {
+      probedDims.clear();
+    }
+  });
+
+  test("clarity alone at a small frame runs guided at the picture's own size", async () => {
+    const g = await graphFor({
+      width: 640,
+      height: 360,
+      clips: [clip("a.mp4", { grade: { clarity: 50 } })],
+    });
+    const joined = g.join(";");
+    expect(joined).not.toContain("lut3d");
+    expect(joined).toContain("[dtic0]split=3[dtc0o][dtc0cs][dtc0cr]");
+    expect(joined).toContain("[dtc0cs]guided=radius=8:eps=0.010:planes=1[dtc0cb]");
+    expect(joined).toContain("[dtc0o][dtc0cd]blend=c0_mode=grainmerge[dtoc0]");
+  });
+
+  test("a graded overlay colors before its box pad, and a still keeps its alpha", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 6 })],
+      overlayVideos: [
+        { file: "ov.mp4", in: 0, out: 2, start: 1, track: 1, muted: true, grade: { contrast: 10 },
+          frame: { x: 0.5, y: 0.5, w: 0.5, h: 0.5 }, mask: { file: "mask_ov0.png" } },
+        { file: "still.png", in: 0, out: 2, start: 3, track: 1, muted: true, image: true, grade: { contrast: 10 },
+          color: { profile: "srgb", matrix: "bt709", fullRange: true } },
+      ],
+    });
+    const ov = g.find((l) => l.includes("[ovv0]") || (l.includes("lut3d") && l.includes("540:960")))!;
+    expect(ov).toContain("format=gbrp16le,lut3d=file=");
+    expect(ov.indexOf("out_range=tv")).toBeLessThan(ov.indexOf("pad=540:960"));
+    const still = g.find((l) => l.includes("gbrap16le"))!;
+    expect(still).toContain("format=gbrap16le,lut3d=file=");
+    expect(still).not.toContain("in_color_matrix");
+    // One recipe each: a video and a still share nothing but the grade.
+    expect(written.filter((w) => w.file.endsWith(".cube"))).toHaveLength(1);
+  });
+
+  test("a smoothed slow clip spells the conversion again after its interpolation", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { speed: 0.5, smoothSlow: true, grade: { exposure: 5 } })],
+    });
+    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    expect(line).toContain("minterpolate=");
+    expect(line.indexOf("minterpolate=")).toBeLessThan(line.indexOf("scale:in_color_matrix=bt709:in_range=tv,format=gbrp16le,lut3d"));
+  });
+
+  test("a staged library LUT bakes into the clip's cube, and one that will not read fails naming it", async () => {
+    stagedFiles.set("lut_abc.cube", "TITLE \"warm\"\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n");
+    const g = await graphFor({
+      clips: [clip("a.mp4", { grade: { lut: { id: "lut:abc" } }, color: { profile: "rec709", matrix: "bt709", fullRange: false, lutFile: "lut_abc.cube" } })],
+    });
+    expect(g.join(";")).toContain("lut3d=file=");
+    expect(written.filter((w) => w.file.endsWith(".cube"))).toHaveLength(1);
+    await expect(
+      graphFor({
+        clips: [clip("a.mp4", { grade: { lut: { id: "lut:missing" } }, color: { profile: "rec709", matrix: "bt709", fullRange: false, lutFile: "lut_missing.cube" } })],
+      })
+    ).rejects.toThrow(/The LUT lut_missing\.cube could not be read/);
+  });
+
+  test("a reversed clip's turned copy carries its code values as they are", async () => {
+    const runs = await runsFor({
+      clips: [clip("hdr.mp4", { reverse: true, color: { profile: "hlg", matrix: "bt2020nc", fullRange: false } })],
+    });
+    const chunk = runs.find((a) => a.includes("-ss"))!;
+    expect(chunk[chunk.indexOf("-vf") + 1]).toBe("reverse,format=yuv420p");
+    const enc = runs.find((a) => a.includes("-filter_complex"))!;
+    const graph = enc[enc.indexOf("-filter_complex") + 1];
+    expect(graph).toMatch(/scale=[^,]*in_color_matrix=bt2020:in_range=tv/);
+    expect(graph).toContain("lut3d=file=");
+    expect(untagged(graph.split(";")).join(";")).not.toContain("colorspace=");
+  });
+});
+
+describe("an HDR delivery", () => {
+  const hdrSpec = (over: Partial<ExportSpec> = {}): Partial<ExportSpec> => ({
+    colorSpace: "hlg",
+    codec: "hevc",
+    clips: [clip("a.mp4")],
+    ...over,
+  });
+
+  test("composites at ten bits in HLG: every clip maps into Rec.2020 and comes back as 10-bit video", async () => {
+    const g = await graphFor(hdrSpec());
+    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    // An ungraded Rec.709 clip is a conversion here, so it takes the LUT.
+    expect(line).toMatch(/scale=[^,]*in_color_matrix=bt709:in_range=tv/);
+    expect(line).toContain("format=gbrp16le,lut3d=file=");
+    expect(line).toContain("scale=out_color_matrix=bt2020:out_range=tv");
+    expect(line).toContain("format=yuv420p10le");
+    expect(g.join(";")).not.toContain("format=yuv420p,");
+    expect(g.join(";")).not.toContain("format=yuv420p[");
+    const cubes = written.filter((w) => w.file.endsWith(".cube")).map((w) => path.basename(w.file));
+    expect(cubes).toContain("clip_0.cube");
+    expect(cubes).toContain("graphics.cube");
+    expect(cubes).not.toContain("hlg_to_pq.cube");
+  });
+
+  test("an HLG file ungraded runs no LUT, and a graded one grades in place", async () => {
+    const hlg = { profile: "hlg" as const, matrix: "bt2020nc" as const, fullRange: false };
+    const plain = await graphFor(hdrSpec({ clips: [clip("h.mp4", { color: hlg })] }));
+    expect(plain.find((l) => l.startsWith("[0:v]"))).not.toContain("lut3d");
+    const graded = await graphFor(hdrSpec({ clips: [clip("h.mp4", { color: hlg, grade: { exposure: 10 } })] }));
+    const line = graded.find((l) => l.startsWith("[0:v]"))!;
+    expect(line).toMatch(/scale=[^,]*in_color_matrix=bt2020:in_range=tv/);
+    expect(line).toContain("lut3d=file=");
+    expect(line).toContain("scale=out_color_matrix=bt2020:out_range=tv");
+  });
+
+  test("graphics take the sRGB to HLG lattice before they overlay, and overlays blend at ten bits", async () => {
+    const g = await graphFor(
+      hdrSpec({
+        duration: 4,
+        overlays: [{ file: "o0.png", start: 0, end: 4 }],
+        captions: [{ file: "cap1.png", start: 0, end: 2 }],
+      })
+    );
+    const joined = g.join(";");
+    const gfxLines = g.filter((l) => l.includes("format=gbrap16le,lut3d=file="));
+    expect(gfxLines.length).toBeGreaterThanOrEqual(2);
+    expect(gfxLines[0]).toContain(path.join("/tmp/graph-test", "graphics.cube"));
+    expect(gfxLines[0]).toMatch(/\[gfx\d+\]$/);
+    const graphics = written.find((w) => w.file.endsWith("graphics.cube"))!;
+    expect(graphics.data).toContain("LUT_3D_SIZE 33");
+    // The lattice's last node: sRGB white sits at HLG reference white.
+    const last = graphics.data.trim().split("\n").at(-1)!.split(" ").map(Number);
+    for (const v of last) expect(Math.abs(v - 0.75)).toBeLessThan(2e-4);
+    expect(joined).toMatch(/overlay=[^\[]*:format=yuv420p10/);
+    expect(joined).not.toMatch(/overlay=[^\[]*:format=yuv420p\b(?!10)/);
+  });
+
+  test("a PQ delivery ends with the fixed HLG to PQ pass and carries HDR10 metadata", async () => {
+    const runs = await runsFor(hdrSpec({ colorSpace: "pq" }));
+    const enc = runs.find((a) => a.includes("-filter_complex"))!;
+    const graph = enc[enc.indexOf("-filter_complex") + 1];
+    const pq = graph.split(";").find((l) => l.includes("hlg_to_pq.cube"))!;
+    expect(pq).toContain("scale=in_color_matrix=bt2020:in_range=tv,format=gbrp16le,lut3d=file=");
+    expect(pq).toContain("scale=out_color_matrix=bt2020:out_range=tv,format=yuv420p10le[vpq]");
+    expect(written.find((w) => w.file.endsWith("hlg_to_pq.cube"))!.data).toContain("LUT_3D_SIZE 65");
+    expect(arg(enc, "-x265-params")).toContain("transfer=smpte2084");
+    expect(arg(enc, "-x265-params")).toContain("hdr10=1");
+    expect(arg(enc, "-x265-params")).toContain("master-display=G(13250,34500)");
+    expect(arg(enc, "-x265-params")).toContain("max-cll=1000,400");
+    expect(arg(enc, "-color_trc")).toBe("smpte2084");
+    expect(arg(enc, "-bsf:v")).toBe("hevc_metadata=colour_primaries=9:transfer_characteristics=16:matrix_coefficients=9:video_full_range_flag=0");
+  });
+
+  test("the worker's HEVC is Main 10 with its color in the bitstream and the container", async () => {
+    const args = await encodeRun(hdrSpec());
+    expect(arg(args, "-c:v")).toBe("libx265");
+    expect(arg(args, "-pix_fmt")).toBe("yuv420p10le");
+    expect(arg(args, "-profile:v")).toBe("main10");
+    expect(arg(args, "-tag:v")).toBe("hvc1");
+    const params = arg(args, "-x265-params");
+    expect(params).toContain("colorprim=bt2020");
+    expect(params).toContain("transfer=arib-std-b67");
+    expect(params).toContain("colormatrix=bt2020nc");
+    expect(params).not.toContain("hdr10");
+    expect(arg(args, "-colorspace")).toBe("bt2020nc");
+    expect(arg(args, "-color_primaries")).toBe("bt2020");
+    expect(arg(args, "-color_trc")).toBe("arib-std-b67");
+    expect(arg(args, "-color_range")).toBe("tv");
+    expect(arg(args, "-bsf:v")).toContain("transfer_characteristics=18");
+    expect(args.join(" ")).not.toContain("hlg_to_pq");
+  });
+
+  test("the Mac's HEVC is Main 10 over p010, PQ with no static metadata", () => {
+    const spec = { fps: 30, crf: 24, preset: "veryfast", codec: "hevc", colorSpace: "pq", width: 1080, height: 1920 } as ExportSpec;
+    const args = videoCodecArgs("hevc_videotoolbox", spec);
+    expect(arg(args, "-c:v")).toBe("hevc_videotoolbox");
+    expect(arg(args, "-profile:v")).toBe("main10");
+    expect(arg(args, "-pix_fmt")).toBe("p010le");
+    expect(arg(args, "-tag:v")).toBe("hvc1");
+    expect(arg(args, "-bsf:v")).toContain("transfer_characteristics=16");
+    expect(args.join(" ")).not.toContain("master-display");
+    expect(colorTagArgs(spec)).toEqual(["-color_range", "tv", "-colorspace", "bt2020nc", "-color_primaries", "bt2020", "-color_trc", "smpte2084"]);
+    expect(colorTagArgs({ colorSpace: "hlg" })[7]).toBe("arib-std-b67");
+    expect(colorTagArgs({})).toEqual(["-color_range", "tv", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]);
+  });
+
+  test("ProRes carries HDR at ten bits with the Rec.2020 tags", async () => {
+    const args = await encodeRun(hdrSpec({ codec: "prores", container: "mov", audioCodec: "pcm" }));
+    expect(arg(args, "-c:v")).toBe("prores_ks");
+    expect(arg(args, "-pix_fmt")).toBe("yuv422p10le");
+    expect(arg(args, "-color_trc")).toBe("arib-std-b67");
+    expect(arg(args, "-colorspace")).toBe("bt2020nc");
+  });
+
+  test("H.264 is refused", async () => {
+    await expect(runsFor(hdrSpec({ codec: "h264" }))).rejects.toThrow(/H\.264 is 8-bit/);
+    await expect(runsFor(hdrSpec({ codec: undefined }))).rejects.toThrow(/H\.264 is 8-bit/);
+    const spec = { fps: 30, crf: 24, preset: "veryfast", codec: "h264", colorSpace: "hlg" } as ExportSpec;
+    expect(() => videoCodecArgs("libx264", spec)).toThrow(/H\.264 is 8-bit/);
+    expect(() => videoCodecArgs("h264_videotoolbox", spec)).toThrow(/H\.264 is 8-bit/);
+  });
+
+  /** Every alpha-carrying segment kind at once: a painted mask on a keyed,
+   * shadowed track-0 clip, a subject-matted clip, a removal clip, a masked
+   * keyed overlay, and a subject-trimmed element. */
+  const alphaSpec = (over: Partial<ExportSpec> = {}): Partial<ExportSpec> => ({
+    duration: 12,
+    clips: [
+      clip("a.mp4", {
+        mask: { file: "mask.png" },
+        kf: [{ t: 0, x: 0.5, y: 0.5, scale: 1, rotation: 10, opacity: 1 }],
+        shadow: { file: "shadow.png" },
+      }),
+      clip("b.mp4", { mask: { subject: { feather: 1 } } }),
+      clip("c.mp4", { removal: { rgb: "rm_rgb.mov", alpha: "rm_a.mov" } }),
+    ],
+    overlayVideos: [
+      {
+        file: "o.mp4",
+        in: 0,
+        out: 2,
+        start: 1,
+        track: 1,
+        muted: true,
+        frame: { x: 0.5, y: 0.5, w: 0.4, h: 0.4 },
+        mask: { file: "omask.png" },
+        kf: [{ t: 0, x: 0.5, y: 0.5, scale: 1, rotation: 5, opacity: 1 }],
+      },
+    ],
+    overlays: [
+      {
+        frames: [{ file: "f0.png", duration: 0.5 }],
+        blank: "blank.png",
+        x: 0,
+        y: 0,
+        start: 1,
+        end: 2,
+        subject: { invert: true },
+        lane: 0,
+      },
+    ],
+    behindMask: { file: "matte.mp4", from: 0 },
+    ...over,
+  });
+
+  test("alpha segments hold ten bits: masks merge as planes, multiply as a blend, and no rgba or alphamerge hop remains", async () => {
+    const g = await graphFor(hdrSpec(alphaSpec()));
+    const joined = g.join(";");
+    expect(joined).not.toContain("format=rgba");
+    expect(joined).not.toContain("alphamerge");
+    expect(joined).not.toContain("alphaextract");
+    // An 8-bit mask widens through 8-bit gray, which is exact, and nothing
+    // reaches the alpha filters below ten bits.
+    expect(joined).not.toMatch(/format=gray[,\]](?!format=gray10le)/);
+    expect(joined).not.toMatch(/format=yuva?4[24][04]p[,\]]/);
+    // Every mask reaches the alpha filters as a four-plane copy carrying the
+    // composite's own tags, so negotiation never converts it on the way in.
+    const carrier = "mergeplanes=0x00000000:format=yuva444p10le,setparams=range=tv:colorspace=bt2020nc";
+    const multiply = "blend=c0_mode=normal:c1_mode=normal:c2_mode=normal:c3_mode=multiply";
+    // Painted mask on track 0: the mask is ten-bit gray, the segment joins
+    // the alpha family tagged like the video, the multiply is per plane.
+    expect(joined).toContain("setsar=1,format=gray,format=gray10le[cmk0]");
+    expect(joined).toContain(`[cmk0]${carrier}[cm0k]`);
+    expect(joined).toContain("format=yuva444p10le,setparams=range=tv:colorspace=bt2020nc[cm0c]");
+    expect(joined).toContain(`[cm0c][cm0k]${multiply}[cmc0]`);
+    // The subject matte is ten-bit gray at the source and multiplies the same way.
+    expect(joined).toMatch(/format=gray10le,tpad=start_duration=0\.000:color=black\[bh_src\]/);
+    expect(joined).toContain(`[cs1c][cs1k]${multiply}[csc1]`);
+    // A removal clip's keyed pair: the color piece converts with the
+    // composite's matrix, the luma piece lands in the alpha plane by mergeplanes.
+    expect(joined).toContain("scale=out_color_matrix=bt2020:out_range=tv,format=yuva444p10le[rvc2]");
+    expect(joined).toContain("format=gray10le[rva2]");
+    expect(joined).toContain("[rvc2][rv2k]mergeplanes=0x00010210:format=yuva444p10le,tpad=stop_mode=clone:stop_duration=1[rvs2]");
+    // Shadow PNG, masked keyed overlay, subject-trimmed element.
+    expect(joined).toContain("scale=out_color_matrix=bt2020:out_range=tv,format=yuva444p10le[csh0]");
+    expect(joined).toContain(`[om0c][om0k]${multiply},format=yuva420p10le[omc0]`);
+    expect(joined).toMatch(/\[omc0\]format=yuva444p10le,setparams=range=tv:colorspace=bt2020nc,rotate=/);
+    expect(joined).toContain(`[oe0c][oe0k]${multiply},format=yuva420p10le[oes0]`);
+  });
+
+  test("nothing overlays onto a main that carries alpha: a pose lands as color and alpha, each on an opaque backdrop", async () => {
+    // ffmpeg's ten-bit overlay onto a main with alpha unpremultiplies with
+    // eight-bit constants: a keyed pose on a clear frame came out at a
+    // quarter of its brightness. The posed picture changes size frame by
+    // frame, so its alpha is read back after it lands, off a zero frame and
+    // a full one.
+    const g = await graphFor(
+      hdrSpec(
+        alphaSpec({
+          clips: [
+            clip("a.mp4", { kf: [{ t: 0, x: 0.5, y: 0.5, scale: 1, rotation: 10, opacity: 1 }] }),
+            clip("c.mp4", { removal: { rgb: "rm_rgb.mov", alpha: "rm_a.mov" }, animOut: { style: "pop", seconds: 0.5 } }),
+          ],
+          overlayVideos: [
+            {
+              file: "o.mp4", in: 0, out: 2, start: 1, track: 1, muted: true,
+              frame: { x: 0.5, y: 0.5, w: 0.4, h: 0.4 },
+              mask: { subject: { feather: 1 } },
+              kf: [{ t: 0, x: 0.5, y: 0.5, scale: 1, rotation: 5, opacity: 1 }],
+            },
+          ],
+        })
+      )
+    );
+    const joined = g.join(";");
+    expect(joined).not.toContain("black@0.0:s=");
+    expect(joined).toContain("[ckt0]format=yuva444p10le,split=3[ckb0c][ckb0z][ckb0f]");
+    expect(joined).toContain("[ckb0c]format=yuv444p10le,setparams=range=tv:colorspace=bt2020nc[ckb0co]");
+    expect(joined).toMatch(/\[ckb0zb\]\[ckb0z\]overlay=[^\[]*format=yuv444p10\[ckb0zp\]/);
+    expect(joined).toContain("[ckb0fp][ckb0zp]blend=all_mode=subtract[ckb0inv]");
+    expect(joined).toContain("[ckb0ff][ckb0inv]blend=all_mode=subtract[ckb0ap]");
+    expect(joined).toContain("[ckb0cp][ckb0ap]mergeplanes=0x00010210:format=yuva444p10le[ckp0]");
+    expect(joined).toContain("[osb0cp][osb0ap]mergeplanes=0x00010210:format=yuva444p10le[osp0]");
+    // The removal clip's pop lands on the bare frame, opaque in format.
+    expect(joined).toMatch(/color=c=black:s=1080x1920:r=30:d=0\.500,format=yuv444p10le\[xbc1_tail\]/);
+    const mains = [...joined.matchAll(/\[([^\]]+)\]\[[^\]]+\]overlay=/g)].map((m) => m[1]);
+    for (const main of mains) {
+      const made = g.find((l) => l.endsWith(`[${main}]`)) ?? "";
+      expect(made).not.toMatch(/format=yuva[^,\[]*\[[^\]]+\]$/);
+    }
+  });
+
+  test("the finished frames carry the delivery's signalling, so a ProRes MOV gets its colr atom", async () => {
+    const hlg = await graphFor(hdrSpec({ codec: "prores", container: "mov", audioCodec: "pcm" }));
+    expect(hlg.at(-1)).toMatch(/^\[v\w*\]setparams=range=tv:colorspace=bt2020nc:color_primaries=bt2020:color_trc=arib-std-b67\[vtag\]$/);
+    const pq = await graphFor(hdrSpec({ colorSpace: "pq" }));
+    expect(pq.at(-1)).toBe("[vpq]setparams=range=tv:colorspace=bt2020nc:color_primaries=bt2020:color_trc=smpte2084[vtag]");
+    const sdr = await graphFor({ codec: "prores", container: "mov", audioCodec: "pcm", clips: [clip("a.mp4")] });
+    expect(sdr.at(-1)).toMatch(/^\[v\w*\]setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709\[vtag\]$/);
+    const enc = (await runsFor(hdrSpec())).find((a) => a.includes("-filter_complex"))!;
+    expect(enc[enc.indexOf("-map") + 1]).toBe("[vtag]");
+    expect(colorParamsFilter({ colorSpace: "hlg" })).toContain("color_trc=arib-std-b67");
+  });
+
+  test("the same segments in SDR keep their rgba chains", async () => {
+    const g = await graphFor(alphaSpec({ codec: "h264" }));
+    const joined = untagged(g).join(";");
+    expect(g.at(-1)).toContain("setparams=range=tv:colorspace=bt709");
+    expect(joined).not.toContain("mergeplanes");
+    expect(joined).not.toContain("setparams");
+    expect(joined).not.toContain("gray10le");
+    expect(joined).toContain("[cmk0]blend=all_mode=multiply");
+    expect(joined).toContain("[rvc2][rva2]alphamerge,tpad=stop_mode=clone:stop_duration=1[rvs2]");
+    expect(joined).toContain("[oe10]alphaextract,fps=30[oea0]");
+    expect(joined).toContain("alphamerge,format=yuva420p[oes0]");
+  });
+
+  test("an SDR delivery is untouched: BT.709 tags, 8-bit planes, no graphics lattice", async () => {
+    const args = await encodeRun({ codec: "hevc" });
+    expect(arg(args, "-pix_fmt")).toBe("yuv420p");
+    expect(arg(args, "-color_trc")).toBe("bt709");
+    expect(args).not.toContain("-bsf:v");
+    expect(written.some((w) => w.file.endsWith("graphics.cube"))).toBe(false);
   });
 });

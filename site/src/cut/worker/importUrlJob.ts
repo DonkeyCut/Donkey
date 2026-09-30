@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import type { Prisma } from "@/generated/prisma/client";
 import { deleteLibraryAssetCascade } from "../server/cloud/library";
-import { dedupeName, inspirationFolderId, safeFileName, typeOf } from "../server/cloud/util";
+import { libraryTypeOf } from "../lib/libraryFileType";
+import { dedupeName, inspirationFolderId, safeFileName } from "../server/cloud/util";
 import type { LibraryAsset } from "../server/library";
 import { probeDuration } from "../server/frames";
 import { download } from "../server/urlDownload";
@@ -199,7 +200,7 @@ async function addLibraryRow(
   posterFile?: string,
   filing?: { folderId: string; origin: "inspiration" }
 ): Promise<LibraryAsset> {
-  const type = typeOf(fileName);
+  const type = libraryTypeOf(fileName);
   if (!type) throw new Error("Unsupported file type.");
   const duration = type === "image" ? 0 : await probeDuration(localFile);
   const dims = type === "audio" ? null : await videoDimensions(localFile);

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { artifactLifecycle, artifactUsageBytes } from "./artifactPolicy";
 
 test("derived playback and scratch are distinct from retained media", () => {
-  for (const kind of ["preview", "card", "hls"]) expect(artifactLifecycle(kind)).toBe("derived");
+  for (const kind of ["preview", "card", "hls", "proxy"]) expect(artifactLifecycle(kind)).toBe("derived");
   expect(artifactLifecycle("overlay")).toBe("scratch");
   for (const kind of ["media", "export", "library"]) expect(artifactLifecycle(kind)).toBe("retained");
 });

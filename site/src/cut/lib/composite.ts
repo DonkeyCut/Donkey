@@ -19,8 +19,10 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { applyLutToImageData, applyMaskToCanvas, buildGradeLut, gradeKey, gradeNeedsLut, gradeTint, gradeToCssFilter, grainTile, isNeutralGrade, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type GradeLut } from "@donkeycut/effects-kit";
+import { applyDetail, applyLutToImageData, applyMaskToCanvas, detailActive, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
+import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
+import { clipRecipe, peekClipLut, requestClipLut, type ClipLut, type RecipeSource } from "./lutBuild";
 import { createRasterCanvas } from "./raster";
 import { clipCovers, clipPosed, clipPoseAt, clipZoom, contentRect, DEFAULT_BACKGROUND, isFullRect, rectOf, shadowInk } from "./types";
 import type { ClipShadow, FrameRect, TransitionStyle, VideoClip } from "./types";
@@ -35,7 +37,16 @@ import type { ClipShadow, FrameRect, TransitionStyle, VideoClip } from "./types"
 export type Frame =
   | { kind: "missing" }
   | { kind: "pending" }
-  | { kind: "ready"; image: CanvasImageSource; width: number; height: number };
+  | {
+      kind: "ready";
+      image: CanvasImageSource;
+      width: number;
+      height: number;
+      /** What these pixels' code values mean, from the reader that decoded
+       * them. A frame held across a move to another file keeps its own;
+       * absent, the clip's `sourceProvider` answers. */
+      source?: RecipeSource;
+    };
 
 export const MISSING_FRAME: Frame = { kind: "missing" };
 export const PENDING_FRAME: Frame = { kind: "pending" };
@@ -66,55 +77,12 @@ type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 /** The grain tile advances on this cadence, in seconds per step. */
 const GRAIN_STEP = 0.08;
 
-/** Compiled grade LUTs, shared across compositors and rebuilt only when a
- * grade actually changes. A cut rarely holds more than a handful of distinct
- * grades at once; the cap just bounds a long editing session. */
-const lutCache = new Map<string, GradeLut | null>();
-const LUT_CACHE_MAX = 24;
+/** The source every clip renders as when nothing says otherwise: Rec.709
+ * display values, which need no conversion. */
+const REC709_SOURCE: RecipeSource = { profile: "rec709" };
 
-/** What a grade object means to the renderer, memoized on the object itself.
- * Every store edit hands out a fresh grade, so identity is a safe key — and
- * the reads that decide the path (neutral? LUT? which LUT?) each normalize the
- * grade, which is far too much allocation to repeat per clip per frame. */
-interface GradeFacts {
-  neutral: boolean;
-  needsLut: boolean;
-  key: string;
-}
-const gradeFacts = new WeakMap<object, GradeFacts>();
-
-function factsFor(grade: VideoClip["grade"]): GradeFacts | null {
-  if (!grade) return null;
-  let facts = gradeFacts.get(grade);
-  if (!facts) {
-    facts = {
-      neutral: isNeutralGrade(grade),
-      needsLut: gradeNeedsLut(grade),
-      key: gradeKey(grade) ?? "",
-    };
-    gradeFacts.set(grade, facts);
-  }
-  return facts;
-}
-
-function lutForGrade(grade: VideoClip["grade"], key: string): { lut: GradeLut; key: string } | null {
-  if (!key) return null;
-  if (lutCache.has(key)) {
-    const hit = lutCache.get(key)!;
-    // Re-insert so the cap evicts the least recently used grade, never one the
-    // cut is still playing.
-    lutCache.delete(key);
-    lutCache.set(key, hit);
-    return hit ? { lut: hit, key } : null;
-  }
-  const lut = buildGradeLut(grade);
-  if (lutCache.size >= LUT_CACHE_MAX) {
-    const oldest = lutCache.keys().next().value;
-    if (oldest !== undefined) lutCache.delete(oldest);
-  }
-  lutCache.set(key, lut);
-  return lut ? { lut, key } : null;
-}
+/** How many clips a compositor remembers the last drawn LUT for. */
+const LAST_LUT_MAX = 64;
 
 export class FrameCompositor {
   /** Scratch buffers, kept for the compositor's life: the grade pass, the
@@ -145,6 +113,33 @@ export class FrameCompositor {
    * `removalLookB`. */
   private removalLookA: Surface | null = null;
   private removalLookB: Surface | null = null;
+  /** The pixel pass of the grade's spatial controls, when the GPU cannot
+   * run it: a scratch the CPU reads and writes. */
+  private detailScratch: Surface | null = null;
+
+  /** What a clip's code values mean — its source profile, and whatever the
+   * decode route adds — so the compositor can build the clip's color recipe.
+   * Absent, every clip is Rec.709. */
+  sourceProvider: ((clip: VideoClip) => RecipeSource) | null = null;
+
+  /** The project's delivery space, which the recipe bakes toward. */
+  output: OutputSpace = "sdr";
+
+  /**
+   * How a LUT that is not in hand is handled. `live` (the preview) never
+   * waits: the build goes off the thread and the clip draws through the last
+   * LUT it had, or plain, until it lands and `wake` repaints. `exact` (an
+   * export, a baked layer) builds on this thread, so every frame is drawn
+   * through its own LUT.
+   */
+  colorMode: "live" | "exact" = "live";
+
+  /** Repaint request, fired when a LUT built off the thread lands. */
+  wake: (() => void) | null = null;
+
+  /** Per clip, the key of the LUT it last drew through: what stands in while
+   * a newer one builds. Bounded; the LUTs themselves live in the cache. */
+  private lastLut = new Map<string, string>();
 
   /** Where a subject-masked clip's person matte comes from: the host hands a
    * reader over the canvas as it stands (the layers beneath the clip), so
@@ -213,7 +208,8 @@ export class FrameCompositor {
       | "removalSil"
       | "removalInk"
       | "removalLookA"
-      | "removalLookB",
+      | "removalLookB"
+      | "detailScratch",
     w: number,
     h: number
   ): { surface: Surface; resized: boolean } {
@@ -231,10 +227,24 @@ export class FrameCompositor {
     return { surface, resized };
   }
 
+  /** The frame color as the composite holds it: as is in SDR, and mapped
+   * like every other sRGB graphic when the composite is HLG. One conversion
+   * per color, held for the frames that follow. */
+  private backgroundFill: { hex: string; output: OutputSpace; fill: string } | null = null;
+
+  private backgroundFor(): string {
+    if (this.output === "sdr") return this.background;
+    const held = this.backgroundFill;
+    if (held && held.hex === this.background && held.output === this.output) return held.fill;
+    const fill = hexToHlgHex(this.background);
+    this.backgroundFill = { hex: this.background, output: this.output, fill };
+    return fill;
+  }
+
   clear() {
     const ctx = this.ctx();
     if (!ctx) return;
-    ctx.fillStyle = this.background;
+    ctx.fillStyle = this.backgroundFor();
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
   }
 
@@ -259,11 +269,49 @@ export class FrameCompositor {
     this.fillVeil("0,0,0", amount, rect);
   }
 
+  /** The recipe a clip renders through: its source, its grade, the output.
+   * `frameSource` is the drawn frame's own, when its reader named one. */
+  recipeFor(clip: VideoClip | undefined, frameSource?: RecipeSource): ClipColorRecipe {
+    const source = frameSource ?? (clip && this.sourceProvider?.(clip)) ?? REC709_SOURCE;
+    return clipRecipe(source, clip?.grade, this.output, this.colorMode === "live");
+  }
+
   /**
-   * The clip's picture with its color grade and look grading applied, or the
-   * raw image when there is nothing to apply. Mirrors the export's chain order
-   * — grade first (lutrgb/hue), then the look's color pass — as CSS filters,
-   * with the grade's warm tint as a multiply pass, and source alpha restored so
+   * The LUT a clip draws through this frame: its own when it is in hand,
+   * the last one it drew through while a newer build is out, and none for
+   * an identity recipe or a clip whose first LUT has not landed yet.
+   */
+  private lutFor(clip: VideoClip | undefined, recipe: ClipColorRecipe): ClipLut | null {
+    const got = requestClipLut(recipe, {
+      exact: this.colorMode === "exact",
+      wake: this.wake ?? undefined,
+    });
+    if (got === null) {
+      if (clip) this.lastLut.delete(clip.id);
+      return null;
+    }
+    if (got) {
+      if (clip && this.lastLut.get(clip.id) !== got.key) {
+        this.lastLut.delete(clip.id);
+        this.lastLut.set(clip.id, got.key);
+        if (this.lastLut.size > LAST_LUT_MAX) {
+          const oldest = this.lastLut.keys().next().value;
+          if (oldest !== undefined) this.lastLut.delete(oldest);
+        }
+      }
+      return got;
+    }
+    const last = clip && this.lastLut.get(clip.id);
+    return last ? (peekClipLut(last) ?? null) : null;
+  }
+
+  /**
+   * The clip's picture with its color and look applied, or the raw image
+   * when there is nothing to apply. The color is one LUT per clip — source
+   * conversion, library LUT and grade baked together — applied on the GPU
+   * (the CPU where there is none), then the grade's sharpen and clarity as a
+   * spatial pass, then the look's color pass as a canvas filter, in the order
+   * the export's chain runs. Source alpha rides through every pass, so
    * transparent stills keep their transparency. The look's post passes
    * (vignette, grain, glow…) draw over the composited layer instead.
    */
@@ -271,61 +319,55 @@ export class FrameCompositor {
     frame: Extract<Frame, { kind: "ready" }>,
     clip: VideoClip | undefined
   ): CanvasImageSource {
-    const grade = clip?.grade;
-    const facts = factsFor(grade);
+    const recipe = this.recipeFor(clip, frame.source);
+    const compiled = this.lutFor(clip, recipe);
+    const detail = detailActive(clip?.grade) ? clip!.grade! : null;
     const lookCss = lookCssFilter(clip?.look, clip?.lookAmount);
-    if ((!facts || facts.neutral) && !lookCss) return frame.image;
+    if (!compiled && !detail && !lookCss) return frame.image;
     const w = frame.width;
     const h = frame.height;
+    let picture: CanvasImageSource = frame.image;
+    if (compiled) {
+      const gpu = applyLutGpu(picture, w, h, compiled.lut, compiled.key);
+      if (gpu) {
+        picture = gpu as CanvasImageSource;
+      } else {
+        const { surface: pixels } = this.scratch("gradeLutScratch", w, h);
+        const pctx = pixels.getContext("2d") as Ctx | null;
+        if (!pctx) return frame.image;
+        pctx.clearRect(0, 0, w, h);
+        pctx.drawImage(picture, 0, 0, w, h);
+        const img = pctx.getImageData(0, 0, w, h);
+        applyLutToImageData(img.data, compiled.lut);
+        pctx.putImageData(img, 0, 0);
+        picture = pixels as CanvasImageSource;
+      }
+    }
+    if (detail) {
+      const gpu = applyDetailGpu(picture, w, h, detail);
+      if (gpu) {
+        picture = gpu as CanvasImageSource;
+      } else {
+        const { surface: pixels } = this.scratch("detailScratch", w, h);
+        const pctx = pixels.getContext("2d") as Ctx | null;
+        if (!pctx) return picture;
+        pctx.clearRect(0, 0, w, h);
+        pctx.drawImage(picture, 0, 0, w, h);
+        const img = pctx.getImageData(0, 0, w, h);
+        applyDetail(img.data, w, h, detail);
+        pctx.putImageData(img, 0, 0);
+        picture = pixels as CanvasImageSource;
+      }
+    }
+    if (!lookCss) return picture;
     const { surface: scratch } = this.scratch("gradeCanvas", w, h);
     const ctx = scratch.getContext("2d") as Ctx | null;
-    // Without ctx.filter support, skip the whole treatment rather than
-    // half-applying the tint.
-    if (!ctx || !("filter" in ctx)) return frame.image;
+    // A context with no filter support draws the color without the look.
+    if (!ctx || !("filter" in ctx)) return picture;
     ctx.clearRect(0, 0, w, h);
-    if (facts?.needsLut) {
-      const compiled = lutForGrade(grade, facts.key);
-      if (compiled) {
-        // The LUT carries the whole grade (preset, curves, wheels, HSL and
-        // the scalar sliders); the look's color pass still applies after it,
-        // keeping the export's grade-before-look order.
-        const gpu = applyLutGpu(frame.image, w, h, compiled.lut, compiled.key);
-        if (gpu) {
-          ctx.filter = lookCss || "none";
-          ctx.drawImage(gpu as CanvasImageSource, 0, 0, w, h);
-          ctx.filter = "none";
-        } else {
-          const { surface: pixels } = this.scratch("gradeLutScratch", w, h);
-          const pctx = pixels.getContext("2d") as Ctx | null;
-          if (!pctx) return frame.image;
-          pctx.clearRect(0, 0, w, h);
-          pctx.drawImage(frame.image, 0, 0, w, h);
-          const img = pctx.getImageData(0, 0, w, h);
-          applyLutToImageData(img.data, compiled.lut);
-          pctx.putImageData(img, 0, 0);
-          ctx.filter = lookCss || "none";
-          ctx.drawImage(pixels, 0, 0, w, h);
-          ctx.filter = "none";
-        }
-        return scratch;
-      }
-      // A grade whose LUT resolves neutral (an unknown preset id alone)
-      // falls through to the fast path for whatever scalars remain.
-    }
-    ctx.filter = [gradeToCssFilter(grade), lookCss].filter(Boolean).join(" ") || "none";
-    ctx.drawImage(frame.image, 0, 0, w, h);
+    ctx.filter = lookCss;
+    ctx.drawImage(picture, 0, 0, w, h);
     ctx.filter = "none";
-    const tint = gradeTint(grade);
-    if (tint) {
-      ctx.globalCompositeOperation = "multiply";
-      ctx.fillStyle = tint;
-      ctx.fillRect(0, 0, w, h);
-      // Multiply painted the transparent areas solid; carve the source's alpha
-      // back in.
-      ctx.globalCompositeOperation = "destination-in";
-      ctx.drawImage(frame.image, 0, 0, w, h);
-      ctx.globalCompositeOperation = "source-over";
-    }
     return scratch;
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { Check, Copy, Loader2, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
@@ -22,6 +22,7 @@ import {
   readPoster,
 } from "@/cut/lib/posterCache";
 import { resizePreviewSurface, setPreviewCanvas } from "@/cut/lib/previewCanvas";
+import { hdrPreviewState, subscribeHdrPreviewState } from "@/cut/lib/hdrPresent";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect, frameOf, isFullRect, rectOf, REGION_MAX_SCALE, type VideoClip } from "@/cut/lib/types";
 import { hasMaskKeys, type MaskKey, type MaskPoint } from "@donkeycut/effects-kit";
 import {
@@ -63,7 +64,10 @@ function stageClick() {
  * fetches and seeks — the engine leaves the canvas alone until it has a frame,
  * which is what lets a poster sit there in the meantime. Once a real frame
  * lands it is kept for the next open. */
-function useCachedFirstFrame(canvasRef: RefObject<HTMLCanvasElement | null>) {
+function useCachedFirstFrame(
+  canvasRef: RefObject<HTMLCanvasElement | null>,
+  presentRef: RefObject<HTMLCanvasElement | null>
+) {
   // Re-runs per load, so reopening a project repaints and re-captures.
   const epoch = useEditor((s) => (s.loaded ? s.loadEpoch : 0));
   const projectId = useEditor((s) => s.projectId);
@@ -78,12 +82,16 @@ function useCachedFirstFrame(canvasRef: RefObject<HTMLCanvasElement | null>) {
         void paintPoster(canvas, data);
       }
     });
-    const stop = capturePosterOnPicture("frame", projectId, () => canvasRef.current);
+    // An HDR preview's poster reads off the presented picture: the composite
+    // canvas beneath holds an HLG signal, which is not a picture to keep.
+    const stop = capturePosterOnPicture("frame", projectId, () =>
+      hdrPreviewState() === "hdr" ? presentRef.current : canvasRef.current
+    );
     return () => {
       alive = false;
       stop();
     };
-  }, [canvasRef, epoch, projectId]);
+  }, [canvasRef, presentRef, epoch, projectId]);
 }
 
 /** How far the camera zooms from the fitted size, in multiples of the fit. */
@@ -160,6 +168,10 @@ function BufferingBadge() {
 
 export function Preview() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // The extended-range canvas the HDR picture is presented on, over the
+  // composite canvas; shown only while the stage is in HDR.
+  const presentRef = useRef<HTMLCanvasElement>(null);
+  const hdr = useSyncExternalStore(subscribeHdrPreviewState, hdrPreviewState, () => "off" as const);
   const wrapRef = useRef<HTMLDivElement>(null);
   // The camera: the picture's fitted size at 100%, the pane it lives in, and
   // the view's zoom and pan on top. The stage's on-screen size stays the unit
@@ -306,7 +318,7 @@ export function Preview() {
     [zoomAt]
   );
 
-  usePlayback(canvasRef);
+  usePlayback(canvasRef, presentRef);
   // An effect grades what plays under it, so the stage is built in slices: the
   // picture, then the elements of each lane band with the look of the effects
   // above them, and each effect's paints sitting where the effect does. Only
@@ -350,7 +362,7 @@ export function Preview() {
     return () => setPreviewCanvas(null);
   }, []);
 
-  useCachedFirstFrame(canvasRef);
+  useCachedFirstFrame(canvasRef, presentRef);
 
   // The canvas backing store matches the pixels the screen will actually show,
   // capped at the project's own frame. Painting a 4K backing store into a box
@@ -642,7 +654,17 @@ export function Preview() {
             // blank the canvas on every change.
             className="block size-full"
           />
+          <canvas
+            ref={presentRef}
+            // Sized by the present pass to the composite beneath it.
+            className={cn("pointer-events-none absolute inset-0 size-full", hdr !== "hdr" && "hidden")}
+          />
           </StagePictureFx>
+          {hdr === "sdr" && (
+            <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white">
+              Previewing SDR
+            </span>
+          )}
           <BufferingBadge />
           <OriginalPeekBadge />
           <GuideHandles stage={stage} />

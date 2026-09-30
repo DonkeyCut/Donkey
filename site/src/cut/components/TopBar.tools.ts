@@ -5,6 +5,7 @@
  * keys its handlers on `TopBarToolName`.
  */
 
+import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
 import { obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { EXPORT_RESOLUTIONS } from "@/cut/lib/exportPresets";
 import { GUIDE_IDS, GUIDE_PRESETS } from "@/cut/lib/guides";
@@ -46,9 +47,15 @@ export const TOP_BAR_TOOLS = [
     inputSchema: obj({ name: str("New project name") }, ["name"]),
   },
   {
+    name: "set_project_color",
+    description:
+      `Set the project's delivery color space: ${OUTPUT_SPACES.map((o) => `${o.id} = ${o.label} (${o.detail})`).join("; ")}. The export writes it — an HDR project encodes 10-bit HEVC Main 10 or ProRes tagged Rec.2020 with the HLG or PQ transfer, and H.264 is not offered — and the preview shows the HDR picture on an HDR display, or the same grade rendered as SDR with a "Previewing SDR" label elsewhere. SDR footage placed in an HDR project sits at reference white (BT.2408); HLG and PQ footage keeps its range. Call it when the user asks for HDR, HLG, PQ, Rec.2100, or to go back to SDR; editor_state project.colorSpace reports the current one.`,
+    inputSchema: obj({ space: { type: "string", enum: OUTPUT_SPACES.map((o) => o.id), description: "The delivery color space" } }, ["space"]),
+  },
+  {
     name: "open_export",
     description:
-      `Open the export dialog: Best uses original resolution, frame rate, supported H.264/HEVC codec and audio settings. Whole files, trims and compatible sequences copy compressed video; joined audio is encoded at source settings. Effects or incompatible joins render with source settings. Other presets are Share, Social 4K, Small and Master. Controls include file name, whole video or selection range, MP4/MOV, H.264/HEVC/ProRes, resolution (${EXPORT_RESOLUTIONS.map((r) => r.label).join(", ")}, Source), frame rate, quality or custom bitrate, AAC/PCM, and an SRT captions file. Exporting itself stays a user action.`,
+      `Open the export dialog: Best uses original resolution, frame rate, supported H.264/HEVC codec and audio settings. Whole files, trims and compatible sequences copy compressed video; joined audio is encoded at source settings. Effects or incompatible joins render with source settings. Other presets are Share, Social 4K, Small and Master. Controls include file name, whole video or selection range, MP4/MOV, H.264/HEVC/ProRes, resolution (${EXPORT_RESOLUTIONS.map((r) => r.label).join(", ")}, Source), frame rate, quality or custom bitrate, AAC/PCM, the project's color space (SDR, or HDR as HLG or PQ — a 10-bit HEVC or ProRes file; H.264 greys out), and an SRT captions file. Exporting itself stays a user action.`,
     inputSchema: obj({}),
   },
 ] as const satisfies readonly AiToolDef[];

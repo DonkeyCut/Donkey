@@ -10,13 +10,18 @@ import { apiJson, type CutBackend } from "./backend";
  * Failure reports what the job itself said, or `fallback`.
  *
  * `onState` sees every state the job reports ("queued", "running", …), so a
- * surface waiting on the job can say which one it is in.
+ * surface waiting on the job can say which one it is in; `onProgress` sees
+ * the share done as the worker reports it.
  */
 export async function pollCloudJob<T>(
   jobId: string,
   backend: CutBackend,
   fallback: string,
-  { timedOut = fallback, onState }: { timedOut?: string; onState?: (state: string) => void } = {}
+  {
+    timedOut = fallback,
+    onState,
+    onProgress,
+  }: { timedOut?: string; onState?: (state: string) => void; onProgress?: (progress: number) => void } = {}
 ): Promise<T> {
   const deadline = Date.now() + 10 * 60 * 1000;
   const MAX_STRIKES = 6;
@@ -37,8 +42,9 @@ export async function pollCloudJob<T>(
       continue;
     }
     strikes = 0;
-    const job = await apiJson<{ state?: string; result?: T }>(res);
+    const job = await apiJson<{ state?: string; progress?: number; result?: T }>(res);
     if (job.state) onState?.(job.state);
+    if (typeof job.progress === "number") onProgress?.(job.progress);
     if (job.state === "error") throw new Error(job.error ?? fallback);
     if (job.state === "done") return (job.result ?? {}) as T;
   }

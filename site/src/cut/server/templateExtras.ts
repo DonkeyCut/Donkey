@@ -8,6 +8,8 @@ export interface TemplateExtras {
   stickers?: unknown[];
   captions?: unknown;
   project?: unknown;
+  /** A saved colour grade: a template carrying only this is a grade preset. */
+  grade?: unknown;
 }
 
 export const templateExtras = (input: TemplateExtras): TemplateExtras => ({
@@ -15,4 +17,5 @@ export const templateExtras = (input: TemplateExtras): TemplateExtras => ({
   ...(input.stickers?.length ? { stickers: input.stickers } : {}),
   ...(input.captions ? { captions: input.captions } : {}),
   ...(input.project ? { project: input.project } : {}),
+  ...(input.grade ? { grade: input.grade } : {}),
 });

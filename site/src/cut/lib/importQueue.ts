@@ -213,6 +213,14 @@ async function run(job: Job) {
       upload: undefined,
       ...(asset.type === "image" ? { thumbs: [url] } : {}),
     });
+    // A ProRes master's preview proxy is built once the bytes are at rest in
+    // the project's own storage, which is now.
+    const landed = useEditor.getState().assets.find((a) => a.id === asset.id);
+    if (landed) {
+      void import("./mediaProxy")
+        .then((m) => (m.needsProxy(landed) ? m.ensureProxy(job.projectId, landed, job.backend) : undefined))
+        .catch(() => {});
+    }
     // Decoders and voices carry across the URL change on what they already
     // hold; the source bytes stay readable while their new stacks open.
     setTimeout(() => revokeTabUrl(localUrl), 10_000);

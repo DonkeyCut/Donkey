@@ -3,10 +3,12 @@
 import { uploadCloudLibraryMedia, withCloudPreparedMedia } from "@/cut/lib/cloudLibraryUpload";
 import type { LibraryUploadStage, LibraryUploadState } from "@/cut/lib/libraryUpload";
 import { assetTypeOf } from "@/cut/lib/media";
-
+import { cutColor } from "@/cut/lib/colorSettings";
+import { lutFacts, parseLutFile } from "@donkeycut/effects-kit";
 import { apiJson, getBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { readSnapshot, writeSnapshot } from "./cache";
+import { contentKey } from "./contentKey";
 import { pollCloudJob } from "./cloudJob";
 import { downloadFromUrl } from "./download";
 import { subtreeOf } from "./folderTree";
@@ -18,6 +20,7 @@ import {
   enrichAsset,
   importRemote,
   isFontFile,
+  isLutFile,
   MAX_FONT_BYTES,
   presignedUpload,
   probeFileMeta,
@@ -38,12 +41,23 @@ import { reportSwallowed } from "./report";
 import { useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import type {
+  AssetType,
   LibraryTemplate,
   MediaAsset,
   TemplateMedia,
   TemplateSaveInput,
 } from "./types";
-import { IMAGE_CLIP_SECONDS, mediaUrl } from "./types";
+import { IMAGE_CLIP_SECONDS, isLinkedAssetType, mediaUrl } from "./types";
+
+
+/** A LUT goes by its file's name. The TITLE line inside the file is whatever
+ * the tool that wrote it put there. */
+export const lutFileName = (fileName: string) => fileName.replace(/\.[^.]+$/, "");
+
+/** What a Library file is called wherever it is shown: a LUT by its file name,
+ * a clip by the title read off it, anything else by its name. */
+export const libraryAssetName = (a: Pick<LibraryAsset, "type" | "fileName" | "name" | "title">) =>
+  a.type === "lut" ? lutFileName(a.fileName) : a.title || a.name;
 
 export interface LibrarySource {
   url: string;
@@ -52,19 +66,28 @@ export interface LibrarySource {
   uploadDate?: string;
 }
 
+/** What a LUT's row says about its table. */
+export type LutFactsMeta = { kind: "1d" | "3d" | "shaper+3d"; size: number };
+
 export interface LibraryAsset {
   id: string;
   fileName: string;
   /** Uploaded source retained when playback needs conversion. */
   originalFile?: string;
   name: string;
-  type: "video" | "audio" | "image" | "font";
+  type: AssetType;
   duration: number;
   width?: number;
   height?: number;
   addedAt: number;
   folderId?: string | null;
   source?: LibrarySource;
+  /** A linked item's identity — the content hash every project names it by.
+   * Written by the page that checked the file, so a sync of a lazy kind
+   * never reads the bytes back. */
+  contentKey?: string;
+  /** For a LUT, what kind of table the file holds. */
+  lut?: LutFactsMeta;
   /** The source's own cover image, stored beside the media on the same shelf.
    * An import from a site that publishes one carries it; it is what a card and
    * the viewer show while the video itself loads. */
@@ -544,8 +567,8 @@ export async function carryAssetTo(
   );
   if (!res.ok) throw new Error("Could not read that file off its shelf.");
   // A font's cover is baked from its bytes on the way in, so the shelf it
-  // lands on draws its own — always the current sheet.
-  const from = asset.type === "font" ? undefined : libraryPosterUrl(asset);
+  // lands on draws its own — always the current sheet. A LUT has none.
+  const from = isLinkedAssetType(asset.type) ? undefined : libraryPosterUrl(asset);
   const cover = from
     ? await backendFor(asset.residency)
         .fetch(
@@ -598,6 +621,48 @@ async function checkFont(
   };
 }
 
+/** A LUT is readable when the parser takes it, so the file is parsed once
+ * here — a truncated download or a renamed text file is refused before a byte
+ * leaves the browser. What comes back is the row's fields: the content key
+ * every project names it by and what kind of table it is, so a sync lists
+ * the shelf without reading the file again. */
+async function checkLut(
+  file: File,
+): Promise<{ label: string; meta: LinkedUploadMeta }> {
+  const maxBytes = cutColor().lutFileMaxBytes;
+  if (file.size > maxBytes) {
+    throw new Error(
+      `LUT files are limited to ${Math.round(maxBytes / 1024 ** 2)}MB.`,
+    );
+  }
+  const bytes = await file.arrayBuffer();
+  let parsed: ReturnType<typeof parseLutFile>;
+  try {
+    parsed = parseLutFile(file.name, new TextDecoder().decode(bytes));
+  } catch (e) {
+    throw new Error(
+      `That file isn't a LUT Cut can read. ${e instanceof Error ? e.message : ""}`.trim(),
+    );
+  }
+  return {
+    label: lutFileName(file.name),
+    meta: {
+      type: "lut",
+      duration: 0,
+      contentKey: await contentKey(bytes),
+      lut: lutFacts(parsed),
+    },
+  };
+}
+
+/** The row a linked upload writes in place of a probe. */
+type LinkedUploadMeta = {
+  type: "font" | "lut";
+  duration: 0;
+  contentKey?: string;
+  lut?: LutFactsMeta;
+};
+
 export async function uploadToLibrary(
   file: File,
   residency: Residency = activeResidency(),
@@ -607,22 +672,26 @@ export async function uploadToLibrary(
   keep: { name?: string; source?: LibrarySource; poster?: Blob; folderId?: string | null; state?: LibraryUploadState; onStage?: (stage: LibraryUploadStage) => void } = {},
 ): Promise<LibraryAsset> {
   const backend = backendFor(residency);
-  // A font has no streams to measure; it is checked by installing it instead,
-  // and the check hands back the specimen the shelf keeps as its cover.
+  // A linked item has no streams to measure. A font is checked by installing
+  // it, and the check hands back the specimen the shelf keeps as its cover;
+  // a LUT is checked by parsing it, and the check hands back its row.
   const font = isFontFile(file) ? await checkFont(file) : null;
-  const fontLabel = font?.label ?? null;
+  const lut = !font && isLutFile(file) ? await checkLut(file) : null;
+  const linkedLabel = font?.label ?? lut?.label ?? null;
   const poster = keep.poster ?? font?.poster ?? null;
   const posterName = `${file.name}${SPECIMEN_FILE_SUFFIX}`;
-  const fontMeta = { type: "font" as const, duration: 0 };
+  const linkedMeta: LinkedUploadMeta | null = font
+    ? { type: "font", duration: 0 }
+    : (lut?.meta ?? null);
   if (residency === "cloud") {
     const type = assetTypeOf(file);
-    const meta = fontLabel ? fontMeta : await probeFileMeta(file).catch(() => null);
+    const meta = linkedMeta ?? (await probeFileMeta(file).catch(() => null));
     if ((!meta || !(meta.duration > 0)) && (type === "video" || type === "audio")) {
       return uploadCloudLibraryMedia(file, keep);
     }
     if (
       !meta ||
-      (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))
+      (meta.type !== "image" && !isLinkedAssetType(meta.type) && !(meta.duration > 0))
     ) {
       throw new Error(
         "This image could not be read.",
@@ -651,7 +720,7 @@ export async function uploadToLibrary(
         key,
         ...(posterKey ? { posterKey } : {}),
         meta: {
-          name: keep.name ?? fontLabel ?? file.name,
+          name: keep.name ?? linkedLabel ?? file.name,
           ...(keep.source ? { source: keep.source } : {}),
           ...meta,
         },
@@ -663,16 +732,16 @@ export async function uploadToLibrary(
   }
   const form = new FormData();
   form.append("file", file, file.name);
-  const name = keep.name ?? fontLabel;
+  const name = keep.name ?? linkedLabel;
   if (name) form.append("name", name);
   if (keep.source) form.append("source", JSON.stringify(keep.source));
   if (poster) form.append("poster", poster, posterName);
   if (residency === "browser") {
     // Hosted preparation supplies missing decoders before the page stores media.
-    const meta = fontLabel ? fontMeta : await probeFileMeta(file).catch(() => null);
+    const meta = linkedMeta ?? (await probeFileMeta(file).catch(() => null));
     if (
       !meta ||
-      (meta.type !== "image" && meta.type !== "font" && !(meta.duration > 0))
+      (meta.type !== "image" && !isLinkedAssetType(meta.type) && !(meta.duration > 0))
     ) {
       const type = assetTypeOf(file);
       if (type === "video" || type === "audio") {
@@ -684,6 +753,8 @@ export async function uploadToLibrary(
       throw new Error("This image could not be read.");
     }
     form.append("meta", JSON.stringify(meta));
+  } else if (linkedMeta) {
+    form.append("meta", JSON.stringify(linkedMeta));
   } else {
     const type = assetTypeOf(file);
     if ((type === "video" || type === "audio") && !(await probeFileMeta(file).catch(() => null))) {
@@ -768,6 +839,8 @@ export async function importLibraryAsset(
 ): Promise<MediaAsset> {
   if (lib.type === "font")
     throw new Error("Fonts are used from the font menu, not the timeline.");
+  if (isLinkedAssetType(lib.type))
+    throw new Error("A LUT is applied to a clip's color, from the Color panel.");
   // The project's media takes the name the shelf shows, so a phone
   // recording lands on the timeline under its title.
   const name = lib.title || lib.name;
@@ -915,6 +988,8 @@ export async function carryTemplateTo(
     ...(t.stickers ? { stickers: t.stickers } : {}),
     ...(t.captions ? { captions: t.captions } : {}),
     ...(t.project ? { project: t.project } : {}),
+    ...(t.sound ? { sound: t.sound } : {}),
+    ...(t.grade ? { grade: t.grade } : {}),
   };
   const backend = backendFor(to);
   let res: Response;

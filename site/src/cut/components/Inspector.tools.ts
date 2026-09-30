@@ -8,11 +8,15 @@
 
 import {
   GRADE_BASIC_FIELDS,
+  GRADE_DETAIL_FIELDS,
   GRADE_HUE_MAX,
   GRADE_MAX,
   GRADE_PRESET_IDS,
   gradePresetCatalogText,
   HSL_BANDS,
+  SOURCE_PROFILES,
+  WHEEL_LABELS,
+  WHEEL_ZONES,
   SOUND_COMPRESSOR_RANGE,
   SOUND_EQ_BANDS,
   SOUND_EQ_DB_RANGE,
@@ -32,24 +36,44 @@ import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 /** Per-field slider hints; ranges interpolate the exported constants so the
  * schema can never drift from the model the renderer clamps to. */
 const GRADE_FIELD_HINTS: Record<string, string> = {
-  exposure: "(±1 stop)",
-  contrast: "",
+  exposure: "(±2 stops, in linear light)",
+  contrast: "around 18% grey",
   highlights: "trim (-) or boost (+) the brights",
   shadows: "lift (+) or crush (-) the darks",
-  temperature: "positive = warmer",
+  whites: "the white point: pull (-) or push (+) the very brightest values",
+  blacks: "the black point: lift (+) or deepen (-) the very darkest values",
+  brilliance: "brings up the darks and tames the brights together, like a photo app's brilliance",
+  fade: "lifts the blacks toward grey for a faded-film look",
+  temperature: "positive = warmer (mireds, CAT02 white balance)",
   tint: "negative = green, positive = magenta",
   saturation: `(-${GRADE_MAX} = grayscale)`,
   vibrance: "saturation weighted toward the muted colors",
+  sharpen: "sharpens fine edges (luma only)",
+  clarity: "local contrast across larger structures (luma only)",
 };
 
+/** A slider's range text: centred sliders run ±GRADE_MAX, one-sided ones 0..GRADE_MAX. */
+const gradeRange = (min: number) => `${min < 0 ? `-${GRADE_MAX}` : "0"}..${GRADE_MAX}, 0 neutral`;
+
 const gradeFieldProps = Object.fromEntries(
-  GRADE_BASIC_FIELDS.map((f) => [
+  [...GRADE_BASIC_FIELDS, ...GRADE_DETAIL_FIELDS].map((f) => [
     f.key,
-    num(
-      `-${GRADE_MAX}..${GRADE_MAX}, 0 neutral${GRADE_FIELD_HINTS[f.key] ? ` — ${GRADE_FIELD_HINTS[f.key]}` : ""}`
-    ),
+    num(`${gradeRange(f.min)}${GRADE_FIELD_HINTS[f.key] ? ` — ${GRADE_FIELD_HINTS[f.key]}` : ""}`),
   ])
 );
+
+/** The tool argument for each wheel, keyed by the wheel's label in lower case
+ * (lift, gamma, gain, offset). */
+const WHEEL_ARGS: Record<string, (typeof WHEEL_ZONES)[number]> = Object.fromEntries(
+  WHEEL_ZONES.map((z) => [WHEEL_LABELS[z].toLowerCase(), z])
+);
+
+/** Several clips at once, the same way `ids` fans a sweep out, plus every
+ * clip on the timeline. */
+const manyClips = {
+  ids: ids("clipId"),
+  all_clips: bool("Land the change on every clip on the timeline (instead of clipId or ids)"),
+};
 
 /** [input, output] control points, 0..255, for one curve channel. */
 const curvePoints = (channel: string) => ({
@@ -64,6 +88,10 @@ const wheelArg = (zone: string) =>
     dy: num(`Chroma y -${GRADE_MAX}..${GRADE_MAX}`),
     luma: num(`${zone} brightness trim -${GRADE_MAX}..${GRADE_MAX}`),
   });
+
+const wheelArgs = Object.fromEntries(
+  Object.entries(WHEEL_ARGS).map(([name, z]) => [name, wheelArg(WHEEL_LABELS[z])])
+);
 
 export const INSPECTOR_TOOLS = [
   {
@@ -323,15 +351,16 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_color_grade",
     description:
-      "Color-grade a video clip's basic sliders (any track; stills too). Fields patch the clip's current grade: only the ones you pass change, and every value 0 is neutral. Manual adjustments layer OVER the clip's color preset (set_color_preset), never replacing it. reset:true clears the manual grade first (the preset stays); auto:true fits a starting grade from the clip's decoded frame (auto-tone: exposure to middle gray, contrast stretch, gray-world white balance — needs the clip's frame decoded, so seek into it first if this errors), and explicit fields then override it. Preview, timeline thumbnails, and export all render the same result. Read read_color_stats before grading so the numbers ground the move.",
+      `Color-grade a video clip's basic sliders (any track; stills too): the Light group (${GRADE_BASIC_FIELDS.filter((f) => f.group === "light").map((f) => f.key).join(", ")}), the Color group (${GRADE_BASIC_FIELDS.filter((f) => f.group === "color").map((f) => f.key).join(", ")}) and the Detail pair (${GRADE_DETAIL_FIELDS.map((f) => f.key).join(", ")}). Fields patch the clip's current grade: only the ones you pass change, and every value 0 is neutral. The light sliders work in linear light on the picture after its source conversion and LUT; manual adjustments layer OVER the clip's color preset (set_color_preset), never replacing it. reset:true clears the manual grade first (the preset and LUT stay); auto:true fits a starting grade from the clip's base rendering (auto-tone: exposure to middle gray, contrast stretch, gray-world white balance — needs the clip's frame decoded, so seek into it first if this errors), and explicit fields then override it. Preview, timeline thumbnails, and export all render the same result. Read read_color_stats before grading so the numbers ground the move. Pass ids or all_clips to land the same patch on several clips as one undo step.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
+      ...manyClips,
       ...gradeFieldProps,
       brightness: num(`-${GRADE_MAX}..${GRADE_MAX}, 0 neutral (plain gain; prefer exposure)`),
       hue: num(`Whole-frame hue rotation in degrees, -${GRADE_HUE_MAX}..${GRADE_HUE_MAX} (for one hue only, use set_color_hsl)`),
       auto: bool("Fit a starting grade from the clip's current frame"),
-      reset: bool("Clear the existing manual grade before applying fields (keeps the preset)"),
-    }, ["clipId"]),
+      reset: bool("Clear the existing manual grade before applying fields (keeps the preset and the LUT)"),
+    }),
   },
   {
     name: "set_color_preset",
@@ -339,7 +368,7 @@ export const INSPECTOR_TOOLS = [
       `Apply a named color preset to a video clip, layered under its manual grade. Presets by category — ${gradePresetCatalogText()}. amount 0..1 scales the preset toward neutral (default 1); protect_skin keeps its color shifts off skin tones. Pass preset "none" to clear. Preview, tiles, and export all render the same result.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
-      ids: ids("clipId"),
+      ...manyClips,
       preset: {
         type: "string",
         enum: [...GRADE_PRESET_IDS, "none"],
@@ -352,29 +381,28 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_color_curves",
     description:
-      `Set a video clip's tone curves: per-channel [input, output] control points (0..255) through a monotone spline — master shapes all three channels, red/green/blue shape one each. A channel you pass replaces that channel; an empty list clears it; others keep their curve. The semantic knobs write the master curve for you: curve_contrast (-${GRADE_MAX}..${GRADE_MAX}) is an s-curve around mid-gray, fade (0..${GRADE_MAX}) lifts the blacks for a faded-film look; passing either replaces the master curve. reset:true clears every curve first.`,
+      `Set a video clip's tone curves: per-channel [input, output] control points (0..255) through a monotone spline — master shapes all three channels, red/green/blue shape one each. A channel you pass replaces that channel; an empty list clears it; others keep their curve. curve_contrast (-${GRADE_MAX}..${GRADE_MAX}) writes an s-curve around mid-gray into the master curve for you, replacing it (lifted, faded blacks are the fade slider of set_color_grade). reset:true clears every curve first. Pass ids or all_clips to land the same curves on several clips.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
+      ...manyClips,
       master: curvePoints("Master"),
       red: curvePoints("Red"),
       green: curvePoints("Green"),
       blue: curvePoints("Blue"),
       curve_contrast: num(`S-curve contrast -${GRADE_MAX}..${GRADE_MAX} (compiled into master points)`),
-      fade: num(`Lifted blacks 0..${GRADE_MAX} (compiled into master points)`),
       reset: bool("Clear all curves before applying"),
-    }, ["clipId"]),
+    }),
   },
   {
     name: "set_color_wheels",
     description:
-      `Set a video clip's color wheels — shadows, midtones, highlights — for split-toning: each wheel pushes its tonal range toward a hue (dx/dy is the wheel puck: angle = hue, 0° = red, 120° = green, 240° = blue; distance = strength) and trims its brightness (luma). A wheel you pass is replaced whole; {dx:0,dy:0,luma:0} clears it. reset:true clears all three.`,
+      `Set a video clip's four color wheels — ${WHEEL_ZONES.map((z) => WHEEL_LABELS[z].toLowerCase()).join(", ")} — the ASC CDL set: lift moves the shadows, gamma the midtones, gain the highlights, and offset shifts the whole picture equally. Each wheel pushes its range toward a hue (dx/dy is the wheel puck: angle = hue, 0° = red, 120° = green, 240° = blue; distance = strength) and trims its brightness (luma). A wheel you pass is replaced whole; {dx:0,dy:0,luma:0} clears it. reset:true clears all four. Pass ids or all_clips to land the same wheels on several clips.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
-      shadows: wheelArg("Shadow"),
-      midtones: wheelArg("Midtone"),
-      highlights: wheelArg("Highlight"),
+      ...manyClips,
+      ...wheelArgs,
       reset: bool("Clear all wheels before applying"),
-    }, ["clipId"]),
+    }),
   },
   {
     name: "set_color_hsl",
@@ -382,6 +410,7 @@ export const INSPECTOR_TOOLS = [
       `Adjust one hue band of a video clip — shift its hue (±${GRADE_MAX} ≈ ±30°), scale its saturation, and lift or darken its luminance — leaving every other color alone ("just the sky bluer", "mute the greens"). Bands: ${HSL_BANDS.map((b) => b.id).join(", ")}. The band's three values are replaced whole (omitted values 0); all-zero clears the band. reset_all clears every band first.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
+      ...manyClips,
       band: {
         type: "string",
         enum: HSL_BANDS.map((b) => b.id),
@@ -391,25 +420,76 @@ export const INSPECTOR_TOOLS = [
       sat: num(`Saturation -${GRADE_MAX}..${GRADE_MAX}`),
       luma: num(`Luminance -${GRADE_MAX}..${GRADE_MAX}`),
       reset_all: bool("Clear every hue band first"),
+    }),
+  },
+  {
+    name: "set_color_lut",
+    description:
+      'Put a LUT from the user\'s Library on a video clip, or take it off. The LUT is a .cube or .3dl file in the Library (editor_state lists them under `luts` with their ids, "lut:<key>"); it is applied to the picture after the clip\'s source conversion and under the grade, so a creative LUT works on log footage and the sliders shape what comes out. amount 0..1 mixes the LUT\'s result with its input (default 1). Pass lut "none" to remove it. A Log-to-Rec.709 technical LUT (a camera maker\'s) belongs on a clip whose source color is set to rec709 (set_source_color) so it is not converted twice. Pass ids or all_clips to land the same LUT on several clips as one undo step.',
+    inputSchema: obj({
+      clipId: str("Video clip id"),
+      ...manyClips,
+      lut: str('A Library LUT id ("lut:<key>", from editor_state.luts) or "none" to remove the LUT'),
+      amount: num("Intensity 0..1 (default 1; omitted keeps the clip's current amount)"),
+    }, ["lut"]),
+  },
+  {
+    name: "copy_color_grade",
+    description:
+      "Copy a video clip's whole color grade — preset, sliders, curves, wheels, hue bands, LUT and intensity — onto other clips, as one undo step. This is \"apply to all\": pass all_clips for every clip on the timeline, or ids for a chosen set. The source clip's grade replaces whatever the targets wore.",
+    inputSchema: obj({
+      clipId: str("The clip whose grade to copy"),
+      ids: ids("clipId (the clips to copy it onto)"),
+      all_clips: bool("Copy it onto every other clip on the timeline"),
     }, ["clipId"]),
+  },
+  {
+    name: "set_source_color",
+    description:
+      `Set what a source's code values mean — its color profile — for footage the header did not settle or the user wants read differently: ${SOURCE_PROFILES.map((p) => `${p.id} (${p.label}: ${p.detail.replace(/\.$/, "")})`).join("; ")}. A log or HDR profile is converted to Rec.709 display values before any LUT or grade (Apple Log through the ACES output transform, HLG/PQ through BT.2100). "auto" returns the asset to the profile read from its file (editor_state.media shows each asset's sourceColor with what was detected). Pass assetId, or clipId for the clip's own source; every clip cut from that source changes with it.`,
+    inputSchema: obj({
+      assetId: str("Project asset id"),
+      clipId: str("A video clip id — its source asset is the one changed"),
+      profile: {
+        type: "string",
+        enum: [...SOURCE_PROFILES.map((p) => p.id), "auto"],
+        description: 'Source profile, or "auto" for the detected one',
+      },
+    }, ["profile"]),
+  },
+  {
+    name: "save_color_grade",
+    description:
+      "Save a clip's current color grade — preset, sliders, curves, wheels, hue bands and LUT — to the user's Library under a name, so apply_saved_grade can put it on other clips and the Color panel's Saved category offers it.",
+    inputSchema: obj({ clipId: str("Video clip whose grade to save"), name: str("Preset name") }, ["clipId", "name"]),
+  },
+  {
+    name: "apply_saved_grade",
+    description:
+      "Put one of the user's saved color grades (editor_state.savedGrades, or library_list templates carrying a grade) on a video clip, replacing the clip's whole grade. Pass ids or all_clips for several clips as one undo step.",
+    inputSchema: obj({
+      clipId: str("Video clip id"),
+      ...manyClips,
+      preset_id: str("The saved grade's id, or its name"),
+    }, ["preset_id"]),
   },
   {
     name: "read_color_stats",
     description:
-      "Read color statistics off a frame — per-channel and luma quantiles (0..255), channel means, mean saturation, and warmth (red/blue midtone ratio; >1 warm, <1 cool). Pass clipId for a video clip's current frame (pre-grade, so the numbers describe the footage itself; seek into the clip first if it errors) or assetId for an image (a chat attachment or Media import). Read stats before grading — never grade blind — and read them again after to verify the move.",
+      "Read color statistics off a frame — per-channel and luma quantiles (0..255), channel means, mean saturation, and warmth (red/blue midtone ratio; >1 warm, <1 cool). Pass clipId for a video clip's current frame as its base rendering (through the source conversion, before any LUT or grade, so the numbers describe the footage itself; seek into the clip first if it errors) or assetId for an image (a chat attachment or Media import). Read stats before grading — never grade blind — and read them again after to verify the move.",
     inputSchema: obj({
-      clipId: str("Video clip id (its current decoded frame)"),
+      clipId: str("Video clip id (its current frame's base rendering)"),
       assetId: str("Image asset id (chat attachment or import)"),
     }),
   },
   {
     name: "match_color_grade",
     description:
-      "Match a video clip's color to a reference, computed from the pixels: per-channel quantile mapping compiled into tone curves plus a saturation delta. The computed curves carry the whole look, so the match replaces the clip's entire grade, preset included. The reference is ref_asset_id (an attached or imported image) or ref_clip_id (another clip's current frame). Use when the user shares a look to copy or asks to match two shots; refine afterward with the other grading tools, checking read_color_stats.",
+      "Match a video clip's color to a reference, computed from the pixels: per-channel quantile mapping compiled into tone curves plus a saturation delta. The computed curves carry the whole look, so the match replaces the clip's entire grade, preset and LUT included. The reference is ref_asset_id (an attached or imported image) or ref_clip_id (another clip's current frame). Use when the user shares a look to copy or asks to match two shots; refine afterward with the other grading tools, checking read_color_stats.",
     inputSchema: obj({
       clipId: str("Video clip to grade"),
       ref_asset_id: str("Reference image asset id"),
-      ref_clip_id: str("Reference video clip id (its current decoded frame)"),
+      ref_clip_id: str("Reference video clip id (its current frame's base rendering)"),
     }, ["clipId"]),
   },
 ] as const satisfies readonly AiToolDef[];

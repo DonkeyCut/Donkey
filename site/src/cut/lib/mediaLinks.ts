@@ -85,7 +85,9 @@ export function refreshSignedUrls(force = false): Promise<void> {
     const { useEditor } = await import("./store");
     const s = useEditor.getState();
     if (!s.loaded || s.projectId !== b.projectId) return;
-    const minted = await fetchSignedMediaUrls(b.projectId, s.assets.map((a) => a.fileName));
+    // A proxy's link expires with its master's, so it re-mints in the batch.
+    const names = s.assets.flatMap((a) => (a.proxy ? [a.fileName, a.proxy.fileName] : [a.fileName]));
+    const minted = await fetchSignedMediaUrls(b.projectId, names);
     const st = useEditor.getState();
     if (batch !== b || st.projectId !== b.projectId || !st.loaded) return;
     // Mint down but the current URLs still work (inside the eager-refresh
@@ -98,6 +100,9 @@ export function refreshSignedUrls(force = false): Promise<void> {
       const url = minted.urls.get(a.fileName) ?? mediaUrl(b.projectId, a.fileName);
       urls.set(a.fileName, url);
       if (url !== a.url) rotated++;
+      if (a.proxy) {
+        urls.set(a.proxy.fileName, minted.urls.get(a.proxy.fileName) ?? mediaUrl(b.projectId, a.proxy.fileName));
+      }
     }
     console.debug(
       `[cut-media] re-mint: ${rotated}/${st.assets.length} url(s) rotated` + (force ? " (forced by a load failure)" : "")

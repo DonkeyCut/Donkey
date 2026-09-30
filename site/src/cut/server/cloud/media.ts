@@ -168,7 +168,7 @@ export const mediaCloud = {
       const rows = await prisma.cutMediaObject.findMany({
         where: {
           userId,
-          kind: "media",
+          kind: { in: ["media", "proxy"] },
           projectId: { in: [...new Set(wanted.map((i) => i.projectId!))] },
         },
         select: { projectId: true, fileName: true, updatedAt: true },

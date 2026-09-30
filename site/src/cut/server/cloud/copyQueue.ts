@@ -86,6 +86,9 @@ interface CopySource {
   name: string;
   folderId: string | null;
   media: MediaRow[];
+  /** Preview proxies of the copied masters, under the names the doc's assets
+   * carry. Quota-exempt, so they add nothing to `added`. */
+  proxies: MediaRow[];
   chats: { id: string; data: unknown }[];
   added: number;
 }
@@ -108,15 +111,44 @@ function completeMedia(
 
 const mediaBytes = (media: MediaRow[]) => media.reduce((sum, m) => sum + Number(m.bytes), 0);
 
+/** The copy's proxies and the doc that names them. A proxy travels with its
+ * master: its object is copied under the same name, and an asset whose master
+ * or proxy has no complete object drops its `proxy`, so the copy's first open
+ * builds a fresh one. */
+async function withProxies(
+  ownerId: string,
+  projectId: string,
+  doc: ProjectDoc,
+  media: MediaRow[]
+): Promise<{ doc: ProjectDoc; proxies: MediaRow[] }> {
+  if (!Array.isArray(doc.assets)) return { doc, proxies: [] };
+  const masters = new Set(media.map((m) => m.fileName));
+  const wanted = doc.assets.flatMap((a) => (a.proxy && masters.has(a.fileName) ? [a.proxy.fileName] : []));
+  const proxies = wanted.length
+    ? await prisma.cutMediaObject.findMany({
+        where: { userId: ownerId, projectId, kind: "proxy", uploadState: "complete", fileName: { in: wanted } },
+      })
+    : [];
+  const built = new Set(proxies.map((p) => p.fileName));
+  const assets = doc.assets.map((a) => {
+    if (!a.proxy || (masters.has(a.fileName) && built.has(a.proxy.fileName))) return a;
+    const rest = { ...a };
+    delete rest.proxy;
+    return rest;
+  });
+  return { doc: { ...doc, assets }, proxies };
+}
+
 async function copyPlan(share: ShareRow) {
   const features = normalizeFeatures(share.features);
   const row = await prisma.cutProject.findFirst({
     where: { id: share.projectId, userId: share.userId },
   });
   if (!row) return null;
-  const doc = filterDocForShare(row.doc as unknown as ProjectDoc, features);
-  const media = await completeMedia(share.userId, share.projectId, doc.assets.map((a) => a.fileName));
-  return { features, doc, media, added: mediaBytes(media) };
+  const filtered = filterDocForShare(row.doc as unknown as ProjectDoc, features);
+  const media = await completeMedia(share.userId, share.projectId, filtered.assets.map((a) => a.fileName));
+  const { doc, proxies } = await withProxies(share.userId, share.projectId, filtered, media);
+  return { features, doc, media, proxies, added: mediaBytes(media) };
 }
 
 /** A share copy's source: access re-checked at drain time, doc filtered to
@@ -149,6 +181,7 @@ async function shareSource(job: { shareId: string | null; userId: string }): Pro
     name: plan.doc.name,
     folderId: null,
     media: plan.media,
+    proxies: plan.proxies,
     chats,
     added: plan.added,
   };
@@ -168,8 +201,8 @@ async function duplicateSource(job: {
     ? await prisma.cutProject.findFirst({ where: { id: job.projectId, userId: job.userId } })
     : null;
   if (!row) return "The project was deleted.";
-  const doc = row.doc as unknown as ProjectDoc;
   const media = await completeMedia(job.userId, row.id);
+  const { doc, proxies } = await withProxies(job.userId, row.id, row.doc as unknown as ProjectDoc, media);
   const chats = await prisma.cutChatThread.findMany({
     where: { userId: job.userId, projectId: row.id },
     select: { id: true, data: true },
@@ -183,6 +216,7 @@ async function duplicateSource(job: {
     name: `${doc.name} copy`,
     folderId: row.folderId,
     media,
+    proxies,
     chats,
     added: mediaBytes(media),
   };
@@ -333,7 +367,7 @@ export async function executeCopyJob(jobId: string): Promise<Response> {
     // R2 copies run before the transaction (network I/O can't sit inside one)
     // but are idempotent: same source to the same deterministic destination
     // key, so a redelivery just overwrites with identical bytes.
-    for (const m of src.media) {
+    for (const m of [...src.media, ...src.proxies]) {
       await copy(m.r2Key, projectMediaKey(job.userId, newProjectId, m.fileName));
     }
 
@@ -365,6 +399,21 @@ export async function executeCopyJob(jobId: string): Promise<Response> {
             bytes: m.bytes,
             kind: "media",
             uploadState: "complete",
+          })),
+        });
+      }
+      if (src.proxies.length > 0) {
+        await tx.cutMediaObject.createMany({
+          data: src.proxies.map((m) => ({
+            userId: job.userId,
+            projectId: newProjectId,
+            r2Key: projectMediaKey(job.userId, newProjectId, m.fileName),
+            fileName: m.fileName,
+            mime: m.mime,
+            bytes: m.bytes,
+            kind: "proxy",
+            uploadState: "complete",
+            quotaExempt: true,
           })),
         });
       }

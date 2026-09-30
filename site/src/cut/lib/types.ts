@@ -1,5 +1,6 @@
 import type { GuideId, GuideLines } from "./guides";
 import {
+  type OutputSpace,
   EFFECT_LABELS,
   behindSubjectMask,
   overlayKind,
@@ -24,10 +25,18 @@ import {
   type TextOverlay as KitTextOverlay,
   type WordEffectId,
 } from "@donkeycut/effects-kit";
+import type { CodeFormat, SourceProfile } from "@donkeycut/effects-kit";
 import { getBackend, type CutBackend } from "./backend";
 import type { VideoProject } from "./genvideo/types";
 
-export type AssetType = "video" | "audio" | "image" | "font";
+export type AssetType = "video" | "audio" | "image" | "font" | "lut";
+
+/** Library kinds a document links to by content key and never copies: fonts
+ * and LUTs. They have no place on the timeline and no streams to probe. */
+export const LINKED_ASSET_TYPES = ["font", "lut"] as const;
+export type LinkedAssetType = (typeof LINKED_ASSET_TYPES)[number];
+export const isLinkedAssetType = (type: string): type is LinkedAssetType =>
+  (LINKED_ASSET_TYPES as readonly string[]).includes(type);
 
 /** Default on-timeline length (seconds) a still image occupies when placed —
  * an image has no intrinsic duration, so the clip carries this as its `out`. */
@@ -258,6 +267,18 @@ export interface StoredAsset {
    * blockSource.ts. Replacing it with real footage is an ordinary item
    * replace; the clip keeps its place and its length. */
   block?: { label: string; color?: string };
+  /** What the video's header says its code values are, read at import
+   * (lib/colorProbe.ts): matrix, range, bit depth, the profile it names and
+   * the codec. Only a header read writes it. Absent on media imported before
+   * the probe existed; enrichAsset fills it from a header read. */
+  color?: CodeFormat & { detected: SourceProfile; codec?: string };
+  /** The person's override of what this source's code values mean. */
+  colorProfile?: SourceProfile;
+  /** A preview proxy of a master the browser cannot play at speed (a ProRes
+   * master, an HDR file on a browser that tone-maps): a bt709-tagged HEVC
+   * file beside the master in the project's media. The preview reads it; an
+   * export reads the master. */
+  proxy?: { fileName: string; sizeBytes: number };
 }
 
 /** A folder in the Media panel's Project Files view — a flat, project-local
@@ -312,7 +333,15 @@ export interface MediaAsset extends StoredAsset {
   peaks?: number[];
   /** Present only while the file is still uploading. */
   upload?: AssetUpload;
+  /** Where the preview proxy is served from, when `proxy` is set. */
+  proxyUrl?: string;
 }
+
+/** The URL the preview decodes: the proxy when the asset has one, else the
+ * master. Every reader that draws for the screen goes through this; a
+ * render reads `url`. */
+export const previewUrl = (asset: Pick<MediaAsset, "url" | "proxyUrl">): string =>
+  asset.proxyUrl ?? asset.url;
 
 /**
  * A layout region inside the output frame, as fractions with a top-left origin
@@ -1195,6 +1224,9 @@ export interface LibraryTemplate {
    * preset (see soundPresets.ts), listed in the audio inspector and kept
    * off the template shelf. */
   sound?: ClipSound;
+  /** A saved colour grade: a template carrying only this is a grade preset,
+   * listed in the Color panel and kept off the template shelf. */
+  grade?: ColorGrade;
 }
 /** What the client sends to save a selection (media are project file names). */
 export type TemplateSaveInput = Omit<LibraryTemplate, "id" | "addedAt">;
@@ -1580,6 +1612,9 @@ export interface ProjectDoc {
    * cut plays over, what letterboxes a fitted clip, and what fills a gap in the
    * timeline. Hex; absent = `DEFAULT_BACKGROUND`. */
   background?: string;
+  /** The delivery's color space — what the export writes and, on an HDR
+   * display, what the preview shows. Absent = SDR. */
+  colorSpace?: OutputSpace;
   /** Auto-generated (then hand-edited) subtitles. */
   subtitles?: SubtitlesBlock;
   /** Legacy per-project view metadata — view state now lives in IndexedDB;

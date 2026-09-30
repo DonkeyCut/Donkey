@@ -301,7 +301,7 @@ const ORPHAN_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 export async function sweepOrphanMedia(id: string, doc: ProjectDoc): Promise<void> {
   const dir = mediaDir(id);
   const names = await readdir(dir).catch(() => [] as string[]);
-  const referenced = new Set(doc.assets.map((a) => a.fileName));
+  const referenced = new Set(doc.assets.flatMap((a) => (a.proxy ? [a.fileName, a.proxy.fileName] : [a.fileName])));
   const cutoff = Date.now() - ORPHAN_MAX_AGE_MS;
   for (const name of names) {
     if (referenced.has(name) || name.startsWith(".")) continue;

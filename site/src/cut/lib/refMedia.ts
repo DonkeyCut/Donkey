@@ -412,6 +412,8 @@ export async function refsToParts(
         text:
           ref.scope === "note"
             ? `Referenced note "${ref.name}". Read its current text with read_note: ${JSON.stringify({ id: ref.id })}`
+            : ref.use
+            ? `Referenced ${ref.use.noun} "${ref.name}" in the Library. Use it with ${ref.use.tool}: ${JSON.stringify(ref.use.args)}`
             : ref.scope === "folder"
             ? `Referenced folder "${ref.name}". Read its current contents with read_folder: ${JSON.stringify(ref.folder)}`
             : isCatalogRef(ref)

@@ -235,6 +235,24 @@ export function listedAssetIds(s: ItemLists): Set<string> {
   return used;
 }
 
+/** Every asset id whose picture the frame draws: the clips on every video
+ * track with what is baked for them, and the elements. What a render has to
+ * read the color of before its first frame. */
+export const pictureAssetIds = (s: Pick<ItemLists, "clips" | "overlays">): Set<string> =>
+  listedAssetIds({ clips: s.clips, overlays: s.overlays, audioClips: [], transitions: [], subtitles: { cues: [] } });
+
+/** The drawn lists of a stored document as it comes off disk or the wire,
+ * before the loader folds it: an older doc keeps its upper-track clips in
+ * `overlayClips`. */
+export const drawnLists = (doc: {
+  clips?: VideoClip[];
+  overlayClips?: VideoClip[];
+  overlays?: Overlay[];
+}): Pick<ItemLists, "clips" | "overlays"> => ({
+  clips: [...(doc.clips ?? []), ...(doc.overlayClips ?? [])],
+  overlays: doc.overlays ?? [],
+});
+
 /** A switch over kinds is complete or it does not compile. */
 export const assertNever = (x: never): never => {
   throw new Error(`Unhandled item kind ${String(x)}`);

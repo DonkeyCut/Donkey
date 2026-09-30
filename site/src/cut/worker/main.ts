@@ -4,13 +4,14 @@ import { claimNextJob, prisma, type ClaimedJob } from "./db";
 import { overlayKeysOf, runExportJob } from "./exportJob";
 import { runHlsJob } from "./hlsJob";
 import { runConvertJob } from "./convertJob";
+import { runProxyJob } from "./proxyJob";
 import { runImportUrlJob } from "./importUrlJob";
 import { runTurnJob } from "./turnJob";
 import { describeRuntime, installHeadlessRuntime } from "../lib/headless/runtime";
 import { deleteObjects } from "./r2";
 
 // The cloud render worker: a headless loop that claims CutRenderJob rows the
-// hosted API queues (export, preview, import_url, convert, agent_turn),
+// hosted API queues (export, preview, import_url, convert, proxy, agent_turn),
 // executes them with the same pipeline code the local engine runs, and writes
 // progress and results
 // back to the row the client polls. Scale is horizontal: one job per process,
@@ -51,6 +52,7 @@ const MAX_RUNTIME_MS: Record<string, number> = {
   hls: 3 * 60 * 60_000,
   import_url: 20 * 60_000,
   convert: 60 * 60_000,
+  proxy: 60 * 60_000,
   agent_turn: 20 * 60_000,
 };
 const DEFAULT_MAX_RUNTIME_MS = 60 * 60_000;
@@ -169,6 +171,12 @@ async function runJob(job: ClaimedJob): Promise<void> {
       });
     } else if (job.kind === "convert") {
       const result = await runConvertJob(job, handle, () => entry.canceled);
+      await prisma.cutRenderJob.updateMany({
+        where: { id: job.id, state: "running" },
+        data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },
+      });
+    } else if (job.kind === "proxy") {
+      const result = await runProxyJob(job, handle, () => entry.canceled);
       await prisma.cutRenderJob.updateMany({
         where: { id: job.id, state: "running" },
         data: { state: "done", progress: 1, result: result as unknown as Prisma.InputJsonValue },

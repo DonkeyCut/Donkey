@@ -53,9 +53,6 @@ export interface TurnSpec {
   /** Which streams the source carries; the file carries the same. */
   video: boolean;
   audio: boolean;
-  /** The picture's fold to BT.709 (see `sdrConvert`), run before the turn so
-   * the file is plain SDR the graph converts nothing about. */
-  colorFix: string;
   /** Bytes a second of the source's picture comes to decoded (see
    * `videoDecodeCost`), which sizes the chunks. */
   decodeCost?: number;
@@ -100,7 +97,7 @@ export async function bakeTurnedMedia(
     const piece = `${outFile}.${i}${spec.video ? ".mov" : ".wav"}`;
     const args = ["-y", "-hide_banner", "-loglevel", "error", "-ss", num(from), "-t", num(to - from), "-i", src];
     if (spec.video) {
-      args.push("-vf", `${spec.colorFix}reverse,format=${spec.fmt}`);
+      args.push("-vf", `reverse,format=${spec.fmt}`);
       args.push(
         ...(spec.master
           ? ["-c:v", "prores_ks", "-profile:v", "4", "-vendor", "apl0", "-pix_fmt", "yuv444p10le"]

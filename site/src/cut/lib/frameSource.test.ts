@@ -112,6 +112,14 @@ await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
   keyframeTimeAt,
 });
 
+/** Proxies a reader reported as unopenable. */
+const unopenable: MediaAsset[] = [];
+await stubModule<typeof import("./mediaProxy")>("./mediaProxy", import.meta.url, {
+  proxyUnreadable: (async (a: MediaAsset) => {
+    unopenable.push(a);
+  }) as never,
+});
+
 const { BACK_WINDOW, ClipFrameSource, FrameRing, FrameSourcePool, mappingKey, walkClaim } =
   await import("./frameSource");
 
@@ -425,6 +433,26 @@ describe("FrameSourcePool", () => {
     expect(pool.size).toBe(1);
   });
 
+  test("a source moves onto the proxy the moment it lands", () => {
+    // A ProRes master plays through the WASM decoder until its proxy is
+    // written onto the asset; the same mapping then reads the proxy's URL,
+    // in place, with nothing reloaded.
+    const pool = new FrameSourcePool(4);
+    pool.beginFrame();
+    const master = asset("a");
+    const before = pool.get("k", master, 480);
+    expect(before.url).toBe(master.url);
+    const proxied = {
+      ...master,
+      proxy: { fileName: "a.proxy.mp4", sizeBytes: 1 },
+      proxyUrl: "https://example.test/a.proxy.mp4",
+    };
+    const after = pool.get("k", proxied, 480);
+    expect(after).toBe(before);
+    expect(after.url).toBe(proxied.proxyUrl);
+    expect(pool.size).toBe(1);
+  });
+
   test("suspends the least recently asked-for, never this frame's", () => {
     const pool = new FrameSourcePool(2);
     pool.beginFrame();
@@ -606,6 +634,34 @@ describe("ClipFrameSource retarget", () => {
     src.close();
   });
 
+  test("a proxy that will not open hands the source back to the master", async () => {
+    // A copied project once named a proxy file it never received: the source
+    // retried that address forever and the clip stayed black. The reader
+    // reports it, the store drops the proxy, and the pool moves the source
+    // onto the master.
+    reset();
+    unopenable.length = 0;
+    const pool = new FrameSourcePool(4);
+    pool.beginFrame();
+    const master = asset("lost");
+    const proxied = { ...master, proxy: { fileName: "lost.proxy.mp4", sizeBytes: 1 }, proxyUrl: "https://example.test/lost.proxy.mp4" };
+    gate(proxied.proxyUrl).refuse();
+    const src = pool.get("k", proxied, 360);
+    src.want(0.1, true);
+    await settle();
+    expect(unopenable.map((a) => a.id)).toEqual(["lost"]);
+    expect(src.failed).toBe(true);
+    // What proxyUnreadable does to the store: the asset loses its proxy.
+    expect(pool.get("k", master, 360)).toBe(src);
+    expect(src.url).toBe(master.url);
+    expect(src.failed).toBe(false);
+    src.want(0.1, true);
+    await settle();
+    expect(src.frameAt(0.1)).not.toBeNull();
+    expect(sinkWalks[sinkWalks.length - 1].url).toBe(master.url);
+    pool.dispose();
+  });
+
   test("a new address that will not open leaves the picture standing", async () => {
     reset();
     const before = asset("stay");
@@ -624,6 +680,81 @@ describe("ClipFrameSource retarget", () => {
     expect(src.frameAt(0.1)).not.toBeNull();
     expect(inputs[0].disposed).toBe(false);
     expect(inputs[inputs.length - 1].disposed).toBe(true);
+    src.close();
+  });
+});
+
+describe("ClipFrameSource held frames keep their read", () => {
+  // A full-range master reads full range; its proxy is limited-range Rec.709.
+  // A frame decoded from one keeps meaning what it meant when the source moves
+  // to the other, until frames off the new file replace it.
+  const color = { matrix: "bt709", fullRange: true, bitDepth: 8, detected: "rec709", codec: "avc1" } as const;
+  const master = (): MediaAsset => ({ ...asset("held"), color: { ...color } });
+  const proxied = (): MediaAsset => ({
+    ...master(),
+    proxy: { fileName: "held.proxy.mp4", sizeBytes: 1 },
+    proxyUrl: "https://example.test/held.proxy.mp4",
+  });
+  const rangeOf = (read: { recipe(): { fullRange?: boolean } } | undefined) => read?.recipe().fullRange;
+
+  test("a master frame held after its proxy lands is read as the master", async () => {
+    inputs.length = 0;
+    sinkWalks.length = 0;
+    gates.clear();
+    const src = new ClipFrameSource(master(), 360);
+    src.want(0.1, true);
+    await settle();
+    expect(rangeOf(src.frameAt(0.1)!.read)).toBe(true);
+    src.retarget(proxied());
+    await settle();
+    // Paused on the same moment: the held master frame answers exactly, so
+    // nothing re-decodes it, and it keeps the master's read while the source
+    // itself now reads the proxy.
+    src.want(0.1, false);
+    await settle();
+    expect(src.hasExact(0.1)).toBe(true);
+    expect(rangeOf(src.colorRead)).toBe(false);
+    expect(rangeOf(src.frameAt(0.1)!.read)).toBe(true);
+    expect(rangeOf(src.shownColorRead)).toBe(true);
+    // Frames the walk lands off the proxy read as the proxy.
+    src.want(2, true);
+    await settle();
+    expect(sinkWalks[sinkWalks.length - 1].url).toBe(proxied().proxyUrl!);
+    expect(rangeOf(src.frameAt(2)!.read)).toBe(false);
+    expect(rangeOf(src.shownColorRead)).toBe(false);
+    src.close();
+  });
+
+  test("a proxy frame held after the fallback to the master is read as the proxy", async () => {
+    inputs.length = 0;
+    sinkWalks.length = 0;
+    gates.clear();
+    const src = new ClipFrameSource(proxied(), 360);
+    src.want(0.1, true);
+    await settle();
+    expect(rangeOf(src.frameAt(0.1)!.read)).toBe(false);
+    src.retarget(master());
+    await settle();
+    src.want(0.1, false);
+    await settle();
+    expect(rangeOf(src.colorRead)).toBe(true);
+    expect(rangeOf(src.frameAt(0.1)!.read)).toBe(false);
+    src.want(2, true);
+    await settle();
+    expect(sinkWalks[sinkWalks.length - 1].url).toBe(master().url);
+    expect(rangeOf(src.frameAt(2)!.read)).toBe(true);
+    src.close();
+  });
+
+  test("a profile override reaches a held frame at once", async () => {
+    inputs.length = 0;
+    sinkWalks.length = 0;
+    gates.clear();
+    const src = new ClipFrameSource(master(), 360);
+    src.want(0.1, true);
+    await settle();
+    src.follow({ ...master(), colorProfile: "srgb" });
+    expect(src.frameAt(0.1)!.read!.recipe().profile).toBe("srgb");
     src.close();
   });
 });

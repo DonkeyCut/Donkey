@@ -3,6 +3,7 @@ import {
   ALL_EFFECT_IDS,
   EFFECT_LABELS,
   GRADE_BASIC_FIELDS,
+  GRADE_DETAIL_FIELDS,
   GRADE_MAX,
   GRADE_PRESET_CATEGORIES,
   GRADE_PRESET_IDS,
@@ -278,7 +279,7 @@ const ENUMS: Record<string, EnumFamily> = {
   },
   grade_field: {
     instructions: "Which colour slider does the request move?",
-    options: Object.fromEntries(GRADE_BASIC_FIELDS.map((f) => [f.key, f.label])),
+    options: Object.fromEntries([...GRADE_BASIC_FIELDS, ...GRADE_DETAIL_FIELDS].map((f) => [f.key, f.label])),
   },
   hsl_band: {
     instructions: "Which colour band does the request single out?",
@@ -998,7 +999,7 @@ export const INSTANT_ACTIONS: Record<string, ActionDef> = {
     build: (p) => {
       const field = p.enumOf("grade_field");
       const value = p.level("grade_amount");
-      const label = GRADE_BASIC_FIELDS.find((f) => f.key === field)?.label ?? field;
+      const label = [...GRADE_BASIC_FIELDS, ...GRADE_DETAIL_FIELDS].find((f) => f.key === field)?.label ?? field;
       return {
         args: { clipId: p.target("clip").id, [field]: value },
         say: `${label} ${value >= 0 ? "up" : "down"} on "${p.target("clip").name}".`,

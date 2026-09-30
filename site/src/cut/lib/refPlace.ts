@@ -9,6 +9,7 @@
  */
 
 import { CATALOG_PREFIX, type AssetRef } from "./assetRef";
+import { isLinkedAssetType } from "./types";
 import {
   addProjectTemplateToTimeline,
   addTemplateToProject,
@@ -27,7 +28,7 @@ import type { EffectId } from "@donkeycut/effects-kit";
  * sound on the first audio lane with room. */
 function placeAsset(asset: MediaAsset, at: number): void {
   const s = useEditor.getState();
-  if (asset.type === "font") return;
+  if (isLinkedAssetType(asset.type)) return;
   if (asset.origin === "sticker") {
     s.addSticker({ assetId: asset.id, ...(isLottieAsset(asset) ? { lottie: true } : {}), at });
     return;
@@ -61,7 +62,7 @@ export async function placeRefAtPlayhead(
     }
     case "library": {
       const lib = library.assets.find((a) => a.id === ref.id);
-      if (!lib || lib.type === "font") return false;
+      if (!lib || isLinkedAssetType(lib.type)) return false;
       placeWhenReady(await importLibraryAsset(projectId, lib));
       return true;
     }

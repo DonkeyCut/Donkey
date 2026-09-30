@@ -13,6 +13,7 @@
 import { matteLumaToAlpha, removalActive, retimeOf } from "@donkeycut/effects-kit";
 import { openCanvasVideo, scaledEvenSize } from "./canvasVideo";
 import { FrameCompositor, type Frame } from "./composite";
+import { ensureClipLuts } from "./lutBuild";
 import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "./raster";
 import type { MediaAsset, VideoClip } from "./types";
 import { liveReader } from "./liveReader";
@@ -109,7 +110,12 @@ export async function renderRemovalPieces(
     // The compositor renders the layer with the preview's own code; its
     // drawing canvas never draws, the scratches do the work.
     const comp = new FrameCompositor(createRasterCanvas(2, 2));
+    comp.colorMode = "exact";
+    // The layer is drawn through the recipe of the read that decoded it.
+    await reader.colorRead.settled();
+    comp.sourceProvider = () => reader.colorRead.recipe();
     const bakeClip = opts.bakeLook ? clip : { ...clip, look: undefined };
+    await ensureClipLuts([comp.recipeFor(bakeClip)]);
     const matteFrame = createRasterCanvas(2, 2);
     // The alpha plane's staging buffer, rewritten whole every frame.
     const alphaPlane = new ImageData(w, h);

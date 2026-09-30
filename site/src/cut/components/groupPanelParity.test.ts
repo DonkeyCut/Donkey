@@ -20,7 +20,7 @@ const names = (label: string) =>
 const SHARED: Record<string, string[]> = {
   "video clips": ["Speed", "Reverse", "Volume", "Mute audio", "Sound quality", "Framing", "Zoom", "Flip", "Rotation", "Opacity", "Hidden", "Border", "Shadow"],
   "audio clips": ["Speed", "Reverse", "Volume", "Duck others", "Fade in", "Fade out", "Sound quality", "Hidden"],
-  titles: ["Font", "Bold", "Italic", "Align ${a}", "Text size", "Line height", "Letter spacing", "${label} stretch", "Color", "Outline", "Shadow", "Backdrop", "Position", "Rotation", "Opacity", "Hidden"],
+  titles: ["Font", "Bold", "Italic", "Align ${a}", "Text size", "Line height", "Letter spacing", "Text box width", "Color", "Outline", "Shadow", "Backdrop", "Position", "Rotation", "Opacity", "Hidden"],
   shapes: ["Fill color", "Corner radius", "Outline", "Position", "Rotation", "Opacity", "Hidden"],
   stickers: ["Sticker size", "Position", "Rotation", "Opacity", "Hidden"],
   effects: ["Effect amount", "Depth", "Zoom speed", "Hidden"],

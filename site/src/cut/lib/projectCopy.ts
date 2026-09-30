@@ -10,7 +10,7 @@ import { mergeThreads, readProjectThreads, writeProjectThreads } from "./chatThr
 import { ensureLinkedOnCloud, linkedIdsIn } from "./linkedLibrary";
 import { uploadProjectMediaTo } from "./media";
 import { localMediaFile } from "./mediaSync";
-import type { ProjectDoc } from "./types";
+import type { ProjectDoc, StoredAsset } from "./types";
 
 /** Move a project's conversations onto the copy.
  *
@@ -63,26 +63,35 @@ export async function copyProjectAcross(
     created = summary.id;
     const assets = Array.isArray(doc.assets) ? doc.assets : [];
     const names = new Map<string, string>();
-    const unique = new Set(assets.map((a) => a.fileName)).size;
-    for (const a of assets) {
-      if (names.has(a.fileName)) continue;
+    // A preview proxy travels with its master to a Mac or a browser. The
+    // cloud writes proxies only through its worker — they are the one
+    // quota-exempt media there — so a copy landing in the cloud leaves the
+    // proxy behind and asks the worker for a new one once the doc is saved.
+    const carryProxies = dst.kind !== "cloud";
+    const files = assets.flatMap((a) => [
+      { fileName: a.fileName, name: a.name },
+      ...(carryProxies && a.proxy ? [{ fileName: a.proxy.fileName, name: a.name }] : []),
+    ]);
+    const unique = new Set(files.map((f) => f.fileName)).size;
+    for (const f of files) {
+      if (names.has(f.fileName)) continue;
       // A cloud project's media may exist only in this browser's store so far
       // (an import the lazy upload hasn't drained — a full account's, say).
       // The local copy is the same write-once bytes, and for the undrained
       // file it is the only copy, so it is read first; the network serves the
       // rest.
-      const local = src.kind === "cloud" ? await localMediaFile(projectId, a.fileName) : null;
+      const local = src.kind === "cloud" ? await localMediaFile(projectId, f.fileName) : null;
       let blob: Blob;
       if (local) {
         blob = local;
       } else {
         const bytes = await src.fetch(
-          `/api/cut/projects/${projectId}/media/${encodeURIComponent(a.fileName)}`
+          `/api/cut/projects/${projectId}/media/${encodeURIComponent(f.fileName)}`
         );
-        if (!bytes.ok) throw new Error(`Could not read “${a.name}”.`);
+        if (!bytes.ok) throw new Error(`Could not read “${f.name}”.`);
         blob = await bytes.blob();
       }
-      names.set(a.fileName, await uploadProjectMediaTo(dst, summary.id, blob, a.fileName));
+      names.set(f.fileName, await uploadProjectMediaTo(dst, summary.id, blob, f.fileName));
       opts.onProgress?.(names.size, unique);
     }
     // A project moving to the cloud takes what it links to with it: a render
@@ -96,7 +105,14 @@ export async function copyProjectAcross(
       id: undefined,
       name,
       folderId: null,
-      assets: assets.map((a) => ({ ...a, fileName: names.get(a.fileName) ?? a.fileName })),
+      assets: assets.map((a) => {
+        const { proxy, ...rest } = a;
+        const copied: StoredAsset = { ...rest, fileName: names.get(a.fileName) ?? a.fileName };
+        if (proxy && carryProxies) {
+          copied.proxy = { ...proxy, fileName: names.get(proxy.fileName) ?? proxy.fileName };
+        }
+        return copied;
+      }),
     };
     const putRes = await dst.fetch(`/api/cut/projects/${summary.id}`, {
       method: "PUT",
@@ -105,6 +121,20 @@ export async function copyProjectAcross(
     });
     if (!putRes.ok) throw new Error("Could not save the project.");
     await copyChatThreads(src, dst, projectId, summary.id);
+    if (!carryProxies) {
+      // The worker builds the proxies the copy left behind; the editor writes
+      // each onto its asset when the project is next opened.
+      for (const a of assets) {
+        if (!a.proxy) continue;
+        void dst
+          .fetch(`/api/cut/projects/${summary.id}/proxy`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ file: names.get(a.fileName) ?? a.fileName }),
+          })
+          .catch(() => {});
+      }
+    }
     return summary.id;
   } catch (e) {
     if (created) {

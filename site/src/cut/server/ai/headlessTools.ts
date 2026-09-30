@@ -13,6 +13,8 @@ import { convertToMp4 } from "../convert";
 import { probeDuration } from "../frames";
 import { deleteMedia, mediaPath, readProject, writeProject } from "../projects";
 import { uniqueName } from "../util";
+import { withFileColors } from "../fileColor";
+import { drawnLists } from "../../lib/itemKinds";
 
 // The engine's own tool executor, for a chat whose editor tab is gone: the
 // project doc hydrates into the same store the page uses, tools run against
@@ -130,10 +132,16 @@ async function ensureOpen(projectId: string): Promise<OpenDoc | null> {
   ) {
     return open;
   }
-  const assets: MediaAsset[] = (stored.assets ?? []).map((a) => ({
-    ...a,
-    url: `/api/cut/projects/${encodeURIComponent(projectId)}/media/${encodeURIComponent(a.fileName)}`,
-  }));
+  // Footage imported before its color was read gets it here, off the file,
+  // so what a tool renders and what the doc saves both read it right.
+  const assets: MediaAsset[] = await withFileColors(
+    (stored.assets ?? []).map((a) => ({
+      ...a,
+      url: `/api/cut/projects/${encodeURIComponent(projectId)}/media/${encodeURIComponent(a.fileName)}`,
+    })),
+    drawnLists(stored),
+    (fileName) => mediaPath(projectId, fileName)
+  );
   await useEditor.getState().openProjectDoc(projectId, stored, assets);
   open = { projectId, stored };
   return open;

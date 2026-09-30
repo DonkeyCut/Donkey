@@ -123,3 +123,16 @@ describe("copy and paste, kind by kind", () => {
     expect(useEditor.getState().subtitles.cues).toHaveLength(1);
   });
 });
+
+describe("pictureAssetIds", () => {
+  test("names what the frame draws and leaves the soundtrack and the shelf out", async () => {
+    const { drawnLists, pictureAssetIds } = await import("./itemKinds");
+    const doc = {
+      clips: [{ assetId: "base", removal: { matte: { assetId: "matte" } } }],
+      overlayClips: [{ assetId: "upper" }],
+      overlays: [{ kind: "sticker", assetId: "sticker" }],
+      audioClips: [{ assetId: "song" }],
+    } as never;
+    expect([...pictureAssetIds(drawnLists(doc))].sort()).toEqual(["base", "matte", "sticker", "upper"]);
+  });
+});

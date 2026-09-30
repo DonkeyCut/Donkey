@@ -30,8 +30,8 @@ import { copyTimelineSelection, pasteCutPayload, payloadFromHtml } from "@/cut/l
 import { useLibrary } from "@/cut/lib/queries";
 import { copyableRefs } from "@/cut/lib/refCopy";
 import { startUpload } from "@/cut/lib/importQueue";
-import { enrichAsset, importFileToProject, isFontFile, isMediaFile, prepareImport } from "@/cut/lib/media";
-import { uploadLibraryFont } from "@/cut/lib/linkedLibrary";
+import { enrichAsset, importFileToProject, isMediaFile, prepareImport } from "@/cut/lib/media";
+import { isLinkedFile, uploadLinkedFile } from "@/cut/lib/linkedLibrary";
 import { copiedFrameFile, hasCopiedFrame } from "@/cut/lib/stageFrame";
 // Side-effect import: registers the brief-to-video resume subscription, so a
 // persisted run resumes on project load even when the AI panel never mounts.
@@ -67,7 +67,7 @@ import {
   shortcutDecline,
   shortcutReached,
 } from "@/cut/lib/shortcutGate";
-import { docAudioClips, docClips, docOverlays, projectDuration, serializeDoc, storedAssets, timelineHMax, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
+import { docFieldsEdited, projectDuration, serializeDoc, storedAssets, timelineHMax, useEditor, clipLen, type VideoTrackPlacement } from "@/cut/lib/store";
 import { fileLandingAt } from "@/cut/lib/timelineDrop";
 import { landOnRow } from "@/cut/lib/laneTracks";
 import { playheadAt, previewAt, skimAt } from "@/cut/lib/playhead";
@@ -520,7 +520,6 @@ export function Editor({
     };
     let timer: ReturnType<typeof setTimeout> | null = null;
     let last = serializeDoc(useEditor.getState());
-    let lastName = useEditor.getState().projectName;
     // serializeDoc copies the bars, so the store's array is the baseline: a
     // parked bar changes no clip field, and comparing the copies would never
     // see it.
@@ -622,7 +621,6 @@ export function Editor({
         // arriving at one never counts as an edit.
         primedEpoch = s.loadEpoch;
         last = serializeDoc(s);
-        lastName = s.projectName;
         lastBars = s.transitions;
         assetsChanged(s.assets);
         return;
@@ -639,36 +637,9 @@ export function Editor({
       // Evaluated every tick (not short-circuited) so the asset baseline
       // advances even when another slice triggered this save.
       const assetsDirty = assetsChanged(s.assets);
-      const changed =
-        assetsDirty ||
-        // The projections, not the raw arrays: clips waiting on an upload are
-        // held out of the document, and holding one is not an edit.
-        docClips(s.clips, s.assets) !== (last.clips as unknown) ||
-        docAudioClips(s.audioClips, s.assets) !== (last.audioClips as unknown) ||
-        docOverlays(s.overlays) !== (last.overlays as unknown) ||
-        s.transitions !== lastBars ||
-        s.templates !== (last.templates as unknown) ||
-        s.mediaFolders !== (last.mediaFolders as unknown) ||
-        s.subtitles !== (last.subtitles as unknown) ||
-        s.aspect !== last.aspect ||
-        s.guides !== last.guides ||
-        s.guideLines !== last.guideLines ||
-        s.background !== last.background ||
-        s.publish.caption !== last.publish?.caption ||
-        s.publish.tags !== last.publish?.tags ||
-        s.publish.soundTitle !== last.publish?.soundTitle ||
-        s.publish.handle !== last.publish?.handle ||
-        s.notes.text !== last.notes?.text ||
-        s.notes.publishedAt !== last.notes?.publishedAt ||
-        s.notes.links.join("") !== (last.notes?.links ?? []).join("") ||
-        // Normalized like serializeDoc stores it (?? null): a project with no
-        // run holds undefined in state and null in the doc — not a change.
-        (s.genvideo ?? null) !== ((last.genvideo ?? null) as unknown) ||
-        s.renders !== (last.renders as unknown) ||
-        s.projectName !== lastName;
+      const changed = assetsDirty || docFieldsEdited(s, last, lastBars);
       if (!changed) return;
       last = serializeDoc(s);
-      lastName = s.projectName;
       lastBars = s.transitions;
       editSeq++;
       // Every edit lands on disk marked dirty before it lands on the server,
@@ -770,7 +741,18 @@ export function Editor({
         onOutcome?: (result: { file: File; assetId: string } | { file: File; failed: true }) => void;
       }
     ) => {
-      const list = Array.from(files);
+      // A font or a LUT dropped on the editor goes on the Library shelf, the
+      // way a paste of one does: it has no place on the timeline.
+      const linked = Array.from(files).filter(isLinkedFile);
+      for (const file of linked) {
+        void uploadLinkedFile(file)
+          .then(() => opts?.onOutcome?.({ file, assetId: "" }))
+          .catch((err) => {
+            reportSwallowed(`[cut] shelving failed for ${file.name}`, err);
+            opts?.onOutcome?.({ file, failed: true });
+          });
+      }
+      const list = Array.from(files).filter((f) => !isLinkedFile(f));
       // A run of files lands in order, each after the last; a new track is
       // opened by the first and the rest join it.
       let at = opts?.at;
@@ -1018,20 +1000,21 @@ export function Editor({
       if (isPasteTarget(e.target)) return;
       const at = Math.max(0, previewAt());
       const pasted = Array.from(e.clipboardData?.files ?? []);
-      // A font is not media for the timeline: it goes on the shelf and lights
-      // up in the font menu, the way the Library panel takes a dropped one.
-      const fonts = pasted.filter(isFontFile);
-      if (fonts.length > 0) {
+      // A font or a LUT is no media for the timeline: it goes on the shelf
+      // and lights up in its menu, the way the Library panel takes a dropped
+      // one.
+      const linked = pasted.filter(isLinkedFile);
+      if (linked.length > 0) {
         e.preventDefault();
-        for (const font of fonts) {
-          void uploadLibraryFont(font).catch((err) =>
-            reportSwallowed(`[cut] paste failed for ${font.name}`, err)
+        for (const file of linked) {
+          void uploadLinkedFile(file).catch((err) =>
+            reportSwallowed(`[cut] paste failed for ${file.name}`, err)
           );
         }
       }
-      const files = pasted.filter((f) => isMediaFile(f) && !isFontFile(f));
+      const files = pasted.filter((f) => isMediaFile(f) && !isLinkedFile(f));
       if (files.length === 0) {
-        if (fonts.length > 0) return;
+        if (linked.length > 0) return;
         // A copy made in Cut — this tab, another tab, another project — rides
         // the HTML flavor whole. It is the newest copy whichever tab made it,
         // so it goes ahead of this tab's own timeline clipboard; a card copy
@@ -1051,7 +1034,7 @@ export function Editor({
         }
         // A ⌘C on a tile — a media card, a library card, a stock sound, a
         // sticker, an effect, a shape, a transition, a template — put its
-        // mention token here; each one lands the way the tile's + button
+        // mention token here; each one lands the way the tile's add action
         // lands it. Imports run behind the editor; a run lands in copy order.
         const library = libraryRef.current;
         const candidates = refCandidatesOf(s, library);

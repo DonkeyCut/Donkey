@@ -60,7 +60,7 @@ async function ownerProject(share: ShareRow) {
 async function mediaVersions(share: ShareRow, fileNames: string[]): Promise<Map<string, string>> {
   if (!fileNames.length) return new Map();
   const rows = await prisma.cutMediaObject.findMany({
-    where: { userId: share.userId, projectId: share.projectId, kind: "media", fileName: { in: fileNames } },
+    where: { userId: share.userId, projectId: share.projectId, kind: { in: ["media", "proxy"] }, fileName: { in: fileNames } },
     select: { fileName: true, updatedAt: true },
   });
   return new Map(rows.map((r) => [r.fileName, String(r.updatedAt.getTime())]));
@@ -130,10 +130,18 @@ export function filterDocForShare(doc: ProjectDoc, features: ShareFeatures): Pro
   return filtered;
 }
 
+/** The files a viewer may fetch: each allowed asset's master and, when it has
+ * one, its preview proxy, which is what the viewer's preview decodes. */
+export function sharedFileNames(doc: ProjectDoc, features: ShareFeatures): Set<string> {
+  return new Set(
+    allowedAssets(doc, features).flatMap((a) => (a.proxy ? [a.fileName, a.proxy.fileName] : [a.fileName]))
+  );
+}
+
 async function allowedFileNames(share: ShareRow, features: ShareFeatures): Promise<Set<string>> {
   const row = await ownerProject(share);
   if (!row) return new Set();
-  return new Set(allowedAssets(row.doc as unknown as ProjectDoc, features).map((a) => a.fileName));
+  return sharedFileNames(row.doc as unknown as ProjectDoc, features);
 }
 
 export const sharedView = {

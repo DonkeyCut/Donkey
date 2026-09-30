@@ -9,6 +9,7 @@
 // needs the editor page's sign-in there and is refused with a plain reason.
 
 import { getBackend, type CutBackend } from "./backend";
+import { isLinkedAssetType } from "./types";
 import { sharedBackendFor } from "./backend/shared";
 import { apiJson } from "./api";
 import { tagChatAsset } from "./chatAssets";
@@ -190,7 +191,7 @@ export async function landReferenceAssets(
     useEditor.getState().addAsset(asset);
     if (opts.chatId !== undefined) tagChatAsset(asset.id, opts.chatId);
     if (asset.type === "font") void registerFontAsset(asset).catch(() => {});
-    else void enrichAsset(asset).catch(() => {});
+    else if (!isLinkedAssetType(asset.type)) void enrichAsset(asset).catch(() => {});
     out.push({ sourceId: source.id, asset, reused: false });
   }
   // In the order asked for, so a caller's index arithmetic holds.

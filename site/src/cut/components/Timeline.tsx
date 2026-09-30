@@ -22,6 +22,7 @@ import {
   draggingAssetId,
   draggingAssetIds,
   draggingElement,
+  draggedLutKey,
   draggingLibraryMany,
   draggingTemplate,
   hasAssetDrag,
@@ -29,6 +30,7 @@ import {
   hasLibraryDrag,
   hasTemplateDrag,
 } from "@/cut/lib/assetDrag";
+import { libraryLutId, LUT_MARK_ICON } from "@/cut/lib/linkedLibrary";
 import { registerFileLanding, registerTransitionLanding } from "@/cut/lib/timelineDrop";
 import { audioClipRefs, clipRefs, draggingRef, hasRefDrag, refFromAsset, type AssetRef } from "@/cut/lib/assetRef";
 import { sendFrameToChat, type FrameGrabOrigin } from "@/cut/lib/chatIntake";
@@ -64,10 +66,10 @@ import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
-import { assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
+import { isLinkedAssetType, assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
-import { gradeCssApprox } from "@donkeycut/effects-kit";
+import { gradeCssApprox, normalizeGrade } from "@donkeycut/effects-kit";
 import { cn } from "@/lib/utils";
 
 /**
@@ -429,13 +431,30 @@ interface CarriedMedia {
   ghost?: DropGhost;
 }
 
+/** The grade id of the LUT a library drag is carrying, or null when the drag
+ * holds anything else. A LUT has no place on the timeline as a clip: it lands
+ * on the clip under the pointer as that clip's grade. */
+function draggedLut(e: React.DragEvent): string | null {
+  const key = draggedLutKey(e);
+  return key ? libraryLutId(key) : null;
+}
+
+/** The clip box under a point, read off the DOM the boxes are drawn in. */
+function clipIdAt(x: number, y: number): string | null {
+  for (const el of document.elementsFromPoint(x, y)) {
+    const sel = (el as HTMLElement).dataset?.tlSel;
+    if (sel?.startsWith("clip:")) return sel.slice(5);
+  }
+  return null;
+}
+
 /** Everything a drag carries, the grabbed item first. A single card is a run
  * of one, so every media drop takes the same path; a font, which has no
  * place on the timeline, is left out. */
 function carriedMedia(e: React.DragEvent): CarriedMedia[] {
   if (hasLibraryDrag(e)) {
     return draggingLibraryMany().flatMap((lib) =>
-      lib.type === "font"
+      isLinkedAssetType(lib.type)
         ? []
         : [
             {
@@ -468,7 +487,7 @@ function carriedMedia(e: React.DragEvent): CarriedMedia[] {
     const assets = useEditor.getState().assets;
     return draggingAssetIds().flatMap((id) => {
       const asset = assets.find((a) => a.id === id);
-      if (!asset || asset.type === "font") return [];
+      if (!asset || isLinkedAssetType(asset.type)) return [];
       return [
         {
           kind: asset.type,
@@ -748,6 +767,8 @@ export function Timeline() {
   } | null>(null);
   // Kind of external media being dragged over the timeline (audio vs video).
   const [dropType, setDropType] = useState<"video" | "audio" | null>(null);
+  // The clip a carried LUT is held over, lit as the drop's target.
+  const [lutTarget, setLutTarget] = useState<string | null>(null);
   // The pending drop preview: which track/gap, at what time, for how long —
   // and which resident clips slide right to open the room, so the row can
   // paint them parting ahead of the drop.
@@ -1706,7 +1727,7 @@ export function Timeline() {
         // The landing outlived a project switch: the asset belongs to the
         // project it was landed in.
         if (useEditor.getState().projectId !== projectId) return;
-        if (asset.type === "font") continue;
+        if (isLinkedAssetType(asset.type)) continue;
         if (only && !only(asset)) continue;
         const sticker = !!stickerOf(asset);
         if (block && !sticker && isClipMedia(asset.type)) {
@@ -1776,8 +1797,9 @@ export function Timeline() {
       // A sticker crossing a video row is still headed for the element rows,
       // and OS files belong to the timeline's own drop, which stashes their
       // landing for the editor's import and clears every preview; both pass
-      // through here untouched.
-      if (hasElementDrag(e) || draggedSticker() || draggedFiles(e)) return;
+      // through here untouched. A LUT lands on a clip, which the footer's
+      // drop resolves.
+      if (hasElementDrag(e) || draggedSticker() || draggedFiles(e) || draggedLut(e)) return;
       e.preventDefault();
       e.stopPropagation();
       cancelPreview();
@@ -1910,6 +1932,20 @@ export function Timeline() {
       // surface's own landing previews while a drag is over it.
       data-segment-drop
       onDragOver={(e) => {
+        // A LUT is a grade, so its landing is the clip under the pointer:
+        // lit while the drag is over it, and none of the slot previews.
+        if (draggedLut(e)) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          cancelPreview();
+          setAssetDrop(null);
+          setOverlayDrop(null);
+          setAudioDrop(null);
+          setDropType(null);
+          const target = clipIdAt(e.clientX, e.clientY);
+          setLutTarget((cur) => (cur === target ? cur : target));
+          return;
+        }
         // A template materializes as a whole arrangement, so it accepts the
         // drop without a single-clip landing preview.
         if (hasTemplateDrag(e)) {
@@ -2055,6 +2091,7 @@ export function Timeline() {
       onDragLeave={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
           cancelPreview();
+          setLutTarget(null);
           setAssetDrop(null);
           endCrossDrag();
           setAudioDrop(null);
@@ -2066,6 +2103,34 @@ export function Timeline() {
       }}
       onDrop={(e) => {
         cancelPreview();
+        // A LUT dropped on a clip becomes that clip's grade LUT — the whole
+        // selection's when the clip is selected. The clip never moves.
+        const lut = draggedLut(e);
+        if (lut) {
+          e.preventDefault();
+          const target = lutTarget ?? clipIdAt(e.clientX, e.clientY);
+          setLutTarget(null);
+          clearAssetDrag();
+          if (!target) return;
+          const st = useEditor.getState();
+          const picked = st.multiSelection
+            .filter((m): m is { kind: "clip"; id: string } => !!m && m.kind === "clip")
+            .map((m) => m.id);
+          const ids = picked.includes(target) ? picked : [target];
+          st.beginHistoryBatch();
+          try {
+            for (const id of ids) {
+              const clip = st.clips.find((c) => c.id === id);
+              if (!clip) continue;
+              st.updateClip(id, {
+                grade: normalizeGrade({ ...clip.grade, lut: { id: lut, amount: clip.grade?.lut?.amount } }),
+              });
+            }
+          } finally {
+            st.endHistoryBatch();
+          }
+          return;
+        }
         // OS files: the window-level drop in the editor imports them and
         // reads the landing resolved here, before the previews (and the new
         // row a drag past the stack opened) clear under it.
@@ -2597,6 +2662,7 @@ export function Timeline() {
                   mention={clipMentions.get(span.clip.id)}
                   pps={pps}
                   selected={selKeys.has(`clip:${span.clip.id}`)}
+                  lutTarget={lutTarget === span.clip.id}
                   drag={laneDragFor(laneDrag, "video", span.clip.id)}
                   parting={laneDragParts(laneDrag, "video", span.clip.id) || videoDragActive}
                   partAt={dropPartAt.get(span.clip.id)}
@@ -2667,6 +2733,7 @@ export function Timeline() {
                 mention={clipMentions.get(span.clip.id)}
                 pps={pps}
                 selected={selKeys.has(`clip:${span.clip.id}`)}
+                lutTarget={lutTarget === span.clip.id}
                 drag={laneDragFor(laneDrag, "video", span.clip.id)}
                 parting={laneDragParts(laneDrag, "video", span.clip.id) || videoDragActive}
                 partAt={dropPartAt.get(span.clip.id)}
@@ -3700,6 +3767,7 @@ function ClipView({
   mention,
   pps,
   selected,
+  lutTarget,
   drag,
   parting,
   partAt,
@@ -3716,6 +3784,8 @@ function ClipView({
   mention?: string;
   pps: number;
   selected: boolean;
+  /** A carried LUT is held over this clip: it lights as the drop's target. */
+  lutTarget?: boolean;
   /** This clip's live drag when it is the one being carried (ghost mode). */
   drag: LaneDrag | null;
   /** Another clip on this row is dragging: animate this one's parting shifts. */
@@ -3797,6 +3867,7 @@ function ClipView({
       className={cn(
         "tl-clip group absolute top-0.5 cursor-grab overflow-hidden rounded-[2.5px] bg-black shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]",
         selected && SELECTED_SHADOW,
+        lutTarget && "tl-clip-lut-target z-10 shadow-[inset_0_0_0_2px_#0a84ff]",
         clip.hidden && "opacity-40 grayscale",
         drag
           ? "tl-clip-ghost pointer-events-none cursor-grabbing opacity-80 shadow-2xl"
@@ -3834,6 +3905,15 @@ function ClipView({
       <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: FILM_H }}>
         <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} hidden={offscreen} block={asset?.block} />
       </div>
+      {clip.grade?.lut && (
+        // The LUT badge: the file mark, small, where the clip's chrome sits.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={LUT_MARK_ICON}
+          alt="LUT"
+          className="tl-clip-lut pointer-events-none absolute top-1 left-1 z-4 size-3.5 drop-shadow-[0_0_1px_rgba(0,0,0,0.6)]"
+        />
+      )}
       {hasWave && (
         <div
           className={cn(

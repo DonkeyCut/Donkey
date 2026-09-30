@@ -14,7 +14,7 @@ import { onActivity } from "./genvideo/activity";
 import { projectWriteMode, withProjectDoc } from "./genvideo/docWriter";
 import type { RefAsset, Shot, VideoEvent, VideoPhase, VideoProject } from "./genvideo/types";
 import { useEditor } from "./store";
-import { nearestAspect } from "./types";
+import { isLinkedAssetType, nearestAspect } from "./types";
 import { defaultVideoAspects } from "./videoModels";
 
 // Brief-to-video ("generate a video") controller. It owns one VideoOrchestrator
@@ -247,7 +247,7 @@ function toReferences(ids: string[] | undefined): RefAsset[] {
   const out: RefAsset[] = [];
   for (const id of ids) {
     const a = assets.find((x) => x.id === id);
-    if (a && a.type !== "font") out.push({ mediaId: a.id, kind: a.type, purpose: "style", name: a.name });
+    if (a && !isLinkedAssetType(a.type)) out.push({ mediaId: a.id, kind: a.type, purpose: "style", name: a.name });
   }
   return out;
 }

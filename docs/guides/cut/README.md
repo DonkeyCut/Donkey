@@ -52,7 +52,7 @@ Guides draw over the preview from the button beside the timeline zoom: thirds, c
 
 ## The export
 
-Best uses original resolution, cadence, supported H.264/HEVC codec and audio settings. Whole files and trims copy compressed streams; compatible sequences copy video and encode joined audio. Interior joins need matching codec configurations and keyframes. Effects and incompatible joins render at source settings. Browser, Mac and cloud share packet copying; audio joins use FFmpeg on the project’s machine. Files land in project storage. The [local-compute guide](local-compute.md) covers browser handoff.
+Best uses original resolution, cadence, supported H.264/HEVC codec and audio settings. Whole files and trims copy compressed streams; compatible sequences copy video and encode joined audio. Interior joins need matching codec configurations and keyframes. Browser, Mac and cloud share packet copying; audio joins use FFmpeg on the project’s machine. The [local-compute guide](local-compute.md) covers browser handoff, the [color guide](color.md) HDR delivery.
 
 ## Sharing
 

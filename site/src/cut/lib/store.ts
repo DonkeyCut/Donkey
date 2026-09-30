@@ -18,7 +18,10 @@ import {
   upsertKey,
   type EffectId,
   type MaskKey,
+  OUTPUT_SPACES,
+  type OutputSpace,
   type OverlayKey,
+  type SourceProfile,
   type SpeedNode,
 } from "@donkeycut/effects-kit";
 import { create } from "zustand";
@@ -342,6 +345,20 @@ const clampPps = (v: number) =>
 /** An asset filed into a Media folder. The Media panel shows what the user put
  * there — assets with no `origin` — so filing a created clip (a render, a
  * voiceover, a recording) is also its move out of the place that made it. */
+/** Whether writing `patch` onto `asset` would leave it as it is. Values are
+ * compared as they are, and a flat record (an asset's color) field by field;
+ * lists compare by identity, so a new strip is always a change. */
+export function patchIsNoop(asset: MediaAsset, patch: Partial<MediaAsset>): boolean {
+  const same = (a: unknown, b: unknown): boolean => {
+    if (Object.is(a, b)) return true;
+    if (!a || !b || typeof a !== "object" || typeof b !== "object" || Array.isArray(a) || Array.isArray(b)) return false;
+    const ka = Object.keys(a);
+    if (ka.length !== Object.keys(b).length) return false;
+    return ka.every((k) => Object.is((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+  };
+  return (Object.keys(patch) as (keyof MediaAsset)[]).every((k) => same(asset[k], patch[k]));
+}
+
 const filedInMedia = (a: MediaAsset, folderId: string | null): MediaAsset => ({
   ...a,
   folderId: folderId ?? undefined,
@@ -362,11 +379,18 @@ interface DocSnapshot {
   /** The custom guide lines: placed, dragged and removed on the preview, so
    * undo brings one back. */
   guideLines: GuideLines;
+  /** The delivery's color space, set from the export dialog, the Color
+   * panel and the chat. */
+  colorSpace: OutputSpace;
   /** Each asset's beat grid. Beats are edited on the timeline like anything
    * else — dragged, added, removed, cleared — but they live on the asset
    * rather than in the doc arrays, so the checkpoint carries them separately
    * and the restore puts them back. */
   beats: { id: string; grid: AssetBeats | undefined }[];
+  /** Each asset's source-colour override, set from the Color panel and the
+   * chat; it lives on the asset like the beat grid, so the checkpoint
+   * carries it the same way. */
+  sourceColor: { id: string; profile: SourceProfile | undefined }[];
 }
 
 export type SubtitleStatus = "idle" | "running" | "ready" | "empty" | "error";
@@ -425,6 +449,9 @@ export interface EditorState {
    * nothing but titles and shapes plays over it, a fitted clip letterboxes
    * into it, and a gap on track 0 shows it. */
   background: string;
+  /** The delivery's color space: SDR, or HDR in HLG or PQ. The export writes
+   * it and the preview shows it on an HDR display. */
+  colorSpace: OutputSpace;
   selection: Selection;
   /** Everything selected, including `selection` (the primary that drives the
    * inspector). Bulk actions — delete, copy — act on this whole set. */
@@ -525,8 +552,22 @@ export interface EditorState {
   /** Set the frame color. Project-level, so it sits outside undo like the
    * aspect. */
   setBackground: (hex: string) => void;
+  /** Set the delivery's color space, with undo. */
+  setColorSpace: (space: OutputSpace) => void;
   addAsset: (asset: MediaAsset) => void;
   updateAsset: (id: string, patch: Partial<MediaAsset>) => void;
+  /** Set what a source's code values mean — the person's override of the
+   * profile the header read — with an undo step. `undefined` returns the
+   * asset to the detected profile. */
+  setAssetColorProfile: (id: string, profile: SourceProfile | undefined) => void;
+  /** Write the preview proxy that landed beside a master onto its asset, and
+   * the address the preview reads it from. The preview retargets on the next
+   * frame; the document saves the proxy with the asset. No undo step: the
+   * proxy is a fact about the file. */
+  setAssetProxy: (id: string, proxy: NonNullable<StoredAsset["proxy"]>, proxyUrl: string) => void;
+  /** Take a proxy that would not open off its asset, so every reader falls
+   * back to the master. A read-only view drops it for this session only. */
+  dropAssetProxy: (id: string) => void;
   /** Give a video asset stored without a length the duration and size a probe
    * read off its file, and open every zero-length clip cut from it to the
    * footage — up to the next clip on its track, so nothing overlaps. A doc
@@ -1317,7 +1358,7 @@ export async function runTranscription(projectId: string, spec: object): Promise
 // Doc-mutating state: in a read-only shared view the set wrapper drops these
 // keys from every write, so edit paths anywhere in the app become no-ops.
 // Hydration (loadProject, the shared-view poll) escapes via `hydrating`.
-const DOC_KEYS = [
+export const DOC_KEYS = [
   "projectName",
   "saveState",
   "assets",
@@ -1331,6 +1372,7 @@ const DOC_KEYS = [
   "guides",
   "guideLines",
   "background",
+  "colorSpace",
   "publish",
   "notes",
   "subtitles",
@@ -1511,10 +1553,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
   api.setState = set as typeof api.setState;
 
   const snapshot = (): DocSnapshot => {
-    const { clips, transitions, audioClips, overlays, subtitles, assets, guideLines } = get();
+    const { clips, transitions, audioClips, overlays, subtitles, assets, guideLines, colorSpace } = get();
     return {
       beats: assets.map((a) => ({ id: a.id, grid: a.beats })),
+      sourceColor: assets.map((a) => ({ id: a.id, profile: a.colorProfile })),
       guideLines: { v: [...guideLines.v], h: [...guideLines.h] },
+      colorSpace,
       // Render-owned clips are excluded — history captures the user's timeline,
       // not the background run's placements (restoreDoc re-attaches the live ones).
       clips: clips.filter((c) => !genClipIds.has(c.id)).map((c) => ({ ...c })),
@@ -1535,16 +1579,21 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
    * doc — an undo mid-session (a brush stroke, a panel edit) keeps the panel
    * and its stage gizmos on the clip being worked. */
   const restoreDoc = (snap: DocSnapshot) => {
-    const { beats, ...doc } = snap;
+    const { beats, sourceColor, ...doc } = snap;
     const { clips, audioClips, assets, selection, multiSelection } = get();
     const genClips = clips.filter((c) => genClipIds.has(c.id));
     const genAudio = audioClips.filter((c) => genAudioIds.has(c.id));
     // Beat grids go back onto the assets they came off. An asset imported
     // since the checkpoint was taken is not in it and keeps the grid it has.
     const grids = new Map(beats.map((b) => [b.id, b.grid]));
-    const withBeats = assets.map((a) =>
-      grids.has(a.id) && grids.get(a.id) !== a.beats ? { ...a, beats: grids.get(a.id) } : a
-    );
+    const profiles = new Map(sourceColor.map((c) => [c.id, c.profile]));
+    const withBeats = assets.map((a) => {
+      let next = a;
+      if (grids.has(a.id) && grids.get(a.id) !== a.beats) next = { ...next, beats: grids.get(a.id) };
+      if (profiles.has(a.id) && profiles.get(a.id) !== a.colorProfile)
+        next = withColorProfile(next, profiles.get(a.id));
+      return next;
+    });
     const beatsMoved = withBeats.some((a, i) => a !== assets[i]);
     const nextClips = [...doc.clips, ...genClips].sort((a, b) => a.start - b.start);
     const nextAudio = [...doc.audioClips, ...genAudio];
@@ -1713,6 +1762,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         guidesHidden: false,
         guideLines: EMPTY_GUIDE_LINES,
         background: DEFAULT_BACKGROUND,
+        colorSpace: "sdr",
         selection: null,
         multiSelection: [],
         playing: false,
@@ -1765,6 +1815,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     guidesHidden: false,
     guideLines: EMPTY_GUIDE_LINES,
     background: DEFAULT_BACKGROUND,
+    colorSpace: "sdr",
     selection: null,
     multiSelection: [],
     selectedKey: null,
@@ -1881,6 +1932,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
               stale.map((a) => ({
                 ...a,
                 url: held.get(a.fileName) ?? links?.urls.get(a.fileName) ?? mediaUrl(id, a.fileName),
+                ...(a.proxy ? { proxyUrl: links?.urls.get(a.proxy.fileName) ?? mediaUrl(id, a.proxy.fileName) } : {}),
               })),
               ui
             );
@@ -1935,6 +1987,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             ...(kept?.sceneCuts !== undefined ? { sceneCuts: kept.sceneCuts } : {}),
             ...(kept?.peaks !== undefined ? { peaks: kept.peaks } : {}),
             url: mediaUrl(id, a.fileName),
+            ...(a.proxy ? { proxyUrl: mediaUrl(id, a.proxy.fileName) } : {}),
           };
         });
         // Cloud and shared media ride signed R2 URLs, batch-minted once per
@@ -1955,10 +2008,14 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           }
           if (!current()) return;
           const missing = assets.filter((a) => !held.has(a.fileName));
-          const signed = await fetchSignedMediaUrls(id, missing.map((a) => a.fileName));
+          // A proxy is served like the master it stands in for, so its link
+          // is minted in the same batch.
+          const proxies = assets.flatMap((a) => (a.proxy ? [a.proxy.fileName] : []));
+          const signed = await fetchSignedMediaUrls(id, [...missing.map((a) => a.fileName), ...proxies]);
           if (!current()) return;
           for (const a of assets) {
             a.url = held.get(a.fileName) ?? signed.urls.get(a.fileName) ?? a.url;
+            if (a.proxy) a.proxyUrl = signed.urls.get(a.proxy.fileName) ?? a.proxyUrl;
           }
           markSignedBatch(id, signed.expiresAt);
           // A browser project's "mint" hands back session blob URLs, dead on
@@ -2072,7 +2129,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       try {
         set({
           projectName: doc.name ?? "",
-          assets,
+          assets: assets.map(liftColorProfile),
           clips: state.clips,
           transitions: state.transitions,
           audioClips: state.audioClips,
@@ -2085,6 +2142,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           guidesHidden: false,
           guideLines: sanitizeGuideLines(doc.guideLines),
           background: state.background,
+          colorSpace: state.colorSpace,
           // View state lives in IndexedDB; doc.ui covers projects saved
           // before the move.
           pxPerSec: clampPps(ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60),
@@ -2353,6 +2411,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
     },
     setBackground: (hex) => set({ background: projectBackground(hex) }),
+    setColorSpace: (space) => {
+      if (get().colorSpace === space || get().readOnly) return;
+      push();
+      set({ colorSpace: space });
+    },
 
     addAsset: (asset) =>
       set((s) => {
@@ -2373,6 +2436,43 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             : null;
         return { assets: [...s.assets, asset], ...(guess ? { aspect: guess } : {}) };
       }),
+
+    setAssetColorProfile: (id, profile) => {
+      const asset = get().assets.find((a) => a.id === id);
+      if (!asset || get().readOnly || asset.colorProfile === profile) return;
+      push();
+      set((s) => ({
+        assets: s.assets.map((a) => (a.id === id ? withColorProfile(a, profile) : a)),
+      }));
+    },
+
+    setAssetProxy: (id, proxy, proxyUrl) => {
+      if (get().readOnly) return;
+      set((s) => ({
+        assets: s.assets.map((a) => (a.id === id ? { ...a, proxy, proxyUrl } : a)),
+      }));
+    },
+
+    dropAssetProxy: (id) => {
+      const target = get().assets.find((a) => a.id === id);
+      if (!target || (!target.proxy && !target.proxyUrl)) return;
+      const drop = (s: EditorState) => ({
+        assets: s.assets.map((a) => {
+          if (a.id !== id) return a;
+          const rest = { ...a };
+          delete rest.proxy;
+          delete rest.proxyUrl;
+          return rest;
+        }),
+      });
+      if (!get().readOnly) return set(drop);
+      hydrating = true;
+      try {
+        set(drop);
+      } finally {
+        hydrating = false;
+      }
+    },
 
     updateAsset: (id, patch) => {
       // A read-only view still takes runtime enrichment (signed URLs,
@@ -2396,6 +2496,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         }
         return;
       }
+      // A patch that changes nothing writes nothing: every asset write
+      // re-renders what reads the assets, and probes that land twice with
+      // the same answer (an import's and the lazy fill's) cost one render.
+      const current = get().assets.find((a) => a.id === id);
+      if (!current || patchIsNoop(current, patch)) return;
       set((s) => ({
         assets: s.assets.map((a) => (a.id === id ? { ...a, ...patch } : a)),
       }));
@@ -2444,14 +2549,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             // browser store serves keeps its blob URL — link rotation is for
             // links that expire.
             if (a.upload || resolveRegisteredBlob(a.url)) return a;
-            const url = urls.get(a.fileName);
-            if (!url || url === a.url) return a;
+            const url = urls.get(a.fileName) ?? a.url;
+            const proxyUrl = a.proxy ? (urls.get(a.proxy.fileName) ?? a.proxyUrl) : a.proxyUrl;
+            if (url === a.url && proxyUrl === a.proxyUrl) return a;
             // A still's filmstrip is its source URL, so it moves with it.
             const thumbs =
               a.type === "image" && a.thumbs?.length && a.thumbs.every((t) => t === a.url)
                 ? [url]
                 : a.thumbs;
-            return { ...a, url, ...(thumbs !== a.thumbs ? { thumbs } : {}) };
+            return {
+              ...a,
+              url,
+              ...(proxyUrl !== undefined ? { proxyUrl } : {}),
+              ...(thumbs !== a.thumbs ? { thumbs } : {}),
+            };
           }),
         }));
       } finally {
@@ -2477,14 +2588,20 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (pending) scrub(pending.snap);
       const dropFile = () => {
         const s = get();
-        if (!s.projectId || s.assets.some((a) => a.fileName === gone.fileName)) return;
-        void apiFetch(
-          `/api/cut/projects/${s.projectId}/media/${encodeURIComponent(gone.fileName)}`,
-          { method: "DELETE" }
-        ).catch(() => {});
-        // A cloud project's browser-store copy — pin, bytes, and blob URL —
-        // dies with the cloud object.
-        if (getBackend().kind === "cloud") void dropLocalMedia(s.projectId, gone.fileName);
+        if (!s.projectId) return;
+        const drop = (fileName: string) => {
+          void apiFetch(
+            `/api/cut/projects/${s.projectId}/media/${encodeURIComponent(fileName)}`,
+            { method: "DELETE" }
+          ).catch(() => {});
+          // A cloud project's browser-store copy — pin, bytes, and blob URL —
+          // dies with the cloud object.
+          if (getBackend().kind === "cloud") void dropLocalMedia(s.projectId!, fileName);
+        };
+        if (!s.assets.some((a) => a.fileName === gone.fileName)) drop(gone.fileName);
+        // The master's preview proxy goes with it.
+        const proxy = gone.proxy?.fileName;
+        if (proxy && !s.assets.some((a) => a.proxy?.fileName === proxy)) drop(proxy);
       };
       // An unreferenced asset is no doc edit: history snapshots don't cover
       // the asset list, so removing one must not open a checkpoint or churn
@@ -4802,12 +4919,34 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
   };
 });
 
-/** Whether any asset's beat grid was rewritten between two asset lists. An
- * asset arriving or leaving is no beat edit; only a grid changing under an id
- * that was already there counts. */
+/** Whether any asset's beat grid or source-colour override was rewritten
+ * between two asset lists. An asset arriving or leaving is no edit; only a
+ * value changing under an id that was already there counts. */
 function beatsEdited(prev: MediaAsset[], next: MediaAsset[]): boolean {
-  const before = new Map(prev.map((a) => [a.id, a.beats]));
-  return next.some((a) => before.has(a.id) && before.get(a.id) !== a.beats);
+  const before = new Map(prev.map((a) => [a.id, a]));
+  return next.some((a) => {
+    const was = before.get(a.id);
+    return !!was && (was.beats !== a.beats || was.colorProfile !== a.colorProfile);
+  });
+}
+
+/** The asset with the person's source profile override set or cleared. The
+ * header's record in `color` is left as it is. */
+function withColorProfile<A extends StoredAsset>(asset: A, profile: SourceProfile | undefined): A {
+  const { colorProfile: _was, ...rest } = asset;
+  void _was;
+  return (profile ? { ...rest, colorProfile: profile } : rest) as A;
+}
+
+/** A stored asset in the current shape. Projects saved while the override
+ * rode inside the header record (`color.profile`) carry it out to
+ * `colorProfile` once, on load. */
+export function liftColorProfile<A extends StoredAsset>(asset: A): A {
+  const color = asset.color as (StoredAsset["color"] & { profile?: SourceProfile }) | undefined;
+  if (!color || !("profile" in color)) return asset;
+  const { profile, ...header } = color;
+  const lifted = { ...asset, color: header };
+  return profile && asset.colorProfile === undefined ? { ...lifted, colorProfile: profile } : lifted;
 }
 
 // Track real edits to the persistable doc so a deferred checkpoint (see push)
@@ -4823,6 +4962,7 @@ useEditor.subscribe((s, prev) => {
     s.overlays !== prev.overlays ||
     s.subtitles !== prev.subtitles ||
     s.guideLines !== prev.guideLines ||
+    s.colorSpace !== prev.colorSpace ||
     (s.assets !== prev.assets && beatsEdited(prev.assets, s.assets))
   )
     docSeq++;
@@ -4894,7 +5034,7 @@ export const docOverlays = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, sizeBytes, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block }) => ({
+    .map(({ id, fileName, name, type, duration, sizeBytes, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block, color, colorProfile, proxy }) => ({
       id,
       fileName,
       name,
@@ -4913,6 +5053,9 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(sceneCuts !== undefined ? { sceneCuts } : {}),
       ...(copiedFrom !== undefined ? { copiedFrom } : {}),
       ...(block !== undefined ? { block } : {}),
+      ...(color !== undefined ? { color } : {}),
+      ...(colorProfile !== undefined ? { colorProfile } : {}),
+      ...(proxy !== undefined ? { proxy } : {}),
     }));
 }
 
@@ -4930,6 +5073,7 @@ export function serializeDoc(s: {
   guides: GuideId[];
   guideLines: GuideLines;
   background: string;
+  colorSpace: OutputSpace;
   publish: { caption: string; tags: string; soundTitle: string; handle: string };
   notes: { text: string; publishedAt: string; links: string[] };
   subtitles: SubtitlesBlock;
@@ -4952,6 +5096,7 @@ export function serializeDoc(s: {
     guides: s.guides,
     guideLines: s.guideLines,
     background: s.background,
+    colorSpace: s.colorSpace,
     subtitles: s.subtitles,
     publish: { ...s.publish },
     notes: { ...s.notes, links: [...s.notes.links] },
@@ -4961,6 +5106,60 @@ export function serializeDoc(s: {
     renders: s.renders,
     firstOpen: s.firstOpen,
   };
+}
+
+export type DocKey = (typeof DOC_KEYS)[number];
+
+/** The autosave's edit test, one comparator per document field. Keyed by
+ * DOC_KEYS, so a field added there without a comparator is a type error.
+ * `saveState` is status, and `assets` compares by its stored projection in
+ * the caller, which keeps a baseline across ticks. */
+const DOC_FIELD_EDITED: {
+  [K in Exclude<DocKey, "saveState" | "assets">]: (
+    s: EditorState,
+    last: Partial<ProjectDoc>,
+    lastBars: TimelineTransition[]
+  ) => boolean;
+} = {
+  projectName: (s, last) => s.projectName !== last.name,
+  // The projections, not the raw arrays: clips waiting on an upload are held
+  // out of the document, and holding one is not an edit.
+  clips: (s, last) => docClips(s.clips, s.assets) !== (last.clips as unknown),
+  audioClips: (s, last) => docAudioClips(s.audioClips, s.assets) !== (last.audioClips as unknown),
+  overlays: (s, last) => docOverlays(s.overlays) !== (last.overlays as unknown),
+  transitions: (s, _last, lastBars) => s.transitions !== lastBars,
+  templates: (s, last) => s.templates !== (last.templates as unknown),
+  mediaFolders: (s, last) => s.mediaFolders !== (last.mediaFolders as unknown),
+  subtitles: (s, last) => s.subtitles !== (last.subtitles as unknown),
+  aspect: (s, last) => s.aspect !== last.aspect,
+  guides: (s, last) => s.guides !== last.guides,
+  guideLines: (s, last) => s.guideLines !== last.guideLines,
+  background: (s, last) => s.background !== last.background,
+  colorSpace: (s, last) => s.colorSpace !== last.colorSpace,
+  publish: (s, last) =>
+    s.publish.caption !== last.publish?.caption ||
+    s.publish.tags !== last.publish?.tags ||
+    s.publish.soundTitle !== last.publish?.soundTitle ||
+    s.publish.handle !== last.publish?.handle,
+  notes: (s, last) =>
+    s.notes.text !== last.notes?.text ||
+    s.notes.publishedAt !== last.notes?.publishedAt ||
+    s.notes.links.join("") !== (last.notes?.links ?? []).join(""),
+  // Normalized like serializeDoc stores it (?? null): a project with no run
+  // holds undefined in state and null in the doc, which is no change.
+  genvideo: (s, last) => (s.genvideo ?? null) !== ((last.genvideo ?? null) as unknown),
+  renders: (s, last) => s.renders !== (last.renders as unknown),
+};
+const DOC_FIELD_TESTS = Object.values(DOC_FIELD_EDITED);
+
+/** Whether the live state differs from the last serialized doc on any
+ * document field other than assets. */
+export function docFieldsEdited(
+  s: EditorState,
+  last: Partial<ProjectDoc>,
+  lastBars: TimelineTransition[]
+): boolean {
+  return DOC_FIELD_TESTS.some((edited) => edited(s, last, lastBars));
 }
 
 /** A clip's uniform playback rate (>0, default 1). A clip carrying a speed
@@ -5547,6 +5746,7 @@ export function normalizeDocState(
   subtitles: SubtitlesBlock;
   aspect: Aspect | null;
   background: string;
+  colorSpace: OutputSpace;
 } {
   const docClips = doc.clips ?? [];
   // Older docs stored video track 0 packed (array order implied the
@@ -5613,6 +5813,7 @@ export function normalizeDocState(
     subtitles: { ...subtitles, cues: merged.cues },
     aspect: normalizeAspect(doc.aspect) ?? null,
     background: projectBackground(doc.background),
+    colorSpace: OUTPUT_SPACES.some((o) => o.id === doc.colorSpace) ? doc.colorSpace! : "sdr",
   };
 }
 

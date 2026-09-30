@@ -1,6 +1,7 @@
 "use client";
 
 import { createRasterCanvas, type RasterSurface } from "./raster";
+import type { ColorRead } from "./sourceColor";
 
 /**
  * The live preview <canvas>, registered by Preview while it is mounted, so
@@ -77,6 +78,19 @@ export function registerSourceSampler(fn: SourceSampler | null) {
 
 export function sampleClipSource(clipId: string): CanvasImageSource | null {
   return sampler?.(clipId) ?? null;
+}
+
+/** How the engine reads a clip's frames — the read the sampled frame came
+ * through, so an analysis converts it the way the compositor does. */
+type SourceColor = (clipId: string) => ColorRead | null;
+let sourceColor: SourceColor | null = null;
+
+export function registerSourceColor(fn: SourceColor | null) {
+  sourceColor = fn;
+}
+
+export function sampleClipColorRead(clipId: string): ColorRead | null {
+  return sourceColor?.(clipId) ?? null;
 }
 
 /** A small RGBA readout of the clip's raw frame, for analysis (auto grade);

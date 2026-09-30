@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { h264Encoder, runFfmpeg, sdrConvert, vtQuality, type RenderHandle } from "./exportPipeline";
+import { h264Encoder, runFfmpeg, vtQuality, type RenderHandle } from "./exportPipeline";
 import { assertGraphSafe } from "./filterGraph";
-import { videoColorInfo, videoDimensions } from "./util";
+import { videoDimensions } from "./util";
 
 /**
  * Re-wrapping one media file as an MP4 every player and every browser opens.
@@ -11,7 +11,10 @@ import { videoColorInfo, videoDimensions } from "./util";
  * container untouched, which costs a read and a write and loses nothing. A
  * file whose picture is HEVC or ProRes, or whose sound is the raw PCM a phone
  * and a camera write into QuickTime, is re-encoded, one stream at a time, so
- * a .mov with H.264 picture and PCM sound only pays for its audio.
+ * a .mov with H.264 picture and PCM sound only pays for its audio. A
+ * re-encode keeps the picture's code values and its color tags: what the
+ * file means is settled at import (the asset's color) and rendered from
+ * there, never folded here.
  *
  * The engine calls this on the Mac's own ffmpeg; the render worker calls it in
  * the container. Both hand it a `RenderHandle`, which is what carries a cancel
@@ -45,11 +48,10 @@ const MP4_EXT = /\.(mp4|m4v)$/i;
 export const fitsAlready = (
   file: string,
   codecs: { video?: string; audio?: string; remux?: boolean; videoNeedsEncoding?: boolean },
-  work: { shrink: boolean; sdr: boolean }
+  work: { shrink: boolean }
 ) =>
   MP4_EXT.test(file) &&
   !work.shrink &&
-  !work.sdr &&
   !codecs.remux &&
   !codecs.videoNeedsEncoding &&
   (!codecs.video || KEEPS_VIDEO.has(codecs.video)) &&
@@ -124,11 +126,9 @@ export async function convertToMp4(
 
   const cap = opts.maxHeight && opts.maxHeight > 0 ? Math.round(opts.maxHeight) : 0;
   const shrink = !!(cap && dims && dims.height > cap);
-  const color = codecs.video ? await videoColorInfo(src) : null;
-  const sdr = sdrConvert(color, "yuv420p");
-  const transcodedVideo = !!codecs.video && (codecs.videoNeedsEncoding || shrink || !!sdr);
+  const transcodedVideo = !!codecs.video && (codecs.videoNeedsEncoding || shrink);
   const transcodedAudio = !!codecs.audio && !KEEPS_AUDIO.has(codecs.audio);
-  if (fitsAlready(src, codecs, { shrink, sdr: !!sdr })) {
+  if (fitsAlready(src, codecs, { shrink })) {
     return {
       transcodedVideo: false,
       transcodedAudio: false,
@@ -145,9 +145,7 @@ export async function convertToMp4(
     } else {
       // Even dimensions: H.264 in 4:2:0 has no odd sizes, and the scale filter
       // is where an odd source height would otherwise land.
-      const scale = shrink ? `scale=-2:${cap - (cap % 2)},` : "";
-      const chain = `${sdr}${scale}`.replace(/,$/, "");
-      if (chain) video.push("-vf", assertGraphSafe(chain));
+      if (shrink) video.push("-vf", assertGraphSafe(`scale=-2:${cap - (cap % 2)}`));
       const enc = await h264Encoder();
       video.push(
         ...(enc === "libx264"

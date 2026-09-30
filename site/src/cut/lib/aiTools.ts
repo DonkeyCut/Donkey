@@ -26,14 +26,20 @@ import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { GUIDE_IDS, guideFits, guidePreset, isGuideId, safeAreaOf, sanitizeGuideLines, type GuideId } from "./guides";
 import { textSpots } from "./textPlace";
 import {
+  OUTPUT_SPACES,
   ALL_EFFECT_IDS,
   autoGradeFromImageData,
   colorStatsFromImageData,
   GRADE_BASIC_FIELDS,
+  GRADE_DETAIL_FIELDS,
   GRADE_PRESETS,
   HSL_BANDS,
   matchGrade,
   normalizeGrade,
+  SOURCE_PROFILES,
+  WHEEL_LABELS,
+  WHEEL_ZONES,
+  type SourceProfile,
   normalizeSound,
   retimeOf,
   semanticMasterCurve,
@@ -165,7 +171,10 @@ import { parseProjectLink } from "./projectLink";
 import { landReferenceAssets as landReferenceAssetsInto, openReference, referenceMediaUrl, type LandedAsset, type ReferenceProject } from "./projectReference";
 import { clampLayersToAssets, mediaTypeFits, templateFromDoc } from "./projectTemplate";
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
+import { isGradePresetTemplate, listSavedGrades, saveGradePreset } from "./gradePresets";
 import { isStylePresetTemplate } from "./stylePresets";
+import { libraryLutId, listLibraryLuts } from "./linkedLibrary";
+import { sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
 import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame, renderProjectFrames } from "./exportRender";
@@ -173,7 +182,6 @@ import { framesAt, readMediaFileSize } from "./mediaRead";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
-import { sampleClipFrameData } from "./previewCanvas";
 import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
 import { findHighlights } from "./highlights";
 import { fuseTimeline, renderFusedTimeline, speechOnsets, speechOver } from "./watch/fuse";
@@ -349,19 +357,25 @@ const ANIM_STYLE_SYNONYMS: Record<string, AnimStyle> = {
   wipedown: "slidedown",
 };
 
-/** The basic sliders the grade tool patches — the panel's field list plus the
- * legacy pair, so the schema and handler can never disagree. */
-const GRADE_KEYS = [...GRADE_BASIC_FIELDS.map((f) => f.key), "brightness", "hue"] as const;
+/** The sliders the grade tool patches — the panel's basic and detail lists
+ * plus the legacy pair, so the schema and handler can never disagree. */
+const GRADE_KEYS = [
+  ...GRADE_BASIC_FIELDS.map((f) => f.key),
+  ...GRADE_DETAIL_FIELDS.map((f) => f.key),
+  "brightness",
+  "hue",
+] as const;
 
-/** Color stats for a grading reference: a clip's current decoded frame
- * (pre-grade, like Auto reads) or an image asset's pixels. */
+/** Color stats for a grading reference: a clip's current frame as the base
+ * rendering (through the source conversion, before any grade — what Auto
+ * reads) or an image asset's pixels. */
 async function colorStatsForRef(
   s: ReturnType<typeof useEditor.getState>,
   ref: { clipId?: string; assetId?: string }
 ): Promise<ColorStats> {
   if (ref.clipId) {
     const clip = requireItem(s.clips, ref.clipId, "video clip");
-    const data = sampleClipFrameData(clip.id, 192, 108);
+    const data = sampleClipBaseFrameData(clip.id, 192, 108);
     if (!data)
       throw new ToolError(
         "No decoded frame for that clip yet — seek into it so it is on screen, then retry."
@@ -384,7 +398,8 @@ async function colorStatsForRef(
     const ctx = c.getContext("2d") as CanvasRenderingContext2D | null;
     if (!ctx) throw new ToolError("Could not read that image's pixels.");
     ctx.drawImage(img.source, 0, 0, w, h);
-    const stats = colorStatsFromImageData(ctx.getImageData(0, 0, w, h).data);
+    // A still cut from log footage carries its source's profile.
+    const stats = colorStatsFromImageData(toBaseRendering(ctx.getImageData(0, 0, w, h).data, sourceProfileOf(asset)));
     if (!stats) throw new ToolError("Could not read pixels off that image.");
     return stats;
   }
@@ -3000,6 +3015,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...body,
         url: await storedMediaUrl(projectId, body.fileName),
         origin: "freeze",
+        // A frame grabbed off the source keeps its code values, so the still
+        // carries the source's profile and draws through the same conversion;
+        // a stage render is already the finished picture.
+        ...(input.with_elements !== true && span.asset.color ? { color: span.asset.color } : {}),
+        ...(input.with_elements !== true && span.asset.colorProfile ? { colorProfile: span.asset.colorProfile } : {}),
       };
       const cur = useEditor.getState();
       cur.addAsset(asset);
@@ -3750,7 +3770,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...(a.origin ? { origin: a.origin } : {}),
         })),
         templates: lib.templates
-          .filter((t) => !isSoundPresetTemplate(t) && !isStylePresetTemplate(t))
+          .filter((t) => !isSoundPresetTemplate(t) && !isStylePresetTemplate(t) && !isGradePresetTemplate(t))
           .map((t) => ({
           id: t.id,
           name: t.name,
@@ -4561,16 +4581,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   set_color_grade: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
-      // reset and auto rebuild the manual layer; the preset layer stays.
+      // reset and auto rebuild the manual layer; the preset and LUT stay.
       let grade: ColorGrade =
-        input.reset === true ? { preset: clip.grade?.preset } : { ...clip.grade };
+        input.reset === true ? { preset: clip.grade?.preset, lut: clip.grade?.lut } : { ...clip.grade };
       if (input.auto === true) {
-        const data = sampleClipFrameData(clip.id);
+        const data = sampleClipBaseFrameData(clip.id);
         if (!data)
           throw new ToolError(
             "No decoded frame for that clip yet — seek into it so it is on screen, then retry."
           );
-        grade = { ...autoGradeFromImageData(data), preset: clip.grade?.preset };
+        grade = { ...autoGradeFromImageData(data), preset: clip.grade?.preset, lut: clip.grade?.lut };
       }
       for (const k of GRADE_KEYS) if (isNum(input[k])) grade[k] = input[k];
       s.updateClip(clip.id, { grade: normalizeGrade(grade) });
@@ -4617,11 +4637,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         if (pts.length === 0) delete curves[ch];
         else curves[ch] = pts as CurvePoint[];
       }
-      if (isNum(input.curve_contrast) || isNum(input.fade)) {
-        const master = semanticMasterCurve(
-          isNum(input.curve_contrast) ? input.curve_contrast : 0,
-          isNum(input.fade) ? input.fade : 0
-        );
+      if (isNum(input.curve_contrast)) {
+        const master = semanticMasterCurve(input.curve_contrast, 0);
         if (master) curves.m = master;
         else delete curves.m;
       }
@@ -4633,12 +4650,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   set_color_wheels: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       const wheels = input.reset === true ? {} : { ...clip.grade?.wheels };
-      const zones = [
-        ["s", input.shadows],
-        ["m", input.midtones],
-        ["h", input.highlights],
-      ] as const;
-      for (const [zone, w] of zones) {
+      // The wheels by their labels (lift, gamma, gain, offset); the older
+      // names a thread may still carry map onto the first three.
+      const zones = WHEEL_ZONES.map((z) => [z, input[WHEEL_LABELS[z].toLowerCase()]] as const);
+      const legacy = { s: input.shadows, m: input.midtones, h: input.highlights } as const;
+      for (const [zone, given] of zones) {
+        const w = given ?? (legacy as Partial<Record<string, unknown>>)[zone];
         if (!w || typeof w !== "object") continue;
         const t = w as { dx?: number; dy?: number; luma?: number };
         wheels[zone] = [t.dx ?? 0, t.dy ?? 0, t.luma ?? 0] as WheelTuple;
@@ -4674,6 +4691,101 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         assetId: typeof input.assetId === "string" ? input.assetId : undefined,
       });
       return statsReport(stats);
+  },
+
+  set_color_lut: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const lut = typeof input.lut === "string" ? input.lut.trim() : "";
+      const amount = isNum(input.amount) ? Math.max(0, Math.min(1, input.amount)) : clip.grade?.lut?.amount;
+      const grade: ColorGrade = { ...clip.grade };
+      if (lut === "none") {
+        delete grade.lut;
+      } else {
+        const item = listLibraryLuts().find((l) => libraryLutId(l.key) === lut);
+        if (!item)
+          throw new ToolError(
+            `No LUT "${lut}" in the Library — pass one of editor_state.luts, or "none".`
+          );
+        grade.lut = { id: lut, amount };
+      }
+      s.updateClip(clip.id, { grade: normalizeGrade(grade) });
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      return { id: next.id, lut: next.grade?.lut ?? "none" };
+  },
+
+  copy_color_grade: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const ids = clipTargets(s, input, clip.id);
+      if (ids.length === 0)
+        throw new ToolError("Pass ids for the clips to copy onto, or all_clips for every clip.");
+      const grade = normalizeGrade(clip.grade);
+      s.beginHistoryBatch();
+      const landed: string[] = [];
+      const failed: { id: string; error: string }[] = [];
+      try {
+        for (const id of ids) {
+          const target = useEditor.getState().clips.find((c) => c.id === id);
+          if (!target) {
+            failed.push({ id, error: `No video clip "${id}".` });
+            continue;
+          }
+          useEditor.getState().updateClip(id, { grade });
+          landed.push(id);
+        }
+      } finally {
+        s.endHistoryBatch();
+      }
+      if (landed.length === 0)
+        throw new ToolError(`None of those ${ids.length} landed: ${failed.map((f) => f.error).join("; ")}`);
+      return { from: clip.id, ids: landed, grade: grade ?? "neutral", ...(failed.length ? { failed } : {}) };
+  },
+
+  set_source_color: (s, input) => {
+      const profile = typeof input.profile === "string" ? input.profile : "";
+      if (profile !== "auto" && !SOURCE_PROFILES.some((p) => p.id === profile))
+        throw new ToolError(`profile must be one of ${SOURCE_PROFILES.map((p) => p.id).join(", ")}, or "auto".`);
+      let assetId = typeof input.assetId === "string" ? input.assetId : "";
+      if (!assetId && typeof input.clipId === "string")
+        assetId = requireItem(s.clips, input.clipId, "video clip").assetId;
+      const asset = requireItem(s.assets, assetId, "project asset");
+      if (asset.type !== "video" && asset.type !== "image")
+        throw new ToolError("Source color is a picture's setting — pass a video or image asset.");
+      const detected = asset.color?.detected ?? "rec709";
+      s.setAssetColorProfile(
+        asset.id,
+        profile === "auto" || profile === detected ? undefined : (profile as SourceProfile)
+      );
+      const next = useEditor.getState().assets.find((a) => a.id === asset.id)!;
+      return {
+        assetId: next.id,
+        profile: sourceProfileOf(next),
+        detected,
+        clips: useEditor.getState().clips.filter((c) => c.assetId === next.id).map((c) => c.id),
+      };
+  },
+
+  save_color_grade: async (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const name = typeof input.name === "string" ? input.name.trim() : "";
+      if (!name) throw new ToolError("name is required.");
+      if (!normalizeGrade(clip.grade)) throw new ToolError("That clip's grade is neutral; grade it first.");
+      if (!s.projectId) throw new ToolError("No open project.");
+      const saved = await saveGradePreset(s.projectId, name, clip.grade);
+      if (!saved) throw new ToolError("The grade could not be saved.");
+      return { id: saved.id, name: saved.name, residency: saved.residency, grade: saved.grade };
+  },
+
+  apply_saved_grade: async (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const wanted = typeof input.preset_id === "string" ? input.preset_id.trim() : "";
+      if (!wanted) throw new ToolError("preset_id is required.");
+      const saved = (await listSavedGrades()).find(
+        (p) => p.id === wanted || p.name.toLowerCase() === wanted.toLowerCase()
+      );
+      if (!saved) throw new ToolError(`No saved grade called "${wanted}" — editor_state.savedGrades lists them.`);
+      s.updateClip(clip.id, { grade: saved.grade });
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      return { id: next.id, preset: { id: saved.id, name: saved.name }, grade: next.grade ?? "neutral" };
   },
 
   match_color_grade: async (s, input) => {
@@ -4763,6 +4875,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError("name is required.");
       s.setProjectName(input.name.trim());
       return { name: input.name.trim() };
+  },
+
+  set_project_color: (s, input) => {
+      const space = OUTPUT_SPACES.find((o) => o.id === input.space);
+      if (!space)
+        throw new ToolError(`Unknown color space ${String(input.space)} — pick from ${OUTPUT_SPACES.map((o) => o.id).join(", ")}.`);
+      s.setColorSpace(space.id);
+      return { colorSpace: useEditor.getState().colorSpace };
   },
 };
 
@@ -4859,13 +4979,13 @@ async function dispatchTool(s: Editor, name: string, input: Record<string, unkno
   const run = (toolRuns as Partial<Record<string, ToolRun>>)[key];
   if (!run) throw new ToolError(`Unknown tool: ${name}`);
   const field = SWEEP_TARGETS[key];
-  const ids = field ? sweepIds(key, field, input) : null;
+  const ids = field ? sweepIds(s, key, field, input) : null;
   if (!ids) return run(s, input, operation);
 
   // A sweep's apply: the same write over every id, as one undo step, with
   // the live state re-read each time because a write can move or remove the
   // items after it. A failure on one item is reported and the rest still land.
-  const rest = Object.fromEntries(Object.entries(input).filter(([k]) => k !== "ids"));
+  const rest = Object.fromEntries(Object.entries(input).filter(([k]) => k !== "ids" && k !== "all_clips"));
   s.beginHistoryBatch();
   const landed: string[] = [];
   const ran: unknown[] = [];
@@ -4892,7 +5012,13 @@ async function dispatchTool(s: Editor, name: string, input: Record<string, unkno
 /** The ids a fan-out writes, or null for a one-item call. Every sweepable
  * tool takes one target or a list, and a call carrying neither reaches no
  * item at all, so it is refused here rather than in each handler. */
-function sweepIds(name: string, field: string, input: Record<string, unknown>): string[] | null {
+function sweepIds(s: Editor, name: string, field: string, input: Record<string, unknown>): string[] | null {
+  // `all_clips` is the whole video timeline, every track, as the id list.
+  if (input.all_clips === true && field === "clipId") {
+    const all = s.clips.map((c) => c.id);
+    if (all.length === 0) throw new ToolError("The timeline has no clips.");
+    return all;
+  }
   const list = Array.isArray(input.ids)
     ? input.ids.filter((x): x is string => typeof x === "string" && x.length > 0)
     : null;
@@ -4903,6 +5029,15 @@ function sweepIds(name: string, field: string, input: Record<string, unknown>): 
   }
   if (!one) throw new ToolError(`${name} needs ${field}, or ids for several at once (select_items finds them).`);
   return null;
+}
+
+/** The clips a copy lands on: every other clip for all_clips, else the ids
+ * given, the source itself left out. */
+function clipTargets(s: Editor, input: Record<string, unknown>, source: string): string[] {
+  if (input.all_clips === true) return s.clips.filter((c) => c.id !== source).map((c) => c.id);
+  return Array.isArray(input.ids)
+    ? input.ids.filter((x): x is string => typeof x === "string" && x.length > 0 && x !== source)
+    : [];
 }
 
 /** Used inside the existing serialized engine session or isolated cloud worker.
@@ -5505,6 +5640,12 @@ const SWEEP_TARGETS: Readonly<Record<string, string>> = {
   set_clip_hidden: "clipId",
   set_clip_volume: "clipId",
   set_color_preset: "clipId",
+  set_color_grade: "clipId",
+  set_color_curves: "clipId",
+  set_color_wheels: "clipId",
+  set_color_hsl: "clipId",
+  set_color_lut: "clipId",
+  apply_saved_grade: "clipId",
   set_speed: "clipId",
   set_framing: "clipId",
   set_transition: "clipId",

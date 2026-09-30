@@ -33,8 +33,11 @@ import { drawBlock } from "./blockSource";
 import { audioFxSpans } from "./audioEffects";
 import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
+import { ensureClipLuts, sourceLookup } from "./lutBuild";
+import { colorRead, type ColorRead, type ReadFile } from "./sourceColor";
+import type { OutputSpace } from "@donkeycut/effects-kit";
 import { overlayPlan, trackZeroPlan } from "./framePlan";
-import { frameSink, keyframeTimeAt, openMedia, videoTrackOf } from "./mediaRead";
+import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, withAssetColors } from "./mediaRead";
 import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
@@ -301,6 +304,18 @@ const frameOfWrapped = (wrapped: WrappedCanvas): Frame => ({
   height: wrapped.canvas.height,
 });
 
+/** The file a render reads: an asset's master, never the preview proxy. The
+ * readers open it and the compositors take their recipes from it through
+ * this one choice, so a frame is always drawn through the recipe of the read
+ * that produced it. */
+export const renderFile = (): ReadFile => "master";
+
+/** Settle the drawn matrix of every master the render reads, so the recipes
+ * built before its first frame are the final ones. */
+export async function settleRenderColor(assets: readonly Pick<MediaAsset, "color" | "type">[]): Promise<void> {
+  await Promise.all(assets.filter((a) => a.type === "video").map((a) => colorRead(a, renderFile()).settled()));
+}
+
 /** A clip's source time at timeline time `t`. */
 function sourceTimeAt(span: ClipSpan, t: number): number {
   return retimeOf(span.clip).srcAt(Math.max(0, t - span.start));
@@ -338,6 +353,8 @@ export class ClipReader {
   /** The frame number this reader was last asked for, for the painter's
    * between-frames eviction. */
   usedAt = 0;
+  /** How this reader reads its file, and the recipe its frames mean. */
+  readonly colorRead: ColorRead;
 
   /**
    * Pixels in a frame of the source.
@@ -366,7 +383,19 @@ export class ClipReader {
      * render is running is picked up rather than the render dying on the
      * snapshot's expired one. */
     private url: () => string
-  ) {}
+  ) {
+    this.colorRead = colorRead(asset, renderFile());
+  }
+
+  /** The sink options every reader of this source opens with. */
+  private sinkOptions(poolSize: number) {
+    const colorSpace = this.colorRead.colorSpace;
+    return {
+      poolSize,
+      ...(this.software ? { software: true } : {}),
+      ...(colorSpace ? { colorSpace } : {}),
+    };
+  }
 
   /** Open the source and hand back its frame reader, or null when it has no
    * readable picture (a still, which is served from `this.still`, or a source
@@ -401,10 +430,7 @@ export class ClipReader {
       this.track = track;
       // A small pool keeps the render's canvas allocation flat over thousands
       // of frames.
-      this.sink = frameSink(track, undefined, {
-        poolSize: READER_POOL,
-        ...(this.software ? { software: true } : {}),
-      });
+      this.sink = frameSink(track, undefined, this.sinkOptions(READER_POOL));
       return this.sink;
     })());
   }
@@ -504,10 +530,7 @@ export class ClipReader {
     const kt = await keyframeTimeAt(this.track, Math.max(0, at));
     if (kt === null) return null;
     const window = this.windowFrames;
-    this.backSink ??= frameSink(this.track, undefined, {
-      poolSize: window + 3,
-      ...(this.software ? { software: true } : {}),
-    });
+    this.backSink ??= frameSink(this.track, undefined, this.sinkOptions(window + 3));
     const start = Math.max(kt, at - (window - 1) * this.frameDt, 0);
     const frames: WrappedCanvas[] = [];
     const stream = this.backSink.canvases(start);
@@ -1246,6 +1269,11 @@ export class FramePainter {
   ) {
     this.comp = new FrameCompositor(canvas);
     this.comp.background = projectBackground(doc.background);
+    // Every frame of a render goes through its clip's own LUT, built before
+    // the first frame (prepare) and on this thread if it ever falls out of
+    // the cache.
+    this.comp.colorMode = "exact";
+    this.comp.sourceProvider = sourceLookup(doc.assets, renderFile);
     this.stamps = new StampCache(canvas.width, canvas.height, doc.assets);
     this.duration = projectDuration(doc);
   }
@@ -1253,6 +1281,12 @@ export class FramePainter {
   /** Make the text layers, the span geometry and the subject pass resident.
    * Runs once, before the first frame. */
   async prepare(): Promise<void> {
+    // Footage the lazy fill has not reached reads its color here, before any
+    // recipe is built from it.
+    this.doc = { ...this.doc, assets: await withAssetColors(this.doc.assets, this.doc, this.resolve) };
+    this.comp.sourceProvider = sourceLookup(this.doc.assets, renderFile);
+    await settleRenderColor(this.doc.assets);
+    await ensureClipLuts(this.doc.clips.map((c) => this.comp.recipeFor(c)));
     this.stacked = [...(await stampText(this.doc))].sort((a, b) => b.stackLane - a.stackLane);
     // The subject pass is created only when something reads the person matte;
     // prepare() makes rasters and the segmenter resident before the first
@@ -1582,10 +1616,16 @@ export async function renderProjectFrame(
  */
 export async function canRenderInBrowser(
   doc: ExportDoc,
-  settings: ExportSettings
+  settings: ExportSettings,
+  /** The color space the file is delivered in: the project's for an export,
+   * SDR for the web pictures (hover preview, share card, stream). */
+  output: OutputSpace
 ): Promise<boolean> {
   const duration = projectDuration(doc);
   if (!(deliverySpan(settings.range, duration) > 0)) return false;
+  // The tab composites on 8-bit canvases; an HDR delivery is a 10-bit
+  // composite, which the engine and the worker build in ffmpeg.
+  if (output !== "sdr") return false;
   if (
     typeof navigator.storage?.getDirectory !== "function" ||
     typeof FileSystemFileHandle === "undefined" ||

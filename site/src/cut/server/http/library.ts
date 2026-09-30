@@ -18,6 +18,7 @@ import {
   copyLibraryAssetToProject,
   copyTemplateToProject,
   type LibrarySource,
+  type LinkedMeta,
   type TemplateInput,
 } from "../library";
 import { serveFileRange, wantsDownload } from "../serveFile";
@@ -181,12 +182,27 @@ export const libraryApi = {
           // Malformed notes are dropped; the media still lands.
         }
       const poster = form.get("poster");
+      // A linked item's row fields (its content key, a LUT's facts) come from
+      // the page that checked the file; the engine has no parser for them.
+      const metaField = form.get("meta");
+      let linked: LinkedMeta | undefined;
+      if (typeof metaField === "string" && metaField)
+        try {
+          const meta = JSON.parse(metaField) as LinkedMeta;
+          linked = {
+            ...(typeof meta.contentKey === "string" ? { contentKey: meta.contentKey } : {}),
+            ...(meta.lut ? { lut: meta.lut } : {}),
+          };
+        } catch {
+          // Malformed fields are dropped; the file still lands.
+        }
       return Response.json(
         await addUpload(
           file,
           typeof name === "string" ? name : undefined,
           source,
           poster instanceof File ? poster : undefined,
+          linked,
           form.get("prepare") === "true",
         ),
       );

@@ -6,6 +6,7 @@
 // plays each part.
 
 import { ITEM_KINDS, type ItemKind, type ItemOf } from "./itemKinds";
+import { isLinkedAssetType } from "./types";
 import { getClipSpans, layerFromClip, normalizeDocState, resolveTransitions, totalDuration } from "./store";
 import {
   CAPTION_LOOK_KEYS,
@@ -256,6 +257,6 @@ export function clampLayersToAssets(
 
 /** Whether an asset of this type can stand in for a source of that type. */
 export const mediaTypeFits = (source: AssetType, replacement: AssetType): boolean =>
-  source === "audio" || source === "font"
+  source === "audio" || isLinkedAssetType(source)
     ? replacement === source
     : replacement === "video" || replacement === "image";
