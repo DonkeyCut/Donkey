@@ -29,11 +29,19 @@ import {
   type TemplateDrag,
 } from "@/cut/lib/assetDrag";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
-import { refFromTemplate, useAssetDrop, type AssetRef } from "@/cut/lib/assetRef";
+import {
+  refFromTemplate,
+  useAssetDrop,
+  type AssetRef,
+} from "@/cut/lib/assetRef";
 import { useRefCopy } from "@/cut/lib/refCopy";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { formatTime } from "@/cut/lib/time";
-import { EFFECT_LABELS, retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
+import {
+  EFFECT_LABELS,
+  retimeOf,
+  type SpeedNode,
+} from "@donkeycut/effects-kit";
 import { SHAPE_LABELS } from "@/cut/lib/types";
 import type { LibraryTemplate, TemplateMedia } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
@@ -60,13 +68,14 @@ export function TemplateCard({
   extraMenu,
   selectId,
   selected = false,
+  tile,
 }: {
   template: LibraryTemplate;
   /** Resolve a template media file to a playable URL (project or library). */
   mediaSrc: (fileName: string) => string;
   /** The payload this card drags; omit to make it undraggable. */
   drag?: TemplateDrag;
-  /** The "+" action; omit to drop the button (e.g. no open project). */
+  /** The menu's add action, named by `addTitle`; omit it with no open project. */
   onAdd?: () => void;
   addTitle?: string;
   /** Rename and delete; omit both on a shelf that can't be written to right
@@ -84,6 +93,9 @@ export function TemplateCard({
    * files into folders in the same selection as the media around it. */
   selectId?: string;
   selected?: boolean;
+  /** Draw as a square file tile, the way every file is set: of this side, or
+   * filling its grid cell with "fill". Absent, the card is a row. */
+  tile?: number | "fill";
 }) {
   const refDrop = useAssetDrop((r) => onRefDrop?.(r));
   // ⌘C over the card copies its mention token, so a saved arrangement can be
@@ -106,8 +118,13 @@ export function TemplateCard({
 
   // The contents, one row per item, in save order: clips and stills, sounds,
   // titles, then a caption count.
-  const speedLen = (x: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean }) =>
-    retimeOf(x).len;
+  const speedLen = (x: {
+    in: number;
+    out: number;
+    speed?: number;
+    speedCurve?: SpeedNode[];
+    reverse?: boolean;
+  }) => retimeOf(x).len;
   const parts: {
     icon: typeof Film;
     label: string;
@@ -148,6 +165,87 @@ export function TemplateCard({
       : []),
   ];
 
+  const nameEl = (
+    <>
+      {renaming ? (
+        <Input
+          autoFocus
+          value={draft}
+          className="h-6 w-full text-[12px]"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => setRenaming(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && draft.trim()) {
+              onRename?.(draft.trim());
+              setRenaming(false);
+            } else if (e.key === "Escape") setRenaming(false);
+          }}
+        />
+      ) : (
+        <div className="truncate text-[12px] font-medium">{t.name}</div>
+      )}
+    </>
+  );
+  const metaEl = (
+    <div className="flex items-center gap-0.5 text-[10.5px] whitespace-nowrap text-muted-foreground">
+      {formatTime(t.duration)} · {itemCount} item
+      {itemCount === 1 ? "" : "s"}
+      <ChevronDown
+        className={cn("size-3 transition-transform", expanded && "rotate-180")}
+      />
+    </div>
+  );
+  const actionsEl = (
+    <div className={cn("flex shrink-0 items-center gap-1", tile && "absolute top-1.5 right-1.5")}>
+      {(onAdd || onRename || onDelete) && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                aria-label="Template options"
+                className={cn(
+                  cardIconButton,
+                  "opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100",
+                )}
+              />
+            }
+          >
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-40">
+            {onAdd && (
+              <>
+                <DropdownMenuItem onClick={onAdd}>
+                  <Plus /> {addTitle ?? "Add"}
+                </DropdownMenuItem>
+                {(onRename || onDelete) && <DropdownMenuSeparator />}
+              </>
+            )}
+            {onRename && (
+              <DropdownMenuItem
+                onClick={() => {
+                  setDraft(t.name);
+                  setRenaming(true);
+                }}
+              >
+                <Pencil /> Rename
+              </DropdownMenuItem>
+            )}
+            {extraMenu}
+            {onDelete && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onClick={onDelete}>
+                  <Trash2 /> Delete
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  );
+
   return (
     <div
       ref={(el) => {
@@ -156,8 +254,11 @@ export function TemplateCard({
       }}
       {...(onRefDrop ? refDrop.targetProps : {})}
       data-sel-id={selectId}
+      style={typeof tile === "number" ? { width: tile, height: tile } : undefined}
       className={cn(
-        "group flex flex-col rounded-lg border bg-background px-2.5 py-1.5",
+        "group flex flex-col border bg-background",
+        tile ? "relative overflow-hidden rounded-xl p-2.5 shadow-sm" : "rounded-lg px-2.5 py-1.5",
+        tile === "fill" && "aspect-square w-full",
         selected ? PICKED_RING : "border-border",
         drag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         onRefDrop && refDrop.active && "border-primary bg-primary/10",
@@ -176,89 +277,33 @@ export function TemplateCard({
         setExpanded((v) => !v);
       }}
     >
-      <div className="flex items-center gap-2">
-        <Layers className="size-3.5 shrink-0 text-violet-500" />
-        <div className="min-w-0 flex-1">
-          {renaming ? (
-            <Input
-              autoFocus
-              value={draft}
-              className="h-6 w-full text-[12px]"
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => setRenaming(false)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && draft.trim()) {
-                  onRename?.(draft.trim());
-                  setRenaming(false);
-                } else if (e.key === "Escape") setRenaming(false);
-              }}
-            />
-          ) : (
-            <div className="truncate text-[12px] font-medium">{t.name}</div>
-          )}
-          <div className="flex items-center gap-0.5 text-[10.5px] text-muted-foreground">
-            {formatTime(t.duration)} · {itemCount} item
-            {itemCount === 1 ? "" : "s"}
-            <ChevronDown
-              className={cn(
-                "size-3 transition-transform",
-                expanded && "rotate-180",
-              )}
-            />
+      {tile ? (
+        <>
+          <div className="min-w-0 pt-0.5">{nameEl}</div>
+          {actionsEl}
+        </>
+      ) : (
+        <div className="flex items-center gap-2">
+          <Layers className="size-3.5 shrink-0 text-violet-500" />
+          <div className="min-w-0 flex-1">
+            {nameEl}
+            {metaEl}
           </div>
+          {actionsEl}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {onAdd && (
-            <button
-              title={addTitle}
-              className="grid size-6 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 hover:brightness-110 group-hover:opacity-100"
-              onClick={onAdd}
-            >
-              <Plus className="size-3.5" />
-            </button>
-          )}
-          {(onRename || onDelete) && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button
-                    title="Template options"
-                    className={cn(
-                      cardIconButton,
-                      "opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100",
-                    )}
-                  />
-                }
-              >
-                <MoreHorizontal className="size-3.5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-40">
-                {onRename && (
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setDraft(t.name);
-                      setRenaming(true);
-                    }}
-                  >
-                    <Pencil /> Rename
-                  </DropdownMenuItem>
-                )}
-                {extraMenu}
-                {onDelete && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                      <Trash2 /> Delete
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+      )}
+      {tile && !(expanded && parts.length > 0) && (
+        <div className="grid min-h-0 flex-1 place-items-center">
+          <Layers className="size-[80%] text-violet-500" strokeWidth={1.5} />
         </div>
-      </div>
+      )}
       {expanded && parts.length > 0 && (
-        <div className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5">
+        <div
+          className={cn(
+            "mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5",
+            tile && "min-h-0 flex-1 overflow-y-auto",
+          )}
+        >
           {parts.map(({ icon: Icon, label, time, media }, i) => (
             <div
               key={i}
@@ -312,6 +357,7 @@ export function TemplateCard({
           ))}
         </div>
       )}
+      {tile && <div className="pt-1">{metaEl}</div>}
       {preview && (
         <div
           className="pointer-events-none fixed z-50"

@@ -1,39 +1,38 @@
 "use client";
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { isCurrentSpecimen, SPECIMEN_LINES } from "@/cut/lib/fontSpecimen";
+import { isCurrentSpecimen, SPECIMEN_TEXT } from "@/cut/lib/fontSpecimen";
 import { linkIdForAsset, onLinkedChanged } from "@/cut/lib/linkedLibrary";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { fontStack, hasFont, onFontsChanged } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 
-// A font drawn in itself. The library card carries a line of it and the big
-// view the whole alphabet, both from here, so the two read as the same object.
+// A font drawn in itself. The library card and the big view both set the
+// pangram from here, wrapped and left-aligned, so the two read as the same
+// object at two sizes.
 //
-// Live text in the installed face is what it draws. The picture the shelf baked
-// at upload is the standby, for a face the page does not have — a shelf that
-// did not answer, a listing that has not synced.
+// Live text in the installed face is what it draws, and only that face: the
+// picture the shelf baked at upload stands in for a face the page does not have
+// — a shelf that did not answer, a listing that has not synced — and is set the
+// same way. With neither, the sheet stays blank.
 
-/** Measured at one size and scaled; large enough that rounding doesn't show. */
-const PROBE_PX = 100;
-/** The share of the room a line is allowed to take. Text measures by advance
- * width, and a swash or an italic leans past that, so the fit leaves a little
- * back rather than setting every face flush to the edge. */
+/** The share of the room the words are allowed to take. Text measures by
+ * advance width, and a swash or an italic leans past that, so the fit leaves a
+ * little back rather than setting every face flush to the edge. */
 const SAFETY = 0.97;
 
 /**
- * The specimen, set to the width it is given.
+ * The specimen, wrapped to fill the box it is given.
  *
  * The size is measured rather than computed because a script face runs three
  * times the width of a grotesque at the same point size, and every card in a
- * grid should carry the same weight of line.
+ * grid should carry the same weight of type: the largest size at which no word
+ * is wider than the box and the lines fit its height.
  */
 export function FontSpecimen({
   assetId,
   src,
   poster,
-  lines: LINES = SPECIMEN_LINES,
-  fitHeight = false,
   pad = 16,
   className,
 }: {
@@ -43,14 +42,7 @@ export function FontSpecimen({
   src?: string;
   /** The specimen the shelf keeps for this file. */
   poster?: string;
-  /** What to set in the face. A card takes one line, the big view the whole
-   * alphabet. */
-  lines?: readonly string[];
-  /** The box has a height of its own — a card — so the line is held inside it
-   * as well as inside its width. Where the box grows with the text (the big
-   * view), width alone sets the size. */
-  fitHeight?: boolean;
-  /** Room left either side of the widest line, px. */
+  /** Room left either side of the words, px. */
   pad?: number;
   className?: string;
 }) {
@@ -64,8 +56,11 @@ export function FontSpecimen({
   const id = linkIdForAsset(assetId) ?? "";
   const localId = useId();
   const [loadedFont, setLoadedFont] = useState<{ src: string; family: string } | null>(null);
+  const registered = hasFont(id);
   useEffect(() => {
-    if (!src) return;
+    // The card loads its own file when the shelf's sync has not installed the
+    // face yet, so it never waits on the listing.
+    if (!src || registered) return;
     let live = true;
     const face = new FontFace(`shared-${localId}`, `url(${JSON.stringify(src)})`);
     void face.load().then(() => {
@@ -74,29 +69,30 @@ export function FontSpecimen({
       setLoadedFont({ src, family: face.family });
     }).catch(() => {});
     return () => { live = false; document.fonts.delete(face); };
-  }, [src, localId]);
+  }, [src, localId, registered]);
   const localFamily = loadedFont?.src === src ? loadedFont?.family : undefined;
-  const family = localFamily ? JSON.stringify(localFamily) : fontStack(id);
-  const installed = !!localFamily || hasFont(id);
+  const family = registered ? fontStack(id) : localFamily ? JSON.stringify(localFamily) : fontStack(id);
+  const installed = registered || !!localFamily;
   const box = useRef<HTMLDivElement>(null);
   const probe = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState(0);
   useLayoutEffect(() => {
     const fit = () => {
-      // The probe holds every line, so its width is the widest of them: on
-      // most faces that is the capitals, on some the figures.
-      const line = probe.current?.getBoundingClientRect().width;
+      const measure = probe.current;
       const width = box.current?.clientWidth;
-      const height = box.current?.clientHeight ?? 0;
-      if (!line || !width) return;
-      // Width sets the size, until the box is short enough that the line would
-      // be clipped — a card in a narrow panel column. SAFETY keeps the ends of
-      // a line off the edge: a face whose glyphs overhang their advance widths
-      // measures narrower than it draws.
-      const byWidth = (PROBE_PX * Math.max(0, width - pad * 2) * SAFETY) / line;
-      const byHeight =
-        fitHeight && height ? (height * SAFETY) / (1.35 * LINES.length) : byWidth;
-      setSize(Math.min(byWidth, byHeight));
+      const height = box.current?.clientHeight;
+      if (!measure || !width || !height) return;
+      const room = Math.max(0, width - pad * 2) * SAFETY;
+      measure.style.width = `${room}px`;
+      let lo = 4;
+      let hi = 400;
+      for (let i = 0; i < 14; i++) {
+        const mid = (lo + hi) / 2;
+        measure.style.fontSize = `${mid}px`;
+        if (measure.scrollWidth <= room + 0.5 && measure.scrollHeight <= height * SAFETY) lo = mid;
+        else hi = mid;
+      }
+      setSize(lo);
     };
     fit();
     // The face arrives after the box does, and the box is resized by the grid.
@@ -113,7 +109,7 @@ export function FontSpecimen({
       ro.disconnect();
       fonts?.removeEventListener?.("loadingdone", fit);
     };
-  }, [family, gen, pad, LINES, fitHeight]);
+  }, [family, gen, pad]);
   if (poster && isCurrentSpecimen(poster) && !broken && !installed)
     return (
       // eslint-disable-next-line @next/next/no-img-element -- library media file, not Next-optimizable
@@ -129,31 +125,32 @@ export function FontSpecimen({
   return (
     <div
       ref={box}
-      className={cn("grid place-items-center overflow-hidden", className)}
+      className={cn("relative grid items-center overflow-hidden", className)}
       style={{ fontFamily: family }}
     >
       <span
         ref={probe}
         aria-hidden
-        className="pointer-events-none invisible fixed top-0 left-0"
-        style={{ fontSize: PROBE_PX }}
+        className="pointer-events-none invisible fixed top-0 left-0 leading-[1.2]"
       >
-        {LINES.map((line) => (
-          <span key={line} className="block whitespace-nowrap">
-            {line}
-          </span>
-        ))}
+        {SPECIMEN_TEXT}
       </span>
       <span
-        className="text-center leading-[1.35] whitespace-nowrap"
-        style={{ fontSize: size || undefined, opacity: size ? 1 : 0 }}
+        className="leading-[1.2]"
+        // Words set in a stand-in face say nothing about the font, so the
+        // sheet stays blank until the face itself is in.
+        style={{ fontSize: size || undefined, opacity: size && installed ? 1 : 0, paddingInline: pad }}
       >
-        {LINES.map((line) => (
-          <span key={line} className="block">
-            {line}
-          </span>
-        ))}
+        {SPECIMEN_TEXT}
       </span>
+      {!installed && (
+        // Lines of type-shaped shimmer while the face loads.
+        <span aria-hidden className="absolute inset-0 flex flex-col justify-center gap-[9%]" style={{ paddingInline: pad }}>
+          {["88%", "72%", "46%"].map((w) => (
+            <span key={w} className="h-[12%] animate-pulse rounded-md bg-white/10" style={{ width: w }} />
+          ))}
+        </span>
+      )}
     </div>
   );
 }

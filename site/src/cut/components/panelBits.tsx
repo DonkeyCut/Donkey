@@ -88,24 +88,46 @@ export const Value = ({ children, className }: { children: React.ReactNode; clas
   <span className={cn("font-mono text-[11.5px] tabular-nums", className)}>{children}</span>
 );
 
+/** A hover label in the house style, on a control that has no text. The
+ * control is the trigger, so it keeps its own element and props. */
+export function Tip({
+  label,
+  side,
+  children,
+}: {
+  label: string;
+  side?: "top" | "bottom" | "left" | "right";
+  children: React.ReactElement;
+}) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger render={children} />
+        <TooltipContent side={side}>{label}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 /** Sits at the right end of a row, visible once its value has moved off the
  * default. Always occupies its slot so the row doesn't shift when it appears. */
 export function ResetButton({ title, show, onClick }: { title: string; show: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      aria-hidden={!show}
-      tabIndex={show ? undefined : -1}
-      className={cn(
-        "grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground",
-        !show && "invisible",
-      )}
-      onClick={onClick}
-    >
-      <RotateCcw className="size-3" />
-    </button>
+    <Tip label={title}>
+      <button
+        type="button"
+        aria-label={title}
+        aria-hidden={!show}
+        tabIndex={show ? undefined : -1}
+        className={cn(
+          "grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground",
+          !show && "invisible",
+        )}
+        onClick={onClick}
+      >
+        <RotateCcw className="size-3" />
+      </button>
+    </Tip>
   );
 }
 

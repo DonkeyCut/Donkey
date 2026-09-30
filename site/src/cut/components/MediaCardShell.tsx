@@ -67,7 +67,7 @@ export function MediaCardShell({
       onDoubleClick={
         view
           ? (e) => {
-              // The + button and the actions menu answer their own clicks; a
+              // The actions menu and its items answer their own clicks; a
               // fast double press on one is two of those, and opens nothing.
               if (
                 (e.target as HTMLElement).closest(

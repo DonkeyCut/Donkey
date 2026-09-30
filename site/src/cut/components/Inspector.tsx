@@ -158,7 +158,7 @@ import {
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Field, ResetButton, Row, Section, SegGroup, SegToggle, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
+import { Field, ResetButton, Row, Section, SegGroup, SegToggle, Tip, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { ColorPanel } from "@/cut/components/ColorPanel";
 import { GroupPanel } from "@/cut/components/GroupPanel";
 import { RemovalPanel } from "@/cut/components/RemovalPanel";
@@ -445,22 +445,23 @@ function RailButton({
   children?: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
-      className={cn(
-        `panel-tab-${id} relative grid size-8 shrink-0 place-items-center rounded-lg transition-colors`,
-        active
-          ? "bg-neutral-900 text-white"
-          : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-      )}
-      onClick={onClick}
-    >
-      <Icon className="size-4" strokeWidth={active ? 2.25 : 2} />
-      {children}
-    </button>
+    <Tip label={label} side="left">
+      <button
+        type="button"
+        aria-label={label}
+        aria-pressed={active}
+        className={cn(
+          `panel-tab-${id} relative grid size-8 shrink-0 place-items-center rounded-lg transition-colors`,
+          active
+            ? "bg-neutral-900 text-white"
+            : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+        )}
+        onClick={onClick}
+      >
+        <Icon className="size-4" strokeWidth={active ? 2.25 : 2} />
+        {children}
+      </button>
+    </Tip>
   );
 }
 
@@ -1910,7 +1911,7 @@ function AudioPanel({ clip }: { clip: AudioClip }) {
  * chevron; any value in range can still be typed or dragged. */
 export const LINE_HEIGHTS = [0.9, 1, 1.15, 1.25, 1.5, 1.75, 2];
 export const LETTER_SPACINGS = [-2, 0, 2, 5, 10, 20];
-/** Glyph stretch stops, percent of the face's own width or height. */
+/** Preset text box widths in percent of the frame width; 0 means no wrap. */
 export const TEXT_WIDTHS = [0, 25, 50, 75, 100];
 
 function TextPanel({ overlay: o }: { overlay: TextOverlay }) {

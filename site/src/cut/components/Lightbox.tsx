@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { LUT_FILE_ICON } from "@/cut/lib/linkedLibrary";
+import { isLinkedAssetType } from "@/cut/lib/types";
 import { Check, Copy, FileText, Loader2, Music, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
@@ -12,7 +14,6 @@ import { useEditor } from "@/cut/lib/store";
 import { DocText, useDocText } from "./DocText";
 import { FontSpecimen } from "./FontSpecimen";
 import {
-  SPECIMEN_ALPHABET,
   SPECIMEN_BG,
   SPECIMEN_INK,
 } from "@/cut/lib/fontSpecimen";
@@ -89,7 +90,7 @@ export function Lightbox() {
   const canAdd =
     !item.bare &&
     item.kind !== "text" &&
-    item.kind !== "font" &&
+    !isLinkedAssetType(item.kind) &&
     (item.kind !== "audio" ||
       item.assetId !== null ||
       item.libraryId !== undefined);
@@ -103,7 +104,9 @@ export function Lightbox() {
     item.kind === "audio"
       ? "min(92vw, 480px)"
       : item.kind === "font"
-        ? "min(92vw, 1000px)"
+        ? "min(92vw, 72vh)"
+        : item.kind === "lut"
+          ? "min(92vw, 360px)"
         : item.kind === "text"
           ? "min(92vw, 720px)"
           : ratio
@@ -201,6 +204,7 @@ function LightboxMedia({
   if (item.kind === "audio") return <AudioBody item={item} />;
   if (item.kind === "text") return <TextBody item={item} />;
   if (item.kind === "font") return <FontBody item={item} />;
+  if (item.kind === "lut") return <LutBody item={item} />;
 
   const mediaClass = ratio
     ? "block w-full rounded-2xl bg-black object-cover shadow-2xl"
@@ -363,23 +367,32 @@ function AudioBody({ item }: { item: LightboxItem }) {
   );
 }
 
-/** A font, big: the sheet a font file previews on, the alphabet filling it. */
+/** A font, big: the card's square sheet, the pangram wrapped across it. */
 function FontBody({ item }: { item: LightboxItem }) {
   return (
-    // The sheet keeps its margin whichever way the alphabet arrives: the baked
+    // The sheet keeps its margin whichever way the specimen arrives: the baked
     // picture is the same charcoal, so padding it reads as more sheet.
     <div
-      className="overflow-hidden rounded-2xl px-10 py-12 shadow-2xl"
+      className="aspect-square w-full overflow-hidden rounded-2xl p-10 shadow-2xl"
       style={{ backgroundColor: SPECIMEN_BG, color: SPECIMEN_INK }}
     >
       <FontSpecimen
         assetId={item.libraryId ?? ""}
         src={!item.libraryId ? item.src : undefined}
         poster={item.poster}
-        lines={SPECIMEN_ALPHABET}
         pad={0}
-        className="w-full"
+        className="size-full"
       />
+    </div>
+  );
+}
+
+function LutBody({ item }: { item: LightboxItem }) {
+  return (
+    <div className="flex flex-col items-center gap-3 rounded-2xl bg-card p-8 shadow-2xl">
+      {/* eslint-disable-next-line @next/next/no-img-element -- static icon */}
+      <img src={LUT_FILE_ICON} alt="" aria-hidden className="size-40" />
+      <span className="truncate text-[12.5px] font-medium">{item.name}</span>
     </div>
   );
 }

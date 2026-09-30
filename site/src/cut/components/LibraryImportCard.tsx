@@ -83,7 +83,7 @@ export function LibraryImportCard({
         event.dataTransfer.effectAllowed = "copy";
       } : undefined}
       className={cn(
-        "relative max-w-full overflow-hidden rounded-xl border",
+        "relative max-w-full overflow-hidden rounded-xl border shadow-sm",
         canPreview && "cursor-pointer",
         item.error ? "border-destructive/50 bg-muted" : "border-border",
       )}
@@ -118,7 +118,7 @@ export function LibraryImportCard({
         // eslint-disable-next-line @next/next/no-img-element -- local file preview
         <img src={previewUrl} alt={item.name} className="size-full object-cover" />
       ) : previewUrl && mediaType === "font" ? (
-        <FontSpecimen assetId={item.id} src={previewUrl} fitHeight className="size-full" />
+        <FontSpecimen assetId={item.id} src={previewUrl} className="size-full" />
       ) : file && mediaType === "video" ? (
         <ImportVideoPoster file={file} size={Math.ceil(Math.sqrt(area))} />
       ) : file && mediaType !== "image" && mediaType !== "audio" ? (

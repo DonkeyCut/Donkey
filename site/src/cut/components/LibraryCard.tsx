@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { isLinkedAssetType } from "@/cut/lib/types";
 import { Download, Ellipsis, ExternalLink, Film, Image as ImageIcon, Music, Plus, Share2, Trash2, Type } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -16,7 +17,8 @@ import { setLibraryDragData } from "@/cut/lib/assetDrag";
 import { refFromLibrary } from "@/cut/lib/assetRef";
 import { openExternal } from "@/cut/lib/hostBridge";
 import { fileKind } from "@/cut/lib/media";
-import { libraryMediaUrl, libraryPosterUrl, downloadLibraryAsset, type LibraryAsset } from "@/cut/lib/library";
+import { libraryAssetName, libraryMediaUrl, libraryPosterUrl, downloadLibraryAsset, type LibraryAsset } from "@/cut/lib/library";
+import { LUT_FILE_ICON, LUT_MARK_ICON } from "@/cut/lib/linkedLibrary";
 import { lightboxItemFromLibrary, type LightboxItem } from "@/cut/lib/lightbox";
 import { availableResidencies } from "@/cut/lib/residency";
 import { SPECIMEN_BG, SPECIMEN_INK, SPECIMEN_META } from "@/cut/lib/fontSpecimen";
@@ -27,6 +29,9 @@ import { cn } from "@/lib/utils";
 
 export const LIBRARY_TILE_AREA = 180 * 320;
 export const LIBRARY_AUDIO_TILE_AREA = LIBRARY_TILE_AREA * 0.7 ** 2;
+/** The side of the square every Library file other than a picture takes:
+ * sounds, LUTs, fonts, notes and templates. */
+export const LIBRARY_SQUARE = Math.round(Math.sqrt(LIBRARY_AUDIO_TILE_AREA));
 
 type SharedMedia = { src: string; poster?: string; downloadHref: string };
 
@@ -77,7 +82,7 @@ export function LibraryCard({
   // at.
   const refs = () => sharedMedia ? [] :
     (selected && dragGroup?.length ? dragGroup : [a])
-      .filter((x) => x.type !== "font")
+      .filter((x) => !isLinkedAssetType(x.type))
       .map(refFromLibrary);
   // With one shelf listed, every card is on it — the badge would say nothing.
   // Phone recordings all come up from the cloud, so they carry none either.
@@ -90,7 +95,7 @@ export function LibraryCard({
   const src = sharedMedia?.src ?? libraryMediaUrl(a.fileName, a.residency);
   const poster = sharedMedia ? sharedMedia.poster : libraryPosterUrl(a);
   const view = (): LightboxItem => sharedMedia ? {
-    kind: a.type, src, name: a.title || a.name, prompt: "", assetId: null, bare: true,
+    kind: a.type, src, name: libraryAssetName(a), prompt: "", assetId: null, bare: true,
     duration: a.duration, poster, ...(a.width && a.height ? { ratio: a.width / a.height } : {}),
   } : lightboxItemFromLibrary(a, !onUse);
 
@@ -107,6 +112,8 @@ export function LibraryCard({
   // into view.
   const [hovered, setHovered] = useState(false);
   const font = a.type === "font";
+  // A LUT tile is the file icon; its facts (CUBE · 33³) ride the footer.
+  const lut = a.type === "lut";
   const sizeBytes = useMediaFileSize(
     offline ? "" : src,
     hovered || (font && seen),
@@ -118,12 +125,12 @@ export function LibraryCard({
   ]
     .filter(Boolean)
     .join(" · ");
+  // Pictures take their own aspect at the shared area; every other file is
+  // the same square the sound tile is.
   const frame =
-    area && a.type !== "audio" && a.width && a.height
+    area && (a.type === "video" || a.type === "image") && a.width && a.height
       ? { w: a.width, h: a.height }
-      : font
-        ? { w: 16, h: 6 }
-        : { w: 1, h: 1 };
+      : { w: 1, h: 1 };
   const tileStyle = {
     ...(area
       ? {
@@ -139,7 +146,7 @@ export function LibraryCard({
       scope="library"
       id={a.id}
       refs={refs}
-      // Without a + button there is no project to add it to, so the viewer
+      // Without an "Add to timeline" item there is no project to add it to, so the viewer
       // opens bare.
       view={offline ? undefined : view}
       restTime={posterT}
@@ -158,8 +165,10 @@ export function LibraryCard({
           <div
             ref={tileRef}
             data-drag-object
+            data-drag-ghost={lut ? LUT_MARK_ICON : undefined}
             className={cn(
-              "relative max-w-full cursor-grab overflow-hidden rounded-xl border bg-muted transition-shadow group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)] active:cursor-grabbing",
+              "relative max-w-full cursor-grab overflow-hidden rounded-xl border shadow-sm transition-shadow active:cursor-grabbing",
+              lut ? "bg-background" : "bg-muted group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)]",
               !area && (font ? "aspect-[16/7]" : "aspect-square"),
               // The sheet is the card, so nothing is drawn around it; the type
               // scales with the tile, which runs from a panel column to a full row.
@@ -183,8 +192,7 @@ export function LibraryCard({
                   ) : (
                     <FontSpecimen
                       assetId={a.id}
-                      src={sharedMedia && seen ? src : undefined}
-                      fitHeight
+                      src={seen ? src : undefined}
                       pad={0}
                       className="size-full"
                     />
@@ -209,6 +217,11 @@ export function LibraryCard({
                   )}
                 </div>
               </div>
+            ) : lut ? (
+              // The tile is the square: the cube with its LUT wordmark under the
+              // name, the way a sound tile sets its own.
+              // eslint-disable-next-line @next/next/no-img-element -- static icon
+              <img src={LUT_FILE_ICON} alt="" aria-hidden className="size-full object-contain px-2 pt-8 pb-2" />
             ) : offline ? (
               // Nothing to load from a shelf that isn't answering, so the card
               // shows what it knows: the kind of file, its name, its length.
@@ -271,16 +284,9 @@ export function LibraryCard({
                 onError={() => setPainted(true)}
               />
             ) : (
-              <AudioCardFace
-                url={src}
-                duration={a.duration}
-                // On hover the + button takes the pill's corner.
-                durationClassName={
-                  !!onUse && "transition-opacity group-hover:opacity-0"
-                }
-              />
+              <AudioCardFace url={src} duration={a.duration} />
             )}
-            {!offline && !font && a.type !== "audio" && !painted && (
+            {!offline && !font && !lut && a.type !== "audio" && !painted && (
               <Skeleton
                 data-drag-omit
                 aria-hidden
@@ -289,10 +295,11 @@ export function LibraryCard({
             )}
             {a.type !== "audio" &&
               !font &&
+              !lut &&
               (a.type === "video" || sizeBytes != null) && (
                 // Length and size share one pill in the corner: on a card this narrow
                 // two of them collide. The length reads at rest, the size takes over
-                // on hover, where the + button is what the pointer is there for.
+                // on hover.
                 <span
                   data-drag-omit
                   className={cn(
@@ -323,29 +330,6 @@ export function LibraryCard({
                 {formatBytes(sizeBytes)}
               </span>
             )}
-            {onUse && (
-              <button
-                aria-label="Add to timeline"
-                title="Add to timeline"
-                className={cn(
-                  "absolute grid size-6 place-items-center rounded-full bg-primary text-primary-foreground opacity-0 shadow transition-all group-hover:opacity-100 hover:scale-110",
-                  // Audio keeps play bottom-left; + swaps in where the badge hides.
-                  // A font's bottom edge is its footer, so its + takes the corner
-                  // the name used to sit in.
-                  a.type === "audio"
-                    ? "right-1.5 bottom-1.5"
-                    : font
-                      ? "top-1.5 left-1.5"
-                      : "bottom-1.5 left-1.5",
-                )}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onUse();
-                }}
-              >
-                <Plus className="size-3.5" />
-              </button>
-            )}
             {bothShelves && (
               <ShelfBadge
                 residency={a.residency}
@@ -361,7 +345,6 @@ export function LibraryCard({
             <DropdownMenu>
               <DropdownMenuTrigger
                 aria-label="More actions"
-                title="More actions"
                 className={cn(
                   "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100",
                   // A black scrim disappears into the charcoal sheet.
@@ -381,6 +364,14 @@ export function LibraryCard({
                 className="w-44"
                 onClick={(e) => e.stopPropagation()}
               >
+                {onUse && (
+                  <>
+                    <DropdownMenuItem onClick={onUse}>
+                      <Plus /> Add to timeline
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                )}
                 {onShare && <DropdownMenuItem disabled={offline} onClick={onShare}><Share2 /> Share</DropdownMenuItem>}
                 {sharedMedia ? (
                   <DropdownMenuItem render={<a href={sharedMedia.downloadHref} />}>
@@ -410,14 +401,15 @@ export function LibraryCard({
             </DropdownMenu>
             {!font && (
               <CopyNameLabel
-                name={a.name}
-                label={a.title}
+                name={lut ? libraryAssetName(a) : a.name}
+                label={lut ? undefined : a.title}
                 dark={a.type === "audio"}
                 mention={mention}
                 className={cn(
                   "absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-2.75rem)]",
                   // The emerald fill is its own backdrop; thumbnails need the scrim pill.
-                  a.type !== "audio" && "rounded-lg bg-black/55 backdrop-blur-sm",
+                  a.type !== "audio" && !lut && "rounded-lg bg-black/55 backdrop-blur-sm",
+                  lut && "text-foreground",
                 )}
               />
             )}

@@ -27,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { LIBRARY_SQUARE } from "./LibraryCard";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
 
 // The note paper's ink, matching the iOS app.
@@ -601,7 +602,10 @@ export function NotesView({ library, ref }: Props = {}) {
         </button>
       ) : (
         <Marquee
-          className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3"
+          className="flex flex-wrap items-start gap-4"
+          // In the Library the notes are one row among the files, sized to
+          // what they hold; the page's own sweep area is below them.
+          {...(library ? { rootClassName: "relative" } : {})}
           selected={selected}
           setSelected={setSelected}
         >
@@ -617,14 +621,22 @@ export function NotesView({ library, ref }: Props = {}) {
                 onDragStart={(e) => onCardDragStart(e, n.id)}
                 onDragEnd={clearRefDrag}
                 className={cn(
-                  "flex min-h-40 cursor-pointer flex-col gap-1.5 rounded-2xl p-4 text-left shadow-sm transition-transform hover:-translate-y-0.5",
+                  "flex cursor-pointer flex-col gap-1.5 text-left shadow-sm transition-transform hover:-translate-y-0.5",
+                  // A note is a file like the rest: the same square a sound
+                  // tile is, here and in the Library.
+                  "overflow-hidden rounded-xl p-3",
                   selected.has(n.id) && PICKED_RING,
                 )}
-                style={{ backgroundColor: noteColor(n.colorIndex).background, color: NOTE_INK }}
+                style={{
+                  backgroundColor: noteColor(n.colorIndex).background,
+                  color: NOTE_INK,
+                  width: LIBRARY_SQUARE,
+                  height: LIBRARY_SQUARE,
+                }}
                 onClick={() => openNote(n)}
               >
-                {n.title && <div className="font-semibold">{n.title}</div>}
-                <div className="line-clamp-6 text-sm whitespace-pre-wrap opacity-80">{n.body}</div>
+                {n.title && <div className="truncate text-[13px] font-semibold">{n.title}</div>}
+                <div className="line-clamp-5 text-[12px] whitespace-pre-wrap opacity-80">{n.body}</div>
                 {worn.length > 0 && (
                   <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
                     {worn.map((name) => (

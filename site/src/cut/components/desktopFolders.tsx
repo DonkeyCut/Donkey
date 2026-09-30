@@ -531,17 +531,14 @@ export function FolderShelf<F extends DeskFolder>({
   const editGlyphClass = rows ? "size-7 shrink-0" : "size-[40px]";
 
   return (
-    <div
-      className={cn(rows ? "mb-4 flex flex-col" : "-ml-2 mb-7 flex flex-wrap gap-2")}
-      data-no-marquee
-    >
+    <div className={cn(rows ? "mb-4 flex flex-col" : "-ml-2 mb-7 flex flex-wrap gap-2")}>
       {folders.map((f) => {
         const s = statOf(f.id);
         const isOver = over === f.id;
         if (editingId === f.id) {
           const text = draftFor === f.id ? draft : f.name;
           return (
-            <div key={f.id} className={editRowClass}>
+            <div key={f.id} className={editRowClass} data-no-marquee>
               <FolderGlyph className={editGlyphClass} />
               <Input
                 autoFocus
@@ -569,7 +566,11 @@ export function FolderShelf<F extends DeskFolder>({
         // folders, with the items riding under their own MIME.
         const carried = isPicked ? splitPick(picked) : { folders: [], items: [] };
         const carriedFolders = [f.id, ...carried.folders.filter((id) => id !== f.id)];
+        // The tile, never the shelf around it, holds off the marquee: the
+        // space between and beside tiles is page, where a press sweeps and a
+        // right-click opens the page menu.
         const interact = {
+          "data-no-marquee": "",
           ...(pickable ? { "data-sel-id": sel } : {}),
           onClick: (e: React.MouseEvent) => {
             if (pickable && additiveClick(e)) {
@@ -726,7 +727,7 @@ export function FolderShelf<F extends DeskFolder>({
       })}
 
       {creating && (
-        <div className={editRowClass}>
+        <div className={editRowClass} data-no-marquee>
           <FolderGlyph className={cn(editGlyphClass, "opacity-60")} />
           <Input
             autoFocus

@@ -1,6 +1,6 @@
 /**
- * The picture a font shows of itself, on a warm charcoal sheet: a pangram on
- * the card, the alphabet in the big view.
+ * The picture a font shows of itself: a pangram on a warm charcoal sheet,
+ * wrapped and left-aligned.
  *
  * Drawing the line in a live face depends on that face being installed in
  * whatever page is looking at it, which is a thing that can be true one minute
@@ -12,16 +12,9 @@
 
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 
-/** What a card shows: one line, enough of the face to recognise it by. */
-export const SPECIMEN_LINES = ["Pack my box with five dozen jugs"];
-
-/** What the big view shows, and what the cover is baked from: every letter and
- * figure, the way a font file previews anywhere else. */
-export const SPECIMEN_ALPHABET = [
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-  "abcdefghijklmnopqrstuvwxyz",
-  "1234567890",
-];
+/** What a font shows of itself, wrapped and left-aligned, on the card and in
+ * the big view alike. */
+export const SPECIMEN_TEXT = "Pack my box with five dozen jugs";
 
 /** The sheet the specimen is set on, shared by the baked picture and the card
  * that draws the face live, so the two read as one object. */
@@ -31,42 +24,61 @@ export const SPECIMEN_INK = "#F1EFE8";
 /** The card's footnote beside the name: file kind and size. */
 export const SPECIMEN_META = "#8A877E";
 
-/** What a baked specimen is called. The name carries the sheet's colours, so a
- * cover baked before this one is spotted by its name and passed over: an old
- * white sheet inside the charcoal card would read as a hole in it. */
-export const SPECIMEN_FILE_SUFFIX = ".specimen-dark.png";
+/** What a baked specimen is called. The name carries the sheet's layout, so a
+ * cover baked before this one — a centred alphabet on a wide sheet — is spotted
+ * by its name and passed over. */
+export const SPECIMEN_FILE_SUFFIX = ".specimen-square.png";
 export const isCurrentSpecimen = (url: string) =>
   url.split("?")[0].endsWith(SPECIMEN_FILE_SUFFIX);
 
-const W = 1600;
-const H = 900;
+const S = 1200;
 const PAD = 90;
-/** Measured at one size and scaled; large enough that rounding doesn't show. */
-const PROBE = 100;
+const LEADING = 1.2;
+
+/** The pangram broken into lines at `size`, greedily, the way the card's
+ * text wraps. */
+function wrapLines(ctx: CanvasRenderingContext2D, size: number, family: string, room: number): string[] | null {
+  ctx.font = `${size}px "${family}"`;
+  const lines: string[] = [];
+  let line = "";
+  for (const word of SPECIMEN_TEXT.split(" ")) {
+    if (ctx.measureText(word).width > room) return null;
+    const next = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(next).width > room) {
+      lines.push(line);
+      line = word;
+    } else line = next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
 
 /**
- * A 16:9 specimen of an installed family.
- *
- * One size for all three lines: the capitals are the widest, so fitting them
- * sets the size and the rest fall where the face puts them.
+ * A square specimen of an installed family, set the way the card sets it: the
+ * largest size at which the wrapped words fit the sheet.
  */
 export async function specimenPng(family: string): Promise<Blob> {
-  const canvas = createRasterCanvas(W, H);
+  const canvas = createRasterCanvas(S, S);
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
   if (!ctx) throw new Error("No 2D context for the specimen.");
+  const room = S - PAD * 2;
+  let lo = 8;
+  let hi = 600;
+  for (let i = 0; i < 16; i++) {
+    const mid = (lo + hi) / 2;
+    const lines = wrapLines(ctx, mid, family, room);
+    if (lines && lines.length * mid * LEADING <= room) lo = mid;
+    else hi = mid;
+  }
+  const lines = wrapLines(ctx, lo, family, room) ?? [SPECIMEN_TEXT];
   ctx.fillStyle = SPECIMEN_BG;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, S, S);
   ctx.fillStyle = SPECIMEN_INK;
-  ctx.textAlign = "center";
+  ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.font = `${PROBE}px "${family}"`;
-  const widest = ctx.measureText(SPECIMEN_ALPHABET[0]).width;
-  const size = widest > 0 ? (PROBE * (W - PAD * 2)) / widest : PROBE;
-  ctx.font = `${size}px "${family}"`;
-  const step = size * 1.35;
-  const mid = (SPECIMEN_ALPHABET.length - 1) / 2;
-  SPECIMEN_ALPHABET.forEach((line, i) => {
-    ctx.fillText(line, W / 2, H / 2 + (i - mid) * step);
-  });
+  ctx.font = `${lo}px "${family}"`;
+  const step = lo * LEADING;
+  const top = S / 2 - ((lines.length - 1) * step) / 2;
+  lines.forEach((line, i) => ctx.fillText(line, PAD, top + i * step));
   return rasterCanvasToPng(canvas);
 }
