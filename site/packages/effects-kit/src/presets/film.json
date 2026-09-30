@@ -3,6 +3,7 @@
     "id": "16mm",
     "label": "16mm",
     "category": "film",
+    "look": "slightly muted, lifted cool shadows; handheld film",
     "grade": {
       "saturation": -2,
       "vibrance": 6,
@@ -31,6 +32,7 @@
     "id": "super-8",
     "label": "Super 8",
     "category": "film",
+    "look": "faded home-movie color, lifted blacks, muted",
     "grade": {
       "temperature": 18,
       "tint": 1,
@@ -45,6 +47,7 @@
     "id": "faded-film",
     "label": "Faded Film",
     "category": "film",
+    "look": "heavily faded, low contrast, washed-out color",
     "grade": {
       "contrast": -14,
       "saturation": -13,
@@ -58,6 +61,7 @@
     "id": "chrome",
     "label": "Chrome",
     "category": "film",
+    "look": "very warm and saturated, deep blacks; slide film",
     "grade": {
       "contrast": -2,
       "saturation": 14,
@@ -71,6 +75,7 @@
     "id": "push-process",
     "label": "Push Process",
     "category": "film",
+    "look": "high contrast, dark midtones, bright whites; pushed film",
     "grade": {
       "exposure": 4,
       "contrast": 17,
@@ -84,6 +89,7 @@
     "id": "cine-print",
     "label": "Cine Print",
     "category": "film",
+    "look": "dark, dense print contrast, warm",
     "grade": {
       "contrast": 12,
       "saturation": -2,
@@ -96,6 +102,7 @@
     "id": "tungsten",
     "label": "Tungsten",
     "category": "film",
+    "look": "warm and saturated, softly lifted blacks",
     "grade": {
       "temperature": 6,
       "tint": 3,
@@ -113,6 +120,7 @@
     "id": "instant",
     "label": "Instant",
     "category": "film",
+    "look": "bright, washed-out instant photo, lifted blacks",
     "grade": {
       "exposure": 6,
       "contrast": -13,
@@ -129,6 +137,7 @@
     "id": "expired",
     "label": "Expired",
     "category": "film",
+    "look": "faded and color-shifted, lifted blacks, muted",
     "grade": {
       "saturation": -16,
       "contrast": -1,

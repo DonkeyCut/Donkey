@@ -72,24 +72,25 @@ describe("parseGradePresets", () => {
 
   test("rejects bad entries individually and keeps good ones", () => {
     const { presets, errors } = parseGradePresets([
-      { id: "good-one", label: "Good One", category: "mood", grade: { contrast: 10 } },
-      { id: "Bad Id", label: "X", category: "mood", grade: { contrast: 10 } },
-      { id: "no-label", label: "", category: "mood", grade: { contrast: 10 } },
-      { id: "bad-cat", label: "X", category: "sparkle", grade: { contrast: 10 } },
-      { id: "neutral", label: "X", category: "mood", grade: { contrast: 0 } },
-      { id: "nested", label: "X", category: "mood", grade: { preset: { id: "mono" } } },
-      { id: "good-one", label: "Duplicate", category: "mood", grade: { contrast: 5 } },
-      { id: "with-lut", label: "X", category: "mood", grade: { contrast: 5, lut: { id: "lut:a" } } },
-      { id: "spatial", label: "X", category: "mood", grade: { contrast: 5, sharpen: 10 } },
-      { id: "clarity", label: "X", category: "mood", grade: { clarity: 10 } },
+      { id: "good-one", label: "Good One", category: "mood", look: "a look", grade: { contrast: 10 } },
+      { id: "Bad Id", label: "X", category: "mood", look: "a look", grade: { contrast: 10 } },
+      { id: "no-label", label: "", category: "mood", look: "a look", grade: { contrast: 10 } },
+      { id: "bad-cat", label: "X", category: "sparkle", look: "a look", grade: { contrast: 10 } },
+      { id: "neutral", label: "X", category: "mood", look: "a look", grade: { contrast: 0 } },
+      { id: "nested", label: "X", category: "mood", look: "a look", grade: { preset: { id: "mono" } } },
+      { id: "good-one", label: "Duplicate", category: "mood", look: "a look", grade: { contrast: 5 } },
+      { id: "with-lut", label: "X", category: "mood", look: "a look", grade: { contrast: 5, lut: { id: "lut:a" } } },
+      { id: "spatial", label: "X", category: "mood", look: "a look", grade: { contrast: 5, sharpen: 10 } },
+      { id: "clarity", label: "X", category: "mood", look: "a look", grade: { clarity: 10 } },
+      { id: "no-look", label: "X", category: "mood", grade: { contrast: 10 } },
     ]);
     expect(presets.map((p) => p.id)).toEqual(["good-one"]);
-    expect(errors.length).toBe(9);
+    expect(errors.length).toBe(10);
   });
 
   test("recipes are normalized on the way in", () => {
     const { presets } = parseGradePresets([
-      { id: "clamped", label: "Clamped", category: "warm", grade: { temperature: 999, tint: 0 } },
+      { id: "clamped", label: "Clamped", category: "warm", look: "a look", grade: { temperature: 999, tint: 0 } },
     ]);
     expect(presets[0].grade).toEqual({ temperature: 50 });
   });

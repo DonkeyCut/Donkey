@@ -3,6 +3,7 @@
     "id": "mono",
     "label": "Mono",
     "category": "bw",
+    "look": "neutral black and white",
     "grade": {
       "saturation": -50,
       "contrast": 8,
@@ -13,6 +14,7 @@
     "id": "silver",
     "label": "Silver",
     "category": "bw",
+    "look": "soft, silvery black and white, lifted blacks",
     "grade": {
       "saturation": -50,
       "contrast": -7,
@@ -26,6 +28,7 @@
     "id": "ink",
     "label": "Ink",
     "category": "bw",
+    "look": "hard-contrast black and white, deep blacks",
     "grade": {
       "saturation": -50,
       "contrast": 13,
@@ -38,6 +41,7 @@
     "id": "high-key",
     "label": "High Key",
     "category": "bw",
+    "look": "bright, airy black and white",
     "grade": {
       "saturation": -50,
       "exposure": 10,
@@ -51,6 +55,7 @@
     "id": "low-key",
     "label": "Low Key",
     "category": "bw",
+    "look": "dark, moody black and white",
     "grade": {
       "saturation": -50,
       "exposure": -8,
@@ -64,6 +69,7 @@
     "id": "charcoal",
     "label": "Charcoal",
     "category": "bw",
+    "look": "flat grey black and white",
     "grade": {
       "saturation": -50,
       "contrast": 4,
@@ -75,6 +81,7 @@
     "id": "soft-mono",
     "label": "Soft Mono",
     "category": "bw",
+    "look": "soft, low-contrast black and white",
     "grade": {
       "saturation": -50,
       "contrast": -7,
@@ -87,6 +94,7 @@
     "id": "grit",
     "label": "Grit",
     "category": "bw",
+    "look": "gritty, high-contrast black and white",
     "grade": {
       "saturation": -50,
       "contrast": 13,

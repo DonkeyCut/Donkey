@@ -3,6 +3,7 @@
     "id": "midnight",
     "label": "Midnight",
     "category": "mood",
+    "look": "cool, dark and muted; night",
     "grade": {
       "exposure": -8,
       "temperature": -14,
@@ -17,6 +18,7 @@
     "id": "moss",
     "label": "Moss",
     "category": "mood",
+    "look": "olive green, muted, earthy",
     "grade": {
       "tint": -10,
       "temperature": 6,
@@ -30,6 +32,7 @@
     "id": "slate",
     "label": "Slate",
     "category": "mood",
+    "look": "cool grey, desaturated",
     "grade": {
       "temperature": -9,
       "tint": -3,
@@ -42,6 +45,7 @@
     "id": "dusk",
     "label": "Dusk",
     "category": "mood",
+    "look": "warm magenta-red, dimmed highlights",
     "grade": {
       "temperature": -4,
       "tint": 2,
@@ -56,6 +60,7 @@
     "id": "neon",
     "label": "Neon",
     "category": "mood",
+    "look": "saturated magenta-red, deep blacks; nightlife",
     "grade": {
       "vibrance": 22,
       "contrast": -4,
@@ -69,6 +74,7 @@
     "id": "arctic",
     "label": "Arctic",
     "category": "mood",
+    "look": "cold blue-cyan, muted",
     "grade": {
       "temperature": -26,
       "tint": -6,
@@ -83,6 +89,7 @@
     "id": "storm",
     "label": "Storm",
     "category": "mood",
+    "look": "dark, muted and cool; overcast",
     "grade": {
       "temperature": -10,
       "contrast": 8,
@@ -96,6 +103,7 @@
     "id": "velvet",
     "label": "Velvet",
     "category": "mood",
+    "look": "deep warm red, dark and rich",
     "grade": {
       "contrast": 6,
       "exposure": -4,

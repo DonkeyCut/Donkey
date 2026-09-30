@@ -14,6 +14,8 @@ export interface BuiltinLut {
   id: string;
   label: string;
   group: "color" | "bw";
+  /** What the look does to a picture, measured off test frames. */
+  look: string;
   /** Site-relative path of the .cube. */
   file: string;
   /** Content key of the file's bytes. */
@@ -23,6 +25,9 @@ export interface BuiltinLut {
 export const BUILTIN_LUTS: readonly BuiltinLut[] = BUILTIN_LUT_MANIFEST;
 
 const byKey = new Map(BUILTIN_LUTS.map((l) => [l.key, l]));
+
+/** One line per built-in LUT, for the chat's tool and prompt text. */
+export const builtinLutCatalogText = (): string => BUILTIN_LUTS.map((l) => `${l.label} (${l.look})`).join("; ");
 
 /** The built-in LUT with this content key. */
 export const builtinLutByKey = (key: string): BuiltinLut | undefined => byKey.get(key);

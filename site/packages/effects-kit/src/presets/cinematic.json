@@ -3,6 +3,7 @@
     "id": "teal-orange",
     "label": "Teal & Orange",
     "category": "cinematic",
+    "look": "warm skin over teal shadows, extra saturation; blockbuster",
     "grade": {
       "contrast": 7,
       "vibrance": -2,
@@ -15,6 +16,7 @@
     "id": "bleach-bypass",
     "label": "Bleach Bypass",
     "category": "cinematic",
+    "look": "desaturated and silvery, crushed blacks; gritty",
     "grade": {
       "contrast": 8,
       "saturation": -27,
@@ -27,6 +29,7 @@
     "id": "matinee",
     "label": "Matinee",
     "category": "cinematic",
+    "look": "very warm, rich saturated color; classic Hollywood",
     "grade": {
       "exposure": 9,
       "contrast": -7,
@@ -40,6 +43,7 @@
     "id": "thriller",
     "label": "Thriller",
     "category": "cinematic",
+    "look": "cool and muted, darker, crushed blacks; tense",
     "grade": {
       "temperature": -17,
       "contrast": 10,
@@ -53,6 +57,7 @@
     "id": "night-market",
     "label": "Night Market",
     "category": "cinematic",
+    "look": "warm and saturated, slightly dim; night streets",
     "grade": {
       "temperature": -6,
       "tint": 4,
@@ -67,6 +72,7 @@
     "id": "sci-fi",
     "label": "Sci-Fi",
     "category": "cinematic",
+    "look": "cooler and slightly muted, clean blacks; clinical",
     "grade": {
       "temperature": -21,
       "tint": -9,
@@ -80,6 +86,7 @@
     "id": "western",
     "label": "Western",
     "category": "cinematic",
+    "look": "warm golden and dusty, lifted blacks",
     "grade": {
       "temperature": 18,
       "tint": 7,
@@ -94,6 +101,7 @@
     "id": "indie",
     "label": "Indie",
     "category": "cinematic",
+    "look": "faded and muted, lifted blacks, soft contrast",
     "grade": {
       "temperature": 4,
       "contrast": -4,

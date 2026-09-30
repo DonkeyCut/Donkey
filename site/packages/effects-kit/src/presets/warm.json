@@ -3,6 +3,7 @@
     "id": "golden-hour",
     "label": "Golden Hour",
     "category": "warm",
+    "look": "warm, saturated sunset glow",
     "grade": {
       "exposure": 6,
       "temperature": 17,
@@ -18,6 +19,7 @@
     "id": "amber",
     "label": "Amber",
     "category": "warm",
+    "look": "strong amber cast, lifted blacks",
     "grade": {
       "temperature": 23,
       "tint": 6,
@@ -30,6 +32,7 @@
     "id": "honey",
     "label": "Honey",
     "category": "warm",
+    "look": "soft warm yellow, gentle",
     "grade": {
       "temperature": 15,
       "tint": 8,
@@ -44,6 +47,7 @@
     "id": "sunbaked",
     "label": "Sunbaked",
     "category": "warm",
+    "look": "warm, a little more saturated, deep blacks",
     "grade": {
       "temperature": 17,
       "contrast": 4,
@@ -56,6 +60,7 @@
     "id": "peach",
     "label": "Peach",
     "category": "warm",
+    "look": "warm pink-orange, softly lifted blacks",
     "grade": {
       "temperature": 11,
       "tint": 9,
@@ -70,6 +75,7 @@
     "id": "sepia",
     "label": "Sepia",
     "category": "warm",
+    "look": "brown-toned, near monochrome",
     "grade": {
       "saturation": -50,
       "temperature": 42,
@@ -82,6 +88,7 @@
     "id": "ember",
     "label": "Ember",
     "category": "warm",
+    "look": "intense red-orange, deep blacks",
     "grade": {
       "temperature": 19,
       "shadows": -1,
@@ -95,6 +102,7 @@
     "id": "bronze",
     "label": "Bronze",
     "category": "warm",
+    "look": "warm and metallic, muted, bright whites",
     "grade": {
       "temperature": 21,
       "tint": 1,

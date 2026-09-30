@@ -18,6 +18,10 @@ describe("built-in LUTs", () => {
     }
   });
 
+  test("every look says what it does to a picture", () => {
+    for (const l of BUILTIN_LUTS) expect(l.look.trim().length).toBeGreaterThan(10);
+  });
+
   test("ids and labels are unique", () => {
     expect(new Set(BUILTIN_LUTS.map((l) => l.id)).size).toBe(BUILTIN_LUTS.length);
     expect(new Set(BUILTIN_LUTS.map((l) => l.label)).size).toBe(BUILTIN_LUTS.length);

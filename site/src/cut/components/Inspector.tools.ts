@@ -32,7 +32,7 @@ import {
   PEN_MIN_POINTS,
 } from "@donkeycut/effects-kit";
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
-import { BUILTIN_LUTS } from "@/cut/lib/builtinLuts";
+import { builtinLutCatalogText } from "@/cut/lib/builtinLuts";
 
 /** Per-field slider hints; ranges interpolate the exported constants so the
  * schema can never drift from the model the renderer clamps to. */
@@ -426,7 +426,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_color_lut",
     description:
-      `Put a LUT on a video clip, or take it off. editor_state.luts lists every LUT by id ("lut:<key>"): the built-in film looks (${BUILTIN_LUTS.map((l) => l.label).join(", ")}), marked builtIn, and the user's own .cube/.3dl files in the Library. The LUT is applied to the picture after the clip's source conversion and under the grade, so a creative LUT works on log footage and the sliders shape what comes out. amount 0..1 mixes the LUT's result with its input (default 1). Pass lut "none" to remove it. A Log-to-Rec.709 technical LUT (a camera maker's) belongs on a clip whose source color is set to rec709 (set_source_color) so it is not converted twice. Pass ids or all_clips to land the same LUT on several clips as one undo step.`,
+      `Put a LUT on a video clip, or take it off. editor_state.luts lists every LUT by id ("lut:<key>"): the built-in film looks, marked builtIn — ${builtinLutCatalogText()} — and the user's own .cube/.3dl files in the Library. The LUT is applied to the picture after the clip's source conversion and under the grade, so a creative LUT works on log footage and the sliders shape what comes out. amount 0..1 mixes the LUT's result with its input (default 1). Pass lut "none" to remove it. A Log-to-Rec.709 technical LUT (a camera maker's) belongs on a clip whose source color is set to rec709 (set_source_color) so it is not converted twice. Pass ids or all_clips to land the same LUT on several clips as one undo step.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
       ...manyClips,

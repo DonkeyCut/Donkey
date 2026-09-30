@@ -29,6 +29,9 @@ export interface GradePreset {
   id: string;
   label: string;
   category: GradePresetCategory;
+  /** What the preset does to a picture, in a few words: the chat picks by it.
+   * Every shipped preset carries one. */
+  look?: string;
   grade: ColorGrade;
 }
 
@@ -70,6 +73,10 @@ export function parseGradePresets(json: unknown): { presets: GradePreset[]; erro
       errors.push(`"${id}": category must be one of ${[...CATEGORY_IDS].join(", ")}`);
       return;
     }
+    if (typeof e.look !== "string" || !e.look.trim()) {
+      errors.push(`"${id}": look must be a non-empty string`);
+      return;
+    }
     if (!e.grade || typeof e.grade !== "object") {
       errors.push(`"${id}": grade must be an object`);
       return;
@@ -96,6 +103,7 @@ export function parseGradePresets(json: unknown): { presets: GradePreset[]; erro
       id,
       label: e.label.trim(),
       category: e.category as GradePresetCategory,
+      look: e.look.trim(),
       grade,
     });
   });
@@ -125,7 +133,7 @@ export function gradePresetCatalogText(): string {
   return GRADE_PRESET_CATEGORIES.map(
     (c) =>
       `${c.label}: ${gradePresetsInCategory(c.id)
-        .map((p) => `${p.id} (${p.label})`)
+        .map((p) => `${p.id} (${p.label}: ${p.look})`)
         .join(", ")}`
   ).join("; ");
 }
