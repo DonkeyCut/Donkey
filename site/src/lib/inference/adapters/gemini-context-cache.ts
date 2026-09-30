@@ -47,10 +47,11 @@ interface CacheHead {
   tools?: Tool[];
 }
 
-function displayNameFor(head: CacheHead): string {
-  // Both parts ride the key: a turn routed to different areas is a different head and must not read back
-  // another turn's cache.
-  const material = JSON.stringify([head.systemInstruction ?? "", head.tools ?? []]);
+function displayNameFor(model: string, head: CacheHead): string {
+  // All three parts ride the key. A turn routed to different areas is a different head and reads back only
+  // its own cache. A cached content is bound to the model it was created for, so the same head sent by two
+  // models gets two caches; a shared one fails the second model's request with INVALID_ARGUMENT.
+  const material = JSON.stringify([model, head.systemInstruction ?? "", head.tools ?? []]);
   const hash = createHash("sha256").update(material).digest("hex").slice(0, 40);
   return `${DISPLAY_NAME_PREFIX}${hash}`;
 }
@@ -75,7 +76,7 @@ async function resolveCachedHead(args: {
   nowMs: number;
 }): Promise<string | null> {
   const { client, model, head, nowMs } = args;
-  const displayName = displayNameFor(head);
+  const displayName = displayNameFor(model, head);
   const memoKey = `${model}:${displayName}`;
 
   const remembered = memo.get(memoKey);
@@ -84,7 +85,7 @@ async function resolveCachedHead(args: {
   }
 
   try {
-    // Reuse a live cache created by this or any other instance for the identical head.
+    // Reuse a live cache created by this or any other instance for the identical model and head.
     const pager = await client.caches.list({ config: { pageSize: 100 } });
     let scanned = 0;
     for await (const cache of pager) {

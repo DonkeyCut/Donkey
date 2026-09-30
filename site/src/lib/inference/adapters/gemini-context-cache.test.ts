@@ -75,6 +75,20 @@ describe("gemini context cache", () => {
     expect(wide.config?.cachedContent).not.toBe(narrow.config?.cachedContent);
   });
 
+  test("the same head sent by two models gets a cache per model", async () => {
+    const { client, created } = stubClient();
+    const head = { systemInstruction: longInstruction, tools: toolBlock };
+    const simple = { model: "gemini-test-lite", contents: [], config: { ...head } } as GenerateContentParameters;
+    const complex = { model: "gemini-test-flash", contents: [], config: { ...head } } as GenerateContentParameters;
+
+    await applyContextCacheToRequest(simple, client);
+    await applyContextCacheToRequest(complex, client);
+
+    expect(created).toHaveLength(2);
+    expect(simple.config?.cachedContent).toBe("caches/1");
+    expect(complex.config?.cachedContent).toBe("caches/2");
+  });
+
   test("a tool block alone is large enough to cache", async () => {
     const { client, created } = stubClient();
     const params = request({ tools: toolBlock });
