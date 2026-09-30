@@ -134,6 +134,17 @@ async function launch(): Promise<{ browser: Browser; page: Page }> {
       if (new URL(request.url()).port === "41417") return route.abort();
       return route.fulfill({ status: 200, contentType: "application/json", body: "{}" });
     });
+    // The chat's models probe: Gemini only, no CLIs on this machine.
+    await context.route((u) => u.pathname.endsWith("/api/cut/ai/models"), (route) => {
+      const off = { available: false, note: "", installed: false };
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          providers: { claude: off, codex: off, test: off, gemini: { available: true, note: "", installed: true } },
+        }),
+      });
+    });
     // "Nothing saved yet" — the onboarding gate reads this and steps aside.
     await context.route("**/api/account/onboarding", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: "null" })
