@@ -3,8 +3,7 @@
 donkeycut.com/blog is the site's writing surface for search: an index of posts,
 one page per post, and a sitemap that lists them. The words and images of a
 post live outside the repository. A post's row is in Postgres, its article is
-an MDX file in the private bucket, and its images sit beside that file. Posts
-are written in su, an internal app in a private repo.
+an MDX file in the private bucket, and its images sit beside that file.
 
 **The one rule:** the repository holds the layout and the machinery; the
 content lives in the database and the bucket. A post reaches the site through
@@ -13,11 +12,11 @@ the cache.
 ## How a post reaches the page
 
 ```text
-su: write, save, publish
+internal admin app: write, save, publish
         │
         ▼
 row in Postgres  ·  blog/<id>/article.mdx and blog/<id>/<sha>.avif in the bucket
-        │  su calls the revalidate route, which clears the `blog` and `blog:<slug>` tags
+        │  POST /api/blog/revalidate (BLOG_REVALIDATE_SECRET) clears `blog` and `blog:<slug>`
         ▼
 /blog and /blog/<slug> read through `use cache` and compile the MDX inside it
         │
@@ -50,9 +49,9 @@ source stays private.
 
 ## Previewing a draft
 
-Preview is Draft Mode. su's Preview button opens a route on donkeycut.com that
-turns Draft Mode on for that browser and lands on the post's real address. With
-the cookie set, the blog's cached reads run fresh and include drafts for that
+Preview is Draft Mode. A super user opening the preview route on donkeycut.com
+turns it on for that browser and lands on the post's real address. With the
+cookie set, the blog's cached reads run fresh and include drafts for that
 browser alone; every other visitor keeps the cache. A banner on the previewed
 page leaves Draft Mode.
 

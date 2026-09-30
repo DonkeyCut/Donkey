@@ -85,8 +85,8 @@ already issued media links valid until their normal expiry.
 
 The integration defaults to disabled in the `chatgptApp` setting. Deploy the
 Prisma models in `site/prisma/Chatgpt.prisma` through the project's database
-release process, deploy the site and cloud worker, then enable the setting in
-su.
+release process, deploy the site and cloud worker, then turn the setting
+on.
 
 Set the same `CUT_RUNNER_SECRET` on the hosted site and the
 `donkey-cut-worker` Cloudflare Worker before deployment. The Worker passes it

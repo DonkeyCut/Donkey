@@ -5,15 +5,13 @@ varies what they get, and reads its own result. A fork runs the same work with
 its own numbers, and none of it needs a deploy to change.
 
 **The one rule:** configuration is code with a runtime override. Every tunable
-is declared once in the settings registry with a default and a schema; a super
-user edits the override on su.donkeycut.com; env holds secrets and nothing
-else. An experiment is a set of variants over settings, drawn by an audience.
+is declared once in the settings registry with a default and a schema, and
+overridden by a database row; env holds secrets and nothing else. An experiment is a set of variants over settings, drawn by an audience.
 
 ## Settings
 
 The registry is one file that lists every setting the product has. Each entry
-carries a schema, a default, a title and description for the su form, and
-whether the value is public. A public setting reaches the browser through the
+carries a schema, a default, a title, a description, and whether the value is public. A public setting reaches the browser through the
 account config route; a server setting is read only by handlers, webhooks and
 jobs.
 
@@ -23,7 +21,7 @@ A value resolves in three layers, later ones winning:
 default (code)
     │
     ▼
-override (SettingOverride row, edited on su)
+override (SettingOverride row)
     │
     ▼
 variant (the experiment the account is assigned to)
@@ -31,9 +29,8 @@ variant (the experiment the account is assigned to)
 
 The registry parses every default against its schema when the module loads,
 so a wrong default fails the process at boot. A stored override that no longer
-parses after a schema change is skipped, logged, and shown on su as invalid so
-it can be reset. su is an internal app in a private repo; the overrides it
-writes live in the database.
+parses after a schema change is skipped and logged. An internal admin app
+writes overrides, experiments and promotions.
 
 **Every tunable is a setting.** A threshold, a switch, a mode: if an operator
 might want it different, it is a registry entry, and a feature that people
@@ -95,9 +92,8 @@ stored on the assignment row, so a report can say where each cohort was.
 
 ### Overrides by account
 
-An account can be placed by hand. On su, an experiment takes an email and a
-variant, and that row stands in place of the hash from then on; the same form
-holds the account out of that one experiment. A holdout list, kept beside the
+An account can be placed by hand: a manual assignment row names a variant, or
+none to hold the account out, and stands in place of the hash. A holdout list, kept beside the
 experiments, keeps an account out of every experiment: it is never assigned,
 reads the plain configuration even where it holds a row, and never counts in a
 result. Rows written by hand are never counted either.
@@ -108,8 +104,8 @@ A metric is something an exposed account does after its exposure: a PostHog
 event by name, or a purchase recorded in the credit grants. An experiment
 lists its metrics, and the first one decides the verdict.
 
-A nightly job computes each live experiment's read and stores it on the row;
-su shows it, with a button to compute one experiment now. For every metric
+A nightly job computes each live experiment's read and stores it on the row.
+For every metric
 and variant it counts exposed accounts and how many converted, then compares
 each variant to the control two ways: a classical two-proportion test for the
 p-value, and a Beta-Binomial posterior for the chance the variant beats the
@@ -129,32 +125,29 @@ by variant as well.
 
 ## Promotions
 
-A promotion is one email from su to an audience, minus anyone an earlier promotion reached; the Pro offers behind it (subscribe bonus, allowance multiplier) are Product-tab settings. A draft saves however it stands and is checked whole at a test or a send. The Outreach tab sends a promotion to one person by hand, as the same email under the same per-person outbox key, so it counts in the promotion and a later segment send skips them.
+A promotion is one email to an audience, minus anyone an earlier promotion reached; the Pro offers behind it (subscribe bonus, allowance multiplier) are settings. A copy sent to one person by hand carries the same per-person outbox key, so it counts in the promotion and a later segment send skips them.
 Every outbound email is a row in one outbox, sent by one drainer in priority order under the email plan's monthly allowance, shared by the whole site. A promotion is read from the accounts table a page at a time by a job, queues its most recently active recipients first, and stops at what the rest of the billing cycle is forecast to need for welcome and credit emails, and for mail sent by hand on the work days left, then picks up the slots that go unused as the cycle runs down. The allowance, the renewal day, the reserves and the work hours are the Email send budget setting, and the order between kinds is the Email priorities setting.
 
 A credit promotion is a credit offer: one row that promises an account an
 amount, the credit's life, and the window it can be claimed in, then records
 the grant that lands. Every kind shares that row, and a kind is a setting and
-code: what opens the offer and what claims it. The manual credit su sends by
-email is one kind, and its link closes a few days after the send, a Product-tab
-setting; the subscribe bonus, offered when an account has spent a
+code: what opens the offer and what claims it. A manual credit sent by email
+is one kind, and its link closes a few days after the send; the subscribe bonus, offered when an account has spent a
 share of its signup grant and landed by a Pro subscription created inside the
 window, is another. A promotion's offer is landed by its link or, when the
 promotion says so, by a Pro subscription started inside the window; a checkout
 carries the largest open offer of that kind, so one lands per subscription.
-An outreach note to one person carries the same offer terms, from the same
-form and the same templates, and the Outreach tab takes an account by its
-address so a note can go to anyone. A new promotion adds no table.
+An outreach note to one person carries the same offer terms. A new promotion
+adds no table.
 
 ## Verification
 
 The registry, audience, assignment, experiment schema, statistics and verdict
-are pure and covered by unit tests. On a dev server: create an experiment on
-su with two variants and a metric and start it, load the app as two accounts
-and confirm the assignment rows and the exposure event; place one account by
-hand and confirm it reads that variant; hold an account out and confirm it
-reads the plain configuration; compute results and confirm the verdict reads
-too early.
+are pure and covered by unit tests. On a dev server, with an experiment of two
+variants and a metric running, load the app as two accounts and confirm the
+assignment rows and the exposure event; confirm a hand-placed account reads
+its variant, a held-out account reads the plain configuration, and the results
+job reads too early.
 
 ## Source Map
 
