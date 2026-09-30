@@ -1,12 +1,16 @@
 /**
- * Reference matching: read color statistics off two frames and compute the
- * grade that carries one onto the other. The match is per-channel quantile
- * mapping compiled into tone-curve control points — the same curves the
- * panel edits — plus a saturation delta, so the result is an ordinary
- * ColorGrade the user (or the assistant) can refine afterward.
+ * Measuring pictures and fitting grades to them: color statistics off a
+ * frame, the auto grade, and reference matching. Every fit is expressed in
+ * the grade's own parameters (exposure in stops, white balance as an
+ * illuminant, contrast about grey, curves), so the result is an ordinary
+ * ColorGrade the user or the assistant refines afterward. Callers hand these
+ * the pixels of the base rendering — the picture after the source
+ * conversion — so a log clip is measured as the display sees it.
  */
 
 import { type ColorGrade, type CurvePoint, GRADE_MAX, normalizeGrade } from "./colorGrade";
+import { REC709_PRIMARIES, bt1886Decode, mat3Apply } from "./colorSpace";
+import { CONTRAST_POWER_AT_MAX, EXPOSURE_STOPS_AT_MAX, whiteBalanceFor } from "./gradeMath";
 
 /** Quantile probes used by stats and matching. */
 export const STAT_QUANTILES = [0.02, 0.1, 0.25, 0.5, 0.75, 0.9, 0.98] as const;
@@ -83,6 +87,103 @@ export function colorStatsFromImageData(data: Uint8ClampedArray): ColorStats | u
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Auto grade                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Auto grade from a frame's RGBA pixels, the classic auto-tone pipeline:
+ *
+ * 1. Exposure — map the frame's log-average (geometric mean) luminance onto
+ *    18% middle grey, in stops.
+ * 2. Contrast — auto-levels: clip 0.5% off each end of the luma histogram
+ *    and stretch what remains toward full range, expressed as the power
+ *    about grey the contrast slider applies.
+ * 3. White balance — grey-world: the illuminant whose CAT02 correction
+ *    equalizes the red and blue means of the midtones, found on the
+ *    temperature slider.
+ *
+ * Corrections are damped and capped inside the slider range so the result
+ * is a starting point the user refines. Saturation and hue are left alone.
+ */
+export function autoGradeFromImageData(data: Uint8ClampedArray): ColorGrade | undefined {
+  const hist = new Float64Array(256);
+  let count = 0;
+  let logSum = 0;
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  let mids = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    hist[Math.min(255, Math.round(luma))]++;
+    logSum += Math.log(Math.max(1e-4, bt1886Decode(luma / 255)));
+    count++;
+    // Cast statistics from the midtones only — near-black and clipped pixels
+    // carry no reliable illuminant signal.
+    if (luma >= 16 && luma <= 240) {
+      sumR += bt1886Decode(r / 255);
+      sumG += bt1886Decode(g / 255);
+      sumB += bt1886Decode(b / 255);
+      mids++;
+    }
+  }
+  if (!count) return undefined;
+  const percentile = (p: number) => {
+    let acc = 0;
+    for (let v = 0; v < 256; v++) {
+      acc += hist[v];
+      if (acc >= count * p) return v;
+    }
+    return 255;
+  };
+
+  const grade: ColorGrade = {};
+  const ev = Math.log2(0.18 / Math.exp(logSum / count));
+  grade.exposure = Math.round((GRADE_MAX * ev * 0.8) / EXPOSURE_STOPS_AT_MAX);
+  // Auto-levels spread after the exposure shift moves it, on encoded values.
+  // A near-flat histogram (solid color, title card) carries no tonal-range
+  // signal — leave contrast alone rather than stretch noise.
+  const gain = Math.pow(2, ((grade.exposure / GRADE_MAX) * EXPOSURE_STOPS_AT_MAX) / 2.4);
+  const lo = Math.min(255, percentile(0.005) * gain);
+  const hi = Math.min(255, percentile(0.995) * gain);
+  if (hi - lo >= 16) {
+    const power = 255 / (hi - lo);
+    grade.contrast = Math.max(
+      -10,
+      Math.min(40, Math.round(((power - 1) * 0.6 * GRADE_MAX) / CONTRAST_POWER_AT_MAX))
+    );
+  }
+  if (mids) {
+    const mean: [number, number, number] = [sumR / mids, sumG / mids, sumB / mids];
+    // Grey-world on the temperature axis: the slider value whose white
+    // balance brings red and blue to the same level.
+    const imbalance = (t: number) => {
+      const wb = whiteBalanceFor(t, 0, REC709_PRIMARIES);
+      const c = wb ? mat3Apply(wb, mean[0], mean[1], mean[2]) : mean;
+      return c[0] - c[2];
+    };
+    let best = 0;
+    let bestErr = Math.abs(imbalance(0));
+    for (let t = -GRADE_MAX; t <= GRADE_MAX; t++) {
+      const err = Math.abs(imbalance(t));
+      if (err < bestErr) {
+        bestErr = err;
+        best = t;
+      }
+    }
+    grade.temperature = Math.max(-40, Math.min(40, Math.round(best * 0.6)));
+  }
+  return normalizeGrade(grade);
+}
+
+/* ------------------------------------------------------------------ */
+/* Reference matching                                                  */
+/* ------------------------------------------------------------------ */
+
 function quantileCurve(src: number[], ref: number[]): CurvePoint[] | undefined {
   const pts: CurvePoint[] = [];
   let lastX = -1;
@@ -119,8 +220,8 @@ function quantileCurve(src: number[], ref: number[]): CurvePoint[] | undefined {
 
 /**
  * Compute the grade that moves `source` toward `reference`: per-channel
- * quantile curves plus a saturation delta. Returns undefined when the frames
- * already agree.
+ * quantile curves, or a saturation delta when the tones already agree.
+ * Returns undefined when the frames already agree.
  */
 export function matchGrade(source: ColorStats, reference: ColorStats): ColorGrade | undefined {
   const grade: ColorGrade = {};
@@ -133,7 +234,10 @@ export function matchGrade(source: ColorStats, reference: ColorStats): ColorGrad
     if (g) grade.curves.g = g;
     if (b) grade.curves.b = b;
   }
-  if (source.meanSat > 0.01) {
+  // Per-channel curves already stretch or squeeze chroma along with the
+  // channels, so the saturation term is for frames that agree in tone and
+  // differ in chroma alone.
+  if (!grade.curves && source.meanSat > 0.01) {
     const delta = Math.round((reference.meanSat / source.meanSat - 1) * GRADE_MAX);
     if (Math.abs(delta) >= 2) {
       grade.saturation = Math.max(-GRADE_MAX, Math.min(GRADE_MAX, delta));

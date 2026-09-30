@@ -5,11 +5,12 @@
     "category": "mood",
     "grade": {
       "exposure": -8,
-      "temperature": -12,
-      "contrast": 12,
-      "saturation": -12,
-      "shadows": -6,
-      "wheels": { "s": [-8, -12, 0] }
+      "temperature": -14,
+      "contrast": 5,
+      "saturation": -9,
+      "shadows": -8,
+      "wheels": { "s": [-8, -12, -14] },
+      "blacks": -5
     }
   },
   {
@@ -17,11 +18,12 @@
     "label": "Moss",
     "category": "mood",
     "grade": {
-      "tint": -14,
-      "temperature": 4,
-      "saturation": -8,
-      "contrast": 6,
-      "hsl": { "green": [0, 8, 0] }
+      "tint": -10,
+      "temperature": 6,
+      "saturation": -5,
+      "contrast": 3,
+      "hsl": { "green": [-2, 4, 5] },
+      "blacks": -7
     }
   },
   {
@@ -29,10 +31,11 @@
     "label": "Slate",
     "category": "mood",
     "grade": {
-      "temperature": -8,
-      "tint": -2,
-      "saturation": -20,
-      "contrast": 8
+      "temperature": -9,
+      "tint": -3,
+      "saturation": -18,
+      "contrast": 4,
+      "blacks": -8
     }
   },
   {
@@ -41,11 +44,12 @@
     "category": "mood",
     "grade": {
       "temperature": -4,
-      "tint": 8,
+      "tint": 2,
       "exposure": -3,
-      "contrast": 4,
-      "vibrance": 8,
-      "wheels": { "h": [6, -10, 0] }
+      "contrast": 3,
+      "vibrance": 6,
+      "wheels": { "h": [5, -10, -6] },
+      "blacks": -7
     }
   },
   {
@@ -54,10 +58,11 @@
     "category": "mood",
     "grade": {
       "vibrance": 22,
-      "contrast": 10,
+      "contrast": -4,
       "saturation": 10,
-      "temperature": -6,
-      "tint": 10
+      "temperature": -2,
+      "tint": 6,
+      "blacks": -22
     }
   },
   {
@@ -65,12 +70,13 @@
     "label": "Arctic",
     "category": "mood",
     "grade": {
-      "temperature": -20,
-      "tint": -2,
-      "exposure": 2,
-      "contrast": 6,
-      "saturation": -6,
-      "highlights": 4
+      "temperature": -26,
+      "tint": -6,
+      "exposure": -5,
+      "contrast": -6,
+      "saturation": -1,
+      "highlights": 39,
+      "blacks": -9
     }
   },
   {
@@ -79,10 +85,11 @@
     "category": "mood",
     "grade": {
       "temperature": -10,
-      "contrast": 14,
-      "saturation": -16,
+      "contrast": 8,
+      "saturation": -13,
       "exposure": -4,
-      "shadows": -8
+      "shadows": -10,
+      "blacks": -26
     }
   },
   {
@@ -90,13 +97,14 @@
     "label": "Velvet",
     "category": "mood",
     "grade": {
-      "contrast": 10,
+      "contrast": 6,
       "exposure": -4,
       "saturation": 12,
-      "temperature": 4,
-      "tint": 6,
+      "temperature": 3,
+      "tint": 4,
       "shadows": -6,
-      "curves": { "m": [[0, 6], [64, 56], [255, 252]] }
+      "curves": { "m": [[0, 6], [64, 56], [255, 252]] },
+      "blacks": -19
     }
   }
 ]

@@ -5,7 +5,8 @@
     "category": "bw",
     "grade": {
       "saturation": -50,
-      "contrast": 10
+      "contrast": 8,
+      "blacks": -14
     }
   },
   {
@@ -14,10 +15,11 @@
     "category": "bw",
     "grade": {
       "saturation": -50,
-      "contrast": -4,
+      "contrast": -7,
       "exposure": 6,
       "shadows": 8,
-      "highlights": -4
+      "highlights": -3,
+      "blacks": 20
     }
   },
   {
@@ -26,9 +28,10 @@
     "category": "bw",
     "grade": {
       "saturation": -50,
-      "contrast": 24,
-      "shadows": -8,
-      "curves": { "m": [[0, 0], [48, 32], [128, 134], [208, 244], [255, 255]] }
+      "contrast": 13,
+      "shadows": -3,
+      "curves": { "m": [[0, 0], [48, 32], [128, 134], [208, 244], [255, 255]] },
+      "blacks": -33
     }
   },
   {
@@ -38,9 +41,10 @@
     "grade": {
       "saturation": -50,
       "exposure": 10,
-      "contrast": -6,
-      "shadows": 10,
-      "highlights": -2
+      "contrast": -12,
+      "shadows": 7,
+      "highlights": 9,
+      "blacks": 24
     }
   },
   {
@@ -50,9 +54,10 @@
     "grade": {
       "saturation": -50,
       "exposure": -8,
-      "contrast": 16,
-      "shadows": -10,
-      "highlights": -4
+      "contrast": 4,
+      "shadows": -16,
+      "highlights": 7,
+      "blacks": -34
     }
   },
   {
@@ -61,8 +66,9 @@
     "category": "bw",
     "grade": {
       "saturation": -50,
-      "contrast": 6,
-      "curves": { "m": [[0, 16], [128, 120], [255, 240]] }
+      "contrast": 4,
+      "curves": { "m": [[0, 16], [128, 120], [255, 240]] },
+      "blacks": -8
     }
   },
   {
@@ -71,9 +77,10 @@
     "category": "bw",
     "grade": {
       "saturation": -50,
-      "contrast": -10,
+      "contrast": -7,
       "exposure": 3,
-      "curves": { "m": [[0, 12], [255, 244]] }
+      "curves": { "m": [[0, 12], [255, 244]] },
+      "blacks": 16
     }
   },
   {
@@ -82,10 +89,11 @@
     "category": "bw",
     "grade": {
       "saturation": -50,
-      "contrast": 16,
+      "contrast": 13,
       "exposure": -2,
-      "highlights": 10,
-      "curves": { "m": [[0, 16], [48, 38], [128, 138], [200, 226], [255, 255]] }
+      "highlights": 7,
+      "curves": { "m": [[0, 16], [48, 38], [128, 138], [200, 226], [255, 255]] },
+      "blacks": -16
     }
   }
 ]

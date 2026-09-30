@@ -558,15 +558,26 @@ export function applyEffectToCanvas(
  * out of quoted expressions). */
 const gate = (a: number, b: number) => `enable='gte(t,${fmt(a)})*lt(t,${fmt(b)})'`;
 
-/** The pixel family a chain works in: the format its branches carry, and the
- * option that keeps `overlay` blending in the same one. A 4:2:0 graph is the
- * default, which is what `overlay` picks on its own. */
+/** The pixel family a chain works in: the format its branches carry, the
+ * option that keeps `overlay` blending in the same one, and the bits a plane
+ * holds — the recipes below are written in 8-bit code values and scale to
+ * the plane's depth. A 4:2:0 8-bit graph is the default, which is what
+ * `overlay` picks on its own. */
 export interface ChainChroma {
   pixFmt: string;
   overlay: string;
+  /** Bits a plane; absent = 8. An HDR composite carries 10. */
+  depth?: 8 | 10;
 }
 
 export const CHROMA_420: ChainChroma = { pixFmt: "yuv420p", overlay: "" };
+
+/** The factor an 8-bit code value scales by to land on a plane of `depth`
+ * bits: 1 at 8, (1023 / 255) at 10. */
+export const codeScale = (depth: 8 | 10 | undefined): number => ((1 << (depth ?? 8)) - 1) / 255;
+
+/** An 8-bit code value spelled at the chain's depth. */
+const code = (v: number, depth: 8 | 10 | undefined): string => fmt(v * codeScale(depth));
 
 /**
  * ffmpeg filter_complex lines rendering one effect from `[inLabel]` into
@@ -601,7 +612,7 @@ export function effectFilterLines(
     // The graded copy renders on its own branch and replaces the frame only
     // inside the window, the same shape the shake recipe uses — a look chain
     // is several filters deep and not all of them take a timeline gate.
-    const lines = lookFilterLines(`lkfi${tag}`, `lkfo${tag}`, look, k, height, chroma.pixFmt, tag);
+    const lines = lookFilterLines(`lkfi${tag}`, `lkfo${tag}`, look, k, height, chroma.pixFmt, tag, chroma.depth);
     if (!lines) return null;
     return [
       `[${inLabel}]split[lkfb${tag}][lkfi${tag}]`,
@@ -690,7 +701,7 @@ export function effectFilterLines(
           `colortemperature=temperature=${Math.round(6500 - 500 * k)}:${en},` +
           `vignette=angle=${fmt((k * Math.PI) / 5)}:mode=backward:` +
           `x0='w*(0.84-0.14*sin(t*0.9))':y0='h*(0.8-0.11*cos(t*0.6))':eval=frame:${en},` +
-          `geq=lum='lum(X,Y)+(235-lum(X,Y))*${G}':cb='cb(X,Y)-40*${G}':cr='cr(X,Y)+26*${G}':${en}[${outLabel}]`,
+          `geq=lum='lum(X,Y)+(${code(235, chroma.depth)}-lum(X,Y))*${G}':cb='cb(X,Y)-${code(40, chroma.depth)}*${G}':cr='cr(X,Y)+${code(26, chroma.depth)}*${G}':${en}[${outLabel}]`,
       ];
     }
     case "flash":
@@ -698,7 +709,7 @@ export function effectFilterLines(
       // frame by geq — `T` is the frame's time, so the decay rides every
       // frame of the window.
       return [
-        `[${inLabel}]geq=lum='min(235,lum(X,Y)+${fmt(200 * k)}*exp(-9*(T-${fmt(start)})))':` +
+        `[${inLabel}]geq=lum='min(${code(235, chroma.depth)},lum(X,Y)+${code(200 * k, chroma.depth)}*exp(-9*(T-${fmt(start)})))':` +
           `cb='cb(X,Y)':cr='cr(X,Y)':${en}[${outLabel}]`,
       ];
     case "shake": {

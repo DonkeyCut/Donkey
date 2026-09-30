@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { EFFECT_IDS, effectFilterLines, effectPreviewState } from "./effects";
+import { codeScale, EFFECT_IDS, effectFilterLines, effectPreviewState } from "./effects";
 
 // The bundled engine ffmpeg is LGPL: a recipe reaching for a GPL-only filter
 // renders on a dev machine (Homebrew ffmpeg) and fails in the shipped app.
@@ -59,6 +59,37 @@ describe("effect recipes", () => {
       const joined = lines.join("\n");
       expect(joined.includes("gte(t,2.5)") || joined.includes("sin(t*")).toBe(true);
     }
+  });
+
+  test("the 8-bit code values in geq scale to a 10-bit composite", () => {
+    expect(codeScale(8)).toBe(1);
+    expect(codeScale(undefined)).toBe(1);
+    expect(codeScale(10)).toBeCloseTo(1023 / 255, 9);
+    const flash8 = effectFilterLines("in", "out", "flash", 1, 0, 1, 1920, 1080, "t")![0];
+    const flash10 = effectFilterLines("in", "out", "flash", 1, 0, 1, 1920, 1080, "t", undefined, undefined, {
+      pixFmt: "yuv420p10le",
+      overlay: ":format=yuv420p10",
+      depth: 10,
+    })![0];
+    expect(flash8).toContain("min(235,");
+    expect(flash8).toContain("+200*exp(");
+    expect(flash10).toContain("min(942.765,");
+    expect(flash10).toContain("+802.353*exp(");
+    const leak10 = effectFilterLines("in", "out", "lightleak", 1, 0, 1, 1920, 1080, "t", undefined, undefined, {
+      pixFmt: "yuv420p10le",
+      overlay: ":format=yuv420p10",
+      depth: 10,
+    })![0];
+    expect(leak10).toContain("(942.765-lum(X,Y))");
+    expect(leak10).toContain("cb(X,Y)-160.471*");
+    expect(leak10).toContain("cr(X,Y)+104.306*");
+    // A look effect hands the depth on to its chain.
+    const hal10 = effectFilterLines("in", "out", "halation", 1, 0, 1, 1920, 1080, "t", undefined, undefined, {
+      pixFmt: "yuv420p10le",
+      overlay: ":format=yuv420p10",
+      depth: 10,
+    })!.join(";");
+    expect(hal10).toContain("clip((val-641.882)*3,0,1023)");
   });
 
   test("unknown ids return null instead of breaking the graph", () => {

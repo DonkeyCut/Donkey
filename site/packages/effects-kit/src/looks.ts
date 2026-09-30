@@ -271,7 +271,9 @@ function lookChain(style: LookStyle, k: number): string | null {
  * invariant holds through xfade/concat joins. Null for an unknown style — the
  * segment renders ungraded rather than failing the job (the spec carries only
  * ids, never filter text). `hPx` scales blur radii so 720p drafts and 1080p
- * exports bloom proportionally; `tag` uniquifies inner labels.
+ * exports bloom proportionally; `tag` uniquifies inner labels; `depth` is
+ * the bits a plane holds, so the 8-bit code values the recipes are written
+ * in land on a 10-bit composite.
  */
 export function lookFilterLines(
   inLabel: string,
@@ -280,13 +282,15 @@ export function lookFilterLines(
   amount: number | undefined,
   hPx: number,
   pixFmt: string,
-  tag: string
+  tag: string,
+  depth: 8 | 10 = 8
 ): string[] | null {
   const k = clampAmount(amount);
+  const scale = ((1 << depth) - 1) / 255;
   if (style === "halation") {
     return [
       `[${inLabel}]split=2[lkb${tag}][lkh${tag}]`,
-      `[lkh${tag}]lutyuv=y='clip((val-160)*3,0,255)',` +
+      `[lkh${tag}]lutyuv=y='clip((val-${fmt(160 * scale)})*3,0,${fmt(255 * scale)})',` +
         `gblur=sigma=${fmt((18 * hPx) / 1920)},` +
         `colorchannelmixer=rr=1:gg=0.55:bb=0.35[lkg${tag}]`,
       `[lkb${tag}][lkg${tag}]blend=all_mode=screen:all_opacity=${fmt(0.6 * k)},format=${pixFmt}[${outLabel}]`,

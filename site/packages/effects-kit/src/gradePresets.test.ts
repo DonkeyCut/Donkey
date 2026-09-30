@@ -47,6 +47,15 @@ describe("shipped catalog", () => {
     }
   });
 
+  test("no recipe carries a LUT or a spatial control", () => {
+    for (const id of GRADE_PRESET_IDS) {
+      const grade = GRADE_PRESETS[id].grade;
+      expect(grade.lut).toBeUndefined();
+      expect(grade.sharpen).toBeUndefined();
+      expect(grade.clarity).toBeUndefined();
+    }
+  });
+
   test("catalog text names every category and preset id", () => {
     const text = gradePresetCatalogText();
     for (const cat of GRADE_PRESET_CATEGORIES) expect(text).toContain(cat.label);
@@ -70,9 +79,12 @@ describe("parseGradePresets", () => {
       { id: "neutral", label: "X", category: "mood", grade: { contrast: 0 } },
       { id: "nested", label: "X", category: "mood", grade: { preset: { id: "mono" } } },
       { id: "good-one", label: "Duplicate", category: "mood", grade: { contrast: 5 } },
+      { id: "with-lut", label: "X", category: "mood", grade: { contrast: 5, lut: { id: "lut:a" } } },
+      { id: "spatial", label: "X", category: "mood", grade: { contrast: 5, sharpen: 10 } },
+      { id: "clarity", label: "X", category: "mood", grade: { clarity: 10 } },
     ]);
     expect(presets.map((p) => p.id)).toEqual(["good-one"]);
-    expect(errors.length).toBe(6);
+    expect(errors.length).toBe(9);
   });
 
   test("recipes are normalized on the way in", () => {

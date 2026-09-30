@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { applyLutToImageData, buildGradeLut, type GradeLut } from "./gradeLut";
+import { buildGradeLut } from "./colorPipeline";
+import { bt1886Decode } from "./colorSpace";
+import { applyLutToImageData, type GradeLut } from "./gradeLut";
+import { createGradeTransform } from "./gradeMath";
 import { GRADE_PRESETS, type GradePreset } from "./gradePresets";
 
 /**
@@ -24,6 +27,11 @@ import { GRADE_PRESETS, type GradePreset } from "./gradePresets";
  *
  * Both tiers measure through the preset's real lookup table with the same
  * tetrahedral pass the preview, the export, and the worker apply.
+ *
+ * A third tier holds the slider physics: the light controls work in linear
+ * light, so a stop of exposure doubles luminance, the highlight control
+ * compresses without clipping, saturation keeps skin on its hue, and the
+ * whole chart survives a neutral grade within a small color difference.
  */
 
 /** ColorChecker Classic, sRGB. */
@@ -609,6 +617,115 @@ const IDENTITY: Record<string, Signature> = {
     },
   },
 };
+
+/* ------------------------------------------------------------------ */
+/* Tier 3: slider physics                                              */
+/* ------------------------------------------------------------------ */
+
+/** CIE ΔE76 between two sRGB colors, through Lab. */
+function deltaE(a: number[], b: number[]): number {
+  const lab = (c: number[]) => {
+    const [r, g, bl] = c.map((v) => bt1886Decode(v / 255));
+    const x = (0.4124 * r + 0.3576 * g + 0.1805 * bl) / 0.95047;
+    const y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+    const z = (0.0193 * r + 0.1192 * g + 0.9505 * bl) / 1.08883;
+    const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+    return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+  };
+  const p = lab(a);
+  const q = lab(b);
+  return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+}
+
+describe("slider physics", () => {
+  test("a stop of exposure doubles linear light on every grey", () => {
+    const t = createGradeTransform({ exposure: 25 })!;
+    for (const v of [0.1, 0.3, 0.5, 0.7]) {
+      const out = t(v, v, v);
+      expect(Math.abs(bt1886Decode(out[0]) / bt1886Decode(v) - 2)).toBeLessThan(1e-6);
+    }
+  });
+
+  test("highlights at full never clip and keep the ramp in order, even a stop over", () => {
+    for (const grade of [{ highlights: 50 }, { highlights: 50, exposure: 25 }, { highlights: -50 }]) {
+      const t = createGradeTransform(grade)!;
+      let prev = -1;
+      for (let i = 0; i <= 255; i++) {
+        const v = i / 255;
+        const out = t(v, v, v)[0];
+        expect(out).toBeGreaterThanOrEqual(prev - 1e-9);
+        prev = out;
+      }
+      if (!("exposure" in grade)) {
+        expect(t(1, 1, 1)[0]).toBeLessThanOrEqual(1 + 1e-9);
+        // Highlights alone never push a value past white.
+        expect(prev).toBeLessThanOrEqual(1 + 1e-9);
+      }
+    }
+  });
+
+  test("every light slider keeps the grey ramp monotone at both ends of its range", () => {
+    for (const key of ["whites", "shadows", "blacks", "brilliance", "fade", "contrast", "exposure"] as const) {
+      for (const value of [50, -50]) {
+        const t = createGradeTransform({ [key]: value });
+        if (!t) continue; // fade has no negative side
+        let prev = -Infinity;
+        for (let i = 0; i <= 255; i++) {
+          const v = i / 255;
+          const out = t(v, v, v)[0];
+          expect(out).toBeGreaterThanOrEqual(prev - 1e-9);
+          prev = out;
+        }
+      }
+    }
+  });
+
+  test("saturation holds skin on its hue", () => {
+    const lut = buildGradeLut({ saturation: 30 })!;
+    const [dark, light] = through(lut, [CHART.darkSkin, CHART.lightSkin]);
+    expect(hueDelta(hsv(CHART.darkSkin).h, hsv(dark).h)).toBeLessThanOrEqual(8);
+    expect(hueDelta(hsv(CHART.lightSkin).h, hsv(light).h)).toBeLessThanOrEqual(8);
+    expect(hsv(light).s).toBeGreaterThan(hsv(CHART.lightSkin).s);
+    const down = buildGradeLut({ saturation: -50 })!;
+    for (const c of through(down, [CHART.red, CHART.blue, CHART.lightSkin])) {
+      expect(Math.max(...c) - Math.min(...c)).toBeLessThanOrEqual(2);
+    }
+  });
+
+  test("a neutral-in-effect grade keeps the ColorChecker within a small ΔE", () => {
+    // Opposing moves that cancel in linear light: contrast −20 is the 0.8
+    // power about grey and +25 the 1.25 power, so the pair is an identity
+    // that only the two lattices' quantization can disturb.
+    const lut = buildGradeLut({ contrast: -20 }, 33)!;
+    const back = buildGradeLut({ contrast: 25 }, 33)!;
+    const once = through(lut, PATCHES.map((n) => CHART[n]));
+    const px = new Uint8ClampedArray(once.length * 4);
+    once.forEach((c, i) => {
+      px[i * 4] = c[0];
+      px[i * 4 + 1] = c[1];
+      px[i * 4 + 2] = c[2];
+      px[i * 4 + 3] = 255;
+    });
+    applyLutToImageData(px, back);
+    let worst = 0;
+    PATCHES.forEach((n, i) => {
+      const dE = deltaE(CHART[n], [px[i * 4], px[i * 4 + 1], px[i * 4 + 2]]);
+      worst = Math.max(worst, dE);
+    });
+    // A round trip through two 33³ lattices costs under 2.5 ΔE on any patch.
+    expect(worst).toBeLessThan(2.5);
+  });
+
+  test("a preset at full strength stays within a colorist's ΔE budget of a small move", () => {
+    // Every preset is a look, and a look is bounded: the mean chart shift
+    // stays under ΔE 45 so nothing turns the picture into something else.
+    for (const p of presets) {
+      const m = measure(lutOf(p));
+      const mean = PATCHES.reduce((a, n) => a + deltaE(CHART[n], m.patch[n]), 0) / PATCHES.length;
+      expect(mean).toBeLessThan(45);
+    }
+  });
+});
 
 describe("every preset declares what it emulates", () => {
   test("the catalog and the identity table cover each other", () => {

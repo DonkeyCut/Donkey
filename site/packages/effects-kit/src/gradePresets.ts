@@ -78,6 +78,14 @@ export function parseGradePresets(json: unknown): { presets: GradePreset[]; erro
       errors.push(`"${id}": a preset recipe cannot reference another preset`);
       return;
     }
+    if ((e.grade as ColorGrade).lut) {
+      errors.push(`"${id}": a preset recipe cannot reference a library LUT`);
+      return;
+    }
+    if ((e.grade as ColorGrade).sharpen || (e.grade as ColorGrade).clarity) {
+      errors.push(`"${id}": a preset recipe cannot carry the spatial controls`);
+      return;
+    }
     const grade = normalizeGrade(e.grade as ColorGrade);
     if (!grade) {
       errors.push(`"${id}": grade is neutral or carries no known fields`);

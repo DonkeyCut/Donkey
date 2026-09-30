@@ -6,8 +6,8 @@
     "grade": {
       "saturation": -2,
       "vibrance": 6,
-      "contrast": 4,
-      "highlights": -6,
+      "contrast": 3,
+      "highlights": -9,
       "shadows": 3,
       "curves": {
         "r": [[0, 10], [24, 24], [64, 64], [128, 133], [192, 199], [224, 230], [255, 248]],
@@ -15,15 +15,16 @@
         "b": [[0, 17], [24, 31], [64, 68], [128, 125], [192, 187], [224, 217], [255, 239]]
       },
       "hsl": {
-        "red": [4, 2, 0],
-        "orange": [-4, 2, 1],
-        "yellow": [6, -10, 6],
-        "green": [10, -8, 4],
-        "aqua": [8, 6, -6],
-        "blue": [6, -6, 3],
-        "purple": [-2, -6, 1],
-        "magenta": [4, 0, -1]
-      }
+        "red": [5, 2, 0],
+        "orange": [-5, 1, 1],
+        "yellow": [5, -6, -2],
+        "green": [4, -7, 2],
+        "aqua": [17, 7, -10],
+        "blue": [5, -2, 3],
+        "purple": [-1, -5, 1],
+        "magenta": [3, 0, -1]
+      },
+      "blacks": 2
     }
   },
   {
@@ -31,12 +32,13 @@
     "label": "Super 8",
     "category": "film",
     "grade": {
-      "temperature": 14,
-      "tint": -3,
-      "contrast": 8,
-      "saturation": -6,
-      "shadows": 8,
-      "curves": { "m": [[0, 12], [255, 246]] }
+      "temperature": 18,
+      "tint": 1,
+      "contrast": 4,
+      "saturation": -4,
+      "shadows": 9,
+      "curves": { "m": [[0, 12], [255, 246]] },
+      "blacks": 7
     }
   },
   {
@@ -44,11 +46,12 @@
     "label": "Faded Film",
     "category": "film",
     "grade": {
-      "contrast": -8,
-      "saturation": -18,
-      "tint": 14,
-      "temperature": 2,
-      "curves": { "m": [[0, 30], [64, 80], [255, 232]] }
+      "contrast": -14,
+      "saturation": -13,
+      "tint": 17,
+      "temperature": 3,
+      "curves": { "m": [[0, 30], [64, 80], [255, 232]] },
+      "blacks": 4
     }
   },
   {
@@ -56,11 +59,12 @@
     "label": "Chrome",
     "category": "film",
     "grade": {
-      "contrast": 14,
+      "contrast": -2,
       "saturation": 14,
-      "vibrance": 6,
-      "highlights": -6,
-      "temperature": 2
+      "vibrance": 7,
+      "highlights": 14,
+      "temperature": 2,
+      "blacks": -23
     }
   },
   {
@@ -69,10 +73,11 @@
     "category": "film",
     "grade": {
       "exposure": 4,
-      "contrast": 20,
-      "saturation": -22,
-      "shadows": -10,
-      "curves": { "m": [[0, 0], [32, 14], [128, 132], [224, 238], [255, 255]] }
+      "contrast": 17,
+      "saturation": -21,
+      "shadows": -5,
+      "curves": { "m": [[0, 0], [32, 14], [128, 132], [224, 238], [255, 255]] },
+      "blacks": -31
     }
   },
   {
@@ -80,10 +85,11 @@
     "label": "Cine Print",
     "category": "film",
     "grade": {
-      "contrast": 18,
-      "saturation": -4,
-      "wheels": { "s": [-10, -6, 0], "m": [8, 4, 0] },
-      "curves": { "m": [[0, 6], [32, 20], [128, 130], [192, 204], [255, 250]] }
+      "contrast": 12,
+      "saturation": -2,
+      "wheels": { "s": [-14, -10, -10], "m": [0, 1, 2] },
+      "curves": { "m": [[0, 6], [32, 20], [128, 130], [192, 204], [255, 250]] },
+      "blacks": -15
     }
   },
   {
@@ -92,14 +98,15 @@
     "category": "film",
     "grade": {
       "temperature": 6,
-      "tint": 2,
-      "contrast": 5,
+      "tint": 3,
+      "contrast": 4,
       "vibrance": 4,
       "curves": {
         "r": [[0, 14], [128, 134], [255, 250]],
         "g": [[0, 8], [128, 126], [255, 243]],
         "b": [[0, 2], [128, 114], [255, 230]]
-      }
+      },
+      "blacks": -8
     }
   },
   {
@@ -107,14 +114,15 @@
     "label": "Instant",
     "category": "film",
     "grade": {
-      "exposure": 5,
-      "contrast": -10,
-      "saturation": -14,
+      "exposure": 6,
+      "contrast": -13,
+      "saturation": -11,
       "curves": {
         "r": [[0, 20], [64, 78], [128, 138], [255, 240]],
         "g": [[0, 30], [64, 84], [128, 136], [255, 234]],
         "b": [[0, 33], [64, 84], [128, 128], [255, 222]]
-      }
+      },
+      "blacks": 9
     }
   },
   {
@@ -122,14 +130,15 @@
     "label": "Expired",
     "category": "film",
     "grade": {
-      "saturation": -20,
-      "contrast": -6,
+      "saturation": -16,
+      "contrast": -1,
       "curves": {
         "r": [[0, 28], [64, 74], [128, 132], [255, 236]],
         "g": [[0, 20], [64, 79], [128, 140], [255, 242]],
         "b": [[0, 32], [64, 71], [128, 118], [255, 212]]
       },
-      "hsl": { "yellow": [10, -8, 4], "green": [8, -6, 2] }
+      "hsl": { "yellow": [0, -34, -4], "green": [15, -12, 8] },
+      "blacks": 11
     }
   }
 ]

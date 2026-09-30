@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createGradeTransform } from "./gradeMath";
-import { colorStatsFromImageData, matchGrade } from "./gradeMatch";
+import { autoGradeFromImageData, colorStatsFromImageData, matchGrade } from "./gradeMatch";
 
 /** A synthetic frame with tonal and color variety. */
 function testFrame(): Uint8ClampedArray {
@@ -86,5 +86,64 @@ describe("matchGrade", () => {
     expect(stats.meanSat).toBeGreaterThan(0);
     expect(stats.warmth).toBeGreaterThan(0);
     expect(stats.luma.length).toBe(7);
+  });
+});
+
+/** RGBA frame from repeating [r,g,b] pixel patterns. */
+function frame(...pixels: [number, number, number][]): Uint8ClampedArray {
+  const per = 64;
+  const data = new Uint8ClampedArray(pixels.length * per * 4);
+  pixels.forEach(([r, g, b], p) => {
+    for (let i = 0; i < per; i++) {
+      const o = (p * per + i) * 4;
+      data[o] = r;
+      data[o + 1] = g;
+      data[o + 2] = b;
+      data[o + 3] = 255;
+    }
+  });
+  return data;
+}
+
+describe("autoGradeFromImageData", () => {
+  test("a mid-gray frame needs nearly nothing", () => {
+    const g = autoGradeFromImageData(frame([125, 125, 125]));
+    expect(Math.abs(g?.exposure ?? 0) <= 1).toBe(true);
+    expect(g?.contrast).toBeUndefined();
+    expect(g?.temperature).toBeUndefined();
+  });
+
+  test("a dark frame gets pushed up toward middle gray, in stops", () => {
+    const g = autoGradeFromImageData(frame([30, 30, 30], [50, 50, 50]));
+    expect((g?.exposure ?? 0) > 10).toBe(true);
+    expect(g?.exposure ?? 0).toBeLessThanOrEqual(50);
+  });
+
+  test("a compressed tonal range gets a contrast stretch", () => {
+    const g = autoGradeFromImageData(frame([100, 100, 100], [150, 150, 150]));
+    expect((g?.contrast ?? 0) > 0).toBe(true);
+  });
+
+  test("gray-world counters color casts both ways and leaves hue and saturation alone", () => {
+    const cool = autoGradeFromImageData(frame([90, 120, 170]));
+    expect((cool?.temperature ?? 0) > 0).toBe(true);
+    const warm = autoGradeFromImageData(frame([170, 120, 90]));
+    expect((warm?.temperature ?? 0) < 0).toBe(true);
+    expect(cool?.saturation).toBeUndefined();
+    expect(cool?.hue).toBeUndefined();
+    expect(Math.abs(cool?.temperature ?? 0)).toBeLessThanOrEqual(40);
+  });
+
+  test("the fitted white balance neutralizes the cast it measured", () => {
+    const cast: [number, number, number] = [150, 120, 95];
+    const g = autoGradeFromImageData(frame(cast))!;
+    const t = createGradeTransform({ temperature: g.temperature })!;
+    const out = t(cast[0] / 255, cast[1] / 255, cast[2] / 255);
+    // Damped correction: the red/blue gap closes by at least half.
+    expect(Math.abs(out[0] - out[2])).toBeLessThan((cast[0] - cast[2]) / 255 / 2);
+  });
+
+  test("an empty sample yields no grade", () => {
+    expect(autoGradeFromImageData(new Uint8ClampedArray(0))).toBeUndefined();
   });
 });

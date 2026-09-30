@@ -1,14 +1,13 @@
 /**
- * The 3D LUT every renderer shares. buildGradeLut samples gradeMath's
- * transform onto a cubic lattice; ffmpeg consumes it as a .cube file
- * (lut3d, tetrahedral), the preview's WebGL pass uploads it as a 3D
- * texture, and headless export applies it on the CPU. All three
- * interpolate tetrahedrally so they agree to within 8-bit quantization.
+ * The 3D LUT every renderer shares: colorPipeline.ts samples a clip's color
+ * mapping onto this cubic lattice; ffmpeg consumes it as a .cube file (lut3d,
+ * tetrahedral), the preview's WebGL pass uploads it as a 3D texture, and
+ * headless export applies it on the CPU. All three interpolate tetrahedrally
+ * so they agree to within 8-bit quantization.
  */
 
 import type { ColorGrade } from "./colorGrade";
-import { normalizeGrade } from "./colorGrade";
-import { createGradeTransform } from "./gradeMath";
+import { gradeWithoutDetail } from "./colorGrade";
 
 export interface GradeLut {
   /** Lattice nodes per axis. */
@@ -19,45 +18,26 @@ export interface GradeLut {
 
 export const GRADE_LUT_SIZE = 33;
 
-/** A stable identity for a grade's rendered result: normalized, key-sorted
- * JSON. Two grades with the same key produce the same LUT. */
-export function gradeKey(g: ColorGrade | undefined | null): string {
-  const n = normalizeGrade(g);
-  if (!n) return "";
-  const sort = (v: unknown): unknown => {
-    if (Array.isArray(v)) return v.map(sort);
-    if (v && typeof v === "object") {
+/** Key-sorted JSON of a plain value: the stable identity used by the LUT keys. */
+export function stableJson(v: unknown): string {
+  const sort = (x: unknown): unknown => {
+    if (Array.isArray(x)) return x.map(sort);
+    if (x && typeof x === "object") {
       const out: Record<string, unknown> = {};
-      for (const k of Object.keys(v).sort()) out[k] = sort((v as Record<string, unknown>)[k]);
+      for (const k of Object.keys(x as object).sort()) out[k] = sort((x as Record<string, unknown>)[k]);
       return out;
     }
-    return v;
+    return x;
   };
-  return JSON.stringify(sort(n));
+  return JSON.stringify(sort(v));
 }
 
-/** Sample the grade's transform onto the lattice. Returns null for a grade
- * that resolves to neutral. */
-export function buildGradeLut(
-  g: ColorGrade | undefined | null,
-  size = GRADE_LUT_SIZE
-): GradeLut | null {
-  const transform = createGradeTransform(g);
-  if (!transform) return null;
-  const data = new Float32Array(size * size * size * 3);
-  const step = 1 / (size - 1);
-  let i = 0;
-  for (let b = 0; b < size; b++) {
-    for (let gg = 0; gg < size; gg++) {
-      for (let r = 0; r < size; r++) {
-        const out = transform(r * step, gg * step, b * step);
-        data[i++] = out[0];
-        data[i++] = out[1];
-        data[i++] = out[2];
-      }
-    }
-  }
-  return { size, data };
+/** A stable identity for a grade's baked result: normalized, key-sorted JSON
+ * without the spatial controls. Two grades with the same key produce the
+ * same LUT. */
+export function gradeKey(g: ColorGrade | undefined | null): string {
+  const n = gradeWithoutDetail(g);
+  return n ? stableJson(n) : "";
 }
 
 /** Serialize to the .cube text ffmpeg's lut3d reads. */

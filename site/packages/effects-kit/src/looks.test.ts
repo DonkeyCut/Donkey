@@ -19,6 +19,21 @@ describe("lookFilterLines", () => {
     expect(lookFilterLines("a", "b", "dreamy", 1, 1920, "yuv420p", "t")!.length).toBe(3);
   });
 
+  test("halation's luma knee scales to the plane's depth", () => {
+    expect(lookFilterLines("a", "b", "halation", 1, 1920, "yuv420p", "t")!.join(";")).toContain(
+      "lutyuv=y='clip((val-160)*3,0,255)'"
+    );
+    expect(lookFilterLines("a", "b", "halation", 1, 1920, "yuv420p10le", "t", 10)!.join(";")).toContain(
+      "lutyuv=y='clip((val-641.882)*3,0,1023)'"
+    );
+    // Every other look is written in ratios and carries no code value.
+    for (const style of ["vintage", "vhs", "horror", "tech", "noir", "grain", "pastel", "blockbuster", "dreamy"]) {
+      const at8 = lookFilterLines("a", "b", style, 1, 1920, "yuv420p", "t")!.join(";");
+      const at10 = lookFilterLines("a", "b", style, 1, 1920, "yuv420p10le", "t", 10)!.join(";");
+      expect(at10).toBe(at8.replaceAll("format=yuv420p", "format=yuv420p10le"));
+    }
+  });
+
   test("an unknown id returns null instead of failing the job", () => {
     expect(lookFilterLines("a", "b", "sparkle", 1, 1920, "yuv420p", "t")).toBe(null);
     expect(lookFilterLines("a", "b", "", 1, 1920, "yuv420p", "t")).toBe(null);

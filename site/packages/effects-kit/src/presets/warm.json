@@ -5,12 +5,13 @@
     "category": "warm",
     "grade": {
       "exposure": 6,
-      "temperature": 18,
+      "temperature": 17,
       "tint": 3,
-      "contrast": 4,
-      "highlights": -6,
-      "vibrance": 10,
-      "hsl": { "orange": [0, 10, 4] }
+      "contrast": 1,
+      "highlights": 2,
+      "vibrance": 13,
+      "hsl": { "orange": [-14, 2, 0] },
+      "blacks": -8
     }
   },
   {
@@ -18,11 +19,11 @@
     "label": "Amber",
     "category": "warm",
     "grade": {
-      "temperature": 22,
-      "tint": 2,
-      "contrast": 6,
-      "shadows": 6,
-      "saturation": 4
+      "temperature": 23,
+      "tint": 6,
+      "shadows": 7,
+      "saturation": 6,
+      "blacks": 5
     }
   },
   {
@@ -30,12 +31,13 @@
     "label": "Honey",
     "category": "warm",
     "grade": {
-      "temperature": 14,
-      "tint": 6,
+      "temperature": 15,
+      "tint": 8,
       "exposure": 4,
-      "contrast": -2,
-      "vibrance": 8,
-      "highlights": -4
+      "contrast": -4,
+      "vibrance": 9,
+      "highlights": -4,
+      "blacks": 1
     }
   },
   {
@@ -43,11 +45,11 @@
     "label": "Sunbaked",
     "category": "warm",
     "grade": {
-      "temperature": 16,
-      "contrast": 10,
-      "saturation": -8,
+      "temperature": 17,
+      "contrast": 4,
+      "saturation": -4,
       "highlights": -10,
-      "shadows": -4
+      "blacks": -18
     }
   },
   {
@@ -55,12 +57,13 @@
     "label": "Peach",
     "category": "warm",
     "grade": {
-      "temperature": 10,
-      "tint": 8,
-      "exposure": 5,
-      "saturation": 6,
+      "temperature": 11,
+      "tint": 9,
+      "exposure": 4,
+      "saturation": 7,
       "contrast": -4,
-      "curves": { "m": [[0, 10], [255, 250]] }
+      "curves": { "m": [[0, 10], [255, 250]] },
+      "blacks": 2
     }
   },
   {
@@ -69,9 +72,10 @@
     "category": "warm",
     "grade": {
       "saturation": -50,
-      "temperature": 34,
-      "tint": 5,
-      "contrast": 4
+      "temperature": 42,
+      "tint": 14,
+      "contrast": -4,
+      "blacks": -8
     }
   },
   {
@@ -79,11 +83,12 @@
     "label": "Ember",
     "category": "warm",
     "grade": {
-      "temperature": 20,
-      "shadows": -8,
+      "temperature": 19,
+      "shadows": -1,
       "contrast": 12,
-      "vibrance": 4,
-      "hsl": { "red": [0, 4, 0] }
+      "vibrance": 3,
+      "hsl": { "red": [0, 5, 6] },
+      "blacks": -21
     }
   },
   {
@@ -91,11 +96,12 @@
     "label": "Bronze",
     "category": "warm",
     "grade": {
-      "temperature": 18,
-      "tint": -4,
-      "contrast": 8,
-      "saturation": -6,
-      "wheels": { "m": [10, 5, 0] }
+      "temperature": 21,
+      "tint": 1,
+      "contrast": 10,
+      "saturation": -5,
+      "wheels": { "m": [6, 2, 5] },
+      "blacks": -6
     }
   }
 ]
