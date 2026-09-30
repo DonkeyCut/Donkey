@@ -130,8 +130,9 @@ export function RefThumb({ item, className }: { item: AssetRef; className?: stri
       ) : (
         <AudioPillSurface peaks={peaks} className="size-full rounded-none" />
       )}
-      {/* One badge: the pinned moment when the user chose one, the length otherwise. */}
-      {(item.t !== undefined || (item.duration !== undefined && item.kind !== "image")) && (
+      {/* One badge: the pinned moment when the user chose one, the length
+          otherwise. Only media that plays has either. */}
+      {(item.kind === "video" || item.kind === "audio") && (item.t ?? item.duration) !== undefined && (
         <span className="absolute right-1 bottom-1 rounded-[5px] bg-black/65 px-1 py-px font-mono text-[8.5px] text-white tabular-nums">
           {formatTime(item.t ?? item.duration!)}
         </span>

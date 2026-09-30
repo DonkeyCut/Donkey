@@ -171,7 +171,7 @@ export const refFromAsset = (a: MediaAsset): AssetRef => ({
   // them out of the @-mention candidates; the arm only keeps the mapping total.
   kind: isLinkedAssetType(a.type) ? "text" : a.type,
   url: a.url,
-  duration: a.duration,
+  ...(isLinkedAssetType(a.type) ? {} : { duration: a.duration }),
 });
 
 export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
@@ -184,7 +184,7 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   // thread — so it carries the shelf route rather than a minted URL that
   // expires inside the hour.
   url: libraryRouteUrl(a.fileName, a.residency),
-  duration: a.duration,
+  ...(isLinkedAssetType(a.type) ? {} : { duration: a.duration }),
   ...(a.width !== undefined ? { width: a.width } : {}),
   ...(a.height !== undefined ? { height: a.height } : {}),
   ...(a.posterFile ? { thumb: libraryRouteUrl(a.posterFile, a.residency) } : {}),
