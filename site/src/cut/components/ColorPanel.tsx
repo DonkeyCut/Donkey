@@ -359,6 +359,31 @@ type LutTile = GradePreset & { lutId: string };
 /** Every LUT a grade can name, re-read as the Library changes. */
 const useLutChoices = (): LutChoice[] => useSyncExternalStore(onLinkedChanged, listLutChoices, listLutChoices);
 
+/** Every LUT as a tile: the built-in looks, then the account's own files. */
+function useLutTiles(): LutTile[] {
+  const choices = useLutChoices();
+  return useMemo(
+    () =>
+      choices.map((l) => ({
+        id: `lut-${l.id.slice("lut:".length)}`,
+        label: l.label,
+        category: "film",
+        grade: { lut: { id: l.id } },
+        lutId: l.id,
+      })),
+    [choices]
+  );
+}
+
+/** The grade with this LUT put on, or taken off when it is the one the clip
+ * already wears. */
+function withLutToggled(grade: ColorGrade | undefined, lutId: string): ColorGrade {
+  const next: ColorGrade = { ...grade };
+  if (grade?.lut?.id === lutId) delete next.lut;
+  else next.lut = { id: lutId, amount: grade?.lut?.amount };
+  return next;
+}
+
 function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readonly VideoClip[]; onAdjust: () => void }) {
   const [category, setCategory] = usePanelState<Category>(clip.id, "colorPresetCategory", "all");
   const gridScroll = useRememberedScroll(clip.id, `color-presets:${category}`);
@@ -379,18 +404,7 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
   );
   // The chat reads the same list off editor_state.
   useEffect(() => rememberSavedGrades(saved.map((t) => t.saved)), [saved]);
-  const lutChoices = useLutChoices();
-  const lutTiles = useMemo<LutTile[]>(
-    () =>
-      lutChoices.map((l) => ({
-        id: `lut-${l.id.slice("lut:".length)}`,
-        label: l.label,
-        category: "film",
-        grade: { lut: { id: l.id } },
-        lutId: l.id,
-      })),
-    [lutChoices]
-  );
+  const lutTiles = useLutTiles();
   const active = clip.grade?.preset;
   const lut = clip.grade?.lut;
   const lutView = category === LUTS;
@@ -407,11 +421,7 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
 
   const pick = (p: GradePreset | SavedTile | LutTile) => {
     if ("lutId" in p) {
-      // Picking the LUT the clip wears takes it off again.
-      const next: ColorGrade = { ...clip.grade };
-      if (lut?.id === p.lutId) delete next.lut;
-      else next.lut = { id: p.lutId, amount: lut?.amount };
-      commit(next);
+      commit(withLutToggled(clip.grade, p.lutId));
       return;
     }
     if ("saved" in p) {
@@ -819,7 +829,7 @@ function AdjustView({ clip, peers, onBack }: { clip: VideoClip; peers?: readonly
         )}
         {tool === "wheels" && <WheelsTool grade={grade} draft={draft} commit={commit} />}
         {tool === "hsl" && <HslTool clipId={clip.id} grade={grade} draft={draft} commit={commit} />}
-        {tool === "lut" && <LutTool grade={grade} draft={draft} commit={commit} />}
+        {tool === "lut" && <LutTool clip={clip} grade={grade} draft={draft} commit={commit} />}
       </ScrollArea>
       <GradeFooter clip={clip} />
     </div>
@@ -1028,12 +1038,17 @@ function useLutLabel(id: string | null): string | undefined {
   return id ? choices.find((c) => c.id === id)?.label : undefined;
 }
 
-/** The LUT tool: the applied table as a chip with its intensity. A LUT file
- * dragged from the Library onto this tool or onto a clip applies it. A LUT
- * sits under the grade — the picture after the source conversion goes
+/** The LUT tool: the applied table as a chip with its intensity, over every
+ * LUT as a tile — the built-in looks and the account's own files. A LUT file
+ * dragged from the Library onto this tool or onto a clip applies it too. A
+ * LUT sits under the grade — the picture after the source conversion goes
  * through it, and the sliders work on what comes out. */
-function LutTool({ grade, draft, commit }: GradeWrite) {
+function LutTool({ clip, grade, draft, commit }: GradeWrite & { clip: VideoClip }) {
   const [over, setOver] = useState(false);
+  const tiles = useLutTiles();
+  // The clip's own frame, ungraded, so each tile shows what its LUT does.
+  const frame = useClipSourceFrame(clip.id);
+  const profile = useEditor((s) => sourceProfileOf(s.assets.find((a) => a.id === clip.assetId)));
   const applied = lutIdOf(grade);
   const label = useLutLabel(applied);
   const amount = Math.round((grade?.lut?.amount ?? 1) * 100);
@@ -1099,6 +1114,18 @@ function LutTool({ grade, draft, commit }: GradeWrite) {
           onCommit={(v) => applied && commit({ ...grade, lut: { id: applied, amount: v / 100 } })}
         />
       </Row>
+      <div className="clip-grade-lut-grid mt-1 grid grid-cols-2 gap-2 pt-1">
+        {tiles.map((t) => (
+          <PresetTile
+            key={`${clip.id}:${t.id}`}
+            preset={t}
+            frame={frame}
+            profile={profile}
+            selected={applied === t.lutId}
+            onPick={() => commit(withLutToggled(grade, t.lutId))}
+          />
+        ))}
+      </div>
     </div>
   );
 }
