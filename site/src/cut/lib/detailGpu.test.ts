@@ -26,7 +26,10 @@ await stubModule<typeof import("./raster")>("./raster", import.meta.url, {
   createRasterCanvas: (() => canvas) as never,
 });
 const { applyDetailGpu, detailGpuBytes, DETAIL_IDLE_MS, disposeDetailGpu, releaseDetailGpu } = await import("./detailGpu");
-// The pass is a module singleton: files after this one build their own.
+// The pass is a module singleton. A file that ran first without WebGL left
+// it marked unavailable, so this one starts from a fresh build; files after
+// this one build their own.
+disposeDetailGpu();
 afterAll(disposeDetailGpu);
 
 afterEach(() => {
