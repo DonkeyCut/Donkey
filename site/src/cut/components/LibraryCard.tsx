@@ -1,11 +1,13 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { isLinkedAssetType } from "@/cut/lib/types";
-import { Download, Ellipsis, ExternalLink, Film, Image as ImageIcon, Music, Plus, Share2, Trash2, Type } from "lucide-react";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { isLinkedAssetType, type AssetType } from "@/cut/lib/types";
+import { Film, Image as ImageIcon, Music, Type } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { CardActionsMenu } from "@/cut/components/CardActionsMenu";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { MediaCardShell } from "@/cut/components/MediaCardShell";
+import { RenameInput } from "@/cut/components/RenameInput";
 import { ShelfBadge } from "@/cut/components/ShelfBadge";
 import { AudioCardFace } from "@/cut/components/AudioPanel";
 import { CopyNameLabel } from "@/cut/components/AssetRefs";
@@ -35,6 +37,101 @@ export const LIBRARY_SQUARE = Math.round(Math.sqrt(LIBRARY_AUDIO_TILE_AREA));
 
 type SharedMedia = { src: string; poster?: string; downloadHref: string };
 
+/** A Library tile's box. Pictures take their own aspect at the shared area;
+ * every other file is the square the sound tile is. Without an area the tile
+ * fills its grid cell. An arriving file draws the same box its asset will. */
+export function libraryTileBox(
+  type: AssetType | undefined,
+  shape: { width?: number; height?: number } | undefined,
+  area: number | undefined,
+) {
+  const font = type === "font";
+  const frame =
+    area && (type === "video" || type === "image") && shape?.width && shape.height
+      ? { w: shape.width, h: shape.height }
+      : { w: 1, h: 1 };
+  return {
+    className: cn(
+      "relative max-w-full overflow-hidden rounded-xl border shadow-sm",
+      type === "lut" ? "bg-background" : "bg-muted",
+      !area && (font ? "aspect-[16/7]" : "aspect-square"),
+      // The sheet is the card, so nothing is drawn around it; the type
+      // scales with the tile, which runs from a panel column to a full row.
+      font && "@container flex flex-col",
+    ),
+    style: {
+      ...(area
+        ? {
+            width: Math.round(Math.sqrt((area * frame.w) / frame.h)),
+            aspectRatio: `${frame.w} / ${frame.h}`,
+          }
+        : {}),
+      ...(font ? { backgroundColor: SPECIMEN_BG, color: SPECIMEN_INK } : {}),
+    },
+  };
+}
+
+/** The name in a tile's top-left corner. */
+export const libraryNameClass = (type: AssetType | undefined) =>
+  cn(
+    "absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-2.75rem)]",
+    // The emerald fill is its own backdrop; thumbnails need the scrim pill.
+    type !== "audio" && type !== "lut" && "rounded-lg bg-black/55 backdrop-blur-sm",
+    type === "lut" && "text-foreground",
+  );
+
+/** A LUT's face: the cube with its LUT wordmark under the name, the way a
+ * sound tile sets its own. */
+export function LibraryLutFace() {
+  // eslint-disable-next-line @next/next/no-img-element -- static icon
+  return <img src={LUT_FILE_ICON} alt="" aria-hidden className="size-full object-contain px-2 pt-8 pb-2" />;
+}
+
+/** A font's face: a pangram set in the face, and under a hairline the name it
+ * goes by with the file behind it. */
+export function LibraryFontFace({
+  specimen,
+  name,
+  label,
+  meta,
+  nameEdit,
+}: {
+  specimen: ReactNode;
+  name: string;
+  label?: string;
+  meta?: string;
+  /** The rename field, in the name's place while it is open. */
+  nameEdit?: ReactNode;
+}) {
+  return (
+    <div className="flex size-full min-h-0 flex-col">
+      <div className="grid min-h-0 flex-1 place-items-center px-3 pt-3 @[220px]:px-5 @[220px]:pt-5">
+        {specimen}
+      </div>
+      <div className="mx-3 flex items-center justify-between gap-2 border-t border-white/10 py-2 @[220px]:mx-5 @[220px]:py-3">
+        {nameEdit ?? (
+          <CopyNameLabel
+            name={name}
+            label={label}
+            dark
+            mention={false}
+            className="min-w-0 text-[11px] font-medium @[220px]:text-[13px]"
+          />
+        )}
+        {meta && !nameEdit && (
+          <span
+            data-drag-omit
+            className="shrink-0 text-[10px] tabular-nums @[220px]:text-[11px]"
+            style={{ color: SPECIMEN_META }}
+          >
+            {meta}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** The library media card, with protected media URLs supplied by a share viewer. */
 export function LibraryCard({
   asset: a,
@@ -49,6 +146,7 @@ export function LibraryCard({
   onDelete,
   onUse,
   onShare,
+  onRename,
   onDragStartExtra,
 }: {
   asset: LibraryAsset;
@@ -74,6 +172,8 @@ export function LibraryCard({
   onDelete?: () => void;
   onUse?: () => void;
   onShare?: () => void;
+  /** A refusal shows on the card with its reason. */
+  onRename?: (name: string) => Promise<unknown>;
   onDragStartExtra?: (e: React.DragEvent) => void;
 }) {
   // ⌘C over the card copies its mention token. A card inside the current
@@ -125,21 +225,24 @@ export function LibraryCard({
   ]
     .filter(Boolean)
     .join(" · ");
-  // Pictures take their own aspect at the shared area; every other file is
-  // the same square the sound tile is.
-  const frame =
-    area && (a.type === "video" || a.type === "image") && a.width && a.height
-      ? { w: a.width, h: a.height }
-      : { w: 1, h: 1 };
-  const tileStyle = {
-    ...(area
-      ? {
-          width: Math.round(Math.sqrt((area * frame.w) / frame.h)),
-          aspectRatio: `${frame.w} / ${frame.h}`,
-        }
-      : {}),
-    ...(font ? { backgroundColor: SPECIMEN_BG, color: SPECIMEN_INK } : {}),
-  };
+  const [renaming, setRenaming] = useState(false);
+  const [renameError, setRenameError] = useState<string>();
+  const nameEdit = renaming && (
+    <RenameInput
+      value={libraryAssetName(a)}
+      className={cn(font ? "text-foreground" : "absolute top-1.5 right-1.5 left-1.5 w-auto bg-background")}
+      onDone={(name) => {
+        setRenaming(false);
+        if (!name || !onRename) return;
+        setRenameError(undefined);
+        onRename(name).catch((e: unknown) => {
+          setRenameError(e instanceof Error ? e.message : "Could not rename the file.");
+          setTimeout(() => setRenameError(undefined), 6000);
+        });
+      }}
+    />
+  );
+  const box = libraryTileBox(a.type, a, area);
 
   return (
     <MediaCardShell
@@ -150,7 +253,7 @@ export function LibraryCard({
       // opens bare.
       view={offline ? undefined : view}
       restTime={posterT}
-      draggable={!offline && !sharedMedia}
+      draggable={!offline && !sharedMedia && !renaming}
       className="group flex min-w-0 max-w-full flex-col"
       onClick={onClick}
       onDragStart={(e) => {
@@ -167,27 +270,27 @@ export function LibraryCard({
             data-drag-object
             data-drag-ghost={lut ? LUT_MARK_ICON : undefined}
             className={cn(
-              "relative max-w-full cursor-grab overflow-hidden rounded-xl border shadow-sm transition-shadow active:cursor-grabbing",
-              lut ? "bg-background" : "bg-muted group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)]",
-              !area && (font ? "aspect-[16/7]" : "aspect-square"),
-              // The sheet is the card, so nothing is drawn around it; the type
-              // scales with the tile, which runs from a panel column to a full row.
-              font && "@container flex flex-col",
+              box.className,
+              "cursor-grab transition-shadow active:cursor-grabbing",
+              !lut && "group-hover:shadow-[0_4px_20px_rgba(0,0,0,0.1)]",
               selected || flash
                 ? PICKED_RING
                 : font
                   ? "border-transparent"
                   : "border-border",
             )}
-            style={tileStyle}
+            style={box.style}
           >
             {font ? (
-              // A pangram set in the face, and under a hairline the name it goes by
-              // with the file behind it. Nothing to load from a shelf that isn't
-              // answering, so that card shows the kind mark instead.
-              <div className="flex size-full min-h-0 flex-col">
-                <div className="grid min-h-0 flex-1 place-items-center px-3 pt-3 @[220px]:px-5 @[220px]:pt-5">
-                  {offline ? (
+              // Nothing to load from a shelf that isn't answering, so that card
+              // shows the kind mark in place of the specimen.
+              <LibraryFontFace
+                name={a.name}
+                label={a.title}
+                meta={fontMeta}
+                nameEdit={nameEdit || undefined}
+                specimen={
+                  offline ? (
                     <Type className="size-6 text-white/35" />
                   ) : (
                     <FontSpecimen
@@ -196,32 +299,11 @@ export function LibraryCard({
                       pad={0}
                       className="size-full"
                     />
-                  )}
-                </div>
-                <div className="mx-3 flex items-center justify-between gap-2 border-t border-white/10 py-2 @[220px]:mx-5 @[220px]:py-3">
-                  <CopyNameLabel
-                    name={a.name}
-                    label={a.title}
-                    dark
-                    mention={false}
-                    className="min-w-0 text-[11px] font-medium @[220px]:text-[13px]"
-                  />
-                  {fontMeta && (
-                    <span
-                      data-drag-omit
-                      className="shrink-0 text-[10px] tabular-nums @[220px]:text-[11px]"
-                      style={{ color: SPECIMEN_META }}
-                    >
-                      {fontMeta}
-                    </span>
-                  )}
-                </div>
-              </div>
+                  )
+                }
+              />
             ) : lut ? (
-              // The tile is the square: the cube with its LUT wordmark under the
-              // name, the way a sound tile sets its own.
-              // eslint-disable-next-line @next/next/no-img-element -- static icon
-              <img src={LUT_FILE_ICON} alt="" aria-hidden className="size-full object-contain px-2 pt-8 pb-2" />
+              <LibraryLutFace />
             ) : offline ? (
               // Nothing to load from a shelf that isn't answering, so the card
               // shows what it knows: the kind of file, its name, its length.
@@ -342,75 +424,44 @@ export function LibraryCard({
                 )}
               />
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label="More actions"
-                className={cn(
-                  "absolute top-1.5 right-1.5 grid size-6 place-items-center rounded-full text-white opacity-0 transition-opacity group-hover:opacity-100 data-[state=open]:opacity-100",
-                  // A black scrim disappears into the charcoal sheet.
-                  font
-                    ? "bg-white/10 hover:bg-white/20"
-                    : "bg-black/40 hover:bg-black/60",
-                )}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Ellipsis className="size-3.5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                // Hung off the card's right edge rather than laid over the media:
-                // the tile stays readable behind the open menu.
-                align="start"
-                alignOffset={4}
-                className="w-44"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {onUse && (
-                  <>
-                    <DropdownMenuItem onClick={onUse}>
-                      <Plus /> Add to timeline
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                  </>
-                )}
-                {onShare && <DropdownMenuItem disabled={offline} onClick={onShare}><Share2 /> Share</DropdownMenuItem>}
-                {sharedMedia ? (
-                  <DropdownMenuItem render={<a href={sharedMedia.downloadHref} />}>
-                    <Download /> Download
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onClick={() => downloadLibraryAsset(a)} disabled={offline}>
-                    <Download /> Download
-                  </DropdownMenuItem>
-                )}
-                {a.source?.url && (
-                  // An imported clip keeps the link it came from, so the post it was
-                  // cut out of is one click away.
-                  <DropdownMenuItem onClick={() => openExternal(a.source!.url)}>
-                    <ExternalLink /> Open original
-                  </DropdownMenuItem>
-                )}
-                {onDelete && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                      <Trash2 /> Delete
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {!font && (
+            <CardActionsMenu
+              sheet={font}
+              className="absolute top-1.5 right-1.5"
+              onUse={onUse}
+              onShare={onShare}
+              shareDisabled={offline}
+              onRename={onRename && !offline ? () => setRenaming(true) : undefined}
+              downloadHref={sharedMedia?.downloadHref}
+              onDownload={sharedMedia ? undefined : () => downloadLibraryAsset(a)}
+              downloadDisabled={offline}
+              onOpenOriginal={a.source?.url ? () => openExternal(a.source!.url) : undefined}
+              onDelete={onDelete}
+            />
+            {renameError && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        data-drag-omit
+                        className="absolute bottom-1.5 left-1.5 rounded-md bg-destructive/90 px-1.5 py-0.5 text-[10px] text-white"
+                      />
+                    }
+                  >
+                    Rename failed
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">{renameError}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+            {!font && nameEdit}
+            {!font && !renaming && (
               <CopyNameLabel
-                name={lut ? libraryAssetName(a) : a.name}
-                label={lut ? undefined : a.title}
+                name={a.name}
+                label={a.title}
                 dark={a.type === "audio"}
                 mention={mention}
-                className={cn(
-                  "absolute top-1.5 left-1.5 max-w-[70%] px-2 py-1 text-[11px] font-medium text-white transition-[max-width] group-hover:max-w-[calc(100%-2.75rem)]",
-                  // The emerald fill is its own backdrop; thumbnails need the scrim pill.
-                  a.type !== "audio" && !lut && "rounded-lg bg-black/55 backdrop-blur-sm",
-                  lut && "text-foreground",
-                )}
+                className={libraryNameClass(a.type)}
               />
             )}
           </div>

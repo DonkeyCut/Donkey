@@ -1,5 +1,6 @@
 "use client";
 import { noteProjectRevision } from "./projectRevision";
+import { freeItemName } from "./itemName";
 
 import { EMPTY_GUIDE_LINES, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import {
@@ -556,6 +557,8 @@ export interface EditorState {
   setColorSpace: (space: OutputSpace) => void;
   addAsset: (asset: MediaAsset) => void;
   updateAsset: (id: string, patch: Partial<MediaAsset>) => void;
+  /** Rename a project file under the rule every Library shelf applies. */
+  renameAsset: (id: string, name: string) => void;
   /** Set what a source's code values mean — the person's override of the
    * profile the header read — with an undo step. `undefined` returns the
    * asset to the detected profile. */
@@ -2473,6 +2476,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         hydrating = false;
       }
     },
+
+    renameAsset: (id, name) =>
+      get().updateAsset(id, {
+        name: freeItemName(name, get().assets.filter((a) => a.id !== id).map((a) => a.name)),
+      }),
 
     updateAsset: (id, patch) => {
       // A read-only view still takes runtime enrichment (signed URLs,

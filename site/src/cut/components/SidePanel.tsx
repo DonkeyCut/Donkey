@@ -6,7 +6,7 @@ import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
 import { libraryFolderRef, projectFolderRef } from "@/cut/lib/folderReference";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Plus, Shapes, Sparkles, Trash2, Upload, X, Blend } from "lucide-react";
+import { Captions, Check, Clapperboard, ClipboardList, Copy, Download, Ellipsis, Film, FolderOpen, FolderPlus, Image as ImageIcon, Loader2, Music, Shapes, Sparkles, Trash2, Upload, X, Blend } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -22,13 +22,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { SectionTitle } from "@/cut/components/SectionTitle";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { apiFetch } from "@/cut/lib/backend";
 import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
@@ -83,7 +77,7 @@ import {
   type LibraryFolder,
 } from "@/cut/lib/library";
 import { useClipTitles } from "@/cut/lib/clipTitle";
-import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
+import { patchLibrary, refetchLibrary, renameInLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   activeResidency,
   availableResidencies,
@@ -152,7 +146,9 @@ import { StockVideosPanel } from "./StockVideosPanel";
 import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { STOCK_SFX } from "@/cut/lib/stockSfxManifest";
 import { STOCK_VIDEOS } from "@/cut/lib/stockVideoManifest";
-import { LibraryCard, LIBRARY_TILE_AREA } from "@/cut/components/LibraryCard";
+import { LibraryCard } from "@/cut/components/LibraryCard";
+import { CardActionsMenu } from "@/cut/components/CardActionsMenu";
+import { RenameInput } from "@/cut/components/RenameInput";
 import { ShelfBadge } from "@/cut/components/ShelfBadge";
 import { MediaCardShell } from "./MediaCardShell";
 import { lightboxItemFromAsset } from "@/cut/lib/lightbox";
@@ -1456,8 +1452,13 @@ function AssetCard({
     }
   };
 
-  const remove = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const [renaming, setRenaming] = useState(false);
+  const finishRename = (name?: string) => {
+    setRenaming(false);
+    if (name) useEditor.getState().renameAsset(asset.id, name);
+  };
+
+  const remove = () => {
     const s = useEditor.getState();
     const uses =
       s.clips.filter((c) => c.assetId === asset.id).length +
@@ -1478,6 +1479,7 @@ function AssetCard({
       view={asset.upload ? undefined : () => lightboxItemFromAsset(asset)}
       restTime={0.1}
       className="asset-card group flex flex-col gap-1.5 text-left"
+      draggable={!renaming}
       onClick={onSelect}
       onDragStart={(e) => {
         setAssetDragData(e, asset.id, dragGroup);
@@ -1551,42 +1553,37 @@ function AssetCard({
                 {formatBytes(sizeBytes)}
               </span>
             )}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                aria-label="More actions"
-                className="absolute top-1 right-1 grid size-5 place-items-center rounded-full bg-black/45 text-white opacity-0 transition-opacity group-hover:opacity-100 hover:bg-black/65 data-[state=open]:opacity-100"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {saved ? <Check className="size-3" /> : <Ellipsis className="size-3" />}
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
-                <DropdownMenuItem onClick={add}>
-                  <Plus /> Add to timeline
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
-                  <FolderPlus /> Save to library
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => downloadMedia(projectId, asset)}
-                  disabled={!!asset.upload}
-                >
-                  <Download /> Download
-                </DropdownMenuItem>
-                {caps.revealInFinder && (
-                  <DropdownMenuItem
-                    onClick={() => void revealMedia(projectId, asset.fileName).catch(() => {})}
-                  >
-                    <FolderOpen /> Show in Finder
+            <CardActionsMenu
+              icon={saved ? <Check className="size-3" /> : <Ellipsis className="size-3" />}
+              className="absolute top-1 right-1 size-5 bg-black/45 hover:bg-black/65"
+              onUse={add}
+              onRename={() => setRenaming(true)}
+              onDownload={() => downloadMedia(projectId, asset)}
+              downloadDisabled={!!asset.upload}
+              extra={
+                <>
+                  <DropdownMenuItem onClick={saveToLibrary} disabled={!!asset.upload}>
+                    <FolderPlus /> Save to library
                   </DropdownMenuItem>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onClick={remove}>
-                  <Trash2 /> Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {asset.type === "audio" && (
+                  {caps.revealInFinder && (
+                    <DropdownMenuItem
+                      onClick={() => void revealMedia(projectId, asset.fileName).catch(() => {})}
+                    >
+                      <FolderOpen /> Show in Finder
+                    </DropdownMenuItem>
+                  )}
+                </>
+              }
+              onDelete={() => remove()}
+            />
+            {asset.type === "audio" && renaming && (
+              <RenameInput
+                value={asset.name}
+                className="absolute top-1.5 right-1.5 left-1.5 w-auto bg-background"
+                onDone={finishRename}
+              />
+            )}
+            {asset.type === "audio" && !renaming && (
               <CopyNameLabel
                 name={asset.name}
                 dark
@@ -1596,9 +1593,12 @@ function AssetCard({
             {asset.upload && <UploadState asset={asset} />}
             {!asset.upload && <ProxyState asset={asset} />}
           </div>
-          {asset.type !== "audio" && (
-            <CopyNameLabel name={asset.name} className="text-[11px] text-muted-foreground" />
-          )}
+          {asset.type !== "audio" &&
+            (renaming ? (
+              <RenameInput value={asset.name} className="text-[11px]" onDone={finishRename} />
+            ) : (
+              <CopyNameLabel name={asset.name} className="text-[11px] text-muted-foreground" />
+            ))}
         </>
       )}
     </MediaCardShell>
@@ -2075,11 +2075,12 @@ function LibraryPanel({ projectId, onImport }: {
                       isLinkedAssetType(a.type) ? undefined : () => void addLibraryAssetToProject(projectId, a)
                     }
                     onDelete={() => setDeleting(setOf(a))}
+                    onRename={(name) => renameInLibrary(client, a, name)}
                     onDragStartExtra={(e) => onCardDragExtra(e, a)}
                   />
                 ))}
                 {pending.map((item) => (
-                  <LibraryImportCard key={item.id} item={item} area={LIBRARY_TILE_AREA}
+                  <LibraryImportCard key={item.id} item={item}
                     onRetry={() => void item.run()}
                     onDismiss={() => dismissLibraryImport(item.id)}
                     onUse={item.file ? () => onImport([item.file!], { mediaOnly: true }) : undefined}

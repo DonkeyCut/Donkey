@@ -38,6 +38,10 @@ export const libraryFontId = (key: string) => linkId(PREFIX, key);
 /** The CSS/skia family name its bytes are installed under. */
 const familyOf = (key: string) => `lf-${key}`;
 
+/** The font menu's entry for a shelf font, under the name the shelf gives it. */
+const menuEntry = (key: string, label: string) =>
+  registerFonts([{ id: libraryFontId(key), label, stack: `"${familyOf(key)}"` }]);
+
 /** The font kind as the registry holds it. */
 export const fontKind: LinkedKind = {
   prefix: PREFIX,
@@ -58,8 +62,9 @@ export const fontKind: LinkedKind = {
   },
   use: async (key, label, bytes) => {
     await installFontFace(familyOf(key), bytes);
-    registerFonts([{ id: libraryFontId(key), label, stack: `"${familyOf(key)}"` }]);
+    menuEntry(key, label);
   },
+  relabel: menuEntry,
   drop: (keys) => {
     unregisterFonts(keys.map(libraryFontId));
     forgetTextWidths();

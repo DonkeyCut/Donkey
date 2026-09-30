@@ -16,7 +16,7 @@ import {
 import { useClipTitles } from "@/cut/lib/clipTitle";
 import { deleteFromLibrary, type LibraryAsset } from "@/cut/lib/library";
 import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
-import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
+import { patchLibrary, refetchLibrary, renameInLibrary, useLibrary } from "@/cut/lib/queries";
 import { formatDate } from "@/cut/lib/time";
 import { shapeBand } from "@/cut/lib/types";
 import { Lightbox } from "./Lightbox";
@@ -96,6 +96,7 @@ export function CameraRollView() {
                     useLightbox.getState().open(lightboxItemFromLibrary(a, true))
                   }
                   onDelete={() => setDeleting(a)}
+                  onRename={(name) => renameInLibrary(client, a, name)}
                 />
               ))}
             </div>

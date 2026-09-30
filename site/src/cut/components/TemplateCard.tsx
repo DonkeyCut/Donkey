@@ -7,21 +7,10 @@ import {
   Film,
   Image as ImageIcon,
   Layers,
-  MoreHorizontal,
   Music,
-  Pencil,
-  Plus,
-  Trash2,
   Type,
 } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { RenameInput } from "@/cut/components/RenameInput";
 import {
   clearAssetDrag,
   setCardDragImage,
@@ -35,6 +24,7 @@ import {
   type AssetRef,
 } from "@/cut/lib/assetRef";
 import { useRefCopy } from "@/cut/lib/refCopy";
+import { CardActionsMenu } from "@/cut/components/CardActionsMenu";
 import { cardIconButton } from "@/cut/components/iconButton";
 import { formatTime } from "@/cut/lib/time";
 import {
@@ -102,7 +92,6 @@ export function TemplateCard({
   // named in a prompt the same way a clip or an effect is.
   const copyRef = useRefCopy(() => [refFromTemplate(t)]);
   const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState<{
     media: TemplateMedia;
@@ -165,26 +154,16 @@ export function TemplateCard({
       : []),
   ];
 
-  const nameEl = (
-    <>
-      {renaming ? (
-        <Input
-          autoFocus
-          value={draft}
-          className="h-6 w-full text-[12px]"
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => setRenaming(false)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && draft.trim()) {
-              onRename?.(draft.trim());
-              setRenaming(false);
-            } else if (e.key === "Escape") setRenaming(false);
-          }}
-        />
-      ) : (
-        <div className="truncate text-[12px] font-medium">{t.name}</div>
-      )}
-    </>
+  const nameEl = renaming ? (
+    <RenameInput
+      value={t.name}
+      onDone={(name) => {
+        setRenaming(false);
+        if (name) onRename?.(name);
+      }}
+    />
+  ) : (
+    <div className="truncate text-[12px] font-medium">{t.name}</div>
   );
   const metaEl = (
     <div className="flex items-center gap-0.5 text-[10.5px] whitespace-nowrap text-muted-foreground">
@@ -196,54 +175,17 @@ export function TemplateCard({
     </div>
   );
   const actionsEl = (
-    <div className={cn("flex shrink-0 items-center gap-1", tile && "absolute top-1.5 right-1.5")}>
-      {(onAdd || onRename || onDelete) && (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <button
-                aria-label="Template options"
-                className={cn(
-                  cardIconButton,
-                  "opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100",
-                )}
-              />
-            }
-          >
-            <MoreHorizontal className="size-3.5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-40">
-            {onAdd && (
-              <>
-                <DropdownMenuItem onClick={onAdd}>
-                  <Plus /> {addTitle ?? "Add"}
-                </DropdownMenuItem>
-                {(onRename || onDelete) && <DropdownMenuSeparator />}
-              </>
-            )}
-            {onRename && (
-              <DropdownMenuItem
-                onClick={() => {
-                  setDraft(t.name);
-                  setRenaming(true);
-                }}
-              >
-                <Pencil /> Rename
-              </DropdownMenuItem>
-            )}
-            {extraMenu}
-            {onDelete && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                  <Trash2 /> Delete
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </div>
+    <CardActionsMenu
+      label="Template options"
+      // A tile floats the scrim pill in its corner; a light row takes the
+      // row's own control.
+      className={tile ? "absolute top-1.5 right-1.5" : cardIconButton}
+      onUse={onAdd}
+      useTitle={addTitle ?? "Add"}
+      onRename={onRename && (() => setRenaming(true))}
+      extra={extraMenu}
+      onDelete={onDelete}
+    />
   );
 
   return (
@@ -263,7 +205,7 @@ export function TemplateCard({
         drag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         onRefDrop && refDrop.active && "border-primary bg-primary/10",
       )}
-      draggable={!!drag}
+      draggable={!!drag && !renaming}
       onDragStart={(e) => {
         if (!drag) return;
         setTemplateDragData(e, drag);

@@ -23,7 +23,9 @@ import { engineLost } from "./api";
 import { cutMode } from "./backend";
 import { useCutMode } from "./backend/hooks";
 import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
-import { fetchLibrary, type LibraryData } from "./library";
+import { fetchLibrary, type LibraryAsset, type LibraryData } from "./library";
+import { freeItemName } from "./itemName";
+import { renameLibraryFile } from "./libraryRename";
 import { fetchNotes, type NotesData } from "./notes";
 import {
   availableResidencies,
@@ -208,6 +210,27 @@ export function patchLibrary(client: QueryClient, fn: (prev: LibraryData) => Lib
     prev ? fn(prev) : prev
   );
   if (next) writeSnapshot(snapshotKey(scope, "library"), next);
+}
+
+/** Rename a Library file from its card: the card shows the new name at once,
+ * and a refusal puts the shelf's own listing back. */
+export async function renameInLibrary(
+  client: QueryClient,
+  asset: Pick<LibraryAsset, "id" | "type" | "residency">,
+  raw: string,
+): Promise<void> {
+  const others = client.getQueryData<LibraryData>(libraryKey(libraryScope()))?.assets ?? [];
+  const name = freeItemName(raw, others.filter((a) => a.id !== asset.id).map((a) => a.name));
+  patchLibrary(client, (d) => ({
+    ...d,
+    assets: d.assets.map((a) =>
+      a.id === asset.id ? { ...a, name, ...(a.residency === "cloud" ? { title: name } : {}) } : a,
+    ),
+  }));
+  await renameLibraryFile(asset, name, others).catch(async (e) => {
+    await refetchLibrary(client);
+    throw e;
+  });
 }
 
 /** Pull a residency's listing again — for the changes only the server can

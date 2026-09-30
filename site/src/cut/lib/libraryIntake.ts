@@ -31,6 +31,9 @@ export const useLibraryFileImports = create<{ items: LibraryArrival[] }>(() => (
 const update = (fn: (items: LibraryArrival[]) => LibraryArrival[]) =>
   useLibraryFileImports.setState((state) => ({ items: fn(state.items) }));
 export const dismissLibraryImport = (id: string) => update((items) => items.filter((item) => item.id !== id));
+/** The arriving picture's measured size, so its tile takes the shape the asset will. */
+export const setLibraryImportShape = (id: string, shape: { width: number; height: number }) =>
+  update((items) => items.map((item) => item.id === id ? { ...item, shape } : item));
 
 // Navigation changes the view of these jobs; the files and retries belong to the account.
 subscribeEngineUser(() => useLibraryFileImports.setState({ items: [] }));

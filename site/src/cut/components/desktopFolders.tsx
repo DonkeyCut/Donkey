@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { RenameInput } from "@/cut/components/RenameInput";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { additiveClick } from "@/cut/lib/hostKeys";
@@ -295,35 +296,21 @@ function CrumbStep({
 }
 
 function FolderTitle({ name, onRename }: { name: string; onRename: (name: string) => void | Promise<void> }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const draftRef = useRef<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const [error, setError] = useState(false);
-  const finish = () => {
-    const value = draftRef.current;
-    draftRef.current = null;
-    setDraft(null);
-    const next = value?.trim();
-    if (!next || next === name) return;
-    void Promise.resolve().then(() => onRename(next)).catch(() => setError(true));
-  };
   return (
     <span className="min-w-0">
-      {draft !== null ? (
-        <input
-          autoFocus
-          aria-label="Folder name"
-          className="h-7 w-52 max-w-full rounded-md border border-input bg-transparent px-2 outline-none select-text focus:border-ring"
-          value={draft}
-          onFocus={(e) => e.currentTarget.select()}
-          onChange={(e) => { draftRef.current = e.target.value; setDraft(e.target.value); }}
-          onBlur={finish}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); finish(); }
-            if (e.key === "Escape") { e.preventDefault(); draftRef.current = null; setDraft(null); }
+      {editing ? (
+        <RenameInput
+          value={name}
+          className="h-7 w-52 max-w-full px-2 text-sm"
+          onDone={(next) => {
+            setEditing(false);
+            if (next) void Promise.resolve().then(() => onRename(next)).catch(() => setError(true));
           }}
         />
       ) : (
-        <button type="button" title="Rename folder" className="max-w-full cursor-text truncate rounded-md px-1 hover:bg-muted" onClick={() => { setError(false); draftRef.current = name; setDraft(name); }}>{name}</button>
+        <button type="button" title="Rename folder" className="max-w-full cursor-text truncate rounded-md px-1 hover:bg-muted" onClick={() => { setError(false); setEditing(true); }}>{name}</button>
       )}
       {error && <span role="alert" className="ml-2 text-xs font-normal text-destructive">Could not rename folder.</span>}
     </span>
@@ -509,9 +496,6 @@ export function FolderShelf<F extends DeskFolder>({
   const editingId = renaming ?? ownEditing;
   const setEditingId = onRenamingChange ?? setOwnEditing;
   const [draft, setDraft] = useState("");
-  // The rename field opens on the folder's own name, whoever opened it, and
-  // holds the draft only once it has been typed in.
-  const [draftFor, setDraftFor] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   // Every close path clears the draft, so the next create opens with an empty
   // name field.
@@ -519,11 +503,7 @@ export function FolderShelf<F extends DeskFolder>({
     setDraft("");
     onCreatingChange?.(false);
   };
-  const closeRename = () => {
-    setDraft("");
-    setDraftFor(null);
-    setEditingId(null);
-  };
+  const closeRename = () => setEditingId(null);
 
   const editRowClass = rows
     ? "flex items-center gap-2.5 rounded-lg px-2 py-1.5"
@@ -536,24 +516,15 @@ export function FolderShelf<F extends DeskFolder>({
         const s = statOf(f.id);
         const isOver = over === f.id;
         if (editingId === f.id) {
-          const text = draftFor === f.id ? draft : f.name;
           return (
             <div key={f.id} className={editRowClass} data-no-marquee>
               <FolderGlyph className={editGlyphClass} />
-              <Input
-                autoFocus
-                value={text}
-                className={cn("h-6 text-[11px]", rows ? "flex-1" : "w-full")}
-                onChange={(e) => {
-                  setDraftFor(f.id);
-                  setDraft(e.target.value);
-                }}
-                onBlur={closeRename}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && text.trim()) {
-                    void onRename(f.id, text.trim());
-                    closeRename();
-                  } else if (e.key === "Escape") closeRename();
+              <RenameInput
+                value={f.name}
+                className={cn("text-[11px]", rows ? "flex-1" : "w-full")}
+                onDone={(name) => {
+                  closeRename();
+                  if (name) void onRename(f.id, name);
                 }}
               />
             </div>

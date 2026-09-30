@@ -5,6 +5,7 @@ import path from "node:path";
 import type { ClipSound } from "@donkeycut/effects-kit";
 import { resolveParent, settleParents, subtreeOf } from "@/cut/lib/folderTree";
 import { IMAGE_RE, libraryTypeOf, VIDEO_RE } from "@/cut/lib/libraryFileType";
+import { itemName } from "@/cut/lib/itemName";
 import { isLinkedAssetType, type AssetType } from "@/cut/lib/types";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
@@ -717,13 +718,22 @@ export async function renameTemplate(
   id: string,
   name: string,
 ): Promise<LibraryTemplate> {
-  const trimmed = name.trim();
-  if (!trimmed) throw new Error("Template name required.");
+  const next = itemName(name);
   return mutateIndex((idx) => {
     const template = (idx.templates ?? []).find((t) => t.id === id);
     if (!template) throw new Error("Template not found.");
-    template.name = trimmed.slice(0, 80);
+    template.name = next;
     return template;
+  });
+}
+
+export async function renameAsset(id: string, name: string): Promise<LibraryAsset> {
+  const next = itemName(name);
+  return mutateIndex((idx) => {
+    const asset = idx.assets.find((a) => a.id === id);
+    if (!asset) throw new Error("Library asset not found.");
+    asset.name = next;
+    return asset;
   });
 }
 

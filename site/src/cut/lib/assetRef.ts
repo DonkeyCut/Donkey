@@ -6,7 +6,7 @@ import { folderRef, folderReferenceSchema, projectFolderRef, libraryFolderRefs, 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isLinkedAssetType } from "./types";
 import type React from "react";
-import { libraryAssetName, libraryRouteUrl, type LibraryAsset, type LibraryData } from "./library";
+import { libraryRouteUrl, type LibraryAsset, type LibraryData } from "./library";
 import { libraryLutId, LUT_MARK_ICON } from "./linkedLibrary/luts";
 import { useLibrary, useNotes } from "./queries";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockSfx, type StockVideo } from "./stock";
@@ -177,7 +177,7 @@ export const refFromAsset = (a: MediaAsset): AssetRef => ({
 export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   scope: "library",
   id: a.id,
-  name: a.type === "lut" ? libraryAssetName(a) : a.name,
+  name: a.name,
   // A linked item is no media to point a tool at; the mapping only stays total.
   kind: isLinkedAssetType(a.type) ? "text" : a.type,
   // A ref outlives the session it was made in — it is saved with the chat

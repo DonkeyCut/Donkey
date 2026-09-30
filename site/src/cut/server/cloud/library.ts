@@ -22,6 +22,7 @@ import { getProject, takenMediaNames } from "./projects";
 import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
 import { libraryTypeOf } from "@/cut/lib/libraryFileType";
+import { itemName } from "@/cut/lib/itemName";
 import type { AssetType } from "@/cut/lib/types";
 import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspirationFolderId, redirect, safeFileName } from "./util";
 
@@ -596,12 +597,13 @@ export const libraryCloud = {
     }
   },
 
-  /** Fill in what a row was uploaded without: the duration and pixel size the
-   * page read from the file the first time it cut a clip from the asset. A
-   * value the row already holds stays. */
+  /** Rename the item, or fill in what a row was uploaded without: the
+   * duration and pixel size the page read from the file the first time it cut
+   * a clip from the asset. A measured value the row already holds stays. */
   async updateMeta(userId: string, id: string, req: Request) {
     try {
       const body = (await req.json()) as {
+        name?: string;
         duration?: number;
         width?: number;
         height?: number;
@@ -617,6 +619,13 @@ export const libraryCloud = {
       const positive = (v: unknown) =>
         typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined;
       const meta = { ...((asset.meta ?? {}) as AssetMeta) };
+      // A rename is the name the item goes by from now on. It takes the
+      // title's place too, so a clip titled before it shows the new name and
+      // one not titled yet never gets a title over it.
+      if (body.name !== undefined) {
+        meta.name = itemName(body.name);
+        meta.title = meta.name;
+      }
       const duration = positive(body.duration);
       const width = positive(body.width);
       const height = positive(body.height);
@@ -1066,13 +1075,12 @@ export const libraryCloud = {
   async renameTemplate(userId: string, id: string, req: Request) {
     try {
       const { name } = (await req.json()) as { name?: string };
-      const trimmed = (name ?? "").trim();
-      if (!trimmed) throw new Error("Template name required.");
+      const next = itemName(name);
       const row = await findTemplate(userId, id);
       if (!row) throw new Error("Template not found.");
       const updated = await prisma.cutTemplate.update({
         where: { id },
-        data: { name: trimmed.slice(0, 80) },
+        data: { name: next },
       });
       return Response.json(templateView(updated));
     } catch (e) {

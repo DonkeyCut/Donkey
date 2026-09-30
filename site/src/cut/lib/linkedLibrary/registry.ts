@@ -73,8 +73,8 @@ export interface LinkedKind {
   use?: (key: string, label: string, bytes: ArrayBuffer) => Promise<void>;
   /** Keys that have left the shelf, so the feature can drop them. */
   drop?: (keys: string[]) => void;
-  /** What an item is called, when that is not the shelf row's name. */
-  labelOf?: (a: LibraryAsset) => string;
+  /** Carry a renamed item's new name to the feature already using it. */
+  relabel?: (key: string, label: string) => void;
   /** Folder a new one is filed into when the shelf has one by that name. */
   homeFolder?: string;
   /** Whether a dropped OS file is one of these. */
@@ -148,6 +148,8 @@ let items: LinkedItem[] = [];
 const byAsset = new Map<string, LinkedItem>();
 /** Keys already in use in this process, per kind. */
 const used = new Map<string, Promise<void>>();
+/** The name each item in use was last put to use under. */
+const labels = new Map<string, string>();
 const listeners = new Set<() => void>();
 
 /** One array per kind, held until the listing changes: a subscriber reads this
@@ -218,6 +220,10 @@ function put(
 ): Promise<void> {
   const id = linkId(kind.prefix, key);
   let hit = used.get(id);
+  if (labels.get(id) !== label) {
+    if (hit) void hit.then(() => kind.relabel?.(key, label));
+    labels.set(id, label);
+  }
   if (hit) return hit;
   hit = (kind.use && bytes ? kind.use(key, label, bytes) : Promise.resolve()).catch(
     () => {
@@ -277,7 +283,11 @@ export async function syncLinkedLibrary(): Promise<void> {
     );
   const found = new Map<string, LinkedItem>();
   for (const { a, kind, bytes, key } of ordered) {
-    const label = kind.labelOf?.(a) ?? a.name;
+    const id = linkId(kind.prefix, key);
+    const hit = found.get(id);
+    // The first copy in the order names the item; a later one only stands
+    // in for its bytes.
+    const label = hit?.label ?? a.name;
     await put(kind, key, label, bytes);
     const copy: LinkedCopy = {
       assetId: a.id,
@@ -285,8 +295,6 @@ export async function syncLinkedLibrary(): Promise<void> {
       fileName: a.fileName,
       name: a.name,
     };
-    const id = linkId(kind.prefix, key);
-    const hit = found.get(id);
     if (hit) hit.copies.push(copy);
     else
       found.set(id, {
@@ -298,7 +306,10 @@ export async function syncLinkedLibrary(): Promise<void> {
   }
   const stale = [...used.keys()].filter((id) => !found.has(id));
   if (stale.length) {
-    for (const id of stale) used.delete(id);
+    for (const id of stale) {
+      used.delete(id);
+      labels.delete(id);
+    }
     for (const kind of kinds.values()) {
       const mine = stale.filter((id) => id.startsWith(`${kind.prefix}:`));
       if (mine.length)
@@ -331,6 +342,7 @@ export function forgetLinkedCopy(assetId: string): void {
     else {
       const id = linkId(i.prefix, i.key);
       used.delete(id);
+      labels.delete(id);
       kinds.get(i.prefix)?.drop?.([i.key]);
     }
   }

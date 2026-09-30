@@ -90,6 +90,7 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "PUT", path: "/api/cut/library/folders/:id", handler: (req, p) => libraryApi.updateFolder(req, { id: p.id }) },
   { method: "DELETE", path: "/api/cut/library/folders/:id", handler: (req, p) => libraryApi.deleteFolder(req, { id: p.id }) },
   { method: "GET", path: "/api/cut/library/media/:file", handler: (req, p) => libraryApi.serveMedia(req, { file: p.file }) },
+  { method: "PUT", path: "/api/cut/library/:id", handler: (req, p) => libraryApi.rename(req, { id: p.id }) },
   { method: "DELETE", path: "/api/cut/library/:id", handler: (req, p) => libraryApi.remove(req, { id: p.id }) },
 
   { method: "GET", path: "/api/cut/export-jobs", handler: () => exportApi.activeAll() },

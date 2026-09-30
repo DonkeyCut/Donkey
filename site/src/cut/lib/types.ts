@@ -1257,14 +1257,19 @@ export const FONTS: FontDef[] = [
 const registeredFonts: FontDef[] = [];
 const fontListeners = new Set<() => void>();
 
+/** Add runtime fonts; one registered again under a new label (a renamed font
+ * asset) takes that label. */
 export function registerFonts(defs: FontDef[]): void {
-  let added = false;
+  let changed = false;
   for (const d of defs) {
-    if (FONTS.some((f) => f.id === d.id) || registeredFonts.some((f) => f.id === d.id)) continue;
-    registeredFonts.push(d);
-    added = true;
+    if (FONTS.some((f) => f.id === d.id)) continue;
+    const i = registeredFonts.findIndex((f) => f.id === d.id);
+    if (i >= 0 && registeredFonts[i].label === d.label) continue;
+    if (i >= 0) registeredFonts[i] = { ...registeredFonts[i], label: d.label };
+    else registeredFonts.push(d);
+    changed = true;
   }
-  if (added) for (const cb of fontListeners) cb();
+  if (changed) for (const cb of fontListeners) cb();
 }
 
 /** Remove runtime fonts by id (a deleted font asset drops out of the menu). */

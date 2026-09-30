@@ -1,18 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useState } from "react";
 import { Film } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { importPoster } from "@/cut/lib/importPoster";
 import { holdMemory } from "@/cut/lib/memoryBudget";
 
-type Props = { file: File; size: number };
+type Props = { file: File; size: number; onShape?: (shape: { width: number; height: number }) => void };
 
 /** A local frame while the original file is being imported to any shelf. */
-export function ImportVideoPoster({ file, size }: Props) {
+export function ImportVideoPoster({ file, size, onShape }: Props) {
   const [visible, setVisible] = useState(false);
   const [poster, setPoster] = useState<string>();
   const [unreadable, setUnreadable] = useState(false);
+  const measured = useEffectEvent((shape: { width: number; height: number }) => onShape?.(shape));
   const ref = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
     const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
@@ -25,8 +26,9 @@ export function ImportVideoPoster({ file, size }: Props) {
     const abort = new AbortController();
     let url: string | undefined;
     let release: (() => void) | undefined;
-    void importPoster(file, size, abort.signal).then((blob) => {
+    void importPoster(file, size, abort.signal).then(({ blob, width, height }) => {
       if (abort.signal.aborted) return;
+      if (width && height) measured({ width, height });
       url = URL.createObjectURL(blob);
       release = holdMemory("libraryPictures", () => blob.size + size * size * 4);
       setPoster(url);

@@ -120,10 +120,13 @@ import {
   folderDeleteTakes,
   importLibraryAsset,
   moveLibraryItem,
+  renameTemplate,
   updateLibraryFolder,
   saveAssetToLibrary,
 } from "./library";
 import { forgetLinkedCopies } from "./linkedLibrary";
+import { itemName } from "./itemName";
+import { renameLibraryFile } from "./libraryRename";
 import { fetchNotes } from "./notes";
 import { noteInLibraryFolder } from "./noteReference";
 import {
@@ -4006,6 +4009,22 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           await moveLibraryItem(r, id, folderId);
           return { moved: true, folderId };
         }
+        case "rename_asset": {
+          const id = String(input.id ?? "");
+          const asset = lib.assets.find((a) => a.id === id);
+          if (!asset) throw new ToolError(`No library asset with id ${id}.`);
+          if (!String(input.name ?? "").trim()) throw new ToolError("A name is required.");
+          return { renamed: true, name: await renameLibraryFile(asset, String(input.name), lib.assets) };
+        }
+        case "rename_template": {
+          const id = String(input.id ?? "");
+          const r = lib.templates.find((t) => t.id === id)?.residency;
+          if (!r) throw new ToolError(`No library template with id ${id}.`);
+          if (!String(input.name ?? "").trim()) throw new ToolError("A name is required.");
+          const name = itemName(input.name);
+          await renameTemplate(r, id, name);
+          return { renamed: true, name };
+        }
         case "delete_asset": {
           const id = String(input.id ?? "");
           const r = lib.assets.find((a) => a.id === id)?.residency;
@@ -4075,6 +4094,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             files,
             note: "Its files were removed from the project, with the timeline clips made from them.",
           };
+        }
+        case "rename_asset": {
+          const asset = requireItem(s.assets, input.asset_id, "project asset");
+          if (!String(input.name ?? "").trim()) throw new ToolError("A name is required.");
+          s.renameAsset(asset.id, String(input.name));
+          return { renamed: true, name: useEditor.getState().assets.find((a) => a.id === asset.id)?.name };
         }
         case "move_asset": {
           const folderId =

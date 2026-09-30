@@ -32,7 +32,7 @@ import { ShelfBadge } from "@/cut/components/ShelfBadge";
 import { MEDIA_ACCEPT } from "@/cut/lib/media";
 import { saveNote } from "@/cut/lib/notes";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
-import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
+import { patchLibrary, refetchLibrary, renameInLibrary, useLibrary } from "@/cut/lib/queries";
 import {
   createLibraryFolder,
   deleteFromLibrary,
@@ -877,7 +877,7 @@ export function LibraryView() {
                       <LibraryImportCard
                         key={tile.pending.id}
                         item={tile.pending}
-                        area={tile.pending.mediaType === "audio" ? audioArea : TILE_AREA}
+                        area={tile.pending.mediaType === "video" || tile.pending.mediaType === "image" ? TILE_AREA : audioArea}
                         onRetry={() => retryPending(tile.pending)}
                         onDismiss={() => dropPending(tile.pending.id)}
                       />
@@ -906,6 +906,11 @@ export function LibraryView() {
                       }}
                       onDelete={
                         live(a.residency) ? () => setDeleting(setOf(a)) : undefined
+                      }
+                      onRename={
+                        live(a.residency)
+                          ? (name) => renameInLibrary(client, a, name)
+                          : undefined
                       }
                       onDragStartExtra={(e) => onCardDragExtra(e, a)}
                     />

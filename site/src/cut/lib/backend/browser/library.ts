@@ -13,6 +13,7 @@
 // hosted twin.
 import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
 import { libraryTypeOf } from "../../libraryFileType";
+import { itemName } from "../../itemName";
 import type {
   AssetType,
   LibraryTemplate,
@@ -617,18 +618,34 @@ async function addToTemplate(req: Request, id: string): Promise<Response> {
 async function renameTemplate(req: Request, id: string): Promise<Response> {
   try {
     const { name } = (await req.json()) as { name?: string };
-    const trimmed = (name ?? "").trim();
-    if (!trimmed) return err("Template name required.", 500);
+    const next = itemName(name);
     return json(
       await mutateIndex((idx) => {
         const template = idx.templates.find((t) => t.id === id);
         if (!template) throw new Error("Template not found.");
-        template.name = trimmed.slice(0, 80);
+        template.name = next;
         return template;
       }),
     );
   } catch (e) {
     return caught(e, "Could not rename the template.");
+  }
+}
+
+async function renameAsset(req: Request, id: string): Promise<Response> {
+  try {
+    const { name } = (await req.json()) as { name?: string };
+    const next = itemName(name);
+    return json(
+      await mutateIndex((idx) => {
+        const asset = idx.assets.find((a) => a.id === id);
+        if (!asset) throw new Error("Library asset not found.");
+        asset.name = next;
+        return asset;
+      }),
+    );
+  } catch (e) {
+    return caught(e, "Could not rename the file.");
   }
 }
 
@@ -699,5 +716,6 @@ export async function dispatchLibraryRoute(
 
   // /library/:id
   if (rest.length === 1 && method === "DELETE") return removeAsset(rest[0]);
+  if (rest.length === 1 && method === "PUT") return renameAsset(req(), rest[0]);
   return null;
 }

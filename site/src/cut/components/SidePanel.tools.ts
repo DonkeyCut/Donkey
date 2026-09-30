@@ -48,14 +48,15 @@ export const SIDE_PANEL_TOOLS = [
   {
     name: "media_organize",
     description:
-      "Organize the Media panel's Project Files with folders (this project only; the shared Library has library_organize): create_folder / rename_folder / delete_folder (permanent: every file in the folder is removed from the project, and the timeline clips made from them go too), move_asset files user-imported media into a folder (omit folder_id for the top level). Folders and each asset's folderId are in `media` / `mediaFolders` from get_state. create_folder can take asset_ids to file into the new folder in the same call.",
+      "Organize the Media panel's Project Files with folders (this project only; the shared Library has library_organize): create_folder / rename_folder / delete_folder (permanent: every file in the folder is removed from the project, and the timeline clips made from them go too), move_asset files user-imported media into a folder (omit folder_id for the top level), rename_asset renames any project asset. Folders and each asset's folderId are in `media` / `mediaFolders` from get_state. create_folder can take asset_ids to file into the new folder in the same call.",
     inputSchema: obj({
       action: {
         type: "string",
-        enum: ["create_folder", "rename_folder", "delete_folder", "move_asset"],
+        enum: ["create_folder", "rename_folder", "delete_folder", "move_asset", "rename_asset"],
         description: "The organize operation",
       },
-      name: str("Folder name (create_folder, rename_folder)"),
+      name: str("New name (create_folder, rename_folder, rename_asset)"),
+      asset_id: str("Project asset id from `media` (rename_asset)"),
       folder_id: str("Media folder id (rename_folder, delete_folder, move_asset destination — omit for the top level)"),
       asset_ids: {
         type: "array",

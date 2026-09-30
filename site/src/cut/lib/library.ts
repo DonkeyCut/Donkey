@@ -15,6 +15,7 @@ import { subtreeOf } from "./folderTree";
 import { normalizeLink } from "./link";
 import { installFontFace } from "./fontAssets";
 import { fontLabelFor } from "./fontName";
+import { itemName } from "./itemName";
 import { SPECIMEN_FILE_SUFFIX, specimenPng } from "./fontSpecimen";
 import {
   enrichAsset,
@@ -54,10 +55,9 @@ import { IMAGE_CLIP_SECONDS, isLinkedAssetType, mediaUrl } from "./types";
  * the tool that wrote it put there. */
 export const lutFileName = (fileName: string) => fileName.replace(/\.[^.]+$/, "");
 
-/** What a Library file is called wherever it is shown: a LUT by its file name,
- * a clip by the title read off it, anything else by its name. */
-export const libraryAssetName = (a: Pick<LibraryAsset, "type" | "fileName" | "name" | "title">) =>
-  a.type === "lut" ? lutFileName(a.fileName) : a.title || a.name;
+/** What a Library file is called wherever it is shown: a clip by the title
+ * read off it, anything else by its name. */
+export const libraryAssetName = (a: Pick<LibraryAsset, "name" | "title">) => a.title || a.name;
 
 export interface LibrarySource {
   url: string;
@@ -1084,6 +1084,28 @@ export async function renameTemplate(
     },
   );
   if (!res.ok) throw new Error("Could not rename the template.");
+}
+
+/** Rename a Library file on its own shelf. Every kind takes the same call. */
+export async function renameLibraryAsset(
+  residency: Residency,
+  id: string,
+  name: string,
+): Promise<void> {
+  const res = await backendFor(residency).fetch(
+    `/api/cut/library/${encodeURIComponent(id)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: itemName(name) }),
+    },
+  );
+  if (res.ok) return;
+  const error = (await apiJson<unknown>(res)).error;
+  // An engine from before renames answers the route with nothing.
+  if (!error && residency === "local" && (res.status === 404 || res.status === 405))
+    throw new Error("Update the Donkey app to rename files on this Mac.");
+  throw new Error(error ?? "Could not rename the file.");
 }
 
 export async function deleteTemplate(

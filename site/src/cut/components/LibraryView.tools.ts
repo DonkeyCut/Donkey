@@ -87,17 +87,17 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_organize",
     description:
-      "Organize the shared Library. Folders nest: create_folder makes one at the root or inside parent_id, rename_folder renames, move_folder files a folder under another (omit parent_id for the root; never into itself or a folder inside it), delete_folder deletes one with everything in it — its folders and every item and note they hold — permanently; a camera clip filed there stays in Camera Roll, and an inspiration item in it leaves the phone too. move_asset files an asset or template into a folder (omit folder_id for the root), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"camera\" or \"inspiration\" takes it off the user's phone as well.",
+      "Organize the shared Library. Folders nest: create_folder makes one at the root or inside parent_id, rename_folder renames, move_folder files a folder under another (omit parent_id for the root; never into itself or a folder inside it), delete_folder deletes one with everything in it — its folders and every item and note they hold — permanently; a camera clip filed there stays in Camera Roll, and an inspiration item in it leaves the phone too. move_asset files an asset or template into a folder (omit folder_id for the root), rename_asset / rename_template rename an item (any file kind — video, audio, image, font, LUT — and a font or LUT keeps its new name in its menu), delete_asset / delete_template remove an item. Deletes are permanent — projects keep their own copies, but delete only what the user explicitly asked to remove. Deleting an asset with origin \"camera\" or \"inspiration\" takes it off the user's phone as well.",
     inputSchema: obj({
       action: {
         type: "string",
-        enum: ["create_folder", "rename_folder", "move_folder", "delete_folder", "move_asset", "delete_asset", "delete_template"],
+        enum: ["create_folder", "rename_folder", "move_folder", "delete_folder", "move_asset", "rename_asset", "rename_template", "delete_asset", "delete_template"],
         description: "The organize operation",
       },
-      name: str("Folder name (create_folder, rename_folder)"),
+      name: str("New name (create_folder, rename_folder, rename_asset, rename_template)"),
       folder_id: str("Folder id (rename_folder, move_folder, delete_folder, move_asset destination — omit for root)"),
       parent_id: str("The folder to file a folder inside (create_folder, move_folder) — omit for the root"),
-      id: str("Library asset or template id (move_asset, delete_asset, delete_template)"),
+      id: str("Library asset or template id (move_asset, rename_asset, rename_template, delete_asset, delete_template)"),
     }, ["action"]),
   },
 ] as const satisfies readonly AiToolDef[];

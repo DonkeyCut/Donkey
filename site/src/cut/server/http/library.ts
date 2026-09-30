@@ -13,6 +13,7 @@ import {
   moveItem,
   removeAsset,
   updateFolder,
+  renameAsset,
   renameTemplate,
   saveTemplate,
   copyLibraryAssetToProject,
@@ -99,6 +100,15 @@ export const libraryApi = {
       return Response.json(await renameTemplate(id, name ?? ""));
     } catch (e) {
       return caught(e, "Could not rename the template.");
+    }
+  },
+
+  async rename(req: Request, { id }: { id: string }) {
+    try {
+      const { name } = (await req.json()) as { name?: string };
+      return Response.json(await renameAsset(id, name ?? ""));
+    } catch (e) {
+      return caught(e, "Could not rename the file.");
     }
   },
 
