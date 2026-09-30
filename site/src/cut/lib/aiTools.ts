@@ -28,7 +28,9 @@ import { textSpots } from "./textPlace";
 import {
   OUTPUT_SPACES,
   ALL_EFFECT_IDS,
+  applyLutToImageData,
   autoGradeFromImageData,
+  buildClipLut,
   colorStatsFromImageData,
   GRADE_BASIC_FIELDS,
   GRADE_DETAIL_FIELDS,
@@ -177,7 +179,7 @@ import { clampLayersToAssets, mediaTypeFits, templateFromDoc } from "./projectTe
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
 import { isGradePresetTemplate, listSavedGrades, saveGradePreset } from "./gradePresets";
 import { isStylePresetTemplate } from "./stylePresets";
-import { lutLabel } from "./linkedLibrary";
+import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
 import { sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
 import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
@@ -372,10 +374,11 @@ const GRADE_KEYS = [
 
 /** Color stats for a grading reference: a clip's current frame as the base
  * rendering (through the source conversion, before any grade — what Auto
- * reads) or an image asset's pixels. */
+ * reads), or `graded` through the clip's LUT, preset and adjustments too, or
+ * an image asset's pixels. */
 async function colorStatsForRef(
   s: ReturnType<typeof useEditor.getState>,
-  ref: { clipId?: string; assetId?: string }
+  ref: { clipId?: string; assetId?: string; graded?: boolean }
 ): Promise<ColorStats> {
   if (ref.clipId) {
     const clip = requireItem(s.clips, ref.clipId, "video clip");
@@ -384,6 +387,14 @@ async function colorStatsForRef(
       throw new ToolError(
         "No decoded frame for that clip yet — seek into it so it is on screen, then retry."
       );
+    if (ref.graded && clip.grade) {
+      // The same recipe the Color panel's tiles draw with: the base rendering
+      // through the clip's LUT, preset and adjustments.
+      const lutId = lutIdOf(clip.grade);
+      const userLut = lutId ? await loadLibraryLut(lutId) : undefined;
+      const lut = buildClipLut({ profile: "rec709", grade: clip.grade, output: "sdr", size: 33 }, userLut);
+      if (lut) applyLutToImageData(data, lut);
+    }
     const stats = colorStatsFromImageData(data);
     if (!stats) throw new ToolError("Could not read pixels off that clip's frame.");
     return stats;
@@ -4719,6 +4730,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const stats = await colorStatsForRef(s, {
         clipId: typeof input.clipId === "string" ? input.clipId : undefined,
         assetId: typeof input.assetId === "string" ? input.assetId : undefined,
+        graded: input.graded === true,
       });
       return statsReport(stats);
   },
@@ -4838,7 +4850,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         id: next.id,
         grade: next.grade ?? "already matched (no change needed)",
-        note: "Verify with read_color_stats on the clip and refine with the grading tools.",
+        note: "Verify with read_color_stats graded:true on the clip and capture_frame, then refine with the grading tools.",
       };
   },
 

@@ -44,6 +44,12 @@ await stubModule<typeof import("./gradePresets")>("./gradePresets", import.meta.
   },
 });
 
+// A flat mid-grey frame stands in for a decoded clip frame, so the stats
+// tool reads known pixels.
+await stubModule<typeof import("./baseFrame")>("./baseFrame", import.meta.url, {
+  sampleClipBaseFrameData: (_clipId, w = 96, h = 54) => new Uint8ClampedArray(w * h * 4).fill(128),
+});
+
 const { runAiTool } = await import("./aiTools");
 const { useEditor } = await import("./store");
 const { syncLinkedLibrary } = await import("./linkedLibrary");
@@ -173,4 +179,14 @@ test("save_color_grade keeps the grade under a name and apply_saved_grade puts i
   expect(out.ran).toBe(2);
   expect(gradeOf(c)).toEqual({ temperature: 15 });
   await expect(runAiTool("apply_saved_grade", { clipId: b, preset_id: "cold" })).rejects.toThrow(/No saved grade/);
+});
+
+test("read_color_stats reads the base frame, and graded:true reads it through the clip's grade", async () => {
+  const [, id] = clipIds();
+  await runAiTool("set_color_grade", { clipId: id, temperature: 40 });
+  type Stats = { warmth: number };
+  const base = (await runAiTool("read_color_stats", { clipId: id })) as Stats;
+  const graded = (await runAiTool("read_color_stats", { clipId: id, graded: true })) as Stats;
+  expect(base.warmth).toBe(1);
+  expect(graded.warmth).toBeGreaterThan(1.05);
 });

@@ -477,10 +477,11 @@ export const INSPECTOR_TOOLS = [
   {
     name: "read_color_stats",
     description:
-      "Read color statistics off a frame — per-channel and luma quantiles (0..255), channel means, mean saturation, and warmth (red/blue midtone ratio; >1 warm, <1 cool). Pass clipId for a video clip's current frame as its base rendering (through the source conversion, before any LUT or grade, so the numbers describe the footage itself; seek into the clip first if it errors) or assetId for an image (a chat attachment or Media import). Read stats before grading — never grade blind — and read them again after to verify the move.",
+      "Read color statistics off a frame — per-channel and luma quantiles (0..255), channel means, mean saturation, and warmth (red/blue midtone ratio; >1 warm, <1 cool). Pass clipId for a video clip's current frame (seek into the clip first if it errors) or assetId for an image (a chat attachment or Media import). A clip reads as its base rendering — through the source conversion, before any LUT or grade, so the numbers describe the footage itself; graded:true reads it through the clip's LUT, preset and adjustments, which is how a move is verified. Read the base before grading — never grade blind — and the graded frame after.",
     inputSchema: obj({
-      clipId: str("Video clip id (its current frame's base rendering)"),
+      clipId: str("Video clip id (its current frame)"),
       assetId: str("Image asset id (chat attachment or import)"),
+      graded: bool("Read the clip as graded (LUT, preset and adjustments applied) to verify a move; default reads the ungraded base"),
     }),
   },
   {
