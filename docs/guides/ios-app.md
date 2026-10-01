@@ -49,9 +49,9 @@ as it lands — so a reel stands tall beside a landscape clip, and the grid
 deals cards into whichever of its two columns is shorter. A card always says where its link stands: waiting to be handed over,
 fetching, or failed with the reason and a way to try again. Every attempt that
 fails writes that reason on the item, so a card can never spin on a request
-nothing is making any more. Notes merge by edit stamp; tombstones carry offline deletions. Folder ids come from the creating device, parents sync first, and deleting a folder deletes everything in it. Labels travel with each note; deleted labels disappear everywhere, and writes above twenty labels fail.
+nothing is making any more. Notes merge by edit stamp; tombstones carry offline deletions. Folder ids come from the creating device and parents sync first; deleting a folder deletes its contents. Labels travel with each note; deleted labels disappear everywhere, and writes above twenty labels fail.
 
-The desktop Library creates notes through its context menu and existing note editor; notes stay cloud-synced, with Library placement stored independently of phone folders and preserved when a phone edits their text.
+A note's Library placement is kept apart from phone folders, and a phone edit leaves it in place. Note bodies are one-block-per-line Markdown, specified in `site/src/cut/lib/noteMarkdown.ts`, which every surface reads, teleprompter included.
 
 Deletes on the shelf run both ways. A synced recording deleted on the phone
 takes the cloud copy with it, and a clip deleted at the desk — from the Camera
@@ -61,9 +61,8 @@ thing: an asset the storage sweep reclaimed carries no tombstone, so the phone
 keeps the clip it shot, forgets the cloud copy, and sends it back up once there
 is room.
 
-Notes are written at the desk as well as here, so the phone pulls on a clock
-of its own while it is on screen, and pull to refresh runs the same pass at
-once.
+While on screen the phone pulls notes on its own clock; pull to refresh pulls
+at once.
 
 A pass that ends with work still queued — a request that timed out, a 5xx —
 books its own next try and backs off, up to five minutes between attempts, so
