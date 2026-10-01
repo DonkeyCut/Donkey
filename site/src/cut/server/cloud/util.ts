@@ -41,12 +41,20 @@ export const wantsDownload = (req: Request) => new URL(req.url).searchParams.has
 
 /** Sanitize an upload name the way the engine's saveMedia does. */
 export function safeFileName(original: string): string {
+  const base = storableFileName(original);
+  if (!base) throw new Error("Invalid file name.");
+  return base;
+}
+
+/** The sanitized name, or null for one no object can be stored under — an
+ * empty name, which a block asset carries, or a dotfile. Batch reads skip
+ * these so one fileless asset leaves the rest of the batch signed. */
+export function storableFileName(original: string): string | null {
   const base = path
     .basename(original)
     .replace(/[^\w.\-() ]+/g, "_")
     .slice(-80);
-  if (!base || base.startsWith(".")) throw new Error("Invalid file name.");
-  return base;
+  return base && !base.startsWith(".") ? base : null;
 }
 
 /** A URL path segment decoded and checked: no separators, no dotfiles. */

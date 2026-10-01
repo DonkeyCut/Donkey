@@ -7,7 +7,7 @@ import { mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { getProject, takenMediaNames } from "./projects";
 import { head, presignPut, projectMediaKey, putObject } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
-import { caught, dedupeName, err, safeFileName } from "./util";
+import { caught, dedupeName, err, safeFileName, storableFileName } from "./util";
 
 /** Direct-upload cap: anything larger goes through presign. */
 const INLINE_UPLOAD_BYTES = 3.5 * 1024 * 1024;
@@ -177,8 +177,8 @@ export const mediaCloud = {
         rows.map((r) => [`${r.projectId}/${r.fileName}`, String(r.updatedAt.getTime())])
       );
       const urls = wanted.flatMap((i) => {
-        const fileName = safeFileName(i.fileName!);
-        const version = versions.get(`${i.projectId}/${fileName}`);
+        const fileName = storableFileName(i.fileName!);
+        const version = fileName && versions.get(`${i.projectId}/${fileName}`);
         if (!version) return [];
         return [
           {

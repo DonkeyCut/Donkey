@@ -24,7 +24,7 @@ import { addUsage, quotaCheck } from "./usage";
 import { libraryTypeOf } from "@/cut/lib/libraryFileType";
 import { itemName } from "@/cut/lib/itemName";
 import type { AssetType } from "@/cut/lib/types";
-import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspirationFolderId, redirect, safeFileName } from "./util";
+import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspirationFolderId, redirect, safeFileName, storableFileName } from "./util";
 
 /** Cap on one signed-URL batch, matching the project media batch. */
 const PRESIGN_GET_BATCH_MAX = 500;
@@ -707,9 +707,7 @@ export const libraryCloud = {
       if (files.length > PRESIGN_GET_BATCH_MAX) return err("Too many files.", 400);
       const wanted = [
         ...new Set(
-          files
-            .filter((f): f is string => typeof f === "string")
-            .map((f) => safeFileName(f)),
+          files.flatMap((f) => (typeof f === "string" ? (storableFileName(f) ?? []) : [])),
         ),
       ];
       const rows = wanted.length
