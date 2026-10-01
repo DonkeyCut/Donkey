@@ -27,3 +27,10 @@ export function bindCutClip(value: unknown): void {
   if (parsed.success) clip = parsed.data;
 }
 export function cutClip(): Settings["cutClip"] { return clip; }
+
+let notes: Settings["cutNotes"] = SETTINGS.cutNotes.default;
+export function bindCutNotes(value: unknown): void {
+  const parsed = SETTINGS.cutNotes.schema.safeParse(value);
+  if (parsed.success) notes = parsed.data;
+}
+export function cutNotes(): Settings["cutNotes"] { return notes; }

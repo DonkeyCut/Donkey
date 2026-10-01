@@ -24,6 +24,7 @@ import {
   type CutNoteFolder,
 } from "@/cut/lib/notes";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
+import { cutNotes } from "@/cut/lib/chatRuntime";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
@@ -32,6 +33,7 @@ import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
 import { DeleteConfirm, foldersGoNote } from "./selectionMenu";
 import { LIBRARY_SQUARE } from "./LibraryCard";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
+import { NoteBodyPreview } from "./NoteBodyPreview";
 
 // The note paper's ink, matching the iOS app.
 const NOTE_INK = "#201a0d";
@@ -45,8 +47,8 @@ const NOTE_FOLDERS_MOVE_MIME = "application/x-donkey-note-folders";
 /** Write a note out. The list shows it the moment it is written, and the
  * server's answer — this write, or a newer one from the phone — replaces it.
  * False means the write was lost and the list has to be read again. A note
- * with nothing in it, or one that comes back untouched, is left alone, so
- * opening a note to read it keeps the list in the order it had.
+ * that comes back untouched is left alone, so opening a note to read it keeps
+ * the list in the order it had.
  *
  * `settleFolder` waits on a folder's own write, so the server knows the folder
  * by the time a note names it. */
@@ -57,13 +59,12 @@ async function writeNote(
   settleLabels: (labelIds: string[]) => Promise<string[]>,
 ): Promise<boolean> {
   const { id, title, body, colorIndex, folderId, labelIds, libraryLocation } = d;
-  if (!title.trim() && !body.trim()) return true;
   if (!noteChanged(d)) return true;
   const now = Date.now();
   const optimistic: CutNote = {
     id,
-    title: title.trim() || "Untitled",
-    body: body.trim(),
+    title: title.trim(),
+    body: body.trimEnd(),
     colorIndex,
     folderId,
     labelIds,
@@ -92,7 +93,6 @@ async function writeNote(
     colorIndex,
     folderId,
     labelIds: live,
-    ...(d.isNew ? { libraryLocation } : {}),
   }).catch(() => null);
   if (!saved) return false;
   patchNotes(client, (prev) => ({
@@ -110,6 +110,20 @@ const mintLabel = (name: string) => ({
   createdAt: Date.now(),
 });
 
+/** A new note with nothing in it yet, stamped now. */
+const blankNote = (folderId: string | null, libraryLocation: NoteLocation | null): CutNote => ({
+  id: crypto.randomUUID(),
+  title: "",
+  body: "",
+  colorIndex: 0,
+  folderId,
+  libraryLocation,
+  labelIds: [],
+  updatedAt: Date.now(),
+  deletedAt: null,
+  createdAt: Date.now(),
+});
+
 /** A stored note, opened for editing. */
 const draftOf = (n: CutNote): NoteDraft => ({
   id: n.id,
@@ -119,7 +133,6 @@ const draftOf = (n: CutNote): NoteDraft => ({
   folderId: n.folderId ?? null,
   labelIds: n.labelIds,
   libraryLocation: n.libraryLocation,
-  isNew: false,
   saved: { title: n.title, body: n.body, colorIndex: n.colorIndex, labelIds: n.labelIds },
 });
 
@@ -147,6 +160,22 @@ export function NotesView({ library, ref }: Props = {}) {
   const edit = (d: NoteDraft) => {
     buffer.current = d;
     setEditing(d);
+  };
+  // A folder tile is on screen the moment it is made, so a note can be filed
+  // into it while its own write is still in flight. The write is held here
+  // and awaited before any note names that folder, so the server knows the
+  // folder by the time it has to resolve the id.
+  const folderWrites = useRef(new Map<string, Promise<unknown>>());
+  const settleFolder = async (folderId: string | null) => {
+    if (folderId) await folderWrites.current.get(folderId);
+  };
+  // Every note write runs after the one before it, so the server and the list
+  // take them in the order they were made.
+  const writes = useRef<Promise<unknown>>(Promise.resolve());
+  const queue = <T,>(job: () => Promise<T>): Promise<T> => {
+    const run = writes.current.then(job);
+    writes.current = run;
+    return run;
   };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [folderCreating, setFolderCreating] = useState(false);
@@ -230,33 +259,36 @@ export function NotesView({ library, ref }: Props = {}) {
     pushedNote.current = true;
   };
 
+  /** Make a blank note and open it. It is written at once, so it is a note
+   * from the moment it is asked for, and every save after this one edits it. */
   const openNew = () => {
-    const id = crypto.randomUUID();
-    edit({
-      id,
-      title: "",
-      body: "",
-      colorIndex: 0,
-      // A note written inside a folder is filed there.
-      folderId: openFolder,
-      ...(library ? { libraryLocation: { folderId: library.folderId, residency: library.residency } satisfies NoteLocation } : {}),
-      labelIds: [],
-      isNew: true,
-      saved: { title: "", body: "", colorIndex: 0, labelIds: [] },
+    // A note written inside a folder is filed there.
+    const note = blankNote(openFolder, library ? { folderId: library.folderId, residency: library.residency } : null);
+    patchNotes(client, (prev) => ({ ...prev, notes: [note, ...prev.notes] }));
+    edit(draftOf(note));
+    openAt(note.id);
+    const folderId = openFolder;
+    void queue(async () => {
+      await settleFolder(folderId);
+      const saved = await saveNote({
+        id: note.id,
+        title: "",
+        body: "",
+        colorIndex: 0,
+        folderId,
+        labelIds: [],
+        ...(library ? { libraryLocation: note.libraryLocation } : {}),
+      }).catch(() => null);
+      if (!saved) return reload();
+      patchNotes(client, (prev) => ({
+        ...prev,
+        notes: prev.notes.map((n) => (n.id === note.id ? saved : n)),
+      }));
     });
-    openAt(id);
   };
   const openNote = (n: CutNote) => openAt(n.id);
   useImperativeHandle(ref, () => ({ create: openNew }));
 
-  // A folder tile is on screen the moment it is made, so a note can be filed
-  // into it while its own write is still in flight. The write is held here
-  // and awaited before any note names that folder, so the server knows the
-  // folder by the time it has to resolve the id.
-  const folderWrites = useRef(new Map<string, Promise<unknown>>());
-  const settleFolder = async (folderId: string | null) => {
-    if (folderId) await folderWrites.current.get(folderId);
-  };
   // The same holds for labels: one made in the picker is on the note at once,
   // and its own write is awaited before a note carries the id to the server.
   // A write that failed answers false, and the id it minted never reaches a
@@ -333,12 +365,20 @@ export function NotesView({ library, ref }: Props = {}) {
     void deleteNoteLabel(id).catch(() => reload());
   };
 
-  /** Write a note out and let go of it. */
-  const commit = (d: NoteDraft) => {
-    setEditing(null);
-    void writeNote(client, d, settleFolder, settleLabels).then((ok) => {
-      if (!ok) setFailedDraft(d);
-      else { setFailedDraft(null); reload(); }
+  /** Write the draft as it stands, after any write still in flight. The open
+   * draft takes what was sent as its baseline, so the next save writes only a
+   * real change; a lost write hands the old baseline back, so the next save
+   * tries again. A note already closed when its write is lost offers a retry. */
+  const save = (d: NoteDraft): Promise<boolean> => {
+    if (!noteChanged(d)) return Promise.resolve(true);
+    const sent = { title: d.title.trim(), body: d.body.trimEnd(), colorIndex: d.colorIndex, labelIds: d.labelIds };
+    if (buffer.current?.id === d.id) edit({ ...buffer.current, saved: sent });
+    return queue(() => writeNote(client, d, settleFolder, settleLabels)).then((ok) => {
+      const held = buffer.current;
+      if (ok) setFailedDraft(null);
+      else if (held?.id !== d.id) setFailedDraft(d);
+      else if (held.saved === sent) edit({ ...held, saved: d.saved });
+      return ok;
     });
   };
 
@@ -351,24 +391,43 @@ export function NotesView({ library, ref }: Props = {}) {
       window.history.replaceState(null, "", notesHref(openFolder));
     }
   };
-  /** Write whatever the composer holds and let go of it. */
+  // A typed edit saves once the note has sat still for the autosave delay.
+  const autosave = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdAutosave = () => {
+    if (autosave.current) clearTimeout(autosave.current);
+    autosave.current = null;
+  };
+  const change = (d: NoteDraft) => {
+    edit(d);
+    holdAutosave();
+    autosave.current = setTimeout(() => {
+      autosave.current = null;
+      if (buffer.current) void save(buffer.current);
+    }, cutNotes().autosaveMs);
+  };
+
+  /** Save whatever the composer holds one last time and let go of it. */
   const letGo = () => {
+    holdAutosave();
     const d = buffer.current;
     buffer.current = null;
     setEditing(null);
-    if (d) commit(d);
+    if (d) void save(d).then((ok) => ok && reload());
   };
   const remove = () => {
     const d = draft;
+    holdAutosave();
     buffer.current = null;
     setEditing(null);
     popNote();
-    if (!d || d.isNew) return;
+    if (!d) return;
     patchNotes(client, (prev) => ({
       ...prev,
       notes: prev.notes.filter((n) => n.id !== d.id),
     }));
-    void deleteNote(d.id).catch(() => reload());
+    // Behind any save still queued for it, whose later stamp would bring
+    // the note back.
+    void queue(() => deleteNote(d.id).catch(() => reload()));
   };
 
   /** File a set of notes into a folder (or back to the top level). Each note
@@ -451,14 +510,20 @@ export function NotesView({ library, ref }: Props = {}) {
   useEffect(() => {
     closing.current = letGo;
   });
-  /** Done, Escape, or the back arrow. */
+  /** Escape or the back arrow. */
   const closeNote = () => {
     letGo();
     popNote();
   };
 
+  // The note editor's code arrives while the list is up, so the first note
+  // opens as fast as the rest.
+  useEffect(() => {
+    void import("./NoteBodyEditor");
+  }, []);
+
   // Leaving the page (the sidebar, another tab) writes the open note the same
-  // way its own Done does, so a draft is never dropped.
+  // way its back arrow does, so a draft is never dropped.
   useEffect(() => () => closing.current(), []);
 
   // Back and forward are how a note closes, so the browser's own event is what
@@ -515,11 +580,12 @@ export function NotesView({ library, ref }: Props = {}) {
           behind it, so closing comes back to the same scroll position. */}
       {draft && (
         <NoteComposer
+          key={draft.id}
           draft={draft}
           back={library?.name ?? draftFolderName ?? "All notes"}
           from={pageRef}
           labels={labels}
-          onChange={edit}
+          onChange={change}
           onClose={closeNote}
           onDelete={remove}
           onCreateLabel={createLabel}
@@ -658,7 +724,7 @@ export function NotesView({ library, ref }: Props = {}) {
                 onClick={() => openNote(n)}
               >
                 {n.title && <div className="truncate text-[13px] font-semibold">{n.title}</div>}
-                <div className="line-clamp-5 text-[12px] whitespace-pre-wrap opacity-80">{n.body}</div>
+                <NoteBodyPreview body={n.body} lines={5} className="text-[12px] opacity-80" />
                 {worn.length > 0 && (
                   <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
                     {worn.map((name) => (

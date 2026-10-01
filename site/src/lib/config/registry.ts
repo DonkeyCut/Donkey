@@ -292,6 +292,13 @@ export const SETTINGS = defineSettings({
     description:
       "How a talk or an interview is read for the moments worth cutting a short from: what a clip may run, how widely the first sweep looks, how many moments earn the close read, and what the ranking weighs.",
   },
+  cutNotes: {
+    schema: z.object({ autosaveMs: z.number().int().min(200).max(10000) }).strict(),
+    default: { autosaveMs: 800 },
+    public: true,
+    title: "Notes",
+    description: "How long a note sits still after the last keystroke before it saves.",
+  },
   cutColor: {
     schema: z
       .object({

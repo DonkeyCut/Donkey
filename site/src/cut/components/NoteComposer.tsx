@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type React from "react";
 import type { NoteLocation } from "@/cut/lib/noteReference";
 import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
+import type { Editor } from "@tiptap/react";
 import { ArrowLeft, Check, ChevronDown, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +22,10 @@ import { cn } from "@/lib/utils";
 // The note paper's ink, matching the iOS app.
 const NOTE_INK = "#201a0d";
 
+// The rich text editor loads with the first note opened, off the list's own
+// bundle.
+const NoteBodyEditor = dynamic(() => import("./NoteBodyEditor"), { ssr: false });
+
 export interface NoteDraft {
   libraryLocation?: NoteLocation | null;
   id: string;
@@ -28,9 +34,8 @@ export interface NoteDraft {
   colorIndex: number;
   folderId: string | null;
   labelIds: string[];
-  isNew: boolean;
-  /** What the note held when it opened. A draft that still matches closes
-   * without a write, so opening a note to read it leaves the list alone. */
+  /** What the server last took from this draft. A draft that still matches
+   * writes nothing, so opening a note to read it leaves the list alone. */
   saved: { title: string; body: string; colorIndex: number; labelIds: string[] };
 }
 
@@ -44,9 +49,29 @@ const labelKey = (ids: string[]) => [...new Set(ids)].sort().join("\n");
 /** True when the draft holds something the stored note does not. */
 export const noteChanged = (d: NoteDraft) =>
   d.title.trim() !== d.saved.title ||
-  d.body.trim() !== d.saved.body ||
+  d.body.trimEnd() !== d.saved.body ||
   d.colorIndex !== d.saved.colorIndex ||
   labelKey(d.labelIds) !== labelKey(d.saved.labelIds);
+
+const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+// A file let go over the paper lands nowhere; left to the browser, it would
+// open the file in place of the app.
+const stopFile = (e: React.DragEvent) => {
+  e.stopPropagation();
+  if (Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
+};
+/** The events the page behind the sheet listens for. */
+const KEEP_EVENTS = {
+  onContextMenu: stop,
+  onPointerDown: stop,
+  onMouseDown: stop,
+  onClick: stop,
+  onKeyDown: stop,
+  onDragEnter: stop,
+  onDragOver: stopFile,
+  onDragLeave: stop,
+  onDrop: stopFile,
+};
 
 /** The box that scrolls around `node`: the app shell gives each page a main
  * column with its own scrollbar, and the document itself scrolls only where
@@ -82,8 +107,9 @@ function useAutoGrow(value: string) {
 /** The note itself, over the whole window: a sheet of paper with a title, a
  * body that runs as long as it needs to, and the paper's color on a menu. It
  * covers the app — sidebar and all — so writing a note is the only thing on
- * screen, and the page behind it holds still while it is open. Closing it —
- * the back arrow, Done, or Escape — hands the draft back to be saved. */
+ * screen, and the page behind it holds still while it is open. Every edit
+ * saves on its own; closing it — the back arrow or Escape — saves it once
+ * more. */
 export function NoteComposer({
   draft,
   back,
@@ -116,7 +142,12 @@ export function NoteComposer({
 }) {
   const paper = noteColor(draft.colorIndex);
   const titleRef = useAutoGrow(draft.title);
-  const bodyRef = useAutoGrow(draft.body);
+  const body = useRef<Editor | null>(null);
+  // The draft as of the last render, for the editor's change handler.
+  const draftRef = useRef(draft);
+  useEffect(() => {
+    draftRef.current = draft;
+  });
   // While the label picker is up, Escape is its to close.
   const [picking, setPicking] = useState(false);
 
@@ -159,14 +190,16 @@ export function NoteComposer({
     };
   }, [from]);
 
-  // Portaled to the body so the sheet covers the app: a press on the paper is
-  // a press on the note, and it never reaches the list's rubber-band selection
-  // underneath.
+  // Portaled to the body so the sheet covers the app. React still bubbles a
+  // portal's events up to the page that rendered it, so the sheet stops them
+  // here: a right-click, a press or a file dropped on the paper belongs to the
+  // note, never to the page's menu, rubber-band selection or import.
   return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-label={draft.title.trim() || "Untitled note"}
+      {...KEEP_EVENTS}
       className="fixed inset-0 z-50 flex flex-col font-system antialiased"
       style={{ backgroundColor: paper.background, color: NOTE_INK }}
     >
@@ -219,24 +252,19 @@ export function NoteComposer({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        {!draft.isNew && (
-          <Button
-            variant="ghost"
-            aria-label="Delete note"
-            className="text-destructive hover:bg-black/5 hover:text-destructive"
-            onClick={onDelete}
-          >
-            <Trash2 data-icon="inline-start" /> Delete
-          </Button>
-        )}
-        <Button className="bg-black/80 text-white hover:bg-black" onClick={onClose}>
-          Done
+        <Button
+          variant="ghost"
+          aria-label="Delete note"
+          className="text-destructive hover:bg-black/5 hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 data-icon="inline-start" /> Delete
         </Button>
       </header>
 
-      {/* The paper scrolls, the header does not. Both text boxes grow with what
-          is written and never scroll on their own, so a wheel anywhere over
-          the sheet moves the sheet. */}
+      {/* The paper scrolls, the header does not. The title and the body grow
+          with what is written and never scroll on their own, so a wheel
+          anywhere over the sheet moves the sheet. */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-8 pt-6 pb-32">
         <textarea
@@ -251,7 +279,7 @@ export function NoteComposer({
           onKeyDown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
-              bodyRef.current?.focus();
+              body.current?.commands.focus("start");
             }
           }}
         />
@@ -293,14 +321,11 @@ export function NoteComposer({
             </PopoverContent>
           </Popover>
         </div>
-        <textarea
-          ref={bodyRef}
-          rows={1}
-          value={draft.body}
-          placeholder="Write your note…"
-          className="min-h-[50vh] resize-none overflow-hidden bg-transparent text-lg leading-8 outline-none placeholder:opacity-40"
-          style={{ color: NOTE_INK }}
-          onChange={(e) => onChange({ ...draft, body: e.target.value })}
+        <NoteBodyEditor
+          body={draft.body}
+          ink={NOTE_INK}
+          onChange={(text) => onChange({ ...draftRef.current, body: text })}
+          onEditor={(editor) => (body.current = editor)}
         />
         </div>
       </div>

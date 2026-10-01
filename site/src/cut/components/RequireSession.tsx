@@ -1,5 +1,5 @@
 "use client";
-import { bindChatRuntime, bindChatgptPolling, bindCutClip, bindCutJudge } from "@/cut/lib/chatRuntime";
+import { bindChatRuntime, bindChatgptPolling, bindCutClip, bindCutJudge, bindCutNotes } from "@/cut/lib/chatRuntime";
 import { bindCutColor } from "@/cut/lib/colorSettings";
 
 import { useEffect, type ReactNode } from "react";
@@ -45,6 +45,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
     bindChatgptPolling(config.data.settings.chatgptPolling);
     bindCutJudge(config.data.settings.cutJudge);
     bindCutClip(config.data.settings.cutClip);
+    bindCutNotes(config.data.settings.cutNotes);
     bindCutColor(config.data.settings.cutColor);
     reportExposures(config.data);
   }, [userId, config.data]);
