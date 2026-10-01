@@ -22,6 +22,7 @@ import { rewriteCaptions, translateCaptions } from "../ai/captions";
 import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
 import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, skillRelevanceBlock, systemPrompt } from "../ai/catalog";
 import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
+import { codexCommand } from "../tool-path";
 
 interface ChatBody {
   threadId: string;
@@ -208,10 +209,6 @@ async function runClaude(
   }
 }
 
-/** The Codex CLI the engine resolved at startup (tool-path.ts); bare
- * `codex` when none was found, so the spawn fails as "not installed". */
-const codexCommand = () => process.env.DONKEY_CUT_CODEX ?? "codex";
-
 /** GPT models through the Codex CLI — the user's ChatGPT login. */
 async function runCodex(
   emit: UIChunkWriter["write"],
@@ -222,6 +219,7 @@ async function runCodex(
   signal: AbortSignal
 ) {
   signal.throwIfAborted();
+  const codex = await codexCommand();
   const mcp = mcpCommand(base, sessionKey);
   const session = body.providerSession;
   const args = ["exec"];
@@ -241,7 +239,7 @@ async function runCodex(
 
   await new Promise<void>((resolve, reject) => {
     // stdin must be closed: `codex exec` otherwise waits on it for EOF.
-    const proc = spawn(codexCommand(), args, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    const proc = spawn(codex, args, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     const onAbort = () => proc.kill("SIGTERM");
     signal.addEventListener("abort", onAbort);
 
@@ -524,7 +522,7 @@ export const aiApi = {
     if (!value) {
       const [claude, codexLogin] = await Promise.all([
         probe("claude", ["--version"]),
-        probe(codexCommand(), ["login", "status"]),
+        probe(await codexCommand(), ["login", "status"]),
       ]);
       // The login probe running at all means codex is installed; only its
       // ENOENT failure (carried through in codexLogin) marks it missing.

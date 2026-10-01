@@ -104,16 +104,10 @@ export async function resolveCodex(
   return null;
 }
 
-let codexResolved: Promise<void> | null = null;
-
-/** Resolve Codex once into DONKEY_CUT_CODEX, which the probe and the turn
- * runner spawn. Widens PATH first. Missing is fine — the models probe reports it. */
-export function ensureCodexPath(): Promise<void> {
-  codexResolved ??= (async () => {
-    await ensureToolPath();
-    if (process.env.DONKEY_CUT_CODEX) return;
-    const codex = await resolveCodex();
-    if (codex) process.env.DONKEY_CUT_CODEX = codex;
-  })();
-  return codexResolved;
+/** The Codex CLI to spawn, resolved on every call so an install, uninstall or
+ * ChatGPT app update takes effect without an engine restart; bare `codex`
+ * when none is found, so the spawn fails as "not installed". */
+export async function codexCommand(): Promise<string> {
+  await ensureToolPath();
+  return (await resolveCodex()) ?? "codex";
 }
