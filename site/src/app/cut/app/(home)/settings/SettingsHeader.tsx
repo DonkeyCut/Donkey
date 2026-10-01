@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 
+import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { cn } from "@/lib/utils";
 
 // Ordered so the more specific path wins the suffix match. Billing pins its
@@ -32,6 +33,7 @@ export function SettingsHeader() {
   // Billing is the settings root, so it's also the fallback title.
   const section =
     SECTIONS.find((s) => pathname.endsWith(s.suffix)) ?? SECTIONS.at(-1)!;
+  useTabTitle(section.title);
   return (
     <div
       className={cn(

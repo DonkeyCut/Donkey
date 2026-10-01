@@ -63,6 +63,7 @@ import {
 } from "@/cut/lib/queries";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useInView } from "@/cut/hooks/useInView";
+import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
 import { NewProjectButton } from "@/cut/components/NewProjectButton";
 import { track } from "@/lib/analytics";
@@ -663,6 +664,7 @@ export function ProjectsHome() {
 
   // The way down to the open folder, for the crumb.
   const trail = folderOwner ? folderTrail(data[folderOwner].folders, openFolder) : [];
+  useTabTitle(openFolder ? trail.at(-1)?.name : "Projects");
   // A folder pins where a new project lands, but only a shelf that answers can
   // take one: inside a folder on an unreachable shelf, New project goes where
   // the picker points instead.

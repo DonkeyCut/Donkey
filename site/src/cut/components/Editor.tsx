@@ -4,6 +4,7 @@ import { chatRuntime } from "@/cut/lib/chatRuntime";
 import { useHostBridge, useHostReady } from "@/cut/lib/hostBridge";
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { usePhoneInbox } from "@/cut/hooks/usePhoneInbox";
+import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { useHostCommands } from "@/cut/lib/hostCommands";
 import { useEnvironment } from "@/cut/lib/environment";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -151,16 +152,8 @@ export function Editor({
   const loaded = useEditor((s) => s.loaded);
   const loadError = useEditor((s) => s.loadError);
   // The tab is the open project, so it wears the project's name — through
-  // renames too. Leaving hands the title back to whatever it was.
-  const projectName = useEditor((s) => s.projectName);
-  useEffect(() => {
-    if (!projectName) return;
-    const previous = document.title;
-    document.title = projectName;
-    return () => {
-      document.title = previous;
-    };
-  }, [projectName]);
+  // renames too.
+  useTabTitle(useEditor((s) => s.projectName));
   // Until loadProject runs, the store still holds the previously open project;
   // rendering the editor against it would leak that project's state (chat,
   // clips, selection) into this route.

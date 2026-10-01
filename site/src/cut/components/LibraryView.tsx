@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
+import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import {
   Dialog,
   DialogContent,
@@ -197,7 +198,8 @@ export function LibraryView() {
   const reload = useCallback(() => refetchLibrary(client), [client]);
   // The open folder lives in the URL (?folder=…) so the browser's back button
   // steps folder → root and the location survives reloads.
-  const openFolder = useSearchParams().get("folder");
+  const params = useSearchParams();
+  const openFolder = params.get("folder");
   // Media on its way in — an upload or a link — each one a tile in the grid
   // from the moment it starts, so the library shows the work rather than the
   // dialog holding it.
@@ -570,6 +572,8 @@ export function LibraryView() {
   );
   // The way down to the open folder, and what is filed right here.
   const trail = useMemo(() => folderTrail(folders, openFolder), [folders, openFolder]);
+  // The tab names the open folder; an open note names itself.
+  useTabTitle(params.has("note") ? null : openFolder ? trail.at(-1)?.name : "Library");
   const shownFolders = useMemo(() => childrenOf(folders, openFolder), [folders, openFolder]);
   // What can be picked at this level, in the order a ⇧-range runs: the
   // shelf's folders, then the grid with templates leading.

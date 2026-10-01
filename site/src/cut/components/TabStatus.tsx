@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useExports } from "@/cut/lib/exportStore";
 import { useGenerate } from "@/cut/lib/generate";
+import { stripTabMark as strip } from "@/cut/hooks/useTabTitle";
 import { useEditor } from "@/cut/lib/store";
 import { useTabActivity } from "@/cut/lib/tabActivity";
 
@@ -14,8 +15,8 @@ import { useTabActivity } from "@/cut/lib/tabActivity";
  * The icon stays the donkey and takes a badge in its corner — amber, carrying
  * how many jobs are under way, then green with a check once the last of them
  * settles. The check waits for the user: until they look at the tab, or a few
- * seconds if they were already looking. Then the tab goes back to being the
- * project's name and the plain donkey.
+ * seconds if they were already looking. Then the tab goes back to its plain
+ * name and the plain donkey.
  */
 
 const DONE_MARK = "✓ ";
@@ -25,9 +26,6 @@ const DONE_MS = 6000;
 const BASE_ICON = "/favicon.ico";
 const BUSY_COLOR = "#ff9500";
 const DONE_COLOR = "#30d158";
-
-/** Take back a mark this component put in front of the title, and nothing else. */
-const strip = (title: string) => title.replace(/^(?:[✓●]|\(\d+\+?\)) /, "");
 
 /** What the badge and the title say when several jobs run at once. */
 const tally = (count: number) => (count > 9 ? "9+" : String(count));
@@ -120,9 +118,6 @@ function paint(state: "busy" | "done", count: number): string {
 }
 
 export function TabStatus() {
-  // The title is repainted when the project is renamed, which takes the mark
-  // with it, so the name is a dependency of the paint.
-  const projectName = useEditor((s) => s.projectName);
   const [count, setCount] = useState(0);
   const [done, setDone] = useState(false);
   const busy = count > 0;
@@ -201,10 +196,17 @@ export function TabStatus() {
     return () => {
       live = false;
     };
-  }, [busy, done, count, projectName]);
+  }, [busy, done, count]);
 
-  // Leaving the editor leaves the tab as it was found.
-  useEffect(() => dropIconLink, []);
+  // Leaving takes the mark and the badge with it, so the next page's name
+  // arrives bare.
+  useEffect(
+    () => () => {
+      dropIconLink();
+      document.title = strip(document.title);
+    },
+    [],
+  );
 
   return null;
 }

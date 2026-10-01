@@ -4,6 +4,7 @@ import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "reac
 import { useSearchParams } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { FolderPlus, Loader2, Plus, StickyNote } from "lucide-react";
+import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { noteInLibraryFolder, noteRef, type NoteLocation } from "@/cut/lib/noteReference";
 import { setRefDragData, clearRefDrag } from "@/cut/lib/assetRef";
 import type { Residency } from "@/cut/lib/residency";
@@ -191,6 +192,17 @@ export function NotesView({ library, ref }: Props = {}) {
   const stored = openNoteId ? list.find((n) => n.id === openNoteId) : undefined;
   const draft =
     editing && editing.id === openNoteId ? editing : stored ? draftOf(stored) : null;
+  // The tab names the open note, as it is typed; without one, the open folder.
+  // Inside the library, the library names the folder.
+  useTabTitle(
+    draft
+      ? draft.title.trim() || "Untitled"
+      : library
+        ? null
+        : openFolder
+          ? trail.at(-1)?.name
+          : "Notes",
+  );
 
   const reload = () => void client.invalidateQueries({ queryKey: notesKey });
   const notesHref = (folder: string | null, note?: string | null) => {

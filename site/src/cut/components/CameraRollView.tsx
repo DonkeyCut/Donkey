@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { useClipTitles } from "@/cut/lib/clipTitle";
 import { deleteFromLibrary, type LibraryAsset } from "@/cut/lib/library";
 import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
@@ -42,6 +43,7 @@ export function CameraRollView() {
     [client]
   );
   useClipTitles(clips, patch);
+  useTabTitle("Camera Roll");
 
   const remove = async () => {
     if (!deleting) return;

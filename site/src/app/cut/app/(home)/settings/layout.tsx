@@ -5,7 +5,6 @@ import { SettingsHeader } from "@/app/cut/app/(home)/settings/SettingsHeader";
 import { SettingsGuard } from "@/cut/components/SettingsGuard";
 
 export const metadata: Metadata = {
-  title: "Settings | Donkey Cut",
   description: "Manage your Donkey Cut subscription, credits, and usage.",
 };
 
