@@ -1,5 +1,5 @@
 diff --git a/node_modules/@mediabunny/prores/dist/bundles/mediabunny-prores.mjs b/node_modules/@mediabunny/prores/dist/bundles/mediabunny-prores.mjs
-index b78d43b..31d0e10 100644
+index 9c33e8d..2ae4ba0 100644
 --- a/node_modules/@mediabunny/prores/dist/bundles/mediabunny-prores.mjs
 +++ b/node_modules/@mediabunny/prores/dist/bundles/mediabunny-prores.mjs
 @@ -353,895 +353,8 @@ var Y = (t, e, r, o) => {
