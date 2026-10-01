@@ -509,7 +509,7 @@ export interface FrameSinkOptions {
 
 /** Decoder hooks that write `colorSpace` into the bitstream's own SPS tags
  * for H.264 and HEVC; empty for every other codec. */
-function spsHooks(colorSpace: VideoColorSpaceInit): {
+export function spsHooks(colorSpace: VideoColorSpaceInit): {
   transformConfig?: (config: VideoDecoderConfig) => VideoDecoderConfig;
   transformPacket?: (data: Uint8Array, config: VideoDecoderConfig) => Uint8Array | null;
 } {
@@ -530,9 +530,9 @@ function spsHooks(colorSpace: VideoColorSpaceInit): {
 }
 
 const bytesOf = (buffer: AllowSharedBufferSource): Uint8Array =>
-  buffer instanceof ArrayBuffer || buffer instanceof SharedArrayBuffer
-    ? new Uint8Array(buffer)
-    : new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  ArrayBuffer.isView(buffer)
+    ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+    : new Uint8Array(buffer);
 
 export type FrameSinkFactory = (
   track: InputVideoTrack,
