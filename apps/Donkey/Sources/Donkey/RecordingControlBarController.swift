@@ -2,9 +2,9 @@ import AppKit
 import DonkeyUI
 import SwiftUI
 
-/// The floating QuickTime-style control bar, pinned center-bottom of a screen. A borderless,
-/// non-activating panel so its buttons click without stealing focus from the app being recorded. The
-/// controller owns framing (`hostingView.sizingOptions = []`) to avoid the SwiftUI layout re-entrancy
+/// The floating QuickTime-style control bar, opening center-bottom of a screen and dragged anywhere
+/// from its background. A borderless, non-activating panel so its buttons click without stealing
+/// focus from the app being recorded. The controller owns framing (`hostingView.sizingOptions = []`) to avoid the SwiftUI layout re-entrancy
 /// crash the other overlays document.
 @MainActor
 final class RecordingControlBarController {
@@ -58,8 +58,10 @@ final class RecordingControlBarController {
         self.hostingView = hostingView
     }
 
+    /// Bring the bar to `screen`. On the screen it already sits on, it stays where the person
+    /// dragged it.
     func reposition(on screen: NSScreen) {
-        guard let panel else { return }
+        guard let panel, panel.screen != screen else { return }
         panel.setFrame(frame(for: panel.frame.size, on: screen), display: true)
     }
 

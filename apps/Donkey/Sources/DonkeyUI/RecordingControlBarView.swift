@@ -128,6 +128,22 @@ public struct RecordingControlBarView: View {
     }
 
     private var bar: some View {
+        // The drag area sits under the controls in the stack: a press off a control lands on it,
+        // and the controls above keep their own clicks.
+        ZStack {
+            WindowDragArea()
+            controls
+        }
+        .frame(height: 48)
+        .background(
+            Capsule().fill(.ultraThinMaterial)
+        )
+        .overlay(
+            Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    private var controls: some View {
         HStack(spacing: 10) {
             iconButton(symbol: "xmark", help: "Close") { model.onClose?() }
 
@@ -147,13 +163,6 @@ public struct RecordingControlBarView: View {
             recordButton
         }
         .padding(.horizontal, 14)
-        .frame(height: 48)
-        .background(
-            Capsule().fill(.ultraThinMaterial)
-        )
-        .overlay(
-            Capsule().strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
     }
 
     private var recordingStatus: some View {
@@ -267,6 +276,23 @@ private extension View {
                 }
             }
         )
+    }
+}
+
+/// The bar's background moves its window: a press anywhere off a control drags the bar around the
+/// screen. It takes the first click, so the drag works while Donkey sits inactive behind the app
+/// being recorded.
+private struct WindowDragArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> DragView { DragView() }
+
+    func updateNSView(_ view: DragView, context: Context) {}
+
+    final class DragView: NSView {
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            window?.performDrag(with: event)
+        }
     }
 }
 
