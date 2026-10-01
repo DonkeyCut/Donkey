@@ -22,7 +22,10 @@ const OWN_MENU = "button,a,input,textarea,[role='button'],[role='menuitem'],[dat
 
 /**
  * The mechanics every tile grid shares — the projects home, the Library page,
- * and the editor's Media panel and Library shelf. A right-click over a tile
+ * Camera Roll, and the editor's Media panel and Library shelf. Every grid of
+ * tiles picks and deletes the same way, a new tab included: `useTilePicks`
+ * and `Marquee` pick, `useDeleteKey` and this menu act, `DeleteConfirm` asks
+ * first. A right-click over a tile
  * (marked `data-sel-id`, the mark `Marquee` sweeps; a folder tile carries one
  * too) opens the selection menu at the pointer, with the tile joining the
  * pick if it wasn't in it, so the browser's own media menu never shows over a
