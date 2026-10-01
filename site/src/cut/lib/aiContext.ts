@@ -1,13 +1,13 @@
 "use client";
 
 import { formatBytes } from "@/lib/bytes";
-import { isLinkedAssetType } from "./types";
+import { isLinkedAssetType, isTimelineId, sanitizeTimelines, TIMELINE_IDS, TIMELINE_LABELS, type TimelineBody, type TimelineId } from "./types";
 import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import { hasOverlayAnim, retimeOf, speedCurveOf, WHEEL_LABELS, WHEEL_ZONES, type ClipSound, type OutputSpace, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { useMatteBakes } from "./removal/bakeJobs";
-import { deriveTransitionFields, getClipSpans, normalizeDocState, overlayLayers, resolveTransitions, totalDuration, useEditor } from "./store";
+import { deriveTransitionFields, getClipSpans, normalizeDocState, overlayLayers, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import type { VideoProject } from "./genvideo/types";
 import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
@@ -307,6 +307,8 @@ export function describeDoc(doc: ProjectDoc, opts?: { fullCues?: boolean; chatId
       guideLines: sanitizeGuideLines(doc.guideLines),
       genvideo: doc.genvideo ?? undefined,
       mediaFolders: doc.mediaFolders ?? [],
+      timeline: isTimelineId(doc.timeline) ? doc.timeline : "main",
+      timelines: sanitizeTimelines(doc.timelines) ?? {},
     },
     { fullCues: opts?.fullCues === true, chatId: opts?.chatId ?? null, live: false }
   );
@@ -334,6 +336,8 @@ interface DescribedState {
   guideLines: GuideLines;
   genvideo?: VideoProject | null;
   mediaFolders: MediaFolder[];
+  timeline: TimelineId;
+  timelines: Partial<Record<TimelineId, TimelineBody>>;
 }
 
 /** The media a project's timeline plays: project content whichever chat made it. */
@@ -391,6 +395,19 @@ function describeState(
       id: s.projectId,
       name: s.projectName,
       duration: r(duration),
+      // The open timeline is what everything else here describes; the others
+      // are parked until switch_timeline opens one.
+      timeline: s.timeline,
+      timelines: TIMELINE_IDS.map((id) => {
+        const body = id === s.timeline ? s : s.timelines[id];
+        return {
+          id,
+          label: TIMELINE_LABELS[id],
+          ...(id === s.timeline ? { open: true } : {}),
+          duration: r(body ? projectDuration(body) : 0),
+          clips: body?.clips.length ?? 0,
+        };
+      }),
       aspect: s.aspect,
       frame: `${frameOf(s.aspect).w}x${frameOf(s.aspect).h}`,
       background: s.background,

@@ -239,6 +239,13 @@ export function threadHasLiveRun(chatId: string): boolean {
   return false;
 }
 
+/** Whether a project's scene run is still working or waiting at the gate:
+ * it places onto the timeline that is open, so that timeline stays open. */
+export function projectHasLiveRun(projectId: string): boolean {
+  const orch = orchestrators.get(projectId);
+  return !!orch && !orch.isAborted && !isTerminal(statusFor(orch.project));
+}
+
 /** Build a persistable RefAsset list from project asset ids the user pointed at.
  * Tagged "style" so they anchor both the reference images and every shot. */
 function toReferences(ids: string[] | undefined): RefAsset[] {

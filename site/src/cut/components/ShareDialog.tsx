@@ -16,6 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSharing, sharingKey } from "@/queries/sharing";
@@ -23,7 +24,7 @@ import { requestSharing, type ShareResource } from "@/cut/lib/sharingClient";
 import { librarySharePath, shareEmailSchema, type ShareSettings as AccessSettings } from "@/cut/lib/librarySharing";
 import { refreshShareCard, refreshShareLadder } from "@/cut/lib/exportClient";
 import { useCutBase } from "@/cut/lib/nav";
-import type { ShareFeatures } from "@/cut/lib/types";
+import { isTimelineId, TIMELINE_IDS, TIMELINE_LABELS, type ShareFeatures, type TimelineId } from "@/cut/lib/types";
 
 // One sharing dialog for projects, library folders, and assets. Changes save immediately.
 
@@ -39,7 +40,9 @@ const NO_FEATURES: ShareFeatures = {
   details: false,
 };
 
-const FEATURE_ROWS: { key: keyof ShareFeatures; label: string; hint: string }[] = [
+type FeatureKey = Exclude<keyof ShareFeatures, "timeline">;
+
+const FEATURE_ROWS: { key: FeatureKey; label: string; hint: string }[] = [
   { key: "chat", label: "Chat", hint: "AI chat threads and their cards" },
   { key: "media", label: "Media", hint: "Uploaded files beyond the timeline" },
   { key: "genai", label: "AI generations", hint: "Generated video, image, and audio" },
@@ -147,8 +150,19 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
     if (access !== current.access) void save({ ...current, access });
   };
 
-  const setFeature = (key: keyof ShareFeatures, on: boolean) => {
+  const setFeature = (key: FeatureKey, on: boolean) => {
     void save({ ...current, features: { ...current.features, [key]: on } });
+  };
+
+  // A different timeline is a different cut on the link, so its card and
+  // stream are rebuilt once the setting lands.
+  const setTimeline = async (timeline: TimelineId) => {
+    if (timeline === (current.features.timeline ?? "main")) return;
+    const saved = await save({ ...current, features: { ...current.features, timeline } });
+    if (saved && projectId) {
+      refreshShareCard(projectId);
+      void refreshShareLadder(projectId);
+    }
   };
 
   const copyLink = async () => {
@@ -287,6 +301,33 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
+
+          {projectId && (
+            <div className="flex min-h-9 items-center justify-between gap-2.5">
+              <span className="text-[13px]">
+                Timeline
+                <span className="block text-[10.5px] text-muted-foreground">What viewers watch</span>
+              </span>
+              <Select
+                value={current.features.timeline ?? "main"}
+                disabled={busy}
+                onValueChange={(v) => {
+                  if (isTimelineId(v)) void setTimeline(v);
+                }}
+              >
+                <SelectTrigger className="w-fit min-w-28" aria-label="Timeline">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {TIMELINE_IDS.map((id) => (
+                    <SelectItem key={id} value={id}>
+                      {TIMELINE_LABELS[id]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {projectId ? <details className="group">
             <summary className="cursor-pointer list-none text-[11px] font-medium tracking-wide text-muted-foreground uppercase select-none">

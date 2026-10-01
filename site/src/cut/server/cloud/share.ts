@@ -2,7 +2,7 @@
 // (CutProjectShare); the row id is the link token viewers open. Viewer-side
 // reads live in sharedView.ts.
 import { randomBytes } from "node:crypto";
-import type { ShareFeatures } from "@/cut/lib/types";
+import { isTimelineId, type ShareFeatures } from "@/cut/lib/types";
 import { prisma } from "@/lib/prisma";
 import { getProject } from "./projects";
 import { caught, err } from "./util";
@@ -23,7 +23,8 @@ function newShareToken(): string {
 
 export function normalizeFeatures(raw: unknown): ShareFeatures {
   const src = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  return Object.fromEntries(FEATURE_KEYS.map((k) => [k, src[k] === true])) as unknown as ShareFeatures;
+  const features = Object.fromEntries(FEATURE_KEYS.map((k) => [k, src[k] === true])) as unknown as ShareFeatures;
+  return isTimelineId(src.timeline) && src.timeline !== "main" ? { ...features, timeline: src.timeline } : features;
 }
 
 /** Lowercased, deduped, email-shaped list — or null when the input is not a

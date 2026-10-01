@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { saveAssetToLibrary } from "@/cut/lib/library";
 import { downloadMedia } from "@/cut/lib/media";
-import { useEditor } from "@/cut/lib/store";
+import { assetClipUses, useEditor } from "@/cut/lib/store";
 import type { MediaAsset } from "@/cut/lib/types";
 
 /** The "…" menu on a generated asset (image tile, video job row, voiceover
@@ -55,9 +55,7 @@ export function GeneratedAssetMenu({
   const remove = () => {
     if (!onDelete) return;
     const s = useEditor.getState();
-    const uses =
-      s.clips.filter((c) => c.assetId === asset.id).length +
-      s.audioClips.filter((c) => c.assetId === asset.id).length;
+    const uses = assetClipUses(s, new Set([asset.id]));
     // Deleting something the cut never used costs the user nothing to redo.
     if (uses > 0) setConfirmUses(uses);
     else onDelete();

@@ -106,4 +106,22 @@ describe("filterDocForShare", () => {
     } as unknown as ProjectDoc;
     expect([...sharedFileNames(proxied, features())].sort()).toEqual(["placed.mp4", "placed.proxy.mp4"]);
   });
+
+  test("the link plays the timeline its settings pick, Main by default", () => {
+    const onSecond = {
+      ...doc,
+      timeline: "second",
+      clips: [{ id: "c2", assetId: "imported", track: 0, start: 0, in: 0, out: 1, muted: false }],
+      timelines: { main: { clips: doc.clips, audioClips: [], transitions: [], overlays: [], subtitles: { cues: [] } } },
+    } as unknown as ProjectDoc;
+    const main = filterDocForShare(onSecond, features());
+    expect(main.clips.map((c) => c.id)).toEqual(["c1"]);
+    expect(ids(main)).toEqual(["placed"]);
+    expect(main.timelines).toBeUndefined();
+    expect([...sharedFileNames(onSecond, features())]).toEqual(["placed.mp4"]);
+    const second = filterDocForShare(onSecond, features({ timeline: "second" }));
+    expect(second.clips.map((c) => c.id)).toEqual(["c2"]);
+    expect(ids(second)).toEqual(["imported"]);
+    expect(filterDocForShare(onSecond, features({ timeline: "third" })).clips).toEqual([]);
+  });
 });

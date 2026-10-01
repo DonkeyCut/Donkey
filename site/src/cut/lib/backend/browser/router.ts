@@ -8,7 +8,7 @@
 // shelf (./library.ts). Everything else is the driver's cloud proxy.
 import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
 import { sanitizeGuideLines, sanitizeGuides } from "../../guides";
-import { normalizeAspect, type ProjectDoc, type ProjectFolder } from "../../types";
+import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder } from "../../types";
 import {
   getBrowserExportJob,
   listBrowserExportJobs,
@@ -92,6 +92,8 @@ async function putProject(req: Request, id: string): Promise<Response> {
           ? []
           : existing.overlayClips,
       overlays: Array.isArray(body.overlays) ? body.overlays : existing.overlays,
+      timeline: isTimelineId(body.timeline) ? body.timeline : existing.timeline,
+      timelines: sanitizeTimelines(body.timelines) ?? existing.timelines,
       templates: Array.isArray(body.templates) ? body.templates : existing.templates,
       mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
       aspect: normalizeAspect(body.aspect) ?? existing.aspect,

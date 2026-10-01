@@ -5,7 +5,7 @@ import { listChatThreads } from "./chats";
 // the content boundary: the filtered doc and the media allowlist are what
 // decide which bytes a viewer can reach; the client's tab hiding is
 // presentation only. Copying a share lives in copyQueue.ts.
-import { uploadedFontId, type ProjectDoc, type StoredAsset } from "@/cut/lib/types";
+import { isTimelineId, sanitizeTimelines, uploadedFontId, type ProjectDoc, type StoredAsset } from "@/cut/lib/types";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { readLadder } from "./ladderStore";
@@ -110,7 +110,31 @@ function allowedAssets(doc: ProjectDoc, features: ShareFeatures): StoredAsset[] 
   });
 }
 
-export function filterDocForShare(doc: ProjectDoc, features: ShareFeatures): ProjectDoc {
+/** The doc with the shared timeline as its cut: the one the share settings
+ * name, Main by default. The parked timelines stay with the owner. */
+function sharedTimelineDoc(doc: ProjectDoc, features: ShareFeatures): ProjectDoc {
+  const want = features.timeline ?? "main";
+  const open = isTimelineId(doc.timeline) ? doc.timeline : "main";
+  const cut =
+    want === open
+      ? doc
+      : (() => {
+          const body = sanitizeTimelines(doc.timelines)?.[want];
+          return {
+            ...doc,
+            clips: body?.clips ?? [],
+            audioClips: body?.audioClips ?? [],
+            transitions: body?.transitions ?? [],
+            overlays: body?.overlays ?? [],
+            subtitles: body?.subtitles,
+            overlayClips: undefined,
+          };
+        })();
+  return { ...cut, timeline: undefined, timelines: undefined };
+}
+
+export function filterDocForShare(source: ProjectDoc, features: ShareFeatures): ProjectDoc {
+  const doc = sharedTimelineDoc(source, features);
   const filtered: ProjectDoc = {
     ...doc,
     assets: allowedAssets(doc, features),
@@ -134,7 +158,7 @@ export function filterDocForShare(doc: ProjectDoc, features: ShareFeatures): Pro
  * one, its preview proxy, which is what the viewer's preview decodes. */
 export function sharedFileNames(doc: ProjectDoc, features: ShareFeatures): Set<string> {
   return new Set(
-    allowedAssets(doc, features).flatMap((a) => (a.proxy ? [a.fileName, a.proxy.fileName] : [a.fileName]))
+    allowedAssets(sharedTimelineDoc(doc, features), features).flatMap((a) => (a.proxy ? [a.fileName, a.proxy.fileName] : [a.fileName]))
   );
 }
 

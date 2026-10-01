@@ -435,8 +435,10 @@ function sweepMattes(): void {
     if (t.projectId !== s.projectId) continue;
     if (Date.now() - (t.at ?? 0) > TICKET_TTL_MS) dropTicket(t.clipId);
   }
+  // A clip on a closed timeline still owns its matte.
   const pointed = new Set<string>();
-  for (const c of s.clips) if (c.removal?.matte) pointed.add(c.removal.matte.assetId);
+  for (const body of [s, ...Object.values(s.timelines)])
+    for (const c of body.clips) if (c.removal?.matte) pointed.add(c.removal.matte.assetId);
   for (const a of s.assets) if (a.origin === "matte" && !pointed.has(a.id)) s.removeAsset(a.id);
 }
 

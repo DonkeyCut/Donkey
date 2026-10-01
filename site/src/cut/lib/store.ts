@@ -52,6 +52,8 @@ import type {
   TemplateLayer,
   TemplateMedia,
   TemplateSaveInput,
+  TimelineBody,
+  TimelineId,
   TimelineTransition,
   TransitionStyle,
   VideoClip,
@@ -87,7 +89,7 @@ import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./pl
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
-import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
@@ -435,6 +437,14 @@ export interface EditorState {
   transitions: TimelineTransition[];
   audioClips: AudioClip[];
   overlays: Overlay[];
+  /** The open timeline: clips, transitions, audio, elements and subtitles
+   * above are its content. */
+  timeline: TimelineId;
+  /** The closed timelines' content, parked as the document stores it. */
+  timelines: Partial<Record<TimelineId, TimelineBody>>;
+  /** Park the open timeline and open another. Each timeline keeps its own
+   * undo history for the session. */
+  switchTimeline: (id: TimelineId) => void;
   /** Output frame ratio ("W:H", short side 1080), persisted per project. */
   aspect: Aspect;
   /** The aspect was chosen deliberately (picker, set_aspect, or saved in the
@@ -987,6 +997,44 @@ let docSeq = 0;
  * beginHistoryBatch). One checkpoint is captured when it goes 0→1. */
 let batchDepth = 0;
 
+/** The project-wide fields a history snapshot also carries, as they stood
+ * when a timeline was closed. */
+interface SharedFields {
+  guideLines: GuideLines;
+  colorSpace: OutputSpace;
+  beats: Map<string, AssetBeats | undefined>;
+  profiles: Map<string, SourceProfile | undefined>;
+}
+/** Each closed timeline's undo and redo stacks: opening a timeline again
+ * brings its history back. Session only, cleared when a project opens. */
+const parkedHistory = new Map<TimelineId, { history: DocSnapshot[]; future: DocSnapshot[]; shared: SharedFields }>();
+
+const sharedFields = (s: Pick<EditorState, "guideLines" | "colorSpace" | "assets">): SharedFields => ({
+  guideLines: s.guideLines,
+  colorSpace: s.colorSpace,
+  beats: new Map(s.assets.map((a) => [a.id, a.beats])),
+  profiles: new Map(s.assets.map((a) => [a.id, a.colorProfile])),
+});
+
+/** A project-wide setting changed on another timeline while this one was
+ * closed is not this timeline's to undo: its snapshots take that setting as
+ * it stands now. Settings untouched meanwhile keep their history. */
+function rebaseShared(snaps: DocSnapshot[], then: SharedFields, now: SharedFields) {
+  const moved = <T,>(a: Map<string, T>, b: Map<string, T>) =>
+    new Set([...b].filter(([id, v]) => a.has(id) && a.get(id) !== v).map(([id]) => id));
+  const beats = moved(then.beats, now.beats);
+  const profiles = moved(then.profiles, now.profiles);
+  for (const snap of snaps) {
+    if (now.guideLines !== then.guideLines) snap.guideLines = { v: [...now.guideLines.v], h: [...now.guideLines.h] };
+    if (now.colorSpace !== then.colorSpace) snap.colorSpace = now.colorSpace;
+    if (beats.size) snap.beats = snap.beats.map((b) => (beats.has(b.id) ? { id: b.id, grid: now.beats.get(b.id) } : b));
+    if (profiles.size)
+      snap.sourceColor = snap.sourceColor.map((c) =>
+        profiles.has(c.id) ? { id: c.id, profile: now.profiles.get(c.id) } : c
+      );
+  }
+}
+
 /** Ids of clips a background generation run placed. Those clips are the
  * orchestrator's to manage — it swaps them idempotently and holds each shot's
  * timeline id — so the user's undo/redo must neither remove nor resurrect them.
@@ -1369,6 +1417,8 @@ export const DOC_KEYS = [
   "transitions",
   "audioClips",
   "overlays",
+  "timeline",
+  "timelines",
   "templates",
   "mediaFolders",
   "aspect",
@@ -1731,6 +1781,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       history.length = 0;
       future.length = 0;
       pending = null;
+      parkedHistory.clear();
       // A fresh project owns no live run — any prior run's render-owned ids are
       // stale, and the loaded clips are ordinary, fully-undoable content.
       genClipIds.clear();
@@ -1757,6 +1808,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         transitions: [],
         audioClips: [],
         overlays: [],
+        timeline: "main",
+        timelines: {},
         templates: [],
         mediaFolders: [],
         aspect: lastChosenAspect() ?? "9:16",
@@ -1810,6 +1863,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     transitions: [],
     audioClips: [],
     overlays: [],
+    timeline: "main",
+    timelines: {},
     templates: [],
     mediaFolders: [],
     aspect: lastChosenAspect() ?? "9:16",
@@ -2137,6 +2192,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           transitions: state.transitions,
           audioClips: state.audioClips,
           overlays: state.overlays,
+          timeline: isTimelineId(doc.timeline) ? doc.timeline : "main",
+          timelines: sanitizeTimelines(doc.timelines) ?? {},
           templates: doc.templates ?? [],
           mediaFolders: doc.mediaFolders ?? [],
           aspect: state.aspect ?? lastChosenAspect() ?? "9:16",
@@ -2414,6 +2471,52 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
     },
     setBackground: (hex) => set({ background: projectBackground(hex) }),
+    switchTimeline: (id) => {
+      const s = get();
+      if (id === s.timeline || s.readOnly || !isTimelineId(id)) return;
+      const opened = normalizeDocState(s.timelines[id] ?? {}, s.assets);
+      const parked: TimelineBody = {
+        clips: s.clips,
+        audioClips: s.audioClips,
+        transitions: s.transitions,
+        overlays: docOverlays(s.overlays),
+        subtitles: s.subtitles,
+      };
+      const rest = { ...s.timelines };
+      delete rest[id];
+      // The history goes with the timeline it was made on.
+      flush();
+      const now = sharedFields(s);
+      parkedHistory.set(s.timeline, { history: [...history], future: [...future], shared: now });
+      const back = parkedHistory.get(id);
+      parkedHistory.delete(id);
+      history.length = 0;
+      future.length = 0;
+      if (back) {
+        rebaseShared([...back.history, ...back.future], back.shared, now);
+        history.push(...back.history);
+        future.push(...back.future);
+      }
+      laneEpoch++; // caption work in flight belongs to the timeline being left
+      set({
+        timeline: id,
+        timelines: { ...rest, [s.timeline]: parked },
+        clips: opened.clips,
+        transitions: opened.transitions,
+        audioClips: opened.audioClips,
+        overlays: opened.overlays,
+        subtitles: opened.subtitles,
+        subtitleLane: 0,
+        subtitleStatus: opened.subtitles.cues.length > 0 ? "ready" : "idle",
+        subtitleError: null,
+        selection: null,
+        multiSelection: [],
+        selectedKey: null,
+      });
+      // A batch still open (a chat turn's run of edits) keeps going on this
+      // timeline, as one undo step of its own.
+      if (batchDepth > 0) pending = { snap: snapshot(), seq: docSeq };
+    },
     setColorSpace: (space) => {
       if (get().colorSpace === space || get().readOnly) return;
       push();
@@ -2594,6 +2697,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       for (const snap of history) scrub(snap);
       for (const snap of future) scrub(snap);
       if (pending) scrub(pending.snap);
+      for (const parked of parkedHistory.values()) [...parked.history, ...parked.future].forEach(scrub);
       const dropFile = () => {
         const s = get();
         if (!s.projectId) return;
@@ -2619,7 +2723,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         !st.clips.some((c) => c.assetId === id) &&
         !st.audioClips.some((c) => c.assetId === id)
       ) {
-        set((s) => ({ assets: s.assets.filter((a) => a.id !== id) }));
+        set((s) => ({ assets: s.assets.filter((a) => a.id !== id), timelines: timelinesWithout(s.timelines, id) }));
         dropFile();
         return;
       }
@@ -2637,6 +2741,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           assets: s.assets.filter((a) => a.id !== id),
           clips: s.clips.filter((c) => c.assetId !== id),
           audioClips: s.audioClips.filter((c) => c.assetId !== id),
+          timelines: timelinesWithout(s.timelines, id),
           multiSelection,
           selection: keep(s.selection) ? s.selection : multiSelection[multiSelection.length - 1] ?? null,
         };
@@ -2708,7 +2813,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
       // A block exists for the footage that replaces it; once nothing plays
       // it, it goes with it.
-      if (was?.block !== undefined && !get().clips.some((c) => c.assetId === was.id))
+      if (was?.block !== undefined && assetClipUses(get(), new Set([was.id])) === 0)
         get().removeAsset(was.id);
       get().endHistoryBatch();
     },
@@ -5034,6 +5139,29 @@ export const docOverlays = (() => {
   };
 })();
 
+/** The parked timelines as the document stores them: like `docClips`, a clip
+ * whose asset is still uploading from this tab stays out. Memoized for the
+ * same reason, so autosave compares the projection by reference. */
+export const docTimelines = (() => {
+  type Parked = Partial<Record<TimelineId, TimelineBody>>;
+  let memo: { timelines: Parked; key: string; out: Parked } | null = null;
+  return (timelines: Parked, assets: MediaAsset[]): Parked => {
+    const key = pendingKey(assets);
+    if (memo && memo.timelines === timelines && memo.key === key) return memo.out;
+    const held = (c: { assetId: string }) => !assets.some((a) => a.id === c.assetId && tabOnlyUpload(a));
+    const out: Parked = key
+      ? Object.fromEntries(
+          Object.entries(timelines).map(([id, body]) => [
+            id,
+            { ...body, clips: body.clips.filter(held), audioClips: body.audioClips.filter(held) },
+          ])
+        )
+      : timelines;
+    memo = { timelines, key, out };
+    return out;
+  };
+})();
+
 /** The asset fields persisted in project.json — the projection autosave
  * writes, and the one its change detector compares (runtime fields like
  * thumbs/peaks must not mark the doc dirty). Assets whose bytes live only in
@@ -5075,6 +5203,8 @@ export function serializeDoc(s: {
   transitions: TimelineTransition[];
   audioClips: AudioClip[];
   overlays: Overlay[];
+  timeline: TimelineId;
+  timelines: Partial<Record<TimelineId, TimelineBody>>;
   templates: LibraryTemplate[];
   mediaFolders: MediaFolder[];
   aspect: Aspect;
@@ -5098,6 +5228,10 @@ export function serializeDoc(s: {
     // Text elements drop the loader-stamped `kind`, so title-only projects
     // serialize byte-identical to the pre-union shape.
     overlays: docOverlays(s.overlays),
+    // Always sent: the save keeps a field the body leaves out, so going back
+    // to Main has to say so.
+    timeline: s.timeline,
+    timelines: docTimelines(s.timelines, s.assets),
     templates: s.templates,
     mediaFolders: s.mediaFolders,
     aspect: s.aspect,
@@ -5135,6 +5269,8 @@ const DOC_FIELD_EDITED: {
   clips: (s, last) => docClips(s.clips, s.assets) !== (last.clips as unknown),
   audioClips: (s, last) => docAudioClips(s.audioClips, s.assets) !== (last.audioClips as unknown),
   overlays: (s, last) => docOverlays(s.overlays) !== (last.overlays as unknown),
+  timeline: (s, last) => s.timeline !== last.timeline,
+  timelines: (s, last) => docTimelines(s.timelines, s.assets) !== (last.timelines as unknown),
   transitions: (s, _last, lastBars) => s.transitions !== lastBars,
   templates: (s, last) => s.templates !== (last.templates as unknown),
   mediaFolders: (s, last) => s.mediaFolders !== (last.mediaFolders as unknown),
@@ -5825,6 +5961,18 @@ export function normalizeDocState(
   };
 }
 
+/** A parked timeline's content in the shape the store holds an open one:
+ * what a render of a timeline that is not on screen draws from. */
+export function openedTimeline(body: Partial<TimelineBody>, assets: MediaAsset[]) {
+  const st = normalizeDocState(body, assets);
+  return {
+    clips: deriveTransitionFields(closeMicroGaps(groundTracks(st.clips)), st.transitions),
+    audioClips: st.audioClips,
+    overlays: st.overlays,
+    subtitles: st.subtitles,
+  };
+}
+
 /** Assign packed sequential starts (each clip abutting the previous): the
  * layout older docs implied by array order. */
 function packStarts(clips: LegacyClip[]): VideoClip[] {
@@ -6026,6 +6174,50 @@ let durValue = 0;
  * decide what an asset is still needed for has to see all of them — dropping
  * what a sticker draws from is as visible as dropping a clip's.
  */
+/** The parked timelines with an asset's clips taken out; the same object when
+ * none of them used it. */
+function timelinesWithout(
+  timelines: Partial<Record<TimelineId, TimelineBody>>,
+  assetId: string
+): Partial<Record<TimelineId, TimelineBody>> {
+  const uses = (c: { assetId: string }) => c.assetId === assetId;
+  if (!Object.values(timelines).some((b) => b.clips.some(uses) || b.audioClips.some(uses))) return timelines;
+  return Object.fromEntries(
+    Object.entries(timelines).map(([id, b]) => [
+      id,
+      { ...b, clips: b.clips.filter((c) => !uses(c)), audioClips: b.audioClips.filter((c) => !uses(c)) },
+    ])
+  );
+}
+
+/** How many clips on any timeline, open or parked, play one of these assets:
+ * what deleting them takes with it. */
+export function assetClipUses(
+  s: { clips: VideoClip[]; audioClips: AudioClip[]; timelines: Partial<Record<TimelineId, TimelineBody>> },
+  assetIds: ReadonlySet<string>
+): number {
+  let n = 0;
+  for (const body of [s, ...Object.values(s.timelines)]) {
+    for (const c of body.clips) if (assetIds.has(c.assetId)) n++;
+    for (const c of body.audioClips) if (assetIds.has(c.assetId)) n++;
+  }
+  return n;
+}
+
+/** Every asset any timeline points at, open or parked. */
+export function assetIdsOnAnyTimeline(s: {
+  clips: VideoClip[];
+  audioClips: AudioClip[];
+  overlays: Overlay[];
+  transitions: TimelineTransition[];
+  subtitles: SubtitlesBlock;
+  timelines: Partial<Record<TimelineId, TimelineBody>>;
+}): Set<string> {
+  const used = assetIdsInUse(s);
+  for (const body of Object.values(s.timelines)) for (const id of assetIdsInUse(body)) used.add(id);
+  return used;
+}
+
 export function assetIdsInUse(s: {
   clips: VideoClip[];
   audioClips: AudioClip[];

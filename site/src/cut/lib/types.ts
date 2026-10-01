@@ -1557,6 +1557,8 @@ export interface ShareFeatures {
   genai: boolean;
   subtitles: boolean;
   details: boolean;
+  /** The timeline viewers watch; absent = main. */
+  timeline?: TimelineId;
 }
 
 /** The editor's side-panel tabs ("publish" shows as Details). */
@@ -1583,6 +1585,46 @@ export const SIDE_PANEL_TABS: SidePanelTab[] = [
   "publish",
 ];
 
+/** A project's timelines. One is open at a time; the open one's content is
+ * the doc's top-level clips, audio, transitions, elements and subtitles, so
+ * preview, export and every tool read whichever timeline is on screen. */
+export const TIMELINE_IDS = ["main", "second", "third"] as const;
+export type TimelineId = (typeof TIMELINE_IDS)[number];
+export const TIMELINE_LABELS: Record<TimelineId, string> = { main: "Main", second: "Second", third: "Third" };
+export const isTimelineId = (v: unknown): v is TimelineId => TIMELINE_IDS.includes(v as TimelineId);
+
+/** Everything placed on one timeline: what a closed timeline keeps parked in
+ * `ProjectDoc.timelines` while another is open. */
+export interface TimelineBody {
+  clips: VideoClip[];
+  audioClips: AudioClip[];
+  transitions: TimelineTransition[];
+  overlays: Overlay[];
+  subtitles: SubtitlesBlock;
+}
+
+/** The parked timelines a save sent, each with every list it carries: a
+ * missing or malformed one reads as empty. */
+export function sanitizeTimelines(v: unknown): Partial<Record<TimelineId, TimelineBody>> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const list = <T,>(x: unknown): T[] => (Array.isArray(x) ? (x as T[]) : []);
+  const out: Partial<Record<TimelineId, TimelineBody>> = {};
+  for (const [id, raw] of Object.entries(v)) {
+    if (!isTimelineId(id) || !raw || typeof raw !== "object") continue;
+    const body = raw as Partial<Record<keyof TimelineBody, unknown>>;
+    const subtitles = body.subtitles as SubtitlesBlock | undefined;
+    out[id] = {
+      clips: list(body.clips),
+      audioClips: list(body.audioClips),
+      transitions: list(body.transitions),
+      overlays: list(body.overlays),
+      subtitles:
+        subtitles && typeof subtitles === "object" && Array.isArray(subtitles.cues) ? subtitles : emptySubtitles(),
+    };
+  }
+  return out;
+}
+
 export interface ProjectDoc {
   version: 1;
   /** The project's stable API id. On the local engine the folder is named
@@ -1606,6 +1648,11 @@ export interface ProjectDoc {
    * docs. Read on open and merged into `clips`; new saves never write it. */
   overlayClips?: VideoClip[];
   overlays: Overlay[];
+  /** The timeline the top-level clips, audio, transitions, elements and
+   * subtitles belong to; absent = main. */
+  timeline?: TimelineId;
+  /** The closed timelines' content, parked until one is opened. */
+  timelines?: Partial<Record<TimelineId, TimelineBody>>;
   /** Output frame; absent in older projects (which are all 9:16). */
   aspect?: Aspect;
   /** Preview guides turned on: thirds, center, safe margins, platform

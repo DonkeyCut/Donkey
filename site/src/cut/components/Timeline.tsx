@@ -7,6 +7,7 @@ import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Downlo
 import { EFFECT_CHIP_ICONS, effectIconKind, SHAPE_CHIP_ICONS, TRANSITION_ICONS } from "@/cut/components/entityIcons";
 import { Button } from "@/components/ui/button";
 import { GuidesMenu } from "@/cut/components/GuidesMenu";
+import { TimelinePicker } from "@/cut/components/TimelinePicker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -2209,6 +2210,7 @@ export function Timeline() {
             measurement below lands: the overlap stops being something to get
             right and becomes something that cannot be drawn. */}
         <div className="col-start-1 row-start-1 ml-2.5 flex min-w-0 items-center gap-0.5 overflow-hidden">
+          <TimelinePicker />
           {!barTight && (
             <TimelineTools
               split={split}
@@ -2222,6 +2224,7 @@ export function Timeline() {
         {/* Measure the contextual icons even when they fold into the menu. */}
         <div aria-hidden className="invisible pointer-events-none absolute flex items-center gap-0.5">
           <div ref={toolsBareRef} className="flex items-center gap-0.5">
+            <TimelinePicker />
             <TimelineTools
               split={split}
               addText={addText}

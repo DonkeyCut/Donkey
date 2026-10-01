@@ -1,6 +1,6 @@
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { execFile } from "node:child_process";
-import { normalizeAspect, type ProjectDoc } from "@/cut/lib/types";
+import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc } from "@/cut/lib/types";
 import { detectSilence, extractAudio, makeFreezeFrame, probeDims, probeDuration } from "../frames";
 import {
   createProject,
@@ -134,6 +134,8 @@ export const projectsApi = {
             ? []
             : existing.overlayClips,
         overlays: Array.isArray(body.overlays) ? body.overlays : existing.overlays,
+        timeline: isTimelineId(body.timeline) ? body.timeline : existing.timeline,
+        timelines: sanitizeTimelines(body.timelines) ?? existing.timelines,
         templates: Array.isArray(body.templates) ? body.templates : existing.templates,
         mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
         aspect: normalizeAspect(body.aspect) ?? existing.aspect,

@@ -46,9 +46,11 @@ Browser previews use the browser compositor and replace one cached proxy in OPFS
 
 Cloud source media, generated media, and retained exports count toward storage. Derived previews, share cards, and HLS ladders are quota-exempt; staging inputs are temporary. An export is weighed twice — the size it is heading for before a frame is drawn, and what actually landed before the account is charged — so one render cannot carry an account past its cap. Transports expose structured storage, credit, and authentication failures. Each host chooses their presentation; the website mounts its storage dialog separately.
 
-Timeline and preview share selection: ⌘/Ctrl-click or Shift-click toggles items; dragging moves them with one undo step. Groups persist. Their preview frame scales and rotates the selection; the group panel edits shared fields, showing Mixed where values differ. Text side grips change wrapping width and corners scale proportionally; height follows content across preview, export and chat. Dropping between timeline rows inserts a row through shared text, video and audio placement.
+A project has three timelines, Main, Second and Third, picked from the timeline toolbar; a share link plays the one its settings pick, Main by default.
 
-Guides draw over the preview from the button beside the timeline zoom: thirds, center, safe margins, the short-form keep-out zone where TikTok, Reels and Shorts draw their own UI or crop the sides of a 9:16 frame, and custom lines dragged into place on the preview. They save with the project, snap a dragged element to their edges, never export, and the assistant reads the safe area they leave when it places graphics.
+Timeline and preview share selection: ⌘/Ctrl-click or Shift-click toggles items; dragging moves them with one undo step. Groups persist. Their preview frame scales and rotates the selection; the group panel edits shared fields, showing Mixed where values differ. Text side grips change wrapping width and corners scale proportionally; height follows content across preview, export and chat.
+
+Guides draw over the preview from the button beside the timeline zoom: thirds, center, safe margins, the short-form keep-out zone, and custom lines. They save with the project, snap a dragged element to their edges and never export.
 
 ## The export
 

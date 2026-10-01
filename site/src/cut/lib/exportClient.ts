@@ -26,7 +26,7 @@ import { withAssetColors } from "./mediaRead";
 import { renderRemovalPieces } from "./removalVideo";
 import { drawBlock } from "./blockSource";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
-import { clipLen, clipSpeed, getClipSpans, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
+import { clipLen, clipSpeed, getClipSpans, openedTimeline, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
@@ -40,6 +40,7 @@ import type {
   Overlay,
   Selection,
   SubtitlesBlock,
+  TimelineId,
   VideoClip,
 } from "./types";
 
@@ -1946,7 +1947,7 @@ export async function renderShareLadder(
   doc: ExportDoc,
   shareSubtitles: boolean,
   backend: CutBackend = getBackend()
-): Promise<void> {
+): Promise<boolean> {
   // The master renders at "Original" — the ladder caps its top rung at this
   // frame, so anything given up here is given up for every viewer. The encode
   // preset is loosened because this master is an intermediate: every rung is
@@ -1964,10 +1965,11 @@ export async function renderShareLadder(
   const burnedSubtitles = shareSubtitles && doc.subtitles?.showOnVideo === true;
   try {
     const payload = await buildExportPayload(projectId, source, settings, "hls");
-    await postExport(projectId, payload, "master.m3u8", backend, { burnedSubtitles });
+    return (await postExport(projectId, payload, "master.m3u8", backend, { burnedSubtitles })).ok;
   } catch {
     // No clips yet, or a slot was busy. The share keeps playing whatever it
     // already had until a later attempt lands.
+    return false;
   }
 }
 
@@ -2111,21 +2113,18 @@ function cardSettings(aspect: Aspect): ExportSettings {
  *
  * Best-effort throughout — a project with no footage, an unconfigured
  * backend, or a busy render slot simply keeps the card it already had. */
-async function renderShareCard(projectId: string, doc: ExportDoc, backend: CutBackend): Promise<void> {
+async function renderShareCard(projectId: string, doc: ExportDoc, backend: CutBackend, force = false): Promise<void> {
   if (backend.kind !== "cloud") return;
-  try {
-    const res = await backend.fetch(`/api/cut/projects/${projectId}/share`);
-    const body = (await res.json().catch(() => ({}))) as { share?: unknown | null };
-    if (!res.ok || !body.share) return;
-  } catch {
-    return;
-  }
+  const share = await shareSettings(projectId, backend);
+  if (!share) return;
+  const { cut, key } = sharedCut(doc, share.features?.timeline);
+  if (!force && key !== null && lastShareRender.get(`${projectId}:card`) === key) return;
   let res: Response;
   try {
     const payload = await buildExportPayload(
       projectId,
-      docFirstSeconds(doc, CARD_SECONDS),
-      cardSettings(doc.aspect),
+      docFirstSeconds(cut, CARD_SECONDS),
+      cardSettings(cut.aspect),
       "card"
     );
     res = await postExport(projectId, payload, "card.mp4", backend);
@@ -2134,17 +2133,49 @@ async function renderShareCard(projectId: string, doc: ExportDoc, backend: CutBa
   }
   const body = (await res.json().catch(() => ({}))) as { id?: string };
   if (!res.ok || !body.id) return;
-  await pollExport(body.id, () => {}, undefined, backend).catch(() => {});
+  await pollExport(body.id, () => {}, undefined, backend)
+    .then(() => key !== null && lastShareRender.set(`${projectId}:card`, key))
+    .catch(() => {});
 }
+
+type ShareRenderSettings = { features?: { subtitles?: boolean; timeline?: TimelineId } };
+
+/** The project's share settings, or null when it is not shared. */
+async function shareSettings(projectId: string, backend: CutBackend): Promise<ShareRenderSettings | null> {
+  const res = await backend.fetch(`/api/cut/projects/${projectId}/share`).catch(() => null);
+  if (!res?.ok) return null;
+  const body = (await res.json().catch(() => null)) as { share?: ShareRenderSettings | null } | null;
+  return body?.share ?? null;
+}
+
+/** The cut a share link plays: the timeline its settings name, Main by
+ * default, whichever one the editor has open. A parked one carries a key of
+ * what it draws, so editing the open timeline does not re-render a link that
+ * plays another; the open one renders on every change, as it always has. */
+function sharedCut(doc: ExportDoc, timeline: TimelineId | undefined): { cut: ExportDoc; key: string | null } {
+  const { timeline: open = "main", timelines, ...cut } = doc;
+  const want = timeline ?? "main";
+  if (want === open) return { cut, key: null };
+  const parked = { ...cut, ...openedTimeline(timelines?.[want] ?? {}, doc.assets) };
+  return { cut: parked, key: shareRenderKey(parked) };
+}
+
+/** What each share render of a parked timeline last drew, this session. */
+const lastShareRender = new Map<string, string>();
+const shareRenderKey = (doc: ExportDoc) =>
+  JSON.stringify([
+    doc.clips, doc.audioClips, doc.overlays, doc.subtitles, doc.aspect, doc.background, doc.colorSpace,
+    doc.assets.map((a) => [a.fileName, a.colorProfile, a.color, a.proxy?.fileName]),
+  ]);
 
 /** Rebuild the open project's share card from the cut as it stands. Fire and
  * forget: the card is an accessory to the link, and a failed render leaves the
  * previous one (or the generated placeholder) in place. */
 export function refreshShareCard(projectId: string): void {
   const s = useEditor.getState();
-  if (!s.loaded || s.projectId !== projectId || projectDuration(s) <= 0) return;
+  if (!s.loaded || s.projectId !== projectId) return;
   const snapshot = captureRenderSnapshot(projectOperation(projectId), renderDoc(s));
-  void renderShareCard(projectId, snapshot.doc, snapshot.operation.backend).catch(() => {});
+  void renderShareCard(projectId, snapshot.doc, snapshot.operation.backend, true).catch(() => {});
 }
 
 /**
@@ -2162,20 +2193,24 @@ export function refreshShareCard(projectId: string): void {
  */
 export async function refreshShareLadder(projectId: string): Promise<void> {
   const s = useEditor.getState();
-  if (!s.loaded || s.projectId !== projectId || projectDuration(s) <= 0) return;
+  if (!s.loaded || s.projectId !== projectId) return;
   const snapshot = captureRenderSnapshot(projectOperation(projectId), renderDoc(s));
-  await refreshSnapshotLadder(snapshot);
+  await refreshSnapshotLadder(snapshot, true);
 }
 
-async function refreshSnapshotLadder({ operation, doc }: RenderSnapshot): Promise<void> {
+async function refreshSnapshotLadder({ operation, doc }: RenderSnapshot, force = false): Promise<void> {
   const { projectId, backend } = operation;
   if (backend.kind !== "cloud") return;
-  const res = await backend.fetch(`/api/cut/projects/${projectId}/share`).catch(() => null);
-  if (!res?.ok) return;
-  const body = (await res.json().catch(() => null)) as {
-    share?: { features?: { subtitles?: boolean } } | null;
-  } | null;
-  if (body?.share) await renderShareLadder(projectId, doc, body.share.features?.subtitles === true, backend);
+  const share = await shareSettings(projectId, backend);
+  if (!share) return;
+  const { cut, key: drawn } = sharedCut(doc, share.features?.timeline);
+  const subtitles = share.features?.subtitles === true;
+  const key = drawn === null ? null : `${subtitles}:${drawn}`;
+  if (!force && key !== null && lastShareRender.get(`${projectId}:ladder`) === key) return;
+  // Like the open timeline's ladder, a job the worker accepted counts as drawn;
+  // the next change to that cut renders it again.
+  if ((await renderShareLadder(projectId, cut, subtitles, backend)) && key !== null)
+    lastShareRender.set(`${projectId}:ladder`, key);
 }
 
 /** All derived representations consume the same captured document and transport. */

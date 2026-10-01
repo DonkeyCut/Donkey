@@ -8,7 +8,7 @@ import { expandTimelineGroups } from "./timelineGroups";
 import { timelineItem } from "./timelineItems";
 import { normalizeDocState } from "./store";
 import { playheadAt, setPlayhead, setSkim } from "./playhead";
-import { emptySubtitles, uploadedFontId } from "./types";
+import { emptySubtitles, sanitizeTimelines, uploadedFontId } from "./types";
 import type { Selection, AudioClip, MediaAsset, SubtitleCue, TextOverlay, VideoClip } from "./types";
 
 /**
@@ -205,6 +205,88 @@ describe("the document projection", () => {
       { id: "s1", kind: "shape", shape: "rect", start: 0, end: 2, x: 0.5, y: 0.5, w: 0.2, h: 0.2, fill: "#fff" },
     ] as unknown as Parameters<typeof docOverlays>[0];
     expect(docOverlays(overlays)).toBe(overlays);
+  });
+});
+
+describe("timelines", () => {
+  // A fresh open: empty timelines and no undo history on any of them.
+  beforeEach(() => s().openProjectDoc("timelines", { name: "Timelines" }, []));
+
+  test("switching parks the open timeline and opens the other, both ways", () => {
+    const a = asset(4);
+    const main = vclip({ assetId: a.id, out: 3 });
+    useEditor.setState({ assets: [a], clips: [main], overlays: [title({ kind: "text" })] });
+    s().switchTimeline("second");
+    expect(s().timeline).toBe("second");
+    expect(s().clips).toEqual([]);
+    expect(s().overlays).toEqual([]);
+    expect(s().timelines.main?.clips.map((c) => c.id)).toEqual([main.id]);
+    s().addClipFromAsset(a.id, 0);
+    s().switchTimeline("main");
+    expect(s().clips.map((c) => c.id)).toEqual([main.id]);
+    expect(s().overlays).toHaveLength(1);
+    expect(s().timelines.second?.clips).toHaveLength(1);
+    expect(s().timelines.main).toBeUndefined();
+  });
+
+  test("each timeline keeps its own undo history", () => {
+    const a = asset(4);
+    useEditor.setState({ assets: [a], colorSpace: "sdr" });
+    s().addClipFromAsset(a.id, 0);
+    s().switchTimeline("second");
+    // Main's add is not Second's to undo.
+    expect(s().undo()).toBe(false);
+    s().addClipFromAsset(a.id, 0);
+    s().addClipFromAsset(a.id, 0);
+    s().setColorSpace("hlg");
+    s().switchTimeline("main");
+    expect(s().clips).toHaveLength(1);
+    expect(s().undo()).toBe(true);
+    expect(s().clips).toHaveLength(0);
+    // A project-wide setting changed on Second stays put through Main's undo.
+    expect(s().colorSpace).toBe("hlg");
+    expect(s().redo()).toBe(true);
+    expect(s().clips).toHaveLength(1);
+    s().switchTimeline("second");
+    expect(s().clips).toHaveLength(2);
+    expect(s().undo()).toBe(true);
+    expect(s().colorSpace).toBe("sdr");
+    expect(s().undo()).toBe(true);
+    expect(s().clips).toHaveLength(1);
+  });
+
+  test("the document carries which timeline is open and the parked ones", () => {
+    useEditor.setState({ clips: [vclip({})] });
+    const last = serializeDoc(s() as Parameters<typeof serializeDoc>[0]);
+    expect(last.timeline).toBe("main");
+    s().switchTimeline("third");
+    expect(docFieldsEdited(s(), last, s().transitions)).toBe(true);
+    const doc = serializeDoc(s() as Parameters<typeof serializeDoc>[0]);
+    expect(doc.timeline).toBe("third");
+    expect(doc.timelines?.main?.clips).toHaveLength(1);
+  });
+
+  test("deleting an asset takes its clips off the parked timelines too", () => {
+    const a = asset(4);
+    useEditor.setState({ assets: [a], clips: [vclip({ assetId: a.id })] });
+    s().switchTimeline("second");
+    expect(assetIdsInUse(s()).has(a.id)).toBe(false);
+    s().removeAsset(a.id);
+    expect(s().timelines.main?.clips).toEqual([]);
+  });
+
+  test("a parked timeline missing a list reads it as empty", () => {
+    const parked = sanitizeTimelines({ second: { clips: [] }, bogus: { clips: [] } });
+    expect(parked).toEqual({
+      second: { clips: [], audioClips: [], transitions: [], overlays: [], subtitles: emptySubtitles() },
+    });
+  });
+
+  test("a shared view cannot switch", () => {
+    useEditor.setState({ readOnly: true });
+    s().switchTimeline("second");
+    expect(s().timeline).toBe("main");
+    useEditor.setState({ readOnly: false });
   });
 });
 

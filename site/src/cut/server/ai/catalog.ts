@@ -65,7 +65,7 @@ import {
 } from "@donkeycut/effects-kit";
 import type { AiToolDef } from "../../lib/aiToolDef";
 import { GOOGLE_FONT_IDS } from "../../lib/fontCatalog";
-import { FONTS, TRANSITION_STYLE_IDS } from "../../lib/types";
+import { FONTS, TIMELINE_IDS, TIMELINE_LABELS, TRANSITION_STYLE_IDS } from "../../lib/types";
 
 export const AI_TOOLS: AiToolDef[] = [
   ...AI_PANEL_TOOLS,
@@ -233,6 +233,7 @@ Cut is a local, project-based short-video editor. Each project has an output asp
 - Center: the video preview canvas (composited at the project's frame size) with draggable text overlays and subtitle captions.
 - Right: the Inspector — its content follows the selection (video clip, overlay video, soundtrack clip, title, or cue).
 - Bottom: the timeline (resizable by dragging its top border). Rows top-to-bottom: the video tracks in z-order (positive tracks, then track 0, then negative tracks behind it), soundtrack lanes (green), titles (purple), subtitle tracks (amber, when enabled). Every track is free-positioned in time.
+- A project has ${TIMELINE_IDS.length} timelines (${TIMELINE_IDS.map((id) => TIMELINE_LABELS[id]).join(", ")}), picked from the menu at the left of the timeline toolbar. Each holds its own clips, soundtrack, transitions, elements and subtitles over the shared media and frame. editor_state project.timeline names the open one; the preview, the export and every edit work on it, and switch_timeline opens another.
 Everything autosaves to the project folder. Undo/redo is unlimited (⌘Z / ⇧⌘Z).
 Times are in seconds on the shared timeline. The playhead is currentTime; a skimmer previews under the mouse without moving the playhead.`,
 

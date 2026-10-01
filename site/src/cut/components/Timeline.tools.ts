@@ -17,6 +17,7 @@ import {
 } from "@/cut/lib/textCompose";
 import { TEXT_MOVE_IDS, TEXT_MOVE_NOTES } from "@/cut/lib/textMotion";
 import { OVERLAY_ANIM_STYLE_IDS } from "@donkeycut/effects-kit";
+import { TIMELINE_IDS, TIMELINE_LABELS } from "@/cut/lib/types";
 
 export const TIMELINE_TOOLS = [
   {
@@ -366,6 +367,13 @@ export const TIMELINE_TOOLS = [
       },
       ["kind", "describe"]
     ),
+  },
+  {
+    name: "switch_timeline",
+    description: `Open another of the project's ${TIMELINE_IDS.length} timelines (${TIMELINE_IDS.map((id) => `${id} = ${TIMELINE_LABELS[id]}`).join(", ")}) — the picker at the left of the timeline toolbar. Each timeline holds its own clips, soundtrack, transitions, elements and subtitles; the media, the frame and the project settings are shared. The preview, the export and every other tool work on the open one, which editor_state project.timeline names, with project.timelines summarizing each. A timeline opened for the first time is empty, and each keeps its own undo history. A share link plays the timeline its share settings pick, Main by default. There are exactly these ${TIMELINE_IDS.length}; none can be added, renamed or deleted.`,
+    inputSchema: obj({
+      timeline: { type: "string", enum: [...TIMELINE_IDS], description: "The timeline to open" },
+    }, ["timeline"]),
   },
   {
     name: "set_view",

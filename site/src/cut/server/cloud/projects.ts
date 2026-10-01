@@ -2,7 +2,7 @@
 // docs and metadata in Postgres, media bytes in R2. Every query scopes by userId.
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
-import { normalizeAspect, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
+import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { deleteLadder } from "./ladderStore";
@@ -221,6 +221,8 @@ export const projectsCloud = {
             ? []
             : existing.overlayClips,
         overlays: Array.isArray(body.overlays) ? body.overlays : existing.overlays,
+        timeline: isTimelineId(body.timeline) ? body.timeline : existing.timeline,
+        timelines: sanitizeTimelines(body.timelines) ?? existing.timelines,
         templates: Array.isArray(body.templates) ? body.templates : existing.templates,
         mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
         aspect: normalizeAspect(body.aspect) ?? existing.aspect,

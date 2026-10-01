@@ -105,7 +105,7 @@ import {
 } from "@/cut/lib/genNotify";
 import { useGenerate, type GenerateJob } from "@/cut/lib/generate";
 import { CAPTION_LIMIT, normalizeTags } from "@/cut/lib/publish";
-import { useEditor } from "@/cut/lib/store";
+import { assetClipUses, useEditor } from "@/cut/lib/store";
 import { useEnvironment } from "@/cut/lib/environment";
 import { formatTime } from "@/cut/lib/time";
 import { useLocalPref } from "@/cut/lib/uiState";
@@ -975,9 +975,7 @@ function ProjectFilesPanel({
     const { folders: goneFolders, items } = splitPick(ids);
     const held = s.assets.filter((a) => !!a.folderId && goneFolders.includes(a.folderId));
     const gone = new Set([...items, ...held.map((a) => a.id)]);
-    const uses =
-      s.clips.filter((c) => gone.has(c.assetId)).length +
-      s.audioClips.filter((c) => gone.has(c.assetId)).length;
+    const uses = assetClipUses(s, gone);
     if (uses > 0 || held.length > 0) setDeletingIds(ids);
     else deleteNow(ids);
   };
@@ -1460,9 +1458,7 @@ function AssetCard({
 
   const remove = () => {
     const s = useEditor.getState();
-    const uses =
-      s.clips.filter((c) => c.assetId === asset.id).length +
-      s.audioClips.filter((c) => c.assetId === asset.id).length;
+    const uses = assetClipUses(s, new Set([asset.id]));
     // Deleting an unused asset is harmless; only confirm when it would also
     // remove clips from the timeline.
     if (uses > 0) setConfirmUses(uses);

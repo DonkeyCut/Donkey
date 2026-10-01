@@ -109,6 +109,7 @@ import { chatOwner, tagChatAsset } from "./chatAssets";
 import { queueMessageFromAgent } from "./chatQueue";
 import { applyOwnership, useGenerate, type VideoAttempt, type VideoGenOptions } from "./generate";
 import { useGenScene } from "./genScene";
+import { switchTimeline } from "./timelineSwitch";
 import { folderWithin } from "./folderTree";
 import { anchorRefused } from "./genvideo/shotAttempts";
 import {
@@ -181,7 +182,7 @@ import { isGradePresetTemplate, listSavedGrades, saveGradePreset } from "./grade
 import { isStylePresetTemplate } from "./stylePresets";
 import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
 import { sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
-import { applyOverlayPatchSettled, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, assetClipUses, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { renderProjectFrame, renderProjectFrames } from "./exportRender";
 import { framesAt, readMediaFileSize } from "./mediaRead";
@@ -258,6 +259,8 @@ import {
   SHAPE_LABELS,
   SIDE_PANEL_TABS,
   SPEED_FLOOR,
+  isTimelineId,
+  TIMELINE_IDS,
   TRANSITION_STYLE_IDS,
   type AnimStyle,
   type AssetWatch,
@@ -4184,9 +4187,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   delete_asset: (s, input) => {
       const asset = requireItem(s.assets, input.asset_id, "project asset");
-      const uses =
-        s.clips.filter((c) => c.assetId === asset.id).length +
-        s.audioClips.filter((c) => c.assetId === asset.id).length;
+      const uses = assetClipUses(s, new Set([asset.id]));
       s.removeAsset(asset.id);
       return { removed: asset.name, clipsRemoved: uses };
   },
@@ -4498,6 +4499,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
       s.setPublish(patch);
       return patch;
+  },
+
+  switch_timeline: async (_s, input) => {
+      if (!isTimelineId(input.timeline))
+        throw new ToolError(`timeline must be one of ${TIMELINE_IDS.join(", ")}.`);
+      const blocked = await switchTimeline(input.timeline);
+      if (blocked) throw new ToolError(blocked);
+      const s = useEditor.getState();
+      return {
+        timeline: s.timeline,
+        duration: round2(projectDuration(s)),
+        clips: s.clips.length,
+        audioClips: s.audioClips.length,
+        overlays: s.overlays.length,
+      };
   },
 
   set_view: (s, input) => {
