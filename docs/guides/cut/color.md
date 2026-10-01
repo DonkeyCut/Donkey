@@ -8,9 +8,9 @@ A clip's color is one recipe: what its code values mean (the source profile), th
 
 Every video carries a source profile, read from its header at import: Apple Log and Log 2 by Apple's metadata identifier, HLG and PQ by the transfer tag beside a BT.2020 matrix, sRGB by its transfer, Rec.709 otherwise. The Color panel shows the detection and takes a per-asset override.
 
-Rec.709 and sRGB sources draw as they are. A Log or HDR source goes through the ACES 2.0 output transform first, so the grade and any creative LUT see a Rec.709 picture. A technical Log→Rec.709 LUT is a conversion of its own: it goes on a clip whose source is set to "Rec.709 (no conversion)".
+Rec.709 and sRGB sources draw as they are. Log goes through the ACES 2.0 output transform, HLG and PQ through the BT.2100 OOTF on a 100-nit display, so the grade and any creative LUT see a Rec.709 picture. A technical Log→Rec.709 LUT is a conversion of its own: it goes on a clip whose source is set to "Rec.709 (no conversion)".
 
-That needs the code values untouched, and a browser converts a decoded frame by its bitstream tags before anything can draw it, so the parameter set's tags are rewritten to neutral Rec.709 / sRGB before the decoder sees them. The matrix a decoder then draws with differs by browser, so each route is measured once per session on a small fixture and the clip's LUT undoes it before applying the file's own. ffmpeg and headless renders read the file's matrix and need no fix. ProRes masters and their preview proxies are in [Local Compute](local-compute.md). Start in the source color module.
+That needs the code values untouched, and a browser converts a decoded frame by its bitstream tags, so the parameter set's tags are rewritten to neutral Rec.709 / sRGB before the decoder sees them. The matrix a decoder draws with differs by browser, so each route is measured once per session and the clip's LUT undoes it before applying the file's own. ffmpeg and headless renders read the file's matrix and need no fix. ProRes masters and their preview proxies are in [Local Compute](local-compute.md).
 
 ## LUTs
 

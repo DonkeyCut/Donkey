@@ -15,7 +15,8 @@
 /* ------------------------------------------------------------------ */
 
 /** What a clip's code values mean. The first two need no conversion; the
- * rest go through a scene-linear decode and the ACES 2.0 output transform. */
+ * log profiles go through the ACES 2.0 output transform, HLG and PQ through
+ * the BT.2100 OOTF. */
 export type SourceProfile = "rec709" | "srgb" | "apple-log" | "apple-log-2" | "hlg" | "pq";
 
 export const SOURCE_PROFILES: { id: SourceProfile; label: string; detail: string }[] = [
@@ -230,9 +231,17 @@ export function hlgOetfInverse(s: number): number {
   return s <= 0.5 ? (s * s) / 3 : (Math.exp((s - HLG_C) / HLG_A) + HLG_B) / 12;
 }
 
-/** BT.2100 HLG system gamma for a display of the given peak (1.2 at 1000 nits). */
+/** HLG system gamma for a display of the given peak (1.2 at 1000 nits):
+ * BT.2100's formula across its 400–2000 nit range, BT.2390's extended one
+ * outside it (0.846 on a 100-nit SDR display). */
 export function hlgGamma(peakNits = 1000): number {
-  return 1.2 + 0.42 * Math.log10(peakNits / 1000);
+  if (peakNits >= 400 && peakNits <= 2000) return 1.2 + 0.42 * Math.log10(peakNits / 1000);
+  return 1.2 * Math.pow(1.111, Math.log2(peakNits / 1000));
+}
+
+/** sRGB transfer: display-linear → signal. */
+export function srgbEncode(l: number): number {
+  return l <= 0.0031308 ? 12.92 * l : 1.055 * Math.pow(l, 1 / 2.4) - 0.055;
 }
 
 const REC2020_LUMA = [0.2627, 0.678, 0.0593];

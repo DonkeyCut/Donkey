@@ -8,9 +8,10 @@
  *     encoding; Apple Log and Apple Log 2 decode to scene-linear ACES and go
  *     through the ACES 2.0 output transform — the Rec.709 100-nit transform
  *     for an SDR project, the Rec.2100 1000-nit HLG one when the project
- *     delivers HDR; HLG and PQ take the same transform into SDR, and cross
- *     into each other through the BT.2100 transfer at 1000 nits, so an HDR
- *     source keeps its range)
+ *     delivers HDR; HLG and PQ are display-referred, so they reach SDR
+ *     through the BT.2100 OOTF on a 100-nit display, and cross into each
+ *     other through the transfer at 1000 nits, so an HDR source keeps its
+ *     range)
  *   2 the clip's library LUT, mixed by its amount
  *   3 the grade (preset layer, then manual), gradeMath.ts
  *   4 output: SDR as is; an SDR source delivered as HDR takes the BT.2408
@@ -34,8 +35,8 @@ import {
   AP0_PRIMARIES,
   APPLE_WIDE_GAMUT_PRIMARIES,
   BRADFORD,
-  HLG_SCENE_WHITE,
   REC2020_PRIMARIES,
+  REC709_PRIMARIES,
   appleLogDecode,
   bt1886Decode,
   hlgOetf,
@@ -49,6 +50,7 @@ import {
   rgbToRgbMatrix,
   sdrToHlg,
   sdrToPq,
+  srgbEncode,
 } from "./colorSpace";
 import { type GradeLut, GRADE_LUT_SIZE, stableJson } from "./gradeLut";
 import { type GradeTransform, createGradeTransform } from "./gradeMath";
@@ -191,13 +193,14 @@ const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 const REC2020_TO_AP0 = rgbToRgbMatrix(REC2020_PRIMARIES, AP0_PRIMARIES, BRADFORD);
 const AWG_TO_AP0 = rgbToRgbMatrix(APPLE_WIDE_GAMUT_PRIMARIES, AP0_PRIMARIES, BRADFORD);
-const HLG_TO_ACES_SCALE = 1 / HLG_SCENE_WHITE;
+const REC2020_TO_REC709 = rgbToRgbMatrix(REC2020_PRIMARIES, REC709_PRIMARIES);
+const SDR_PEAK_NITS = 100;
 
 function acesPresetFor(output: OutputSpace): AcesOutputPresetId {
   return output === "hlg" ? "rec2100-hlg-1000" : output === "pq" ? "rec2100-pq-1000" : "rec709-100";
 }
 
-/** Code values → scene-linear AP0 for the profiles that carry a scene. */
+/** Code values → scene-linear AP0 for the log profiles. */
 function sceneDecoder(profile: SourceProfile): ((r: number, g: number, b: number) => [number, number, number]) | null {
   const toAp0 = (m: Mat3, r: number, g: number, b: number): [number, number, number] => [
     m[0] * r + m[1] * g + m[2] * b,
@@ -209,23 +212,6 @@ function sceneDecoder(profile: SourceProfile): ((r: number, g: number, b: number
       return (r, g, b) => toAp0(REC2020_TO_AP0, appleLogDecode(r), appleLogDecode(g), appleLogDecode(b));
     case "apple-log-2":
       return (r, g, b) => toAp0(AWG_TO_AP0, appleLogDecode(r), appleLogDecode(g), appleLogDecode(b));
-    case "hlg":
-      // BT.2100 inverse OETF gives the HLG scene; BT.2408 puts its reference
-      // white at the 75% signal, and ACES puts diffuse white at 1.0.
-      return (r, g, b) =>
-        toAp0(
-          REC2020_TO_AP0,
-          hlgOetfInverse(r) * HLG_TO_ACES_SCALE,
-          hlgOetfInverse(g) * HLG_TO_ACES_SCALE,
-          hlgOetfInverse(b) * HLG_TO_ACES_SCALE
-        );
-    case "pq":
-      // PQ is display-referred: the ST 2084 EOTF gives nits, and the BT.2390
-      // inverse OOTF for a 1000-nit display recovers the HLG scene.
-      return (r, g, b) => {
-        const [rs, gs, bs] = hlgOotfInverse(pqDecode(r), pqDecode(g), pqDecode(b), 1000);
-        return toAp0(REC2020_TO_AP0, rs * HLG_TO_ACES_SCALE, gs * HLG_TO_ACES_SCALE, bs * HLG_TO_ACES_SCALE);
-      };
     default:
       return null;
   }
@@ -246,6 +232,18 @@ export function pqToHlg(r: number, g: number, b: number): [number, number, numbe
   return [hlgOetf(rs), hlgOetf(gs), hlgOetf(bs)];
 }
 
+/** HLG signal → SDR signal: the HLG picture on a 100-nit display, the
+ * BT.2100 OOTF at that peak's system gamma with HLG's peak at SDR white,
+ * moved into Rec.709 primaries, clipped and sRGB-encoded. Display-referred,
+ * so hue and contrast hold; the rendition a phone's own player shows on an
+ * SDR screen, within a level or two. */
+export function hlgToSdr(r: number, g: number, b: number): [number, number, number] {
+  const k = 1 / SDR_PEAK_NITS;
+  const [rd, gd, bd] = hlgOotf(hlgOetfInverse(r), hlgOetfInverse(g), hlgOetfInverse(b), SDR_PEAK_NITS);
+  const [x, y, z] = mat3Apply(REC2020_TO_REC709, rd * k, gd * k, bd * k);
+  return [srgbEncode(clamp01(x)), srgbEncode(clamp01(y)), srgbEncode(clamp01(z))];
+}
+
 /** The source conversion for a profile into the output's display values, or
  * null when the source already is display values in the grade's container.
  * A drawn matrix that differs from the file's is undone first. An HDR file
@@ -258,8 +256,15 @@ export function sourceTransform(
 ): GradeTransform | null {
   const fix = needsMatrixFix(drawn) ? matrixFixTransform(drawn) : null;
   if (recipeIsIdentity(profile, output)) return fix;
-  if (isHdrSource(profile) && output !== "sdr") {
-    const cross = output === "pq" ? hlgToPq : pqToHlg;
+  if (isHdrSource(profile)) {
+    const cross =
+      output === "sdr"
+        ? profile === "pq"
+          ? (r: number, g: number, b: number) => hlgToSdr(...pqToHlg(r, g, b))
+          : hlgToSdr
+        : output === "pq"
+          ? hlgToPq
+          : pqToHlg;
     return (r, g, b) => {
       const [fr, fg, fb] = fix ? fix(r, g, b) : [r, g, b];
       return cross(clamp01(fr), clamp01(fg), clamp01(fb));

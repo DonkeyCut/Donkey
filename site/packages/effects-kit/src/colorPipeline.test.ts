@@ -15,7 +15,7 @@ import {
   recipeKey,
   sourceTransform,
 } from "./colorPipeline";
-import { BT2408_HLG_WHITE, appleLogEncode, bt1886Encode, pqEncode } from "./colorSpace";
+import { BT2408_HLG_WHITE, appleLogEncode, bt1886Encode, pqEncode, sdrToHlg } from "./colorSpace";
 import { applyLutToImageData } from "./gradeLut";
 import type { ParsedLut } from "./lutFile";
 
@@ -106,8 +106,19 @@ describe("source conversion", () => {
     neutral(hlg);
     neutral(pq);
     expect(Math.abs(hlg[0] - pq[0])).toBeLessThan(2e-3);
-    // The BT.2408 reference white lands where ACES puts diffuse white.
-    expect(Math.abs(hlg[0] - 0.722)).toBeLessThan(2e-3);
+    // The BT.2408 reference white lands near 0.6, leaving the top of the
+    // range to the highlights.
+    expect(Math.abs(hlg[0] - 0.6056)).toBeLessThan(2e-3);
+  });
+
+  test("an HLG source keeps its hues in SDR", () => {
+    // Pure Rec.709 red, as an iPhone records a red screen: the red channel
+    // carries it alone after the conversion, with no drift toward orange.
+    const red = sdrToHlg(0.6, 0, 0);
+    const out = sourceTransform("hlg", "sdr")!(...red);
+    expect(out[0]).toBeGreaterThan(0.5);
+    expect(out[1]).toBeLessThan(0.01);
+    expect(out[2]).toBeLessThan(0.01);
   });
 
   test("an HDR source delivered in its own encoding is left alone, graded in place", () => {
