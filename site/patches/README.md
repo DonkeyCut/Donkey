@@ -26,3 +26,13 @@ Delete this patch when upstream's pump counts frames in flight itself: check
 deleting the patch file, this section, the check script, and `patch-package`
 from `postinstall` and `devDependencies`, then running the perf eval's
 playback bucket (`npm run eval:cut-perf -- --bucket playback`).
+
+## @mediabunny/prores: the WASM binary as base64
+
+The ProRes decoder embeds its WASM binary as an escaped template literal. The
+production minifier rewrites `\x00` before a digit as `\0`, which inside a
+template literal is an octal escape and a SyntaxError, so the decoder chunk
+never loads and every ProRes import fails at the probe. The patch stores the
+binary as a base64 string read through `atob`: the same bytes, with no escapes
+to rewrite. Delete it when a production build's decoder chunk parses without it
+(`node --check` on the emitted chunk).
