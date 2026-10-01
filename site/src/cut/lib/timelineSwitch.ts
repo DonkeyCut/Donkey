@@ -6,14 +6,18 @@ import { useMatteBakes, type MatteBakeJob } from "./removal/bakeJobs";
 import { useEditor } from "./store";
 import { TIMELINE_LABELS, type TimelineId } from "./types";
 
-/** Whether the open project's storage keeps more than one timeline. An engine
- * from before timelines rebuilds the saved doc without the parked ones, so a
- * Mac project on an older app stays on Main. A headless turn runs inside the
- * same build that stores the doc. */
-export async function timelinesSupported(): Promise<boolean> {
-  if (typeof window === "undefined" || getBackend().kind !== "local") return true;
-  return (await engineFeatures()).has("doc.timelines");
+/** What the open project's storage keeps of its timelines. An engine from
+ * before timelines rebuilds the saved doc without the parked ones, so a Mac
+ * project on an older app stays on Main; one from before per-timeline frames
+ * drops their aspect, so its timelines share one frame. A headless turn runs
+ * inside the same build that stores the doc. */
+async function timelineStorage(): Promise<{ timelines: boolean; aspects: boolean }> {
+  if (typeof window === "undefined" || getBackend().kind !== "local") return { timelines: true, aspects: true };
+  const features = await engineFeatures();
+  return { timelines: features.has("doc.timelines"), aspects: features.has("doc.timelineAspect") };
 }
+
+export const timelinesSupported = async () => (await timelineStorage()).timelines;
 
 const baking = (jobs: Record<string, MatteBakeJob>) => Object.values(jobs).some((j) => j.status === "running");
 
@@ -33,10 +37,11 @@ export function timelineSwitchBlocker(): string | null {
 
 /** Open another of the project's timelines, or say why it cannot. */
 export async function switchTimeline(id: TimelineId): Promise<string | null> {
-  if (!(await timelinesSupported())) return "Update the Donkey app to use more than one timeline.";
+  const storage = await timelineStorage();
+  if (!storage.timelines) return "Update the Donkey app to use more than one timeline.";
   const blocked = timelineSwitchBlocker();
   if (blocked) return blocked;
-  useEditor.getState().switchTimeline(id);
+  useEditor.getState().switchTimeline(id, { ownAspect: storage.aspects });
   return null;
 }
 

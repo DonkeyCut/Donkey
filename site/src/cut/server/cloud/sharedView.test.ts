@@ -112,16 +112,22 @@ describe("filterDocForShare", () => {
       ...doc,
       timeline: "second",
       clips: [{ id: "c2", assetId: "imported", track: 0, start: 0, in: 0, out: 1, muted: false }],
-      timelines: { main: { clips: doc.clips, audioClips: [], transitions: [], overlays: [], subtitles: { cues: [] } } },
+      aspect: "16:9",
+      timelines: { main: { clips: doc.clips, audioClips: [], transitions: [], overlays: [], subtitles: { cues: [] }, aspect: "9:16" } },
     } as unknown as ProjectDoc;
     const main = filterDocForShare(onSecond, features());
     expect(main.clips.map((c) => c.id)).toEqual(["c1"]);
     expect(ids(main)).toEqual(["placed"]);
     expect(main.timelines).toBeUndefined();
+    expect(main.aspect).toBe("9:16");
     expect([...sharedFileNames(onSecond, features())]).toEqual(["placed.mp4"]);
     const second = filterDocForShare(onSecond, features({ timeline: "second" }));
     expect(second.clips.map((c) => c.id)).toEqual(["c2"]);
+    expect(second.aspect).toBe("16:9");
     expect(ids(second)).toEqual(["imported"]);
-    expect(filterDocForShare(onSecond, features({ timeline: "third" })).clips).toEqual([]);
+    const third = filterDocForShare(onSecond, features({ timeline: "third" }));
+    expect(third.clips).toEqual([]);
+    // Never opened: Main's frame.
+    expect(third.aspect).toBe("9:16");
   });
 });

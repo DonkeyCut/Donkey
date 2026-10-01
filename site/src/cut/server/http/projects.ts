@@ -135,7 +135,7 @@ export const projectsApi = {
             : existing.overlayClips,
         overlays: Array.isArray(body.overlays) ? body.overlays : existing.overlays,
         timeline: isTimelineId(body.timeline) ? body.timeline : existing.timeline,
-        timelines: sanitizeTimelines(body.timelines) ?? existing.timelines,
+        timelines: sanitizeTimelines(body.timelines, existing) ?? existing.timelines,
         templates: Array.isArray(body.templates) ? body.templates : existing.templates,
         mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
         aspect: normalizeAspect(body.aspect) ?? existing.aspect,

@@ -89,7 +89,7 @@ import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./pl
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
-import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
@@ -437,15 +437,16 @@ export interface EditorState {
   transitions: TimelineTransition[];
   audioClips: AudioClip[];
   overlays: Overlay[];
-  /** The open timeline: clips, transitions, audio, elements and subtitles
-   * above are its content. */
+  /** The open timeline: clips, transitions, audio, elements, subtitles and
+   * aspect are its content. */
   timeline: TimelineId;
   /** The closed timelines' content, parked as the document stores it. */
   timelines: Partial<Record<TimelineId, TimelineBody>>;
   /** Park the open timeline and open another. Each timeline keeps its own
-   * undo history for the session. */
-  switchTimeline: (id: TimelineId) => void;
-  /** Output frame ratio ("W:H", short side 1080), persisted per project. */
+   * undo history for the session, and its own frame where the storage keeps
+   * one per timeline (`ownAspect`). */
+  switchTimeline: (id: TimelineId, opts?: { ownAspect?: boolean }) => void;
+  /** Output frame ratio ("W:H", short side 1080), persisted per timeline. */
   aspect: Aspect;
   /** The aspect was chosen deliberately (picker, set_aspect, or saved in the
    * doc) — the first-import orientation guess stands down. Not a doc field. */
@@ -2183,6 +2184,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     applyDocState: (doc, assets, ui) => {
       const state = normalizeDocState(doc, assets);
+      const aspect = state.aspect ?? lastChosenAspect() ?? "9:16";
       hydrating = true;
       try {
         set({
@@ -2193,10 +2195,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           audioClips: state.audioClips,
           overlays: state.overlays,
           timeline: isTimelineId(doc.timeline) ? doc.timeline : "main",
-          timelines: sanitizeTimelines(doc.timelines) ?? {},
+          timelines: sanitizeTimelines(doc.timelines, { aspect }) ?? {},
           templates: doc.templates ?? [],
           mediaFolders: doc.mediaFolders ?? [],
-          aspect: state.aspect ?? lastChosenAspect() ?? "9:16",
+          aspect,
           aspectTouched: doc.aspect !== undefined || lastChosenAspect() !== null,
           guides: sanitizeGuides(doc.guides),
           guidesHidden: false,
@@ -2471,7 +2473,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
     },
     setBackground: (hex) => set({ background: projectBackground(hex) }),
-    switchTimeline: (id) => {
+    switchTimeline: (id, opts) => {
       const s = get();
       if (id === s.timeline || s.readOnly || !isTimelineId(id)) return;
       const opened = normalizeDocState(s.timelines[id] ?? {}, s.assets);
@@ -2481,6 +2483,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         transitions: s.transitions,
         overlays: docOverlays(s.overlays),
         subtitles: s.subtitles,
+        aspect: s.aspect,
       };
       const rest = { ...s.timelines };
       delete rest[id];
@@ -2506,6 +2509,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         audioClips: opened.audioClips,
         overlays: opened.overlays,
         subtitles: opened.subtitles,
+        aspect: opts?.ownAspect === false ? s.aspect : timelineAspect(s, id),
         subtitleLane: 0,
         subtitleStatus: opened.subtitles.cues.length > 0 ? "ready" : "idle",
         subtitleError: null,

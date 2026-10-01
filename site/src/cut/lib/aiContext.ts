@@ -1,7 +1,7 @@
 "use client";
 
 import { formatBytes } from "@/lib/bytes";
-import { isLinkedAssetType, isTimelineId, sanitizeTimelines, TIMELINE_IDS, TIMELINE_LABELS, type TimelineBody, type TimelineId } from "./types";
+import { isLinkedAssetType, isTimelineId, sanitizeTimelines, timelineAspect, TIMELINE_IDS, TIMELINE_LABELS, type TimelineBody, type TimelineId } from "./types";
 import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import { hasOverlayAnim, retimeOf, speedCurveOf, WHEEL_LABELS, WHEEL_ZONES, type ClipSound, type OutputSpace, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
@@ -286,6 +286,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
 export function describeDoc(doc: ProjectDoc, opts?: { fullCues?: boolean; chatId?: string | null }) {
   const assets: MediaAsset[] = (doc.assets ?? []).map((a) => ({ ...a, url: "" }));
   const state = normalizeDocState(doc, assets);
+  const aspect = state.aspect ?? "9:16";
   const core = describeState(
     {
       projectId: doc.id ?? null,
@@ -300,7 +301,7 @@ export function describeDoc(doc: ProjectDoc, opts?: { fullCues?: boolean; chatId
       subtitles: state.subtitles,
       subtitleLane: 0,
       subtitleStatus: state.subtitles.cues.length > 0 ? "ready" : "idle",
-      aspect: state.aspect ?? "9:16",
+      aspect,
       background: state.background,
       colorSpace: state.colorSpace,
       guides: sanitizeGuides(doc.guides),
@@ -308,7 +309,7 @@ export function describeDoc(doc: ProjectDoc, opts?: { fullCues?: boolean; chatId
       genvideo: doc.genvideo ?? undefined,
       mediaFolders: doc.mediaFolders ?? [],
       timeline: isTimelineId(doc.timeline) ? doc.timeline : "main",
-      timelines: sanitizeTimelines(doc.timelines) ?? {},
+      timelines: sanitizeTimelines(doc.timelines, { aspect }) ?? {},
     },
     { fullCues: opts?.fullCues === true, chatId: opts?.chatId ?? null, live: false }
   );
@@ -406,6 +407,7 @@ function describeState(
           ...(id === s.timeline ? { open: true } : {}),
           duration: r(body ? projectDuration(body) : 0),
           clips: body?.clips.length ?? 0,
+          aspect: timelineAspect(s, id),
         };
       }),
       aspect: s.aspect,

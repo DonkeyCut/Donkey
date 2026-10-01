@@ -370,7 +370,7 @@ export const TIMELINE_TOOLS = [
   },
   {
     name: "switch_timeline",
-    description: `Open another of the project's ${TIMELINE_IDS.length} timelines (${TIMELINE_IDS.map((id) => `${id} = ${TIMELINE_LABELS[id]}`).join(", ")}) — the picker at the left of the timeline toolbar. Each timeline holds its own clips, soundtrack, transitions, elements and subtitles; the media, the frame and the project settings are shared. The preview, the export and every other tool work on the open one, which editor_state project.timeline names, with project.timelines summarizing each. A timeline opened for the first time is empty, and each keeps its own undo history. A share link plays the timeline its share settings pick, Main by default. There are exactly these ${TIMELINE_IDS.length}; none can be added, renamed or deleted.`,
+    description: `Open another of the project's ${TIMELINE_IDS.length} timelines (${TIMELINE_IDS.map((id) => `${id} = ${TIMELINE_LABELS[id]}`).join(", ")}) — the picker at the left of the timeline toolbar. Each timeline holds its own clips, soundtrack, transitions, elements, subtitles and aspect ratio; the media and the project settings are shared. The preview, the export and every other tool work on the open one, which editor_state project.timeline names, with project.timelines summarizing each. A timeline opened for the first time is empty at Main's aspect ratio, and each keeps its own undo history. A share link plays the timeline its share settings pick, Main by default. There are exactly these ${TIMELINE_IDS.length}; none can be added, renamed or deleted.`,
     inputSchema: obj({
       timeline: { type: "string", enum: [...TIMELINE_IDS], description: "The timeline to open" },
     }, ["timeline"]),

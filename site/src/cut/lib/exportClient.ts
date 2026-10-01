@@ -30,7 +30,7 @@ import { clipLen, clipSpeed, getClipSpans, openedTimeline, overlayLayers, projec
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng } from "./textRender";
-import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked } from "./types";
+import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
 import type {
   Aspect,
@@ -2156,7 +2156,8 @@ function sharedCut(doc: ExportDoc, timeline: TimelineId | undefined): { cut: Exp
   const { timeline: open = "main", timelines, ...cut } = doc;
   const want = timeline ?? "main";
   if (want === open) return { cut, key: null };
-  const parked = { ...cut, ...openedTimeline(timelines?.[want] ?? {}, doc.assets) };
+  const { aspect, ...body } = parkedTimeline({ aspect: cut.aspect, timeline: open, timelines: timelines ?? {} }, want);
+  const parked = { ...cut, ...openedTimeline(body, doc.assets), aspect };
   return { cut: parked, key: shareRenderKey(parked) };
 }
 

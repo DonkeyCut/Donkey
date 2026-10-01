@@ -275,6 +275,40 @@ describe("timelines", () => {
     expect(s().timelines.main?.clips).toEqual([]);
   });
 
+  test("each timeline keeps its own aspect", () => {
+    s().setAspect("16:9");
+    s().switchTimeline("second");
+    // Opened for the first time: Main's frame.
+    expect(s().aspect).toBe("16:9");
+    s().setAspect("9:16");
+    s().switchTimeline("third");
+    expect(s().aspect).toBe("16:9");
+    s().switchTimeline("main");
+    expect(s().aspect).toBe("16:9");
+    expect(s().timelines.second?.aspect).toBe("9:16");
+    const doc = serializeDoc(s() as Parameters<typeof serializeDoc>[0]);
+    expect(sanitizeTimelines(doc.timelines)?.second?.aspect).toBe("9:16");
+    s().switchTimeline("second");
+    expect(s().aspect).toBe("9:16");
+  });
+
+  test("a timeline parked where the frame was project-wide keeps the doc's", () => {
+    const body = { clips: [], audioClips: [], transitions: [], overlays: [], subtitles: emptySubtitles() };
+    expect(sanitizeTimelines({ main: body }, { aspect: "16:9" })?.main?.aspect).toBe("16:9");
+    // A save from such a client keeps the frame the doc already holds.
+    const prior = { aspect: "9:16", timelines: { main: { ...body, aspect: "4:3" as const } } };
+    expect(sanitizeTimelines({ main: body }, prior)?.main?.aspect).toBe("4:3");
+    expect(sanitizeTimelines({ main: { ...body, aspect: "1:1" } }, prior)?.main?.aspect).toBe("1:1");
+  });
+
+  test("an engine without per-timeline frames keeps one frame across switches", () => {
+    s().setAspect("16:9");
+    s().switchTimeline("second", { ownAspect: false });
+    s().setAspect("9:16");
+    s().switchTimeline("main", { ownAspect: false });
+    expect(s().aspect).toBe("9:16");
+  });
+
   test("a parked timeline missing a list reads it as empty", () => {
     const parked = sanitizeTimelines({ second: { clips: [] }, bogus: { clips: [] } });
     expect(parked).toEqual({

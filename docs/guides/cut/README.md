@@ -46,7 +46,7 @@ Browser previews use the browser compositor and replace one cached proxy in OPFS
 
 Cloud source media, generated media, and retained exports count toward storage. Derived previews, share cards, and HLS ladders are quota-exempt; staging inputs are temporary. An export is weighed twice — the size it is heading for before a frame is drawn, and what actually landed before the account is charged — so one render cannot carry an account past its cap. Transports expose structured storage, credit, and authentication failures. Each host chooses their presentation; the website mounts its storage dialog separately.
 
-A project has three timelines, Main, Second and Third, picked from the timeline toolbar; a share link plays the one its settings pick, Main by default.
+A project has three timelines, Main, Second and Third, each with its own frame; a share link plays the one its settings pick.
 
 Timeline and preview share selection: ⌘/Ctrl-click or Shift-click toggles items; dragging moves them with one undo step. Groups persist. Their preview frame scales and rotates the selection; the group panel edits shared fields, showing Mixed where values differ. Text side grips change wrapping width and corners scale proportionally; height follows content across preview, export and chat.
 

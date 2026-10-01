@@ -1601,11 +1601,46 @@ export interface TimelineBody {
   transitions: TimelineTransition[];
   overlays: Overlay[];
   subtitles: SubtitlesBlock;
+  /** The timeline's frame; absent = it has not been opened yet and takes
+   * Main's. */
+  aspect?: Aspect;
+}
+
+/** A timeline's frame: the open one's is the doc's own, a parked one keeps
+ * its own, and one never opened takes Main's. */
+export function timelineAspect(
+  doc: { aspect: Aspect; timeline: TimelineId; timelines: Partial<Record<TimelineId, Pick<TimelineBody, "aspect">>> },
+  id: TimelineId
+): Aspect {
+  if (id === doc.timeline) return doc.aspect;
+  return doc.timelines[id]?.aspect ?? (id === "main" ? doc.aspect : timelineAspect(doc, "main"));
+}
+
+/** A parked timeline as a cut of its own: its lists, empty when it was never
+ * opened, and its frame. What a share link playing it draws. */
+export function parkedTimeline(
+  doc: { aspect: Aspect; timeline: TimelineId; timelines: Partial<Record<TimelineId, TimelineBody>> },
+  id: TimelineId
+): Required<TimelineBody> {
+  const body = doc.timelines[id];
+  return {
+    clips: body?.clips ?? [],
+    audioClips: body?.audioClips ?? [],
+    transitions: body?.transitions ?? [],
+    overlays: body?.overlays ?? [],
+    subtitles: body?.subtitles ?? emptySubtitles(),
+    aspect: timelineAspect(doc, id),
+  };
 }
 
 /** The parked timelines a save sent, each with every list it carries: a
- * missing or malformed one reads as empty. */
-export function sanitizeTimelines(v: unknown): Partial<Record<TimelineId, TimelineBody>> | undefined {
+ * missing or malformed one reads as empty. A body without its aspect was
+ * written where the frame was project-wide, so it takes the one `prior` kept
+ * for it, else the doc's. */
+export function sanitizeTimelines(
+  v: unknown,
+  prior?: { aspect?: string; timelines?: Partial<Record<TimelineId, TimelineBody>> }
+): Partial<Record<TimelineId, TimelineBody>> | undefined {
   if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
   const list = <T,>(x: unknown): T[] => (Array.isArray(x) ? (x as T[]) : []);
   const out: Partial<Record<TimelineId, TimelineBody>> = {};
@@ -1613,6 +1648,10 @@ export function sanitizeTimelines(v: unknown): Partial<Record<TimelineId, Timeli
     if (!isTimelineId(id) || !raw || typeof raw !== "object") continue;
     const body = raw as Partial<Record<keyof TimelineBody, unknown>>;
     const subtitles = body.subtitles as SubtitlesBlock | undefined;
+    const aspect =
+      normalizeAspect(typeof body.aspect === "string" ? body.aspect : null) ??
+      prior?.timelines?.[id]?.aspect ??
+      normalizeAspect(prior?.aspect);
     out[id] = {
       clips: list(body.clips),
       audioClips: list(body.audioClips),
@@ -1620,6 +1659,7 @@ export function sanitizeTimelines(v: unknown): Partial<Record<TimelineId, Timeli
       overlays: list(body.overlays),
       subtitles:
         subtitles && typeof subtitles === "object" && Array.isArray(subtitles.cues) ? subtitles : emptySubtitles(),
+      ...(aspect ? { aspect } : {}),
     };
   }
   return out;
@@ -1648,8 +1688,8 @@ export interface ProjectDoc {
    * docs. Read on open and merged into `clips`; new saves never write it. */
   overlayClips?: VideoClip[];
   overlays: Overlay[];
-  /** The timeline the top-level clips, audio, transitions, elements and
-   * subtitles belong to; absent = main. */
+  /** The timeline the top-level clips, audio, transitions, elements,
+   * subtitles and aspect belong to; absent = main. */
   timeline?: TimelineId;
   /** The closed timelines' content, parked until one is opened. */
   timelines?: Partial<Record<TimelineId, TimelineBody>>;
