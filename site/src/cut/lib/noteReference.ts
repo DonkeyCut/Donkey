@@ -3,6 +3,7 @@ import { NOTE_LABELS_MAX } from "@/cut/lib/types";
 import type { AssetRef } from "@/cut/lib/assetRef";
 import type { CutNote } from "@/cut/lib/notes";
 import { normalizeLink } from "@/cut/lib/link";
+import { NOTE_BODY_FORMAT } from "@/cut/lib/noteMarkdown";
 
 export const noteIdSchema = z.string().regex(/^[\w-]{1,64}$/);
 export const noteLocationSchema = z.object({
@@ -20,7 +21,7 @@ export const noteReadSchema = z.object({ id: noteIdSchema.optional(), link: z.st
 export const noteSaveSchema = z.object({
   id: noteIdSchema.optional().describe("Existing note id; omit to create a note"),
   title: z.string().max(200).optional(),
-  body: z.string().max(20_000).optional(),
+  body: z.string().max(20_000).optional().describe(NOTE_BODY_FORMAT),
   colorIndex: z.number().int().optional(),
   labelIds: z.array(noteIdSchema).max(NOTE_LABELS_MAX).optional(),
   libraryLocation: noteLocationSchema.nullable().optional().describe(NOTE_LIBRARY_LOCATION_DESCRIPTION),
