@@ -115,11 +115,14 @@ nonisolated public struct Note: Identifiable, Equatable, Sendable {
         self.updatedAt = updatedAt
     }
 
-    /// The text a teleprompter reads for this note: what is written in it. A
-    /// title names the note, so it is read only when it is all the note has.
+    /// The text a teleprompter reads for this note, in the body's own format:
+    /// what is written in it. A title names the note, so it is read only when
+    /// it is all the note has.
     public var script: String {
-        let written = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        return written.isEmpty ? title.trimmingCharacters(in: .whitespacesAndNewlines) : written
+        let written = NoteMarkdown.plainText(body).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard written.isEmpty else { return body }
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return NoteMarkdown.serialize([NoteBlock(.paragraph, runs: [NoteRun(title)])])
     }
 }
 
@@ -540,7 +543,7 @@ public final class IdeasModel {
 
         public var hasContent: Bool {
             !title.trimmingCharacters(in: .whitespaces).isEmpty
-                || !body.trimmingCharacters(in: .whitespaces).isEmpty
+                || !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -574,13 +577,22 @@ public final class IdeasModel {
         self.draft = draft
     }
 
-    /// Saves the open draft. Returns the saved note, or nil when the draft was empty.
+    /// Saves the open draft. Returns the saved note, or nil when the draft was
+    /// empty. A draft nobody changed closes without a write, so opening a note
+    /// to read it leaves it as the cloud has it.
     @discardableResult
     public func saveDraft() -> Note? {
         guard let draft, draft.hasContent else { return nil }
         let title = draft.title.trimmingCharacters(in: .whitespaces)
-        let body = draft.body.trimmingCharacters(in: .whitespaces)
+        // The body is the editor's own output, and its spaces are markup: the
+        // two at the head of a nested list item are its nesting.
+        let body = draft.body
         let existing = notes.first(where: { $0.id == draft.id })
+        if let existing, existing.title == title, existing.body == body, existing.color == draft.color,
+           existing.folderId == draft.folderId, existing.labelIds == draft.labelIds {
+            self.draft = nil
+            return existing
+        }
         // A stand-in title would be read out by the prompter, so an untitled
         // note stays untitled and the card shows the placeholder.
         let note = Note(

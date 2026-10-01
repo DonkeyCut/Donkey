@@ -659,6 +659,18 @@ struct TeleprompterCard: View {
     @Binding var showsSettings: Bool
     let onUseNote: () -> Void
 
+    @State private var editing: NoteBodyEditing
+    @FocusState private var editingScript: Bool
+
+    init(camera: CameraModel, showsSettings: Binding<Bool>, onUseNote: @escaping () -> Void) {
+        self.camera = camera
+        _showsSettings = showsSettings
+        self.onUseNote = onUseNote
+        _editing = State(initialValue: NoteBodyEditing(body: camera.teleprompter.script, look: .scriptCard) { [camera] script in
+            camera.teleprompter.script = script
+        })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // The card's controls ride the top row: the camera rail runs up the
@@ -700,20 +712,24 @@ struct TeleprompterCard: View {
                 }
             }
             .font(.body.weight(.semibold))
-            TextEditor(text: $camera.teleprompter.script)
-                .font(.system(size: 19, weight: .semibold))
+            // The script is a note's body, styles and all, and edits the same
+            // way the note does.
+            NoteBodyEditor(editing: editing, placeholder: "Add your script here...")
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 96, maxHeight: 160)
-                .overlay(alignment: .topLeading) {
-                    if camera.teleprompter.script.isEmpty {
-                        Text("Add your script here...")
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 8)
-                            .padding(.leading, 5)
-                            .allowsHitTesting(false)
-                    }
-                }
+                .focused($editingScript)
+        }
+        // A note picked while the card is up replaces the script under it.
+        .onChange(of: camera.teleprompter.script) { _, script in
+            if script != editing.body { editing.load(script) }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                NoteFormatControls(editing: editing)
+                Spacer()
+                Button("Done") { editingScript = false }
+                    .font(.body.weight(.bold))
+            }
         }
         .foregroundStyle(.white)
         .padding(14)
@@ -766,24 +782,26 @@ struct TeleprompterOverlay: View {
     /// Margin each side of the script.
     private static var sidePadding: Double { 24 }
 
+    /// The face the script draws in, at the reader's size. Headings draw
+    /// larger, styled words in their own weight, slant and color.
+    private var look: NoteLook { .prompter(size: camera.teleprompter.settings.textSize) }
+
     /// The script broken to the width it is drawn in, measured on the very
-    /// face and size it will be drawn in. A line holds as many words as the
+    /// faces and sizes it will be drawn in. A line holds as many words as the
     /// picture has room for, so a short clause reads on one line with what
     /// follows it. The last point of the width is left to the layout, so a
     /// line measured here as fitting is never broken again as it draws.
-    private func script(room: Double) -> String {
-        let font = UIFont.systemFont(
-            ofSize: camera.teleprompter.settings.textSize,
-            weight: .heavy
-        )
-        return camera.teleprompter.displayScript(room: room - 1) { line in
-            (line as NSString).size(withAttributes: [.font: font]).width
+    private func script(room: Double) -> AttributedString {
+        let look = look
+        let paced = camera.teleprompter.displayScript(room: room - 1) { runs, kind in
+            look.width(runs, kind)
         }
+        return look.text(paced)
     }
 
-    private func scriptText(_ text: String) -> some View {
+    private func scriptText(_ text: AttributedString) -> some View {
         Text(text)
-            .font(.system(size: camera.teleprompter.settings.textSize, weight: .heavy))
+            .font(look.font(.paragraph, NoteMarks()))
             .foregroundStyle(.white)
             .lineSpacing(4)
             .shadow(color: .black.opacity(0.7), radius: 6, y: 1)

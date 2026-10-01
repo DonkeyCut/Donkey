@@ -612,7 +612,9 @@ struct NoteCard: View {
                 Text(note.title)
                     .font(.subheadline.weight(.bold))
             }
-            Text(note.body)
+            // The body in its own styles: headings, lists and colored words
+            // read on the card as they do in the note.
+            Text(NoteLook.card.text(NoteMarkdown.parse(note.body)))
                 .font(.footnote)
                 .opacity(0.75)
                 .lineLimit(8)

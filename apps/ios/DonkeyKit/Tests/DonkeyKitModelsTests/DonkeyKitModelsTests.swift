@@ -231,28 +231,34 @@ import Testing
     /// Enough to pin down where a line ends without a screen.
     func measure(_ line: String) -> Double { Double(line.count) * 10 }
 
+    /// The paced script as plain lines: a line break inside a block, a blank
+    /// line between blocks.
+    func paced(_ script: String, room: Double) -> String {
+        pacedScript(script, room: room) { runs, _ in measure(runs.map(\.text).joined()) }
+            .map { $0.lines.map { $0.map(\.text).joined() }.joined(separator: "\n") }
+            .joined(separator: "\n\n")
+    }
+
     @Test func pacingRespectsUserNewlines() {
-        let paced = pacedScript("First thought\nSecond thought", room: 1000, measure: measure)
-        #expect(paced == "First thought\n\nSecond thought")
+        #expect(paced("First thought\nSecond thought", room: 1000) == "First thought\n\nSecond thought")
     }
 
     @Test func pacingCollapsesSpaceRuns() {
-        #expect(pacedScript("hello    there   friend", room: 1000, measure: measure) == "hello there friend")
+        #expect(paced("hello    there   friend", room: 1000) == "hello there friend")
     }
 
     @Test func wordsShareALineWhileThePictureHasRoom() {
         let script = "Hey everyone, welcome back"
         // 26 characters at ten points each, with room to spare.
-        #expect(pacedScript(script, room: 400, measure: measure) == script)
+        #expect(paced(script, room: 400) == script)
     }
 
     @Test func aLineEndsWhereTheNextWordWouldRunOff() {
-        let paced = pacedScript(
+        let text = paced(
             "Hey everyone, welcome back to the channel where we talk about editing",
-            room: 200,
-            measure: measure
+            room: 200
         )
-        let lines = paced.split(separator: "\n").map(String.init)
+        let lines = text.split(separator: "\n").map(String.init)
         #expect(lines.allSatisfy { measure($0) <= 200 })
         // Each line is full: the first word of the next one would not have fit.
         for (line, next) in zip(lines, lines.dropFirst()) {
@@ -260,16 +266,41 @@ import Testing
             #expect(measure("\(line) \(word)") > 200)
         }
         // Every word survives the wrap.
-        #expect(paced.split(whereSeparator: { $0.isWhitespace }).count == 12)
+        #expect(text.split(whereSeparator: { $0.isWhitespace }).count == 12)
     }
 
     @Test func aWordWiderThanTheRoomKeepsItsOwnLine() {
-        let paced = pacedScript("a supercalifragilistic b", room: 60, measure: measure)
-        #expect(paced == "a\nsupercalifragilistic\nb")
+        #expect(paced("a supercalifragilistic b", room: 60) == "a\nsupercalifragilistic\nb")
     }
 
     @Test func noRoomToSpeakOfLeavesTheParagraphWhole() {
-        #expect(pacedScript("keep me together", room: 0, measure: measure) == "keep me together")
+        #expect(paced("keep me together", room: 0) == "keep me together")
+    }
+
+    @Test func pacingKeepsStylesAndMarkersAndDropsMarkup() {
+        let blocks = pacedScript("# **Hi** there\n- one *two*\n2. three\n\n- [x] done", room: 1000) { runs, _ in
+            measure(runs.map(\.text).joined())
+        }
+        #expect(blocks.map(\.kind) == [.heading(1), .bullet, .number, .todo(checked: true)])
+        #expect(blocks[0].lines == [[NoteRun("Hi", NoteMarks(bold: true)), NoteRun(" there")]])
+        #expect(blocks[1].lines == [[NoteRun("• one "), NoteRun("two", NoteMarks(italic: true))]])
+        // Numbers count within their run, whatever the note wrote.
+        #expect(blocks[2].lines == [[NoteRun("1. three")]])
+        #expect(blocks[3].lines == [[NoteRun("☑\u{FE0E} done")]])
+    }
+
+    @Test func aStyledWordIsMeasuredWithTheBlockItSitsIn() {
+        // Headings draw twice as wide here, so the same words break sooner.
+        let blocks = pacedScript("# one two three\none two three", room: 100) { runs, kind in
+            let width = measure(runs.map(\.text).joined())
+            return kind == .heading(1) ? width * 2 : width
+        }
+        #expect(blocks[0].lines.count == 3)
+        #expect(blocks[1].lines.count == 2)
+    }
+
+    @Test func readDurationCountsTheWordsNotTheMarkup() {
+        #expect(readDuration(of: "- **one** two\n> three", wordsPerMinute: 60) == 3)
     }
 }
 

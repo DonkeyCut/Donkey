@@ -11,6 +11,16 @@ struct NoteEditorView: View {
 
     @FocusState private var focused: Field?
     @State private var showingLabels = false
+    @State private var editing: NoteBodyEditing
+
+    init(app: AppModel, ideas: IdeasModel, onRecordNote: @escaping (Note) -> Void) {
+        self.app = app
+        self.ideas = ideas
+        self.onRecordNote = onRecordNote
+        _editing = State(initialValue: NoteBodyEditing(body: ideas.draft?.body ?? "", look: .paper) { [ideas] body in
+            ideas.draft?.body = body
+        })
+    }
 
     var body: some View {
         let color = ideas.draft?.color ?? .butter
@@ -67,22 +77,14 @@ struct NoteEditorView: View {
                 .submitLabel(.next)
                 .onSubmit { focused = .body }
 
-            TextEditor(text: bodyBinding)
-                .font(.system(size: 20, weight: .medium))
+            // The body edits as rich text: the keyboard's format controls
+            // and the system's format menu style the words, and typing a
+            // list marker starts a list.
+            NoteBodyEditor(editing: editing, placeholder: "Write down an idea...")
                 .scrollContentBackground(.hidden)
                 .scrollDismissesKeyboard(.interactively)
                 .padding(.horizontal, 18)
                 .focused($focused, equals: .body)
-                .overlay(alignment: .topLeading) {
-                    if (ideas.draft?.body ?? "").isEmpty {
-                        Text("Write down an idea...")
-                            .font(.system(size: 20, weight: .medium))
-                            .opacity(0.4)
-                            .padding(.horizontal, 23)
-                            .padding(.top, 8)
-                            .allowsHitTesting(false)
-                    }
-                }
 
             // The labels the note wears. A tap on a chip takes it off; the
             // tag button opens the picker that adds, makes, renames and
@@ -146,6 +148,9 @@ struct NoteEditorView: View {
             // Opening a note is reading it as often as writing it, so the
             // keyboard comes and goes on the writer's word.
             ToolbarItemGroup(placement: .keyboard) {
+                if focused == .body {
+                    NoteFormatControls(editing: editing)
+                }
                 Spacer()
                 Button("Done") { focused = nil }
                     .font(.body.weight(.bold))
@@ -159,13 +164,6 @@ struct NoteEditorView: View {
         Binding(
             get: { ideas.draft?.title ?? "" },
             set: { ideas.draft?.title = $0 }
-        )
-    }
-
-    private var bodyBinding: Binding<String> {
-        Binding(
-            get: { ideas.draft?.body ?? "" },
-            set: { ideas.draft?.body = $0 }
         )
     }
 }
