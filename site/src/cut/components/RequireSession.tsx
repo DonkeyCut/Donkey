@@ -1,6 +1,7 @@
 "use client";
 import { bindChatRuntime, bindChatgptPolling, bindCutClip, bindCutJudge, bindCutNotes } from "@/cut/lib/chatRuntime";
 import { bindCutColor } from "@/cut/lib/colorSettings";
+import { bindCutMediaCache } from "@/cut/lib/chunkCache";
 
 import { useEffect, type ReactNode } from "react";
 import { useEnvironment } from "@/cut/lib/environment";
@@ -47,6 +48,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
     bindCutClip(config.data.settings.cutClip);
     bindCutNotes(config.data.settings.cutNotes);
     bindCutColor(config.data.settings.cutColor);
+    bindCutMediaCache(config.data.settings.cutMediaCache);
     reportExposures(config.data);
   }, [userId, config.data]);
 

@@ -53,6 +53,7 @@ import {
 } from "./backend/browser/opfs";
 import { CUT_MEDIA_ORIGIN } from "./hosts";
 import { allowance, holdMemory } from "./memoryBudget";
+import { SETTINGS, type Settings } from "@/lib/config/registry";
 
 export const CHUNK_SIZE = 2 * 1024 * 1024;
 /** Longest single ranged request, in chunks, when a read needs a missing run. */
@@ -70,6 +71,8 @@ const FETCH_ATTEMPTS = 3;
  * refusal is a moment's verdict: an eviction elsewhere can free hundreds of
  * megabytes seconds later, and an object that latched off would never notice. */
 const PERSIST_RETRY_MS = 30_000;
+/** How long one walk of the store's metas stands in for the next. */
+const TALLY_TTL_MS = 60_000;
 /** Chunks written between meta commits. The resident map is what saves a
  * reopened file from enumerating thousands of directory entries, and it is
  * safe to lag: a claim the disk can't back costs one refetch. */
@@ -746,10 +749,41 @@ async function persistChunk(state: ObjState, idx: number, bytes: Uint8Array): Pr
     // A cache write only; the bytes were already served. The reservation goes
     // back so a run of failures can't talk the store into believing it's full.
     refund(bytes.length);
+    if (tally) tally.bytes = Math.max(0, tally.bytes - bytes.length);
   }
 }
 
 let lastEstimate: { at: number; usage: number; quota: number } | null = null;
+
+// The browser grants an origin most of the disk, so the quota alone would let
+// cached media fill the Mac. The cache keeps to its own ceiling, counted over
+// the chunks here and the whole-file copies mediaSync reports.
+let cacheSetting: Settings["cutMediaCache"] = SETTINGS.cutMediaCache.default;
+export function bindCutMediaCache(value: unknown): void {
+  const parsed = SETTINGS.cutMediaCache.schema.safeParse(value);
+  if (parsed.success) cacheSetting = parsed.data;
+}
+export function cutMediaCache(): Settings["cutMediaCache"] {
+  return cacheSetting;
+}
+
+let tally: { at: number; bytes: number } | null = null;
+let copyBytes = 0;
+
+/** What the chunk store holds, from its metas; writes and evictions keep the
+ * count between walks. */
+export async function chunkStoreBytes(): Promise<number> {
+  if (!tally || Date.now() - tally.at > TALLY_TTL_MS) {
+    const bytes = (await listCached()).reduce((sum, c) => sum + c.bytes, 0);
+    tally = { at: Date.now(), bytes };
+  }
+  return tally.bytes;
+}
+
+/** The whole-file copies' total, as mediaSync last measured it. */
+export function noteCachedCopyBytes(bytes: number): void {
+  copyBytes = bytes;
+}
 
 function refund(bytes: number): void {
   if (lastEstimate) lastEstimate.usage = Math.max(0, lastEstimate.usage - bytes);
@@ -766,7 +800,11 @@ async function roomFor(bytes: number, keepKeyHash: string): Promise<boolean> {
     return true;
   }
   const margin = Math.min(QUOTA_MARGIN, lastEstimate.quota * 0.1);
-  let deficit = lastEstimate.usage + bytes + margin - lastEstimate.quota;
+  const stored = await chunkStoreBytes();
+  let deficit = Math.max(
+    lastEstimate.usage + bytes + margin - lastEstimate.quota,
+    stored + copyBytes + bytes - cacheSetting.maxBytes,
+  );
   if (deficit > 0) {
     const freed = await evictChunkBytes(deficit, keepKeyHash);
     refund(freed);
@@ -774,6 +812,7 @@ async function roomFor(bytes: number, keepKeyHash: string): Promise<boolean> {
   }
   if (deficit > 0) return false;
   lastEstimate.usage += bytes;
+  if (tally) tally.bytes += bytes;
   return true;
 }
 
@@ -856,6 +895,7 @@ async function removeVersion(keyHash: string, versionTag: string, bytes: number)
   } catch {
     return 0;
   }
+  if (tally) tally.bytes = Math.max(0, tally.bytes - bytes);
   const k = `${keyHash}/${versionTag}`;
   memory.forget(k);
   const live = states.get(k);

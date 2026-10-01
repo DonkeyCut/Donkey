@@ -44,7 +44,14 @@ import {
   revokeRegistered,
 } from "./backend/browser/registry";
 import { getBackend, type CutBackend } from "./backend";
-import { dropChunksMatching, evictChunkBytes, prefetchChunks } from "./chunkCache";
+import {
+  chunkStoreBytes,
+  cutMediaCache,
+  dropChunksMatching,
+  evictChunkBytes,
+  noteCachedCopyBytes,
+  prefetchChunks,
+} from "./chunkCache";
 import { mediaUrl, type AssetType } from "./types";
 
 const mediaPath = (projectId: string, fileName: string) =>
@@ -61,7 +68,7 @@ export async function stashCloudMedia(
 ): Promise<string | null> {
   if (!supportsBrowserStore()) return null;
   try {
-    await makeRoom(projectId, file.size);
+    await makeRoom(projectId, file.size, false);
     const dir = await mediaDir(projectId, true);
     if (!dir) return null;
     await writeFileAt(dir, fileName, file);
@@ -88,7 +95,7 @@ export async function stashUnclaimedMedia(
 ): Promise<{ fileName: string; url: string } | null> {
   if (!supportsBrowserStore()) return null;
   try {
-    await makeRoom(projectId, file.size);
+    await makeRoom(projectId, file.size, false);
     const fileName = await saveMedia(projectId, file, file.name);
     await updateIndex((idx) => {
       idx.pendingUploads = [
@@ -260,6 +267,8 @@ export function prefetchCloudMedia(
     await updateIndex((idx) => {
       idx.opens = { ...idx.opens, [projectId]: Date.now() };
     }).catch(() => {});
+    // Opening a project brings a cache that outgrew its ceiling back under it.
+    await makeRoom(projectId, 0).catch(() => {});
     for (let i = 0; i < files.length; i++) {
       if (run.ctrl.signal.aborted) return;
       const f = files[i];
@@ -344,39 +353,63 @@ async function cacheOne(
 const QUOTA_MARGIN = 512 * 1024 * 1024;
 
 /** Make room for `bytes` of new media, evicting least-recently-opened cloud
- * projects' cached copies until the write fits under quota. Pinned files and
- * browser-resident projects are exempt; `keepId` (the project being written)
- * is never a candidate. */
-async function makeRoom(keepId: string, bytes: number): Promise<void> {
-  let est: StorageEstimate | undefined;
+ * projects' cached copies until the write fits under quota and the cache
+ * under its ceiling (cutMediaCache). Pinned files and browser-resident
+ * projects are exempt; `keepId` (the project being written) is never a
+ * candidate. A pinned write (`cached` false) needs quota room only; it is no
+ * cache. */
+async function makeRoom(keepId: string, bytes: number, cached = true): Promise<void> {
+  let quotaDeficit = -Infinity;
   try {
-    est = await navigator.storage.estimate?.();
+    const est = await navigator.storage.estimate?.();
+    if (est?.quota) {
+      quotaDeficit = (est.usage ?? 0) + bytes + Math.min(QUOTA_MARGIN, est.quota * 0.1) - est.quota;
+    }
   } catch {
-    return;
+    // No estimate; the ceiling still holds.
   }
-  if (!est?.quota) return;
-  const margin = Math.min(QUOTA_MARGIN, est.quota * 0.1);
-  let deficit = (est.usage ?? 0) + bytes + margin - est.quota;
+  const idx = await readIndex();
+  const pinned = new Set(idx.pendingUploads.map((p) => `${p.projectId}/${p.fileName}`));
+  const candidates: { id: string; openedAt: number }[] = [];
+  let copies = 0;
+  for (const id of await listProjectIds()) {
+    // A directory holding a doc is a browser-resident project — the store is
+    // its only home. Cached cloud copies hold media alone.
+    if (await readFileAt(await projectDir(id), "project.json")) continue;
+    copies += await cachedCopyBytes(id, pinned);
+    if (id !== keepId) candidates.push({ id, openedAt: idx.opens[id] ?? 0 });
+  }
+  noteCachedCopyBytes(copies);
+  let deficit = Math.max(quotaDeficit, (await chunkStoreBytes()) + copies + (cached ? bytes : 0) - cutMediaCache().maxBytes);
   if (deficit <= 0) return;
   // The chunk cache is the cheapest byte to lose — losing one costs a ranged
   // re-fetch, where losing a whole-file copy costs the file — so it goes first.
   deficit -= await evictChunkBytes(deficit);
   if (deficit <= 0) return;
-  const idx = await readIndex();
-  const pinned = new Set(idx.pendingUploads.map((p) => `${p.projectId}/${p.fileName}`));
-  const candidates: { id: string; openedAt: number }[] = [];
-  for (const id of await listProjectIds()) {
-    if (id === keepId) continue;
-    // A directory holding a doc is a browser-resident project — the store is
-    // its only home. Cached cloud copies hold media alone.
-    if (await readFileAt(await projectDir(id), "project.json")) continue;
-    candidates.push({ id, openedAt: idx.opens[id] ?? 0 });
-  }
   candidates.sort((a, b) => a.openedAt - b.openedAt);
   for (const c of candidates) {
-    if (deficit <= 0) return;
-    deficit -= await evictCachedCopy(c.id, pinned);
+    if (deficit <= 0) break;
+    const freed = await evictCachedCopy(c.id, pinned);
+    deficit -= freed;
+    copies -= freed;
   }
+  noteCachedCopyBytes(copies);
+}
+
+/** Bytes a cloud project's cached copy holds, pinned files aside. */
+async function cachedCopyBytes(id: string, pinned: Set<string>): Promise<number> {
+  const dir = await mediaDir(id);
+  if (!dir) return 0;
+  let total = 0;
+  try {
+    for await (const [name, handle] of dir) {
+      if (handle.kind !== "file" || pinned.has(`${id}/${name}`)) continue;
+      total += (await (handle as FileSystemFileHandle).getFile()).size;
+    }
+  } catch {
+    // A directory swept mid-walk counts what it had.
+  }
+  return total;
 }
 
 /** Drop a cloud project's cached media, keeping pinned files. A copy left

@@ -299,6 +299,14 @@ export const SETTINGS = defineSettings({
     title: "Notes",
     description: "How long a note sits still after the last keystroke before it saves.",
   },
+  cutMediaCache: {
+    schema: z.object({ maxBytes: z.number().int().min(1024 ** 3).max(1024 ** 4) }).strict(),
+    default: { maxBytes: 10 * 1024 ** 3 },
+    public: true,
+    title: "Cloud media cache",
+    description:
+      "The most disk a browser spends on cached copies of cloud media. Past it, the least recently used copies go first.",
+  },
   cutColor: {
     schema: z
       .object({
