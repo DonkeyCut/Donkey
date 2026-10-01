@@ -9,7 +9,7 @@ import { createJobRegistry } from "./jobRegistry";
 import { mediaPath, readProject } from "./projects";
 import { retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
 import { bakeRetimedAudio, type BakedAudio } from "./retimeAudio";
-import { atempoChain, findOnPath, hasStream, num, round } from "./util";
+import { atempoChain, findOnPath, hasStream, num, round, errorMessage } from "./util";
 
 /** The audible slice of the cut, in timeline time (mirrors ExportSpec). */
 export interface TranscribeSpec {
@@ -249,7 +249,7 @@ export async function createAudioTranscribeJob(
   void runAudioTranscribe(job, audio, opts)
     .catch((err: unknown) => {
       job.status = "error";
-      job.error = err instanceof Error ? err.message : String(err);
+      job.error = errorMessage(err, String(err));
     })
     .finally(() => retire(job));
   return job;
@@ -301,7 +301,7 @@ export async function createTranscribeJob(spec: TranscribeSpec): Promise<Transcr
   void runTranscribe(job, spec)
     .catch((err: unknown) => {
       job.status = "error";
-      job.error = err instanceof Error ? err.message : String(err);
+      job.error = errorMessage(err, String(err));
     })
     .finally(() => retire(job));
   return job;

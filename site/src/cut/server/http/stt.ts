@@ -1,4 +1,5 @@
 import { createAudioTranscribeJob, getTranscribeJob } from "../transcribe";
+import { errorMessage } from "../util";
 
 /** On-device speech for audio the caller supplies, rather than for a project
  * this engine stores: a cloud project renders its audible mix in the browser
@@ -22,7 +23,7 @@ export const sttApi = {
       return Response.json({ id: job.id });
     } catch (e) {
       return Response.json(
-        { error: e instanceof Error ? e.message : "Transcription failed to start." },
+        { error: errorMessage(e, "Transcription failed to start.") },
         { status: 500 }
       );
     }

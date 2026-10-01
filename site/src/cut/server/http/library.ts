@@ -24,11 +24,12 @@ import {
 } from "../library";
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importFromUrl } from "../urlImport";
+import { errorMessage } from "../util";
 
 const err = (message: string, status: number) =>
   Response.json({ error: message }, { status });
 const caught = (e: unknown, fallback: string) =>
-  err(e instanceof Error ? e.message : fallback, 500);
+  err(errorMessage(e, fallback), 500);
 
 /** The shared library: reusable media outside any project. */
 export const libraryApi = {

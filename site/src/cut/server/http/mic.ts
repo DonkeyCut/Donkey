@@ -1,4 +1,5 @@
 import { cancelMic, feedMic, getMicJob, startMicJob, stopMic } from "../mic";
+import { errorMessage } from "../util";
 
 const err = (message: string, status: number) => Response.json({ error: message }, { status });
 
@@ -10,7 +11,7 @@ export const micApi = {
       const job = await startMicJob(typeof body.locale === "string" ? body.locale : "en-US");
       return Response.json({ id: job.id });
     } catch (e) {
-      return err(e instanceof Error ? e.message : "Could not start dictation.", 500);
+      return err(errorMessage(e, "Could not start dictation."), 500);
     }
   },
 

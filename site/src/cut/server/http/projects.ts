@@ -29,11 +29,11 @@ import { makeProxy, proxyNameFor } from "../proxy";
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importUrlToProject } from "../urlImport";
 import { createTranscribeJob, getTranscribeJob, type TranscribeSpec } from "../transcribe";
-import { exists, uniqueName } from "../util";
+import { exists, uniqueName, errorMessage } from "../util";
 
 const err = (message: string, status: number) => Response.json({ error: message }, { status });
 const caught = (e: unknown, fallback: string, status = 500) =>
-  err(e instanceof Error ? e.message : fallback, status);
+  err(errorMessage(e, fallback), status);
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Project CRUD, media, exports, transcription, freeze-frames. */

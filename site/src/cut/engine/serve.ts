@@ -4,6 +4,7 @@ import { flattenCutUsers, migrateCutDataDir } from "../server/migrateDataDir";
 import { sweepPhoneInbox } from "../server/phoneLink";
 import { reconcileProjectDirs } from "../server/projects";
 import { ensureToolPath, resolveOnPath } from "../server/tool-path";
+import { errorMessage } from "../server/util";
 import { enginePort } from "./config";
 
 // Throws (and exits with a clear message) on a bad DONKEY_CUT_PORT rather than
@@ -84,7 +85,7 @@ async function start() {
           status: response.status, statusText: response.statusText, headers: merged,
         });
       } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500, headers });
+        return Response.json({ error: errorMessage(error, String(error)) }, { status: 500, headers });
       }
     },
   });

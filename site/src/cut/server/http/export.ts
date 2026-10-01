@@ -10,6 +10,7 @@ import {
   type ExportSpec,
 } from "../jobs";
 import { serveFileRange } from "../serveFile";
+import { errorMessage } from "../util";
 
 /** Export rendering: start a job, poll it, cancel it, download the result. */
 export const exportApi = {
@@ -29,7 +30,7 @@ export const exportApi = {
       return Response.json({ id: job.id });
     } catch (e) {
       return Response.json(
-        { error: e instanceof Error ? e.message : "Export failed to start." },
+        { error: errorMessage(e, "Export failed to start.") },
         { status: 500 }
       );
     }
@@ -50,7 +51,7 @@ export const exportApi = {
       return Response.json({ id: job.id, outName: job.outName });
     } catch (e) {
       return Response.json(
-        { error: e instanceof Error ? e.message : "Export failed to start." },
+        { error: errorMessage(e, "Export failed to start.") },
         { status: 500 }
       );
     }

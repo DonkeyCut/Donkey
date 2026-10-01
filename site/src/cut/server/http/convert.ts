@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { convertToMp4, mp4NameFor } from "../convert";
+import { errorMessage } from "../util";
 
 /**
  * Convert media the caller supplies, for a project this engine does not store.
@@ -33,7 +34,7 @@ export const convertApi = {
       });
     } catch (e) {
       return Response.json(
-        { error: e instanceof Error ? e.message : "Could not convert that file." },
+        { error: errorMessage(e, "Could not convert that file.") },
         { status: 500 }
       );
     } finally {

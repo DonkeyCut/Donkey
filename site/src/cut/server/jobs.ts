@@ -7,6 +7,7 @@ import { createJobRegistry } from "./jobRegistry";
 import { containerExtension, runExport, type ExportSpec } from "./exportPipeline";
 import { exportBaseName } from "../lib/exportDelivery";
 import { exportsDir, mediaPath, projectDir, readProject, setActiveJobGuard } from "./projects";
+import { errorMessage } from "./util";
 
 export type { ExportSpec } from "./exportPipeline";
 
@@ -142,7 +143,7 @@ function startRun(job: Job, spec: ExportSpec) {
     })
     .catch((err: unknown) => {
       job.status = "error";
-      job.error = err instanceof Error ? err.message : String(err);
+      job.error = errorMessage(err, String(err));
       void rm(job.outPath, { force: true }); // no half-written files in exports/
     })
     .finally(() => {
@@ -326,7 +327,7 @@ export async function createJob(form: FormData): Promise<Job> {
     }
   } catch (err) {
     job.status = "error";
-    job.error = err instanceof Error ? err.message : String(err);
+    job.error = errorMessage(err, String(err));
     if (job.tmpDir) void rm(job.tmpDir, { recursive: true, force: true });
     retire(job);
   }
@@ -371,7 +372,7 @@ export async function createClientJob(
     await mkdir(path.dirname(job.outPath), { recursive: true });
   } catch (err) {
     job.status = "error";
-    job.error = err instanceof Error ? err.message : String(err);
+    job.error = errorMessage(err, String(err));
     retire(job);
   }
   return job;
@@ -416,7 +417,7 @@ export async function completeClientJob(
   } catch (err) {
     await rm(partial, { force: true });
     job.status = "error";
-    job.error = err instanceof Error ? err.message : String(err);
+    job.error = errorMessage(err, String(err));
   } finally {
     retire(job);
   }

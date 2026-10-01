@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import type { UIMessageChunk } from "ai";
 import { cutDataRoot } from "../dataDir";
+import { errorMessage } from "../util";
 
 type Turn = { abort: AbortController; clients: number; finished: boolean; detached: () => void; attached: () => void };
 const globalTurns = globalThis as unknown as { __cutChatTurns?: Map<string, Turn> };
@@ -44,7 +45,7 @@ export async function startTurnStream(
         }
       } catch (error) {
         turn.abort.abort();
-        await file.write(`data: ${JSON.stringify({ type: "error", errorText: error instanceof Error ? error.message : "Chat stopped." })}\n\n`);
+        await file.write(`data: ${JSON.stringify({ type: "error", errorText: errorMessage(error, "Chat stopped.") })}\n\n`);
       } finally {
         try { await file.write("data: [DONE]\n\n"); }
         finally {

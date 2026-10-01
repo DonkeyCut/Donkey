@@ -16,10 +16,11 @@ import {
   removePhoneDevice,
 } from "../phoneLink";
 import { serveFileRange } from "../serveFile";
+import { errorMessage } from "../util";
 
 const err = (message: string, status: number) => Response.json({ error: message }, { status });
 const caught = (e: unknown, fallback: string) =>
-  err(e instanceof Error ? e.message : fallback, 500);
+  err(errorMessage(e, fallback), 500);
 
 /** The header a paired phone's traffic carries. The app's listener copies it
  * across from the peer connection; nothing else on this Mac sets it. */

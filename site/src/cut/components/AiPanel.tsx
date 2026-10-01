@@ -48,7 +48,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { engineReady } from "@/cut/lib/api";
+import { apiJson, engineReady } from "@/cut/lib/api";
 import { useCutCaps, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { localBackend } from "@/cut/lib/backend/local";
 import { setAssetDragData } from "@/cut/lib/assetDrag";
@@ -1094,6 +1094,12 @@ function ChatSession({
     let engineTransport: DefaultChatTransport<UIMessage> | null = null;
     const engine = () =>
       (engineTransport ??= new DefaultChatTransport<UIMessage>({
+        // A refused turn reads as its message; the transport would show the raw body.
+        fetch: async (input, init) => {
+          const res = await fetch(input, init);
+          if (res.ok) return res;
+          throw new Error((await apiJson(res)).error ?? `The engine replied ${res.status}.`);
+        },
         // The engine origin is discovered asynchronously; await it per request
         // (not at mount) so an early send still targets the local engine rather
         // than the hosted origin, where the Cut APIs 404. engineReady memoizes,
@@ -1974,7 +1980,7 @@ function ChatSession({
           {((error && !retryDisconnect) || sendError) && (
             <div className="ai-error mt-2 flex items-start gap-2 rounded-lg bg-red-50 px-2.5 py-2 text-[11.5px] leading-relaxed text-red-700">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-              <span>
+              <span className="min-w-0 break-words">
                 {error ? (
                   <HostedErrorText error={error.message} link={false} />
                 ) : (

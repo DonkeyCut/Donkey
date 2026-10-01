@@ -2,6 +2,14 @@ import { spawn } from "node:child_process";
 import { access, constants, rename, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+/** A failure's message for the person. A full disk names itself in plain words;
+ * its raw text carries a code and a private path. */
+export function errorMessage(e: unknown, fallback: string): string {
+  const code = (e as { code?: unknown } | null)?.code;
+  if (code === "ENOSPC" || code === "EDQUOT") return "This Mac is out of disk space. Free up space and try again.";
+  return e instanceof Error ? e.message : fallback;
+}
+
 /** Does a file/dir exist? (stat, coerced to a boolean.) */
 export async function exists(p: string) {
   return stat(p).then(

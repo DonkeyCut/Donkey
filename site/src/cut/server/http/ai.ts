@@ -23,6 +23,7 @@ import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
 import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, skillRelevanceBlock, systemPrompt } from "../ai/catalog";
 import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
 import { codexCommand } from "../tool-path";
+import { errorMessage } from "../util";
 
 interface ChatBody {
   threadId: string;
@@ -420,7 +421,7 @@ export const aiApi = {
       return Response.json({ texts });
     } catch (e) {
       return Response.json(
-        { error: e instanceof Error ? e.message : "Could not write captions." },
+        { error: errorMessage(e, "Could not write captions.") },
         { status: 500 }
       );
     }
@@ -442,7 +443,7 @@ export const aiApi = {
       return Response.json({ cues });
     } catch (e) {
       return Response.json(
-        { error: e instanceof Error ? e.message : "Could not caption the visuals." },
+        { error: errorMessage(e, "Could not caption the visuals.") },
         { status: 500 }
       );
     }
@@ -489,7 +490,7 @@ export const aiApi = {
             await runCodex(emit, prompt, body, base, sessionKey, signal);
           }
         } catch (err) {
-          emit({ type: "error", errorText: err instanceof Error ? err.message : String(err) });
+          emit({ type: "error", errorText: errorMessage(err, String(err)) });
         } finally {
           unregisterSession(sessionKey);
           emit({ type: "finish" });

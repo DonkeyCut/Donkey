@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { makeProxy, proxyNameFor } from "../proxy";
+import { errorMessage } from "../util";
 
 /**
  * Build a preview proxy of a master the caller supplies, for a project this
@@ -37,7 +38,7 @@ export const proxyApi = {
       });
     } catch (e) {
       return Response.json(
-        { error: e instanceof Error ? e.message : "Could not make the preview proxy." },
+        { error: errorMessage(e, "Could not make the preview proxy.") },
         { status: 500 }
       );
     } finally {
