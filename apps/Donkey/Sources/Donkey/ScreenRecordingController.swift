@@ -1,4 +1,5 @@
 import AppKit
+@preconcurrency import ApplicationServices
 import AVFoundation
 import DonkeyRuntime
 import DonkeyUI
@@ -28,12 +29,14 @@ final class ScreenRecordingController {
     private let regionOverlay = RegionSelectionOverlayController()
     private let windowPicker = WindowPickerOverlayController()
     private let recordingDim = RecordingRegionDimOverlayController()
+    private let windowResizer = RecordingWindowResizer()
 
     private var recorder: (any ScreenRecording)?
     private var phase: Phase = .idle
     private var armScreen: NSScreen?
     private var selectedRegion: (rect: CGRect, displayID: CGDirectDisplayID)?
     private var selectedWindowID: CGWindowID?
+    private var windowSizeTask: Task<Void, Never>?
     private var recordingStart: Date?
     private var timer: Timer?
 
@@ -44,11 +47,17 @@ final class ScreenRecordingController {
         model.onRecord = { [weak self] in self?.startRecording() }
         model.onStop = { [weak self] in self?.stopRecording() }
         model.onClose = { [weak self] in self?.cancel() }
+        model.onRefreshWindowSize = { [weak self] in self?.refreshWindowSize() }
+        model.onResizeWindow = { [weak self] width, height in self?.resizeWindow(width: width, height: height) }
 
         regionOverlay.onSelect = { [weak self] rect, displayID in self?.handleRegionSelected(rect, displayID) }
         regionOverlay.onCancel = { [weak self] in self?.handlePickerCancel() }
         windowPicker.onSelect = { [weak self] windowID in self?.handleWindowSelected(windowID) }
         windowPicker.onCancel = { [weak self] in self?.handlePickerCancel() }
+    }
+
+    deinit {
+        windowSizeTask?.cancel()
     }
 
     // MARK: - Menu bar routing
@@ -87,6 +96,8 @@ final class ScreenRecordingController {
         phase = .armed
         selectedRegion = nil
         selectedWindowID = nil
+        model.windowWidth = nil
+        model.windowHeight = nil
         model.mode = .fullScreen
         model.isRecording = false
         model.isBusy = false
@@ -105,6 +116,8 @@ final class ScreenRecordingController {
     }
 
     private func cancel() {
+        guard !model.isBusy else { return }
+        stopWindowSizeUpdates()
         teardownOverlays()
         recordingDim.close()
         controlBar.close()
@@ -116,6 +129,24 @@ final class ScreenRecordingController {
     // MARK: - Mode selection
 
     private func selectMode(_ mode: RecordingCaptureMode) {
+        guard phase == .armed, !model.isBusy else { return }
+        if mode != .fullScreen, SystemPermissionCoordinator.status(.screenRecording) != .granted {
+            model.isBusy = true
+            Task {
+                let granted = await ensurePermission(.screenRecording, hint: "Allow Screen Recording in System Settings, then select a window or region.")
+                model.isBusy = false
+                if granted, SystemPermissionCoordinator.status(.screenRecording) == .granted {
+                    selectMode(mode)
+                } else {
+                    if granted { model.statusMessage = "Restart Donkey to finish enabling Screen Recording." }
+                    openScreenRecordingSettings()
+                }
+            }
+            return
+        }
+        stopWindowSizeUpdates()
+        model.windowWidth = nil
+        model.windowHeight = nil
         model.mode = mode
         model.statusMessage = nil
         teardownOverlays()
@@ -140,11 +171,93 @@ final class ScreenRecordingController {
     private func handleWindowSelected(_ windowID: CGWindowID) {
         selectedWindowID = windowID
         windowPicker.close()
+        refreshWindowSize()
+        startWindowSizeUpdates(windowID: windowID)
         refreshCanRecord()
+    }
+
+    private func refreshWindowSize() {
+        let size = selectedWindowID.flatMap { RecordingWindowResizer.frame(windowID: $0)?.size }
+        setWindowSize(size)
+    }
+
+    private func setWindowSize(_ size: CGSize?) {
+        let width = size.map { Int($0.width.rounded()) }
+        let height = size.map { Int($0.height.rounded()) }
+        if model.windowWidth != width { model.windowWidth = width }
+        if model.windowHeight != height { model.windowHeight = height }
+        if model.mode == .window, model.canRecord != (size != nil) {
+            model.canRecord = size != nil
+        }
+    }
+
+    private func startWindowSizeUpdates(windowID: CGWindowID) {
+        stopWindowSizeUpdates()
+        // Read only the selected window off the main thread. Window-server geometry also works
+        // before Accessibility permission is granted and follows manual resizing in other apps.
+        windowSizeTask = Task.detached(priority: .utility) { [weak self] in
+            while !Task.isCancelled {
+                let size = RecordingWindowResizer.frame(windowID: windowID)?.size
+                guard await self?.updateWindowSize(size, windowID: windowID) == true else { return }
+                do {
+                    try await Task.sleep(for: .milliseconds(200))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func updateWindowSize(_ size: CGSize?, windowID: CGWindowID) -> Bool {
+        guard !Task.isCancelled, phase == .armed, model.mode == .window, selectedWindowID == windowID else {
+            return false
+        }
+        setWindowSize(size)
+        return true
+    }
+
+    private func stopWindowSizeUpdates() {
+        windowSizeTask?.cancel()
+        windowSizeTask = nil
+    }
+
+    private func resizeWindow(width: Int, height: Int) {
+        guard phase == .armed, !model.isBusy, model.mode == .window,
+              let selectedWindowID, width > 0, height > 0 else { return }
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(options) else {
+            model.statusMessage = "Allow Donkey in System Settings → Privacy & Security → Accessibility, then apply the size again."
+            return
+        }
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        let visibleFrames = NSScreen.screens.map { screen in
+            let frame = screen.visibleFrame
+            return CGRect(x: frame.minX, y: primaryHeight - frame.maxY, width: frame.width, height: frame.height)
+        }
+        model.isBusy = true
+        model.statusMessage = nil
+        Task {
+            defer { model.isBusy = false }
+            do {
+                let actual = try await windowResizer.resize(
+                    windowID: selectedWindowID,
+                    size: CGSize(width: width, height: height),
+                    visibleFrames: visibleFrames
+                )
+                refreshWindowSize()
+                if abs(actual.width - CGFloat(width)) >= 1 || abs(actual.height - CGFloat(height)) >= 1 {
+                    model.statusMessage = "The app adjusted the size to \(Int(actual.width.rounded())) × \(Int(actual.height.rounded())) pt. Try a larger preset or custom size."
+                }
+            } catch {
+                refreshWindowSize()
+                model.statusMessage = error.localizedDescription
+            }
+        }
     }
 
     /// Escape / dismiss from a picker returns to full-screen, keeping the control bar up.
     private func handlePickerCancel() {
+        stopWindowSizeUpdates()
         teardownOverlays()
         model.mode = .fullScreen
         selectedRegion = nil
@@ -156,21 +269,25 @@ final class ScreenRecordingController {
         switch model.mode {
         case .fullScreen: model.canRecord = true
         case .region: model.canRecord = selectedRegion != nil
-        case .window: model.canRecord = selectedWindowID != nil
+        case .window: model.canRecord = selectedWindowID != nil && model.windowWidth != nil && model.windowHeight != nil
         }
     }
 
     // MARK: - Recording
 
     private func startRecording() {
-        guard phase == .armed else { return }
+        guard phase == .armed, !model.isBusy else { return }
         guard #available(macOS 15.0, *) else {
             model.statusMessage = "Screen recording requires macOS 15 or later."
             return
         }
         guard let target = resolveTarget() else { return }
 
-        Task { await beginCapture(target: target) }
+        model.isBusy = true
+        Task {
+            defer { model.isBusy = false }
+            await beginCapture(target: target)
+        }
     }
 
     @available(macOS 15.0, *)
@@ -213,6 +330,7 @@ final class ScreenRecordingController {
 
         do {
             try await recorder.start(configuration)
+            stopWindowSizeUpdates()
             phase = .recording
             recordingStart = Date()
             model.isRecording = true

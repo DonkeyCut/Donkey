@@ -23,12 +23,9 @@ the recorder. Name files after their MVC role when a feature grows past one
 screen: `FeatureModel.swift`, `FeatureRootView.swift`,
 `FeatureController.swift`.
 
-Screen recording follows this split: the recorder and its destination types
-hold the capture state; the control bar view renders it; controllers own the
-AppKit-only work such as the control bar panel, the region and window pickers,
-and screen positioning; the app delegate bootstraps the feature and the menu
-bar without owning product behavior. The stream draws the pointer straight
-into the video.
+Recording controllers own pickers and window geometry; the runtime captures
+video and the pointer. Window mode offers preset and custom sizes in screen
+points through Accessibility; app minimum sizes appear in the controls.
 
 ## Language
 

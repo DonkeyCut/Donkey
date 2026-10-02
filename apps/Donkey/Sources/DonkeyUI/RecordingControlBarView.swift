@@ -54,6 +54,8 @@ public final class RecordingControlBarModel: ObservableObject {
     @Published public var isBusy = false
     @Published public var elapsedText = "0:00"
     @Published public var canRecord = true
+    @Published public var windowWidth: Int?
+    @Published public var windowHeight: Int?
     /// An inline hint under the bar (e.g. a permission prompt); `nil` hides it.
     @Published public var statusMessage: String?
 
@@ -62,6 +64,8 @@ public final class RecordingControlBarModel: ObservableObject {
     public var onRecord: (() -> Void)?
     public var onStop: (() -> Void)?
     public var onClose: (() -> Void)?
+    public var onRefreshWindowSize: (() -> Void)?
+    public var onResizeWindow: ((Int, Int) -> Void)?
 
     public init() {}
 
@@ -85,7 +89,7 @@ public final class RecordingControlBarModel: ObservableObject {
 public struct RecordingControlBarView: View {
     /// Fixed panel size — the controller owns framing (`hostingView.sizingOptions = []`), so the bar
     /// paints to a known rect rather than pushing its content size back to the window.
-    public static let contentSize = CGSize(width: 500, height: 96)
+    public static let contentSize = CGSize(width: 620, height: 116)
 
     /// The lane above the bar that holds the hovered control's name, plus the stack spacing under
     /// it. The controller drops the panel by this much so the bar itself stays put.
@@ -93,6 +97,7 @@ public struct RecordingControlBarView: View {
 
     @ObservedObject private var model: RecordingControlBarModel
     @State private var hint: String?
+    @State private var showsWindowSize = false
 
     public init(model: RecordingControlBarModel) {
         self.model = model
@@ -106,7 +111,8 @@ public struct RecordingControlBarView: View {
                 Text(statusMessage)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
             }
         }
         .frame(width: Self.contentSize.width, height: Self.contentSize.height, alignment: .top)
@@ -146,6 +152,7 @@ public struct RecordingControlBarView: View {
     private var controls: some View {
         HStack(spacing: 10) {
             iconButton(symbol: "xmark", help: "Close") { model.onClose?() }
+                .disabled(model.isBusy)
 
             Divider().frame(height: 22)
 
@@ -157,12 +164,41 @@ public struct RecordingControlBarView: View {
                 }
                 Divider().frame(height: 22)
                 audioInputPicker
+                if model.mode == .window {
+                    windowSizeButton
+                }
             }
 
             Spacer(minLength: 4)
             recordButton
         }
         .padding(.horizontal, 14)
+    }
+
+    private var windowSizeButton: some View {
+        Button {
+            model.onRefreshWindowSize?()
+            showsWindowSize = true
+        } label: {
+            Label {
+                if let width = model.windowWidth, let height = model.windowHeight {
+                    Text("\(width) × \(height)")
+                } else {
+                    Text("— × —")
+                }
+            } icon: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+            }
+                .font(.system(size: 13))
+                .monospacedDigit()
+                .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .disabled(model.isBusy || !model.canRecord)
+        .popover(isPresented: $showsWindowSize, arrowEdge: .top) {
+            RecordingWindowSizeView(model: model)
+        }
+        .hoverHint("Window Dimensions in Points · Click to Resize", into: $hint)
     }
 
     private var recordingStatus: some View {
@@ -190,6 +226,7 @@ public struct RecordingControlBarView: View {
                 .foregroundStyle(isActive ? Color.white : Color.primary)
         }
         .buttonStyle(.plain)
+        .disabled(model.isBusy)
         .hoverHint(mode.tooltip, into: $hint)
     }
 

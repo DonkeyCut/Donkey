@@ -32,7 +32,7 @@ final class RecordingControlBarController {
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
 
-        let panel = NSPanel(
+        let panel = RecordingControlPanel(
             contentRect: frame(for: size, on: screen),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -78,4 +78,8 @@ final class RecordingControlBarController {
         let y = screen.visibleFrame.minY + 24 - RecordingControlBarView.hintLaneHeight
         return CGRect(x: x, y: y, width: size.width, height: size.height)
     }
+}
+
+private final class RecordingControlPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }
