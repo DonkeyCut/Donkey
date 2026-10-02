@@ -63,6 +63,7 @@ import {
   OVERLAY_ANIM_MAX_SECONDS,
   OVERLAY_ANIM_MIN_SECONDS,
   OVERLAY_ANIM_STYLE_IDS,
+  TEXT_ONLY_ANIM_STYLE_IDS,
   OVERLAY_LOOP_STYLE_IDS,
   hasOverlayAnim,
   WORD_EFFECT_IDS,
@@ -575,8 +576,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         }
         if (!(OVERLAY_ANIM_STYLE_IDS as string[]).includes(raw))
           throw new ToolError(`Unknown ${slot} style: ${raw}`);
-        if (raw === "typewriter" && (o.kind ?? "text") !== "text")
-          throw new ToolError("typewriter animates titles only.");
+        if ((TEXT_ONLY_ANIM_STYLE_IDS as string[]).includes(raw) && (o.kind ?? "text") !== "text")
+          throw new ToolError(`${raw} animates titles only.`);
         anim[slot] = {
           style: raw as OverlayAnimStyle,
           seconds: secs ?? anim[slot]?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,

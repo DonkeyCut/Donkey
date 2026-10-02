@@ -14,8 +14,11 @@ import {
   OVERLAY_ANIM_MIN_SECONDS,
   GLYPH_ANIM_STYLE_IDS,
   GLYPH_LOOP_STYLE_IDS,
+  DIVE_ANIM_STYLE_IDS,
+  edgeNotes,
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_LOOP_STYLE_IDS,
+  TEXT_ONLY_ANIM_STYLE_IDS,
   wordEffectCatalog,
   WORD_EFFECT_IDS,
   WORD_POP_SCALE,
@@ -36,7 +39,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_animation",
     description:
-      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; typewriter animates titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; set_overlay_keyframes is the precise way to move an element and the default reach, so name a move when it is exactly what you mean — the two compose together. Word effects — words_style, titles only — play the line word by word, timed against the cut's transcript when there is one and spread across the element's own span when there is not: an emphasis travels along a line that is fully up, and a build assembles the line as it is spoken. It is the slot for "make each word pop as I say it" and for "have the words appear one by one".`,
+      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; ${TEXT_ONLY_ANIM_STYLE_IDS.join(", ")} animate titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece. ${edgeNotes()} ${DIVE_ANIM_STYLE_IDS.join(", ")} as the exit is the zoom-through-a-letter transition: the shot after the element shows once the ink has filled the frame, so it needs no freeze frames, image stills or per-letter keyframes. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; set_overlay_keyframes is the precise way to move an element and the default reach, so name a move when it is exactly what you mean — the two compose together. Word effects — words_style, titles only — play the line word by word, timed against the cut's transcript when there is one and spread across the element's own span when there is not: an emphasis travels along a line that is fully up, and a build assembles the line as it is spoken. It is the slot for "make each word pop as I say it" and for "have the words appear one by one".`,
     inputSchema: obj({
       id: str("Overlay element id"),
       move: {
