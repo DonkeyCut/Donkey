@@ -95,12 +95,14 @@ export const SLOT_PITCH = 0.62;
 /** A slot character's reel: what is in sight at `roll`, each at its vertical
  * offset in line heights (positive is below) and its own opacity. Letters roll
  * through letters of their own case and digits through digits; anything else
- * — a space, a mark — holds still. The fillers are a fixed draw per position,
- * so the same title always rolls through the same characters. */
+ * — a space, a mark — holds still. The fillers are a fixed draw per title and
+ * position (`seed` is `slotSeed` of the title), so each title rolls through
+ * its own characters and rolls the same way every time it plays. */
 export function slotReel(
   ch: string,
   index: number,
-  roll: number
+  roll: number,
+  seed: number
 ): { ch: string; y: number; alpha: number }[] {
   const pool = reelPool(ch);
   if (!pool || roll <= 0) return [{ ch, y: 0, alpha: 1 }];
@@ -110,7 +112,7 @@ export function slotReel(
     const y = (roll - j) * SLOT_PITCH;
     // Past the band's edge nothing of the character shows.
     if (Math.abs(y) >= 0.9) continue;
-    out.push({ ch: j === 0 ? ch : filler(pool, ch, index, j), y, alpha: 1 - Math.min(1, Math.abs(y)) * 0.7 });
+    out.push({ ch: j === 0 ? ch : filler(pool, ch, index, j, seed), y, alpha: 1 - Math.min(1, Math.abs(y)) * 0.7 });
   }
   return out;
 }
@@ -125,8 +127,16 @@ function reelPool(ch: string): string | null {
   return ch === ch.toUpperCase() ? UPPER : LOWER;
 }
 
-function filler(pool: string, ch: string, index: number, step: number): string {
-  let h = (Math.imul(index + 1, 2654435761) ^ Math.imul(step, 40503)) >>> 0;
+/** A title's reel seed: its characters, with the line breaks wrapping puts in
+ * left out, so every renderer seeds the same title the same way. */
+export function slotSeed(text: string): number {
+  let h = 2166136261;
+  for (const ch of text.replace(/\s+/g, "")) h = Math.imul(h ^ ch.codePointAt(0)!, 16777619);
+  return h >>> 0;
+}
+
+function filler(pool: string, ch: string, index: number, step: number, seed: number): string {
+  let h = (Math.imul(index + 1, 2654435761) ^ Math.imul(step, 40503) ^ seed) >>> 0;
   h = Math.imul(h ^ (h >>> 15), 2246822519) >>> 0;
   const pick = pool[((h ^ (h >>> 13)) >>> 0) % pool.length];
   return pick === ch ? pool[(pool.indexOf(pick) + 1) % pool.length] : pick;

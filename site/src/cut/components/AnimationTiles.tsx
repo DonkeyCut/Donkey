@@ -12,6 +12,7 @@ import {
   presetExtent,
   sampleProperties,
   slotReel,
+  slotSeed,
   TEXT_ONLY_ANIM_STYLE_IDS,
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_ANIM_STYLE_LABELS,
@@ -235,7 +236,7 @@ function LiveName({
     /** A slot letter's reel, drawn into its empty windows. */
     const drawReel = (kid: HTMLElement, i: number, roll: number) => {
       const windows = kid.querySelectorAll<HTMLElement>("[data-reel]");
-      const reel = roll ? slotReel(chars[i] ?? "", i, roll) : [{ ch: chars[i] ?? "", y: 0, alpha: 1 }];
+      const reel = roll ? slotReel(chars[i] ?? "", i, roll, slotSeed(label)) : [{ ch: chars[i] ?? "", y: 0, alpha: 1 }];
       windows.forEach((w, k) => {
         const r = reel[k];
         w.textContent = r ? r.ch : "";

@@ -18,7 +18,7 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { diveView, evalOverlayFrame, glyphStateAt, measureDiveFocus, paintElementInto, slotReel, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type DiveFocus, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
+import { diveView, evalOverlayFrame, glyphStateAt, measureDiveFocus, paintElementInto, slotReel, slotSeed, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type DiveFocus, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -1285,6 +1285,7 @@ function GlyphText({
   scale: number;
 }) {
   const total = Math.max(1, [...text].length);
+  const seed = slotSeed(text);
   let gi = 0;
   return (
     <>
@@ -1294,7 +1295,7 @@ function GlyphText({
           const g = glyphStateAt(phase, i, total);
           // A slot character shows its reel through its own line band; the
           // band clips top and bottom only, so a wide filler is not cut.
-          const reel = g.roll ? slotReel(ch, i, g.roll) : null;
+          const reel = g.roll ? slotReel(ch, i, g.roll, seed) : null;
           return (
             <span
               key={i}

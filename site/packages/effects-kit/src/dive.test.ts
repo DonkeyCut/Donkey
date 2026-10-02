@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { diveView, DIVE_MAX_SCALE, slotReel } from "./dive";
+import { diveView, DIVE_MAX_SCALE, slotReel, slotSeed } from "./dive";
 import { evalOverlayAnim } from "./anim";
 
 const frame = { width: 1080, height: 1920, scale: 1 };
@@ -11,7 +11,7 @@ describe("slot reels", () => {
     for (const ch of ["A", "z", "7"]) {
       for (let i = 0; i < 40; i++) {
         for (let roll = 0; roll <= 5; roll += 0.13) {
-          for (const r of slotReel(ch, i, roll)) {
+          for (const r of slotReel(ch, i, roll, slotSeed("THE END"))) {
             expect(r.ch.length).toBe(1);
             if (ch === "7") expect(r.ch).toMatch(/[0-9]/);
             else if (ch === "A") expect(r.ch).toMatch(/[A-Z]/);
@@ -23,8 +23,17 @@ describe("slot reels", () => {
   });
 
   test("a landed reel shows the character alone, and a space never rolls", () => {
-    expect(slotReel("Q", 3, 0)).toEqual([{ ch: "Q", y: 0, alpha: 1 }]);
-    expect(slotReel(" ", 3, 2.5)).toEqual([{ ch: " ", y: 0, alpha: 1 }]);
+    expect(slotReel("Q", 3, 0, 1)).toEqual([{ ch: "Q", y: 0, alpha: 1 }]);
+    expect(slotReel(" ", 3, 2.5, 1)).toEqual([{ ch: " ", y: 0, alpha: 1 }]);
+  });
+
+  test("each title rolls through its own fillers, the same way every time", () => {
+    const fillers = (title: string) =>
+      [...title].flatMap((ch, i) => [1, 2, 3, 4].map((roll) => slotReel(ch, i, roll, slotSeed(title))[0].ch)).join("");
+    expect(fillers("THE END")).toBe(fillers("THE END"));
+    expect(fillers("THE END")).not.toBe(fillers("THE ENE"));
+    // Wrapping only moves line breaks, so it never changes the roll.
+    expect(slotSeed("THE\nEND")).toBe(slotSeed("THE END"));
   });
 });
 

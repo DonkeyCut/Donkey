@@ -17,7 +17,7 @@ import {
   type GlyphPhase,
   type OverlayAnim,
 } from "./anim";
-import { diveView, slotReel, type DiveFocus, type DiveView } from "./dive";
+import { diveView, slotReel, slotSeed, type DiveFocus, type DiveView } from "./dive";
 import { presetExtent } from "./motion/evaluate";
 import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys } from "./keys";
 import { applyMaskToCanvas, isMaskAnimated } from "./mask";
@@ -519,7 +519,7 @@ async function paintText(
             ctx.rect(-w * 3, -lineH / 2, w * 6, lineH);
             ctx.clip();
             const a = ctx.globalAlpha;
-            for (const r of slotReel(ch, gi - 1, g.roll)) {
+            for (const r of slotReel(ch, gi - 1, g.roll, slotSeed(overlay.text))) {
               ctx.globalAlpha = a * r.alpha;
               drawText(r.ch, 0, r.y * lineH);
             }
