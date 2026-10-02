@@ -42,12 +42,12 @@ import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { applyEffectToCanvas, evalOverlayFrame, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
+import { applyEffectToCanvas, diveView, divesAt, evalOverlayFrame, measureDiveFocus, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type DiveFocus, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
-import { renderElementPng } from "./textRender";
+import { cutRenderEnv, renderElementCanvas, renderElementPng } from "./textRender";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc } from "./renderSnapshot";
@@ -761,11 +761,18 @@ class StampCache {
     const el = isMaskAnimated(m)
       ? { ...layer.overlay, mask: { ...m!, ...maskFrameAt(m!, tLocal), kf: undefined } }
       : layer.overlay;
-    const png = await renderElementPng(el, this.width, this.height, this.assets, phase);
-    const bitmap = await createImageBitmap(png);
+    // Drawn once and shown once, so it goes straight from the canvas.
+    const bitmap = await createImageBitmap(
+      await renderElementCanvas(el, this.width, this.height, this.assets, phase)
+    );
     hit?.bitmap.close();
     this.maskFrames.set(layer, { t: tLocal, bitmap });
     return bitmap;
+  }
+
+  /** Where a diving element flies into, measured once per look. */
+  diveFocus(o: Overlay): Promise<DiveFocus> {
+    return measureDiveFocus(o, this.width / this.height, cutRenderEnv(this.assets));
   }
 
   /** Release the pictures of layers that have finished by `t`. */
@@ -1175,7 +1182,24 @@ async function drawStamps(
       : null;
     // A per-glyph loop moves the characters inside the picture, so its window
     // is drawn afresh each frame with the loop folded into the layer's phase.
-    const livePhase = ev?.glyphLoop ? { ...layer.phase, glyphLoop: ev.glyphLoop } : undefined;
+    // So is a dive: a cached picture scaled up fifty times would be mush, so
+    // each frame draws the type at the size it is seen.
+    const dive =
+      ev?.dive && divesAt(layer.anim)
+        ? diveView(ev.dive, await stamps.diveFocus(layer.source ?? layer.overlay), ev, layer.overlay, {
+            width: canvas.width,
+            height: canvas.height,
+            scale: Math.min(canvas.width, canvas.height) / 1080,
+          })
+        : undefined;
+    const livePhase =
+      ev?.glyphLoop || dive
+        ? {
+            ...layer.phase,
+            ...(ev?.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
+            ...(dive ? { dive } : {}),
+          }
+        : undefined;
     const bitmap =
       livePhase || isMaskAnimated(layer.overlay.mask)
         ? await stamps.bitmapAt(layer, tLocal, livePhase ?? layer.phase)

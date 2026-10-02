@@ -11,7 +11,11 @@
 
 import {
   applyWordDraw,
+  diveView,
+  divesAt,
   evalOverlayFrame,
+  measureDiveFocus,
+  peekDiveFocus,
   glyphStateAt,
   hasGlyphMotion,
   maskComposite,
@@ -21,7 +25,7 @@ import {
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { allowance, holdMemory } from "./memoryBudget";
 import { createRasterCanvas } from "./raster";
-import { renderElementPng } from "./textRender";
+import { cutRenderEnv, renderElementPng } from "./textRender";
 import {
   behindSubjectOverlay,
   frontSubjectOverlay,
@@ -298,6 +302,11 @@ export class SubjectMaskCompositor {
     });
     const behind = overlays.filter((o) => behindSubjectOverlay(o) && drawable(o));
     await Promise.all(
+      behind.filter((o) => divesAt(o.anim)).map((o) =>
+        measureDiveFocus(o, w / h, cutRenderEnv(assets)).catch(() => {})
+      )
+    );
+    await Promise.all(
       behind.flatMap((o) =>
         // An element that lights its words needs one picture per word, all of
         // them resident before the first frame draws.
@@ -511,6 +520,15 @@ export class SubjectMaskCompositor {
       ctx.rotate(((ev.rotation + (g?.rotate ?? 0)) * Math.PI) / 180);
       ctx.scale(ev.scale * (g?.sx ?? 1), ev.scale * (g?.sy ?? 1));
       ctx.translate(-cx, -cy);
+      // A dive flies the same one picture in, under the view the other
+      // renderers draw their type under.
+      const focus = ev.dive && divesAt(o.anim) ? peekDiveFocus(o, W / H, cutRenderEnv(assets)) : undefined;
+      if (focus) {
+        const v = diveView(ev.dive!, focus, ev, o, { width: W, height: H, scale });
+        ctx.translate(v.tx, v.ty);
+        ctx.scale(v.s, v.s);
+        ctx.translate(-v.fx, -v.fy);
+      }
       ctx.drawImage(bmp, 0, 0, W, H);
       ctx.restore();
     }

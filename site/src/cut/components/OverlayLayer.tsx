@@ -18,12 +18,13 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { evalOverlayFrame, glyphStateAt, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
+import { diveView, evalOverlayFrame, glyphStateAt, measureDiveFocus, paintElementInto, slotReel, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type DiveFocus, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
   PLATE_PAD_Y,
   PLATE_RADIUS,
+  cutRenderEnv,
   plateFill,
   SHADOW,
   wordDrawCss,
@@ -675,6 +676,12 @@ function OverlayItem({
   // still works.
   const behindHidden = behindSubjectOverlay(o) && !editing;
 
+  // A dive flies the view into the element's deepest ink. Zoomed fifty times,
+  // the few pixels the DOM and the canvas disagree on where a line's middle
+  // sits become the width of the frame, so while it dives the element is
+  // drawn by the kit's own painter — the picture the export draws.
+  const diving = !!live?.dive && !editing && !behindHidden;
+
   const tLocal = Math.max(0, t - o.start);
   // The mask clips the content wrapper only, never the box itself — the
   // selection chrome and the mask's own grips must stay visible outside it.
@@ -752,6 +759,7 @@ function OverlayItem({
         })()
       : {}),
     ...(maskCss ?? {}),
+    ...(diving ? { visibility: "hidden" as const } : {}),
     ...(reveal !== undefined
       ? { clipPath: `inset(0 ${(1 - Math.min(1, Math.max(0, reveal))) * 100}% 0 0)` }
       : {}),
@@ -1166,6 +1174,9 @@ function OverlayItem({
           <StickerView sticker={o} stageWidth={stageWidth} stageHeight={stageHeight} t={t} />
         ) : null}
       </div>
+      {diving && live && (
+        <DiveCanvas o={o} live={live} stageWidth={stageWidth} stageHeight={stageHeight} />
+      )}
       {/* The twin can't mount until its size is read, so the in-box chrome
           holds through that first frame — a select never blinks. */}
       {!chromeLifted && chrome}
@@ -1281,6 +1292,9 @@ function GlyphText({
         const chars = [...line].map((ch) => {
           const i = gi++;
           const g = glyphStateAt(phase, i, total);
+          // A slot character shows its reel through its own line band; the
+          // band clips top and bottom only, so a wide filler is not cut.
+          const reel = g.roll ? slotReel(ch, i, g.roll) : null;
           return (
             <span
               key={i}
@@ -1291,9 +1305,32 @@ function GlyphText({
                 transform:
                   `translate(${g.dx * scale}px, ${g.dy * scale}px)` +
                   ` rotate(${g.rotate}deg) scale(${g.sx}, ${g.sy})`,
+                ...(reel
+                  ? { position: "relative", overflowX: "visible", overflowY: "clip", verticalAlign: "top" }
+                  : {}),
               }}
             >
-              {ch}
+              {reel ? (
+                <>
+                  <span style={{ visibility: "hidden" }}>{ch}</span>
+                  {reel.map((r, k) => (
+                    <span
+                      key={k}
+                      style={{
+                        position: "absolute",
+                        left: "50%",
+                        top: 0,
+                        transform: `translate(-50%, ${r.y * 100}%)`,
+                        opacity: r.alpha,
+                      }}
+                    >
+                      {r.ch}
+                    </span>
+                  ))}
+                </>
+              ) : (
+                ch
+              )}
             </span>
           );
         });
@@ -1305,6 +1342,76 @@ function GlyphText({
         );
       })}
     </>
+  );
+}
+
+/**
+ * A diving element, painted by the kit over a stage-sized canvas that rides
+ * inside the element's box: the box carries the pose, the canvas the dive's
+ * view, and the painter is the one the export draws with. One paint is in
+ * flight at a time; a frame that arrives during it is painted next.
+ */
+function DiveCanvas({
+  o,
+  live,
+  stageWidth,
+  stageHeight,
+}: {
+  o: Overlay;
+  live: OverlayFrameState;
+  stageWidth: number;
+  stageHeight: number;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const assets = useEditor((s) => (o.kind === "sticker" ? s.assets : null));
+  const dpr = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(stageWidth * dpr));
+  const h = Math.max(1, Math.round(stageHeight * dpr));
+  const pending = useRef<{ live: OverlayFrameState } | null>(null);
+  const busy = useRef(false);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    pending.current = { live };
+    if (busy.current) return;
+    busy.current = true;
+    const env = cutRenderEnv(assets ?? []);
+    // The element's own look, neutral: the box already carries its pose.
+    const el = { ...o, rotation: undefined, opacity: undefined } as Overlay;
+    void (async () => {
+      try {
+        while (pending.current) {
+          const next = pending.current.live;
+          pending.current = null;
+          const focus: DiveFocus = await measureDiveFocus(o, w / h, env);
+          const view = diveView(next.dive ?? 0, focus, next, o, {
+            width: w,
+            height: h,
+            scale: Math.min(w, h) / 1080,
+          });
+          await paintElementInto(canvas, el, env, { dive: view });
+        }
+      } finally {
+        busy.current = false;
+      }
+    })();
+  }, [o, live, w, h, assets]);
+  return (
+    <canvas
+      ref={ref}
+      width={w}
+      height={h}
+      className="pointer-events-none absolute"
+      style={{
+        left: "50%",
+        top: "50%",
+        width: stageWidth,
+        height: stageHeight,
+        // The canvas spans the stage in the element's unposed frame: its
+        // origin sits the element's resting position back from the box center.
+        transform: `translate(${-o.x * stageWidth}px, ${-o.y * stageHeight}px)`,
+      }}
+    />
   );
 }
 

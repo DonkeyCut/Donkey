@@ -3,6 +3,7 @@
 import {
   hexAlpha,
   WORD_BASELINE_DROP,
+  renderElementCanvas as kitRenderElementCanvas,
   renderElementPng as kitRenderElementPng,
   renderOverlayFrames as kitRenderOverlayFrames,
   LINE_HEIGHT,
@@ -176,6 +177,18 @@ export function renderElementPng(
   phase?: PaintPhase
 ): Promise<Blob> {
   return kitRenderElementPng(overlay, width, height, cutRenderEnv(assets), phase);
+}
+
+/** The element drawn on a canvas at the export resolution, for a picture
+ * drawn straight away. */
+export function renderElementCanvas(
+  overlay: Overlay,
+  width: number,
+  height: number,
+  assets: MediaAsset[] = [],
+  phase?: PaintPhase
+): Promise<HTMLCanvasElement> {
+  return kitRenderElementCanvas(overlay, width, height, cutRenderEnv(assets), phase);
 }
 
 /** Rasterize an animated element into its region-cropped frame set (the

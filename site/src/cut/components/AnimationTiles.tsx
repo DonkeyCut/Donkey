@@ -11,6 +11,8 @@ import {
   MOTION,
   presetExtent,
   sampleProperties,
+  slotReel,
+  TEXT_ONLY_ANIM_STYLE_IDS,
   OVERLAY_ANIM_STYLE_IDS,
   OVERLAY_ANIM_STYLE_LABELS,
   OVERLAY_LOOP_STYLE_IDS,
@@ -162,6 +164,19 @@ const wordStyle = () => ({ fontFamily: fontStack("montserrat"), fontWeight: 700,
 const typesItsName = (slot: Slot, style: string) =>
   slot === "in" || slot === "out" ? !!MOTION.edges[style]?.animate.typed : false;
 
+/** Whether the demo rolls each letter up a reel (slot). The reel's three
+ * windows come from React empty, for the reason a typed demo's do. */
+const rollsItsName = (slot: Slot, style: string) =>
+  slot === "in" || slot === "out" ? !!MOTION.edges[style]?.animate.roll : false;
+
+/** Whether the demo flies into its own last letter (dive). */
+const divesIntoName = (slot: Slot, style: string) =>
+  slot === "in" || slot === "out" ? !!MOTION.edges[style]?.animate.dive : false;
+
+/** How far a dive demo zooms: the last letter's ink fills a tile well before
+ * the frame-sized flight the element takes. */
+const DEMO_DIVE_MAX = 40;
+
 /** Whether the demo has to lay the name out letter by letter: the per-glyph
  * ramps and the per-glyph loops both move each character on its own delay. */
 const splitsGlyphs = (slot: Slot, style: string) =>
@@ -204,6 +219,8 @@ function LiveName({
   const ref = useRef<HTMLSpanElement>(null);
   const label = labelOf(slot, style);
   const typed = typesItsName(slot, style);
+  const rolls = isText && rollsItsName(slot, style);
+  const dives = divesIntoName(slot, style);
   // Golden-ratio steps around the cycle: neighbouring tiles land far apart in
   // it, and no run of them ever bunches up mid-motion together.
   const phase = index * (slot === "loop" ? LOOP_SPREAD : demoCycle(seconds)) * PHASE_STEP;
@@ -214,16 +231,33 @@ function LiveName({
     // effect's to write, starting with the whole name.
     if (el.dataset.word) el.textContent = el.dataset.word;
     const letters = () => Array.from(el.children) as HTMLElement[];
+    const chars = [...label];
+    /** A slot letter's reel, drawn into its empty windows. */
+    const drawReel = (kid: HTMLElement, i: number, roll: number) => {
+      const windows = kid.querySelectorAll<HTMLElement>("[data-reel]");
+      const reel = roll ? slotReel(chars[i] ?? "", i, roll) : [{ ch: chars[i] ?? "", y: 0, alpha: 1 }];
+      windows.forEach((w, k) => {
+        const r = reel[k];
+        w.textContent = r ? r.ch : "";
+        w.style.transform = r ? `translate(-50%, ${r.y * 100}%)` : "";
+        w.style.opacity = r ? String(r.alpha) : "0";
+      });
+    };
     const rest = () => {
       el.style.transform = "";
+      el.style.transformOrigin = "";
       el.style.opacity = "";
       el.style.clipPath = "";
-      for (const kid of letters()) {
+      letters().forEach((kid, i) => {
         kid.style.transform = "";
         kid.style.opacity = "";
-      }
+        if (rolls) drawReel(kid, i, 0);
+      });
       if (el.dataset.word) el.textContent = el.dataset.word;
     };
+    // The reel windows come from React empty: the name goes in before
+    // anything moves.
+    if (rolls) letters().forEach((kid, i) => drawReel(kid, i, 0));
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return rest;
     let start = 0;
     let raf = 0;
@@ -242,17 +276,25 @@ function LiveName({
           const g = glyphStateAt(st, i, kids.length);
           kid.style.transform = `translate(${px(g.dx)}px, ${px(g.dy)}px) rotate(${g.rotate}deg) scale(${g.sx}, ${g.sy})`;
           kid.style.opacity = String(g.alpha);
+          if (rolls) drawReel(kid, i, g.roll ?? 0);
         });
         glyphed = true;
       } else {
         if (glyphed) {
-          for (const kid of letters()) {
+          letters().forEach((kid, i) => {
             kid.style.transform = "";
             kid.style.opacity = "";
-          }
+            if (rolls) drawReel(kid, i, 0);
+          });
           glyphed = false;
         }
-        el.style.transform = `translate(${px(st.dx)}px, ${px(st.dy)}px) rotate(${st.rotate}deg) scale(${st.scale})`;
+        // A dive zooms the name about its last letter.
+        const last = dives ? letters().at(-1) : undefined;
+        el.style.transformOrigin = last
+          ? `${last.offsetLeft + last.offsetWidth / 2}px ${last.offsetTop + last.offsetHeight / 2}px`
+          : "";
+        const zoom = st.dive ? Math.pow(DEMO_DIVE_MAX, st.dive) : 1;
+        el.style.transform = `translate(${px(st.dx)}px, ${px(st.dy)}px) rotate(${st.rotate}deg) scale(${st.scale * zoom})`;
         el.style.opacity = String(st.alpha);
       }
       el.style.clipPath =
@@ -269,7 +311,7 @@ function LiveName({
       cancelAnimationFrame(raf);
       rest();
     };
-  }, [slot, style, isText, seconds, speed, phase]);
+  }, [slot, style, isText, seconds, speed, phase, label, rolls, dives]);
 
   return (
     <span
@@ -280,7 +322,16 @@ function LiveName({
     >
       {typed
         ? null
-        : isText && splitsGlyphs(slot, style)
+        : rolls
+          ? [...label].map((ch, i) => (
+              <span key={i} className="relative inline-block align-top" style={{ overflowY: "clip" }}>
+                <span className="invisible">{ch}</span>
+                <span data-reel className="absolute top-0 left-1/2" />
+                <span data-reel className="absolute top-0 left-1/2" />
+                <span data-reel className="absolute top-0 left-1/2" />
+              </span>
+            ))
+          : (isText && splitsGlyphs(slot, style)) || dives
           ? [...label].map((ch, i) => (
               <span key={i} className="inline-block">
                 {ch}
@@ -524,7 +575,7 @@ export function AnimationTiles({
   /** The slot plays an animation the project carries itself, so none of these
    * tiles is what is running — including None. */
   custom?: boolean;
-  /** Typewriter is offered on titles only. */
+  /** Typing and rolling reels are offered on titles only. */
   isText: boolean;
   /** The In/Out length the panel has set — the hover demo's ramp. */
   seconds: number;
@@ -593,7 +644,7 @@ export function AnimationTiles({
       ? HOLD_IDS
       : slot === "loop"
         ? OVERLAY_LOOP_STYLE_IDS
-        : OVERLAY_ANIM_STYLE_IDS.filter((s) => s !== "typewriter" || isText);
+        : OVERLAY_ANIM_STYLE_IDS.filter((s) => isText || !TEXT_ONLY_ANIM_STYLE_IDS.includes(s));
 
   return (
     <div className="grid grid-cols-2 gap-[9px]">
