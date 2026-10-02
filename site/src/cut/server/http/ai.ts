@@ -3,8 +3,9 @@ import os from "node:os";
 import { z } from "zod";
 import { SETTINGS } from "@/lib/config/registry";
 import { startTurnStream, followTurnStream, cancelTurnStream } from "../ai/turnStreams";
+import { foldIntoTurn, openFoldInbox, type Fold, type FoldInbox } from "../ai/turnFolds";
 import path from "node:path";
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { claudeFailure } from "../ai/claudeFailure";
 import { createUIMessageStream, type UIMessage } from "ai";
 
@@ -80,6 +81,7 @@ async function runClaude(
   body: ChatBody,
   base: string,
   sessionKey: string,
+  inbox: FoldInbox,
   signal: AbortSignal
 ) {
   signal.throwIfAborted();
@@ -93,11 +95,41 @@ async function runClaude(
   };
 
   /** One run of the query. It ends when the model signs off, when the SDK
-   * spends the step budget, or when the editor tools failed to bind. */
+   * spends the step budget, or when the editor tools failed to bind.
+   *
+   * The input stays open for the run so folds reach the CLI as they land: it
+   * injects each one at the model's next step and acknowledges it then, and
+   * one that lands as the model signs off starts a follow-on reply in the same
+   * session. The run ends on a result with no fold still unacknowledged. */
   const pass = async (ask: string): Promise<TurnEnd> => {
     signal.throwIfAborted();
+    const unacked: Fold[] = [];
+    const outbox: string[] = [];
+    let wake = null as (() => void) | null;
+    let open = true;
+    const unlisten = inbox.listen((fold) => {
+      unacked.push(fold);
+      outbox.push(fold.text);
+      wake?.();
+    });
+    const userMessage = (text: string): SDKUserMessage => ({
+      type: "user",
+      message: { role: "user", content: text },
+      parent_tool_use_id: null,
+    });
+    async function* input(): AsyncGenerator<SDKUserMessage> {
+      yield userMessage(ask);
+      for (;;) {
+        while (outbox.length) yield userMessage(outbox.shift()!);
+        if (!open) return;
+        await new Promise<void>((resolve) => (wake = resolve));
+        wake = null;
+      }
+    }
+    // The CLI echoes each input message as it takes it; the first is the ask.
+    let echoes = 0;
     const q = query({
-      prompt: ask,
+      prompt: input(),
       options: {
         model: body.model,
         ...(session ? { resume: session } : {}),
@@ -126,6 +158,7 @@ async function runClaude(
         strictMcpConfig: true,
         settings: { disableClaudeAiConnectors: true },
         includePartialMessages: true,
+        extraArgs: { "replay-user-messages": null },
         maxTurns: STEP_BUDGET,
         cwd: os.tmpdir(),
       },
@@ -160,6 +193,8 @@ async function runClaude(
           // newest, so an extended turn keeps one continuous history.
           if (typeof m.session_id === "string") session = m.session_id;
           emit({ type: "data-session", data: { providerSession: m.session_id }, transient: true });
+        } else if (m.type === "user" && m.isReplay === true) {
+          if (echoes++ > 0) unacked.shift()?.resolve(true);
         } else if (m.type === "stream_event") {
           const ev = m.event as {
             type: string;
@@ -184,6 +219,8 @@ async function runClaude(
             end = "failed";
             emit({ type: "error", errorText: stopText(m.result) });
           }
+          // A fold the CLI holds runs next, in this same session.
+          if (unacked.length) continue;
           // The result message is the run's last word — after it the CLI only
           // tears down. Leaving the loop closes the chat stream now instead of
           // holding the working indicator open through process exit.
@@ -191,6 +228,10 @@ async function runClaude(
         }
       }
     } finally {
+      unlisten();
+      open = false;
+      wake?.();
+      for (const fold of unacked.splice(0)) fold.resolve(false);
       signal.removeEventListener("abort", onAbort);
       if (textId) emit({ type: "text-end", id: textId });
     }
@@ -217,15 +258,41 @@ async function runCodex(
   body: ChatBody,
   base: string,
   sessionKey: string,
+  inbox: FoldInbox,
   signal: AbortSignal
 ) {
+  // `codex exec` reads no input once it starts, so a fold waits for the run
+  // to finish and goes in as a resumed run of the same session, inside this
+  // turn.
+  let session = body.providerSession;
+  let ask = prompt;
+  for (;;) {
+    session = (await codexRun(emit, ask, body.model, session, base, sessionKey, signal)) ?? session;
+    if (signal.aborted || !session) return;
+    const folds = inbox.take();
+    if (!folds.length) return;
+    for (const fold of folds) fold.resolve(true);
+    ask = folds.map((fold) => fold.text).join("\n\n");
+  }
+}
+
+/** One `codex exec` run; returns the session it ran in. */
+async function codexRun(
+  emit: UIChunkWriter["write"],
+  prompt: string,
+  model: string,
+  session: string | undefined,
+  base: string,
+  sessionKey: string,
+  signal: AbortSignal
+): Promise<string | undefined> {
   signal.throwIfAborted();
   const codex = await codexCommand();
   const mcp = mcpCommand(base, sessionKey);
-  const session = body.providerSession;
+  let thread = session;
   const args = ["exec"];
   if (session) args.push("resume", session);
-  args.push("--json", "--skip-git-repo-check", "-m", body.model);
+  args.push("--json", "--skip-git-repo-check", "-m", model);
   // `codex exec resume` inherits the original session's sandbox and working
   // root, and its subcommand parser rejects --sandbox/-C. Pass those only on a
   // fresh run; appending them to a resume exits the CLI with code 2.
@@ -259,8 +326,10 @@ async function runCodex(
     };
 
     let textCount = 0;
+    // Part ids stay unique across the runs a turn makes.
+    const run = crypto.randomUUID().slice(0, 8);
     const say = (text: string) => {
-      const id = `t${++textCount}`;
+      const id = `${run}-t${++textCount}`;
       emit({ type: "text-start", id });
       emit({ type: "text-delta", id, delta: text });
       emit({ type: "text-end", id });
@@ -282,6 +351,7 @@ async function runCodex(
           continue;
         }
         if (ev.type === "thread.started" && ev.thread_id) {
+          thread = ev.thread_id;
           emit({ type: "data-session", data: { providerSession: ev.thread_id }, transient: true });
         } else if (ev.type === "item.completed" && ev.item?.type === "agent_message" && ev.item.text) {
           say(ev.item.text);
@@ -324,6 +394,7 @@ async function runCodex(
       resolve();
     });
   });
+  return thread;
 }
 
 /**
@@ -481,17 +552,19 @@ export const aiApi = {
         } });
         // The browser posts tool outputs back to /api/cut/ai/tool-result with this key.
         emit({ type: "data-session", data: { sessionKey }, transient: true });
+        const folds = openFoldInbox(identity.data.context.project.id, body.threadId);
         try {
           if (body.model.startsWith("claude")) {
-            await runClaude(emit, prompt, body, base, sessionKey, signal);
+            await runClaude(emit, prompt, body, base, sessionKey, folds.inbox, signal);
           } else if (body.model === "cut-test") {
             await runFake(emit, sessionKey, userText);
           } else {
-            await runCodex(emit, prompt, body, base, sessionKey, signal);
+            await runCodex(emit, prompt, body, base, sessionKey, folds.inbox, signal);
           }
         } catch (err) {
           emit({ type: "error", errorText: errorMessage(err, String(err)) });
         } finally {
+          folds.close();
           unregisterSession(sessionKey);
           emit({ type: "finish" });
         }
@@ -503,6 +576,22 @@ export const aiApi = {
     const projectId = new URL(req.url).searchParams.get("projectId");
     if (!projectId) return Response.json({ error: "A project is required." }, { status: 400 });
     return followTurnStream(projectId, threadId, req.signal);
+  },
+
+  /** A message sent while the thread's turn runs, folded into that turn.
+   * Answers once the provider has taken it, or false when the turn ended
+   * first. */
+  async foldChat(req: Request, threadId: string) {
+    const body = z.object({
+      projectId: z.string().min(1).max(200),
+      text: z.string().min(1).max(100_000),
+      attachments: z.array(z.unknown()).max(100).default([]),
+      context: z.unknown(),
+    }).safeParse(await req.json().catch(() => null));
+    if (!body.success) return Response.json({ error: "A project and a message are required." }, { status: 400 });
+    const { projectId, text, attachments, context } = body.data;
+    const prompt = `${text}${attachedAssetsBlock(attachments)}\n\n<editor_state>\n${JSON.stringify(context ?? {})}\n</editor_state>`;
+    return Response.json({ folded: await foldIntoTurn(projectId, threadId, prompt) });
   },
 
   async cancelChat(req: Request, threadId: string) {

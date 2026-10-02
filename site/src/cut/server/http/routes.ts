@@ -120,6 +120,7 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "POST", path: "/api/cut/projects/:id/scene-lease", handler: (req, p) => localSceneLease(p.id, req) },
   { method: "GET", path: "/api/cut/ai/chat/:id/stream", handler: (req, p) => aiApi.resumeChat(req, p.id) },
   { method: "POST", path: "/api/cut/ai/chat/:id/cancel", handler: (req, p) => aiApi.cancelChat(req, p.id) },
+  { method: "POST", path: "/api/cut/ai/chat/:id/fold", handler: (req, p) => aiApi.foldChat(req, p.id) },
   { method: "POST", path: "/api/cut/ai/tool-claim", handler: (req) => aiApi.claimTool(req) },
   { method: "POST", path: "/api/cut/ai/captions", handler: (req) => aiApi.captions(req) },
   { method: "POST", path: "/api/cut/ai/visual-subtitles", handler: (req) => aiApi.visualSubtitles(req) },

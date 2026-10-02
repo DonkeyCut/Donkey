@@ -108,7 +108,7 @@ import { holdEditorChat } from "@/cut/lib/editorWork";
 import { recoverSceneCall } from "@/cut/lib/chatRecovery";
 import { replayChatStream } from "@/cut/lib/chatReplay";
 import { INTERRUPTED_ERROR, isResumeMessage, RESUME_LIMIT, resumePrompt, scrubLostTurn, unfinishedAsk, type ResumeMetadata, type TurnSettled } from "@/cut/lib/chatResume";
-import { claimEngineTool, cancelEngineChat } from "@/cut/lib/engineChat";
+import { claimEngineTool, cancelEngineChat, foldIntoEngineChat } from "@/cut/lib/engineChat";
 import { projectBackend } from "@/cut/lib/residency";
 import { beginBrowserChat, browserChatRunning, cancelBrowserChat, watchBrowserChatTurns } from "@/cut/lib/browserChatTurns";
 import { putCloudThread } from "@/cut/lib/chatCloud";
@@ -1530,8 +1530,7 @@ function ChatSession({
   // joins the transcript as its own message, a spawn starts a parallel
   // thread, and the rest wait in the tray. Each verdict is checked against
   // the live queue before it acts, since a row can be edited, removed, or
-  // drained while the call is out. A turn on the local engine cannot take a
-  // fold, so there the row waits as before.
+  // drained while the call is out.
   const triage = async (rows: QueuedMessage[]) => {
     const ask = runningAskRef.current;
     if (!ask) return;
@@ -1576,14 +1575,21 @@ function ChatSession({
       if (verdict === "spawn") {
         const id = onSpawn({ text, attachments: live, model });
         setQueue((q) => q.map((m) => (m.id === row.id ? { ...m, status: "spawned", threadId: id } : m)));
-      } else if (verdict === "fold" && provider(model) === "gemini" && cutChatLive(threadId)) {
+      } else if (verdict === "fold" && (provider(model) !== "gemini" || cutChatLive(threadId))) {
         setQueue((q) => q.map((m) => (m.id === row.id ? { ...m, status: "folding" } : m)));
-        const folded = await foldIntoCutChat({
-          threadId,
-          text,
-          attachments: live,
-          deps: productionDeps(projectId, turnSignalRef.current),
-        });
+        const folded =
+          provider(model) === "gemini"
+            ? await foldIntoCutChat({
+                threadId,
+                text,
+                attachments: live,
+                deps: productionDeps(projectId, turnSignalRef.current),
+              })
+            : await foldIntoEngineChat(projectId, threadId, {
+                text,
+                attachments: live,
+                context: productionDeps(projectId).buildContext(),
+              }).catch(() => false);
         if (!folded) {
           setQueue((q) => q.map((m) => (m.id === row.id ? { ...m, status: "queued" } : m)));
           continue;
