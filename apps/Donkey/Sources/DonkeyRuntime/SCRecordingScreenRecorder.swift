@@ -46,6 +46,7 @@ public final class SCRecordingScreenRecorder: ScreenRecording {
         streamConfig.width = Self.evenPixels(capturePoints.width, scale: scale)
         streamConfig.height = Self.evenPixels(capturePoints.height, scale: scale)
         streamConfig.scalesToFit = false
+        streamConfig.ignoreShadowsSingleWindow = true
 
         // System audio (default on) — never record our own UI sounds.
         streamConfig.capturesAudio = configuration.capturesSystemAudio
