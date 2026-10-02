@@ -90,6 +90,8 @@ export function sampleProperties(props: MotionProperties, q: number, dur = 0): M
       tracking: capped(props.tracking, dur),
       reveal: capped(props.reveal, dur),
       typed: capped(props.typed, dur),
+      roll: capped(props.roll, dur),
+      dive: capped(props.dive, dur),
     };
   return samplePropertiesRaw(props, q);
 }
@@ -107,6 +109,8 @@ function samplePropertiesRaw(props: MotionProperties, q: number): MotionPose {
     tracking: sampleTrack(props.tracking, q, 0),
     ...(props.reveal ? { reveal: sampleTrack(props.reveal, q, 1) } : {}),
     ...(props.typed ? { typed: sampleTrack(props.typed, q, 1) } : {}),
+    ...(props.roll ? { roll: sampleTrack(props.roll, q, 0) } : {}),
+    ...(props.dive ? { dive: sampleTrack(props.dive, q, 0) } : {}),
   };
 }
 

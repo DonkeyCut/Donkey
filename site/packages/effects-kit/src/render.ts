@@ -17,6 +17,7 @@ import {
   type GlyphPhase,
   type OverlayAnim,
 } from "./anim";
+import { diveView, slotReel, type DiveFocus, type DiveView } from "./dive";
 import { presetExtent } from "./motion/evaluate";
 import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys } from "./keys";
 import { applyMaskToCanvas, isMaskAnimated } from "./mask";
@@ -137,6 +138,8 @@ export interface PaintPhase {
   reveal?: number;
   glyphs?: GlyphPhase;
   glyphLoop?: GlyphLoopPhase;
+  /** The view a dive draws the whole picture under (see `diveView`). */
+  dive?: DiveView;
 }
 
 /**
@@ -509,7 +512,20 @@ async function paintText(
           ctx.translate(x + w / 2 + g.dx * scale, y + g.dy * scale);
           if (g.rotate) ctx.rotate((g.rotate * Math.PI) / 180);
           ctx.scale(g.sx, g.sy);
-          drawText(ch, 0, 0);
+          if (g.roll) {
+            // A rolling reel shows through its own line band only; sideways
+            // it stays open, so a wide filler is not cut to the slot.
+            ctx.beginPath();
+            ctx.rect(-w * 3, -lineH / 2, w * 6, lineH);
+            ctx.clip();
+            const a = ctx.globalAlpha;
+            for (const r of slotReel(ch, gi - 1, g.roll)) {
+              ctx.globalAlpha = a * r.alpha;
+              drawText(r.ch, 0, r.y * lineH);
+            }
+          } else {
+            drawText(ch, 0, 0);
+          }
           ctx.restore();
         }
         x += w;
@@ -653,6 +669,225 @@ export async function paintElement(
   }
 }
 
+/** Draw everything after this under a dive's view. */
+export function applyDiveView(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  v: DiveView
+): void {
+  ctx.translate(v.tx, v.ty);
+  ctx.scale(v.s, v.s);
+  ctx.translate(-v.fx, -v.fy);
+}
+
+/** Whether either edge of an element dives, so a renderer knows to measure
+ * the focus and give the flight the whole frame. */
+export function divesAt(anim: OverlayAnim | undefined): boolean {
+  return !!edgeMotion(anim?.in)?.animate.dive || !!edgeMotion(anim?.out)?.animate.dive;
+}
+
+/** Measured foci, by look, newest last. A focus is three numbers, so the
+ * bound is a count. */
+const diveFoci = new Map<string, Promise<DiveFocus>>();
+const settledFoci = new Map<string, DiveFocus>();
+const DIVE_FOCI_MAX = 64;
+/** The longest side the focus raster is drawn at: enough to place the point
+ * within a couple of design px, small enough to measure in a frame. */
+const DIVE_RASTER = 480;
+
+/** What decides where a dive lands: the look and the layout, never the
+ * timing or the motion. */
+function diveKey(o: Overlay, aspect: number): string {
+  const look: Record<string, unknown> = { ...o };
+  for (const k of ["id", "start", "end", "anim", "kf", "lane", "opacity", "rotation", "mask"]) delete look[k];
+  return JSON.stringify([look, Math.round(aspect * 1000)]);
+}
+
+/**
+ * Where a dive flies into: the point of the element's ink that sits deepest
+ * inside it — on a title, inside its last letter — and how deep. Measured on
+ * the same painter that draws the element, at a 1080 short side, and kept per
+ * look, so every renderer and every frame reads one answer.
+ */
+export function measureDiveFocus(o: Overlay, aspect: number, env: RenderEnv): Promise<DiveFocus> {
+  const key = diveKey(o, aspect);
+  let hit = diveFoci.get(key);
+  if (hit) {
+    diveFoci.delete(key);
+  } else {
+    hit = findDiveFocus(o, aspect, env).then((f) => {
+      settledFoci.set(key, f);
+      return f;
+    });
+  }
+  diveFoci.set(key, hit);
+  while (diveFoci.size > DIVE_FOCI_MAX) {
+    const old = diveFoci.keys().next().value!;
+    diveFoci.delete(old);
+    settledFoci.delete(old);
+  }
+  return hit;
+}
+
+/** The measured focus if it has landed; otherwise starts measuring and says
+ * so with undefined. For renderers that draw synchronously. */
+export function peekDiveFocus(o: Overlay, aspect: number, env: RenderEnv): DiveFocus | undefined {
+  const hit = settledFoci.get(diveKey(o, aspect));
+  if (!hit) void measureDiveFocus(o, aspect, env).catch(() => {});
+  return hit;
+}
+
+async function findDiveFocus(o: Overlay, aspect: number, env: RenderEnv): Promise<DiveFocus> {
+  const width = aspect >= 1 ? 1080 * aspect : 1080;
+  const height = aspect >= 1 ? 1080 : 1080 / aspect;
+  const frame: PaintFrame = { width, height, scale: 1 };
+  const isText = (o.kind ?? "text") === "text";
+  // The ink alone: a plate would pull the flight into the plate, a shadow
+  // blurs the edge the depth is measured from.
+  const el = {
+    ...o,
+    rotation: undefined,
+    opacity: undefined,
+    mask: undefined,
+    anim: undefined,
+    kf: undefined,
+    ...(isText ? { plate: false, shadow: false } : {}),
+  } as Overlay;
+  const b = await measureElementBounds(el, frame, env);
+  const q = Math.min(1, DIVE_RASTER / Math.max(b.w, b.h, 1));
+  const pad = 2;
+  const rw = Math.ceil(b.w * q) + pad * 2;
+  const rh = Math.ceil(b.h * q) + pad * 2;
+  const left = b.cx - b.w / 2;
+  const top = b.cy - b.h / 2;
+  const canvas = newCanvas(env, rw, rh);
+  const ctx = canvas.getContext("2d")!;
+  ctx.translate(pad, pad);
+  ctx.scale(q, q);
+  ctx.translate(-left, -top);
+  await paintElement(ctx, el, frame, env);
+  const pixels = ctx.getImageData(0, 0, rw, rh).data;
+  const depth = inkDepth(pixels, rw, rh);
+  // A title flies into its last letter; anything else into its deepest ink.
+  const box = isText ? await lastGlyphBox(el as TextOverlay, frame, env) : null;
+  const toRaster = (v: number, from: number) => (v - from) * q + pad;
+  const x0 = box ? Math.max(0, Math.floor(toRaster(box.x0, left))) : 0;
+  const x1 = box ? Math.min(rw, Math.ceil(toRaster(box.x1, left))) : rw;
+  const y0 = box ? Math.max(0, Math.floor(toRaster(box.y0, top))) : 0;
+  const y1 = box ? Math.min(rh, Math.ceil(toRaster(box.y1, top))) : rh;
+  let best = -1;
+  let bx = rw / 2;
+  let by = rh / 2;
+  const scan = (ax: number, bx1: number, ay: number, by1: number) => {
+    for (let y = ay; y < by1; y++)
+      for (let x = ax; x < bx1; x++) {
+        const d = depth[y * rw + x];
+        if (d > best) {
+          best = d;
+          bx = x;
+          by = y;
+        }
+      }
+  };
+  scan(x0, x1, y0, y1);
+  // A last letter with no ink of its own (a mark too thin to measure) falls
+  // back to the deepest ink anywhere.
+  if (best <= 0) scan(0, rw, 0, rh);
+  return {
+    x: (bx + 0.5 - pad) / q + left - b.cx,
+    y: (by + 0.5 - pad) / q + top - b.cy,
+    // Distances run center to center; the antialiased edge sits up to a
+    // pixel short of the last ink center, so that pixel is not counted.
+    r: Math.max(0.5, best - 1) / q,
+  };
+}
+
+/** Each pixel's distance to the nearest pixel outside the ink, in raster px:
+ * the exact Euclidean transform (Felzenszwalb–Huttenlocher), one pass down
+ * the columns and one along the rows. A dive's landing scale is read off this
+ * depth, so an estimate that runs long leaves a corner of the frame uncovered. */
+function inkDepth(rgba: Uint8ClampedArray, w: number, h: number): Float32Array {
+  const INF = 1e20;
+  const n = Math.max(w, h);
+  const f = new Float64Array(n);
+  const d = new Float64Array(n);
+  const v = new Int32Array(n);
+  const z = new Float64Array(n + 1);
+  // The squared distance along one line, in place.
+  const line = (len: number) => {
+    let k = 0;
+    v[0] = 0;
+    z[0] = -INF;
+    z[1] = INF;
+    for (let q = 1; q < len; q++) {
+      let s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) {
+        k--;
+        s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      }
+      k++;
+      v[k] = q;
+      z[k] = s;
+      z[k + 1] = INF;
+    }
+    k = 0;
+    for (let q = 0; q < len; q++) {
+      while (z[k + 1] < q) k++;
+      d[q] = (q - v[k]) * (q - v[k]) + f[v[k]];
+    }
+  };
+  const sq = new Float64Array(w * h);
+  for (let i = 0; i < w * h; i++) sq[i] = rgba[i * 4 + 3] >= 128 ? INF : 0;
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) f[y] = sq[y * w + x];
+    line(h);
+    for (let y = 0; y < h; y++) sq[y * w + x] = d[y];
+  }
+  const out = new Float32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) f[x] = sq[y * w + x];
+    line(w);
+    for (let x = 0; x < w; x++) out[y * w + x] = Math.sqrt(d[x]);
+  }
+  return out;
+}
+
+/** The box the last drawn character of a title takes, in frame px — laid out
+ * the way `paintText` lays it out. */
+async function lastGlyphBox(
+  o: TextOverlay,
+  frame: PaintFrame,
+  env: RenderEnv
+): Promise<{ x0: number; x1: number; y0: number; y1: number } | null> {
+  const fpx = o.size * frame.scale;
+  const cssFont = textCssFont(o, fpx, env);
+  await ensureFontLoaded(cssFont, o.text);
+  const ctx = newCanvas(env, 1, 1).getContext("2d")!;
+  ctx.font = cssFont;
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${(o.letterSpacing ?? 0) * fpx}px`;
+  const measure = (line: string) => ctx.measureText(line).width;
+  const lines = wrapTextToRoom(o.text, textWrapRoom(o, frame.width), measure).split("\n");
+  const widths = lines.map(measure);
+  const maxW = o.wrapWidth ? textWrapRoom(o, frame.width) : Math.max(...widths, 1);
+  const lineH = fpx * (o.lineHeight ?? LINE_HEIGHT);
+  const cx = o.x * frame.width;
+  const cy = o.y * frame.height;
+  const align = o.align ?? "center";
+  let i = lines.length - 1;
+  while (i >= 0 && !lines[i].trim()) i--;
+  if (i < 0) return null;
+  const chars = [...lines[i].trimEnd()];
+  const center =
+    align === "center" ? cx : align === "left" ? cx - maxW / 2 + widths[i] / 2 : cx + maxW / 2 - widths[i] / 2;
+  const left = center - widths[i] / 2;
+  const y0 = cy - (lines.length * lineH) / 2 + lineH * i;
+  return {
+    x0: left + measure(chars.slice(0, -1).join("")),
+    x1: left + measure(chars.join("")),
+    y0,
+    y1: y0 + lineH,
+  };
+}
+
 function pngBlob(canvas: HTMLCanvasElement, env: RenderEnv): Promise<Blob> {
   if (env.canvasToPngBlob) return env.canvasToPngBlob(canvas);
   return new Promise((resolve, reject) =>
@@ -680,12 +915,41 @@ export async function renderElementPng(
   env: RenderEnv,
   phase?: PaintPhase
 ): Promise<Blob> {
+  return pngBlob(await renderElementCanvas(overlay, width, height, env, phase), env);
+}
+
+/** The same picture left on its canvas, for a caller that draws it straight
+ * away — a picture redrawn every frame never pays a PNG round trip. */
+export async function renderElementCanvas(
+  overlay: Overlay,
+  width: number,
+  height: number,
+  env: RenderEnv,
+  phase?: PaintPhase
+): Promise<HTMLCanvasElement> {
+  const canvas = newCanvas(env, width, height);
+  await paintElementInto(canvas, overlay, env, phase);
+  return canvas;
+}
+
+/** Paint one element over the whole of a canvas the caller owns, cleared
+ * first — the full-frame picture `renderElementPng` encodes, drawn into a
+ * surface that is reused frame after frame. */
+export async function paintElementInto(
+  canvas: HTMLCanvasElement,
+  overlay: Overlay,
+  env: RenderEnv,
+  phase?: PaintPhase
+): Promise<void> {
+  const { width, height } = canvas;
   // Element sizes are design pixels with a 1080 short side, so scaling by the
   // short side keeps them the same visual size in any aspect and resolution.
   const scale = Math.min(width, height) / 1080;
-  const canvas = newCanvas(env, width, height);
   const ctx = canvas.getContext("2d")!;
   const frame: PaintFrame = { width, height, scale, phase };
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, width, height);
 
   ctx.globalAlpha = overlay.opacity ?? 1;
   if (overlay.rotation) {
@@ -695,6 +959,7 @@ export async function renderElementPng(
     ctx.rotate((overlay.rotation * Math.PI) / 180);
     ctx.translate(-cx, -cy);
   }
+  if (phase?.dive) applyDiveView(ctx, phase.dive);
 
   await paintElement(ctx, overlay, frame, env);
   if (overlay.mask) {
@@ -711,7 +976,6 @@ export async function renderElementPng(
       ctx.getTransform()
     );
   }
-  return pngBlob(canvas, env);
 }
 
 /** An element's resting box in output pixels (center + size), rotation left
@@ -984,10 +1248,13 @@ export async function renderOverlayFrames(
     halfW = r;
     halfH = r;
   }
-  const x0 = Math.max(0, Math.floor(extent.x0 * width - halfW));
-  const y0 = Math.max(0, Math.floor(extent.y0 * height - halfH));
-  const x1 = Math.min(width, Math.ceil(extent.x1 * width + halfW));
-  const y1 = Math.min(height, Math.ceil(extent.y1 * height + halfH));
+  // A dive flies into the element until it fills the frame, so its flight
+  // takes the whole frame.
+  const focus = divesAt(anim) ? await measureDiveFocus(overlay, width / height, env) : null;
+  const x0 = focus ? 0 : Math.max(0, Math.floor(extent.x0 * width - halfW));
+  const y0 = focus ? 0 : Math.max(0, Math.floor(extent.y0 * height - halfH));
+  const x1 = focus ? width : Math.min(width, Math.ceil(extent.x1 * width + halfW));
+  const y1 = focus ? height : Math.min(height, Math.ceil(extent.y1 * height + halfH));
   const rw = Math.max(2, x1 - x0);
   const rh = Math.max(2, y1 - y0);
 
@@ -1009,6 +1276,9 @@ export async function renderOverlayFrames(
     // Back to the origin the painters draw around, so they stay unaware of
     // any of this.
     ctx.translate(-overlay.x * width, -overlay.y * height);
+    // A dive's view goes inside the pose, so the type is drawn as vectors at
+    // the size it is seen and stays sharp however far in the flight gets.
+    if (focus && ev.dive) applyDiveView(ctx, diveView(ev.dive, focus, ev, overlay, frame));
     let el: Overlay = applyWordDraw(
       { ...overlay, rotation: undefined, opacity: undefined },
       tLocal,

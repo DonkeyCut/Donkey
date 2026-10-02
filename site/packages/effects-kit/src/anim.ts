@@ -36,6 +36,7 @@ export type OverlayAnimStyle =
   | "slidedown"
   | "typewriter" // text only; other kinds render it as a fade
   | "wipe"
+  | "dive"
   // Per-glyph styles: on text each character runs the ramp on its own delay
   // (the preset carries a range selector); on every other kind the whole
   // element runs it once.
@@ -49,7 +50,8 @@ export type OverlayAnimStyle =
   | "converge"
   | "streak"
   | "tumble"
-  | "scatter";
+  | "scatter"
+  | "slot";
 
 export type OverlayLoopStyle =
   | "pulse"
@@ -83,7 +85,8 @@ export type GlyphAnimStyle =
   | "converge"
   | "streak"
   | "tumble"
-  | "scatter";
+  | "scatter"
+  | "slot";
 
 /**
  * A ramp at one end of the element.
@@ -149,6 +152,22 @@ export const OVERLAY_ANIM_STYLE_IDS = EDGE_IDS as OverlayAnimStyle[];
 export const OVERLAY_LOOP_STYLE_IDS = LOOP_IDS as OverlayLoopStyle[];
 export const GLYPH_ANIM_STYLE_IDS = PER_UNIT_EDGE_IDS as GlyphAnimStyle[];
 export const GLYPH_LOOP_STYLE_IDS = PER_UNIT_LOOP_IDS as GlyphLoopStyle[];
+
+/** The edges that only play on characters — typing them out, rolling each up
+ * a reel. Every other kind is offered the rest. */
+export const TEXT_ONLY_ANIM_STYLE_IDS = EDGE_IDS.filter(
+  (id) => !!MOTION.edges[id].animate.typed || !!MOTION.edges[id].animate.roll
+) as OverlayAnimStyle[];
+/** The edges that fly the view into the element's ink until it fills the
+ * frame. */
+export const DIVE_ANIM_STYLE_IDS = EDGE_IDS.filter((id) => !!MOTION.edges[id].animate.dive) as OverlayAnimStyle[];
+
+/** Each catalog edge that carries a note, as "id: note" lines — what tool
+ * schemas and prompts teach the edges from. */
+export const edgeNotes = (): string =>
+  EDGE_IDS.filter((id) => MOTION.edges[id].note)
+    .map((id) => `${id}: ${MOTION.edges[id].note}`)
+    .join(" ");
 
 const GLYPH_STYLES: Set<string> = new Set(GLYPH_ANIM_STYLE_IDS);
 const GLYPH_LOOPS: Set<string> = new Set(GLYPH_LOOP_STYLE_IDS);
@@ -260,6 +279,10 @@ export interface OverlayAnimState {
   reveal?: number;
   glyphs?: GlyphPhase;
   glyphLoop?: GlyphLoopPhase;
+  /** How far the view has flown into the element's deepest ink, 0..1 (dive).
+   * Renderers turn it into a view with `diveView`, which needs the drawn
+   * geometry this evaluator never sees. */
+  dive?: number;
 }
 
 /** How one character sits at a moment: offsets in design px, a scale per axis
@@ -271,6 +294,9 @@ export interface GlyphAnimState {
   sy: number;
   rotate: number;
   alpha: number;
+  /** Characters its reel still rolls past before it lands (slot); absent or
+   * 0 = the character alone. `slotReel` says what to draw. */
+  roll?: number;
 }
 
 const IDLE: OverlayAnimState = { dx: 0, dy: 0, scale: 1, rotate: 0, alpha: 1 };
@@ -292,6 +318,7 @@ function asGlyph(pose: MotionPose, index: number, count: number): GlyphAnimState
     sy: pose.sy,
     rotate: pose.rotate,
     alpha: pose.alpha,
+    ...(pose.roll ? { roll: pose.roll } : {}),
   };
 }
 
@@ -324,6 +351,7 @@ export function glyphStateAt(
   if (!preset) return ramp;
   const n = Math.max(1, count);
   const loop = asGlyph(evalPreset(preset, state.glyphLoop.phase, index, n, false), index, n);
+  const roll = (ramp.roll ?? 0) + (loop.roll ?? 0);
   return {
     dx: ramp.dx + loop.dx,
     dy: ramp.dy + loop.dy,
@@ -331,6 +359,7 @@ export function glyphStateAt(
     sy: ramp.sy * loop.sy,
     rotate: ramp.rotate + loop.rotate,
     alpha: ramp.alpha * loop.alpha,
+    ...(roll ? { roll } : {}),
   };
 }
 
@@ -374,6 +403,7 @@ function edgeState(
   // element just holds — the same as it always did.
   if (pose.typed !== undefined) state.textProgress = pose.typed;
   if (pose.reveal !== undefined) state.reveal = pose.reveal;
+  if (pose.dive !== undefined) state.dive = pose.dive;
   return state;
 }
 

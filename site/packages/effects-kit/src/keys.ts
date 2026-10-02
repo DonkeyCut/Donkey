@@ -192,6 +192,8 @@ export interface OverlayFrameState extends OverlayPose {
   glyphs?: GlyphPhase;
   /** Where a per-glyph loop stands, on the same terms. */
   glyphLoop?: GlyphLoopPhase;
+  /** How far the view has flown into the element's deepest ink (dive). */
+  dive?: number;
 }
 
 export function evalOverlayFrame(o: Posable, tLocal: number): OverlayFrameState {
@@ -210,6 +212,7 @@ export function evalOverlayFrame(o: Posable, tLocal: number): OverlayFrameState 
     ...(ev.reveal !== undefined ? { reveal: ev.reveal } : {}),
     ...(ev.glyphs ? { glyphs: ev.glyphs } : {}),
     ...(ev.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
+    ...(ev.dive !== undefined ? { dive: ev.dive } : {}),
   };
 }
 

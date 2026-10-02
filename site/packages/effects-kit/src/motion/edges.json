@@ -1760,5 +1760,82 @@
         }
       ]
     }
+  },
+  "slot": {
+    "label": "Slot",
+    "note": "Each letter rolls up through other characters like a slot reel and lands in turn.",
+    "slots": [
+      "in",
+      "out"
+    ],
+    "selector": {
+      "basedOn": "characters",
+      "shape": "rampUp",
+      "spread": 0.55
+    },
+    "animate": {
+      "roll": [
+        {
+          "t": 0,
+          "v": 5,
+          "ease": [
+            0.2,
+            0.6,
+            0.3,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": 0
+        }
+      ],
+      "opacity": [
+        {
+          "t": 0,
+          "v": 0,
+          "ease": [
+            0.335,
+            0.335,
+            0.665,
+            0.665
+          ]
+        },
+        {
+          "t": 0.3,
+          "v": 1
+        },
+        {
+          "t": 1,
+          "v": 1
+        }
+      ]
+    }
+  },
+  "dive": {
+    "label": "Dive",
+    "note": "The camera flies into the last letter until its ink fills the frame. On In it pulls back out of the letter.",
+    "slots": [
+      "in",
+      "out"
+    ],
+    "animate": {
+      "dive": [
+        {
+          "t": 0,
+          "v": 1,
+          "ease": [
+            0.4,
+            0,
+            0.6,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": 0
+        }
+      ]
+    }
   }
 }

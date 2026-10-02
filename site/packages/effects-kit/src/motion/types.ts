@@ -59,6 +59,12 @@ export interface MotionProperties {
   reveal?: PropertyKey<number>[];
   /** Share of the characters drawn, 0..1 (typewriter). */
   typed?: PropertyKey<number>[];
+  /** Characters a unit's reel still has to roll past before it lands, 0 at
+   * rest (slot). */
+  roll?: PropertyKey<number>[];
+  /** How far the view has flown into the element's deepest ink, 0..1: at 1
+   * that ink covers the frame (dive). */
+  dive?: PropertyKey<number>[];
 }
 
 /** What the selector counts as one unit. */
@@ -140,6 +146,8 @@ export interface MotionPose {
   tracking: number;
   reveal?: number;
   typed?: number;
+  roll?: number;
+  dive?: number;
 }
 
 export const REST_POSE: MotionPose = {
