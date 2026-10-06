@@ -252,6 +252,9 @@ import { resolveVoiceAsk, synthesizeSpeech, SPEECH_VOICES } from "./tts";
 import { hostedPost } from "./hosted";
 import { blockAsset } from "./blockSource";
 import { cutClip, cutJudge } from "./chatRuntime";
+import { FOLLOW_MODES } from "./trackKeys";
+import { trackMotion } from "./trackMotion";
+import { TRACK_TARGET_IDS, TRACK_USES } from "./trackTargets";
 import { askJudgeChunked, noul } from "./judge";
 import { SWEEP_CHUNK, sweepPicks, sweepQuestions, sweepState, type SweepCandidate } from "./sweepSelect";
 import { clampVideoDuration, defaultVideoAspects, videoResolutionOf } from "./videoModels";
@@ -908,6 +911,28 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       ? after.overlays.find((x) => x.id === o.id)?.mask
       : after.clips.find((c) => c.id === clip!.id)?.mask;
     return { id: input.id, mask: next ?? null };
+  },
+
+  track_motion: async (_s, input) => {
+    const target = TRACK_TARGET_IDS.find((t) => t === input.target);
+    if (!target) throw new ToolError(`target must be one of: ${TRACK_TARGET_IDS.join(", ")}.`);
+    const use = TRACK_USES.find((u) => u === input.use);
+    if (!use) throw new ToolError(`use must be one of: ${TRACK_USES.join(", ")}.`);
+    const follow = input.follow_mode === undefined ? undefined : FOLLOW_MODES.find((m) => m === input.follow_mode);
+    if (input.follow_mode !== undefined && !follow) throw new ToolError(`follow_mode must be one of: ${FOLLOW_MODES.join(", ")}.`);
+    return trackMotion({
+      id: String(input.id ?? ""),
+      target,
+      use,
+      ...(typeof input.source_id === "string" ? { sourceId: input.source_id } : {}),
+      ...(isNum(input.from) ? { from: input.from } : {}),
+      ...(isNum(input.to) ? { to: input.to } : {}),
+      ...(follow ? { follow } : {}),
+      ...(isNum(input.feather) ? { feather: input.feather } : {}),
+      ...(typeof input.invert === "boolean" ? { invert: input.invert } : {}),
+    }).catch((e) => {
+      throw new ToolError(e instanceof Error ? e.message : "Could not track the footage.");
+    });
   },
 
   set_transition: (s, input) => {
@@ -5329,6 +5354,11 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "align_to_audio",
   "stock_add",
 ]);
+
+/** Tools that need the editor page itself: motion tracking runs MediaPipe's
+ * landmark models, which load into a browser and nowhere else. A headless
+ * session answers these with a refusal that sends the person to the tab. */
+export const PAGE_ONLY_TOOLS: ReadonlySet<string> = new Set(["track_motion"]);
 
 export async function runAiTool(
   name: string,

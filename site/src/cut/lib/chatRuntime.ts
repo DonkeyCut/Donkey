@@ -28,6 +28,13 @@ export function bindCutClip(value: unknown): void {
 }
 export function cutClip(): Settings["cutClip"] { return clip; }
 
+let tracking: Settings["cutTracking"] = SETTINGS.cutTracking.default;
+export function bindCutTracking(value: unknown): void {
+  const parsed = SETTINGS.cutTracking.schema.safeParse(value);
+  if (parsed.success) tracking = parsed.data;
+}
+export function cutTracking(): Settings["cutTracking"] { return tracking; }
+
 let notes: Settings["cutNotes"] = SETTINGS.cutNotes.default;
 export function bindCutNotes(value: unknown): void {
   const parsed = SETTINGS.cutNotes.schema.safeParse(value);

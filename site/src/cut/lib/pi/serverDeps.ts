@@ -4,7 +4,7 @@ import { AI_SKILL_INDEX, readSkill } from "@/cut/server/ai/catalog";
 import { projectOperation } from "../projectOperation";
 import { useEditor } from "../store";
 import { buildAiContext } from "../aiContext";
-import { MEDIA_RUNTIME_TOOLS, runProjectCommand } from "../aiTools";
+import { MEDIA_RUNTIME_TOOLS, PAGE_ONLY_TOOLS, runProjectCommand } from "../aiTools";
 import { normalizeRef } from "../assetRef";
 import { DETACHED_UI_NOTE } from "../chatResume";
 import { NO_CREDITS_MESSAGE } from "../credits";
@@ -36,6 +36,8 @@ export function headlessDeps(session: HeadlessSession): CutAgentDeps {
       if (UI_TOOLS.has(name)) return { noEditor: true, note: DETACHED_UI_NOTE };
       // The worker installs canvas and decoders at startup and these run as
       // written. A process that came up without them says so plainly.
+      if (PAGE_ONLY_TOOLS.has(name))
+        throw new Error("This tool runs in the editor tab, and this session has none. Tell the user to open the project in Donkey Cut and ask again.");
       if (MEDIA_RUNTIME_TOOLS.has(name)) {
         const rt = headlessRuntime();
         if (!rt?.raster || !rt.media)

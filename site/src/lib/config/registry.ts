@@ -292,6 +292,43 @@ export const SETTINGS = defineSettings({
     description:
       "How a talk or an interview is read for the moments worth cutting a short from: what a clip may run, how widely the first sweep looks, how many moments earn the close read, and what the ranking weighs.",
   },
+  cutTracking: {
+    schema: z
+      .object({
+        // Tracked frames per second of the span, and the most frames one
+        // track reads; a longer span samples more sparsely.
+        sampleFps: z.number().int().min(5).max(60),
+        maxFrames: z.number().int().min(60).max(3600),
+        // The decoded frame's long side the landmarkers read.
+        longSide: z.number().int().min(320).max(1920),
+        // Detection, presence and tracking confidence floors.
+        minConfidence: z.number().min(0.1).max(0.95),
+        // One-euro smoothing: the cutoff (Hz) a still target settles at, and
+        // how fast the cutoff rises with speed.
+        smoothCutoff: z.number().min(0.1).max(30),
+        smoothBeta: z.number().min(0).max(200),
+        // A dropout this short is bridged; a longer one hides the shape.
+        bridgeSeconds: z.number().min(0).max(2),
+        // How far, in frame fractions, a dropped key may sit from the line
+        // its neighbors draw.
+        keyTolerance: z.number().min(0).max(0.02),
+      })
+      .strict(),
+    default: {
+      sampleFps: 30,
+      maxFrames: 1200,
+      longSide: 1280,
+      minConfidence: 0.5,
+      smoothCutoff: 1.5,
+      smoothBeta: 20,
+      bridgeSeconds: 0.25,
+      keyTolerance: 0.0015,
+    },
+    public: true,
+    title: "Motion tracking",
+    description:
+      "How hands, heads and people are tracked through a clip: frames read per second, the frame size and confidence the landmarkers use, how hard the path is smoothed, and how closely the written keys follow it.",
+  },
   cutNotes: {
     schema: z.object({ autosaveMs: z.number().int().min(200).max(10000) }).strict(),
     default: { autosaveMs: 800 },

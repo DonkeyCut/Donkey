@@ -1,5 +1,5 @@
 "use client";
-import { bindChatRuntime, bindChatgptPolling, bindCutClip, bindCutJudge, bindCutNotes } from "@/cut/lib/chatRuntime";
+import { bindChatRuntime, bindChatgptPolling, bindCutClip, bindCutJudge, bindCutNotes, bindCutTracking } from "@/cut/lib/chatRuntime";
 import { bindCutColor } from "@/cut/lib/colorSettings";
 import { bindCutSound } from "@/cut/lib/soundSettings";
 import { bindCutMotion } from "@/cut/lib/motionSettings";
@@ -50,6 +50,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
     bindCutJudge(config.data.settings.cutJudge);
     bindCutClip(config.data.settings.cutClip);
     bindCutNotes(config.data.settings.cutNotes);
+    bindCutTracking(config.data.settings.cutTracking);
     bindCutColor(config.data.settings.cutColor);
     bindCutSound(config.data.settings.cutSound);
     bindCutMotion(config.data.settings.cutMotion);

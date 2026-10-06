@@ -147,3 +147,41 @@ describe("pen masks", () => {
     );
   });
 });
+
+describe("keyed pen outlines", () => {
+  const square = (s: number) => [
+    { x: -s, y: -s },
+    { x: s, y: -s },
+    { x: s, y: s },
+    { x: -s, y: s },
+  ];
+  const pen = (kf: MaskKey[]): Mask => ({ kind: "pen", w: 1, h: 1, points: square(0.1), kf });
+
+  test("an outline blends corner by corner between keys", () => {
+    const m = pen([key(0, { w: 1, h: 1, points: square(0.1) }), key(1, { w: 1, h: 1, points: square(0.3) })]);
+    expect(maskFrameAt(m, 0.5).points).toEqual(square(0.2));
+  });
+
+  test("outlines of different corner counts hold the earlier one", () => {
+    const tri = [{ x: 0, y: -0.2 }, { x: 0.2, y: 0.2 }, { x: -0.2, y: 0.2 }];
+    const m = pen([key(0, { points: square(0.1) }), key(1, { points: tri })]);
+    expect(maskFrameAt(m, 0.5).points).toEqual(square(0.1));
+    expect(maskFrameAt(m, 1).points).toEqual(tri);
+  });
+
+  test("keys without an outline leave the mask's own points in charge", () => {
+    const m = pen([key(0), key(1, { x: 0.2 })]);
+    expect(maskFrameAt(m, 0.5).points).toBeUndefined();
+    expect(maskKeyAt(m, 0.5).points).toBeUndefined();
+  });
+
+  test("a key captured on a tracked outline carries the outline there", () => {
+    const m = pen([key(0, { points: square(0.1) }), key(2, { points: square(0.3) })]);
+    expect(maskKeyAt(m, 1).points).toEqual(square(0.2));
+  });
+
+  test("keys stored out of order still evaluate in time order", () => {
+    const m = pen([key(1, { points: square(0.3) }), key(0, { points: square(0.1) })]);
+    expect(maskFrameAt(m, 0.5).points).toEqual(square(0.2));
+  });
+});

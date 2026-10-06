@@ -61,6 +61,7 @@ next-env.d.ts
 
 # MediaPipe wasm runtime, staged from node_modules by postinstall
 /public/mediapipe/wasm/
+/public/mediapipe/*.task
 /public/cut-fonts/
 /public/models/rife_v4.25.onnx
 /public/ort/

@@ -1820,13 +1820,17 @@ export function MaskGizmoCore({
   poseScale: number;
   /** Keyed geometry: lands on the key at the playhead when keys exist. */
   writeGeom: (patch: Partial<Omit<MaskKey, "t">>) => void;
-  /** A pen mask's corners, on the mask itself (corners are never keyed). */
+  /** A pen mask's corners, on the mask itself (a tracked outline keys its own
+   * and shows no corner grips). */
   writePoints: (points: MaskPoint[]) => void;
   begin: () => void;
 }) {
   const f = maskFrameAt(m, tLocal);
   const pen = m.kind === "pen";
   const drawing = pen && !penClosed(m);
+  // A tracked outline keys its corners: the guides trace the outline at the
+  // playhead, and its corners belong to the tracker.
+  const shown = f.points ? { ...m, points: f.points } : m;
   // Guide lines while a drag sits on a detent: `rot` is the locked quarter
   // turn, `x`/`y` mark the mask centered on an axis, `w`/`h` a size locked at
   // exactly full frame. Local space, so on an element they ride its transform
@@ -1979,7 +1983,7 @@ export function MaskGizmoCore({
   // σ = feather / 2, so the transition spans about the feather width centered
   // on the edge; a mirror band's feather never exceeds the band.
   const featherPx = Math.min(f.feather * designScale, m.kind === "mirror" ? h : Infinity);
-  const outlineD = maskOutlinePathD(m, w, h, span, radiusPx);
+  const outlineD = maskOutlinePathD(shown, w, h, span, radiusPx);
   // Where the shape's bottom edge sits in its own frame, for the feather grip.
   const bottom = m.kind === "linear" ? 0 : m.kind === "square" ? w / 2 : h / 2;
   const edge = {
@@ -2151,7 +2155,7 @@ export function MaskGizmoCore({
   // the outline; linear/mirror get a grabbable strip along their edge line.
   const grabW = m.kind === "linear" || m.kind === "mirror" ? span * 2 : w;
   const grabH = m.kind === "linear" ? 28 : m.kind === "mirror" ? Math.max(h, 28) : h;
-  const points = pen && !drawing ? m.points! : null;
+  const points = pen && !drawing && !f.points ? m.points! : null;
   const grip = {
     borderColor: "#ff9f0a",
     boxShadow: "0 1px 4px rgba(0,0,0,0.4)",
@@ -2224,7 +2228,7 @@ export function MaskGizmoCore({
           // ellipse, or the polygon's own outline.
           ...(m.kind === "linear" || m.kind === "mirror"
             ? {}
-            : { clipPath: `path("${maskOutlinePathD(m, w, h, span, radiusPx, grabW / 2, grabH / 2)}")` }),
+            : { clipPath: `path("${maskOutlinePathD(shown, w, h, span, radiusPx, grabW / 2, grabH / 2)}")` }),
         }}
         onPointerDown={beginMove}
       />

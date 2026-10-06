@@ -35,6 +35,8 @@ import {
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { builtinLutCatalogText } from "@/cut/lib/builtinLuts";
 import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
+import { FOLLOW_MODES } from "@/cut/lib/trackKeys";
+import { TRACK_TARGET_IDS, TRACK_TARGETS, TRACK_USES } from "@/cut/lib/trackTargets";
 
 /** Per-field slider hints; ranges interpolate the exported constants so the
  * schema can never drift from the model the renderer clamps to. */
@@ -180,6 +182,22 @@ export const INSPECTOR_TOOLS = [
         ),
       },
     }, ["id"]),
+  },
+  {
+    name: "track_motion",
+    description:
+      `Track a target through a video clip's footage, frame by frame, with on-device landmark models, and drive an item with the path. Targets: ${TRACK_TARGETS.map((t) => `${t.id} (${t.covers})`).join("; ")}. use "mask" gives the item a pen mask whose outline follows the target on every frame, keyed for you — a filtered copy of the shot that shows only between the hands, a blur only on a face; it replaces the item's mask, and one masked item carries the whole span, so never split a clip into pieces to move a mask. use "follow" keys the item's pose so it rides the target — a sticker on a head, a label beside a hand — keeping where it sits relative to the target at the start (follow_mode says whether it also scales and turns with it); it replaces the item's pose keys. use "read" changes nothing and returns when the target is in view and where it goes. The source is the video clip whose picture is read: a clip is its own source unless source_id names another; an element defaults to the video clip under it. Runs in the editor tab, about a second per second of footage.`,
+    inputSchema: obj({
+      id: str("The item to drive: a video clip id or an overlay element id"),
+      target: { type: "string", enum: TRACK_TARGET_IDS, description: "What to track" },
+      use: { type: "string", enum: TRACK_USES, description: "mask: trace the target as a keyed pen mask; follow: key the item's pose to ride it; read: report only" },
+      source_id: str("Video clip whose footage is tracked; default: the item itself when it is a clip, else the clip under the element"),
+      from: num("Timeline seconds to start tracking; default where the item and the source first overlap"),
+      to: num("Timeline seconds to stop tracking; default where they stop overlapping"),
+      follow_mode: { type: "string", enum: FOLLOW_MODES, description: "follow only: move = position; move_scale = position and size; move_scale_turn = position, size and turn (default move_scale)" },
+      feather: num(`mask only: edge softness, px at the 1080 design short side (0..${MASK_FEATHER_MAX})`),
+      invert: bool("mask only: keep everything outside the target"),
+    }, ["id", "target", "use"]),
   },
   {
     name: "set_clip_keyframes",

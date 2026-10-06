@@ -124,6 +124,13 @@ export function sortedKeys<K extends { t: number }>(keys: K[]): K[] {
   return [...keys].sort((a, b) => a.t - b.t);
 }
 
+function inOrder(keys: { t: number }[]): boolean {
+  for (let i = 1; i < keys.length; i++) {
+    if (keys[i].t < keys[i - 1].t) return false;
+  }
+  return true;
+}
+
 /**
  * The interpolation core every key track shares: find the surrounding keys,
  * hold flat outside them, and hand the pair to `mix`. The pose track and the
@@ -134,12 +141,21 @@ export function lerpKeys<K extends { t: number; ease?: EaseId }>(
   tLocal: number,
   mix: (a: K, b: K, p: number) => K
 ): K {
-  const ks = sortedKeys(keys);
+  // Stored tracks are already in order, and a tracked mask carries a key per
+  // frame: reading them in place and halving the search keeps a playback
+  // frame free of a copy and a sort.
+  const ks = inOrder(keys) ? keys : sortedKeys(keys);
   if (tLocal <= ks[0].t) return ks[0];
   const last = ks[ks.length - 1];
   if (tLocal >= last.t) return last;
-  let i = 0;
-  while (i < ks.length - 1 && ks[i + 1].t <= tLocal) i++;
+  let lo = 0;
+  let hi = ks.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (ks[mid].t <= tLocal) lo = mid;
+    else hi = mid;
+  }
+  const i = lo;
   const a = ks[i];
   const b = ks[i + 1];
   const span = b.t - a.t;

@@ -1,7 +1,7 @@
 import { parseFolderLink } from "@/cut/lib/folderReference";
 import { copyFile } from "node:fs/promises";
 import { UI_TOOLS } from "@/cut/lib/projectCommands";
-import { runProjectCommand } from "../../lib/aiTools";
+import { PAGE_ONLY_TOOLS, runProjectCommand } from "../../lib/aiTools";
 import { projectOperation } from "../../lib/projectOperation";
 import { localBackend } from "../../lib/backend/local";
 import { DETACHED_MEDIA_ERROR, DETACHED_SESSION_ERROR, DETACHED_UI_NOTE } from "../../lib/chatResume";
@@ -45,6 +45,7 @@ const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "captions_generate",
   "subtitles_from_visuals",
   "stock_add",
+  ...PAGE_ONLY_TOOLS,
 ]);
 
 const PAGE_SESSION_TOOLS: ReadonlySet<string> = new Set([

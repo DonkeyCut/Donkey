@@ -23,46 +23,14 @@ import {
 import { hostedPost } from "./hosted";
 import { decodeRasterImage, rasterCanvasToDataUrl, rasterCanvasToPng } from "./raster";
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
+import { visionFileset, withQuietWasmLogs } from "./mediapipe";
 
-const WASM_BASE = "/mediapipe/wasm";
 const PERSON_MODEL = "/mediapipe/selfie_segmenter.tflite";
 /** Confidence above which a pixel counts as subject. */
 const PERSON_THRESHOLD = 0.35;
 type Segmenter = import("@mediapipe/tasks-vision").ImageSegmenter;
 
 let segmenterOnce: Promise<Segmenter | null> | null = null;
-
-/**
- * Give the wasm module somewhere quiet to log.
- *
- * TFLite writes its start-up notes ("INFO: Created TensorFlow Lite XNNPACK
- * delegate for CPU.", the GL and feedback-manager warnings) to the module's
- * stderr, and Emscripten binds stderr to `console.error` as the glue script
- * evaluates. Next's dev overlay classifies by channel rather than severity, so
- * an INFO line arrives on screen as a page error, pinned to whichever frame
- * happened to be running — in practice the behind-speaker pass, mid-playback.
- *
- * Emscripten reads `print`/`printErr` off the module object, and the task
- * runner passes a pre-set `self.Module` through to the factory (copying its own
- * `locateFile` onto it and clearing the global afterwards). Pointing those at
- * `console.debug` keeps the notes readable under verbose logging and off the
- * error channel. Patching `console.error` around the call cannot work: the glue
- * captured the original binding before we could reach it.
- */
-type EmscriptenScope = typeof globalThis & { Module?: Record<string, unknown> };
-
-async function withQuietWasmLogs<T>(create: () => Promise<T>): Promise<T> {
-  const scope = globalThis as EmscriptenScope;
-  const prior = scope.Module;
-  const note = (...args: unknown[]) => console.debug("[mediapipe]", ...args);
-  scope.Module = { print: note, printErr: note };
-  try {
-    return await create();
-  } finally {
-    if (prior === undefined) delete scope.Module;
-    else scope.Module = prior;
-  }
-}
 
 /** Build the inference delegate at load time. TFLite defers it to the first
  * inference, which would otherwise land on the first playback frame that needs
@@ -83,8 +51,8 @@ function warmSegmenter(segmenter: Segmenter): void {
 export function personSegmenter(): Promise<Segmenter | null> {
   segmenterOnce ??= (async () => {
     try {
-      const { FilesetResolver, ImageSegmenter } = await import("@mediapipe/tasks-vision");
-      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+      const { ImageSegmenter } = await import("@mediapipe/tasks-vision");
+      const fileset = await visionFileset();
       const segmenter = await withQuietWasmLogs(() =>
         ImageSegmenter.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: PERSON_MODEL },

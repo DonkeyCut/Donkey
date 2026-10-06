@@ -211,6 +211,9 @@ export interface MaskKey {
   feather: number; // edge softness, px at the 1080 design short side
   /** Box corner radius, design px; absent = the mask's own. */
   radius?: number;
+  /** A pen outline of the key's own, for an outline whose corners move — a
+   * tracked shape. Keys without one draw the mask's `points`. */
+  points?: MaskPoint[];
 }
 
 export interface Mask {
@@ -246,6 +249,9 @@ export interface MaskFrame {
   rotation: number;
   feather: number;
   radius: number;
+  /** The keyed pen outline at this moment; absent when the keys carry none
+   * and the mask's own `points` draw. */
+  points?: MaskPoint[];
 }
 
 export function restingMaskFrame(m: Mask): MaskFrame {
@@ -293,6 +299,7 @@ export function maskFrameAt(m: Mask, tLocal: number): MaskFrame {
       rotation: a.rotation + shortestTurn(a.rotation, b.rotation) * p,
       feather: mix(a.feather, b.feather),
       radius: mix(a.radius ?? rest, b.radius ?? rest),
+      points: mixPoints(a.points, b.points, p),
     };
   });
   return {
@@ -303,7 +310,15 @@ export function maskFrameAt(m: Mask, tLocal: number): MaskFrame {
     rotation: k.rotation,
     feather: k.feather,
     radius: k.radius ?? rest,
+    ...(k.points ? { points: k.points } : {}),
   };
+}
+
+/** Two keyed outlines blended corner by corner. Outlines with different
+ * corner counts cannot blend, so the earlier one holds until the next key. */
+function mixPoints(a: MaskPoint[] | undefined, b: MaskPoint[] | undefined, p: number): MaskPoint[] | undefined {
+  if (!a || !b || a.length !== b.length) return a ?? b;
+  return a.map((q, i) => ({ x: q.x + (b[i].x - q.x) * p, y: q.y + (b[i].y - q.y) * p }));
 }
 
 /** A key holding the mask's geometry at `t`, ready to be added — capturing
@@ -383,7 +398,7 @@ export function paintMaskCoverage(
     } else {
       if (feather > 0 && "filter" in ctx) ctx.filter = `blur(${feather / 2}px)`;
       ctx.beginPath();
-      tracePen(ctx, m.points!, w, h);
+      tracePen(ctx, f.points ?? m.points!, w, h);
       ctx.fill();
     }
   } else if (m.kind === "linear") {

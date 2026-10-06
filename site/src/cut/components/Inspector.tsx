@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
 import { ClipAnimationTiles, previewBar } from "@/cut/components/TransitionsPanel";
+import { TrackRow } from "@/cut/components/TrackRow";
 import {
   Select,
   SelectContent,
@@ -3545,14 +3546,17 @@ function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
   const seek = useEditor((s) => s.seek);
   const st = () => useEditor.getState();
   return (
-    <KeyRow
-      element={o}
-      now={now}
-      keys={o.kf ?? []}
-      onAdd={(tLocal) => st().setOverlayKey(o.id, tLocal)}
-      onRemove={(tLocal) => st().removeOverlayKey(o.id, tLocal)}
-      onSeek={seek}
-    />
+    <>
+      <KeyRow
+        element={o}
+        now={now}
+        keys={o.kf ?? []}
+        onAdd={(tLocal) => st().setOverlayKey(o.id, tLocal)}
+        onRemove={(tLocal) => st().removeOverlayKey(o.id, tLocal)}
+        onSeek={seek}
+      />
+      <TrackRow id={o.id} use="follow" />
+    </>
   );
 }
 
@@ -3725,6 +3729,7 @@ function ClipTransformSection({ clip }: { clip: VideoClip }) {
         onRemove={(t) => st().removeClipKey(clip.id, t)}
         onSeek={seek}
       />
+      <TrackRow id={clip.id} use="follow" />
       {keyed && (
         <>
           <PositionRow
@@ -4176,6 +4181,7 @@ function MaskSection({ target }: { target: MaskTarget }) {
               </button>
             ))}
           </div>
+          {!subject && !drawing && <TrackRow id={target.id} use="mask" />}
           {drawing && (
             <p className="px-1 py-1.5 text-[11.5px] leading-snug text-muted-foreground">
               Click the picture to place corners. Click the first corner, double-click, or press
