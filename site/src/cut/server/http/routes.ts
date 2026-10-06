@@ -129,6 +129,7 @@ export const CUT_ROUTES: CutRoute[] = [
   { method: "GET", path: "/api/cut/ai/proxy", handler: (req) => aiApi.proxyCatalog(req) },
   { method: "POST", path: "/api/cut/ai/proxy", handler: (req) => aiApi.proxyCall(req) },
   { method: "POST", path: "/api/cut/ai/tool-result", handler: (req) => aiApi.toolResult(req) },
+  { method: "POST", path: "/api/cut/ai/gate", handler: (req) => aiApi.gate(req) },
 ];
 
 export type RouteMatch =

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { UIMessageChunk } from "ai";
 import { cancelTurnStream, followTurnStream, startTurnStream } from "./turnStreams";
-import { callBrowserTool, claimBrowserTool, detachSession, registerSession, resolveBrowserTool, unregisterSession } from "./bridge";
+import { askPageGate, callBrowserTool, claimBrowserTool, detachSession, registerSession, resolveBrowserTool, resolvePageGate, unregisterSession } from "./bridge";
 import { createProject, readProject } from "../projects";
 
 const root = await mkdtemp(path.join(os.tmpdir(), "donkey-chat-test-"));
@@ -58,6 +58,23 @@ test("only one tab can claim a tool, and detached calls are not replayed", async
   expect((await pending).errorText).toContain("disconnected");
   expect(claimBrowserTool("session", id)).toBe(false);
   unregisterSession("session");
+});
+
+test("the page answers the quality gate, and a detached page lets the turn close", async () => {
+  const chunks: Record<string, unknown>[] = [];
+  registerSession("gate", { write: (chunk) => chunks.push(chunk) });
+  const held = askPageGate("gate", "It opens on a title.");
+  const ask = chunks[0] as { type: string; data: { gateId: string; reply: string }; transient: boolean };
+  expect(ask.type).toBe("data-gate");
+  expect(ask.transient).toBe(true);
+  expect(ask.data.reply).toBe("It opens on a title.");
+  expect(resolvePageGate("gate", ask.data.gateId, "Watch the rest.")).toBe(true);
+  expect(await held).toBe("Watch the rest.");
+  const pending = askPageGate("gate", "Done.");
+  detachSession("gate");
+  expect(await pending).toBeNull();
+  expect(await askPageGate("gate", "Done.")).toBeNull();
+  unregisterSession("gate");
 });
 
 test("detached tools edit their original documents and journal their results", async () => {

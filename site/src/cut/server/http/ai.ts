@@ -14,14 +14,17 @@ import {
   attachSession,
   detachSession,
   claimBrowserTool,
+  askPageGate,
   registerSession,
+  resolvePageGate,
   resolveBrowserTool,
   unregisterSession,
   type UIChunkWriter,
 } from "../ai/bridge";
 import { rewriteCaptions, translateCaptions } from "../ai/captions";
 import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
-import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, systemPrompt } from "../ai/catalog";
+import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, skillRelevanceBlock, systemPrompt } from "../ai/catalog";
+import { declaresTool, declareTurn, dropTurn, takeWidened, turnTools, widenTurn, type EngineRoute, type HandledAsk } from "../ai/turnCatalog";
 import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
 import { codexCommand } from "../tool-path";
 import { errorMessage } from "../util";
@@ -33,6 +36,35 @@ interface ChatBody {
   context?: unknown;
   /** Provider-native session/thread id from the previous turn, if any. */
   providerSession?: string;
+  /** The page's judged route; absent when the turn was not judged. */
+  route?: EngineRoute;
+  /** Asks the editor carried out on its own since the provider's last turn. */
+  handled?: HandledAsk[];
+}
+
+const routeSchema = z.object({
+  intent: z.enum(["chat", "simple", "complex"]),
+  areas: z.array(z.string().max(100)).max(100),
+  skill: z.string().max(200).nullable().optional(),
+  gate: z.boolean(),
+});
+
+const handledSchema = z.array(z.object({
+  ask: z.string().max(100_000),
+  tool: z.string().max(200),
+  args: z.unknown(),
+  say: z.string().max(10_000),
+})).max(50);
+
+// The steer a Codex turn resumes on once request_tools widened its catalog.
+const WIDENED_STEER = "The tool areas you requested are declared now. Carry on with the request.";
+
+/** The asks the provider's session never saw, as prompt text. The editor ran
+ * them straight from the judgment, so a resumed session learns of them here. */
+function handledBlock(handled: HandledAsk[]): string {
+  if (handled.length === 0) return "";
+  const lines = handled.map((h) => `- "${h.ask}" → ${h.tool} ${JSON.stringify(h.args)}: ${h.say}`);
+  return `<handled_by_editor>\nThe editor carried out these asks itself since your last turn:\n${lines.join("\n")}\n</handled_by_editor>\n\n`;
 }
 
 // Cut lives under site/src/cut; the proxy is spawned by filesystem path (not
@@ -84,6 +116,8 @@ async function runClaude(
   signal.throwIfAborted();
   let textCount = 0;
   let session = body.providerSession;
+  // The newest assistant message's text: the line the quality gate reads.
+  let reply = "";
   const say = (text: string) => {
     const id = `t${++textCount}`;
     emit({ type: "text-start", id });
@@ -198,10 +232,13 @@ async function runClaude(
             content_block?: { type: string };
             delta?: { type: string; text?: string };
           };
-          if (ev.type === "content_block_start" && ev.content_block?.type === "text") {
+          if (ev.type === "message_start") {
+            reply = "";
+          } else if (ev.type === "content_block_start" && ev.content_block?.type === "text") {
             textId = `t${++textCount}`;
             emit({ type: "text-start", id: textId });
           } else if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta" && textId) {
+            reply += ev.delta.text ?? "";
             emit({ type: "text-delta", id: textId, delta: ev.delta.text ?? "" });
           } else if (ev.type === "content_block_stop" && textId) {
             emit({ type: "text-end", id: textId });
@@ -237,14 +274,23 @@ async function runClaude(
 
   // A run that spent the budget resumes from its own session, so the next
   // one carries the whole tool history and the build finishes on its own.
+  // A judged turn that signs off asks the page's quality gate first, and a
+  // hold resumes the session on the gate's steer.
   let ask = prompt;
-  for (let extensions = 0; ; extensions++) {
+  let extensions = 0;
+  for (;;) {
     const end = await pass(ask);
     if (signal.aborted) return;
+    const steer = end === "done" && body.route?.gate ? await askPageGate(sessionKey, reply) : null;
+    if (steer && !signal.aborted) {
+      ask = steer;
+      continue;
+    }
     const close = turnClose({ end, spoke: textCount > 0, extensions });
     if (!close) return;
     if ("signoff" in close) return say(close.signoff);
     ask = close.steer;
+    extensions++;
   }
 }
 
@@ -264,16 +310,27 @@ async function runCodex(
   let session = body.providerSession;
   let ask = prompt;
   for (;;) {
-    session = (await codexRun(emit, ask, body.model, session, base, sessionKey, signal)) ?? session;
+    const run = await codexRun(emit, ask, body.model, session, base, sessionKey, signal);
+    session = run.thread ?? session;
     if (signal.aborted || !session) return;
     const folds = inbox.take();
-    if (!folds.length) return;
-    for (const fold of folds) fold.resolve(true);
-    ask = folds.map((fold) => fold.text).join("\n\n");
+    if (folds.length) {
+      for (const fold of folds) fold.resolve(true);
+      ask = folds.map((fold) => fold.text).join("\n\n");
+      continue;
+    }
+    // Codex lists its tools once per run, so a widened catalog takes a run.
+    if (takeWidened(sessionKey)) {
+      ask = WIDENED_STEER;
+      continue;
+    }
+    const steer = body.route?.gate ? await askPageGate(sessionKey, run.reply) : null;
+    if (!steer || signal.aborted) return;
+    ask = steer;
   }
 }
 
-/** One `codex exec` run; returns the session it ran in. */
+/** One `codex exec` run; returns the session it ran in and its last line. */
 async function codexRun(
   emit: UIChunkWriter["write"],
   prompt: string,
@@ -282,11 +339,12 @@ async function codexRun(
   base: string,
   sessionKey: string,
   signal: AbortSignal
-): Promise<string | undefined> {
+): Promise<{ thread: string | undefined; reply: string }> {
   signal.throwIfAborted();
   const codex = await codexCommand();
   const mcp = mcpCommand(base, sessionKey);
   let thread = session;
+  let reply = "";
   const args = ["exec"];
   if (session) args.push("resume", session);
   args.push("--json", "--skip-git-repo-check", "-m", model);
@@ -356,6 +414,7 @@ async function codexRun(
           thread = ev.thread_id;
           emit({ type: "data-session", data: { providerSession: ev.thread_id }, transient: true });
         } else if (ev.type === "item.completed" && ev.item?.type === "agent_message" && ev.item.text) {
+          reply = ev.item.text;
           say(ev.item.text);
         } else if (ev.type === "error" || ev.type === "turn.failed") {
           emit({ type: "error", errorText: stopText(ev.error?.message ?? ev.message) });
@@ -396,7 +455,7 @@ async function codexRun(
       resolve();
     });
   });
-  return thread;
+  return { thread, reply };
 }
 
 /**
@@ -530,14 +589,21 @@ export const aiApi = {
       messages: z.array(z.object({ id: z.string(), role: z.enum(["user", "assistant", "system"]), parts: z.array(z.object({ type: z.string() })) })),
       runtime: SETTINGS.chatRuntime.schema,
       context: z.object({ project: z.object({ id: z.string().min(1).max(200) }) }),
+      route: routeSchema.optional(),
+      handled: handledSchema.optional(),
     }).safeParse(body);
     if (!identity.success) return Response.json({ error: "A project and chat are required." }, { status: 400 });
     const projectId = identity.data.context.project.id;
+    const { route, handled = [] } = identity.data;
     const base = new URL(req.url).origin;
     const sessionKey = crypto.randomUUID();
     const userText = lastUserText(body.messages);
     const attachments = lastUserAttachments(body.messages);
-    const prompt = `${userText}${attachedAssetsBlock(attachments)}\n\n<editor_state>\n${JSON.stringify(body.context ?? {})}\n</editor_state>`;
+    // A judged work turn carries the judge's skill pick, the same block the
+    // hosted loop attaches.
+    const skill = route && route.intent !== "chat" && route.skill !== undefined ? `\n\n${skillRelevanceBlock(route.skill)}` : "";
+    const prompt = `${handledBlock(handled)}${userText}${attachedAssetsBlock(attachments)}${skill}\n\n<editor_state>\n${JSON.stringify(body.context ?? {})}\n</editor_state>`;
+    declareTurn(sessionKey, route, body.model.startsWith("claude") ? "live" : "next-run");
 
     return startTurnStream(projectId, body.threadId, (signal) => createUIMessageStream({
       execute: async ({ writer }) => {
@@ -566,6 +632,7 @@ export const aiApi = {
         } finally {
           folds.close();
           unregisterSession(sessionKey);
+          dropTurn(sessionKey);
           emit({ type: "finish" });
         }
       },
@@ -638,12 +705,13 @@ export const aiApi = {
     });
   },
 
-  /** MCP-shaped tool catalog for the stdio proxy. */
+  /** MCP-shaped tool catalog for the stdio proxy: the session's turn
+   * catalog. */
   async proxyCatalog(req: Request) {
-    const type = new URL(req.url).searchParams.get("type");
-    if (type !== "catalog") return Response.json({ error: "Bad request." }, { status: 400 });
+    const params = new URL(req.url).searchParams;
+    if (params.get("type") !== "catalog") return Response.json({ error: "Bad request." }, { status: 400 });
     return Response.json({
-      tools: AI_TOOLS.map((t) => ({
+      tools: turnTools(params.get("session")).map((t) => ({
         name: t.name,
         description: t.description,
         inputSchema: t.inputSchema,
@@ -658,9 +726,14 @@ export const aiApi = {
       name?: string;
       args?: Record<string, unknown>;
     };
+    const key = String(sessionKey ?? "");
+    if (name === "request_tools") return Response.json(mcpText(widenTurn(key, args?.areas)));
     const def = AI_TOOLS.find((t) => t.name === name);
     if (!name || !def) {
       return Response.json({ ...mcpText(`Unknown tool: ${name}`), isError: true });
+    }
+    if (!declaresTool(key, name)) {
+      return Response.json({ ...mcpText(`${name} is not declared this turn. Call request_tools with its area first.`), isError: true });
     }
 
     if (def.server) {
@@ -676,7 +749,7 @@ export const aiApi = {
       }
     }
 
-    const result = await callBrowserTool(String(sessionKey ?? ""), name, args ?? {});
+    const result = await callBrowserTool(key, name, args ?? {});
     if (result.errorText !== undefined) {
       return Response.json({ ...mcpText(result.errorText), isError: true });
     }
@@ -707,6 +780,17 @@ export const aiApi = {
       });
     }
     return Response.json(mcpText(result.output ?? { ok: true }));
+  },
+
+  /** The page's quality-gate verdict for a signing-off turn. */
+  async gate(req: Request) {
+    const body = z.object({
+      sessionKey: z.string().min(1).max(200),
+      gateId: z.string().min(1).max(200),
+      steer: z.string().max(20_000).nullable(),
+    }).safeParse(await req.json().catch(() => null));
+    if (!body.success) return Response.json({ error: "A chat session and gate are required." }, { status: 400 });
+    return Response.json({ ok: resolvePageGate(body.data.sessionKey, body.data.gateId, body.data.steer) });
   },
 
   /** The browser posts tool outputs here after executing them on the store. */

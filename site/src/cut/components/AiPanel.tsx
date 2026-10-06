@@ -1,6 +1,6 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { notesKey } from "@/cut/lib/queries";
 import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 
@@ -108,7 +108,10 @@ import { holdEditorChat } from "@/cut/lib/editorWork";
 import { recoverSceneCall } from "@/cut/lib/chatRecovery";
 import { replayChatStream } from "@/cut/lib/chatReplay";
 import { INTERRUPTED_ERROR, isResumeMessage, RESUME_LIMIT, resumePrompt, scrubLostTurn, unfinishedAsk, type ResumeMetadata, type TurnSettled } from "@/cut/lib/chatResume";
-import { claimEngineTool, cancelEngineChat, foldIntoEngineChat } from "@/cut/lib/engineChat";
+import { answerEngineGate, claimEngineTool, cancelEngineChat, foldIntoEngineChat } from "@/cut/lib/engineChat";
+import { EngineGate, engineInstant, handledSince, judgeEngineTurn } from "@/cut/lib/pi/engineTurn";
+import type { EngineRoute } from "@/cut/server/ai/turnCatalog";
+import { fetchCreditBalance } from "@/queries/credits";
 import { projectBackend } from "@/cut/lib/residency";
 import { beginBrowserChat, browserChatRunning, cancelBrowserChat, watchBrowserChatTurns } from "@/cut/lib/browserChatTurns";
 import { putCloudThread } from "@/cut/lib/chatCloud";
@@ -900,6 +903,17 @@ function ChipsReveal({ open, children }: { open: boolean; children: ReactNode })
 }
 
 /** Running sessions stay mounted for the lifetime of their editor. */
+/** Whether this account's turns are judged: signed in, with credits. An
+ * account with none chats on its own CLI model, which decides alone. */
+async function accountJudges(queryClient: QueryClient): Promise<boolean> {
+  if (useGenerate.getState().signedIn !== true || useOutOfCredits.getState().out) return false;
+  try {
+    return Number((await fetchCreditBalance(queryClient)).balanceMicros) > 0;
+  } catch {
+    return false;
+  }
+}
+
 function ChatSession({
   projectId,
   threadId,
@@ -1037,6 +1051,11 @@ function ChatSession({
   }, [readOnly, visible]);
   const sessionKeyRef = useRef<string | null>(null);
   const toolAbort = useRef(new AbortController());
+  const queryClient = useQueryClient();
+  // The judged route the next engine send carries, and the quality gate of
+  // the engine turn in flight. Both stay empty for an unjudged turn.
+  const engineRouteRef = useRef<EngineRoute | undefined>(undefined);
+  const engineGateRef = useRef<EngineGate | null>(null);
   // Resume from the saved thread when this id exists in history.
   const [initialThread] = useState<ChatThread | undefined>(() =>
     typeof window === "undefined"
@@ -1108,9 +1127,8 @@ function ChatSession({
         // localBackend (read after the origin resolves), which carries the
         // account scope the engine requires on every data route.
         prepareSendMessagesRequest: async ({ messages }) => {
-          // A CLI turn runs on the person's own model and calls nothing
-          // hosted on the way, so a free account keeps chatting on a local
-          // project; the model reads skills through read_skill.
+          // The route was judged in sendMessages; an unjudged turn (an account
+          // with no credits) carries none and the model reads skills itself.
           await engineReady();
           return {
             api: localBackend.url("/api/cut/ai/chat"),
@@ -1121,6 +1139,8 @@ function ChatSession({
               model: currentModel(),
               context: productionDeps(projectId).buildContext(),
               providerSession: sessionFor(currentModel()),
+              route: engineRouteRef.current,
+              handled: handledSince(messages),
             },
           };
         },
@@ -1152,6 +1172,22 @@ function ChatSession({
         }
         setClientTools(false);
         toolAbort.current = new AbortController();
+        // An account with credits has the turn judged before the send: one
+        // known action runs here with no model round, and the rest go out
+        // routed, with the gate answering when the CLI signs off.
+        const decision = (await accountJudges(queryClient))
+          ? await judgeEngineTurn(options.messages, productionDeps(projectId), options.abortSignal)
+          : null;
+        if (decision?.instant) {
+          const handled = await engineInstant(decision.instant, productionDeps(projectId, options.abortSignal));
+          if (handled) {
+            setClientTools(true);
+            return handled;
+          }
+        }
+        engineRouteRef.current = decision?.route;
+        const ask = options.messages.findLast((m) => m.role === "user" && !isResumeMessage(m));
+        engineGateRef.current = decision?.route.gate ? new EngineGate(ask?.parts.map((p) => (p.type === "text" ? p.text : "")).join("").trim() ?? "") : null;
         return engine().sendMessages(options);
       },
       reconnectToStream: async (options) => {
@@ -1169,7 +1205,7 @@ function ChatSession({
         return replay;
       },
     };
-  }, [threadId, projectId, currentModel, sessionFor, setClientTools, prepareReplay, attachReplay, registerBrowserTurn]);
+  }, [threadId, projectId, currentModel, sessionFor, setClientTools, prepareReplay, attachReplay, registerBrowserTurn, queryClient]);
 
   const { messages, setMessages, sendMessage, stop, status, error, clearError, resumeStream } = useChat({
     id: threadId,
@@ -1231,6 +1267,18 @@ function ChatSession({
           providerSessions.current[provider(modelRef.current)] =
             d.providerSession;
       }
+      // The engine's turn is signing off: judge its record and answer with
+      // the next pass's steer, or none to let it close.
+      if (part.type === "data-gate") {
+        const { gateId, reply } = part.data as { gateId: string; reply: string };
+        const gate = engineGateRef.current;
+        const sessionKey = sessionKeyRef.current;
+        const signal = toolAbort.current.signal;
+        void (async () => {
+          const steer = gate ? await gate.steer(reply, productionDeps(projectId), signal).catch(() => null) : null;
+          await answerEngineGate(sessionKey, gateId, steer).catch(() => {});
+        })();
+      }
     },
     onToolCall: ({ toolCall }) => {
       // Gemini turns already executed the tool in the transport loop; their
@@ -1257,12 +1305,13 @@ function ChatSession({
             signal.throwIfAborted();
             beginChatTurn(threadId);
             const output = await runAiTool(toolCall.toolName, (toolCall.input ?? {}) as Record<string, unknown>);
+            engineGateRef.current?.record(toolCall.toolName, output, undefined);
             await post({ output });
           }, signal);
         } catch (err) {
-          await post({
-            errorText: err instanceof Error ? err.message : String(err),
-          });
+          const errorText = err instanceof Error ? err.message : String(err);
+          engineGateRef.current?.record(toolCall.toolName, undefined, errorText);
+          await post({ errorText });
         }
       })();
     },
@@ -1530,6 +1579,9 @@ function ChatSession({
   const triage = async (rows: QueuedMessage[]) => {
     const ask = runningAskRef.current;
     if (!ask) return;
+    // Placing rows is a judgment; with no credits to judge with they wait in
+    // the tray for the turn to end.
+    if (!(await accountJudges(queryClient))) return;
     triagingRef.current += 1;
     triagedAtRef.current = Date.now();
     try {

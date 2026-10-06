@@ -68,7 +68,7 @@ export function runMcpProxy(BASE = "http://localhost:3000", SESSION = "") {
       if (method === "initialize") {
         reply({
           protocolVersion: params?.protocolVersion ?? "2024-11-05",
-          capabilities: { tools: {} },
+          capabilities: { tools: { listChanged: true } },
           serverInfo: { name: "cut", version: "1.0.0" },
         });
       } else if (method === "notifications/initialized" || method === "notifications/cancelled") {
@@ -78,7 +78,13 @@ export function runMcpProxy(BASE = "http://localhost:3000", SESSION = "") {
       } else if (method === "tools/list") {
         // Idempotent: retry so a momentary hiccup can't leave the model with an
         // empty tool set (which reads to it as "editing tools aren't reachable").
-        const res = await fetchEngine(`${BASE}/api/cut/ai/proxy?type=catalog`, undefined, "tools/list", true);
+        // The listing is this session's turn catalog, which request_tools widens.
+        const res = await fetchEngine(
+          `${BASE}/api/cut/ai/proxy?type=catalog&session=${encodeURIComponent(SESSION)}`,
+          undefined,
+          "tools/list",
+          true
+        );
         const { tools } = await res.json();
         reply({ tools });
       } else if (method === "tools/call") {
@@ -100,6 +106,8 @@ export function runMcpProxy(BASE = "http://localhost:3000", SESSION = "") {
         );
         const body = await res.json();
         reply(body); // { content: [...], isError? } — already MCP-shaped
+        // A widened catalog: a client that refreshes on notice lists it now.
+        if (params?.name === "request_tools") send({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
       } else if (id !== undefined) {
         send({ jsonrpc: "2.0", id, error: { code: -32601, message: `Unknown method ${method}` } });
       }

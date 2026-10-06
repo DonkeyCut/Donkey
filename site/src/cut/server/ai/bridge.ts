@@ -22,6 +22,8 @@ interface Waiter {
 interface Session {
   writer: UIChunkWriter;
   waiters: Map<string, Waiter>;
+  /** Quality-gate asks the page has not answered yet, by gate id. */
+  gates: Map<string, (steer: string | null) => void>;
   attached: boolean;
 }
 
@@ -36,7 +38,7 @@ const g2 = globalThis as unknown as { __veditorAiProjects?: Map<string, string> 
 const sessionProjects = (g2.__veditorAiProjects ??= new Map<string, string>());
 
 export function registerSession(key: string, writer: UIChunkWriter, projectId?: string) {
-  sessions.set(key, { writer, waiters: new Map(), attached: true });
+  sessions.set(key, { writer, waiters: new Map(), gates: new Map(), attached: true });
   if (projectId) sessionProjects.set(key, projectId);
 }
 
@@ -57,6 +59,7 @@ export function detachSession(key: string): void {
     else waiter.resolve({ errorText: "The editor disconnected before recording this result. Check the project state before repeating the operation." });
   }
   session.waiters.clear();
+  settleGates(session);
 }
 
 export function unregisterSession(key: string) {
@@ -66,6 +69,7 @@ export function unregisterSession(key: string) {
       clearTimeout(w.timer);
       w.resolve({ errorText: "The chat request ended before the tool finished." });
     }
+    settleGates(s);
   }
   sessions.delete(key);
   // The chat route unregisters after the provider run settles, so no more
@@ -174,5 +178,45 @@ export function resolveBrowserTool(
   session.waiters.delete(toolCallId);
   clearTimeout(waiter.timer);
   waiter.resolve(result);
+  return true;
+}
+
+// The page judges the gate with the hosted judge; a page that does not
+// answer in this long lets the turn close.
+const GATE_TIMEOUT_MS = 20_000;
+
+/** A gate no page will answer lets its turn close. */
+function settleGates(session: Session) {
+  for (const settle of session.gates.values()) settle(null);
+  session.gates.clear();
+}
+
+/**
+ * Ask the attached page whether a signing-off turn holds up. The page reads
+ * the turn's record against the ask through the hosted judge and answers
+ * with the steer for the next pass, or null to let the turn close. A session
+ * with no attached page closes at once.
+ */
+export function askPageGate(sessionKey: string, reply: string): Promise<string | null> {
+  const session = sessions.get(sessionKey);
+  if (!session?.attached) return Promise.resolve(null);
+  const gateId = crypto.randomUUID().slice(0, 12);
+  session.writer.write({ type: "data-gate", data: { gateId, reply }, transient: true });
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => settle(null), GATE_TIMEOUT_MS);
+    const settle = (steer: string | null) => {
+      clearTimeout(timer);
+      session.gates.delete(gateId);
+      resolve(steer);
+    };
+    session.gates.set(gateId, settle);
+  });
+}
+
+/** Called by /api/cut/ai/gate with the page's verdict. */
+export function resolvePageGate(sessionKey: string, gateId: string, steer: string | null): boolean {
+  const settle = sessions.get(sessionKey)?.gates.get(gateId);
+  if (!settle) return false;
+  settle(steer);
   return true;
 }

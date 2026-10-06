@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
 import { apiFetch } from "@/queries/apiClient";
 
@@ -39,11 +39,22 @@ export type Account = {
   superUser: boolean;
 };
 
+const readCreditBalance = () => apiFetch<CreditBalance>("/api/credits/balance");
+
+// How long a read balance stands in for the account's before it is read again.
+const BALANCE_FRESH_MS = 60_000;
+
 export function useCreditBalance() {
   return useQuery({
-    queryFn: () => apiFetch<CreditBalance>("/api/credits/balance"),
+    queryFn: readCreditBalance,
     queryKey: creditBalanceQueryKey,
   });
+}
+
+/** The balance through the shared cache: a fresh read is reused, a stale one
+ * is read again. */
+export function fetchCreditBalance(queryClient: QueryClient): Promise<CreditBalance> {
+  return queryClient.fetchQuery({ queryKey: creditBalanceQueryKey, queryFn: readCreditBalance, staleTime: BALANCE_FRESH_MS });
 }
 
 export type SubscribeBonus = {
