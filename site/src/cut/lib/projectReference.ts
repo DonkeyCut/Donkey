@@ -160,7 +160,14 @@ export async function landReferenceAssets(
 ): Promise<LandedAsset[]> {
   const out: LandedAsset[] = [];
   const toCopy: StoredAsset[] = [];
+  // A video bound to a separate recording brings the recording with it.
+  const refAssets = new Map(ref.doc.assets.map((a) => [a.id, a]));
+  const wanted = [...sources];
   for (const source of sources) {
+    const rec = source.soundFrom && refAssets.get(source.soundFrom.assetId);
+    if (rec && !wanted.some((w) => w.id === rec.id)) wanted.push(rec);
+  }
+  for (const source of wanted) {
     const have = useEditor
       .getState()
       .assets.find((a) => a.copiedFrom?.projectId === ref.projectId && a.copiedFrom.assetId === source.id);
@@ -194,7 +201,15 @@ export async function landReferenceAssets(
     else if (!isLinkedAssetType(asset.type)) void enrichAsset(asset).catch(() => {});
     out.push({ sourceId: source.id, asset, reused: false });
   }
-  // In the order asked for, so a caller's index arithmetic holds.
+  // A copied video's binding points at the copy of its recording.
   const bySource = new Map(out.map((l) => [l.sourceId, l]));
+  for (const l of out) {
+    const from = l.asset.soundFrom;
+    if (l.reused || !from) continue;
+    const rec = bySource.get(from.assetId)?.asset.id;
+    useEditor.getState().updateAsset(l.asset.id, { soundFrom: rec ? { ...from, assetId: rec } : undefined });
+    l.asset = useEditor.getState().assets.find((a) => a.id === l.asset.id) ?? l.asset;
+  }
+  // In the order asked for, so a caller's index arithmetic holds.
   return sources.map((s) => bySource.get(s.id)!);
 }

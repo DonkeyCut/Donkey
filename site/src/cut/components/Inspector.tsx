@@ -79,9 +79,11 @@ import {
   restingMaskFrame,
 } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
+import { bindRecording, unbindRecording } from "@/cut/lib/soundBind";
+import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
 import { clipLen, clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
 import { PANEL_GLOBAL, usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
-import { usePreviewTime } from "@/cut/lib/playhead";
+import { playheadAt, usePreviewTime } from "@/cut/lib/playhead";
 import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
 import { AnimationTiles } from "@/cut/components/AnimationTiles";
 import { ColorField } from "@/cut/components/ColorField";
@@ -753,6 +755,8 @@ function ClipAudioPanel({ clip }: { clip: VideoClip }) {
             onCheckedChange={(v) => updateClip(clip.id, { muted: v })}
           />
         </Row>
+        {asset?.type === "video" && <ClipSoundSource clip={clip} asset={asset} />}
+        {asset?.type === "video" && (!assetIsSilent(asset) || !!asset.soundFrom) && <ClipSplitEdit clip={clip} />}
         {asset && !assetIsSilent(asset) && (
           <Row
             label="Beats"
@@ -761,11 +765,132 @@ function ClipAudioPanel({ clip }: { clip: VideoClip }) {
             <BeatsControl asset={asset} />
           </Row>
         )}
-        {asset && !assetIsSilent(asset) && (
+        {asset && (!assetIsSilent(asset) || !!asset.soundFrom) && (
           <SoundQualityRow sound={clip.sound} onOpen={() => setView("sound")} />
         )}
         <ClipGeneratedAudio clip={clip} />
       </div>
+    </>
+  );
+}
+
+/** The Select value that stands for the video's own sound. */
+const CAMERA_SOUND = "camera";
+
+/**
+ * Where a video's sound comes from: the camera's own track, or a recording
+ * made apart from it. Picking a recording lines it up against the camera's
+ * sound and binds it to the video, so every clip of the video plays it; a
+ * recording with no clear match is refused and the reason shown.
+ */
+function ClipSoundSource({ clip, asset }: { clip: VideoClip; asset: MediaAsset }) {
+  const assets = useEditor((s) => s.assets);
+  const recordings = useMemo(
+    () => assets.filter((a) => a.type === "audio" && !a.upload && a.duration > 0),
+    [assets]
+  );
+  const audioAssetId = asset.soundFrom?.assetId;
+  const bound = audioAssetId ? recordings.find((a) => a.id === audioAssetId) : undefined;
+  const [syncing, setSyncing] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const pick = (id: string) => {
+    setRefusal(null);
+    if (id === CAMERA_SOUND) {
+      unbindRecording(asset.id);
+      return;
+    }
+    setSyncing(true);
+    void bindRecording(asset.id, id, clip)
+      .catch((e: unknown) => setRefusal(e instanceof Error ? e.message : "Could not line the recording up."))
+      .finally(() => setSyncing(false));
+  };
+  return (
+    <>
+      <Row
+        label="Sound"
+        info="Where this video's sound comes from. Pick an audio file recorded alongside it (a lav or a recorder) and it is lined up by matching it against the camera's sound; every clip of this video then plays the recording, through any trim, speed or split."
+      >
+        {syncing && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+        <Select value={bound ? bound.id : CAMERA_SOUND} onValueChange={(v) => pick(String(v))} disabled={syncing}>
+          <SelectTrigger className="clip-sound-source h-8 w-36 text-[12px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={CAMERA_SOUND} className="text-[12px]">
+              Camera
+            </SelectItem>
+            {recordings.map((r) => (
+              <SelectItem key={r.id} value={r.id} className="text-[12px]">
+                {r.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <ResetButton title="Use the camera's sound" show={!!bound} onClick={() => pick(CAMERA_SOUND)} />
+      </Row>
+      {bound && asset.soundFrom && (
+        <p className="pb-1 text-[11.5px] text-muted-foreground">
+          Synced {asset.soundFrom.offset >= 0 ? "+" : "−"}
+          {Math.abs(asset.soundFrom.offset).toFixed(3)} s · every clip of this video plays it
+        </p>
+      )}
+      {refusal && <p className="pb-1 text-[11.5px] text-destructive">{refusal}</p>}
+    </>
+  );
+}
+
+const formatSplit = (v: number) => (v > 0 ? `${v.toFixed(2)} s` : "Off");
+const parseSplitInput = (raw: string) =>
+  /^off$/i.test(raw.trim()) ? 0 : parseNumberInput(raw.replace(/\s*s$/i, ""));
+
+/**
+ * The clip's split edit: its sound running ahead of the picture (a J-cut)
+ * or past it (an L-cut), played from the source beyond the trim. The picture
+ * and the clip's place on the timeline stay put.
+ */
+function ClipSplitEdit({ clip }: { clip: VideoClip }) {
+  const updateClip = useEditor((s) => s.updateClip);
+  const [leadDraft, setLeadDraft] = useState<number | null>(null);
+  const [tailDraft, setTailDraft] = useState<number | null>(null);
+  const lead = leadDraft ?? clip.audioLead ?? 0;
+  const tail = tailDraft ?? clip.audioTail ?? 0;
+  const slider = (
+    label: string,
+    value: number,
+    onDraft: (v: number | null) => void,
+    write: (v: number) => Partial<VideoClip>
+  ) => (
+    <ValueSlider
+      label={label}
+      sliderClassName="clip-split-edit data-horizontal:w-24"
+      valueClassName="w-11 text-muted-foreground"
+      value={value}
+      min={0}
+      max={SPLIT_EDIT_MAX_S}
+      step={0.05}
+      format={formatSplit}
+      parse={parseSplitInput}
+      onDraft={onDraft}
+      onCommit={(v) => {
+        updateClip(clip.id, write(v));
+        onDraft(null);
+      }}
+    />
+  );
+  return (
+    <>
+      <Row
+        label="Sound lead"
+        info="J-cut: this clip's sound starts this long before its picture, under the clip before it. A tenth to half a second softens a dialogue cut; a second or two hands one scene into the next."
+      >
+        {slider("Sound lead", lead, setLeadDraft, (v) => ({ audioLead: v > 0 ? v : undefined }))}
+      </Row>
+      <Row
+        label="Sound tail"
+        info="L-cut: this clip's sound carries on this long past its picture, under the clip after it."
+      >
+        {slider("Sound tail", tail, setTailDraft, (v) => ({ audioTail: v > 0 ? v : undefined }))}
+      </Row>
     </>
   );
 }

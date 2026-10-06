@@ -284,6 +284,9 @@ import {
   type WatchDetail,
 } from "./types";
 
+import { soundSourceOf, SPLIT_EDIT_MAX_S } from "./soundSource";
+import { bindRecording, unbindRecording } from "./soundBind";
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** The timeline rows a mutation touched, small enough to ride every result:
@@ -1544,7 +1547,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...(wanted > 3 ? { shortfallDb: round2(20 * Math.log10(wanted / 3)) } : {}),
         };
       });
-      return { targetId, clips };
+      return { targetId, clips, ...(mix ? { mix } : {}) };
   },
 
   listen_audio: async (s, input) => {
@@ -1559,7 +1562,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // A whole audio file that clears the cap falls through to the same
       // fitting path a range takes, so length truncates instead of refusing.
       const heard = whole
-        ? { inline: whole, to: asset.duration }
+        ? { inline: whole, from, to: asset.duration }
         : await listenSpan(projectId, asset, from, to);
       // Listening shows interest in the source's sound — queue the background
       // sweep so its transcript (and, for video, its visual map) fills in.
@@ -1579,7 +1582,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         source: sourceRef(asset),
         duration: round2(asset.duration),
         ...(clip ? { clipId: clip.id } : {}),
-        from: round2(from),
+        from: round2(heard.from),
+        ...(soundSourceOf(asset, s.assets).bound
+          ? { soundFrom: soundSourceOf(asset, s.assets).asset.name }
+          : {}),
         // Where this play stopped, and how much of the source nobody has
         // heard — the sound's answer to coveredTo and unwatchedSeconds. The
         // cap is bytes, so the seconds that fit depend on the source.
@@ -1807,6 +1813,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const h = clamp(rg.h, 0.05, 1);
         patch.frame = { x: clamp(rg.x, 0, 1 - w), y: clamp(rg.y, 0, 1 - h), w, h };
       }
+      refuseCardFraming(c, input, ["fit", "zoom"]);
       if (input.fit === "fit" || input.fit === "fill") patch.fit = input.fit;
       if (isNum(input.zoom)) {
         const z = clamp(input.zoom, 1, CLIP_MAX_ZOOM);
@@ -2077,6 +2084,50 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { id: next.id, volume: next.volume ?? 1 };
   },
 
+  sync_audio: async (s, input) => {
+      const clip = input.clipId !== undefined ? requireItem(s.clips, input.clipId, "video clip") : undefined;
+      const video = requireItem(s.assets, clip?.assetId ?? input.assetId, "video asset");
+      if (video.type !== "video") throw new ToolError(`"${video.name}" is not a video.`);
+      if (input.clear === true || input.audio_asset_id === null) {
+        unbindRecording(video.id);
+        return { assetId: video.id, soundFrom: null, note: `"${video.name}" plays its own sound again.` };
+      }
+      return syncVideoSound(s, video, input.audio_asset_id, clip);
+  },
+
+  set_split_edit: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      const side = (v: unknown, name: string) => {
+        if (v === undefined) return undefined;
+        if (!isNum(v)) throw new ToolError(`${name} is seconds, 0..${SPLIT_EDIT_MAX_S}.`);
+        const secs = Math.round(clamp(v, 0, SPLIT_EDIT_MAX_S) * 1000) / 1000;
+        return secs > 0 ? secs : 0;
+      };
+      const lead = side(input.lead, "lead");
+      const tail = side(input.tail, "tail");
+      if (lead === undefined && tail === undefined) throw new ToolError("Pass lead, tail, or both, in seconds (0 clears).");
+      s.updateClip(clip.id, {
+        ...(lead !== undefined ? { audioLead: lead || undefined } : {}),
+        ...(tail !== undefined ? { audioTail: tail || undefined } : {}),
+      });
+      const next = useEditor.getState();
+      const live = next.clips.find((c) => c.id === clip.id)!;
+      const sp = getClipSpans(next.clips, next.assets, live.track).find((x) => x.clip.id === clip.id);
+      const playing = { lead: round2(sp?.soundLead ?? 0), tail: round2(sp?.soundTail ?? 0) };
+      const short = (asked: number | undefined, got: number) => asked !== undefined && asked - got > 0.01;
+      return {
+        id: clip.id,
+        audioLead: live.audioLead ?? 0,
+        audioTail: live.audioTail ?? 0,
+        playing,
+        ...(short(lead, playing.lead) || short(tail, playing.tail)
+          ? {
+              note: "Part of the split edit does not play: a transition owns that cut, the source ends there, or the timeline starts there. `playing` is what sounds.",
+            }
+          : {}),
+      };
+  },
+
   rename_item: (s, input) => {
       const name = String(input.name ?? "").trim().slice(0, 60) || undefined;
       const id = String(input.id ?? "");
@@ -2255,7 +2306,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // puts that whole track on the soundtrack with nothing else placed.
       if (input.assetId) {
         const asset = requireItem(s.assets, input.assetId, "project asset");
-        if (asset.type === "image" || assetIsSilent(asset))
+        if (asset.type === "image" || (assetIsSilent(asset) && !soundSourceOf(asset, s.assets).bound))
           throw new ToolError(`"${asset.name}" carries no audio.`);
         const start = isNum(input.start) ? Math.max(0, input.start) : 0;
         s.addAudioFromAsset(asset.id, start);
@@ -2707,6 +2758,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   set_framing: (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
+      refuseCardFraming(clip, input, ["mode", "zoom", "panX", "panY"]);
       // Only what the call names changes; the rest of the framing stays as
       // the user left it.
       const mode = input.mode === "fill" || input.mode === "fit" ? input.mode : clip.fit ?? "fit";
@@ -5009,6 +5061,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "detect_silence",
   "detect_beats",
   "refine_speech_cuts",
+  "sync_audio",
   "capture_frame",
   "compare_to_source",
   "render_preview",
@@ -5525,9 +5578,38 @@ async function eachScanned<T>(items: T[], run: (item: T) => Promise<void>) {
  * threshold cannot answer it, because a quiet room and a loud one disagree
  * about what silence is and a cut placed on the wrong answer lands in a word. */
 async function fetchSpeech(asset: MediaAsset, from: number, to: number) {
-  return scanSourceSpeech(asset.url, { from, to }).catch((e) => {
+  const heard = soundSpan(asset, from, to);
+  const scan = await scanSourceSpeech(heard.asset.url, { from: heard.from, to: heard.to }).catch((e) => {
     throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
   });
+  return {
+    ...scan,
+    from: heard.back(scan.from),
+    to: heard.back(scan.to),
+    segments: scan.segments.map((g) => ({ ...g, start: heard.back(g.start), end: heard.back(g.end) })),
+  };
+}
+
+/**
+ * Where a source range's sound is read. A video bound to a recording sounds
+ * from the recording: the range moves onto its clock and narrows to what it
+ * holds, and `back` carries a second on that file back to the video's source
+ * time, so every answer comes back in the seconds the caller asked in.
+ */
+function soundSpan(asset: MediaAsset, from: number, to: number | undefined) {
+  const src = soundSourceOf(asset, useEditor.getState().assets);
+  if (!src.bound) return { asset, from, to, back: (t: number) => t };
+  const lo = Math.max(0, from + src.offset);
+  const hi = Math.min(src.limit, (to ?? asset.duration) + src.offset);
+  if (!(hi - lo > 0.05))
+    throw new ToolError(`"${src.asset.name}", the sound bound to "${asset.name}", holds nothing of that stretch.`);
+  return { asset: src.asset, from: lo, to: hi as number | undefined, back: (t: number) => t - src.offset };
+}
+
+/** How loud a source range plays, read where its sound is. */
+async function sourceLevel(asset: MediaAsset, from: number, to: number | undefined) {
+  const heard = soundSpan(asset, from, to);
+  return measureSourceLevel(heard.asset.url, { from: heard.from, ...(heard.to !== undefined ? { to: heard.to } : {}) });
 }
 
 /** Silent stretches of a source range, in source seconds — the engine's
@@ -5542,23 +5624,28 @@ async function fetchSilences(
   // Same defaults and clamps as the engine's silence handler.
   const thresholdDb = clamp(opts.thresholdDb ?? -30, -90, 0);
   const minSilence = clamp(opts.minSilence ?? 0.35, 0.05, 10);
+  const heard = soundSpan(asset, opts.from, opts.to);
+  const back = (list: { start: number; end: number; duration: number }[]) =>
+    list.map((x) => ({ ...x, start: heard.back(x.start), end: heard.back(x.end) }));
   if (getBackend().kind !== "local") {
-    return detectSilenceClientSide(asset.url, {
-      from: opts.from,
-      ...(opts.to !== undefined ? { to: opts.to } : {}),
-      thresholdDb,
-      minSilence,
-    }).catch((e) => {
-      throw new ToolError(e instanceof Error ? e.message : "Could not scan for silence.");
-    });
+    return back(
+      await detectSilenceClientSide(heard.asset.url, {
+        from: heard.from,
+        ...(heard.to !== undefined ? { to: heard.to } : {}),
+        thresholdDb,
+        minSilence,
+      }).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : "Could not scan for silence.");
+      })
+    );
   }
   const res = await apiFetch(`/api/cut/projects/${projectId}/silence`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      file: asset.fileName,
-      from: opts.from,
-      ...(opts.to !== undefined ? { to: opts.to } : {}),
+      file: heard.asset.fileName,
+      from: heard.from,
+      ...(heard.to !== undefined ? { to: heard.to } : {}),
       threshold_db: thresholdDb,
       min_silence: minSilence,
     }),
@@ -5568,7 +5655,7 @@ async function fetchSilences(
     error?: string;
   }>(res);
   if (!res.ok) throw new ToolError(body.error ?? "Could not scan for silence.");
-  return body.silences;
+  return back(body.silences);
 }
 
 /** Pull a source's audio track off (video and audio alike) and inline it for
@@ -5612,15 +5699,20 @@ const LISTEN_MAX_S = 600;
 async function listenSpan(
   projectId: string,
   asset: MediaAsset,
-  from: number,
-  to: number | undefined,
-): Promise<{ inline: InlineImage; to: number }> {
+  askedFrom: number,
+  askedTo: number | undefined,
+): Promise<{ inline: InlineImage; from: number; to: number }> {
+  // A bound recording is what is heard, from where it holds
+  // sound; the span reports back in the video's own seconds.
+  const heard = soundSpan(asset, askedFrom, askedTo ?? Math.min(asset.duration, askedFrom + LISTEN_MAX_S));
+  const from = heard.from;
+  const to = heard.to;
   const end = Math.min(to ?? from + LISTEN_MAX_S, from + LISTEN_MAX_S);
   let span = end - from;
   for (let attempt = 0; attempt < 3 && span > 0.5; attempt++) {
-    const blob = await audioSpanBlob(projectId, asset, from, round2(from + span));
+    const blob = await audioSpanBlob(projectId, heard.asset, from, round2(from + span));
     const inline = await blobToInlineAudio(blob);
-    if (inline) return { inline, to: round2(from + span) };
+    if (inline) return { inline, from: round2(heard.back(from)), to: round2(heard.back(from + span)) };
     const perSecond = blob.size / span;
     // Leave room for the base64 inflation the cap already accounts for.
     const fits = (MAX_AUDIO_BYTES * 0.9) / perSecond;
@@ -5695,6 +5787,7 @@ const SWEEP_TARGETS: Readonly<Record<string, string>> = {
   set_clip_muted: "clipId",
   set_clip_hidden: "clipId",
   set_clip_volume: "clipId",
+  set_split_edit: "clipId",
   set_color_preset: "clipId",
   set_color_grade: "clipId",
   set_color_curves: "clipId",

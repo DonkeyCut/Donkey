@@ -89,6 +89,11 @@ export function templateFromDoc(doc: ProjectDoc, opts: { items?: string[] } = {}
     assetByMedia.push(a.id);
     sourceAssets.push(a);
     indexByAsset.set(assetId, i);
+    // The recording a video plays rides along with it.
+    if (a.soundFrom) {
+      const rec = mediaFor(a.soundFrom.assetId);
+      if (rec != null) media[i] = { ...media[i], soundFrom: { media: rec, offset: a.soundFrom.offset } };
+    }
     return i;
   };
 

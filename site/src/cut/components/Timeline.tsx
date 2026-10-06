@@ -132,16 +132,17 @@ const WAVE_H = 24;
  * play in the band (an image, a silent video) drops the band and its box stops
  * at the filmstrip's edge. */
 const FILM_H = VIDEO_H - 4 - WAVE_H;
-/** Whether a clip has a sound band to draw: a video carrying audio of its own.
- * Muting greys the band down, so the clip keeps its shape and its waveform. An
- * image or a silent video has nothing to show there. */
-const hasSoundBand = (asset: MediaAsset) =>
-  asset.type === "video" && !!asset.peaks?.length;
+/** Whether a clip has a sound band to draw: a video carrying audio of its own,
+ * or a recording bound to it (`sound`, which the band then draws). Muting
+ * greys the band down, so the clip keeps its shape and its waveform. An image
+ * or a silent video has nothing to show there. */
+const hasSoundBand = (asset: MediaAsset, sound?: MediaAsset) =>
+  asset.type === "video" && !!(sound ?? asset).peaks?.length;
 /** A video row's height. Rows whose clips carry no audio lose the sound band's
  * worth, so the row ends where the filmstrips do. An empty row keeps the full
  * height: it is a drop target for clips that do have sound. */
 const videoRowH = (list: ClipSpan[]) =>
-  list.length > 0 && !list.some((sp) => hasSoundBand(sp.asset))
+  list.length > 0 && !list.some((sp) => hasSoundBand(sp.asset, sp.sound?.asset))
     ? VIDEO_H - WAVE_H
     : VIDEO_H;
 /** The `mt-1.5` every row carries, so a row drag knows what one row's worth of
@@ -3809,7 +3810,7 @@ function ClipView({
   const { clip, asset } = span;
   const spine = clip.track === 0;
   const loading = useEditor((s) => s.loadingMedia.has(asset.fileName));
-  const baking = useMatteBakes((s) => s.jobs[clip.id]?.status === "running");
+  const baking = useMatteBakes((s) => s.jobs[clip.id]?.status === "running" || s.jobs[cardMatteKey(clip.id)]?.status === "running");
   const rt = retimeOf(clip);
   // Every box is its clip's whole footprint. Clips never overlap — a
   // transition is a render-time blend at the cut, drawn as the bar above the
@@ -3833,7 +3834,11 @@ function ClipView({
   // The clip's own sound, drawn in the box's band under the picture. Muting —
   // detach included — greys the band, so the clip's shape holds still and its
   // waveform stays readable (a detached copy draws on the soundtrack row too).
-  const hasWave = hasSoundBand(asset);
+  // A recording bound to the video is what plays, so it is what draws, moved
+  // onto the video's clock.
+  const hasWave = hasSoundBand(asset, span.sound?.asset);
+  const waveAsset = span.sound?.asset ?? asset;
+  const waveOff = span.sound?.offset ?? 0;
   // Bumped as tile captures land, so the memo re-plans and picks them up.
   const [filmGen, onTileFrame] = useReducer((x: number) => x + 1, 0);
   // The strip draws the stretch of the box the scroller shows. The box's
@@ -3927,7 +3932,10 @@ function ClipView({
           )}
           style={{ height: WAVE_H }}
         >
-          <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={WAVE_H - 4} map={rt.uniform && !rt.reverse ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-0.5" />
+          <WaveformCanvas asset={waveAsset} from={clip.in + waveOff} to={clip.out + waveOff} w={barW} h={WAVE_H - 4} map={rt.uniform && !rt.reverse ? undefined : (px) => rt.srcAt(px / pps) + waveOff} className="inset-x-0 inset-y-0.5" />
+          {/* A split edit: the edge whose sound runs past the picture. */}
+          {(span.soundLead ?? 0) > 0 && <div className="tl-clip-split absolute inset-y-0 left-0 w-0.5 bg-white/80" />}
+          {(span.soundTail ?? 0) > 0 && <div className="tl-clip-split absolute inset-y-0 right-0 w-0.5 bg-white/80" />}
         </div>
       )}
       {selected && (
@@ -5122,6 +5130,9 @@ function WaveTile({
       const start = (from / duration) * n;
       const perBar = (((to - from) / duration) * n) / bars;
       for (let i = 0; i < bars; i++) {
+        // A stretch the file does not hold (a bound recording that started
+        // late or stopped early) draws nothing.
+        if (start + (i + 1) * perBar <= 0 || start + i * perBar >= n) continue;
         const a = Math.max(0, Math.min(n - 1, Math.floor(start + i * perBar)));
         const b = Math.max(a + 1, Math.ceil(start + (i + 1) * perBar));
         let p = 0;
@@ -5333,6 +5344,13 @@ function AudioView({
   onSnap: (x: number | null) => void;
 }) {
   const loading = useEditor((s) => (asset ? s.loadingMedia.has(asset.fileName) : false));
+  // Detached from a video bound to a recording, the clip plays the recording,
+  // so the bar draws it on the video's clock.
+  const recording = useEditor((s) => {
+    const id = asset?.soundFrom?.assetId;
+    return id ? s.assets.find((a) => a.id === id && !assetIsSilent(a)) : undefined;
+  });
+  const waveOff = recording ? (asset?.soundFrom?.offset ?? 0) : 0;
   const len = clipLen(clip);
   const w = Math.max(10, len * pps);
   // The bar is drawn a gutter narrower than the footprint; what sits inside
@@ -5387,7 +5405,7 @@ function AudioView({
         className="pointer-events-none absolute inset-0"
         style={{ clipPath: fadeClipPath(fadeInPx, fadeOutPx, barW) }}
       >
-        <WaveformCanvas asset={asset} from={clip.in} to={clip.out} w={barW} h={AUDIO_H - 8} map={rt.uniform && !rt.reverse ? undefined : (px) => rt.srcAt(px / pps)} className="inset-x-0 inset-y-1" />
+        <WaveformCanvas asset={recording ?? asset} from={clip.in + waveOff} to={clip.out + waveOff} w={barW} h={AUDIO_H - 8} map={rt.uniform && !rt.reverse ? undefined : (px) => rt.srcAt(px / pps) + waveOff} className="inset-x-0 inset-y-1" />
       </div>
       <BeatDots asset={asset} lo={clip.in} hi={clip.out} retime={rt} pps={pps} w={barW} />
       <FadeEnvelope inPx={fadeInPx} outPx={fadeOutPx} barW={barW} />

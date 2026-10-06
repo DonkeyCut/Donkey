@@ -890,6 +890,7 @@ export const libraryCloud = {
             duration: m.duration,
             width: m.width,
             height: m.height,
+            ...(m.soundFrom ? { soundFrom: m.soundFrom } : {}),
           });
         }
       } catch (e) {

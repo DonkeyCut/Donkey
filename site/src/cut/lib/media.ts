@@ -1,6 +1,8 @@
 "use client";
 
 import { scanBeats, scanLevel, scanSilence, scanSpeech, type BeatScan, type LevelScan, type PcmChunk, type SpeechScan } from "./audioScan";
+import { syncSound, type SyncAnswer } from "./soundSync";
+import { LoudnessMeter, type LoudnessMeasure } from "./loudness";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { registerBlobFile } from "./backend/browser/registry";
 import { cloudBackend } from "./backend/cloud";

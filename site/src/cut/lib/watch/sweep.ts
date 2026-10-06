@@ -12,6 +12,7 @@ import { engineTranscribeSamples } from "../localStt";
 import { sampleWatchFrames } from "../media";
 import { runTranscription, useEditor } from "../store";
 import { trackLocale } from "../subtitles";
+import { soundSourceOf, soundWindow } from "../soundSource";
 import { speechOnsets } from "./fuse";
 import { mergeSpeech, mergeWatch, nextUncoveredSpan } from "./merge";
 
@@ -129,12 +130,18 @@ async function transcribeChunk(
   if (!s.projectId || !asset) return;
   const locale = asset.language ?? trackLocale(s.subtitles, 0);
   const specFrom = Math.max(0, span.from - (span.from > 0 ? SPEECH_PAD_S : 0));
-  const cues = await transcribeFree(s.projectId, {
-    duration: span.to - specFrom,
-    locale,
-    clips: [],
-    audio: [{ file: asset.fileName, in: specFrom, out: span.to, start: 0, volume: 1 }],
-  });
+  // A video bound to a recording is transcribed off the recording, laid on
+  // the video's clock; a stretch the recording does not reach is silence.
+  const src = soundSourceOf(asset, s.assets);
+  const heard = soundWindow({ in: specFrom, out: span.to }, src, 0, span.to - specFrom);
+  const cues = heard
+    ? await transcribeFree(s.projectId, {
+        duration: span.to - specFrom,
+        locale,
+        clips: [],
+        audio: [{ file: src.asset.fileName, in: heard.lo, out: heard.hi, start: heard.at, volume: 1 }],
+      })
+    : [];
   if (cues === null) return; // another project took over mid-run
   const segments = cues
     .map((c) => ({ start: c.start + specFrom, end: c.end + specFrom, text: c.text }))

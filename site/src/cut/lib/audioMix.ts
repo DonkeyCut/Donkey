@@ -23,12 +23,12 @@ import {
   buildAudioFx,
   retimeOf,
   soundRecipe,
-  srcSpan,
   type ClipSound,
   type SpeedNode,
 } from "@donkeycut/effects-kit";
 import { decodeAudioSpan } from "./mediaRead";
 import { fitSpan, retimeFits } from "./retimeFit";
+import { shiftSpan, soundWindow, type SoundWindow, type SpecSound } from "./soundSource";
 
 /** One track-0 clip's audio in the sequential fold. A spacer (no file) only
  * shapes time. */
@@ -61,6 +61,15 @@ export interface MixClip {
    * are what make the two clips audible at once over a hard picture cut. */
   soundAhead?: number;
   soundBack?: number;
+  /** A split edit: seconds of `soundBack` the clip's sound plays ahead of its
+   * picture and of `soundAhead` past its end, each ramping from silence over
+   * `splitFade` at its outer end. */
+  soundLead?: number;
+  soundTail?: number;
+  splitFade?: number;
+  /** The video's sound recorded apart from it: the sound reads this file,
+   * `offset` seconds later in the source (see soundSource.ts). */
+  soundFrom?: SpecSound;
 }
 
 /** A clip placed at an absolute time: an upper-track video's audio, a
@@ -87,6 +96,13 @@ export interface MixItem {
   sound?: ClipSound;
   /** While this item is audible, everything else drops to this gain. */
   duck?: number;
+  soundLead?: number;
+  soundTail?: number;
+  splitFade?: number;
+  soundFrom?: SpecSound;
+  /** The soundtrack lane this item sits on; absent for a video clip's own
+   * sound. What a stem render picks items by. */
+  lane?: number;
 }
 
 /** One audio effect element: the treatment it names, and the stretch of
@@ -285,21 +301,23 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
   // crossing at either edge widens it into the handle it reaches for.
   const folded = foldClips(spec.clips).map((g) => {
     const { back, ahead } = handles(g);
-    return { ...g, back, ahead, span: crossSpan(g.clip, back, ahead) };
+    const read = g.clip.file && !g.clip.muted ? soundRead(g.clip, back, ahead) : null;
+    return { ...g, back, ahead, read };
+  });
+  // Each placed item's reach: a crossing's handle, or the split edit an edge
+  // without one carries.
+  const placed = spec.items.map((a) => {
+    const back = Math.min(a.soundBack ?? 0, Math.max(a.crossIn ?? 0, a.soundLead ?? 0));
+    const ahead = Math.min(a.soundAhead ?? 0, Math.max(a.crossOut ?? 0, a.soundTail ?? 0));
+    const read = a.file && !a.muted ? soundRead(a, back, ahead) : null;
+    return { a, back, ahead, read };
   });
 
   const wanted = new Map<string, { file: string; from: number; to: number }>();
-  const spanKey = (c: { file: string; in: number; out: number }) =>
-    `${c.file}|${c.in.toFixed(3)}|${c.out.toFixed(3)}`;
-  for (const c of folded) {
-    if (!c.clip.file || c.clip.muted) continue;
-    const span = c.span;
-    wanted.set(spanKey(span), { file: span.file, from: Math.max(0, span.in), to: span.out });
-  }
-  for (const a of spec.items) {
-    if (!a.file || a.muted) continue;
-    const span = crossSpan(a, a.soundBack, a.soundAhead);
-    wanted.set(spanKey(span), { file: span.file, from: Math.max(0, span.in), to: span.out });
+  const spanKey = (c: { file: string; lo: number; hi: number }) =>
+    `${c.file}|${c.lo.toFixed(3)}|${c.hi.toFixed(3)}`;
+  for (const { read } of [...folded, ...placed]) {
+    if (read) wanted.set(spanKey(read), { file: read.file, from: read.lo, to: read.hi });
   }
 
   const buffers = new Map<string, AudioBuffer>();
@@ -320,7 +338,7 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
   // Everything that can be ducked passes through one node; the voiceovers doing
   // the ducking connect past it, so they never duck themselves.
   const ducked = ctx.createGain();
-  scheduleDuck(ducked, duckWindows(spec.items));
+  scheduleDuck(ducked, spec.ducks ?? duckWindows(spec.items));
 
   // Every sound meets on the bus, which is what the effect elements treat —
   // the ffmpeg graph applies them to the mixed stream in the same place.
@@ -425,18 +443,22 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
       src.connect(gain);
     }
     gain.connect(into);
-    src.start(Math.max(0, at), 0, Math.max(0, duration));
+    // A sound reaching before the timeline's start joins part-way in.
+    const skip = Math.max(0, -at);
+    src.start(Math.max(0, at), skip, Math.max(0, duration - skip));
   };
 
   for (const g of folded) {
     const c = g.clip;
-    const key = spanKey(g.span);
-    const buf = !c.muted && c.file ? buffers.get(key) : undefined;
-    if (!buf) continue; // muted, silent, or a gap spacer: only shapes time
-    const fit = fitted(key, buf, c, Math.max(0, g.span.in), g.span.out);
-    const from = g.at - g.back + fit.shift;
+    const read = g.read;
+    const key = read ? spanKey(read) : "";
+    const buf = read ? buffers.get(key) : undefined;
+    if (!read || !buf) continue; // muted, silent, or a gap spacer: only shapes time
+    // Laid through the clip's own map, moved onto the file the sound reads.
+    const fit = fitted(key, buf, shiftSpan(c, c.soundFrom?.offset ?? 0), read.lo, read.hi);
+    const from = g.at - g.back + read.at + fit.shift;
     const end = g.at + g.dur;
-    play(fit.buffer, from, g.dur + g.back + g.ahead, ducked, c.sound, (gain) => {
+    play(fit.buffer, from, read.len, ducked, c.sound, (gain) => {
       const level = Math.max(0, c.volume ?? 1);
       gain.gain.value = level;
       // A crossing and a fade never share an edge — the cut carries one
@@ -453,23 +475,29 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
         gain.gain.setValueAtTime(level, end - g.fadeOut);
         gain.gain.linearRampToValueAtTime(0, end);
       }
+      scheduleSplit(
+        gain.gain,
+        level,
+        g.at,
+        end,
+        g.crossIn > 0 ? 0 : Math.min(c.soundLead ?? 0, g.back),
+        g.crossOut > 0 ? 0 : Math.min(c.soundTail ?? 0, g.ahead),
+        c.splitFade ?? 0
+      );
     });
   }
 
-  for (const a of spec.items) {
-    const back = Math.min(a.soundBack ?? 0, a.crossIn ?? 0);
-    const ahead = Math.min(a.soundAhead ?? 0, a.crossOut ?? 0);
-    const key = spanKey(crossSpan(a, back, ahead));
-    const buf = a.muted ? undefined : buffers.get(key);
-    if (!buf) continue;
+  for (const { a, back, ahead, read } of placed) {
+    const key = read ? spanKey(read) : "";
+    const buf = read ? buffers.get(key) : undefined;
+    if (!read || !buf) continue;
     const dur = itemDur(a);
     const end = a.start + dur;
     // A voiceover that ducks everything else is not itself ducked; it still
     // lands on the bus, so the effect elements treat it with the rest.
     const into = a.duck !== undefined && a.duck < 1 ? bus : ducked;
-    const reach = crossSpan(a, back, ahead);
-    const fit = fitted(key, buf, a, Math.max(0, reach.in), reach.out);
-    play(fit.buffer, a.start - back + fit.shift, dur + back + ahead, into, a.sound, (gain) => {
+    const fit = fitted(key, buf, shiftSpan(a, a.soundFrom?.offset ?? 0), read.lo, read.hi);
+    play(fit.buffer, a.start - back + read.at + fit.shift, read.len, into, a.sound, (gain) => {
       const level = Math.max(0, a.volume);
       gain.gain.value = level;
       const fIn = Math.min(a.fadeIn ?? 0, dur);

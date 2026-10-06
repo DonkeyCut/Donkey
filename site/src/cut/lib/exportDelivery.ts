@@ -161,9 +161,9 @@ export function videoBitrateFor(s: {
 /** Every media file a render spec plays — clips, picture-in-picture video,
  * sound — by name, once each. */
 export function specMediaFiles(spec: {
-  clips?: { file?: string; staged?: boolean }[];
-  overlayVideos?: { file?: string }[];
-  audio?: { file?: string }[];
+  clips?: { file?: string; staged?: boolean; soundFrom?: { file?: string } }[];
+  overlayVideos?: { file?: string; soundFrom?: { file?: string } }[];
+  audio?: { file?: string; soundFrom?: { file?: string } }[];
 }): string[] {
   const names = new Set<string>();
   for (const c of [...(spec.clips ?? []), ...(spec.overlayVideos ?? []), ...(spec.audio ?? [])]) {
@@ -172,6 +172,8 @@ export function specMediaFiles(spec: {
     // project's folder finds nothing, and staging it there puts it where the
     // render does not read.
     if (c?.file && !("staged" in c && c.staged)) names.add(c.file);
+    // A recording bound to the video is read beside it.
+    if (c?.soundFrom?.file) names.add(c.soundFrom.file);
   }
   return [...names];
 }

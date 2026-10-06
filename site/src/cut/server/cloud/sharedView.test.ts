@@ -83,6 +83,18 @@ describe("filterDocForShare", () => {
     ]);
   });
 
+  test("a placed video's bound recording travels with it", () => {
+    const bound = {
+      ...doc,
+      assets: [
+        ...doc.assets.map((a) => (a.id === "placed" ? { ...a, soundFrom: { assetId: "lav", offset: 0.4 } } : a)),
+        { id: "lav", fileName: "lav.wav", type: "audio", duration: 1 },
+      ],
+    } as unknown as ProjectDoc;
+    expect(ids(filterDocForShare(bound, features()))).toEqual(["lav", "placed"]);
+    expect(sharedFileNames(bound, features()).has("lav.wav")).toBe(true);
+  });
+
   test("a caption font travels only when subtitles are shared", () => {
     const captioned = {
       ...doc,

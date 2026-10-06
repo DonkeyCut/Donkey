@@ -81,6 +81,8 @@ export interface TemplateMedia {
   duration: number;
   width?: number;
   height?: number;
+  /** A video's separately recorded sound: the recording's index in `media`. */
+  soundFrom?: { media: number; offset: number };
 }
 export interface TemplateLayer {
   media: number; // index into template.media
@@ -544,6 +546,7 @@ export interface TemplateInput {
     duration: number;
     width?: number;
     height?: number;
+    soundFrom?: { media: number; offset: number };
   }[];
   layers: TemplateLayer[];
   audio: TemplateAudio[];
@@ -631,6 +634,7 @@ export async function saveTemplate(
       duration: m.duration,
       width: m.width,
       height: m.height,
+      ...(m.soundFrom ? { soundFrom: m.soundFrom } : {}),
     });
   }
   const template: LibraryTemplate = {

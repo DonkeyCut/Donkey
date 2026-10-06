@@ -279,6 +279,18 @@ export interface StoredAsset {
    * file beside the master in the project's media. The preview reads it; an
    * export reads the master. */
   proxy?: { fileName: string; sizeBytes: number };
+  /** A video's sound recorded on a separate device: every clip of this video
+   * plays that recording, and the camera's own track stays out (see
+   * soundSource.ts). Absent = the camera's sound. */
+  soundFrom?: SoundFrom;
+}
+
+/** Where a video's sound comes from when it was recorded apart from the
+ * picture: the recording, and the seconds its clock runs ahead of the
+ * video's. Recording time = video source time + `offset`. */
+export interface SoundFrom {
+  assetId: string;
+  offset: number;
 }
 
 /** A folder in the Media panel's Project Files view — a flat, project-local
@@ -1122,6 +1134,9 @@ export interface TemplateMedia {
   duration: number;
   width?: number;
   height?: number;
+  /** A video's separately recorded sound: the recording's index in `media`
+   * and its clock offset (see SoundFrom). */
+  soundFrom?: { media: number; offset: number };
 }
 export interface TemplateLayer {
   /** Explicit timeline group; absent means independent. */
@@ -1546,6 +1561,19 @@ export interface ClipSpan {
    * the incoming half of the cross dissolve at the cut behind it. Zero when
    * the clip starts at its source's head. */
   soundBack: number;
+  /** The split edit's share of `soundBack`: seconds this clip's sound plays
+   * ahead of its picture, ramping up over `splitFade` from silence. Zero or
+   * absent when the cut behind it carries a transition, which owns that
+   * handover. */
+  soundLead?: number;
+  /** The split edit's share of `soundAhead`: seconds the sound carries past
+   * the picture's end, ramping down over `splitFade` at its far end. */
+  soundTail?: number;
+  /** The ramp at the outer end of a split edit's extension, seconds. */
+  splitFade?: number;
+  /** The recording bound to the clip's video, when it has one: the clip's
+   * sound reads it, `offset` seconds past the video's source time. */
+  sound?: { asset: MediaAsset; offset: number; limit: number };
 }
 
 /** The document persisted as project.json inside each project folder. */

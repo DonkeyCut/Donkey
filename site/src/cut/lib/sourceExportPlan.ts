@@ -15,7 +15,7 @@ export function sourceSequence(doc: ExportDoc) {
   const neutral: Partial<Record<keyof VideoClip, unknown>> = {
     track: 0, muted: false, volume: 1, fit: "fit", zoom: 1,
     panX: 0, panY: 0, flipH: false, flipV: false, rotation: 0, opacity: 1,
-    speed: 1, reverse: false, smoothSlow: false, transition: 0, hidden: false,
+    speed: 1, reverse: false, smoothSlow: false, transition: 0, hidden: false, audioLead: 0, audioTail: 0,
   };
   const metadata = new Set(["id", "assetId", "name", "groupId", "in", "out", "start"]);
   for (const clip of clips) {
@@ -25,7 +25,7 @@ export function sourceSequence(doc: ExportDoc) {
       if (!(key in neutral) || value !== neutral[key as keyof VideoClip]) return null;
     }
     const asset = doc.assets.find((a) => a.id === clip.assetId);
-    if (!asset || asset.type !== "video" || asset.block || !asset.width || !asset.height ||
+    if (!asset || asset.type !== "video" || asset.block || asset.soundFrom || !asset.width || !asset.height ||
         !Number.isFinite(clip.in) || !Number.isFinite(clip.out) || clip.in < 0 || clip.out <= clip.in || clip.out > asset.duration + 0.000001) return null;
     // A file whose code values need converting (a log source, or an HDR file
     // into another delivery) has to render; an ungraded file already in the

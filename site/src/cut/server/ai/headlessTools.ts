@@ -35,6 +35,7 @@ const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "detect_silence",
   "detect_beats",
   "refine_speech_cuts",
+  "sync_audio",
   "freeze_frame",
   "capture_frame",
   "compare_to_source",

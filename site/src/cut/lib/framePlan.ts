@@ -266,9 +266,30 @@ export function crossHandles(spans: ClipSpan[], t: number): { span: ClipSpan; ga
     const from = sp.start - sp.soundBack;
     const to = sp.start + sp.len + sp.soundAhead;
     if (t < from || t >= to) continue;
-    out.push({ span: sp, gain: soundCrossGain(spans, sp, t) });
+    out.push({ span: sp, gain: soundCrossGain(spans, sp, t) * splitEditGain(sp, t) });
   }
   return out;
+}
+
+/**
+ * The gain a split edit puts on a clip's sound at `t`: full inside the
+ * picture, a short ramp up from silence where a J-cut's lead opens and down to
+ * silence where an L-cut's tail closes. The offline fold and the ffmpeg graph
+ * write the same ramps.
+ */
+export function splitEditGain(sp: ClipSpan, t: number): number {
+  const lead = sp.soundLead ?? 0;
+  const tail = sp.soundTail ?? 0;
+  const end = sp.start + sp.len;
+  if (lead > 0 && t < sp.start) {
+    const f = Math.min(sp.splitFade ?? 0, lead);
+    return f > 0 ? Math.max(0, Math.min(1, (t - (sp.start - lead)) / f)) : 1;
+  }
+  if (tail > 0 && t >= end) {
+    const f = Math.min(sp.splitFade ?? 0, tail);
+    return f > 0 ? Math.max(0, Math.min(1, (end + tail - t) / f)) : 1;
+  }
+  return 1;
 }
 
 /** How much of a clip's animation window is still running at `rel`, for the

@@ -462,6 +462,17 @@ function describeState(
       duration: r(a.duration),
       ...(a.origin ? { origin: a.origin } : {}),
       ...(a.folderId != null ? { folderId: a.folderId } : {}),
+      // The recording bound to this video (sync_audio): every clip of it
+      // plays that file, recording second = video second + offset.
+      ...(a.soundFrom
+        ? {
+            soundFrom: {
+              assetId: a.soundFrom.assetId,
+              name: s.assets.find((x) => x.id === a.soundFrom!.assetId)?.name ?? null,
+              offset: Math.round(a.soundFrom.offset * 1000) / 1000,
+            },
+          }
+        : {}),
       // What the file's code values mean, for footage that is not plain
       // Rec.709: the profile in force and, when the person overrode it, what
       // the header read (set_source_color changes it).
@@ -529,6 +540,7 @@ function describeState(
       // The clip's own equalizer/compressor/limiter, set through
       // set_clip_sound; absent when its sound is untouched.
       ...(sp.clip.sound ? { sound: sp.clip.sound } : {}),
+      ...splitEditOf(sp.clip),
       framing: sp.clip.fit ?? "fit",
       ...describeRate(sp.clip),
       // The generated scene shot this clip came from — sceneShot is the
@@ -696,6 +708,12 @@ function describeAudio(
   };
 }
 
+/** A clip's split edit as set_split_edit wrote it: seconds its sound leads
+ * the picture and carries past it. Absent when it has none. */
+function splitEditOf(c: VideoClip) {
+  return c.audioLead || c.audioTail ? { audioLead: c.audioLead ?? 0, audioTail: c.audioTail ?? 0 } : {};
+}
+
 function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>) {
   const rect = rectOf(c);
   return {
@@ -707,6 +725,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     in: r(c.in),
     out: r(c.out),
     muted: c.muted,
+    ...splitEditOf(c),
     ...(c.hidden ? { hidden: true } : {}),
     ...(c.sound ? { sound: c.sound } : {}),
     // The frame region this layer occupies: Full covers the frame; Top/Bottom/

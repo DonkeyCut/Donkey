@@ -32,10 +32,12 @@ import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, pa
 import { renderElementFrames, renderElementPng } from "./textRender";
 import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
+import { specSound } from "./soundSource";
 import type {
   Aspect,
   AudioClip,
   ClipAnim,
+  ClipSpan,
   MediaAsset,
   Overlay,
   Selection,
@@ -785,6 +787,19 @@ function renderClipBorderPng(
   return rasterCanvasToPng(canvas);
 }
 
+/** A clip's sound as the spec carries it: the recording bound to its video,
+ * and a split edit's reach past its picture with the ramp at the far end. */
+function specSpanSound(sp: ClipSpan) {
+  return {
+    ...(sp.sound
+      ? { soundFrom: { file: sp.sound.asset.fileName, offset: sp.sound.offset, duration: sp.sound.asset.duration } }
+      : {}),
+    ...(sp.soundLead || sp.soundTail
+      ? { soundLead: sp.soundLead ?? 0, soundTail: sp.soundTail ?? 0, splitFade: sp.splitFade ?? 0 }
+      : {}),
+  };
+}
+
 /** What a source's code values mean, for the spec: the profile the header
  * settled (with the person's override), and the matrix and range the file
  * decodes with. A still is sRGB, decoded to full-range RGB, and a block is
@@ -880,6 +895,7 @@ export async function buildExportPayload(
       : undefined;
 
   const clipEntries = spans.map((sp) => ({
+    ...specSpanSound(sp),
     file: sp.asset.fileName,
     in: sp.clip.in,
     out: sp.clip.out,
@@ -1094,10 +1110,11 @@ export async function buildExportPayload(
       r.soundBack = sp.soundBack;
     });
     return trackSpans
-      .map((sp, i) => ({ c: sp.clip, ramp: ramps[i] }))
+      .map((sp, i) => ({ c: sp.clip, sp, ramp: ramps[i] }))
       .filter(({ c }) => !c.hidden && c.start < duration)
-      .map(({ c, ramp }) => {
+      .map(({ c, sp, ramp }) => {
         const entry = {
+          ...specSpanSound(sp),
           file: assetById.get(c.assetId)!.fileName,
           in: c.in,
           out: c.out,
@@ -1226,6 +1243,7 @@ export async function buildExportPayload(
   const audio = doc.audioClips
     .filter((a) => !a.hidden && a.start < duration && assetById.has(a.assetId))
     .map((a) => ({
+      soundFrom: specSound(assetById.get(a.assetId)!, assetById, (x) => x.fileName),
       file: assetById.get(a.assetId)!.fileName,
       in: a.in,
       out: a.out,

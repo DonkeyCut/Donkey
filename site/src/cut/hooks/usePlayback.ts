@@ -9,11 +9,12 @@ import {
   projectDuration,
   useEditor,
 } from "@/cut/lib/store";
-import { headSrc, matteLumaToAlpha, retimeOf, smoothsAt, srcSpan } from "@donkeycut/effects-kit";
+import { headSrc, matteLumaToAlpha, retimeOf, smoothsAt } from "@donkeycut/effects-kit";
 import { blendInto, SYNTH_EDGE, synthWeight } from "@/cut/lib/frameSynth";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
 import { assetIsSilent, clipCovers, rectOf } from "@/cut/lib/types";
-import type { ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
+import type { AudioClip, ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
+import { soundSourceOf, soundWindow } from "@/cut/lib/soundSource";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { hdrCanvasSupport } from "@/cut/lib/hdrCanvas";
@@ -167,26 +168,38 @@ export function engineLog(msg: string): void {
  */
 const SOUND_LOOKAHEAD_S = 3;
 
+const OWN_TRACK = { offset: 0, limit: Infinity };
+
 const voiceSpan = (sp: ClipSpan) => {
-  // The handles a crossing reaches into play at the pace of the footage
-  // beside them, so the voice's span widens through the clip's own map and
-  // its retime is rebuilt over the wider span.
-  const rt = retimeOf(sp.clip);
-  const { lo, hi } = srcSpan(rt, -sp.soundBack, rt.len + sp.soundAhead);
+  // The handles a crossing or a split edit reaches into play at the pace of
+  // the footage beside them, so the voice's span widens through the clip's
+  // own map and its retime is rebuilt over the wider span. A recording bound
+  // to the video is read through the same map, on its own clock, and starts
+  // late where it rolled after the camera did.
+  const w = soundWindow(sp.clip, sp.sound ?? OWN_TRACK, -sp.soundBack, sp.len + sp.soundAhead);
+  if (!w) return null;
   return {
-    url: sp.asset.url,
-    start: sp.start - sp.soundBack,
-    in: lo,
-    out: hi,
-    retime: retimeOf({
-      in: lo,
-      out: hi,
-      speed: sp.clip.speed,
-      speedCurve: sp.clip.speedCurve,
-      reverse: sp.clip.reverse,
-    }),
+    url: (sp.sound?.asset ?? sp.asset).url,
+    start: sp.start - sp.soundBack + w.at,
+    in: w.lo,
+    out: w.hi,
+    retime: retimeOf(w.span),
     sound: sp.clip.sound,
   };
+};
+
+/** A span with nothing to hear: its video has no sound track and no
+ * recording bound to it. */
+const spanSilent = (sp: ClipSpan) => !sp.sound && assetIsSilent(sp.asset);
+
+/** An audio clip's sound: its own file, or the recording bound to the video
+ * it was detached from. */
+const audioVoice = (a: AudioClip, asset: MediaAsset, assets: MediaAsset[]) => {
+  const src = soundSourceOf(asset, assets);
+  if (!src.bound) return { url: asset.url, start: a.start, in: a.in, out: a.out, retime: retimeOf(a) };
+  const w = soundWindow(a, src, 0, retimeOf(a).len);
+  if (!w) return null;
+  return { url: src.asset.url, start: a.start + w.at, in: w.lo, out: w.hi, retime: retimeOf(w.span) };
 };
 
 class Engine {

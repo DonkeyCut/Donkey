@@ -33,6 +33,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { builtinLutCatalogText } from "@/cut/lib/builtinLuts";
+import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
 
 /** Per-field slider hints; ranges interpolate the exported constants so the
  * schema can never drift from the model the renderer clamps to. */
@@ -226,6 +227,27 @@ export const INSPECTOR_TOOLS = [
     name: "set_clip_volume",
     description: "Set the gain on a video clip's own audio (soundtrack clips use update_audio).",
     inputSchema: obj({ clipId: str("Video clip id"), ids: ids("clipId"), volume: num("0..3 (1 = unchanged, up to 3 boosts the clip's own sound)") }, ["volume"]),
+  },
+  {
+    name: "sync_audio",
+    description:
+      "Dual-system sound: line up a separately recorded audio file (a lavalier, a recorder, a second camera's mic) with a video by matching it against the camera's own sound, then bind it to the video. Every clip of that video — the ones on the timeline now and any split, trimmed, sped, reversed, or copied later — plays the recording through its own trim and speed, and the camera's track goes quiet; the preview, every export, captions, and the listening tools all hear the recording. Name the video by clipId (one of its clips) or assetId, and the recording by audio_asset_id (an audio file in the project). The match reports `offset` (recording seconds = video seconds + offset) and `confidence`; when no single alignment stands out — a different take, or two files with no sound in common — it refuses and binds nothing, and the user can pick another file. clear: true returns the video to its own sound. editor_state shows each bound video's `soundFrom` on its media entry.",
+    inputSchema: obj({
+      clipId: str("A video clip whose source video gets the recording"),
+      assetId: str("The video asset to bind, when no clip names it"),
+      audio_asset_id: str("The audio asset holding the clean recording"),
+      clear: bool("Unbind the recording: the video plays its own sound again"),
+    }),
+  },
+  {
+    name: "set_split_edit",
+    description: `Split edit on a video clip: its sound starts ahead of its picture (lead — a J-cut, the next speaker heard before the cut) or carries on past it (tail — an L-cut, a voice running over the next shot). The extension plays the clip's own source from beyond its trim, under the neighbouring clip, ramping in from silence at the far end; pictures and clip positions stay where they are. Typical values: 0.05–0.5 s to soften a dialogue cut, 1–2 s to hand one scene into the next. Each side is capped at ${SPLIT_EDIT_MAX_S} s and at the source the clip has beyond its trim; 0 clears that side, and a side left out keeps its value. A cut carrying a transition keeps the transition's own handover, so that side plays no split edit. editor_state reports audioLead/audioTail on the clip.`,
+    inputSchema: obj({
+      clipId: str("Video clip id"),
+      ids: ids("clipId"),
+      lead: num(`Seconds the sound starts before the picture, 0..${SPLIT_EDIT_MAX_S} (0 clears)`),
+      tail: num(`Seconds the sound carries past the picture's end, 0..${SPLIT_EDIT_MAX_S} (0 clears)`),
+    }),
   },
   {
     name: "set_clip_sound",

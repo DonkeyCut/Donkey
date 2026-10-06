@@ -96,11 +96,16 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
     at: (c, start) => ({ ...c, start }),
     split: (c, at) => {
       const [left, right] = splitMedia(c, at);
-      return [{ ...left, transition: undefined, transitionStyle: undefined, animOut: undefined }, { ...right, animIn: undefined }];
+      // A split edit stays on the outer edges: the new cut between the halves
+      // carries none.
+      return [
+        { ...left, transition: undefined, transitionStyle: undefined, animOut: undefined, audioTail: undefined },
+        { ...right, animIn: undefined, audioLead: undefined },
+      ];
     },
     clone: deep,
     assetIds: (c) =>
-      [c.assetId, c.removal?.matte?.assetId, c.removal?.backdrop?.assetId].filter(
+      [c.assetId, c.removal?.matte?.assetId, c.removal?.backdrop?.assetId, c.card?.matte?.assetId].filter(
         (id): id is string => typeof id === "string" && id.length > 0
       ),
     remapAssets: (c, to) => ({

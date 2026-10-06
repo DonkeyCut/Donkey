@@ -137,6 +137,15 @@ export interface ExportSpec {
      * a cut their pictures hard-join. */
     soundAhead?: number;
     soundBack?: number;
+    /** A split edit: seconds of `soundBack` the sound plays ahead of the
+     * picture (J-cut) and of `soundAhead` it carries past it (L-cut), each
+     * ramping from silence over `splitFade` at its far end. */
+    soundLead?: number;
+    soundTail?: number;
+    splitFade?: number;
+    /** The recording bound to this clip's video, which its sound reads in
+     * place of the file's own track (see soundAlign.ts). */
+    soundFrom?: SpecSound;
     /** Transition look id, resolved to an xfade name through the
      * TRANSITION_XFADE allowlist (unknown ids render as a plain fade). Cross
      * zoom renders as the fade plus zoom ramps on both segments' overlap
@@ -244,6 +253,11 @@ export interface ExportSpec {
     tailSound?: number;
     soundBack?: number;
     soundAhead?: number;
+    /** A split edit and a bound recording, as on `clips`. */
+    soundLead?: number;
+    soundTail?: number;
+    splitFade?: number;
+    soundFrom?: SpecSound;
     /** A still image: looped for the clip's length instead of trimmed. */
     image?: boolean;
     /** Manual color adjustments, baked into this overlay's segment. */
@@ -296,6 +310,10 @@ export interface ExportSpec {
     /** Voiceover ducking: while this clip plays, every other sound drops to
      * this gain (0..1). Ducking clips never duck each other. */
     duck?: number;
+    /** Detached from a video bound to a recording: it plays the recording. */
+    soundFrom?: SpecSound;
+    /** The soundtrack lane it sits on, which picks its stem; absent = 0. */
+    lane?: number;
   }[];
   /** Overlay elements. A static element is one full-frame PNG windowed with
    * `enable`. An animated element ships `frames` — a region-cropped slideshow
@@ -882,13 +900,61 @@ export async function runExport(
     turned.set(file, { video, audio, mono });
     return { ...mirrorRetimable(c, pivot), file };
   };
+  // A video bound to a recording sounds from the recording. Each entry that
+  // reads one gets a sound twin: the recording laid on the video's clock over
+  // the stretch the entry reaches (soundAlign.ts), with the entry's trim and
+  // map moved onto that file. Picture reads keep the entry; every sound read
+  // below goes through `sounding`. A twin turns with its entry, and a
+  // recording that holds none of the stretch leaves the entry silent.
+  const twinFiles = new Set<string>();
+  const twinOf = async <T extends Parameters<typeof turn>[0] & { soundFrom?: SpecSound; muted?: boolean }>(
+    c: T,
+    tag: string
+  ): Promise<T | null | undefined> => {
+    if (!c.soundFrom || !c.file || c.image || c.hidden || c.muted) return undefined;
+    const rec = await resolveMedia(io.stat, mediaPathFor, c.soundFrom.file);
+    const rt = retimeOf(c);
+    const reach = srcSpan(rt, -(c.soundBack ?? 0), rt.len + (c.soundAhead ?? 0));
+    const file = path.join(job.tmpDir, `bound_${tag}.wav`);
+    const mono = (await io.audioChannels(rec)) === 1;
+    const laid = await alignRecording((args) => io.runFfmpeg(job, args), rec, c.soundFrom, reach.lo, reach.hi, file, {
+      mono,
+    });
+    if (!laid) return null;
+    twinFiles.add(file);
+    const { soundFrom: _bound, ...rest } = shiftSpan(c, -reach.lo);
+    void _bound;
+    return { ...rest, file } as T;
+  };
+  /** Each entry's sound twin, null for one whose recording is silent there. */
+  const soundTwins = new Map<object, Sounding | null>();
   const turnedClips: ExportSpec["clips"] = [];
-  for (const [j, c] of spec.clips.entries()) turnedClips.push(await turn(c, `clip_${j}`));
+  for (const [j, c] of spec.clips.entries()) {
+    const twin = await twinOf(c, `clip_${j}`);
+    const tc = await turn(c, `clip_${j}`);
+    turnedClips.push(tc);
+    if (twin !== undefined) soundTwins.set(tc, twin && (await turn(twin, `clipsnd_${j}`, true)));
+  }
   const turnedOverlays: NonNullable<ExportSpec["overlayVideos"]> = [];
-  for (const [k, oc] of (spec.overlayVideos ?? []).entries()) turnedOverlays.push(await turn(oc, `ovl_${k}`));
+  for (const [k, oc] of (spec.overlayVideos ?? []).entries()) {
+    const twin = await twinOf(oc, `ovl_${k}`);
+    const to = await turn(oc, `ovl_${k}`);
+    turnedOverlays.push(to);
+    if (twin !== undefined) soundTwins.set(to, twin && (await turn(twin, `ovlsnd_${k}`, true)));
+  }
   const turnedAudio: ExportSpec["audio"] = [];
-  for (const [k, a] of spec.audio.entries()) turnedAudio.push(await turn(a, `snd_${k}`, true));
+  for (const [k, a] of spec.audio.entries()) {
+    const twin = await twinOf(a, `snd_${k}`);
+    if (twin === null) continue;
+    turnedAudio.push(await turn(twin ?? a, `snd_${k}`, true));
+  }
   spec = { ...spec, clips: turnedClips, overlayVideos: turnedOverlays, audio: turnedAudio };
+  /** What an entry's sound reads: its sound twin, or the entry itself. Null
+   * when a bound recording holds nothing over it. */
+  const sounding = <T extends Sounding>(c: T): T | Sounding | null => (soundTwins.has(c) ? soundTwins.get(c)! : c);
+  /** The path an entry's file reads from: a twin is on disk already. */
+  const sourcePath = (file: string) =>
+    twinFiles.has(file) ? Promise.resolve(file) : resolveMedia(io.stat, mediaPathFor, file);
 
   // Tracks number 0..N bottom-up: track 0 folds sequentially into the base
   // picture, the rest overlay it in track order (highest last = frontmost).

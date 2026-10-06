@@ -132,6 +132,25 @@ describe("insertTemplate", () => {
   const MAP: Record<string, string> = { v0: "b0", v1: "b1", m0: "bm", s0: "bs", f0: "" };
   const idsFor = (assetByMedia: string[], map = MAP) => assetByMedia.map((id) => map[id] ?? "");
 
+  test("a video's bound recording travels with it and binds to the landed copy", () => {
+    const doc = richDoc();
+    const withRec = {
+      ...doc,
+      assets: [
+        ...(doc.assets ?? []).map((a) => (a.id === "v0" ? { ...a, soundFrom: { assetId: "r0", offset: 0.25 } } : a)),
+        { id: "r0", fileName: "lav.wav", name: "lav", type: "audio" as const, duration: 60 },
+      ],
+    };
+    const { template, assetByMedia } = templateFromDoc(withRec);
+    const v0 = assetByMedia.indexOf("v0");
+    const r0 = assetByMedia.indexOf("r0");
+    expect(r0).toBeGreaterThanOrEqual(0);
+    expect(template.media[v0].soundFrom).toEqual({ media: r0, offset: 0.25 });
+    useEditor.setState({ assets: [...useEditor.getState().assets, asset("br", "audio", 60)] });
+    useEditor.getState().insertTemplate({ ...template, id: "t", addedAt: 0 }, idsFor(assetByMedia, { ...MAP, r0: "br" }), 0);
+    expect(useEditor.getState().assets.find((a) => a.id === "b0")?.soundFrom).toEqual({ assetId: "br", offset: 0.25 });
+  });
+
   test("stands the whole edit up on other footage, treatment and all", () => {
     const { template, assetByMedia } = templateFromDoc(richDoc());
     useEditor.getState().insertTemplate({ ...template, id: "t", addedAt: 0 }, idsFor(assetByMedia), 0);

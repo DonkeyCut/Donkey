@@ -859,6 +859,14 @@ function trackZeroFades(spans: ClipSpan[], i: number): { fadeIn: number; fadeOut
  * while the picture keeps them, and everything after the first gap plays early.
  */
 export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => string): MixSpec {
+  // A clip's sound past its picture (a split edit) and the recording bound to
+  // its video, as the fold reads them.
+  const spanSound = (sp: ClipSpan) => ({
+    ...(sp.sound ? { soundFrom: { file: resolve(sp.sound.asset), offset: sp.sound.offset, duration: sp.sound.asset.duration } } : {}),
+    ...(sp.soundLead || sp.soundTail
+      ? { soundLead: sp.soundLead, soundTail: sp.soundTail, splitFade: sp.splitFade }
+      : {}),
+  });
   const duration = projectDuration(doc);
   const spans = getClipSpans(doc.clips, doc.assets, 0);
   const byId = new Map(doc.assets.map((a) => [a.id, a]));
@@ -878,20 +886,24 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
         speedCurve: sp.clip.speedCurve,
         reverse: sp.clip.reverse,
         sound: sp.clip.sound,
-        muted: sp.clip.muted || assetIsSilent(sp.asset),
+        muted: sp.clip.muted || (!sp.sound && assetIsSilent(sp.asset)),
         fadeIn: ramps[i].head,
         fadeOut: ramps[i].tail,
         crossIn: ramps[i].crossIn,
         crossOut: ramps[i].crossOut,
         soundBack: sp.soundBack,
         soundAhead: sp.soundAhead,
+        ...spanSound(sp),
       });
     });
   }
   for (const a of doc.audioClips) {
     const asset = byId.get(a.assetId);
-    if (!asset || a.hidden || a.start >= duration || assetIsSilent(asset)) continue;
+    if (!asset || a.hidden || a.start >= duration) continue;
+    const soundFrom = specSound(asset, byId, resolve);
+    if (!soundFrom && assetIsSilent(asset)) continue;
     items.push({
+      ...(soundFrom ? { soundFrom } : {}),
       file: resolve(asset),
       in: a.in,
       out: a.out,

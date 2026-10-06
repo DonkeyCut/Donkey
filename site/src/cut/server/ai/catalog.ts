@@ -12,6 +12,7 @@
 import { EXPORT_RESOLUTIONS } from "@/cut/lib/exportPresets";
 import { UI_TOOLS } from "@/cut/lib/projectCommands";
 import { STOCK_SFX_CATEGORIES } from "@/cut/lib/stock";
+import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
 import { builtinLutCatalogText } from "@/cut/lib/builtinLuts";
 import { AI_PANEL_TOOLS } from "@/cut/components/AiPanel.tools";
 import {

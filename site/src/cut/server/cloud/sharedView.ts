@@ -95,7 +95,10 @@ function allowedAssets(doc: ProjectDoc, features: ShareFeatures): StoredAsset[] 
   for (const c of clips) {
     if (c.removal?.matte) referenced.add(c.removal.matte.assetId);
     if (c.removal?.backdrop?.assetId) referenced.add(c.removal.backdrop.assetId);
+    if (c.card?.matte) referenced.add(c.card.matte.assetId);
   }
+  // A video bound to a separate recording plays that recording.
+  for (const a of assets) if (referenced.has(a.id) && a.soundFrom) referenced.add(a.soundFrom.assetId);
   const fonts = new Set<string>();
   for (const o of Array.isArray(doc.overlays) ? doc.overlays : []) {
     if (o.kind === "sticker" && o.assetId) referenced.add(o.assetId);

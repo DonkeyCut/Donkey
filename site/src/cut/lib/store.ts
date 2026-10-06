@@ -394,6 +394,9 @@ interface DocSnapshot {
    * chat; it lives on the asset like the beat grid, so the checkpoint
    * carries it the same way. */
   sourceColor: { id: string; profile: SourceProfile | undefined }[];
+  /** Each video's bound recording, set from the Audio tab and the chat; on
+   * the asset like the source-colour override, carried the same way. */
+  soundFrom: { id: string; from: SoundFrom | undefined }[];
 }
 
 export type SubtitleStatus = "idle" | "running" | "ready" | "empty" | "error";
@@ -1015,6 +1018,7 @@ const sharedFields = (s: Pick<EditorState, "guideLines" | "colorSpace" | "assets
   colorSpace: s.colorSpace,
   beats: new Map(s.assets.map((a) => [a.id, a.beats])),
   profiles: new Map(s.assets.map((a) => [a.id, a.colorProfile])),
+  sounds: new Map(s.assets.map((a) => [a.id, a.soundFrom])),
 });
 
 /** A project-wide setting changed on another timeline while this one was
@@ -1033,6 +1037,8 @@ function rebaseShared(snaps: DocSnapshot[], then: SharedFields, now: SharedField
       snap.sourceColor = snap.sourceColor.map((c) =>
         profiles.has(c.id) ? { id: c.id, profile: now.profiles.get(c.id) } : c
       );
+    if (sounds.size)
+      snap.soundFrom = snap.soundFrom.map((c) => (sounds.has(c.id) ? { id: c.id, from: now.sounds.get(c.id) } : c));
   }
 }
 
@@ -1495,47 +1501,70 @@ export function cutTranscribeSpec(
   const spans = getClipSpans(s.clips, s.assets);
   const duration = projectDuration(s);
   const assetById = new Map(s.assets.map((a) => [a.id, a]));
-  const audio = s.audioClips
-    .filter(
-      (a) =>
-        !a.hidden &&
-        !a.reverse &&
-        a.start < duration &&
-        assetById.has(a.assetId) &&
-        !assetIsSilent(assetById.get(a.assetId)!)
-    )
-    .map((a) => ({
-      file: assetById.get(a.assetId)!.fileName,
-      in: a.in,
-      out: a.out,
-      start: a.start,
-      volume: a.volume,
-      speed: a.speed,
-      speedCurve: a.speedCurve,
-      reverse: a.reverse,
-    }))
-    .concat(
-      overlayLayers(s.clips)
-        .filter(
-          (c) =>
-            !c.hidden &&
-            !c.muted &&
-            !c.reverse &&
-            c.start < duration &&
-            assetById.has(c.assetId) &&
-            !assetIsSilent(assetById.get(c.assetId)!)
-        )
-        .map((c) => ({
-          file: assetById.get(c.assetId)!.fileName,
-          in: c.in,
-          out: c.out,
-          start: c.start,
-          volume: 1,
-          speed: c.speed,
-          speedCurve: c.speedCurve,
-          reverse: c.reverse,
-        }))
-    );
+  type Item = CloudTranscribeSpec["audio"][number];
+  /** The stretch `[fromT, toT]` of a span's sound (timeline seconds from its
+   * head at `start`) as a placed item, read off its sound file: the video's
+   * own track or the recording bound to it. Null when that file holds none
+   * of it. */
+  const placed = (
+    c: Parameters<typeof soundWindow>[0],
+    src: { asset: MediaAsset; offset: number; limit: number },
+    start: number,
+    fromT: number,
+    toT: number,
+    volume: number
+  ): Item | null => {
+    const w = soundWindow(c, src, fromT, toT);
+    return w
+      ? {
+          file: src.asset.fileName,
+          in: w.lo,
+          out: w.hi,
+          start: start + fromT + w.at,
+          volume,
+          speed: w.span.speed,
+          speedCurve: w.span.speedCurve,
+          reverse: w.span.reverse,
+        }
+      : null;
+  };
+  const own = (asset: MediaAsset) => ({ asset, offset: 0, limit: Infinity });
+  const audio: Item[] = [];
+  for (const a of s.audioClips) {
+    const asset = assetById.get(a.assetId);
+    if (!asset || a.hidden || a.reverse || a.start >= duration) continue;
+    const src = soundSourceOf(asset, assetById);
+    if (!src.bound && assetIsSilent(asset)) continue;
+    const item = placed(a, src, a.start, 0, retimeOf(a).len, a.volume);
+    if (item) audio.push(item);
+  }
+  // Every upper-track clip's sound, split edit included; on track 0 the fold
+  // carries the clip itself, so only what plays off its own footprint — a
+  // bound recording, a split edit's lead and tail — rides here.
+  const audible = (sp: ClipSpan) =>
+    !sp.clip.hidden && !sp.clip.muted && !sp.clip.reverse && (!!sp.sound || !assetIsSilent(sp.asset));
+  for (const track of new Set(overlayLayers(s.clips).map((c) => c.track))) {
+    for (const sp of getClipSpans(s.clips, s.assets, track)) {
+      if (!audible(sp) || sp.start >= duration) continue;
+      const item = placed(sp.clip, sp.sound ?? own(sp.asset), sp.start, -(sp.soundLead ?? 0), sp.len + (sp.soundTail ?? 0), 1);
+      if (item) audio.push(item);
+    }
+  }
+  for (const sp of spans) {
+    if (!audible(sp)) continue;
+    const src = sp.sound ?? own(sp.asset);
+    const pieces: [number, number][] = sp.sound
+      ? [[-(sp.soundLead ?? 0), sp.len + (sp.soundTail ?? 0)]]
+      : [
+          [-(sp.soundLead ?? 0), 0],
+          [sp.len, sp.len + (sp.soundTail ?? 0)],
+        ];
+    for (const [from, to] of pieces) {
+      if (to - from <= 1e-3) continue;
+      const item = placed(sp.clip, src, sp.start, from, to, 1);
+      if (item) audio.push(item);
+    }
+  }
   if (spans.length === 0 && audio.length === 0) return null;
   const silentSpacer = (len: number) => ({ file: "", in: 0, out: len, muted: true, speed: 1, transition: 0 });
   return {
@@ -1554,8 +1583,9 @@ export function cutTranscribeSpec(
               in: sp.clip.in,
               out: sp.clip.out,
               // Sound played backward is not speech; the clip keeps its
-              // time in the mix as silence.
-              muted: sp.clip.muted || assetIsSilent(sp.asset) || !!sp.clip.reverse,
+              // time in the mix as silence. A bound recording plays from
+              // the items above, so the slot holds silence too.
+              muted: sp.clip.muted || assetIsSilent(sp.asset) || !!sp.clip.reverse || !!sp.sound,
               speed: clipSpeed(sp.clip),
               speedCurve: sp.clip.speedCurve,
               // The clamped cross-dissolve overlap, so the mix overlaps clip
@@ -1611,6 +1641,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     return {
       beats: assets.map((a) => ({ id: a.id, grid: a.beats })),
       sourceColor: assets.map((a) => ({ id: a.id, profile: a.colorProfile })),
+      soundFrom: assets.map((a) => ({ id: a.id, from: a.soundFrom })),
       guideLines: { v: [...guideLines.v], h: [...guideLines.h] },
       colorSpace,
       // Render-owned clips are excluded — history captures the user's timeline,
@@ -1633,7 +1664,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
    * doc — an undo mid-session (a brush stroke, a panel edit) keeps the panel
    * and its stage gizmos on the clip being worked. */
   const restoreDoc = (snap: DocSnapshot) => {
-    const { beats, sourceColor, ...doc } = snap;
+    const { beats, sourceColor, soundFrom, ...doc } = snap;
     const { clips, audioClips, assets, selection, multiSelection } = get();
     const genClips = clips.filter((c) => genClipIds.has(c.id));
     const genAudio = audioClips.filter((c) => genAudioIds.has(c.id));
@@ -1641,11 +1672,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     // since the checkpoint was taken is not in it and keeps the grid it has.
     const grids = new Map(beats.map((b) => [b.id, b.grid]));
     const profiles = new Map(sourceColor.map((c) => [c.id, c.profile]));
+    const sounds = new Map(soundFrom.map((c) => [c.id, c.from]));
     const withBeats = assets.map((a) => {
       let next = a;
       if (grids.has(a.id) && grids.get(a.id) !== a.beats) next = { ...next, beats: grids.get(a.id) };
       if (profiles.has(a.id) && profiles.get(a.id) !== a.colorProfile)
         next = withColorProfile(next, profiles.get(a.id));
+      if (sounds.has(a.id) && sounds.get(a.id) !== a.soundFrom) next = withSoundFrom(next, sounds.get(a.id));
       return next;
     });
     const beatsMoved = withBeats.some((a, i) => a !== assets[i]);
@@ -2556,6 +2589,18 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
     },
 
+    setAssetSoundFrom: (id, from) => {
+      const asset = get().assets.find((a) => a.id === id);
+      if (!asset || get().readOnly) return;
+      if (asset.soundFrom?.assetId === from?.assetId && asset.soundFrom?.offset === from?.offset) return;
+      push();
+      // The source's transcript was heard off the sound it had; the sweep
+      // hears the new one.
+      set((s) => ({
+        assets: s.assets.map((a) => (a.id === id ? { ...withSoundFrom(a, from), speech: undefined } : a)),
+      }));
+    },
+
     setAssetProxy: (id, proxy, proxyUrl) => {
       if (get().readOnly) return;
       set((s) => ({
@@ -2697,7 +2742,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const scrub = (snap: DocSnapshot) => {
         snap.clips = snap.clips.filter((c) => c.assetId !== id);
         snap.audioClips = snap.audioClips.filter((c) => c.assetId !== id);
+        snap.soundFrom = snap.soundFrom.map((c) => (c.from?.assetId === id ? { id: c.id, from: undefined } : c));
       };
+      // A video bound to this recording goes back to its own track.
+      const remaining = (assets: MediaAsset[]) =>
+        assets
+          .filter((a) => a.id !== id)
+          .map((a) => (a.soundFrom?.assetId === id ? withSoundFrom(a, undefined) : a));
       for (const snap of history) scrub(snap);
       for (const snap of future) scrub(snap);
       if (pending) scrub(pending.snap);
@@ -2842,7 +2893,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // A video's own track plays on the soundtrack the same way a sound file
       // does — it is what detaching a clip's audio leaves behind — so a cut
       // laid out as empty shots can still carry the reference's sound.
-      if (!asset || asset.type === "image" || assetIsSilent(asset)) return;
+      if (!asset || asset.type === "image" || (assetIsSilent(asset) && !soundSourceOf(asset, get().assets).bound)) return;
       push();
       // Within its lane the clip slides to the next free slot at or after the
       // target so it never lands on top of an existing sound.
@@ -3704,7 +3755,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const clip = clips.find((c) => c.id === selection.id);
       if (!clip || clip.muted) return; // no sound to detach
       const span = clipWindow(clips, assets, clip.id);
-      if (!span || assetIsSilent(span.asset)) return; // a still has none either
+      // A still has none either; a bound recording counts as the clip's sound.
+      if (!span || (assetIsSilent(span.asset) && !soundSourceOf(span.asset, assets).bound)) return;
       push();
       const audio: AudioClip = {
         id: uid(),
@@ -4105,7 +4157,15 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         style: t.style,
         ...(t.hidden ? { hidden: true } : {}),
       }));
+      // A video's separate recording binds to the landed copy of it.
+      const bound = new Map<string, SoundFrom>();
+      template.media.forEach((m, i) => {
+        const video = assetIds[i];
+        const rec = m.soundFrom ? assetIds[m.soundFrom.media] : undefined;
+        if (video && rec && m.soundFrom) bound.set(video, { assetId: rec, offset: m.soundFrom.offset });
+      });
       set((s) => ({
+        ...(bound.size ? { assets: s.assets.map((a) => (bound.has(a.id) ? { ...a, soundFrom: bound.get(a.id) } : a)) } : {}),
         clips: [...s.clips, ...newClips, ...newLayers].sort((a, b) => a.start - b.start),
         audioClips: [...s.audioClips, ...newAudio],
         overlays: [...s.overlays, ...newTexts],
@@ -4280,27 +4340,46 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const projectId = s.projectId;
       const sp = clipWindow(s.clips, s.assets, clipId);
       if (!sp) throw new Error("The clip is no longer on the timeline.");
-      if (assetIsSilent(sp.asset)) throw new Error("This clip is a still — it has no sound.");
+      const src = soundSourceOf(sp.asset, s.assets);
+      if (assetIsSilent(sp.asset) && !src.bound) throw new Error("This clip is a still — it has no sound.");
       if (sp.clip.reverse) throw new Error("This clip plays backward — its sound is not speech.");
+      // A recording bound to the video is what the clip says; it is read on
+      // the video's clock, starting late where it rolled late.
+      const heard = src.bound ? soundWindow(sp.clip, src, 0, sp.len) : null;
+      if (src.bound && !heard) throw new Error("The recording bound to this video holds none of this clip.");
       const lane = s.subtitleLane;
       const epoch = laneEpoch;
       // The clip's own sound, deliberately unmuted: this transcribes what the
       // clip says even when its timeline audio is muted.
-      const spec = {
+      const spec: CloudTranscribeSpec = {
         duration: sp.len,
         locale: trackLocale(s.subtitles, lane),
         clips: [
-          {
-            file: sp.asset.fileName,
-            in: sp.clip.in,
-            out: sp.clip.out,
-            muted: false,
-            speed: clipSpeed(sp.clip),
-            speedCurve: sp.clip.speedCurve,
-            transition: 0,
-          },
+          heard
+            ? { file: "", in: 0, out: sp.len, muted: true, speed: 1, transition: 0 }
+            : {
+                file: sp.asset.fileName,
+                in: sp.clip.in,
+                out: sp.clip.out,
+                muted: false,
+                speed: clipSpeed(sp.clip),
+                speedCurve: sp.clip.speedCurve,
+                transition: 0,
+              },
         ],
-        audio: [],
+        audio: heard
+          ? [
+              {
+                file: src.asset.fileName,
+                in: heard.lo,
+                out: heard.hi,
+                start: heard.at,
+                volume: 1,
+                speed: heard.span.speed,
+                speedCurve: heard.span.speedCurve,
+              },
+            ]
+          : [],
       };
       set({ subtitleStatus: "running", subtitleError: null, subtitleStartedAt: Date.now() });
       try {
@@ -5043,7 +5122,7 @@ function beatsEdited(prev: MediaAsset[], next: MediaAsset[]): boolean {
   const before = new Map(prev.map((a) => [a.id, a]));
   return next.some((a) => {
     const was = before.get(a.id);
-    return !!was && (was.beats !== a.beats || was.colorProfile !== a.colorProfile);
+    return !!was && (was.beats !== a.beats || was.colorProfile !== a.colorProfile || was.soundFrom !== a.soundFrom);
   });
 }
 
@@ -5053,6 +5132,13 @@ function withColorProfile<A extends StoredAsset>(asset: A, profile: SourceProfil
   const { colorProfile: _was, ...rest } = asset;
   void _was;
   return (profile ? { ...rest, colorProfile: profile } : rest) as A;
+}
+
+/** The asset with its bound recording set or cleared. */
+function withSoundFrom<A extends StoredAsset>(asset: A, from: SoundFrom | undefined): A {
+  const { soundFrom: _was, ...rest } = asset;
+  void _was;
+  return (from ? { ...rest, soundFrom: from } : rest) as A;
 }
 
 /** A stored asset in the current shape. Projects saved while the override
@@ -5174,7 +5260,7 @@ export const docTimelines = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, sizeBytes, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block, color, colorProfile, proxy }) => ({
+    .map(({ id, fileName, name, type, duration, sizeBytes, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block, color, colorProfile, proxy, soundFrom }) => ({
       id,
       fileName,
       name,
@@ -5196,6 +5282,7 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(color !== undefined ? { color } : {}),
       ...(colorProfile !== undefined ? { colorProfile } : {}),
       ...(proxy !== undefined ? { proxy } : {}),
+      ...(soundFrom !== undefined ? { soundFrom } : {}),
     }));
 }
 
@@ -5772,6 +5859,18 @@ function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number)
     // and they are what lets the two clips be audible at once over a cut
     // their pictures hard-join.
     const prevSound = spans[spans.length - 1]?.soundOut ?? 0;
+    // The handles are measured on the file the sound reads: a recording
+    // bound to the video holds its own stretch on either side of the trim.
+    const src = soundSourceOf(asset, byId);
+    const room = soundRoom(clip, src);
+    // A split edit carries the sound past an edge the picture cuts on. A
+    // transition at that cut owns the handover, so the edge keeps none; the
+    // lead never reaches before the timeline's start.
+    const prevJoin = present[i - 1] ? transitionOverlap(present[i - 1].clip, clip) > 0 : false;
+    const lead = prevJoin
+      ? 0
+      : Math.min(clip.start, handleSeconds(Math.min(SPLIT_EDIT_MAX_S, clip.audioLead ?? 0), room.head, clip, "head"));
+    const tail = overlap > 0 ? 0 : handleSeconds(Math.min(SPLIT_EDIT_MAX_S, clip.audioTail ?? 0), room.tail, clip, "tail");
     spans.push({
       clip,
       asset,
@@ -5780,8 +5879,12 @@ function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number)
       transitionOut: onSound ? 0 : overlap,
       soundOut,
       // A reversed clip's head faces the source's end and its tail its start.
-      soundAhead: handleSeconds(soundOut, clip.reverse ? clip.in : asset.duration - clip.out, clip, "tail"),
-      soundBack: handleSeconds(prevSound, clip.reverse ? asset.duration - clip.out : clip.in, clip, "head"),
+      soundAhead: Math.max(tail, handleSeconds(soundOut, room.tail, clip, "tail")),
+      soundBack: Math.max(lead, handleSeconds(prevSound, room.head, clip, "head")),
+      ...(lead > 0 || tail > 0
+        ? { soundLead: lead, soundTail: tail, splitFade: cutSound().splitFadeSeconds }
+        : {}),
+      ...(src.bound ? { sound: { asset: src.asset, offset: src.offset, limit: src.limit } } : {}),
     });
   }
   return spans;
@@ -6216,9 +6319,17 @@ export function assetIdsOnAnyTimeline(s: {
   transitions: TimelineTransition[];
   subtitles: SubtitlesBlock;
   timelines: Partial<Record<TimelineId, TimelineBody>>;
+  assets?: readonly StoredAsset[];
 }): Set<string> {
   const used = assetIdsInUse(s);
   for (const body of Object.values(s.timelines)) for (const id of assetIdsInUse(body)) used.add(id);
+  return withBoundSound(used, s.assets);
+}
+
+/** `used` plus the recordings bound to the videos in it: a bound recording
+ * plays wherever its video does. */
+function withBoundSound(used: Set<string>, assets: readonly StoredAsset[] | undefined): Set<string> {
+  for (const a of assets ?? []) if (a.soundFrom && used.has(a.id)) used.add(a.soundFrom.assetId);
   return used;
 }
 
@@ -6240,7 +6351,7 @@ export function assetIdsInUse(s: {
   });
   const captionFont = s.subtitles?.font ? fontAssetId(s.subtitles.font) : null;
   if (captionFont) used.add(captionFont);
-  return used;
+  return withBoundSound(used, s.assets);
 }
 
 export function projectDuration(s: {
