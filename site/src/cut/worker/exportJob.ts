@@ -5,13 +5,16 @@ import type { CloudDocSnapshot } from "../lib/headless/docSession";
 import { buildDocExportSpec, isDocExportPreset } from "../lib/headless/docExport";
 import { runExport, type ExportSpec, type RenderHandle } from "../server/exportPipeline";
 import { storeCardArtifacts } from "./cardJob";
-import { prisma, registerObject, type ClaimedJob } from "./db";
+import { prisma, registerObjectIn, storageTransaction, type ClaimedJob } from "./db";
 import { deleteObjects, downloadToFile, exportKey, mediaKey, mimeFor, uploadFile } from "./r2";
 import { overlayKey } from "../server/cloud/r2";
 import { STORAGE_FULL } from "../lib/operationFailure";
-import { specMediaFiles } from "../lib/exportDelivery";
+import { specMediaFiles, stemsArchiveName } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
 import { bindCutColor } from "../lib/colorSettings";
+import { bindCutSound } from "../lib/soundSettings";
+import { bindCutLoudness } from "../lib/loudnessSettings";
+import type { DocExportAudio } from "../lib/exportPresets";
 import { getGlobalSetting } from "@/lib/config/effective";
 
 /** The stored spec of an export/preview CutRenderJob: the engine export spec
@@ -139,7 +142,12 @@ export async function runExportJob(
     handle.tmpDir = path.join(work, "overlays");
     await mkdir(handle.tmpDir, { recursive: true });
     // A doc-built spec sizes its LUTs from the same setting the tab binds.
-    if (stored.fromDoc) bindCutColor(await getGlobalSetting("cutColor"));
+    if (stored.fromDoc) {
+      bindCutColor(await getGlobalSetting("cutColor"));
+      bindCutSound(await getGlobalSetting("cutSound"));
+      // Its loudness target and ceiling come from the setting the tab binds.
+      bindCutLoudness(await getGlobalSetting("cutLoudness"));
+    }
     const body: ExportJobSpec = stored.fromDoc
       ? {
           ...stored,
@@ -149,7 +157,8 @@ export async function runExportJob(
             isDocExportPreset(stored.fromDoc.preset) ? stored.fromDoc.preset : "original",
             handle.tmpDir,
             stored.fromDoc.snapshot,
-            job.kind === "preview" ? "preview" : "export"
+            job.kind === "preview" ? "preview" : "export",
+            { loudness: stored.fromDoc.loudness, stems: stored.fromDoc.stems }
           )) as ExportSpec,
         }
       : stored;
@@ -166,6 +175,11 @@ export async function runExportJob(
     const outName = mode === "export" ? job.outName?.trim() || "export.mp4" : `${mode}.mp4`;
     handle.outPath = path.join(work, "out", outName);
     await mkdir(path.dirname(handle.outPath), { recursive: true });
+    // Stems ride the export they were asked with, under the name claimed with it.
+    const stemsName = mode === "export" && spec.stemPlan?.length ? stemsArchiveName(outName) : null;
+    // A borrowed render hands back only the picture; its tab mixes the stems.
+    if (stemsName && body.mediaFrom === "overlays") throw new Error("A borrowed render cannot carry stems.");
+    if (stemsName) handle.stemsPath = path.join(work, "out", stemsName);
 
     await runExport(handle, spec, (file) => path.join(mediaDir, path.basename(file)));
 
@@ -195,25 +209,42 @@ export async function runExportJob(
     // the account had when the render was queued. The file is still on the
     // worker's disk here: nothing goes up, and nothing is charged.
     if (!preview && typeof stored.maxBytes === "number") {
-      const size = (await stat(handle.outPath)).size;
+      const size =
+        (await stat(handle.outPath)).size + (handle.stemsPath ? (await stat(handle.stemsPath)).size : 0);
       if (size > stored.maxBytes) throw new Error(STORAGE_FULL);
     }
-    const bytes = await uploadFile(key, handle.outPath, mime);
+    const stemsKey = stemsName ? exportKey(job.userId, projectId, stemsName) : null;
+    const uploaded = [key, ...(stemsKey ? [stemsKey] : [])];
     try {
-      await registerObject({
-        userId: job.userId,
-        projectId,
-        r2Key: key,
-        fileName: outName,
-        mime,
-        bytes,
-        kind: preview ? "preview" : "export",
+      const bytes = await uploadFile(key, handle.outPath, mime);
+      const stemsBytes = stemsKey ? await uploadFile(stemsKey, handle.stemsPath!, mimeFor(stemsName!)) : 0;
+      await storageTransaction(async (tx) => {
+        await registerObjectIn(tx, {
+          userId: job.userId,
+          projectId,
+          r2Key: key,
+          fileName: outName,
+          mime,
+          bytes,
+          kind: preview ? "preview" : "export",
+        });
+        if (stemsKey) {
+          await registerObjectIn(tx, {
+            userId: job.userId,
+            projectId,
+            r2Key: stemsKey,
+            fileName: stemsName!,
+            mime: mimeFor(stemsName!),
+            bytes: stemsBytes,
+            kind: "export",
+          });
+        }
       });
     } catch (err) {
       // The file is up and no row owns it. The sweep walks rows, so nothing
       // would ever find these bytes again — and a storage wall that leaves the
       // bytes behind walls the account in tighter with every retry.
-      await deleteObjects([key]).catch(() => {});
+      await deleteObjects(uploaded).catch(() => {});
       throw err;
     }
     if (preview) {

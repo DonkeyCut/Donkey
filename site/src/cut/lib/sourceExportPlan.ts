@@ -43,6 +43,8 @@ export function sourceSequence(doc: ExportDoc) {
 
 export function sourceExportPlan(doc: ExportDoc, settings: ExportSettings): SourceSegment[] | null {
   if (!settings.copySource || settings.container !== "mp4" || settings.audioCodec !== "aac") return null;
+  // A mastered mix is new audio: the sound has to render.
+  if (settings.loudness !== undefined) return null;
   const sources = sourceSequence(doc);
   if (!sources || settings.width !== sources[0].asset.width || settings.height !== sources[0].asset.height) return null;
   const from = Math.max(0, settings.range?.start ?? 0);

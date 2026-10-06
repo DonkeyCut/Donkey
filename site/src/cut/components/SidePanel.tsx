@@ -111,7 +111,7 @@ import { formatTime } from "@/cut/lib/time";
 import { useLocalPref } from "@/cut/lib/uiState";
 import type { MediaAsset, SidePanelTab } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
-import { containerOfName } from "@/cut/lib/exportDelivery";
+import { containerOfName, isStemsName } from "@/cut/lib/exportDelivery";
 import { useRevealEffect } from "@/cut/lib/refReveal";
 import { usePanelRequestEffect } from "@/cut/lib/panelRequest";
 import { CopyNameLabel } from "./AssetRefs";
@@ -1185,6 +1185,20 @@ function ProjectFilesPanel({
                   className="export-row group relative flex w-full items-center gap-2.5 overflow-hidden rounded-lg border border-border p-1.5 transition-colors hover:border-input hover:bg-muted/50"
                 >
                   <ExportPulse file={it.file} />
+                  {isStemsName(it.file) ? (
+                  // A stems zip has no picture to preview; it downloads.
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                    <span className="flex h-11 w-[25px] shrink-0 items-center justify-center rounded-[4px] bg-muted text-muted-foreground">
+                      <Music className="size-3" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11.5px] font-medium">{it.file}</span>
+                      <span className="block text-[10.5px] text-muted-foreground">
+                        {(it.size / (1024 * 1024)).toFixed(1)} MB · WAV stems · ZIP
+                      </span>
+                    </span>
+                  </div>
+                  ) : (
                   <button
                     type="button"
                     className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
@@ -1220,6 +1234,7 @@ function ProjectFilesPanel({
                       </span>
                     </span>
                   </button>
+                  )}
                   <div className="flex shrink-0 items-center gap-0.5 pr-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                     {caps.revealInFinder ? (
                       <Button

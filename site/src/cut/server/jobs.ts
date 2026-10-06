@@ -5,7 +5,7 @@ import path from "node:path";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { containerExtension, runExport, type ExportSpec } from "./exportPipeline";
-import { exportBaseName } from "../lib/exportDelivery";
+import { exportBaseName, stemsArchiveName } from "../lib/exportDelivery";
 import { exportsDir, mediaPath, projectDir, readProject, setActiveJobGuard } from "./projects";
 import { errorMessage } from "./util";
 
@@ -30,6 +30,8 @@ export interface Job {
   tmpDir: string;
   outPath: string;
   outName: string;
+  /** The stems zip beside the file, when the export asked for stems. */
+  stemsPath?: string;
   proc?: ChildProcess;
   /** A render the browser tab carries itself: the row holds the file's name
    * and the dock's slot while the tab draws the frames, and the finished file
@@ -145,6 +147,7 @@ function startRun(job: Job, spec: ExportSpec) {
       job.status = "error";
       job.error = errorMessage(err, String(err));
       void rm(job.outPath, { force: true }); // no half-written files in exports/
+      if (job.stemsPath) void rm(job.stemsPath, { force: true });
     })
     .finally(() => {
       void rm(job.tmpDir, { recursive: true, force: true }); // overlay tmp, win or lose
@@ -212,8 +215,9 @@ export function cancelJob(id: string) {
 }
 
 /** Export file named after the project, with a " 2", " 3"… suffix when the
- * name is already taken by a file on disk or an export still in flight. */
-async function exportName(projectId: string, projectName: string, ext: string) {
+ * name is already taken by a file on disk or an export still in flight. An
+ * export with stems needs its stems' name free too. */
+async function exportName(projectId: string, projectName: string, ext: string, stems = false) {
   const base = exportBaseName(projectName);
   const taken = new Set(
     await readdir(exportsDir(projectId)).catch(() => [] as string[])
@@ -221,11 +225,14 @@ async function exportName(projectId: string, projectName: string, ext: string) {
   // A failed job wrote nothing under its name; only live and finished ones
   // hold theirs.
   for (const j of jobs.values()) {
-    if (j.projectId === projectId && j.outName && j.status !== "error") taken.add(j.outName);
+    if (j.projectId === projectId && j.outName && j.status !== "error") {
+      taken.add(j.outName);
+      if (j.stemsPath) taken.add(stemsArchiveName(j.outName));
+    }
   }
   for (let n = 1; ; n++) {
     const candidate = n === 1 ? `${base}${ext}` : `${base} ${n}${ext}`;
-    if (!taken.has(candidate)) return candidate;
+    if (!taken.has(candidate) && !(stems && taken.has(stemsArchiveName(candidate)))) return candidate;
   }
 }
 
@@ -233,9 +240,10 @@ async function exportName(projectId: string, projectName: string, ext: string) {
 // its outName is assigned, so two jobs racing through their first awaits could
 // otherwise both claim "<Project>.mp4" and overwrite each other's render.
 let namingQueue: Promise<unknown> = Promise.resolve();
-function claimExportName(job: Job, projectName: string, ext: string): Promise<void> {
+function claimExportName(job: Job, projectName: string, ext: string, stems = false): Promise<void> {
   const claim = namingQueue.then(async () => {
-    job.outName = await exportName(job.projectId, projectName, ext);
+    job.outName = await exportName(job.projectId, projectName, ext, stems);
+    if (stems) job.stemsPath = path.join(exportsDir(job.projectId), stemsArchiveName(job.outName));
   });
   namingQueue = claim.catch(() => {});
   return claim;
@@ -291,7 +299,7 @@ export async function createJob(form: FormData): Promise<Job> {
     if (!doc) throw new Error("Project not found.");
     job.projectName = doc.name;
     if (preview) job.outName = "preview.mp4";
-    else await claimExportName(job, spec.name ?? doc.name, containerExtension(spec));
+    else await claimExportName(job, spec.name ?? doc.name, containerExtension(spec), !!spec.stemPlan?.length);
     job.outPath = path.join(
       preview ? path.join(projectDir(spec.projectId), ".previews") : exportsDir(spec.projectId),
       preview ? `${job.id}.mp4` : job.outName
@@ -342,7 +350,9 @@ export async function createJob(form: FormData): Promise<Job> {
 export async function createClientJob(
   projectId: string,
   container: ExportSpec["container"],
-  name?: string
+  name?: string,
+  /** The tab hands in a stems zip beside the file. */
+  stems = false
 ): Promise<Job> {
   assertLocalRuntime();
   sweepClientJobs();
@@ -367,7 +377,7 @@ export async function createClientJob(
     const doc = await readProject(projectId);
     if (!doc) throw new Error("Project not found.");
     job.projectName = doc.name;
-    await claimExportName(job, name ?? doc.name, containerExtension({ container }));
+    await claimExportName(job, name ?? doc.name, containerExtension({ container }), stems);
     job.outPath = path.join(exportsDir(projectId), job.outName);
     await mkdir(path.dirname(job.outPath), { recursive: true });
   } catch (err) {
@@ -424,6 +434,35 @@ export async function completeClientJob(
   return job;
 }
 
+/**
+ * A tab render's stems zip, streamed beside the file under the name claimed
+ * with it. It lands before the file does, since the file settles the job.
+ * Null when the job is no longer a running tab render that asked for stems.
+ */
+export async function completeClientStems(
+  id: string,
+  body: ReadableStream<Uint8Array> | null
+): Promise<Job | null> {
+  const job = jobs.get(id);
+  if (!job?.client || job.status !== "running" || !job.stemsPath) return null;
+  job.seenAt = Date.now();
+  const partial = `${job.stemsPath}.part`;
+  try {
+    if (!body) throw new Error("The stems arrived without a file.");
+    const file = await open(partial, "w");
+    try {
+      for await (const chunk of body) await file.write(chunk);
+    } finally {
+      await file.close();
+    }
+    await rename(partial, job.stemsPath);
+  } catch (err) {
+    await rm(partial, { force: true });
+    throw err;
+  }
+  return job;
+}
+
 /** A tab render that stopped before its file landed gives the name and the
  * row back; nothing of it stays in the feed. That covers a render the tab
  * abandoned while still running and one whose hand-in broke off — a cancel
@@ -433,6 +472,8 @@ export async function completeClientJob(
 export function releaseClientJob(id: string): void {
   const job = jobs.get(id);
   if (!job?.client || job.status === "done") return;
+  // Stems that landed for a file that never did go with it.
+  if (job.stemsPath) void rm(job.stemsPath, { force: true });
   jobs.delete(id);
 }
 

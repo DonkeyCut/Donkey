@@ -1349,15 +1349,59 @@ export async function scanSourceSpeech(
   return scanSpeech(sourcePcm(sourceUrl, from, opts.to), { ...opts, from });
 }
 
-/** How loud a span of a source plays. Same residency story as the speech
- * scan: the page decodes its own media, the headless runner installs the
- * same decoders. */
+/** Where a separately recorded sound lines up with a camera's own: read off
+ * both files where the page or the headless runner decodes them (soundSync.ts
+ * holds the arithmetic). */
+export async function syncSourceSound(
+  cameraUrl: string,
+  recordingUrl: string,
+  opts: { cameraFrom: number; cameraTo: number; recordingTo: number }
+): Promise<SyncAnswer | null> {
+  return syncSound(
+    {
+      camera: (from, to) => sourcePcm(cameraUrl, from, to),
+      recording: (from, to) => sourcePcm(recordingUrl, from, to),
+    },
+    opts
+  );
+}
+
+/** How loud a span of a source plays: its RMS level and, from the same
+ * decode, its BS.1770 loudness and true peak. A mono source is measured as
+ * the two channels it plays on in the stereo mix. Same residency story as the
+ * speech scan: the page decodes its own media, the headless runner installs
+ * the same decoders. */
 export async function measureSourceLevel(
   sourceUrl: string,
   opts: { from: number; to?: number }
-): Promise<LevelScan> {
+): Promise<LevelScan & { loudness: LoudnessMeasure | null }> {
   const from = Math.max(0, opts.from);
-  return scanLevel(sourcePcm(sourceUrl, from, opts.to), { ...opts, from });
+  const metered: { meter?: LoudnessMeter } = {};
+  async function* tapped(): AsyncGenerator<PcmChunk> {
+    for await (const chunk of sourcePcm(sourceUrl, from, opts.to)) {
+      const n = chunk.channels[0]?.length ?? 0;
+      if (n > 0) {
+        const rate = chunk.sampleRate;
+        const meter = (metered.meter ??= new LoudnessMeter(
+          rate,
+          chunk.channels.length,
+          chunk.channels.length === 1 ? { weights: [2] } : {}
+        ));
+        // A decode opens on the packet before `from` and may run past `to`;
+        // only the asked span is measured.
+        const a = Math.max(0, Math.round((from - chunk.timestamp) * rate));
+        const b = opts.to === undefined ? n : Math.min(n, Math.round((opts.to - chunk.timestamp) * rate));
+        if (b > a) {
+          meter.push(
+            Array.from({ length: meter.channels }, (_, c) => (chunk.channels[c] ?? chunk.channels[0]).subarray(a, b))
+          );
+        }
+      }
+      yield chunk;
+    }
+  }
+  const level = await scanLevel(tapped(), { ...opts, from });
+  return { ...level, loudness: metered.meter ? metered.meter.result() : null };
 }
 
 /** The source's musical beat grid, end to end. The grid is a property of the

@@ -188,30 +188,75 @@ export function foldClips(clips: MixClip[]) {
 }
 
 /** How far each side of a clip reaches into its handle for a crossing, capped
- * by the ramp that crossing actually got. */
+ * by the ramp that crossing actually got, or for a split edit, which an edge
+ * with a crossing never carries. */
 const handles = (g: { clip: MixClip; crossIn: number; crossOut: number }) => {
   const rt = retimeOf(g.clip);
   return {
     // Never past the head of the source: a handle is what the trim left
     // behind. A reversed clip's head reaches toward the source's end, and
-    // `soundBack` already stops at it.
-    back: Math.min(g.clip.soundBack ?? 0, g.crossIn, rt.reverse ? Infinity : Math.max(0, -rt.tAt(0))),
-    ahead: Math.min(g.clip.soundAhead ?? 0, g.crossOut),
+    // `soundBack` already stops at it; a bound recording's reach was measured
+    // on the recording.
+    back: Math.min(
+      g.clip.soundBack ?? 0,
+      Math.max(g.crossIn, g.clip.soundLead ?? 0),
+      rt.reverse || g.clip.soundFrom ? Infinity : Math.max(0, -rt.tAt(0))
+    ),
+    ahead: Math.min(g.clip.soundAhead ?? 0, Math.max(g.crossOut, g.clip.soundTail ?? 0)),
   };
 };
 
-/** The source span an entry decodes, low end first: its own trim, widened by
- * the handle each crossing at its edges reaches into. Timeline seconds go
- * through the entry's own map on the way into the source. */
-const crossSpan = (
-  c: { file: string; in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean },
-  back = 0,
-  ahead = 0
-) => {
-  const rt = retimeOf(c);
-  const { lo, hi } = srcSpan(rt, -back, rt.len + ahead);
-  return { file: c.file, in: lo, out: hi };
+type Sounded = {
+  file: string;
+  in: number;
+  out: number;
+  speed?: number;
+  speedCurve?: SpeedNode[];
+  reverse?: boolean;
+  soundFrom?: SpecSound;
 };
+
+/** What an entry decodes: its own trim widened by the reach at its edges,
+ * on the file its sound reads — a bound recording through its offset, the
+ * window narrowed to what that recording holds. */
+const soundRead = (c: Sounded, back = 0, ahead = 0): (SoundWindow & { file: string }) | null => {
+  const len = retimeOf(c).len;
+  const from = c.soundFrom;
+  const w = soundWindow(c, from ? { offset: from.offset, limit: from.duration } : { offset: 0, limit: Infinity }, -back, len + ahead);
+  return w && { ...w, file: from ? from.file : c.file };
+};
+
+/** The ramps a split edit puts on an entry's gain, in timeline seconds: up
+ * from silence at the head of the sound that leads the picture, down to
+ * silence at the end of the sound that trails it. Inside the picture the
+ * clip's own fades and crossings shape the level, and they never reach out
+ * here — so the trailing sound comes back up to `level` at the picture's end.
+ * Scheduled after those fades: two events at the picture's end keep the order
+ * they were set in, and the last one is the level the tail plays at. */
+function scheduleSplit(
+  param: AudioParam,
+  level: number,
+  head: number,
+  end: number,
+  lead: number,
+  tail: number,
+  fade: number
+) {
+  if (lead > 0) {
+    const f = Math.min(fade, lead);
+    const from = Math.max(0, head - lead);
+    param.setValueAtTime(f > 0 ? 0 : level, from);
+    if (f > 0) param.linearRampToValueAtTime(level, from + f);
+  }
+  if (tail > 0) {
+    const f = Math.min(fade, tail);
+    param.setValueAtTime(level, end);
+    if (f > 0) {
+      param.setValueAtTime(level, end + tail - f);
+      param.linearRampToValueAtTime(0, end + tail);
+    }
+  }
+}
 
 /**
  * The windows during which a ducking item is audible, merged into a single
@@ -518,6 +563,15 @@ export async function renderMix(spec: MixSpec, opts: MixOptions): Promise<AudioB
         gain.gain.setValueAtTime(level, end - fOut);
         gain.gain.linearRampToValueAtTime(0, end);
       }
+      scheduleSplit(
+        gain.gain,
+        level,
+        a.start,
+        end,
+        a.crossIn ? 0 : Math.min(a.soundLead ?? 0, back),
+        a.crossOut ? 0 : Math.min(a.soundTail ?? 0, ahead),
+        a.splitFade ?? 0
+      );
     });
   }
 

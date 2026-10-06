@@ -1568,7 +1568,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   measure_level: async (s, input) => {
       const ids = Array.isArray(input.ids) ? input.ids.map(String) : [];
-      if (ids.length === 0) throw new ToolError("ids is required: the clip ids to measure.");
+      const wantsMix = input.mix === true;
+      if (ids.length === 0 && !wantsMix)
+        throw new ToolError("ids is required: the clip ids to measure, or mix: true for the whole mix.");
+      const mix = wantsMix ? await measureMix(s) : undefined;
+      if (ids.length === 0) return { mix };
       const targetId = input.target_id === undefined || input.target_id === null ? ids[0] : String(input.target_id);
       if (!ids.includes(targetId)) ids.push(targetId);
       type Row = {
@@ -1580,6 +1584,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         audibleSeconds: number;
         volume: number;
         levelDb: number;
+        integratedLufs: number | null;
+        truePeakDbtp: number | null;
         muted?: boolean;
       };
       const rows = new Map<string, Row | { id: string; name: string; kind: "video" | "soundtrack"; noAudio: string }>();
@@ -1596,7 +1602,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // one silent generated clip among them.
         let level: Awaited<ReturnType<typeof measureSourceLevel>>;
         try {
-          level = await measureSourceLevel(asset.url, { from, ...(to !== undefined ? { to } : {}) });
+          level = await sourceLevel(asset, from, to);
         } catch (e) {
           rows.set(id, { id, name: asset.name, kind, noAudio: e instanceof Error ? e.message : "Could not read the audio." });
           return;
@@ -1612,6 +1618,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           volume: round2(volume),
           // A muted clip plays nothing; its level is what it would play unmuted.
           levelDb: round2(level.rmsDb + gainDb(volume)),
+          // BS.1770 loudness and true peak as it plays, volume applied.
+          ...playedLoudness(level.loudness, volume),
           ...(muted ? { muted: true } : {}),
         });
       });
@@ -5625,6 +5633,33 @@ function notesIn(
 
 /** A clip volume as decibels of gain; silence reads as the quiet floor. */
 const gainDb = (volume: number) => (volume > 0 ? 20 * Math.log10(volume) : -100);
+
+/** A source's loudness and true peak moved by a clip's volume. */
+function playedLoudness(
+  loudness: LoudnessMeasure | null,
+  volume: number
+): { integratedLufs: number | null; truePeakDbtp: number | null } {
+  if (!loudness) return { integratedLufs: null, truePeakDbtp: null };
+  const r = roundedLoudness(loudness);
+  const gain = gainDb(volume);
+  return {
+    integratedLufs: r.integratedLufs === null ? null : round2(r.integratedLufs + gain),
+    truePeakDbtp: r.truePeakDbtp === null ? null : round2(r.truePeakDbtp + gain),
+  };
+}
+
+/** The whole mix as an unmastered export hears it: the same offline mix, at
+ * the export's 48 kHz stereo, measured to BS.1770. */
+async function measureMix(s: ReturnType<typeof useEditor.getState>) {
+  const whole = await renderMix(mixSpecFor(renderDoc(s), (a) => a.url), {
+    sampleRate: 48000,
+    channels: 2,
+    resolve: (file) => file,
+  });
+  if (!whole) return { silent: true, note: "Nothing in the cut makes a sound." };
+  const channels = Array.from({ length: whole.numberOfChannels }, (_, c) => whole.getChannelData(c));
+  return { ...roundedLoudness(await measureLoudnessSliced(channels, whole.sampleRate)), seconds: round2(whole.duration) };
+}
 
 function resolveWatchTarget(
   s: ReturnType<typeof useEditor.getState>,

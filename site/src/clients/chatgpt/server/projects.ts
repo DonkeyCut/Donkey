@@ -7,6 +7,8 @@ import { normalizeAspect, type ProjectDoc } from "@/cut/lib/types";
 import { ADOPT_COMMAND, type AdoptedAsset } from "@/cut/lib/commandBatch";
 import { NO_CARD_OPEN, queueCommands, waitForJob, type CommandCall, type CommandJobResult, type JobRow } from "@/cut/server/cloud/commands";
 import { needsWorker, queueDocExport, queueImportUrl } from "@/cut/server/cloud/jobs";
+import type { DocExportAudio } from "@/cut/lib/exportPresets";
+import { stemsArchiveName } from "@/cut/lib/exportDelivery";
 import { cutLimitsFor } from "@/cut/server/cloud/limits";
 import { previewFromDoc } from "@/cut/server/cloud/previewJobs";
 import { mediaObjectUrl, mediaUrlLifetime } from "@/cut/server/cloud/mediaCdn";
@@ -212,6 +214,20 @@ export function projectTools(
       view.export.status = "expired";
       view.export.error = "The export file was deleted. Export again.";
       return { view, playback: null, download: null };
+    }
+    // Stems land beside the video under its name, in the project's exports.
+    if (row.outName) {
+      const stems = await db.cutMediaObject.findFirst({
+        where: {
+          userId: identity.userId,
+          projectId: row.projectId,
+          kind: "export",
+          fileName: stemsArchiveName(row.outName),
+          uploadState: "complete",
+        },
+        select: { fileName: true },
+      });
+      if (stems) view.export.stems = stems.fileName;
     }
     return {
       view,
@@ -498,9 +514,9 @@ export function projectTools(
     undo: (projectId: string) => step(projectId, "undo"),
     redo: (projectId: string) => step(projectId, "redo"),
 
-    async exportVideo(projectId: string, preset: string): Promise<ProjectResult> {
+    async exportVideo(projectId: string, preset: string, audio: DocExportAudio = {}): Promise<ProjectResult> {
       requireEdit();
-      const queued = await queueDocExport(identity.userId, projectId, preset);
+      const queued = await queueDocExport(identity.userId, projectId, preset, audio);
       if (queued instanceof Response) return refusal(queued);
       const row = await waitForJob(identity.userId, queued.id, config.commandWaitMs);
       if (!row) throw new ProjectToolError("The export disappeared. Try again.");

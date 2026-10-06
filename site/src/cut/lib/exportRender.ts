@@ -31,7 +31,10 @@ import {
 } from "mediabunny";
 import { drawBlock } from "./blockSource";
 import { audioFxSpans } from "./audioEffects";
-import { renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
+import { duckWindows, renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
+import { masterInPlace } from "./loudness";
+import { wavBytes, wavChunks, writeStoredZip, type StemDef } from "./stems";
+import { specSound } from "./soundSource";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { ensureClipLuts, sourceLookup } from "./lutBuild";
 import { colorRead, type ColorRead, type ReadFile } from "./sourceColor";
@@ -1091,6 +1094,17 @@ export async function renderProjectToMp4(
   });
   const mix = whole && settings.range ? sliceAudio(whole, from, from + span) : whole;
   stop();
+  // A mastered delivery: the mix as it will be heard is measured, moved by
+  // one gain to its target, and limited only where that gain carries its
+  // true peak over the ceiling — the same code the engine runs on its mix.
+  if (mix && settings.loudness !== undefined) {
+    if (settings.truePeakCeiling === undefined) throw new Error("A mastered export needs its true-peak ceiling.");
+    await masterInPlace(
+      Array.from({ length: mix.numberOfChannels }, (_, c) => mix.getChannelData(c)),
+      { sampleRate: mix.sampleRate, targetLufs: settings.loudness, ceilingDbtp: settings.truePeakCeiling }
+    );
+    stop();
+  }
 
   const canvas = createRasterCanvas(settings.width, settings.height);
   const painter = new FramePainter(doc, canvas, resolve);
@@ -1180,6 +1194,78 @@ export async function renderProjectToMp4(
     throw err;
   } finally {
     painter.dispose();
+  }
+}
+
+/**
+ * Render the cut's stems into one stored zip in scratch storage: a 24-bit WAV
+ * per stem, each as long as the delivery and starting where it starts, from
+ * the same fold the export's mix comes from and before any master.
+ *
+ * One stem is rendered at a time, and its WAV streams into the archive a
+ * second at a time, so what this holds is one stem's mix.
+ */
+export async function renderStemsArchive(
+  doc: ExportDoc,
+  settings: ExportSettings,
+  stems: StemDef[],
+  opts: Pick<RenderOptions, "resolve" | "signal">
+): Promise<RenderedExport> {
+  if (stems.length === 0) throw new Error("Nothing in this cut makes a sound to split into stems.");
+  const duration = projectDuration(doc);
+  const from = Math.max(0, settings.range?.start ?? 0);
+  const span = deliverySpan(settings.range, duration);
+  const rate = settings.audioSampleRate ?? AUDIO_RATE;
+  const count = settings.audioChannels ?? AUDIO_CHANNELS;
+  const spec = mixSpecFor(doc, opts.resolve);
+  // The length the export's own mix comes out at, slice included.
+  const total = Math.max(1, Math.ceil(duration * rate));
+  const frames = settings.range
+    ? Math.max(1, Math.min(total, Math.round((from + span) * rate)) - Math.min(total, Math.round(from * rate)))
+    : total;
+
+  const dir = await scratchDir();
+  void sweepScratch(dir);
+  const name = `stems-${crypto.randomUUID()}.zip`;
+  const handle = await dir.getFileHandle(name, { create: true });
+  const writable = await handle.createWritable();
+  const discard = async () => {
+    await writable.close().catch(() => {});
+    await dir.removeEntry(name).catch(() => {});
+  };
+  try {
+    // A stem's mix renders when its entry is first read; the entry is read
+    // twice (checksum, then bytes), so the last one rendered is kept.
+    let held: { stem: StemDef; channels: Float32Array[] } | null = null;
+    const channelsOf = async (stem: StemDef): Promise<Float32Array[]> => {
+      if (held?.stem === stem) return held.channels;
+      held = null;
+      opts.signal?.throwIfAborted();
+      const whole = await renderMix(stemMixSpec(spec, stem), { sampleRate: rate, channels: count, resolve: (f) => f });
+      const cut = whole && settings.range ? sliceAudio(whole, from, from + span) : whole;
+      const channels = cut ? Array.from({ length: cut.numberOfChannels }, (_, c) => cut.getChannelData(c)) : [];
+      held = { stem, channels };
+      return channels;
+    };
+    await writeStoredZip(
+      stems.map((stem) => ({
+        name: stem.file,
+        size: wavBytes(frames, count),
+        read: async function* () {
+          yield* wavChunks(await channelsOf(stem), frames, count, rate);
+        },
+      })),
+      async (bytes) => {
+        opts.signal?.throwIfAborted();
+        await writable.write(bytes as Uint8Array<ArrayBuffer>);
+      }
+    );
+    await writable.close();
+    return { file: await handle.getFile(), discard };
+  } catch (err) {
+    await writable.abort().catch(() => {});
+    await dir.removeEntry(name).catch(() => {});
+    throw err;
   }
 }
 

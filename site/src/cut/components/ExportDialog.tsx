@@ -46,6 +46,8 @@ import { useExports } from "@/cut/lib/exportStore";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { subtitleFiles } from "@/cut/lib/subtitleFile";
 import { formatTime } from "@/cut/lib/time";
+import { cutLoudness, LOUDNESS_CHOICES, loudnessLabel, loudnessSettings, type LoudnessId } from "@/cut/lib/loudnessSettings";
+import { planStems } from "@/cut/lib/stems";
 import { cn } from "@/lib/utils";
 
 /** A file format the menu offers: a container carrying a codec. A codec that
@@ -106,6 +108,12 @@ export function ExportDialog() {
   const [rangeMode, setRangeMode] = useState<"all" | "selection">("all");
   // A captions file beside the video.
   const [withCaptions, setWithCaptions] = useState(false);
+  // The loudness the mix is mastered to, starting on the account's default.
+  const [loudness, setLoudness] = useState<LoudnessId>(() => cutLoudness().defaultTarget);
+  // A zip of one WAV per lane beside the video.
+  const [withStems, setWithStems] = useState(false);
+  const canStem = useMemo(() => planStems({ clips, audioClips, assets }).length > 0, [clips, audioClips, assets]);
+  const stems = withStems && canStem;
   // The footage's frame rate, read from the sources once the dialog opens;
   // a "source" frame-rate choice resolves to it. Undefined while the probe
   // runs, null for a cut with no readable video. The probe re-runs only when
@@ -149,9 +157,11 @@ export function ExportDialog() {
         ...(hdr && chosen.codec === "h264" ? { codec: "hevc" as const, copySource: false } : {}),
         ...(typedName ? { name: baseName } : {}),
         ...(range ? { range } : {}),
+        ...loudnessSettings(loudness),
+        ...(stems ? { stems: true } : {}),
       };
     },
-    [choice, resolutions, sourceFps, probe, probing, audioClips.length, typedName, baseName, range, hdr]
+    [choice, resolutions, sourceFps, probe, probing, audioClips.length, typedName, baseName, range, hdr, loudness, stems]
   );
   const set = (patch: Partial<ExportChoice>) => setChoice((c) => ({ ...c, ...patch }));
   const captionFiles = useMemo(
@@ -398,6 +408,27 @@ export function ExportDialog() {
                 </SelectContent>
               </Select>
             </Field>
+            <Field
+              label="Loudness"
+              hint={
+                loudness === "off"
+                  ? undefined
+                  : `Sets the whole mix to its target and holds true peaks under ${String(cutLoudness().truePeakCeiling).replace("-", "−")} dBTP.`
+              }
+            >
+              <Select value={loudness} onValueChange={(v) => setLoudness(v as LoudnessId)}>
+                <SelectTrigger className="w-fit min-w-32" aria-label="Loudness">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  {LOUDNESS_CHOICES.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {loudnessLabel(c.id)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           </div>
 
           <Collapsible open={moreOpen} onOpenChange={setMoreOpen} className="flex flex-col gap-3">
@@ -436,6 +467,18 @@ export function ExportDialog() {
                   <span className="text-xs text-muted-foreground">Mbps</span>
                 </label>
               </Field>
+              {canStem && (
+                <Field
+                  label="Stems"
+                  hint="Saves one WAV per lane, dialogue and each soundtrack lane, zipped beside the video for mixing elsewhere."
+                >
+                  <Switch
+                    aria-label="Export stems"
+                    checked={withStems}
+                    onCheckedChange={(v) => setWithStems(v === true)}
+                  />
+                </Field>
+              )}
               {captionFiles.length > 0 && (
                 <Field
                   label="Captions file"
@@ -466,6 +509,8 @@ export function ExportDialog() {
               {FORMATS.find((f) => f.id === formatId)?.label ?? formatId} · {settings.audioCodec.toUpperCase()}
               {hdr ? ` · ${OUTPUT_SPACES.find((o) => o.id === colorSpace)?.label}` : ""}
               {range ? ` · ${formatTime(span)}` : ""}
+              {settings.loudness !== undefined ? ` · ${String(settings.loudness).replace("-", "−")} LUFS` : ""}
+              {stems ? " · stems" : ""}
             </span>
             <span className="shrink-0 tabular-nums">{sizeEstimate}</span>
           </div>

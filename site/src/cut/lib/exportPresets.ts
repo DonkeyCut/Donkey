@@ -1,5 +1,6 @@
 // The export sizes offered by name. Kept apart from the export client so a
 // server route can list them without pulling the editor in.
+import type { LoudnessId } from "./loudnessSettings";
 
 /** The delivery every render that is not the user's own export uses — hover
  * proxies, share cards, ladder masters, the phone's presets. */
@@ -40,6 +41,10 @@ export type DocExportPreset = (typeof DOC_EXPORT_PRESETS)[number];
 export function isDocExportPreset(value: unknown): value is DocExportPreset {
   return typeof value === "string" && (DOC_EXPORT_PRESETS as readonly string[]).includes(value);
 }
+
+/** How a queued render of the stored document treats its sound: a loudness
+ * target (absent = the setting's default) and stems beside the file. */
+export type DocExportAudio = { loudness?: LoudnessId; stems?: boolean };
 
 /** Named output sizes; Source is derived from the project media. */
 export const EXPORT_RESOLUTIONS = [

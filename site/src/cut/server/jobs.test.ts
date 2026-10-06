@@ -108,6 +108,49 @@ describe("a render the tab carries itself", () => {
   });
 });
 
+describe("stems beside a tab render", () => {
+  let projectId = "";
+  beforeAll(async () => {
+    projectId = (await projects.createProject("Stem Render")).id;
+  });
+
+  test("the stems land under the video's name, before the video settles the job", async () => {
+    const job = await jobs.createClientJob(projectId, "mp4", undefined, true);
+    expect(job.outName).toBe("Stem Render.mp4");
+    expect(await jobs.completeClientStems(job.id, bytes("zip bytes"))).not.toBeNull();
+    const zip = path.join(projects.exportsDir(projectId), "Stem Render stems.zip");
+    expect(await readFile(zip, "utf8")).toBe("zip bytes");
+    expect(await exists(`${zip}.part`)).toBe(false);
+    expect((await jobs.completeClientJob(job.id, bytes("mp4 bytes")))?.status).toBe("done");
+  });
+
+  test("a name whose stems are taken is passed over by a render that asks for stems", async () => {
+    // "Stem Render 2.mp4" is free, but a stray zip holds its stems' name.
+    await writeFile(path.join(projects.exportsDir(projectId), "Stem Render 2 stems.zip"), "old");
+    const plain = await jobs.createClientJob(projectId, "mp4");
+    expect(plain.outName).toBe("Stem Render 2.mp4");
+    jobs.releaseClientJob(plain.id);
+    const stemmed = await jobs.createClientJob(projectId, "mp4", undefined, true);
+    expect(stemmed.outName).toBe("Stem Render 3.mp4");
+    jobs.releaseClientJob(stemmed.id);
+  });
+
+  test("a render that never asked for stems refuses them, and a release takes landed stems with it", async () => {
+    const plain = await jobs.createClientJob(projectId, "mp4");
+    expect(await jobs.completeClientStems(plain.id, bytes("zip"))).toBeNull();
+    jobs.releaseClientJob(plain.id);
+
+    const job = await jobs.createClientJob(projectId, "mov", undefined, true);
+    await jobs.completeClientStems(job.id, bytes("zip"));
+    const zip = path.join(projects.exportsDir(projectId), jobs.getJob(job.id)!.outName.replace(/\.mov$/, " stems.zip"));
+    expect(await exists(zip)).toBe(true);
+    jobs.releaseClientJob(job.id);
+    // The release removes in the background.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(await exists(zip)).toBe(false);
+  });
+});
+
 describe("preview publication", () => {
   async function request(projectId: string) {
     const form = new FormData();

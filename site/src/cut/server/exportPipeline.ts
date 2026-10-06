@@ -11,6 +11,10 @@ import { assertGraphSafe, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
 import { withSpecColors } from "./fileColor";
+import { alignRecording } from "./soundAlign";
+import { shiftSpan, type SpecSound } from "../lib/soundSource";
+import { masterRawMix, packStems } from "./exportAudio";
+import type { StemDef } from "../lib/stems";
 import { CLIP_MAX_ZOOM, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
 import { audioFxFilters, buildClipLut, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipSound, type CodeFormat, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
@@ -103,6 +107,14 @@ export interface ExportSpec {
    * graph composites the whole cut and the delivery is cut from it, so fades,
    * captions and elements sit where the timeline has them. */
   range?: ExportRange;
+  /** The integrated loudness the delivered mix is mastered to, LUFS; absent
+   * = the mix as it plays. */
+  loudness?: number;
+  /** The true peak a mastered mix is held under, dBTP. */
+  truePeakCeiling?: number;
+  /** The stems written beside the file, zipped at the handle's
+   * `stemsPath`; absent = none. */
+  stemPlan?: StemDef[];
   duration: number;
   /** The frame's own color (hex): what letterboxes a fitted clip, what a gap
    * on track 0 plays, and what a cut of nothing but elements composites over.
@@ -376,6 +388,11 @@ export interface ExportSpec {
   captions?: { file: string; start: number; end: number; lane?: number }[];
 }
 
+/** The rate the graph mixes at: every read resamples to it. */
+const MIX_RATE = 44100;
+/** The rate stems are written at, the rate the tab's own stems mix at. */
+const STEM_RATE = 48000;
+
 /** What the pipeline needs from its caller's job record: the staging dir the
  * overlay PNGs were written into, the output path, and the mutable fields the
  * run reports through (progress, the live ffmpeg process for cancellation,
@@ -385,6 +402,8 @@ export interface ExportSpec {
 export interface RenderHandle {
   tmpDir: string;
   outPath: string;
+  /** Where the stems zip lands when the spec asks for stems. */
+  stemsPath?: string;
   progress: number;
   error?: string;
   proc?: ChildProcess;
@@ -762,9 +781,13 @@ export interface ExportPipelineIO {
   mediaDuration: typeof mediaDuration;
   videoEncoder: (codec: ExportVideoCodec) => Promise<string>;
   runFfmpeg: typeof runFfmpeg;
+  masterRawMix: typeof masterRawMix;
+  packStems: typeof packStems;
 }
 
 const realIO: ExportPipelineIO = {
+  masterRawMix,
+  packStems,
   exportSourceFiles,
   stat,
   writeFile,
@@ -791,7 +814,9 @@ export async function runExport(
 ) {
   if (given.clips.length === 0) throw new Error("Nothing to export.");
   const codec = given.codec ?? "h264";
-  if (given.target === "export" && given.sourceSegments?.length && (codec === "h264" || codec === "hevc")) {
+  // Stems are cut from the graph's own sound, so a spec that asks for them
+  // renders.
+  if (given.target === "export" && given.sourceSegments?.length && !given.stemPlan?.length && (codec === "h264" || codec === "hevc")) {
     for (const segment of given.sourceSegments) {
       if (!given.clips.some((clip) => segment.file === clip.file && segment.from >= clip.in && segment.to <= clip.out)) {
         // Adjacent splits of a source may be merged into one copy span.
@@ -890,7 +915,7 @@ export async function runExport(
     soundOnly = false
   ): Promise<T> => {
     if (!c.reverse || !c.file || c.image || c.hidden) return c;
-    const src = await resolveMedia(io.stat, mediaPathFor, c.file);
+    const src = twinFiles.has(c.file) ? c.file : await resolveMedia(io.stat, mediaPathFor, c.file);
     const rt = retimeOf(c);
     // The span plus the handles a crossing reaches into, so the copy holds
     // what the sound of a cross dissolve needs on either side.
@@ -1104,6 +1129,14 @@ export async function runExport(
     audioPresence.set(file, streams.audio);
     videoPresence.set(file, streams.video);
     if (streams.mono) monoFiles.add(file);
+  }
+  // The sound twins still read forward: stereo sound, written just now.
+  for (const file of new Set([...soundTwins.values(), ...spec.audio].map((e) => e?.file ?? ""))) {
+    if (!twinFiles.has(file)) continue;
+    inputIndex.set(file, nInputs++);
+    inputs.push("-i", file);
+    audioPresence.set(file, true);
+    videoPresence.set(file, false);
   }
   // Animated overlays: each is its own concat-demuxer slideshow (region-sized
   // frames with transparent filler around the element's window), the exact
@@ -1570,16 +1603,17 @@ export async function runExport(
     image?: boolean;
   };
   const baked = new Map<Sounding, BakedAudio & { idx: number }>();
-  const bakeTargets: { c: Sounding; tag: string }[] = [
-    ...spec.clips.map((c, j) => ({ c, tag: `clip_${j}` })),
-    ...overlayVideos.map((oc, k) => ({ c: oc, tag: `ovl_${k}` })),
+  const bakeTargets: { c: Sounding | null; tag: string }[] = [
+    ...spec.clips.map((c, j) => ({ c: sounding(c), tag: `clip_${j}` })),
+    ...overlayVideos.map((oc, k) => ({ c: sounding(oc), tag: `ovl_${k}` })),
     ...spec.audio.map((a, k) => ({ c: a, tag: `snd_${k}` })),
   ];
   for (const { c, tag } of bakeTargets) {
+    if (!c) continue;
     const rt = retimeOf(c);
     if (rt.uniform || !c.file || c.image || c.muted || c.hidden || !audioPresence.get(c.file)) continue;
     const file = path.join(job.tmpDir, `retime_${tag}.wav`);
-    const src = await resolveMedia(io.stat, mediaPathFor, c.file);
+    const src = await sourcePath(c.file);
     const bake = await bakeRetimedAudio(
       {
         ffmpeg: (args) => io.runFfmpeg(job, args),
@@ -2144,7 +2178,8 @@ export async function runExport(
         `color=c=${padColor}:s=${W}x${H}:r=${fps},trim=0:${num(dur)},setpts=PTS-STARTPTS,fps=${fps},format=${clipFmt}[v${j}]`
       );
     }
-    if (!c.muted && !c.hidden && audioPresence.get(c.file)) {
+    const snd = sounding(c);
+    if (!c.muted && !c.hidden && snd && audioPresence.get(snd.file)) {
       const vol = `${soundChain(c.sound)}${(c.volume ?? 1) !== 1 ? `volume=${num(c.volume ?? 1)},` : ""}`;
       // The picture's fade edges carry the sound with them; zoom edges don't.
       const afades =
@@ -2277,12 +2312,23 @@ export async function runExport(
     const ahead = Math.min(prevC.soundAhead ?? 0, half);
     // Never reach past the head of the source: a handle is what the trim left
     // behind, and there is none before zero.
-    const back = Math.min(c.soundBack ?? 0, half, headRoom(c));
+    const back = Math.min(c.soundBack ?? 0, half, headRoom(sounding(c) ?? c));
     // The outgoing clip, still sounding past its out point.
     const prevDur = clipDur(prevC);
     handleStream(prevC, `a${j}`, prevDur, prevDur + ahead, cut, crossExpr(0, half, false));
     // The incoming clip, already sounding before its in point.
     handleStream(c, `b${j}`, -back, 0, cut - back, crossExpr(back, half, true));
+  });
+  // A split edit: a clip's sound ahead of its picture (J-cut) or carried on
+  // past it (L-cut), lifted out the same way and ramped from silence at its
+  // far end. A transition at that cut owns the handover, so it has none.
+  spec.clips.forEach((c, j) => {
+    const fade = c.splitFade ?? 0;
+    const lead = Math.min(c.soundLead ?? 0, c.soundBack ?? 0, headRoom(sounding(c) ?? c), clipAt[j]);
+    if (lead > 0.01) handleStream(c, `l${j}`, -lead, 0, clipAt[j] - lead, splitExpr(0, lead, fade, true));
+    const tail = Math.min(c.soundTail ?? 0, c.soundAhead ?? 0);
+    const dur = clipDur(c);
+    if (tail > 0.01) handleStream(c, `t${j}`, dur, dur + tail, clipAt[j] + dur, splitExpr(0, tail, fade, false));
   });
 
   // Join the segments. Clips abut — a transition claims no layout — so every
@@ -2716,6 +2762,8 @@ export async function runExport(
 
   // Soundtrack clips: trim, gain, shift into place, mix with clip audio.
   const soundLabels: string[] = [];
+  /** The lane of each entry in soundLabels, for the stems. */
+  const soundLanes: number[] = [];
   spec.audio.forEach((a, k) => {
     if (!audioPresence.get(a.file)) return;
     const delayMs = Math.max(0, Math.round(a.start * 1000));
@@ -2735,14 +2783,29 @@ export async function runExport(
     );
     // Music and other non-voiceover sound ducks under the voiceovers.
     soundLabels.push(a.duck !== undefined && a.duck < 1 ? `snd${k}` : duckOthers(`snd${k}`));
+    soundLanes.push(a.lane ?? 0);
   });
 
   // The joined clip audio and overlay-video audio duck too.
   let aLabel = duckOthers(aAcc);
+  const overlayDucked = overlaySoundLabels.map(duckOthers);
+  const crossDucked = crossHandleLabels.map(duckOthers);
+  // Stems hear a split of the very streams the mix sums — ducked, faded,
+  // treated — so adding them back up gives the mix.
+  const stemPlan = spec.stemPlan ?? [];
+  const stemInputs: string[][] = stemPlan.map(() => []);
+  const dialogueStem = stemPlan.findIndex((s) => s.lane === null);
+  const tap = (label: string, stem: number): string => {
+    if (stem < 0) return label;
+    filters.push(`[${label}]asplit=2[${label}m][${label}s]`);
+    stemInputs[stem].push(`${label}s`);
+    return `${label}m`;
+  };
+  aLabel = tap(aLabel, dialogueStem);
   const extraSound = [
-    ...soundLabels,
-    ...overlaySoundLabels.map(duckOthers),
-    ...crossHandleLabels.map(duckOthers),
+    ...soundLabels.map((l, i) => tap(l, stemPlan.findIndex((s) => s.lane === soundLanes[i]))),
+    ...overlayDucked.map((l) => tap(l, dialogueStem)),
+    ...crossDucked.map((l) => tap(l, dialogueStem)),
   ];
   if (extraSound.length > 0) {
     const mixIn = [aLabel, ...extraSound].map((l) => `[${l}]`).join("");
@@ -2834,6 +2897,42 @@ export async function runExport(
     aLabel = "arange";
   }
 
+  // Each stem: its streams summed, treated like the mix, and laid over the
+  // delivery's whole length so every file starts and ends where it does.
+  const stemLabels = stemPlan.map((_, i) => {
+    const ins = stemInputs[i];
+    let label = `stm${i}`;
+    if (ins.length === 0) filters.push(`anullsrc=r=44100:cl=stereo,atrim=0:${num(spec.duration)}[${label}]`);
+    else if (ins.length === 1) label = ins[0];
+    else {
+      filters.push(
+        `${ins.map((l) => `[${l}]`).join("")}amix=inputs=${ins.length}:duration=longest:dropout_transition=0:normalize=0[${label}]`
+      );
+    }
+    label = treatAudio(label, `s${i}_`);
+    const window = spec.range
+      ? `,atrim=start=${num(Math.max(0, spec.range.start))}:end=${num(Math.min(spec.duration, spec.range.end))},asetpts=PTS-STARTPTS`
+      : "";
+    filters.push(`[${label}]apad=whole_dur=${num(spec.duration)},atrim=0:${num(spec.duration)}${window}[stem${i}]`);
+    return `stem${i}`;
+  });
+  if (stemPlan.length > 0 && !job.stemsPath) throw new Error("This export has nowhere to put its stems.");
+  const stemFiles = stemPlan.map((s, i) => ({ path: path.join(job.tmpDir, `stem_${i}.wav`), name: s.file }));
+  const stemOutputs = stemLabels.flatMap((label, i) => [
+    "-map", `[${label}]`,
+    "-c:a", "pcm_s24le",
+    "-ar", String(STEM_RATE),
+    "-ac", "2",
+    "-t", num(span),
+    stemFiles[i].path,
+  ]);
+
+  // A mastered delivery takes its sound out of this pass as raw float, so the
+  // master can run the tab's own loudness code over it before it is encoded.
+  const master = spec.loudness !== undefined;
+  if (master && spec.truePeakCeiling === undefined) throw new Error("A mastered export needs its true-peak ceiling.");
+  const mixPath = path.join(job.tmpDir, "mix.f32");
+
   const enc = await io.videoEncoder(spec.codec ?? "h264");
 
   // Encode into the tmp dir, then re-emit the container to strip a stray output
@@ -2847,15 +2946,30 @@ export async function runExport(
       ...inputs,
       "-filter_complex", assertGraphSafe(filters.join(";")),
       "-map", `[${vLabel}]`,
-      "-map", `[${aLabel}]`,
+      ...(master ? [] : ["-map", `[${aLabel}]`]),
       ...videoCodecArgs(enc, spec),
       ...colorTagArgs(spec),
-      ...audioCodecArgs(spec),
+      ...(master ? [] : audioCodecArgs(spec)),
       "-t", num(span),
       encodePath,
+      ...(master
+        ? ["-map", `[${aLabel}]`, "-c:a", "pcm_f32le", "-ar", String(MIX_RATE), "-ac", "2", "-f", "f32le", "-t", num(span), mixPath]
+        : []),
+      ...stemOutputs,
     ],
     (t) => (job.progress = Math.min(0.99, t / Math.max(0.1, span)))
   );
+
+  const masteredPath = path.join(job.tmpDir, "master.f32");
+  if (master) {
+    await io.masterRawMix(mixPath, masteredPath, {
+      sampleRate: MIX_RATE,
+      channels: 2,
+      targetLufs: spec.loudness!,
+      ceilingDbtp: spec.truePeakCeiling!,
+    });
+  }
+  if (stemPlan.length > 0) await io.packStems(stemFiles, job.stemsPath!);
 
   // ffmpeg's autorotation already baked each source's display matrix into the
   // pixels, so the encode's frames are upright. But for a complex filtergraph it
@@ -2865,12 +2979,17 @@ export async function runExport(
   // "desktop" frame. `-display_rotation 0` overrides that matrix to identity; a
   // stream copy re-emits the (already correct) pixels and audio unchanged and
   // writes the faststart-optimized final file.
+  // A mastered mix joins the picture here, encoded for the delivery.
   await io.runFfmpeg(job, [
     "-y",
     "-display_rotation", "0",
     "-i", encodePath,
-    "-map", "0",
-    "-c", "copy",
+    ...(master
+      ? [
+          "-f", "f32le", "-ar", String(MIX_RATE), "-ac", "2", "-i", masteredPath,
+          "-map", "0:v", "-map", "1:a", "-c:v", "copy", ...audioCodecArgs(spec), "-t", num(span),
+        ]
+      : ["-map", "0", "-c", "copy"]),
     "-movflags", "+faststart",
     job.outPath,
   ]);

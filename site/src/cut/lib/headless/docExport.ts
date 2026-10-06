@@ -14,13 +14,14 @@ import { useEditor } from "../store";
 import { sourceExportProfile } from "@/cut/lib/exportRender";
 import { bindHeadlessSession, type HeadlessSession } from "./bind";
 import { openCloudSnapshot, type CloudDocSnapshot } from "./docSession";
+import { loudnessSettings } from "../loudnessSettings";
 
 // Queued document exports hydrate their captured revision in an isolated
 // worker, prepare the same payload as the editor, and stage its overlay
 // pictures in the render's own scratch directory.
 
-export { DOC_EXPORT_PRESETS, isDocExportPreset, type DocExportPreset } from "../exportPresets";
-import type { DocExportPreset } from "../exportPresets";
+export { DOC_EXPORT_PRESETS, isDocExportPreset, type DocExportAudio, type DocExportPreset } from "../exportPresets";
+import type { DocExportAudio, DocExportPreset } from "../exportPresets";
 
 async function settingsFor(preset: DocExportPreset, doc: ExportDoc): Promise<ExportSettings> {
   const fixed = EXPORT_PRESETS.find((p) => p.id === preset);
@@ -41,12 +42,21 @@ export async function buildDocExportSpec(
   preset: DocExportPreset,
   tmpDir: string,
   snapshot: CloudDocSnapshot,
-  target: "export" | "preview" = "export"
+  target: "export" | "preview" = "export",
+  audio: DocExportAudio = {}
 ): Promise<object> {
   bindHeadlessSession(session);
   await openCloudSnapshot(session, projectId, snapshot);
   const doc = renderDoc(useEditor.getState());
-  const payload = await buildExportPayload(projectId, doc, target === "preview" ? previewSettings(doc.aspect) : await settingsFor(preset, doc), target);
+  const settings: ExportSettings =
+    target === "preview"
+      ? previewSettings(doc.aspect)
+      : {
+          ...(await settingsFor(preset, doc)),
+          ...loudnessSettings(audio.loudness),
+          ...(audio.stems ? { stems: true } : {}),
+        };
+  const payload = await buildExportPayload(projectId, doc, settings, target);
   await Promise.all(
     payload.pngs.map(async (p) =>
       writeFile(

@@ -18,6 +18,8 @@ import {
 } from "@/clients/chatgpt/server/catalog";
 import { MAX_COMMANDS_PER_BATCH } from "@/cut/server/cloud/commands";
 import { DOC_EXPORT_PRESETS } from "@/cut/lib/exportPresets";
+import { bindCutLoudness, cutLoudness, LOUDNESS_CHOICES, LOUDNESS_IDS } from "@/cut/lib/loudnessSettings";
+import { getGlobalSetting } from "@/lib/config/effective";
 import {
   chatgptConfig,
   RESOURCE_METADATA_PATH,
@@ -414,13 +416,19 @@ export function createChatgptServer(
     {
       title: "Export a project",
       description:
-        `Render the saved project to an MP4 the user downloads from the Donkey Cut card. preset: ${DOC_EXPORT_PRESETS.join(" | ")} (original matches the footage; tiktok is best quality 1080p; fast is a smaller 1080p; light is a 720p draft). Free; the file counts against the account's cloud storage and is listed in the project's Media panel. A render can outlast this call — finish it with get_export_status.`,
-      inputSchema: z.object({ projectId: idSchema, preset: z.enum(DOC_EXPORT_PRESETS).optional() }),
+        `Render the saved project to an MP4 the user downloads from the Donkey Cut card. preset: ${DOC_EXPORT_PRESETS.join(" | ")} (original matches the footage; tiktok is best quality 1080p; fast is a smaller 1080p; light is a 720p draft). loudness masters the mix to an integrated target under a true-peak ceiling: ${LOUDNESS_CHOICES.map((c) => (c.id === "off" ? "off (the mix as it plays)" : `${c.id} ${cutLoudness().targets[c.id]} LUFS (${c.detail})`)).join(", ")}; the true-peak ceiling is ${cutLoudness().truePeakCeiling} dBTP; omitted uses the account default (${cutLoudness().defaultTarget}). stems: true also writes one 24-bit WAV per lane (dialogue from the video clips, then each soundtrack lane), full length and unmastered, zipped as "<name> stems.zip" beside the video in the project's exports. Free; the files count against the account's cloud storage and are listed in the project's exports. A render can outlast this call — finish it with get_export_status.`,
+      inputSchema: z.object({
+        projectId: idSchema,
+        preset: z.enum(DOC_EXPORT_PRESETS).optional(),
+        loudness: z.enum(LOUDNESS_IDS).optional(),
+        stems: z.boolean().optional(),
+      }),
       outputSchema: viewSchema,
       annotations: editAnnotations,
       _meta: { ...editMetadata, ...status("Exporting the video", "Export started") },
     },
-    ({ projectId, preset }) => editing(() => runTool(() => projects.exportVideo(projectId, preset ?? "original"))),
+    ({ projectId, preset, loudness, stems }) =>
+      editing(() => runTool(() => projects.exportVideo(projectId, preset ?? "original", { loudness, stems }))),
   );
 
   server.registerTool(
@@ -589,6 +597,8 @@ export async function mcpEndpoint(request: Request) {
     return rateLimitResponse(rateLimit.retryAfterSeconds);
   }
 
+  // export_video teaches the loudness targets the worker will master to.
+  bindCutLoudness(await getGlobalSetting("cutLoudness"));
   const handler = chatgptHttpHandler(identity, config);
   try {
     const response = await handler.fetch(request);

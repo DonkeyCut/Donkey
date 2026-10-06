@@ -8,7 +8,7 @@ export const projectSchema = z.object({ id: z.string(), name: z.string(), url: z
 export const jobStatusSchema = z.enum(["queued", "running", "done", "error", "expired"]);
 export const previewSchema = z.object({ id: z.string(), status: jobStatusSchema, progress: z.number(), revision: z.string().nullish(), error: z.string().optional() });
 /** A finished export downloads from the widget; the model gets the project link. */
-export const exportSchema = z.object({ id: z.string(), status: jobStatusSchema, progress: z.number(), name: z.string().nullish(), error: z.string().optional() });
+export const exportSchema = z.object({ id: z.string(), status: jobStatusSchema, progress: z.number(), name: z.string().nullish(), error: z.string().optional(), stems: z.string().nullish() });
 /** Any queued work the caller may poll with get_job_status. */
 export const jobSchema = z.object({ id: z.string(), kind: z.string(), status: jobStatusSchema, progress: z.number(), error: z.string().optional() });
 /** One command's outcome inside a batch. */

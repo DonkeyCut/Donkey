@@ -1,6 +1,7 @@
 import {
   cancelJob,
   completeClientJob,
+  completeClientStems,
   createClientJob,
   createJob,
   getJob,
@@ -44,9 +45,10 @@ export const exportApi = {
         projectId?: string;
         container?: ExportSpec["container"];
         name?: string;
+        stems?: boolean;
       };
       if (!body.projectId) return Response.json({ error: "Missing project." }, { status: 400 });
-      const job = await createClientJob(body.projectId, body.container, body.name?.trim() || undefined);
+      const job = await createClientJob(body.projectId, body.container, body.name?.trim() || undefined, body.stems === true);
       if (job.status === "error") return Response.json({ error: job.error }, { status: 400 });
       return Response.json({ id: job.id, outName: job.outName });
     } catch (e) {
@@ -69,6 +71,17 @@ export const exportApi = {
     if (!job) return Response.json({ error: "This export is no longer running." }, { status: 409 });
     if (job.status === "error") return Response.json({ error: job.error }, { status: 500 });
     return Response.json({ id: job.id, outName: job.outName });
+  },
+
+  /** The tab's stems zip, streamed beside the file before the file lands. */
+  async clientStems(req: Request, { jobId }: { jobId: string }) {
+    try {
+      const job = await completeClientStems(jobId, req.body);
+      if (!job) return Response.json({ error: "This export is no longer running." }, { status: 409 });
+      return Response.json({ ok: true });
+    } catch (e) {
+      return Response.json({ error: errorMessage(e, "Could not save the stems.") }, { status: 500 });
+    }
   },
 
   async clientRelease(_req: Request, { jobId }: { jobId: string }) {

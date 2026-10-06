@@ -57,6 +57,8 @@ import {
   EXPORT_CONTAINERS,
   exportBaseName,
   fixedRate,
+  STEMS_MIME,
+  stemsArchiveName,
   type SpecClipColor,
   specMediaFiles,
   type ExportAudioCodec,
@@ -93,6 +95,14 @@ export interface ExportSettings {
   name?: string;
   /** The stretch of the timeline to render, seconds; absent = all of it. */
   range?: ExportRange;
+  /** The integrated loudness the mix is mastered to, LUFS; absent = the
+   * mix as it plays. */
+  loudness?: number;
+  /** The true peak a mastered mix is held under, dBTP. */
+  truePeakCeiling?: number;
+  /** Write the audio as stems too: one WAV per lane, zipped beside the
+   * video. */
+  stems?: boolean;
 }
 
 export { DELIVERY_DEFAULTS, EXPORT_PRESETS } from "./exportPresets";
@@ -981,7 +991,7 @@ export async function buildExportPayload(
   // matte; painted pictures still travel beside it when the pose track keys
   // opacity, since opacity ships as coverage luma.
   for (let i = 0; i < spans.length; i++) {
-    const c = posed(spans[i].clip);
+    const c = posed(cardBoxless(spans[i].clip));
     const dur = Math.max(0.1, retimeOf(c).len);
     const pictures = await renderClipMaskPictures(
       c,
@@ -1184,7 +1194,7 @@ export async function buildExportPayload(
           removal: undefined as { rgb: string; alpha: string } | undefined,
           ...ramp,
         };
-        overlayClipOf.set(entry, posed(c));
+        overlayClipOf.set(entry, posed(cardBoxless(c)));
         return entry;
       });
   });
@@ -1304,6 +1314,7 @@ export async function buildExportPayload(
       reverse: a.reverse,
       sound: a.sound,
       duck: a.duck,
+      ...(a.lane ? { lane: a.lane } : {}),
     }));
 
   const overlays: {
@@ -1446,6 +1457,7 @@ export async function buildExportPayload(
       target,
       ...settings,
       ...(target === "export" ? { sourceSegments: sourceExportPlan(doc, settings) ?? undefined } : {}),
+      ...(target === "export" && settings.stems ? { stemPlan: stemsFor(doc) } : {}),
       // The hover proxy, the share card and the streaming ladder are SDR web
       // pictures whatever the project delivers.
       colorSpace: target === "export" ? doc.colorSpace ?? "sdr" : "sdr",
@@ -1552,6 +1564,29 @@ async function postExport(
   });
 }
 
+/** The stems a cut exports as. A cut with nothing audible has none, and
+ * asking for them is refused before anything renders. */
+function stemsFor(doc: ExportDoc): StemDef[] {
+  const stems = planStems(doc);
+  if (stems.length === 0) throw new ExportRefusedError("Nothing in this cut makes a sound to split into stems.");
+  return stems;
+}
+
+/** The stems archive for an export that asks for one, rendered in this tab
+ * from the same mix fold as the file's sound; null when it asks for none. */
+async function stemsArchive(
+  projectId: string,
+  doc: ExportDoc,
+  settings: ExportSettings,
+  signal?: AbortSignal
+): Promise<RenderedExport | null> {
+  if (!settings.stems) return null;
+  return renderStemsArchive(doc, settings, stemsFor(doc), {
+    resolve: (asset) => renderAssetUrl(projectId, asset),
+    signal,
+  });
+}
+
 function renderAssetUrl(projectId: string, asset: MediaAsset): string {
   const state = useEditor.getState();
   return state.projectId === projectId
@@ -1597,8 +1632,27 @@ export function downloadExport(jobId: string, outName: string, backend: CutBacke
  * not know — a range export would come back as the whole cut, a typed name
  * as the project's — so what the settings ask of the engine is checked
  * against what it says it carries, and the export refuses with the fix. */
-async function assertEngineCarries(settings: ExportSettings, doc: ExportDoc): Promise<void> {
+/** Whether the cut plays a bound recording or a split edit anywhere. */
+function cutUsesSoundFeatures(doc: ExportDoc): boolean {
+  const bound = new Set(doc.assets.filter((a) => a.soundFrom).map((a) => a.id));
+  return doc.clips.some((c) => bound.has(c.assetId) || !!c.audioLead || !!c.audioTail);
+}
+
+async function assertEngineCarries(
+  settings: ExportSettings,
+  doc: ExportDoc,
+  /** The engine encodes this one in ffmpeg; a tab render only hands it the
+   * finished files. */
+  engineRenders = true
+): Promise<void> {
   const wants: [EngineFeature, boolean, string][] = [
+    // An older engine would deliver the mix unmastered and drop the stems.
+    ["export.loudness", engineRenders && settings.loudness !== undefined, "master the loudness"],
+    ["export.stems", !!settings.stems, "export stems"],
+    // An older engine plays the camera's own sound and no split edits, so a
+    // cut that binds a separate recording or leads/trails its sound would
+    // come back with the scratch track.
+    ["export.sound", engineRenders && cutUsesSoundFeatures(doc), "play a separate sound recording or split edits"],
     // The color pipeline: an engine from before it grades nothing and folds
     // a log or HDR file the old way, so every export needs it.
     ["color.v2", true, "export this cut"],
@@ -1691,11 +1745,17 @@ export async function runBrowserExport(
       bytes: Math.round(
         estimateExportBytes(settings, deliverySpan(settings.range, projectDuration(doc)))
       ),
+      // The stems ride the same claim: their name is held with the video's,
+      // and the completion registers both.
+      ...(settings.stems ? { stems: true } : {}),
     }),
   });
-  const claimed = await apiJson<{ jobId?: string; url?: string; outName?: string; type?: string }>(claim);
+  const claimed = await apiJson<{ jobId?: string; url?: string; outName?: string; type?: string; stemsUrl?: string }>(claim);
   if (!claim.ok || !claimed.jobId || !claimed.url) {
     throw cloudRefusal(claim, claimed) ?? new Error(claimed.error ?? "Export failed to start.");
+  }
+  if (settings.stems && !claimed.stemsUrl) {
+    throw new Error("The cloud did not hold a place for the stems.");
   }
   const jobId = claimed.jobId;
   opts.onClaimed?.(jobId);
@@ -1724,6 +1784,14 @@ export async function runBrowserExport(
       // The file streamed from scratch disk into the upload; its space comes
       // back as soon as the upload is done with it.
       void rendered.discard();
+    }
+    const stems = await stemsArchive(projectId, doc, settings, opts.signal);
+    if (stems) {
+      try {
+        await putSigned(claimed.stemsUrl!, stems.file, STEMS_MIME, { signal: opts.signal });
+      } finally {
+        void stems.discard();
+      }
     }
 
     const done = await backend.fetch("/api/cut/export/client/complete", {
@@ -1768,11 +1836,16 @@ async function runEngineExport(
   opts: NonNullable<Parameters<typeof runBrowserExport>[3]>,
   backend: CutBackend
 ): Promise<string> {
-  await assertEngineCarries(settings, doc);
+  await assertEngineCarries(settings, doc, false);
   const claim = await backend.fetch("/api/cut/export/client", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ projectId, container: settings.container, name: settings.name }),
+    body: JSON.stringify({
+      projectId,
+      container: settings.container,
+      name: settings.name,
+      ...(settings.stems ? { stems: true } : {}),
+    }),
   });
   const claimed = await apiJson<{ id?: string; outName?: string }>(claim);
   if (!claim.ok || !claimed.id) throw new Error(claimed.error ?? "Export failed to start.");
@@ -1810,6 +1883,23 @@ async function runEngineExport(
         report(ratio * 0.95);
       },
     });
+    // The stems land first: the video's hand-in settles the job.
+    const stems = await stemsArchive(projectId, doc, settings, opts.signal);
+    if (stems) {
+      let landed: Response;
+      try {
+        landed = await backend.fetch(`/api/cut/export/client/${jobId}/stems`, {
+          method: "PUT",
+          headers: { "Content-Type": STEMS_MIME },
+          body: stems.file,
+          signal: opts.signal,
+        });
+      } finally {
+        void stems.discard();
+      }
+      if (landed.status === 409) throw new DOMException("Export canceled.", "AbortError");
+      if (!landed.ok) throw new Error((await apiJson<object>(landed)).error ?? "Could not save the stems.");
+    }
     let done: Response;
     try {
       done = await backend.fetch(`/api/cut/export/client/${jobId}/file`, {
@@ -1845,6 +1935,31 @@ async function runEngineExport(
   }
 }
 
+/** A browser-resident project's stems, rendered in this tab and shelved
+ * beside the video they go with. */
+async function saveStems(
+  projectId: string,
+  doc: ExportDoc,
+  settings: ExportSettings,
+  videoName: string,
+  signal?: AbortSignal
+): Promise<void> {
+  if (!settings.stems) return;
+  holdRegistered(`/api/cut/projects/${projectId}/`);
+  try {
+    const stems = (await stemsArchive(projectId, doc, settings, signal))!;
+    try {
+      const saved = await saveExport(projectId, stems.file, stemsArchiveName(videoName));
+      const stored = await readFileAt(await exportsDir(projectId), saved);
+      if (stored) registerBlobFile(`/api/cut/projects/${projectId}/exports/${encodeURIComponent(saved)}`, stored);
+    } finally {
+      void stems.discard();
+    }
+  } finally {
+    releaseRegistered(`/api/cut/projects/${projectId}/`);
+  }
+}
+
 /** A browser-resident project's export: the same in-tab render, with the
  * finished file written into the project's exports shelf in the browser store.
  * The job is a row in the tab-local feed, so the dock tracks, cancels, and
@@ -1875,6 +1990,7 @@ async function runStoreExport(
     } finally {
       void rendered.discard();
     }
+    await saveStems(projectId, doc, settings, outName, opts.signal);
     // Serve the finished file from the store copy: the scratch file behind the
     // render is already gone, and these two paths are what the dock's download
     // button and the exports shelf resolve through backend.url().
@@ -1956,11 +2072,14 @@ async function runBorrowedExport(
   const job = reserveBrowserExportJob(projectId, opts.projectName);
   opts.onClaimed?.(job.id);
   try {
-    const file = await renderBorrowedFile(projectId, doc, settings, "export", {
+    // The worker borrows only the encode the tab cannot do; the stems are
+    // sound, which this tab mixes itself, so they stay here.
+    const file = await renderBorrowedFile(projectId, doc, { ...settings, stems: undefined }, "export", {
       ...opts,
       onProgress: (progress) => { opts.onProgress?.(progress); updateBrowserExportJob(job.id, { progress }); },
     });
     const saved = await saveExport(projectId, file, file.name);
+    await saveStems(projectId, doc, settings, saved, opts.signal);
     const stored = await readFileAt(await exportsDir(projectId), saved);
     if (stored) {
       registerBlobFile(`/api/cut/export/${job.id}/file`, stored);

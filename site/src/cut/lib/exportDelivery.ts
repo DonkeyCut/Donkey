@@ -129,7 +129,24 @@ export function containerOfName(name: string): DeliveryContainer {
 /** Whether a file name is one the export writes. */
 export function isDeliveryName(name: string): boolean {
   const lower = name.toLowerCase();
-  return EXPORT_CONTAINERS.some((c) => lower.endsWith(c.ext));
+  return EXPORT_CONTAINERS.some((c) => lower.endsWith(c.ext)) || isStemsName(name);
+}
+
+/** The stems archive that rides beside a video: "Trip.mp4" → "Trip stems.zip". */
+export const STEMS_SUFFIX = " stems.zip";
+export const STEMS_MIME = "application/zip";
+
+export function stemsArchiveName(videoName: string): string {
+  return `${exportBaseName(videoName)}${STEMS_SUFFIX}`;
+}
+
+export function isStemsName(name: string): boolean {
+  return name.toLowerCase().endsWith(".zip");
+}
+
+/** The media type of a delivered file, by its name. */
+export function deliveryMime(name: string): string {
+  return isStemsName(name) ? STEMS_MIME : containerOfName(name).mime;
 }
 
 /**

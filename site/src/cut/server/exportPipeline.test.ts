@@ -24,9 +24,15 @@ const stagedFiles = new Map<string, string>();
 /** Source sizes the probe reports, by staged path; absent probes as unknown. */
 const probedDims = new Map<string, { width: number; height: number }>();
 
+/** The masters and stem packs the last run asked for. */
+let mastered: { input: string; output: string; opts: Parameters<ExportPipelineIO["masterRawMix"]>[2] }[] = [];
+let packed: { files: { path: string; name: string }[]; output: string }[] = [];
+
 const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
   const ffmpegCalls: string[][] = [];
   written = [];
+  mastered = [];
+  packed = [];
   // Seconds each turned file was asked to produce, summed off the `-t` of the
   // chunk runs that wrote its pieces, so the bake reads back a whole file.
   const produced = new Map<string, number>();
@@ -47,6 +53,13 @@ const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
     mediaDuration: async (file) => produced.get(file) ?? 0,
     videoEncoder: async (codec) =>
       codec === "hevc" ? "libx265" : codec.startsWith("prores") ? "prores_ks" : "libx264",
+    masterRawMix: async (input, output, opts) => {
+      mastered.push({ input, output, opts });
+      return {} as Awaited<ReturnType<ExportPipelineIO["masterRawMix"]>>;
+    },
+    packStems: async (files, output) => {
+      packed.push({ files, output });
+    },
     runFfmpeg: async (_job, args) => {
       ffmpegCalls.push(args);
       const piece = args[args.length - 1].match(/^(.*)\.\d+\.(?:mov|wav)$/);
@@ -71,6 +84,7 @@ const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
   const job: RenderHandle = {
     tmpDir: "/tmp/graph-test",
     outPath: "/tmp/graph-test/out.mp4",
+    stemsPath: "/tmp/graph-test/out stems.zip",
     progress: 0,
     log: [],
   };
