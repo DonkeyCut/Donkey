@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { collectRefs, normalizeRef, refToken } from "@/cut/lib/assetRef";
-import { noteInLibraryFolder, noteRef, parseNoteLink } from "@/cut/lib/noteReference";
+import { noteInLibraryFolder, noteInNotesFolder, noteRef, parseNoteLink } from "@/cut/lib/noteReference";
 import { readNote, writeNoteFromTool, type CutNote } from "@/cut/lib/notes";
 import * as notes from "@/cut/lib/notes";
 import { backendFor } from "@/cut/lib/residency";
@@ -22,6 +22,13 @@ describe("note references", () => {
       expect(noteInLibraryFolder(filed, "assets", residency)).toBe(true);
       expect(noteInLibraryFolder(filed, "assets", residency === "cloud" ? "browser" : "cloud")).toBe(false);
     }
+  });
+  test("Library notes stay out of Notes", () => {
+    expect(noteInNotesFolder({ folderId: null, libraryLocation: null }, null)).toBe(true);
+    expect(noteInNotesFolder({ folderId: "plans" }, "plans")).toBe(true);
+    expect(noteInNotesFolder({ folderId: "plans" }, null)).toBe(false);
+    expect(noteInNotesFolder({ folderId: null, libraryLocation: { folderId: null, residency: "cloud" } }, null)).toBe(false);
+    expect(noteInNotesFolder({ folderId: "plans", libraryLocation: { folderId: "assets", residency: "browser" } }, "plans")).toBe(false);
   });
   test("saved mentions retain identity through renaming and duplicate titles", () => {
     const ref = noteRef(note);

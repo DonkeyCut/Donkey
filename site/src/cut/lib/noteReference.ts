@@ -16,6 +16,13 @@ export function noteInLibraryFolder(note: Pick<CutNote, "libraryLocation">, fold
   const location = note.libraryLocation;
   return !!location && location.folderId === folderId && (!residency || location.residency === residency);
 }
+// A note placed in the Library lives there alone; Notes shows only the rest.
+export function noteInNotesFolder(note: Pick<CutNote, "folderId" | "libraryLocation">, folderId: string | null): boolean {
+  if (note.libraryLocation) {
+    return false;
+  }
+  return (note.folderId ?? null) === folderId;
+}
 export const noteLibraryFoldersSchema = z.object({ residency: z.enum(["browser", "local", "cloud"]), folderIds: z.array(z.string().min(1).max(128)).max(10000) });
 export const noteReadSchema = z.object({ id: noteIdSchema.optional(), link: z.string().optional() });
 export const noteSaveSchema = z.object({
