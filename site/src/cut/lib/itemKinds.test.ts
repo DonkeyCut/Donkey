@@ -136,3 +136,34 @@ describe("pictureAssetIds", () => {
     expect([...pictureAssetIds(drawnLists(doc))].sort()).toEqual(["base", "matte", "sticker", "upper"]);
   });
 });
+
+describe("splitting keyed items", () => {
+  const poseKey = (t: number, x: number) => ({ t, x, y: 0.5, scale: 1, rotation: 0, opacity: 1 });
+  const maskKey = (t: number, x: number) => ({ t, x, y: 0, w: 0.5, h: 0.5, rotation: 0, feather: 0 });
+
+  test("a clip's pose and mask keys keep their timing in both halves", () => {
+    const clip = {
+      id: "k1", assetId: "v0", start: 10, in: 0, out: 4, track: 1,
+      kf: [poseKey(0, 0.2), poseKey(4, 0.6)],
+      mask: { kind: "rect" as const, kf: [maskKey(0, 0), maskKey(4, 0.4)] },
+    };
+    const [left, right] = ITEM_KINDS.clip.split!(clip as never, 12);
+    // Halfway through the original is the right half's first frame.
+    expect(right.kf![0]).toMatchObject({ t: 0, x: 0.4 });
+    expect(right.kf![right.kf!.length - 1]).toMatchObject({ t: 2, x: 0.6 });
+    expect(right.mask!.kf![0]).toMatchObject({ t: 0, x: 0.2 });
+    expect(left.kf![left.kf!.length - 1]).toMatchObject({ t: 2, x: 0.4 });
+    expect(left.mask!.kf![left.mask!.kf!.length - 1]).toMatchObject({ t: 2, x: 0.2 });
+  });
+
+  test("an element's pose and mask keys keep their timing in both halves", () => {
+    const o = {
+      id: "k2", kind: "shape", start: 0, end: 4, x: 0.5, y: 0.5,
+      kf: [poseKey(0, 0.2), poseKey(4, 0.6)],
+      mask: { kind: "rect" as const, kf: [maskKey(0, 0), maskKey(4, 0.4)] },
+    };
+    const [, right] = ITEM_KINDS.overlay.split!(o as never, 1);
+    expect(right.kf![0]).toMatchObject({ t: 0, x: 0.3 });
+    expect(right.mask!.kf![0]).toMatchObject({ t: 0, x: 0.1 });
+  });
+});

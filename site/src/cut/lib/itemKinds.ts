@@ -13,9 +13,10 @@
 // compile until it has an entry, and `itemKinds.test.ts` walks the table so
 // every entry proves it copies and pastes.
 
-import { retimeOf, shiftCamera } from "@donkeycut/effects-kit";
+import { KEY_EPSILON, maskKeyAt, poseAt, retimeOf, shiftCamera, type Mask, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
 import { cueEmphasis, sliceEmphasis, withEmphasis } from "./captionEmphasis";
 import {
+  clipPoseAt,
   fontAssetId,
   isStickerOverlay,
   isTextOverlay,
@@ -80,6 +81,35 @@ export interface ItemKindDef<K extends ItemKind> {
 
 const deep = <T>(v: T): T => (v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T));
 
+/** A key track cut at `cut` seconds into its item. Each half keeps the keys on
+ * its side, closed by a key holding the value at the cut, and the right
+ * half's keys count from its own start — so both halves play what the whole
+ * did. A tracked mask keys every frame, and a split copy has to hold it. */
+function splitKeys<K extends { t: number }>(keys: K[] | undefined, cut: number, valueAt: (t: number) => K): [K[] | undefined, K[] | undefined] {
+  if (!keys || keys.length === 0) return [keys, keys];
+  const edge = valueAt(cut);
+  return [
+    [...keys.filter((k) => k.t < cut - KEY_EPSILON), { ...edge, t: cut }],
+    [{ ...edge, t: 0 }, ...keys.filter((k) => k.t > cut + KEY_EPSILON).map((k) => ({ ...k, t: k.t - cut }))],
+  ];
+}
+
+/** An item's pose and mask tracks cut at `cut` seconds into it, as the
+ * fields each half takes. */
+function splitTracks(
+  item: { kf?: OverlayKey[]; mask?: Mask },
+  cut: number,
+  poseOf: (t: number) => OverlayPose
+): [{ kf?: OverlayKey[]; mask?: Mask }, { kf?: OverlayKey[]; mask?: Mask }] {
+  const [kfL, kfR] = splitKeys(item.kf, cut, (t) => ({ t, ...poseOf(t) }));
+  const m = item.mask;
+  const [mL, mR] = splitKeys(m?.kf, cut, (t) => maskKeyAt(m!, t));
+  return [
+    { ...(item.kf ? { kf: kfL } : {}), ...(m ? { mask: { ...m, kf: mL } } : {}) },
+    { ...(item.kf ? { kf: kfR } : {}), ...(m ? { mask: { ...m, kf: mR } } : {}) },
+  ];
+}
+
 function splitMedia<T extends VideoClip | AudioClip>(item: T, at: number): [T, T] {
   const cut = retimeOf(item).srcAt(at - item.start);
   return item.reverse
@@ -97,11 +127,12 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
     at: (c, start) => ({ ...c, start }),
     split: (c, at) => {
       const [left, right] = splitMedia(c, at);
+      const [keysL, keysR] = splitTracks(c, at - c.start, (t) => clipPoseAt(c, t));
       // A split edit stays on the outer edges: the new cut between the halves
       // carries none.
       return [
-        { ...left, transition: undefined, transitionStyle: undefined, animOut: undefined, audioTail: undefined },
-        { ...right, animIn: undefined, audioLead: undefined },
+        { ...left, ...keysL, transition: undefined, transitionStyle: undefined, animOut: undefined, audioTail: undefined },
+        { ...right, ...keysR, animIn: undefined, audioLead: undefined },
       ];
     },
     clone: deep,
@@ -157,7 +188,13 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
     lane: (o) => o.lane ?? 0,
     at: (o, start) => ({ ...o, start, end: start + o.end - o.start }),
     // The tail keeps filming on the group camera's clock.
-    split: (o, at) => [{ ...o, end: at }, { ...o, start: at, ...(o.camera ? { camera: shiftCamera(o.camera, o.start - at) } : {}) }],
+    split: (o, at) => {
+      const [keysL, keysR] = splitTracks(o, at - o.start, (t) => poseAt(o, t));
+      return [
+        { ...o, ...keysL, end: at },
+        { ...o, ...keysR, start: at, ...(o.camera ? { camera: shiftCamera(o.camera, o.start - at) } : {}) },
+      ];
+    },
     clone: deep,
     assetIds: (o) => {
       if (isStickerOverlay(o)) return o.assetId ? [o.assetId] : [];
