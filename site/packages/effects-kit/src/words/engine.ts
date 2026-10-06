@@ -17,7 +17,7 @@
 import { bezierEase } from "../motion/evaluate";
 import type { Overlay, TextOverlay } from "../types";
 import { wordEffect, wordEffectRamps } from "./catalog";
-import type { OverlayWords, WordDraw, WordEffect, WordPose } from "./types";
+import type { OverlayWords, WordDraw, WordEffect, WordFace, WordPose } from "./types";
 
 /** How far a word's alphabetic baseline sits below the middle of its em box,
  * in em. The canvas painter measures this off the face it is drawing and only
@@ -219,7 +219,10 @@ export function wordDrawsAt(
   words: OverlayWords,
   textColor: string,
   dur: number,
-  t: number
+  t: number,
+  /** Per display word: the face a word is set apart in, or nothing. The
+   * effect's accent blends from the face's own fill. */
+  faces?: readonly (WordFace | undefined)[]
 ): WordDraw[] {
   const e = wordEffect(words.style);
   const accent = wordAccent(words, textColor);
@@ -229,20 +232,56 @@ export function wordDrawsAt(
   const target = e.mark === "box" ? markText : accent;
   const opts = { swell: wordSwell(words), dim: wordDim(words) };
   const restScale = (e.after.scale ?? 1) > 1 ? opts.swell : (e.after.scale ?? 1);
-  return wordWindows(text, dur, words.times).map((win) => {
+  return wordWindows(text, dur, words.times).map((win, i) => {
     const p = wordPoseAt(e, win, t, opts);
-    return {
-      color: mixHex(textColor, target, p.accent),
-      opacity: p.opacity,
-      scale: p.scale,
-      layoutScale: Math.max(p.scale, restScale),
-      dx: p.dx,
-      dy: p.dy,
-      rotate: p.rotate,
-      ...(e.mark && p.mark > 0.001
-        ? { mark: e.mark, markAlpha: p.mark, markColor: accent, markText }
-        : {}),
-    };
+    const face = faces?.[i];
+    return withFace(
+      {
+        color: mixHex(face?.color ?? textColor, target, p.accent),
+        opacity: p.opacity,
+        scale: p.scale,
+        layoutScale: Math.max(p.scale, restScale),
+        dx: p.dx,
+        dy: p.dy,
+        rotate: p.rotate,
+        ...(e.mark && p.mark > 0.001
+          ? { mark: e.mark, markAlpha: p.mark, markColor: accent, markText }
+          : {}),
+      },
+      face
+    );
+  });
+}
+
+/** A resolved word set in its face: the face's size multiplies the pose's,
+ * and its family, slant and weight ride along for the painters. */
+function withFace(d: WordDraw, face: WordFace | undefined): WordDraw {
+  if (!face) return d;
+  const k = face.scale !== undefined && Number.isFinite(face.scale) && face.scale > 0 ? face.scale : 1;
+  if (k !== 1) {
+    d.scale *= k;
+    d.layoutScale *= k;
+  }
+  if (face.font) d.font = face.font;
+  if (face.italic !== undefined) d.italic = face.italic;
+  if (face.weight !== undefined) d.weight = face.weight;
+  return d;
+}
+
+/**
+ * Every display word at rest, with the faces some of them are set apart in —
+ * a line that runs no word effect but still sets chosen words apart. Nothing
+ * here moves, so a caller may compute it once and hold it for the line's
+ * whole span.
+ */
+export function wordFaceDraws(
+  text: string,
+  textColor: string,
+  faces: readonly (WordFace | undefined)[]
+): WordDraw[] {
+  return displayWords(text).map((_, i) => {
+    const face = faces[i];
+    return withFace({ ...REST_WORD, color: face?.color ?? textColor }, face);
   });
 }
 

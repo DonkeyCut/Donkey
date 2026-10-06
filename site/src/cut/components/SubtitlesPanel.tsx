@@ -692,6 +692,77 @@ function Transcript({ cues }: { cues: SubtitleCue[] }) {
   );
 }
 
+/** Characters from the start of `el` to a point inside it. */
+function offsetIn(el: HTMLElement, node: Node, offset: number): number {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.setEnd(node, offset);
+  return range.toString().length;
+}
+
+/** The current selection as character offsets inside `el`, or null when it
+ * lies elsewhere. */
+function selectionIn(el: HTMLElement): [number, number] | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const r = sel.getRangeAt(0);
+  if (!el.contains(r.startContainer) || !el.contains(r.endContainer)) return null;
+  return [offsetIn(el, r.startContainer, r.startOffset), offsetIn(el, r.endContainer, r.endOffset)];
+}
+
+/** The character offset inside `el` under a pointer, or null off its text. */
+function pointIn(el: HTMLElement, x: number, y: number): number | null {
+  let node: Node | null = null;
+  let offset = 0;
+  if ("caretPositionFromPoint" in document) {
+    const p = document.caretPositionFromPoint(x, y);
+    if (p) ({ offsetNode: node, offset } = p);
+  } else if ("caretRangeFromPoint" in document) {
+    const r = (document as Document).caretRangeFromPoint(x, y);
+    if (r) ({ startContainer: node, startOffset: offset } = r);
+  }
+  return node && el.contains(node) ? offsetIn(el, node, offset) : null;
+}
+
+/** Put the selection back at character offsets inside `el`. */
+function selectIn(el: HTMLElement, from: number, to: number) {
+  const at = (target: number): [Node, number] => {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let left = target;
+    let last: Text | null = null;
+    for (let n = walk.nextNode() as Text | null; n; n = walk.nextNode() as Text | null) {
+      if (left <= n.length) return [n, left];
+      left -= n.length;
+      last = n;
+    }
+    return last ? [last, last.length] : [el, 0];
+  };
+  const sel = window.getSelection();
+  if (!sel) return;
+  const range = document.createRange();
+  range.setStart(...at(from));
+  range.setEnd(...at(to));
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+/** Emphasized words in the transcript read set apart from the rest. */
+const EM_CLASS = "sub-em rounded-[3px] bg-[#FFE94A]/70 font-semibold italic";
+
+/** Fill the editable caption with its text, each emphasized word in a marked
+ * span. Reading `textContent` back gives the text unchanged. */
+function paintCue(el: HTMLElement, text: string, marked: readonly number[]) {
+  el.replaceChildren(
+    ...emphasisRuns(text, marked).map((run) => {
+      if (!run.em) return document.createTextNode(run.text);
+      const span = document.createElement("span");
+      span.className = EM_CLASS;
+      span.textContent = run.text;
+      return span;
+    })
+  );
+}
+
 function caretOffset(el: HTMLElement): number {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return 0;
@@ -805,10 +876,35 @@ const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: num
         data-cue={cue.id}
         onFocus={() => setFocused(true)}
         onBlur={commit}
+        onContextMenu={(e) => {
+          const el = ref.current;
+          if (!el || readOnly) return;
+          // A selection under the pointer names its words; otherwise the word
+          // the pointer is on.
+          const sel = selectionIn(el);
+          const at = pointIn(el, e.clientX, e.clientY);
+          const range: [number, number] | null =
+            sel && sel[0] !== sel[1] && at !== null && at >= Math.min(...sel) && at <= Math.max(...sel)
+              ? sel
+              : at !== null
+                ? [at, at]
+                : null;
+          const hit = range ? wordsAt(range[0], range[1]) : null;
+          if (!range || !hit) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setMenu({ x: e.clientX, y: e.clientY, from: range[0], to: range[1], label: hit.label, on: hit.on });
+        }}
         onKeyDown={(e) => {
           e.stopPropagation();
           const el = ref.current;
           if (!el) return;
+          if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "b") {
+            e.preventDefault();
+            const sel = selectionIn(el);
+            if (sel && !readOnly) toggle(sel[0], sel[1]);
+            return;
+          }
           if (e.key === "Escape") {
             e.preventDefault();
             el.blur();

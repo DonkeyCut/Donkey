@@ -10,13 +10,13 @@
  * frame and nothing else on the page moves.
  *
  * A run lasts exactly as long as the animation it shows — the In/Out length,
- * or one cycle of a loop. When it ends the element holds its resting pose:
+ * one cycle of a loop, or a hit's own window. When it ends the element holds its resting pose:
  * the paused playhead may sit mid-fade or mid-spin, and snapping there would
  * leave the element hidden or upside-down right after the pick. The hold
  * lifts the moment the preview clock moves.
  */
 
-import { loopPeriod, type OverlayAnim } from "@donkeycut/effects-kit";
+import { hitWindow, loopPeriod, type OverlayAnim } from "@donkeycut/effects-kit";
 import { useSyncExternalStore } from "react";
 
 /** A live rehearsal: which element, where in the slot's own window, and the
@@ -87,7 +87,7 @@ const SPAN_REHEARSAL_MAX = 2.4;
  */
 export function playAnimPreview(
   o: { id: string; start: number; end: number; anim?: OverlayAnim },
-  slot: "in" | "out" | "loop" | "move" | "words"
+  slot: "in" | "out" | "loop" | "move" | "words" | "hit"
 ): void {
   stopAnimPreview();
   const anim: OverlayAnim =
@@ -99,16 +99,23 @@ export function playAnimPreview(
           ? { loop: o.anim?.loop }
           : slot === "move"
             ? { move: o.anim?.move }
-            : { words: o.anim?.words };
+            : slot === "hit"
+              ? { hit: o.anim?.hit }
+              : { words: o.anim?.words };
   const wholeSpan = slot === "move" || slot === "words";
   if (slot === "move" && !anim.move) return;
   if (slot === "words" && !anim.words) return;
   const dur = Math.max(0.1, o.end - o.start);
-  const span = wholeSpan
-    ? dur
-    : slot === "loop"
-      ? (loopPeriod(anim) ?? 0)
-      : Math.min((slot === "in" ? anim.in?.seconds : anim.out?.seconds) ?? 0, dur);
+  // A hit plays its own window, wherever in the element it sits.
+  const hit = slot === "hit" ? hitWindow(anim, dur) : null;
+  if (slot === "hit" && !hit) return;
+  const span = hit
+    ? hit.end - hit.start
+    : wholeSpan
+      ? dur
+      : slot === "loop"
+        ? (loopPeriod(anim) ?? 0)
+        : Math.min((slot === "in" ? anim.in?.seconds : anim.out?.seconds) ?? 0, dur);
   if (span <= 0) return;
   // How long the rehearsal takes on the wall clock. A slot that plays at its
   // own speed keeps it; one that runs the whole span is compressed into the
@@ -116,7 +123,7 @@ export function playAnimPreview(
   const window = wholeSpan ? Math.min(span, SPAN_REHEARSAL_MAX) : span;
   // Where the slot lives inside the element: In, a loop and a move start at
   // its head, Out ends at its tail.
-  const from = slot === "out" ? dur - span : 0;
+  const from = hit ? hit.start : slot === "out" ? dur - span : 0;
   const t0 = performance.now();
   const step = () => {
     const elapsed = (performance.now() - t0) / 1000;

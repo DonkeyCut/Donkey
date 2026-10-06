@@ -3,11 +3,15 @@ import {
   textRoom,
   wrapTextToRoom,
   wordDrawsAt,
+  wordFaceDraws,
   WORD_ACCENT_DEFAULT,
   wordEffect,
   wordSampleWindows,
   type OverlayWords,
+  type WordDraw,
+  type WordFace,
 } from "@donkeycut/effects-kit";
+import { cueEmphasis } from "./captionEmphasis";
 import { measureLine, textFontOf } from "./textFit";
 import { formatTime } from "./time";
 import type {
@@ -448,11 +452,76 @@ export function cueOverlay(
             words,
             style.color,
             Math.max(0, cue.end - cue.start),
-            at - cue.start
+            at - cue.start,
+            cueFaces(cue, pos) ?? undefined
           ),
         }
-      : {}),
+      : cueFaces(cue, pos)
+        ? { wordDraw: restingDraws(cue, text, style.color, pos) }
+        : {}),
   };
+}
+
+/** One cue's emphasis, resolved: the face list its words wear and, for a
+ * caption with no word effect running, the still picture of them. Both are
+ * the same from frame to frame, so they are held per cue and handed back
+ * until the cue or the style changes — the preview asks every frame. */
+interface FaceEntry {
+  face: Required<WordFace>;
+  faces: (WordFace | undefined)[];
+  restText?: string;
+  restColor?: string;
+  rest?: WordDraw[];
+}
+const faceCache = new WeakMap<SubtitleCue, FaceEntry>();
+
+const sameFace = (a: Required<WordFace>, b: CaptionEmphasisOverrides | undefined) => {
+  const c = CAPTION_EMPHASIS_DEFAULT;
+  return (
+    a.font === (b?.emphasisFont ?? c.font) &&
+    a.color === (b?.emphasisColor ?? c.color) &&
+    a.italic === (b?.emphasisItalic ?? c.italic) &&
+    a.weight === (b?.emphasisWeight ?? c.weight) &&
+    a.scale === (b?.emphasisScale ?? c.scale)
+  );
+};
+
+function faceEntry(cue: SubtitleCue, pos: CaptionEmphasisOverrides | undefined): FaceEntry | null {
+  if (!cue.emphasis?.length) return null;
+  const held = faceCache.get(cue);
+  if (held && sameFace(held.face, pos)) return held;
+  const marked = cueEmphasis(cue);
+  if (marked.length === 0) return null;
+  const face = captionEmphasis(pos);
+  const faces: (WordFace | undefined)[] = [];
+  for (const i of marked) faces[i] = face;
+  const entry: FaceEntry = { face, faces };
+  faceCache.set(cue, entry);
+  return entry;
+}
+
+/** Per display word: the emphasis face, or nothing. Null when no word in the
+ * cue is emphasized. */
+export function cueFaces(
+  cue: SubtitleCue,
+  pos: CaptionEmphasisOverrides | undefined
+): (WordFace | undefined)[] | null {
+  return faceEntry(cue, pos)?.faces ?? null;
+}
+
+function restingDraws(
+  cue: SubtitleCue,
+  text: string,
+  color: string,
+  pos: CaptionEmphasisOverrides | undefined
+): WordDraw[] {
+  const entry = faceEntry(cue, pos)!;
+  if (!entry.rest || entry.restText !== text || entry.restColor !== color) {
+    entry.rest = wordFaceDraws(text, color, entry.faces);
+    entry.restText = text;
+    entry.restColor = color;
+  }
+  return entry.rest;
 }
 
 /** A caption's pictures are full frames, one per span, and a cut carries one

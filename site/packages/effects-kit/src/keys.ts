@@ -325,6 +325,9 @@ function ownFrame(o: Posable, tLocal: number): OverlayFrameState {
     ...(ev.glyphs ? { glyphs: ev.glyphs } : {}),
     ...(ev.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
     ...(ev.dive !== undefined ? { dive: ev.dive } : {}),
+    ...(pose.blur ? { blur: pose.blur } : {}),
+    ...(ev.caret !== undefined ? { caret: ev.caret } : {}),
+    ...(ev.brightness !== undefined ? { brightness: ev.brightness } : {}),
   };
 }
 

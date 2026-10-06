@@ -15,6 +15,8 @@
 import {
   edgePreset,
   EDGE_IDS,
+  hitPreset,
+  HIT_IDS,
   holdPreset,
   loopPreset,
   LOOP_IDS,
@@ -101,6 +103,50 @@ export interface OverlayEdge {
   style: OverlayAnimStyle;
   seconds: number;
   preset?: MotionPreset;
+  /** The typing bar, on an entrance that types (typewriter). Every other
+   * entrance ignores it. */
+  caret?: OverlayCaret;
+}
+
+/**
+ * The bar at the end of the typed text. It holds solid while the entrance
+ * types, then blinks for the rest of the element's life, or for `blinks`
+ * blinks and then stays lit (or goes, with `hide`). With `blink` off it
+ * holds solid after typing, or goes with `hide`.
+ */
+export interface OverlayCaret {
+  blink: boolean;
+  /** How many times it blinks once typing stops; absent = for as long as
+   * the element is up. */
+  blinks?: number;
+  /** Gone after its last blink (or right after typing, with blink off). */
+  hide?: boolean;
+  /** Hex; absent = the text's own color. */
+  color?: string;
+}
+
+/** Half a blink: the bar is lit this long, then dark this long — the rate a
+ * desktop text field blinks at. */
+export const CARET_BLINK_SECONDS = 0.53;
+/** Bar geometry in em of the type size: its width, its height, and the gap
+ * between the last character and the bar. Both painters read these. */
+export const CARET_WIDTH_EM = 0.07;
+export const CARET_HEIGHT_EM = 1;
+export const CARET_GAP_EM = 0.04;
+/** The most blinks the panel and the tools offer. */
+export const CARET_BLINKS_MAX = 20;
+
+/**
+ * A one-shot hit: a catalog motion played once, over `seconds`, starting `at`
+ * seconds into the element (a button press). Unlike the edges it sits inside
+ * the element's life, and unlike a loop it plays exactly once. `darken` lets
+ * the preset's brightness track through; off, the hit only moves.
+ */
+export interface OverlayHit {
+  style: string;
+  at: number;
+  seconds: number;
+  darken?: boolean;
 }
 
 /** The cycle an element runs for its whole duration; `speed` multiplies the
@@ -130,6 +176,7 @@ export interface OverlayAnim {
   /** Word-by-word emphasis (see words.ts). Text only: every other kind
    * ignores it, the way typewriter is offered on titles alone. */
   words?: OverlayWords;
+  hit?: OverlayHit;
 }
 
 /** The motion a slot plays: the one it carries, or the catalog entry it
@@ -143,6 +190,9 @@ export const loopMotion = (slot: OverlayLoop | undefined): MotionPreset | undefi
 export const moveMotion = (slot: OverlayMove | undefined): MotionPreset | undefined =>
   slot ? holdPreset(slot.style) : undefined;
 
+export const hitMotion = (slot: OverlayHit | undefined): MotionPreset | undefined =>
+  slot ? hitPreset(slot.style) : undefined;
+
 // ── the registries, read from the catalog ─────────────────────────────────
 // A preset added to the motion catalog appears in every menu, tool enum and prompt
 // without being named anywhere else. The unions above stay hand-written:
@@ -152,6 +202,18 @@ export const OVERLAY_ANIM_STYLE_IDS = EDGE_IDS as OverlayAnimStyle[];
 export const OVERLAY_LOOP_STYLE_IDS = LOOP_IDS as OverlayLoopStyle[];
 export const GLYPH_ANIM_STYLE_IDS = PER_UNIT_EDGE_IDS as GlyphAnimStyle[];
 export const GLYPH_LOOP_STYLE_IDS = PER_UNIT_LOOP_IDS as GlyphLoopStyle[];
+export const OVERLAY_HIT_STYLE_IDS = HIT_IDS;
+export const OVERLAY_HIT_STYLE_LABELS: Record<string, string> = Object.fromEntries(
+  HIT_IDS.map((id) => [id, MOTION.hits[id].label])
+);
+/** Each hit as "id: note", what tool schemas and prompts teach them from. */
+export const hitNotes = (): string =>
+  HIT_IDS.map((id) => `${id}: ${MOTION.hits[id].note ?? MOTION.hits[id].label}`).join(" ");
+
+/** Hit length bounds, seconds. */
+export const OVERLAY_HIT_MIN_SECONDS = 0.1;
+export const OVERLAY_HIT_MAX_SECONDS = 1;
+export const OVERLAY_HIT_DEFAULT_SECONDS = 0.3;
 
 /** The edges that only play on characters — typing them out, rolling each up
  * a reel. Every other kind is offered the rest. */
@@ -283,6 +345,11 @@ export interface OverlayAnimState {
    * Renderers turn it into a view with `diveView`, which needs the drawn
    * geometry this evaluator never sees. */
   dive?: number;
+  /** Whether the typing bar is lit (typewriter with a caret); absent when the
+   * element has none. */
+  caret?: boolean;
+  /** Multiplies the element's colors (a hit that darkens); absent = 1. */
+  brightness?: number;
 }
 
 /** How one character sits at a moment: offsets in design px, a scale per axis
@@ -458,7 +525,99 @@ export function evalOverlayAnim(
     applyLoop(state, anim.loop, wrap01(tLocal / period), isText);
   }
   if (anim.move) applyMove(state, anim.move, tLocal, dur);
+  if (anim.hit) applyHit(state, anim.hit, tLocal);
+  if (isText) {
+    const caret = caretOn(anim, tLocal, dur);
+    if (caret !== undefined) state.caret = caret;
+  }
   return state;
+}
+
+/** The hit's contribution at `tLocal`: nothing outside its window; inside,
+ * the preset's pose folded onto what the other slots left, as one piece. */
+function applyHit(state: OverlayAnimState, slot: OverlayHit, tLocal: number): void {
+  const preset = hitMotion(slot);
+  const secs = slot.seconds > 0 ? slot.seconds : OVERLAY_HIT_DEFAULT_SECONDS;
+  const q = (tLocal - slot.at) / secs;
+  if (!preset || q <= 0 || q >= 1) return;
+  const pose = evalWhole(preset, q, false);
+  state.dx += pose.dx;
+  state.dy += pose.dy;
+  state.rotate += pose.rotate;
+  state.scale *= (pose.sx + pose.sy) / 2;
+  state.alpha *= pose.alpha;
+  if (slot.darken && pose.brightness !== undefined && pose.brightness !== 1)
+    state.brightness = (state.brightness ?? 1) * pose.brightness;
+}
+
+/** Where the hit plays inside [0, dur], or null when there is none. The frame
+ * samplers draw this window frame by frame. */
+export function hitWindow(
+  anim: OverlayAnim | undefined,
+  dur: number
+): { start: number; end: number } | null {
+  const slot = anim?.hit;
+  if (!slot || !hitMotion(slot)) return null;
+  const secs = slot.seconds > 0 ? slot.seconds : OVERLAY_HIT_DEFAULT_SECONDS;
+  const start = Math.max(0, Math.min(dur, slot.at));
+  const end = Math.max(start, Math.min(dur, slot.at + secs));
+  return end - start > 1e-3 ? { start, end } : null;
+}
+
+/** The largest scale a hit reaches, so the frame sampler can pad its crop. */
+export function hitScale(anim: OverlayAnim | undefined): number {
+  const preset = hitMotion(anim?.hit);
+  let s = 1;
+  for (const key of preset?.animate.scale ?? []) s = Math.max(s, key.v[0], key.v[1]);
+  return s;
+}
+
+/** The element's typing bar, when its entrance types and carries one. */
+export function typeCaret(anim: OverlayAnim | undefined): OverlayCaret | undefined {
+  const edge = anim?.in;
+  if (!edge?.caret) return undefined;
+  return edgeMotion(edge)?.animate.typed ? edge.caret : undefined;
+}
+
+/**
+ * Whether the typing bar is lit at `tLocal`: solid while the entrance types,
+ * then lit and dark by turns, CARET_BLINK_SECONDS each, starting lit.
+ * Undefined when the element has no bar. Pure, so every renderer and every
+ * sampler reads the same blink.
+ */
+export function caretOn(
+  anim: OverlayAnim | undefined,
+  tLocal: number,
+  dur: number
+): boolean | undefined {
+  const caret = typeCaret(anim);
+  if (!caret) return undefined;
+  const typedBy = Math.min(anim!.in!.seconds, dur);
+  if (tLocal < typedBy) return true;
+  if (!caret.blink) return !caret.hide;
+  const u = tLocal - typedBy;
+  const cycle = CARET_BLINK_SECONDS * 2;
+  if (caret.blinks !== undefined && caret.blinks > 0 && u >= caret.blinks * cycle) return !caret.hide;
+  return u % cycle < CARET_BLINK_SECONDS;
+}
+
+/** The moments inside (0, dur) where the bar turns on or off, in order. The
+ * frame samplers cut their still windows here, so a blink costs two pictures
+ * and never a frame-by-frame run. */
+export function caretToggles(anim: OverlayAnim | undefined, dur: number): number[] {
+  const caret = typeCaret(anim);
+  if (!caret) return [];
+  const typedBy = Math.min(anim!.in!.seconds, dur);
+  const out: number[] = [];
+  const half = CARET_BLINK_SECONDS / 2;
+  // Every flip lands on a half-blink boundary after typing stops; each one
+  // is kept when the bar reads differently on its two sides.
+  for (let k = 0; typedBy + k * CARET_BLINK_SECONDS < dur; k++) {
+    const t = typedBy + k * CARET_BLINK_SECONDS;
+    if (t <= 0) continue;
+    if (caretOn(anim, t - half, dur) !== caretOn(anim, t + half, dur)) out.push(t);
+  }
+  return out;
 }
 
 /** The move's contribution at `tLocal`: the hold preset sampled across the
@@ -487,7 +646,9 @@ export function loopPeriod(anim: OverlayAnim | undefined): number | null {
 
 /** Whether any slot is set (an element with an empty anim object is static). */
 export function hasOverlayAnim(anim: OverlayAnim | undefined): boolean {
-  return !!anim && (!!anim.in || !!anim.out || !!anim.loop || !!anim.move || !!anim.words);
+  return (
+    !!anim && (!!anim.in || !!anim.out || !!anim.loop || !!anim.move || !!anim.words || !!anim.hit)
+  );
 }
 
 /**

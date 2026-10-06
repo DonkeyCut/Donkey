@@ -18,6 +18,8 @@ import {
   OVERLAY_ANIM_STYLE_LABELS,
   OVERLAY_LOOP_STYLE_IDS,
   OVERLAY_LOOP_STYLE_LABELS,
+  OVERLAY_HIT_STYLE_IDS,
+  OVERLAY_HIT_STYLE_LABELS,
   wordDrawsAt,
   wordEffectIdsIn,
   WORD_ACCENT_DEFAULT,
@@ -93,20 +95,22 @@ const referencePx = (slot: Slot, style: string) =>
       ? LOOP_REFERENCE_PX
       : DEMO_REFERENCE_PX;
 
-type Slot = "in" | "out" | "loop" | "move" | "words";
+type Slot = "in" | "out" | "loop" | "move" | "words" | "hit";
 
 /** A move runs the element's whole span, so the tile gives it one of its own
  * to play in — long enough to read a push, short enough to come round again. */
 const MOVE_DEMO_SECONDS = 2.4;
 
 const labelOf = (slot: Slot, style: string) =>
-  slot === "words"
-    ? (WORD_EFFECT_LABELS[style] ?? style)
-    : slot === "move"
-      ? (MOTION.holds[style]?.label ?? style)
-      : slot === "loop"
-        ? (OVERLAY_LOOP_STYLE_LABELS[style as OverlayLoopStyle] ?? style)
-        : (OVERLAY_ANIM_STYLE_LABELS[style as OverlayAnimStyle] ?? style);
+  slot === "hit"
+    ? (OVERLAY_HIT_STYLE_LABELS[style] ?? style)
+    : slot === "words"
+      ? (WORD_EFFECT_LABELS[style] ?? style)
+      : slot === "move"
+        ? (MOTION.holds[style]?.label ?? style)
+        : slot === "loop"
+          ? (OVERLAY_LOOP_STYLE_LABELS[style as OverlayLoopStyle] ?? style)
+          : (OVERLAY_ANIM_STYLE_LABELS[style as OverlayAnimStyle] ?? style);
 
 function demoStateAt(
   slot: Slot,
@@ -136,6 +140,17 @@ function demoStateAt(
   }
   if (slot === "loop") {
     return evalOverlayAnim({ loop: { style: style as OverlayLoopStyle, speed } }, t, 60, isText);
+  }
+  if (slot === "hit") {
+    // A hit is one press and the rest beat after it, darkening as it will on
+    // the element.
+    const cycle = demoCycle(ramp);
+    return evalOverlayAnim(
+      { hit: { style, at: 0, seconds: ramp, darken: true } },
+      t % cycle,
+      cycle,
+      isText
+    );
   }
   const cycle = demoCycle(ramp);
   const local = t % cycle;
@@ -301,6 +316,7 @@ function LiveName({
       }
       el.style.clipPath =
         st.reveal !== undefined ? `inset(0 ${(1 - st.reveal) * 100}% 0 0)` : "";
+      el.style.filter = st.brightness !== undefined ? `brightness(${st.brightness})` : "";
       if (st.textProgress !== undefined) {
         const word = el.dataset.word ?? "";
         el.textContent = word.slice(0, Math.ceil(st.textProgress * word.length));

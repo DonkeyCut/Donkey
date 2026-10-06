@@ -28,7 +28,13 @@ const FAMILIES = [
   { id: "poppins", label: "Poppins", family: "Poppins", weights: [400, 700] },
   { id: "oswald", label: "Oswald", family: "Oswald", weights: [400, 700] },
   { id: "space-grotesk", label: "Space Grotesk", family: "Space Grotesk", weights: [400, 700] },
-  { id: "playfair", label: "Playfair Display", family: "Playfair Display", weights: [400, 700] },
+  {
+    id: "playfair",
+    label: "Playfair Display",
+    family: "Playfair Display",
+    weights: [400, 700],
+    italics: [400, 700],
+  },
   { id: "caveat", label: "Caveat", family: "Caveat", weights: [400, 700] },
   { id: "bebas", label: "Bebas Neue", family: "Bebas Neue", weights: [400] },
   {
@@ -88,6 +94,12 @@ for (const entry of FAMILIES) {
     copyFileSync(path.join(files, `${pkg}-latin-${weight}-normal.woff2`), path.join(dest, name));
     return name;
   });
+  // Italic faces join the same family; skia reads the slant off the file.
+  for (const weight of entry.italics ?? []) {
+    const name = `${pkg}-${weight}-italic.woff2`;
+    copyFileSync(path.join(files, `${pkg}-latin-${weight}-italic.woff2`), path.join(dest, name));
+    staged.push(name);
+  }
   manifest.push({
     ...(entry.id ? { id: entry.id, label: entry.label } : {}),
     family: entry.family,

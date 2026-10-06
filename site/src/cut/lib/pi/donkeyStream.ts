@@ -37,6 +37,8 @@ export interface WireCarrier {
 export interface DonkeyToolDetails {
   response: unknown;
   mediaParts?: WirePart[];
+  /** What the chat shows beside the result and the model never reads. */
+  display?: ToolDisplay;
 }
 
 interface ResponseBody {

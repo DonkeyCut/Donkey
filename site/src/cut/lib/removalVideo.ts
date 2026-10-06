@@ -25,7 +25,7 @@ export interface RemovalPieces {
 
 /** Straight-alpha colors survive a getImageData round trip; premultiplied
  * draws would darken every soft edge once the engine re-applies the alpha. */
-function splitFrame(
+export function splitFrame(
   layer: CanvasImageSource,
   lw: number,
   lh: number,

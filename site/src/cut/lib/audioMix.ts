@@ -121,6 +121,10 @@ export interface MixSpec {
   items: MixItem[];
   /** Audio effect elements over the finished mix, in timeline order. */
   effects?: MixEffect[];
+  /** The duck envelope, when it comes from items outside this spec: a stem
+   * holds some of the mix's items and still ducks under all of its
+   * voiceovers. Absent = read from `items`. */
+  ducks?: { start: number; end: number; gain: number }[];
 }
 
 export interface MixOptions {

@@ -7,12 +7,20 @@
 
 import {
   bakesPixels,
+  CARET_GAP_EM,
+  CARET_HEIGHT_EM,
+  CARET_WIDTH_EM,
+  caretOn,
+  caretToggles,
   edgeMotion,
   glyphStateAt,
   hasGlyphMotion,
+  hitScale,
+  hitWindow,
   loopExtent,
   loopPeriod,
   moveExtent,
+  typeCaret,
   type GlyphLoopPhase,
   type GlyphPhase,
   type OverlayAnim,
@@ -44,6 +52,7 @@ import {
   wordReach,
   wordSampleWindows,
   wordSwell,
+  type WordDraw,
 } from "./words";
 
 // Text metrics shared by DOM preview and canvas burn-in.
@@ -141,9 +150,32 @@ export interface PaintPhase {
   glyphLoop?: GlyphLoopPhase;
   /** The view a dive draws the whole picture under (see `diveView`). */
   dive?: DiveView;
+  /** The typing bar is lit in this picture (see `caretOn`). */
+  caret?: boolean;
   /** A dive's pose is painted before frame clipping, so a half-size title
    * still fills the output frame when its flight lands. */
   pose?: Pick<OverlayFrameState, "x" | "y" | "dx" | "dy" | "scale" | "rotation">;
+}
+
+/**
+ * Multiply every color already on a surface by `brightness` (0..1), leaving
+ * alpha alone: black laid source-atop at 1 - brightness. The surface has to
+ * hold the element by itself, or whatever sits under it darkens too.
+ */
+export function darkenCanvas(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number,
+  brightness: number
+): void {
+  if (!(brightness < 1)) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-atop";
+  ctx.globalAlpha = Math.min(1, 1 - Math.max(0, brightness));
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, width, height);
+  ctx.restore();
 }
 
 /**
@@ -382,23 +414,50 @@ async function paintText(
   // and it takes that width in the line — its neighbours move out of its way —
   // so the plate, the alignment and the draw all have to read one layout.
   const draws = overlay.wordDraw?.length ? overlay.wordDraw : null;
-  const fonts = new Map<number, string>();
+  const fonts = new Map<string, string>();
   const sizeKey = (mult: number) => Math.round(mult * 1000) / 1000;
-  const fontFor = (mult: number) => {
+  // A word set in its own face (an emphasized caption word) measures and
+  // draws in that face; every other word in the line's.
+  const faceKey = (d?: WordDraw) =>
+    d && (d.font !== undefined || d.italic !== undefined || d.weight !== undefined)
+      ? `${d.font ?? ""}|${d.italic === undefined ? "" : d.italic ? 1 : 0}|${d.weight ?? ""}`
+      : "";
+  const fontFor = (mult: number, d?: WordDraw) => {
     const key = sizeKey(mult);
-    let f = fonts.get(key);
+    const face = faceKey(d);
+    const id = `${key}#${face}`;
+    let f = fonts.get(id);
     if (!f) {
-      f = key === 1 ? cssFont : textCssFont(overlay, fpx * key, env);
-      fonts.set(key, f);
+      f =
+        key === 1 && !face
+          ? cssFont
+          : textCssFont(
+              face && d
+                ? {
+                    ...overlay,
+                    font: d.font ?? overlay.font,
+                    italic: d.italic ?? overlay.italic,
+                    weight: d.weight ?? overlay.weight,
+                  }
+                : overlay,
+              fpx * key,
+              env
+            );
+      fonts.set(id, f);
     }
     return f;
   };
-  // Every size in play has to be resident before measureText, or the layout is
-  // measured against a fallback face and the burn-in drifts off the preview.
+  // Every size and face in play has to be resident before measureText, or the
+  // layout is measured against a fallback face and the burn-in drifts off the
+  // preview.
   if (draws) {
-    const sizes = new Set(draws.flatMap((d) => [sizeKey(d.scale), sizeKey(d.layoutScale)]));
-    for (const key of sizes) {
-      if (key !== 1) await ensureFontLoaded(fontFor(key), overlay.text);
+    const wanted = new Set<string>();
+    for (const d of draws) {
+      wanted.add(fontFor(d.scale, d));
+      wanted.add(fontFor(d.layoutScale, d));
+    }
+    for (const f of wanted) {
+      if (f !== cssFont) await ensureFontLoaded(f, overlay.text);
     }
   }
   /** Draw and measure at a word's own size, or back at the line's. Tracking is
@@ -408,8 +467,8 @@ async function paintText(
   // front of it, so reading the size back out of `ctx.font` returns the weight
   // on any bold face; this is the size, tracked where it is set.
   let drawSize = fpx;
-  const setSize = (mult: number) => {
-    ctx.font = fontFor(mult);
+  const setSize = (mult: number, d?: WordDraw) => {
+    ctx.font = fontFor(mult, d);
     drawSize = fpx * sizeKey(mult);
     if ("letterSpacing" in ctx) ctx.letterSpacing = `${(overlay.letterSpacing ?? 0) * drawSize}px`;
   };
@@ -418,9 +477,9 @@ async function paintText(
     : (() => {
         const spaceW = ctx.measureText(" ").width;
         let k = 0;
-        const at = (w: string, mult: number) => {
-          if (mult === 1) return ctx.measureText(w).width;
-          setSize(mult);
+        const at = (w: string, mult: number, d?: WordDraw) => {
+          if (mult === 1 && !faceKey(d)) return ctx.measureText(w).width;
+          setSize(mult, d);
           const ww = ctx.measureText(w).width;
           setSize(1);
           return ww;
@@ -432,8 +491,12 @@ async function paintText(
           // into its place, and it draws centered in the room it will fill.
           const from = k;
           k += words.length;
-          const widths = words.map((w, j) => at(w, sizeKey(draws[from + j]?.layoutScale ?? 1)));
-          const drawn = words.map((w, j) => at(w, sizeKey(draws[from + j]?.scale ?? 1)));
+          const widths = words.map((w, j) =>
+            at(w, sizeKey(draws[from + j]?.layoutScale ?? 1), draws[from + j])
+          );
+          const drawn = words.map((w, j) =>
+            at(w, sizeKey(draws[from + j]?.scale ?? 1), draws[from + j])
+          );
           return {
             words,
             widths,
@@ -491,6 +554,31 @@ async function paintText(
         : cx + maxW / 2 - widthsOf[i] / 2;
 
   const phase = frame.phase;
+  // The typing bar: just past the last character drawn, on the last line, as
+  // tall as the type, centered where the DOM's vertical-align: middle puts
+  // it — half an x-height over the baseline. No shadow, so it reads the same
+  // as the preview's bar.
+  const caretColor = phase?.caret ? (typeCaret(overlay.anim)?.color ?? overlay.color) : null;
+  const alphaOf = ctx.globalAlpha;
+  const drawCaret = (right: number) => {
+    if (!caretColor) return;
+    const y = cy - totalH / 2 + lineH * (lines.length - 0.5);
+    ctx.save();
+    ctx.font = cssFont;
+    ctx.textBaseline = "alphabetic";
+    const base = ctx.measureText("Hg").actualBoundingBoxAscent;
+    const xh = ctx.measureText("x").actualBoundingBoxAscent;
+    ctx.textBaseline = "middle";
+    const mid = ctx.measureText("Hg").actualBoundingBoxAscent;
+    const off =
+      Number.isFinite(base) && Number.isFinite(mid) && Number.isFinite(xh) ? base - mid - xh / 2 : 0;
+    ctx.shadowColor = "transparent";
+    ctx.globalAlpha = alphaOf;
+    ctx.fillStyle = caretColor;
+    const h = CARET_HEIGHT_EM * fpx;
+    ctx.fillRect(right + CARET_GAP_EM * fpx, y + off - h / 2, Math.max(2 * scale, CARET_WIDTH_EM * fpx), h);
+    ctx.restore();
+  };
   if (phase && hasGlyphMotion(phase)) {
     // A per-glyph ramp or loop draws character by character, each at its own
     // place in the motion. The index counts through the whole element, line
@@ -498,6 +586,7 @@ async function paintText(
     const total = Math.max(1, [...overlay.text].length);
     const alpha0 = ctx.globalAlpha;
     let gi = 0;
+    let lastRight = cx;
     lines.forEach((line, i) => {
       const y = cy - totalH / 2 + lineH * (i + 0.5);
       // Characters drawn one by one lose the kerning between them, so the run
@@ -506,6 +595,7 @@ async function paintText(
       const chars = [...line];
       const widths = chars.map((ch) => ctx.measureText(ch).width);
       let x = lineX(i) - widths.reduce((a, b) => a + b, 0) / 2;
+      lastRight = lineX(i) + widths.reduce((a, b) => a + b, 0) / 2;
       chars.forEach((ch, ci) => {
         const w = widths[ci];
         const g = glyphStateAt(phase, gi, total);
@@ -536,6 +626,7 @@ async function paintText(
       });
       gi++; // the line break takes a turn too
     });
+    drawCaret(lastRight);
     return;
   }
 
@@ -545,6 +636,7 @@ async function paintText(
   // pushed its neighbours aside and they close back up as it shrinks.
   if (!runs || !draws) {
     lines.forEach((line, i) => drawText(line, lineX(i), cy - totalH / 2 + lineH * (i + 0.5)));
+    drawCaret(lineX(lines.length - 1) + widthsOf[lines.length - 1] / 2);
     return;
   }
   // A word drawn at another size shares the baseline with the words beside it,
@@ -563,6 +655,24 @@ async function paintText(
     Number.isFinite(alphabetic) && Number.isFinite(middle) && alphabetic > middle
       ? alphabetic - middle
       : fpx * WORD_BASELINE_DROP;
+  // A word in its own face sits on the line's baseline too, and that face
+  // puts its baseline its own distance below its middle: read once per face,
+  // at the line's size, and scaled with the word.
+  const drops = new Map<string, number>();
+  const dropOf = (d: WordDraw) => {
+    const face = faceKey(d);
+    if (!face) return drop;
+    let v = drops.get(face);
+    if (v === undefined) {
+      setSize(1, d);
+      const a = ascentAt("alphabetic");
+      const m = ascentAt("middle");
+      v = Number.isFinite(a) && Number.isFinite(m) && a > m ? a - m : drop;
+      drops.set(face, v);
+      setSize(1);
+    }
+    return v;
+  };
   ctx.textBaseline = "middle";
   const alpha0 = ctx.globalAlpha;
   let k = 0;
@@ -582,7 +692,7 @@ async function paintText(
         // lifted or dropped by exactly as much as sharing the line's baseline
         // asks for.
         const size = fpx * mult;
-        const mid = y + drop * (1 - mult);
+        const mid = y + drop - dropOf(d) * mult;
         const drawY = mid;
         // Centered in the room the layout left it.
         const drawX = x + (width - run.drawn[wi]) / 2;
@@ -597,7 +707,7 @@ async function paintText(
           if (d.rotate) ctx.rotate((d.rotate * Math.PI) / 180);
           ctx.translate(-wx, -mid);
         }
-        setSize(mult);
+        setSize(mult, d);
         const boxed = d.mark === "box" && !!d.markAlpha;
         if (boxed) {
           // Accent box behind the word, and the word on top of it — both drawn
@@ -634,6 +744,7 @@ async function paintText(
   });
   ctx.globalAlpha = alpha0;
   ctx.textAlign = "center";
+  drawCaret(cx + (runs[runs.length - 1]?.lineW ?? 0) / 2);
 }
 
 /** Paint one element in frame coordinates with no element-level transform —
@@ -1055,6 +1166,8 @@ export async function measureElementBounds(
     h += PLATE_PAD_Y * fpx * 2;
   }
   if (opts?.pad === false) return { cx, cy, w, h };
+  // The typing bar stands past the last character, so the crop leaves it room.
+  if (typeCaret(o.anim)) w += ((CARET_GAP_EM + CARET_WIDTH_EM) * fpx + 2 * frame.scale) * 2;
   const strokePad = (o.stroke?.width ?? 0) * fpx * 2;
   const shadow = resolveShadow(o.shadow);
   const shadowPad = shadow ? (shadow.blur + Math.abs(shadow.offsetY)) * frame.scale : 0;
@@ -1140,6 +1253,18 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
     }
     add(overlay, start, stop);
   };
+  // The typing bar blinks on the element's own clock, so a window it lights
+  // and darkens inside is cut where it turns, and each piece is drawn with the
+  // bar as it stands there.
+  const barred = isText && !!typeCaret(anim);
+  const toggles = barred ? caretToggles(anim, dur).map((t) => o.start + t) : [];
+  const lit = (phase: PaintPhase | undefined, from: number, to: number) =>
+    barred && caretOn(anim, (from + to) / 2 - o.start, dur) ? { ...phase, caret: true } : phase;
+  const pushLit = (from: number, to: number, animPart: OverlayAnim) => {
+    const cuts = [from, ...toggles.filter((t) => t > from && t < to), to];
+    for (let i = 0; i + 1 < cuts.length; i++)
+      push(o, cuts[i], cuts[i + 1], animPart, lit(undefined, cuts[i], cuts[i + 1]));
+  };
   /** One window per slice, each drawn at the ramp's position mid-window. The
    * slot leaves the window's anim: its motion is in the picture already. */
   const slices = (from: number, secs: number, slot: "in" | "out") => {
@@ -1160,27 +1285,95 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
       const to = from + ((i + 1) / n) * secs;
       if (types) {
         const chars = Math.max(1, Math.ceil(p * text.length));
-        push({ ...o, text: text.slice(0, chars) } as Overlay, at, to, rest);
+        push({ ...o, text: text.slice(0, chars) } as Overlay, at, to, rest, lit(undefined, at, to));
       } else if (perGlyph) {
-        push(o, at, to, rest, {
+        push(o, at, to, rest, lit({
           glyphs: { style: edge.style, preset: edge.preset, p, exiting: slot === "out" },
-        });
+        }, at, to));
       } else {
-        push(o, at, to, rest, { reveal: p });
+        push(o, at, to, rest, lit({ reveal: p }, at, to));
       }
     }
   };
 
   if (inS > 1e-3) {
     if (baked("in")) slices(o.start, inS, "in");
-    else push(o, o.start, o.start + inS, anim);
+    else pushLit(o.start, o.start + inS, anim);
   }
-  push(o, o.start + inS, o.start + dur - outS, anim);
+  pushLit(o.start + inS, o.start + dur - outS, anim);
   if (outS > 1e-3) {
     if (baked("out")) slices(o.start + dur - outS, outS, "out");
-    else push(o, o.start + dur - outS, o.start + dur, anim);
+    else pushLit(o.start + dur - outS, o.start + dur, anim);
   }
   return out;
+}
+
+/** The element as it paints at one moment, neutral — rotation and opacity
+ * belong to the pose: its words drawn as they stand, the typed share of its
+ * text, and the pixel-level phase of a wipe or a per-glyph move. `typed` says
+ * the typewriter is running. */
+export function elementAtMoment(
+  overlay: Overlay,
+  tLocal: number,
+  ev: OverlayFrameState
+): { el: Overlay; phase?: PaintPhase; typed: boolean } {
+  const dur = Math.max(0.1, overlay.end - overlay.start);
+  let el: Overlay = applyWordDraw({ ...overlay, rotation: undefined, opacity: undefined }, tLocal, dur);
+  const typed = ev.textProgress !== undefined && (overlay.kind ?? "text") === "text";
+  if (typed) {
+    const text = (overlay as TextOverlay).text;
+    const chars = Math.max(0, Math.min(text.length, Math.ceil(ev.textProgress! * text.length)));
+    el = { ...el, text: text.slice(0, chars) } as Overlay;
+  }
+  const phase: PaintPhase | undefined =
+    ev.glyphs || ev.glyphLoop || ev.reveal !== undefined || ev.caret
+      ? {
+          ...(ev.glyphs ? { glyphs: ev.glyphs } : {}),
+          ...(ev.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
+          ...(ev.reveal !== undefined ? { reveal: ev.reveal } : {}),
+          ...(ev.caret ? { caret: true } : {}),
+        }
+      : undefined;
+  return { el, phase, typed };
+}
+
+/**
+ * Paint an element, neutral and at rest, into a canvas cropped to its inked
+ * box in a `width` × `height` frame, its shape mask applied. Returns where the
+ * crop's top-left sits in the frame. The preview's motion blur smears this
+ * picture: a few element-sized draws a frame where a frame-sized picture
+ * would cost the whole stage.
+ */
+export async function paintElementCrop(
+  canvas: HTMLCanvasElement,
+  el: Overlay,
+  width: number,
+  height: number,
+  env: RenderEnv,
+  opts: { t: number; phase?: PaintPhase }
+): Promise<{ x: number; y: number }> {
+  const scale = Math.min(width, height) / 1080;
+  const frame: PaintFrame = { width, height, scale, t: opts.t, phase: opts.phase };
+  const b = await measureElementBounds(el, frame, env);
+  // Letters on a per-glyph move and lifted words travel a little past the
+  // resting box.
+  const pad = Math.ceil(4 + 0.1 * Math.max(b.w, b.h) + ((el.kind ?? "text") === "text" ? 1.5 * (el as TextOverlay).size * scale : 0));
+  const x = Math.floor(b.cx - b.w / 2 - pad);
+  const y = Math.floor(b.cy - b.h / 2 - pad);
+  const w = Math.max(1, Math.ceil(b.w + 2 * pad));
+  const h = Math.max(1, Math.ceil(b.h + 2 * pad));
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  const ctx = canvas.getContext("2d")!;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, w, h);
+  ctx.translate(-x, -y);
+  await paintElement(ctx, el, frame, env);
+  if (el.mask && el.mask.kind !== "subject") {
+    applyMaskToCanvas(ctx, newCanvas(env, 1, 1), el.mask, opts.t, frame, { x: el.x, y: el.y }, ctx.getTransform());
+  }
+  return { x, y };
 }
 
 /** One animated element as a region-cropped frame sequence: unique pictures
@@ -1254,7 +1447,7 @@ export async function renderOverlayFrames(
   const extent = poseExtent(overlay);
   // A swollen word grows the line past the resting box, so the region carries
   // it — width from the swell, and the type's own extra height with it.
-  const maxScale = 1.15 * extent.scale * move.scale * wordSwell(accent);
+  const maxScale = 1.15 * extent.scale * move.scale * wordSwell(accent) * hitScale(anim);
   const rotates =
     !!overlay.rotation ||
     loop.rotates ||
@@ -1308,26 +1501,9 @@ export async function renderOverlayFrames(
     // A dive's view goes inside the pose, so the type is drawn as vectors at
     // the size it is seen and stays sharp however far in the flight gets.
     if (focus && ev.dive) applyDiveView(ctx, diveView(ev.dive, focus, ev, overlay, frame));
-    let el: Overlay = applyWordDraw(
-      { ...overlay, rotation: undefined, opacity: undefined },
-      tLocal,
-      dur
-    );
-    if (ev.textProgress !== undefined && (overlay.kind ?? "text") === "text") {
-      const text = (overlay as TextOverlay).text;
-      const chars = Math.max(0, Math.min(text.length, Math.ceil(ev.textProgress * text.length)));
-      el = { ...el, text: text.slice(0, chars) } as Overlay;
-      // Typing reveals characters; it must not also fade them.
-      ctx.globalAlpha = poseAt(overlay, tLocal).opacity;
-    }
-    const phase: PaintPhase | undefined =
-      ev.glyphs || ev.glyphLoop || ev.reveal !== undefined
-        ? {
-            ...(ev.glyphs ? { glyphs: ev.glyphs } : {}),
-            ...(ev.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
-            ...(ev.reveal !== undefined ? { reveal: ev.reveal } : {}),
-          }
-        : undefined;
+    const { el, phase, typed } = elementAtMoment(overlay, tLocal, ev);
+    // Typing reveals characters; it must not also fade them.
+    if (typed) ctx.globalAlpha = poseAt(overlay, tLocal).opacity;
     const maskTransform = ctx.getTransform();
     await paintElement(ctx, el, { ...frame, t: tLocal, phase }, env);
     if (overlay.mask && maskScratch) {
@@ -1343,6 +1519,10 @@ export async function renderOverlayFrames(
         maskTransform
       );
     }
+    // The region holds this element alone, so a hit's darkening lands on its
+    // own pixels.
+    if (ev.brightness !== undefined) darkenCanvas(ctx, rw, rh, ev.brightness);
+    fx.end(target);
     return pngBlob(canvas, env);
   };
 
@@ -1354,16 +1534,30 @@ export async function renderOverlayFrames(
   };
 
   const step = 1 / fps;
-  // A keyframed pose, a move, or a keyframed mask changes on its own schedule
-  // across the whole element, so there is no still middle and no cycle to
-  // repeat: sample the element frame by frame.
-  if (keyed || anim?.move || isMaskAnimated(overlay.mask) || (accent && anim?.loop)) {
+  const period = loopPeriod(anim) ?? lottieDur;
+  // A hit and a blinking bar change the middle at their own moments.
+  const hit = hitWindow(anim, dur);
+  const toggles = (overlay.kind ?? "text") === "text" ? caretToggles(anim, dur) : [];
+  const timed = !!hit || toggles.length > 0;
+  // A keyframed pose, a camera, a move, or a keyframed mask changes on its
+  // own schedule across the whole element, so there is no still middle and no cycle to
+  // repeat: sample the element frame by frame. So does a hit or a blink over
+  // a middle that already cycles.
+  if (
+    keyed ||
+    filmed ||
+    anim?.move ||
+    isMaskAnimated(overlay.mask) ||
+    (accent && anim?.loop) ||
+    (timed && (!!accent || !!period))
+  ) {
     const n = Math.max(1, Math.round(dur * fps));
     for (let i = 0; i < n; i++) {
       await push(i * step, i === n - 1 ? dur - (n - 1) * step : step);
     }
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, rw, rh);
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.clearRect(0, 0, rw, rh);
+    fx.dispose();
     return { x: x0, y: y0, w: rw, h: rh, images, blank: await pngBlob(canvas, env), entries };
   }
   // Head ramp, frame by frame; the last frame absorbs the rounding so the
@@ -1376,8 +1570,35 @@ export async function renderOverlayFrames(
   }
   const middle = dur - inS - outS;
   if (middle > 1e-3) {
-    const period = loopPeriod(anim) ?? lottieDur;
-    if (accent) {
+    if (timed && !accent && !period) {
+      // The middle holds still between the hit and the bar's turns: one
+      // picture per look (bar lit, bar dark), reused across every still
+      // piece, and the hit frame by frame.
+      const a0 = inS;
+      const b0 = dur - outS;
+      const cuts = [a0, b0, ...toggles];
+      if (hit) cuts.push(hit.start, hit.end);
+      const marks = [...new Set(cuts.filter((t) => t >= a0 && t <= b0))].sort((x, y) => x - y);
+      const stills = new Map<boolean, number>();
+      for (let i = 0; i + 1 < marks.length; i++) {
+        const a = marks[i];
+        const b = marks[i + 1];
+        if (b - a < 1e-4) continue;
+        if (hit && a >= hit.start - 1e-6 && b <= hit.end + 1e-6) {
+          const n = Math.max(1, Math.round((b - a) * fps));
+          for (let j = 0; j < n; j++) await push(a + j * step, j === n - 1 ? b - a - (n - 1) * step : step);
+          continue;
+        }
+        const lit = caretOn(anim, (a + b) / 2, dur) === true;
+        let image = stills.get(lit);
+        if (image === undefined) {
+          images.push(await drawAt((a + b) / 2));
+          image = images.length - 1;
+          stills.set(lit, image);
+        }
+        entries.push({ image, duration: b - a });
+      }
+    } else if (accent) {
       // The picture changes as the effect walks the line, and nowhere else:
       // one frame per span the engine says holds still covers the middle
       // however long it runs. The last one absorbs the rounding, so the
@@ -1414,8 +1635,9 @@ export async function renderOverlayFrames(
     }
   }
 
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, rw, rh);
+  target.setTransform(1, 0, 0, 1, 0, 0);
+  target.clearRect(0, 0, rw, rh);
+  fx.dispose();
   const blank = await pngBlob(canvas, env);
   return { x: x0, y: y0, w: rw, h: rh, images, blank, entries };
 }

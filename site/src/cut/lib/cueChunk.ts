@@ -83,6 +83,8 @@ interface StreamWord {
    * caption it lands in reuses when it opens on the same word. */
   from: number;
   id: string;
+  /** The word is emphasized, and stays so in whichever caption it lands. */
+  em: boolean;
 }
 
 /** One track's words in order, each carrying where it came from. Times are

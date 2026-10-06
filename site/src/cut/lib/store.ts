@@ -585,6 +585,10 @@ export interface EditorState {
    * profile the header read — with an undo step. `undefined` returns the
    * asset to the detected profile. */
   setAssetColorProfile: (id: string, profile: SourceProfile | undefined) => void;
+  /** Bind a separately recorded sound to a video, so every clip of it plays
+   * the recording; `undefined` returns the video to its own track. One undo
+   * step. */
+  setAssetSoundFrom: (id: string, from: SoundFrom | undefined) => void;
   /** Write the preview proxy that landed beside a master onto its asset, and
    * the address the preview reads it from. The preview retargets on the next
    * frame; the document saves the proxy with the asset. No undo step: the
@@ -1034,6 +1038,7 @@ interface SharedFields {
   colorSpace: OutputSpace;
   beats: Map<string, AssetBeats | undefined>;
   profiles: Map<string, SourceProfile | undefined>;
+  sounds: Map<string, SoundFrom | undefined>;
 }
 /** Each closed timeline's undo and redo stacks: opening a timeline again
  * brings its history back. Session only, cleared when a project opens. */

@@ -388,15 +388,19 @@ function WordText({
   text,
   draws,
   lineHeight,
+  tail,
 }: {
   text: string;
   draws: WordDraw[];
   lineHeight?: number;
+  /** Drawn at the end of the last line (the typing bar). */
+  tail?: React.ReactNode;
 }) {
   let k = 0;
+  const lines = text.split("\n");
   return (
     <>
-      {text.split("\n").map((line, li) => (
+      {lines.map((line, li) => (
         <span key={li} className="block">
           {line
             .split(" ")
@@ -1225,15 +1229,19 @@ function OverlayItem({
               {o.text}
             </div>
           ) : glyphs ? (
-            <GlyphText text={shownText} phase={glyphs} scale={scale} />
+            <GlyphText text={shownText} phase={glyphs} scale={scale} tail={caretBar} />
           ) : wordDraw ? (
             <WordText
               text={shownText}
               draws={wordDraw}
               lineHeight={(isTextOverlay(o) ? o.lineHeight : undefined) ?? LINE_HEIGHT}
+              tail={caretBar}
             />
           ) : (
-            <span>{shownText}</span>
+            <span>
+              {shownText}
+              {caretBar}
+            </span>
           )
         ) : o.kind === "shape" ? (
           <ShapeView shape={o} stageWidth={stageWidth} stageHeight={stageHeight} scale={scale} />
@@ -1356,12 +1364,16 @@ function GlyphText({
   text,
   phase,
   scale,
+  tail,
 }: {
   text: string;
   phase: OverlayFrameState;
   scale: number;
+  /** Drawn at the end of the last line (the typing bar). */
+  tail?: React.ReactNode;
 }) {
   const total = Math.max(1, [...text].length);
+  const lineCount = text.split("\n").length;
   const seed = slotSeed(text);
   let gi = 0;
   return (
@@ -1469,7 +1481,7 @@ function DiveCanvas({
             height: h,
             scale: Math.min(w, h) / 1080,
           });
-          await paintElementInto(canvas, el, env, { dive: view, pose: next });
+          await paintElementInto(canvas, el, env, { dive: view, pose: next, ...(next.caret ? { caret: true } : {}) });
         }
       } finally {
         busy.current = false;

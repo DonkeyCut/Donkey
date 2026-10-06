@@ -39,6 +39,9 @@ export {
  * box-shadow spread, which stays clear of the layout. */
 export function wordDrawCss(d: WordDraw, lineHeight = LINE_HEIGHT): CSSProperties {
   const css: CSSProperties = { color: d.color };
+  if (d.font !== undefined) css.fontFamily = fontStack(d.font);
+  if (d.italic !== undefined) css.fontStyle = d.italic ? "italic" : "normal";
+  if (d.weight !== undefined) css.fontWeight = d.weight;
   if (d.opacity < 0.999) css.opacity = d.opacity;
   // The word takes its room at the layout size and draws at its own, which
   // differ only while it is growing into its place: real type size for the

@@ -231,7 +231,10 @@ export class FrameCompositor {
       | "removalInk"
       | "removalLookA"
       | "removalLookB"
-      | "detailScratch",
+      | "detailScratch"
+      | "cardPop"
+      | "cardLayer"
+      | "cardPost",
     w: number,
     h: number
   ): { surface: Surface; resized: boolean } {

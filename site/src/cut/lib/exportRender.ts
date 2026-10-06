@@ -730,6 +730,11 @@ async function stampText(doc: ExportDoc): Promise<StampedLayer[]> {
 class StampCache {
   private drawn = new Map<StampedLayer, ImageBitmap>();
   private maskFrames = new Map<StampedLayer, { t: number; bitmap: ImageBitmap }>();
+  /** Scratch for blurred and motion-blurred stamps, made on first use. */
+  readonly fx = new ElementFx(createRasterCanvas);
+  /** Where an element a hit darkens is drawn alone, so the darkening lands on
+   * its pixels and not on the frame under it. Made on the first such frame. */
+  private dark: RasterSurface | null = null;
 
   constructor(
     private width: number,
@@ -773,6 +778,23 @@ class StampCache {
     return bitmap;
   }
 
+  /** What the scratch surfaces hold: the blur and streak scratch, and the
+   * darkening surface once a hit has made it. */
+  scratchBytes(): number {
+    return this.fx.bytes() + (this.dark ? canvasBytes(this.dark.width * this.dark.height) : 0);
+  }
+
+  /** The darkening surface, cleared, at the frame's size. */
+  darkTarget(): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
+    this.dark ??= createRasterCanvas(this.width, this.height);
+    const c = this.dark.getContext("2d") as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, this.width, this.height);
+    return c;
+  }
+
   /** Where a diving element flies into, measured once per look. */
   diveFocus(o: Overlay): Promise<DiveFocus> {
     return measureDiveFocus(o, this.width / this.height, cutRenderEnv(this.assets));
@@ -795,10 +817,12 @@ class StampCache {
   }
 
   dispose() {
+    this.dark = null;
     for (const bitmap of this.drawn.values()) bitmap.close();
     this.drawn.clear();
     for (const hit of this.maskFrames.values()) hit.bitmap.close();
     this.maskFrames.clear();
+    this.fx.dispose();
   }
 }
 
@@ -919,6 +943,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
       fadeOut: a.fadeOut,
       sound: a.sound,
       duck: a.duck,
+      lane: a.lane ?? 0,
     });
   }
 
@@ -932,7 +957,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             file: resolve(sp.asset),
             in: sp.clip.in,
             out: sp.clip.out,
-            muted: sp.clip.muted || !!sp.clip.hidden || assetIsSilent(sp.asset),
+            muted: sp.clip.muted || !!sp.clip.hidden || (!sp.sound && assetIsSilent(sp.asset)),
             speed: sp.clip.speed,
             speedCurve: sp.clip.speedCurve,
             reverse: sp.clip.reverse,
@@ -943,6 +968,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             soundCross: sp.soundOut,
             soundBack: sp.soundBack,
             soundAhead: sp.soundAhead,
+            ...spanSound(sp),
           },
         ]);
 
@@ -1191,20 +1217,33 @@ async function drawStamps(
       const o = layer.overlay as StickerOverlay;
       const ev = evalOverlayFrame(
         { ...(layer.source ?? o), anim: layer.anim },
-        t - (layer.animStart ?? layer.start)
+        t - (layer.animStart ?? layer.start),
+        canvas.width / canvas.height
       );
       if (ev.opacity <= 0.001) continue;
       const scale = Math.min(canvas.width, canvas.height) / 1080;
       const w = Math.max(1, o.w * canvas.width);
       const aspect = layer.lottie.width > 0 ? layer.lottie.width / layer.lottie.height : 1;
       const h = w / aspect;
-      ctx.save();
-      ctx.globalAlpha = ev.opacity;
-      ctx.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
-      ctx.rotate((ev.rotation * Math.PI) / 180);
-      ctx.scale(ev.scale, ev.scale);
-      ctx.drawImage(layer.lottie.seek(t - (layer.animStart ?? layer.start)), -w / 2, -h / 2, w, h);
-      ctx.restore();
+      // A hit that darkens is drawn alone first, so the darkening lands on
+      // the sticker's pixels; a blurred or streaking one poses into the
+      // scratch and lands soft.
+      const look = elementLook(ev, scale);
+      const dark = ev.brightness !== undefined && ev.brightness < 1;
+      const c = dark ? stamps.darkTarget() : ctx;
+      const lc = stamps.fx.begin(c, canvas.width, canvas.height, look);
+      lc.save();
+      lc.globalAlpha = ev.opacity;
+      lc.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
+      lc.rotate((ev.rotation * Math.PI) / 180);
+      lc.scale(ev.scale, ev.scale);
+      lc.drawImage(layer.lottie.seek(t - (layer.animStart ?? layer.start)), -w / 2, -h / 2, w, h);
+      lc.restore();
+      stamps.fx.end(c);
+      if (dark) {
+        darkenCanvas(c, canvas.width, canvas.height, ev.brightness!);
+        ctx.drawImage(c.canvas, 0, 0);
+      }
       continue;
     }
     // Unkeyed, the bitmap bakes the element's own rotation/opacity and only
@@ -1213,7 +1252,11 @@ async function drawStamps(
     // way this samples the evaluator the ffmpeg path rasterized into frames.
     const tLocal = t - (layer.animStart ?? layer.start);
     const ev = layer.anim
-      ? evalOverlayFrame({ ...(layer.source ?? layer.overlay), anim: layer.anim }, tLocal)
+      ? evalOverlayFrame(
+          { ...(layer.source ?? layer.overlay), anim: layer.anim },
+          tLocal,
+          canvas.width / canvas.height
+        )
       : null;
     // A per-glyph loop moves the characters inside the picture, so its window
     // is drawn afresh each frame with the loop folded into the layer's phase.
@@ -1269,20 +1312,33 @@ async function drawStamps(
       c.translate(-cx, -cy);
       c.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     };
-    ctx.save();
-    ctx.globalAlpha = ev.opacity;
+    // A blurred or streaking element poses into the scratch first and lands
+    // softened; a sharp one draws straight onto the frame. A hit that darkens
+    // needs a surface holding the element alone: the matte's, or the dark one.
+    const look = elementLook(ev, scale);
+    const dark = ev.brightness !== undefined && ev.brightness < 1;
+    const lay = (into: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => {
+      const target = stamps.fx.begin(into, canvas.width, canvas.height, look);
+      target.save();
+      target.globalAlpha = ev.opacity;
+      posed(target);
+      target.restore();
+      stamps.fx.end(into);
+      if (dark) darkenCanvas(into, canvas.width, canvas.height, ev.brightness!);
+    };
     if (subjectFront) {
       // Pose the stamp inside the matte surface, so the matte stays put in
-      // frame space while the element travels beneath it.
-      ctx.drawImage(
-        subject!.mattedStamp(layer.overlay, canvas.width, canvas.height, posed),
-        0,
-        0
-      );
+      // frame space while the element travels beneath it. The softening
+      // lands first and the matte trims after, so the person's edge stays
+      // sharp over a moving element, as the preview shows it.
+      ctx.drawImage(subject!.mattedStamp(layer.overlay, canvas.width, canvas.height, lay), 0, 0);
+    } else if (dark) {
+      const c = stamps.darkTarget();
+      lay(c);
+      ctx.drawImage(c.canvas, 0, 0);
     } else {
-      posed(ctx);
+      lay(ctx);
     }
-    ctx.restore();
   }
 }
 
@@ -1299,12 +1355,13 @@ export class FramePainter {
   private comp: FrameCompositor;
   private stamps: StampCache;
   private readers = new Map<string, ClipReader>();
-  /** What the open readers are standing on, so a render in the tab shows up
-   * beside the preview's own pictures in the memory report. */
+  /** What the open readers and the stamp scratch are standing on, so a
+   * render in the tab shows up beside the preview's own pictures in the
+   * memory report. */
   private readonly releaseMemory = holdMemory("exportReaders", () => {
     let n = 0;
     for (const r of this.readers.values()) n += canvasBytes(readerPoolFrames(r) * r.sourcePixels);
-    return n;
+    return n + this.stamps.scratchBytes();
   });
   /** Frames drawn, which is the clock the readers' eviction order runs on. */
   private frameNo = 0;
@@ -1508,16 +1565,16 @@ export class FramePainter {
     const mt = Math.max(0, Math.min(sourceTimeAt(span, t) - m.in, dur - 0.001));
     const frame = await this.readerFor(asset).frameAt(mt);
     if (frame.kind !== "ready") return;
-    let scratch = this.matteScratch.get(clip.id);
+    let scratch = this.matteScratch.get(key);
     // The matte advances at its own baked rate below the export's, so a
     // converted frame is reused until the read crosses into the next one —
     // the pixel pass is per matte frame, never per output frame.
     const stamp = `${m.assetId}:${Math.floor(mt * MATTE_FPS)}`;
-    if (scratch && this.matteStamp.get(clip.id) === stamp) {
-      this.matteFrames.set(clip.id, scratch as CanvasImageSource);
+    if (scratch && this.matteStamp.get(key) === stamp) {
+      this.matteFrames.set(key, scratch as CanvasImageSource);
       return;
     }
-    if (!scratch) this.matteScratch.set(clip.id, (scratch = createRasterCanvas(frame.width, frame.height)));
+    if (!scratch) this.matteScratch.set(key, (scratch = createRasterCanvas(frame.width, frame.height)));
     if (scratch.width !== frame.width) scratch.width = frame.width;
     if (scratch.height !== frame.height) scratch.height = frame.height;
     const ctx = scratch.getContext("2d") as CanvasRenderingContext2D | null;
@@ -1527,8 +1584,8 @@ export class FramePainter {
     const img = ctx.getImageData(0, 0, scratch.width, scratch.height);
     matteLumaToAlpha(img.data);
     ctx.putImageData(img, 0, 0);
-    this.matteStamp.set(clip.id, stamp);
-    this.matteFrames.set(clip.id, scratch as CanvasImageSource);
+    this.matteStamp.set(key, stamp);
+    this.matteFrames.set(key, scratch as CanvasImageSource);
   }
 
   /** Draw the whole cut at timeline time `t` onto the canvas. */
@@ -1594,6 +1651,7 @@ export class FramePainter {
     // The subject pass: video → behind elements → segmented person, exactly
     // the preview's pass, sampled per drawn frame (no mask throttling).
     // It also refreshes the matte the front subject-masked stamps read.
+    await this.behind?.ready(doc.overlays, canvas.width, canvas.height, doc.assets, t);
     this.behind?.draw(canvas, doc.overlays, doc.assets, t, { minMaskInterval: 0 });
 
     // The stack, bottom up: an effect grades what plays under it, so the

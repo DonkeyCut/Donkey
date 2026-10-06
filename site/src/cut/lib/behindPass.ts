@@ -11,6 +11,7 @@
 
 import {
   applyWordDraw,
+  darkenCanvas,
   diveView,
   divesAt,
   evalOverlayFrame,
@@ -74,6 +75,36 @@ function rasterSliceAt(o: Overlay, tLocal: number): number {
   return i < 0 ? spans.length - 1 : i;
 }
 
+/**
+ * Which picture an element needs at one moment: its word slice, how many
+ * characters a typewriter has typed (-1 = the whole text), and whether the
+ * typing bar is lit — the same reading the front path's painters take from
+ * the evaluator. One record, rewritten in place every time it is read.
+ */
+const look = { word: -1, chars: -1, caret: false, key: 0 };
+
+/** Fill `look` for `o` at `tLocal` and return its picture key. A whole-text
+ * picture keys at zero or above (two per word slice, bar dark and lit); a
+ * typing picture keys below zero, one per typed count. */
+function lookAt(o: Overlay, tLocal: number, ev: OverlayFrameState): number {
+  look.word = rasterSliceAt(o, tLocal);
+  look.caret = ev.caret === true;
+  const n = isTextOverlay(o) ? o.text.length : 0;
+  look.chars =
+    isTextOverlay(o) && ev.textProgress !== undefined
+      ? Math.max(0, Math.min(n, Math.ceil(ev.textProgress * n)))
+      : -1;
+  const bar = look.caret ? 1 : 0;
+  look.key =
+    look.chars < 0
+      ? (look.word + 1) * 2 + bar
+      : -1 - (((look.word + 1) * (n + 1) + look.chars) * 2 + bar);
+  return look.key;
+}
+
+/** The phase a picture with its typing bar lit is painted at. */
+const CARET_LIT: PaintPhase = { caret: true };
+
 /** Segmentation input width — small on purpose; this runs per frame. */
 const SEG_WIDTH = 256;
 
@@ -136,6 +167,20 @@ const entryBytes = (e: { byWord: Map<number, ImageBitmap> }): number => {
   return n;
 };
 
+/** One element's pictures: whole-text ones by word slice and bar, and the
+ * typing picture it is on. `want` is the typing picture it is waiting for. */
+interface RasterEntry {
+  of: Overlay;
+  byWord: Map<number, ImageBitmap>;
+  pending: Set<number>;
+  usedAt: number;
+  last: ImageBitmap | null;
+  want: number | null;
+  wantWord: number;
+  wantChars: number;
+  wantCaret: boolean;
+}
+
 export class SubjectMaskCompositor {
   /** `publishes` marks the live preview's instance, the one whose matte the
    * DOM layer reads. */
@@ -159,10 +204,14 @@ export class SubjectMaskCompositor {
    * It marks a draw already asked for, and a marker outliving the picture it
    * was asked for would leave the element blank for good.
    */
-  private rasters = new Map<
-    string,
-    { of: Overlay; byWord: Map<number, ImageBitmap>; pending: Set<number>; usedAt: number }
-  >();
+  private rasters = new Map<string, RasterEntry>();
+  /** Typing pictures are painted one at a time on this surface: a typed
+   * count is a picture shown for a frame or two, so it skips the PNG round
+   * trip, and an element that types faster than the pictures land shows the
+   * latest count it reached. */
+  private typeSurface: HTMLCanvasElement | null = null;
+  private typing = false;
+  private typeArgs: { w: number; h: number; assets: MediaAsset[] } = { w: 1, h: 1, assets: [] };
   /** Frames this pass has drawn, which is the clock the pictures are given
    * back on: an element drawn on the frame being composited is the one the
    * next frame will ask for again. */
@@ -170,9 +219,12 @@ export class SubjectMaskCompositor {
   private readonly releaseMemory = holdMemory("overlayRasters", () => {
     let n = 0;
     for (const e of this.rasters.values()) n += entryBytes(e);
-    return n;
+    const dark = this.darkSurface ? this.darkSurface.width * this.darkSurface.height * 4 : 0;
+    return n + this.fx.bytes() + dark;
   });
   private person: HTMLCanvasElement | null = null;
+  /** Scratch for blurred and motion-blurred behind elements. */
+  private fx = new ElementFx(createRasterCanvas);
   private small: HTMLCanvasElement | null = null;
   private mask: { at: number; alpha: HTMLCanvasElement | null } = { at: -1e9, alpha: null };
   /** A second matte slot for mid-stack clip masks: it snapshots the canvas as
@@ -198,9 +250,21 @@ export class SubjectMaskCompositor {
       entry.byWord.clear();
       entry.pending.clear();
       entry.of = o;
+      entry.last = null;
+      entry.want = null;
     }
     if (!entry) {
-      entry = { of: o, byWord: new Map(), pending: new Set(), usedAt: this.pass };
+      entry = {
+        of: o,
+        byWord: new Map(),
+        pending: new Set(),
+        usedAt: this.pass,
+        last: null,
+        want: null,
+        wantWord: -1,
+        wantChars: -1,
+        wantCaret: false,
+      };
       this.rasters.set(o.id, entry);
     }
     entry.usedAt = this.pass;
@@ -235,44 +299,115 @@ export class SubjectMaskCompositor {
     }
   }
 
-  private rasterFor(
-    o: Overlay,
-    w: number,
-    h: number,
-    assets: MediaAsset[],
-    word: number
-  ): ImageBitmap | null {
+  /**
+   * The picture `look` names (see `lookAt`), or while it is being drawn the
+   * last one this element landed, so a typing title moves on a frame late
+   * and never blinks out.
+   */
+  private rasterFor(o: Overlay, w: number, h: number, assets: MediaAsset[]): ImageBitmap | null {
     const entry = this.entryFor(o);
-    const hit = entry.byWord.get(word);
+    const key = look.key;
+    const hit = entry.byWord.get(key);
     if (hit) return hit;
-    if (!entry.pending.has(word)) {
-      entry.pending.add(word);
+    if (key < 0) {
+      if (entry.want !== key) {
+        entry.want = key;
+        entry.wantWord = look.word;
+        entry.wantChars = look.chars;
+        entry.wantCaret = look.caret;
+      }
+      this.typeArgs.w = w;
+      this.typeArgs.h = h;
+      this.typeArgs.assets = assets;
+      this.pumpTyping();
+    } else if (!entry.pending.has(key)) {
+      entry.pending.add(key);
       // Neutral picture: position aside, the per-frame pose owns rotation and
       // opacity, so baking them here would apply each of them twice.
-      void this.drawRaster(o, w, h, assets, word).catch(() => {});
+      void this.drawRaster(o, w, h, assets, key, look.word, look.caret).catch(() => {});
     }
-    return null;
+    return entry.last;
   }
 
-  /** One element picture, with its words drawn as they stand across the span
-   * it covers, kept under the element it came from. */
+  /** The element as one picture shows it: its words as they stand across
+   * the span the picture covers, `chars` of its text typed (-1 = all). */
+  private pictureOf(o: Overlay, word: number, chars: number): Overlay {
+    const spans = rasterSpans(o);
+    const span = word >= 0 ? spans?.[word] : undefined;
+    const at = span ? (span.start + span.end) / 2 : 0;
+    const el = applyWordDraw({ ...o, rotation: undefined, opacity: undefined }, at, spanOf(o));
+    return chars >= 0 && isTextOverlay(el) ? { ...el, text: el.text.slice(0, chars) } : el;
+  }
+
+  /** One whole-text picture, kept under the element it came from. */
   private async drawRaster(
     o: Overlay,
     w: number,
     h: number,
     assets: MediaAsset[],
-    word: number
+    key: number,
+    word: number,
+    caret: boolean
   ): Promise<void> {
-    const spans = rasterSpans(o);
-    const span = word >= 0 ? spans?.[word] : undefined;
-    const at = span ? (span.start + span.end) / 2 : 0;
-    const png = await renderElementPng(
-      applyWordDraw({ ...o, rotation: undefined, opacity: undefined }, at, spanOf(o)),
-      w,
-      h,
-      assets
+    const png = await renderElementPng(this.pictureOf(o, word, -1), w, h, assets, caret ? CARET_LIT : undefined);
+    this.land(o, key, await createImageBitmap(png));
+  }
+
+  /** One typing picture, painted on the shared surface. */
+  private async drawTyped(
+    o: Overlay,
+    w: number,
+    h: number,
+    assets: MediaAsset[],
+    key: number,
+    word: number,
+    chars: number,
+    caret: boolean
+  ): Promise<void> {
+    this.typeSurface ??= scratchCanvas();
+    if (this.typeSurface.width !== w) this.typeSurface.width = w;
+    if (this.typeSurface.height !== h) this.typeSurface.height = h;
+    await paintElementInto(
+      this.typeSurface,
+      this.pictureOf(o, word, chars),
+      cutRenderEnv(assets),
+      caret ? CARET_LIT : undefined
     );
-    const bmp = await createImageBitmap(png);
+    this.land(o, key, await createImageBitmap(this.typeSurface));
+  }
+
+  /** Paint the typing pictures elements are waiting on, one after another,
+   * each at the latest count its element asked for. */
+  private pumpTyping(): void {
+    if (this.typing) return;
+    this.typing = true;
+    void (async () => {
+      try {
+        for (;;) {
+          let next: RasterEntry | null = null;
+          for (const e of this.rasters.values()) {
+            if (e.want !== null) {
+              next = e;
+              break;
+            }
+          }
+          if (!next) break;
+          const key = next.want!;
+          next.want = null;
+          const { w, h, assets } = this.typeArgs;
+          await this.drawTyped(next.of, w, h, assets, key, next.wantWord, next.wantChars, next.wantCaret).catch(
+            () => {}
+          );
+        }
+      } finally {
+        this.typing = false;
+      }
+    })();
+  }
+
+  /** File a finished picture. Any typing picture it supersedes goes: an
+   * element holds one typed count at a time, however long it types. */
+  private land(o: Overlay, key: number, bmp: ImageBitmap): void {
     // The element may have been edited, or the pictures released, while this
     // one was being drawn; either way its entry is gone or stamped with a
     // different object, and this picture is of the wrong thing.
@@ -281,8 +416,34 @@ export class SubjectMaskCompositor {
       bmp.close();
       return;
     }
-    entry.byWord.get(word)?.close();
-    entry.byWord.set(word, bmp);
+    entry.pending.delete(key);
+    for (const [k, b] of entry.byWord) {
+      if (k >= 0 || k === key) continue;
+      b.close();
+      entry.byWord.delete(k);
+    }
+    entry.byWord.get(key)?.close();
+    entry.byWord.set(key, bmp);
+    entry.last = bmp;
+  }
+
+  /** Export path: the picture every behind element needs at `t`, drawn
+   * before the frame is, so no frame of a render shows a stale one. */
+  async ready(overlays: Overlay[], w: number, h: number, assets: MediaAsset[], t: number): Promise<void> {
+    for (const o of overlays) {
+      if (!behindSubjectOverlay(o) || !drawable(o) || t < o.start || t > o.end) continue;
+      const tLocal = Math.max(0, t - o.start);
+      const key = lookAt(o, tLocal, evalOverlayFrame(o, tLocal, w / h));
+      const entry = this.entryFor(o);
+      if (entry.byWord.has(key)) continue;
+      const { word, chars, caret } = look;
+      try {
+        if (key < 0) await this.drawTyped(o, w, h, assets, key, word, chars, caret);
+        else await this.drawRaster(o, w, h, assets, key, word, caret);
+      } catch {
+        // The overlay just draws in front when its raster is missing.
+      }
+    }
   }
 
   /** Give back every picture this pass is holding. The pass stays usable and
@@ -295,6 +456,7 @@ export class SubjectMaskCompositor {
   /** Give the pictures back and stop reporting what this pass holds. */
   dispose(): void {
     this.clear();
+    this.fx.dispose();
     this.releaseMemory();
   }
 
@@ -315,9 +477,10 @@ export class SubjectMaskCompositor {
         // An element that lights its words needs one picture per word, all of
         // them resident before the first frame draws.
         rasterSlices(o).map(async (word) => {
-          if (this.entryFor(o).byWord.has(word)) return;
+          const key = (word + 1) * 2;
+          if (this.entryFor(o).byWord.has(key)) return;
           try {
-            await this.drawRaster(o, w, h, assets, word);
+            await this.drawRaster(o, w, h, assets, key, word, false);
           } catch {
             // The overlay just draws in front when its raster is missing.
           }
@@ -417,6 +580,8 @@ export class SubjectMaskCompositor {
    * the element moves under it. The surfaces live and die with this pass. */
   private stampSurface: HTMLCanvasElement | null = null;
   private stampScratch: HTMLCanvasElement | null = null;
+  /** Where an element a hit darkens is drawn alone (see `darkTarget`). */
+  private darkSurface: HTMLCanvasElement | null = null;
   mattedStamp(
     o: { mask?: { invert?: boolean; feather?: number } },
     w: number,
@@ -442,6 +607,17 @@ export class SubjectMaskCompositor {
       (o.mask?.feather ?? 0) * (Math.min(w, h) / 1080)
     );
     return this.stampSurface;
+  }
+
+  /** The darkening surface, cleared and sized to the frame. */
+  private darkTarget(w: number, h: number): CanvasRenderingContext2D {
+    this.darkSurface ??= scratchCanvas();
+    if (this.darkSurface.width !== w) this.darkSurface.width = w;
+    if (this.darkSurface.height !== h) this.darkSurface.height = h;
+    const c = this.darkSurface.getContext("2d")!;
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.clearRect(0, 0, w, h);
+    return c;
   }
 
   /**
@@ -505,9 +681,10 @@ export class SubjectMaskCompositor {
     const scale = Math.min(W, H) / 1080;
     for (const o of active) {
       const tLocal = Math.max(0, t - o.start);
-      const bmp = this.rasterFor(o, W, H, assets, rasterSliceAt(o, tLocal));
+      const ev = evalOverlayFrame(o, tLocal, W / H);
+      lookAt(o, tLocal, ev);
+      const bmp = this.rasterFor(o, W, H, assets);
       if (!bmp) continue;
-      const ev = evalOverlayFrame(o, tLocal);
       // One cached picture per element here, so a per-glyph ramp or loop runs
       // its motion over the whole box as a single letter would.
       const g = hasGlyphMotion(ev) ? glyphStateAt(ev, 0, 1) : null;
@@ -515,26 +692,37 @@ export class SubjectMaskCompositor {
       if (alphaOf <= 0.001) continue;
       const cx = o.x * W;
       const cy = o.y * H;
-      ctx.save();
-      ctx.globalAlpha = alphaOf;
-      ctx.translate(
+      // A hit that darkens is drawn alone first, so the darkening lands on
+      // the element's pixels and not on the frame under it. A blurred or
+      // streaking element poses into the scratch and lands soft.
+      const dark = ev.brightness !== undefined && ev.brightness < 1;
+      const c = dark ? this.darkTarget(W, H) : ctx;
+      const target = this.fx.begin(c, W, H, elementLook(ev, scale)) as CanvasRenderingContext2D;
+      target.save();
+      target.globalAlpha = alphaOf;
+      target.translate(
         ev.x * W + (ev.dx + (g?.dx ?? 0)) * scale,
         ev.y * H + (ev.dy + (g?.dy ?? 0)) * scale
       );
-      ctx.rotate(((ev.rotation + (g?.rotate ?? 0)) * Math.PI) / 180);
-      ctx.scale(ev.scale * (g?.sx ?? 1), ev.scale * (g?.sy ?? 1));
-      ctx.translate(-cx, -cy);
+      target.rotate(((ev.rotation + (g?.rotate ?? 0)) * Math.PI) / 180);
+      target.scale(ev.scale * (g?.sx ?? 1), ev.scale * (g?.sy ?? 1));
+      target.translate(-cx, -cy);
       // A dive flies the same one picture in, under the view the other
       // renderers draw their type under.
       const focus = ev.dive && divesAt(o.anim) ? peekDiveFocus(o, W / H, cutRenderEnv(assets)) : undefined;
       if (focus) {
         const v = diveView(ev.dive!, focus, ev, o, { width: W, height: H, scale });
-        ctx.translate(v.tx, v.ty);
-        ctx.scale(v.s, v.s);
-        ctx.translate(-v.fx, -v.fy);
+        target.translate(v.tx, v.ty);
+        target.scale(v.s, v.s);
+        target.translate(-v.fx, -v.fy);
       }
-      ctx.drawImage(bmp, 0, 0, W, H);
-      ctx.restore();
+      target.drawImage(bmp, 0, 0, W, H);
+      target.restore();
+      this.fx.end(c);
+      if (dark) {
+        darkenCanvas(c, W, H, ev.brightness!);
+        ctx.drawImage(c.canvas, 0, 0);
+      }
     }
 
     // The person back on top, its edge softened by the widest feather any

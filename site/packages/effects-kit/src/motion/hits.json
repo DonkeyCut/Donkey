@@ -1,0 +1,72 @@
+{
+  "press": {
+    "label": "Press",
+    "note": "a finger tapping a button: the element dips to 93% and springs back, and darkens while it is held down when darken is on",
+    "slots": [
+      "hit"
+    ],
+    "animate": {
+      "scale": [
+        {
+          "t": 0,
+          "v": [
+            1,
+            1
+          ],
+          "ease": [
+            0.4,
+            0,
+            0.6,
+            1
+          ]
+        },
+        {
+          "t": 0.35,
+          "v": [
+            0.93,
+            0.93
+          ],
+          "ease": [
+            0.3,
+            0,
+            0.2,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": [
+            1,
+            1
+          ]
+        }
+      ],
+      "brightness": [
+        {
+          "t": 0,
+          "v": 1,
+          "ease": [
+            0.4,
+            0,
+            0.6,
+            1
+          ]
+        },
+        {
+          "t": 0.35,
+          "v": 0.8,
+          "ease": [
+            0.3,
+            0,
+            0.2,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": 1
+        }
+      ]
+    }
+  }
+}

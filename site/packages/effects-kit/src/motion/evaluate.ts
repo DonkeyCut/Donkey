@@ -92,6 +92,7 @@ export function sampleProperties(props: MotionProperties, q: number, dur = 0): M
       typed: capped(props.typed, dur),
       roll: capped(props.roll, dur),
       dive: capped(props.dive, dur),
+      brightness: capped(props.brightness, dur),
     };
   return samplePropertiesRaw(props, q);
 }
@@ -111,6 +112,7 @@ function samplePropertiesRaw(props: MotionProperties, q: number): MotionPose {
     ...(props.typed ? { typed: sampleTrack(props.typed, q, 1) } : {}),
     ...(props.roll ? { roll: sampleTrack(props.roll, q, 0) } : {}),
     ...(props.dive ? { dive: sampleTrack(props.dive, q, 0) } : {}),
+    ...(props.brightness ? { brightness: sampleTrack(props.brightness, q, 1) } : {}),
   };
 }
 

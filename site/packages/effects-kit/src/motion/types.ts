@@ -65,6 +65,9 @@ export interface MotionProperties {
   /** How far the view has flown into the element's deepest ink, 0..1: at 1
    * that ink covers the frame (dive). */
   dive?: PropertyKey<number>[];
+  /** Multiplies the element's colors, 1 = as drawn; below 1 it darkens
+   * (a pressed button). */
+  brightness?: PropertyKey<number>[];
 }
 
 /** What the selector counts as one unit. */
@@ -106,7 +109,7 @@ export interface WigglySelector {
   seed?: number;
 }
 
-export type MotionSlot = "in" | "out" | "loop" | "hold";
+export type MotionSlot = "in" | "out" | "loop" | "hold" | "hit";
 
 export interface MotionPreset {
   label: string;
@@ -133,6 +136,9 @@ export interface MotionCatalog {
   /** Moves an element holds for its whole span, baked onto its own pose
    * track rather than played as a preset. */
   holds: Record<string, MotionPreset>;
+  /** One-shot hits played once at a chosen moment inside the element (a
+   * button press). */
+  hits: Record<string, MotionPreset>;
 }
 
 /** A resolved pose for one unit at one moment. */
@@ -148,6 +154,7 @@ export interface MotionPose {
   typed?: number;
   roll?: number;
   dive?: number;
+  brightness?: number;
 }
 
 export const REST_POSE: MotionPose = {

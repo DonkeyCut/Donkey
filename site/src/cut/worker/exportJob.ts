@@ -23,7 +23,7 @@ export interface ExportJobSpec {
   /** A render asked for by a client that cannot build a spec — the phone. The
    * row carries the size and nothing else; the worker opens the project doc
    * and builds the spec itself. */
-  fromDoc?: { preset?: string; snapshot: CloudDocSnapshot };
+  fromDoc?: { preset?: string; snapshot: CloudDocSnapshot } & DocExportAudio;
   overlays?: { name: string; key: string }[];
   /** "overlays": the cut's media came up with the job — a browser-resident
    * project borrowing this worker. Its output is the job's scratch too: it

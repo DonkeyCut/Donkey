@@ -41,6 +41,14 @@ import {
   OVERLAY_ANIM_DEFAULT_SECONDS,
   OVERLAY_ANIM_MAX_SECONDS,
   OVERLAY_ANIM_MIN_SECONDS,
+  CARET_BLINKS_MAX,
+  edgeMotion,
+  edgePreset,
+  OVERLAY_HIT_DEFAULT_SECONDS,
+  OVERLAY_HIT_MAX_SECONDS,
+  OVERLAY_HIT_MIN_SECONDS,
+  type OverlayCaret,
+  type OverlayHit,
   normalizeSound,
   SOUND_COMPRESSOR_DEFAULT,
   SOUND_COMPRESSOR_RANGE,
@@ -2589,6 +2597,7 @@ function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayA
   if (!next.loop) delete next.loop;
   if (!next.move) delete next.move;
   if (!next.words) delete next.words;
+  if (!next.hit) delete next.hit;
   const value = hasOverlayAnim(next) ? next : undefined;
   const st = useEditor.getState();
   // A multi-selection names its targets; a lone grouped element stamps its group.
@@ -2732,8 +2741,187 @@ function WordSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonl
   );
 }
 
+/** A caret with one setting taken out, so an absent field reads as its
+ * default. */
+function caretWithout(caret: OverlayCaret, key: "blinks"): OverlayCaret {
+  const next = { ...caret };
+  delete next[key];
+  return next;
+}
+
+/** The typing bar of a typewriter entrance: on or off, whether it blinks once
+ * typing stops, how many times, whether it goes after, and its color. */
+function CaretSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
+  const ck = useSliderCheckpoint();
+  const anim = o.anim ?? {};
+  const edge = anim.in;
+  if (!edge) return null;
+  const caret = edge.caret;
+  const caretBlink = caret?.blink ?? true;
+  const caretBlinks = caret?.blinks ?? 0;
+  const caretHide = caret?.hide ?? false;
+  const caretColor = caret?.color ?? (isTextOverlay(o) ? o.color : WORD_ACCENT_DEFAULT);
+  const write = (next: OverlayCaret | undefined) => {
+    const nextEdge = { ...edge };
+    if (next) nextEdge.caret = next;
+    else delete nextEdge.caret;
+    writeOverlayAnim(o, anim, { in: nextEdge }, peers);
+  };
+  const toggle = (patch: Partial<OverlayCaret>) => {
+    if (!caret) return;
+    useEditor.getState().pushHistory();
+    write({ ...caret, ...patch });
+  };
+  const setColor = (color: string) => {
+    if (caret) write({ ...caret, color });
+  };
+  const setBlinks = (v: number) => {
+    if (!caret) return;
+    write(v > 0 ? { ...caret, blinks: Math.round(v) } : caretWithout(caret, "blinks"));
+  };
+  return (
+    <>
+      <Row label="Caret">
+        <Switch
+          checked={!!caret}
+          onCheckedChange={(v) => {
+            useEditor.getState().pushHistory();
+            write(v ? { blink: true } : undefined);
+          }}
+        />
+      </Row>
+      {caret && (
+        <Row label="Blink">
+          <Switch checked={caretBlink} onCheckedChange={(v) => toggle({ blink: v })} />
+        </Row>
+      )}
+      {caret && caretBlink && (
+        <Row label="Blinks">
+          <ValueSlider
+            label="Blinks"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={caretBlinks}
+            min={0}
+            max={CARET_BLINKS_MAX}
+            step={1}
+            format={(v) => (v === 0 ? "All" : `${Math.round(v)}`)}
+            parse={parseNumberInput}
+            onDraft={(v) => {
+              ck.begin();
+              setBlinks(v);
+            }}
+            onCommit={(v) => {
+              setBlinks(v);
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
+      {caret && (!caretBlink || caretBlinks > 0) && (
+        <Row label="Then hide">
+          <Switch checked={caretHide} onCheckedChange={(v) => toggle({ hide: v })} />
+        </Row>
+      )}
+      {caret && (
+        <Row label="Caret color">
+          <ColorField
+            value={caretColor}
+            label="Caret color"
+            onBegin={() => useEditor.getState().pushHistory()}
+            onLive={setColor}
+            onCommit={setColor}
+          />
+        </Row>
+      )}
+    </>
+  );
+}
+
+/** A newly picked hit lands at the playhead when the playhead is inside the
+ * element with room for the hit, and in the element's middle otherwise.
+ * Switching hits keeps the moment, the length and the darkening. */
+function pickedHit(o: Overlay, anim: OverlayAnim, style: string): OverlayHit {
+  if (anim.hit) return { ...anim.hit, style };
+  const dur = Math.max(0.1, o.end - o.start);
+  const seconds = Math.min(OVERLAY_HIT_DEFAULT_SECONDS, dur);
+  const local = playheadAt() - o.start;
+  const at = local >= 0 && local <= dur - seconds ? local : Math.max(0, (dur - seconds) / 2);
+  return { style, at: Math.round(at * 100) / 100, seconds, darken: true };
+}
+
+/** The hit's moment inside the element, its length, and whether it darkens. */
+function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
+  const ck = useSliderCheckpoint();
+  const anim = o.anim ?? {};
+  const hit = anim.hit;
+  const dur = Math.max(0.2, Math.min(...(peers ?? [o]).map((el) => el.end - el.start)));
+  const hitSeconds = hit?.seconds ?? OVERLAY_HIT_DEFAULT_SECONDS;
+  const hitAt = hit?.at ?? 0;
+  const hitDarken = hit?.darken ?? false;
+  const write = (patch: Partial<OverlayHit>) => {
+    if (!hit) return;
+    ck.begin();
+    writeOverlayAnim(o, anim, { hit: { ...hit, ...patch } }, peers);
+  };
+  return (
+    <>
+      <Row label="At">
+        <ValueSlider
+          label="At"
+          sliderClassName="data-horizontal:w-24"
+          valueClassName="w-9 text-muted-foreground"
+          value={hitAt}
+          min={0}
+          max={Math.max(0, dur - hitSeconds)}
+          step={0.05}
+          format={(v) => `${v.toFixed(2)}s`}
+          parse={parseSecondsInput}
+          disabled={!hit}
+          onDraft={(v) => write({ at: v })}
+          onCommit={(v) => {
+            write({ at: v });
+            ck.end();
+          }}
+        />
+      </Row>
+      <Row label="Duration">
+        <ValueSlider
+          label="Duration"
+          sliderClassName="data-horizontal:w-24"
+          valueClassName="w-9 text-muted-foreground"
+          value={hitSeconds}
+          min={OVERLAY_HIT_MIN_SECONDS}
+          max={Math.min(OVERLAY_HIT_MAX_SECONDS, dur)}
+          step={0.05}
+          snap={[OVERLAY_HIT_DEFAULT_SECONDS]}
+          format={(v) => `${v.toFixed(2)}s`}
+          parse={parseSecondsInput}
+          disabled={!hit}
+          onDraft={(v) => write({ seconds: v })}
+          onCommit={(v) => {
+            write({ seconds: v });
+            ck.end();
+          }}
+        />
+      </Row>
+      <Row label="Darken">
+        <Switch
+          checked={hitDarken}
+          disabled={!hit}
+          onCheckedChange={(v) => {
+            if (!hit) return;
+            useEditor.getState().pushHistory();
+            writeOverlayAnim(o, anim, { hit: { ...hit, darken: v } }, peers);
+          }}
+        />
+      </Row>
+    </>
+  );
+}
+
 /** The slots the picker fills, in tab order. */
-type AnimSlot = "in" | "out" | "loop" | "move" | "words";
+type AnimSlot = "in" | "out" | "loop" | "move" | "words" | "hit";
 
 /** The pill of slot tabs over an animation grid. A slot that is already set
  * reads darker, so switching tabs is not the only way to see what an item is
@@ -2867,14 +3055,30 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
   // selecting one hands the picker back to the entrance.
   // Word emphasis needs words on every target.
   const tabs: AnimSlot[] = (peers ?? [o]).every(isTextOverlay)
-    ? ["in", "out", "loop", "move", "words"]
-    : ["in", "out", "loop", "move"];
+    ? ["in", "out", "loop", "move", "words", "hit"]
+    : ["in", "out", "loop", "move", "hit"];
   const slot = tabs.includes(picked) ? picked : "in";
   const tilesScroll = useRememberedScroll(o.id, `anim:${slot}`);
-  const active = slot === "move" || slot === "words" ? undefined : anim[slot];
-  const seconds = slot === "in" || slot === "out" ? anim[slot]?.seconds : undefined;
+  const active = slot === "move" || slot === "words" || slot === "hit" ? undefined : anim[slot];
+  const seconds =
+    slot === "in" || slot === "out"
+      ? anim[slot]?.seconds
+      : slot === "hit"
+        ? (anim.hit?.seconds ?? OVERLAY_HIT_DEFAULT_SECONDS)
+        : undefined;
   const activeMove = anim.move;
+  const hitStyle = anim.hit?.style;
   const pick = (style: string | null) => {
+    if (slot === "hit") {
+      if (!style && !anim.hit) return;
+      useEditor.getState().pushHistory();
+      const patch: Partial<OverlayAnim> = { hit: style ? pickedHit(o, anim, style) : undefined };
+      writeOverlayAnim(o, anim, patch, peers);
+      // The pick plays itself on the stage, over its own window.
+      if (style) playAnimPreview({ ...o, anim: { ...anim, ...patch } }, "hit");
+      else stopAnimPreview();
+      return;
+    }
     if (slot === "words") {
       if (!style && !anim.words) return;
       useEditor.getState().pushHistory();
@@ -2927,6 +3131,10 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
             [slot]: {
               style: style as OverlayAnimStyle,
               seconds: seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
+              // A caret stays with an entrance that still types.
+              ...(slot === "in" && anim.in?.caret && edgePreset(style)?.animate.typed
+                ? { caret: anim.in.caret }
+                : {}),
             },
           };
     useEditor.getState().pushHistory();
@@ -2975,7 +3183,9 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
                 ? activeMove?.style
                 : slot === "words"
                   ? anim.words?.style
-                  : active?.style
+                  : slot === "hit"
+                    ? hitStyle
+                    : active?.style
           }
           custom={!!active?.preset}
           isText={isTextOverlay(o)}
@@ -3014,6 +3224,8 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
 
   if (slot === "words") return bar(<WordSettings overlay={o} peers={peers} />);
 
+  if (slot === "hit") return bar(<HitSettings overlay={o} peers={peers} />);
+
   if (slot === "loop") {
     const write = (speed: number) => {
       if (!anim.loop) return;
@@ -3049,27 +3261,32 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
     ck.begin();
     writeOverlayAnim(o, anim, { [slot]: { ...edge, seconds: secs } }, peers);
   };
+  // A typing entrance on a title carries its typing bar's settings too.
+  const types = slot === "in" && isTextOverlay(o) && !!edgeMotion(edge)?.animate.typed;
   return bar(
-    <Row label="Duration">
-      <ValueSlider
-        label="Duration"
-        sliderClassName="data-horizontal:w-24"
-        valueClassName="w-9 text-muted-foreground"
-        value={edge?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
-        min={OVERLAY_ANIM_MIN_SECONDS}
-        max={Math.min(OVERLAY_ANIM_MAX_SECONDS, dur)}
-        step={0.05}
-        snap={[OVERLAY_ANIM_DEFAULT_SECONDS]}
-        format={(v) => `${v.toFixed(2)}s`}
-        parse={parseSecondsInput}
-        disabled={!edge}
-        onDraft={write}
-        onCommit={(v) => {
-          write(v);
-          ck.end();
-        }}
-      />
-    </Row>
+    <>
+      <Row label="Duration">
+        <ValueSlider
+          label="Duration"
+          sliderClassName="data-horizontal:w-24"
+          valueClassName="w-9 text-muted-foreground"
+          value={edge?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
+          min={OVERLAY_ANIM_MIN_SECONDS}
+          max={Math.min(OVERLAY_ANIM_MAX_SECONDS, dur)}
+          step={0.05}
+          snap={[OVERLAY_ANIM_DEFAULT_SECONDS]}
+          format={(v) => `${v.toFixed(2)}s`}
+          parse={parseSecondsInput}
+          disabled={!edge}
+          onDraft={write}
+          onCommit={(v) => {
+            write(v);
+            ck.end();
+          }}
+        />
+      </Row>
+      {types && <CaretSettings overlay={o} peers={peers} />}
+    </>
   );
 }
 

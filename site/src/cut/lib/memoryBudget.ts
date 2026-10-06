@@ -132,7 +132,7 @@ const HOLDERS = {
    * shelf of canvases kept for the sources that have stood down. */
   previewCanvases: { bucket: "canvases", portion: 0.72 },
   /** Readers a render keeps open between frames, each with its own pool of
-   * canvases at the source's size. */
+   * canvases at the source's size, and its element scratch surfaces. */
   exportReaders: { bucket: "canvases", portion: 0.2 },
   /** The sharpen and clarity pass's float framebuffers, at the picture's
    * size while detail is in use. */

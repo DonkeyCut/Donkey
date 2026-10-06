@@ -61,7 +61,7 @@ import { enforceContextBudget } from "./contextBudget";
 import { donkeyModel, type ChatThinkingLevel } from "./donkeyModel";
 import { isMutatingTool, ledgerText, recordCall, type LedgerRecord } from "./mutationLedger";
 import { makeDonkeyStream, type DonkeyToolDetails, type PostFn, type WireCarrier, type WirePart } from "./donkeyStream";
-import { toAgentTools, toToolResult, type ExecTool } from "./tools";
+import { toAgentTools, toToolResult, uiToolOutput, type ExecTool } from "./tools";
 import { subscribeUiChunks } from "./uiChunks";
 
 // The chat turn runner on the pi agent harness. Each turn: one typed judgment
@@ -629,7 +629,7 @@ async function runInstantAction(
   }
   const result = toToolResult(action.tool, output);
   emit({ type: "tool-input-available", toolCallId, toolName: action.tool, input: action.args });
-  emit({ type: "tool-output-available", toolCallId, output: result.details?.response ?? null });
+  emit({ type: "tool-output-available", toolCallId, output: uiToolOutput(result.details) });
   emit({ type: "text-start", id: "t1" });
   emit({ type: "text-delta", id: "t1", delta: action.say });
   emit({ type: "text-end", id: "t1" });

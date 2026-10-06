@@ -105,4 +105,22 @@ export interface WordDraw {
   markColor?: string;
   /** Word color over a box, which needs to read against the fill. */
   markText?: string;
+  /** The word's own face, where it is set apart from the line: an emphasized
+   * word in another family, slant or weight. Absent = the line's. */
+  font?: string;
+  italic?: boolean;
+  weight?: 400 | 700;
+}
+
+/** How one word is set apart from the rest of its line: its own fill, face
+ * and size. A caption's emphasized words wear one of these, and the word
+ * effect runs on top of it, so a spoken emphasized word still lights up. */
+export interface WordFace {
+  /** The fill the word rests at; the accent blends from here. */
+  color?: string;
+  font?: string;
+  italic?: boolean;
+  weight?: 400 | 700;
+  /** Type-size multiplier, on top of whatever the effect does to the word. */
+  scale?: number;
 }

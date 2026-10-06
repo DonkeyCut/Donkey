@@ -72,6 +72,14 @@ import {
   type OverlayAnim,
   type OverlayAnimStyle,
   type OverlayLoopStyle,
+  CARET_BLINKS_MAX,
+  edgeMotion,
+  edgePreset,
+  OVERLAY_HIT_DEFAULT_SECONDS,
+  OVERLAY_HIT_MAX_SECONDS,
+  OVERLAY_HIT_MIN_SECONDS,
+  OVERLAY_HIT_STYLE_IDS,
+  type OverlayCaret,
   STROKE_FEATHER_MAX,
   STROKE_OFFSET_MAX,
   STROKE_STYLES,
@@ -604,9 +612,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           throw new ToolError(`Unknown ${slot} style: ${raw}`);
         if ((TEXT_ONLY_ANIM_STYLE_IDS as string[]).includes(raw) && (o.kind ?? "text") !== "text")
           throw new ToolError(`${raw} animates titles only.`);
+        // A caret stays with an entrance that still types.
+        const caret = edgePreset(raw)?.animate.typed ? anim[slot]?.caret : undefined;
         anim[slot] = {
           style: raw as OverlayAnimStyle,
           seconds: secs ?? anim[slot]?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
+          ...(caret ? { caret } : {}),
         };
       } else if (secs !== undefined && anim[slot]) {
         anim[slot] = { ...anim[slot]!, seconds: secs };
@@ -676,6 +687,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...(wordDim !== undefined ? { dim: wordDim } : {}),
       };
     }
+    applyCaretInput(o, anim, input);
+    applyHitInput(o, anim, input);
     s.updateOverlay(o.id, { anim: hasOverlayAnim(anim) ? anim : undefined });
     const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
     return { id: next.id, anim: next.anim ?? null };
@@ -6054,6 +6067,98 @@ function soundTarget(s: Editor, id: unknown) {
     };
   }
   throw new ToolError(`No video or soundtrack clip with id "${key}".`);
+}
+
+/** sync_audio's bind: line the recording up with the video and bind it, or
+ * refuse with the reason. The clip it was named by aims the match. */
+async function syncVideoSound(s: Editor, video: MediaAsset, audioId: unknown, clip: VideoClip | undefined) {
+  const rec = requireItem(s.assets, audioId, "audio asset");
+  const bound = await bindRecording(video.id, rec.id, clip).catch((e: unknown) => {
+    throw new ToolError(e instanceof Error ? e.message : "Could not line the recording up.");
+  });
+  return {
+    ...bound,
+    note: `Every clip of "${video.name}" (${bound.clips} on the timeline) now plays "${rec.name}"; recording second = video second ${bound.offset < 0 ? "−" : "+"} ${Math.abs(bound.offset)}.${bound.refined ? "" : " Aligned to the nearest 20 ms; the waveforms had no sharp detail to place it closer."}`,
+  };
+}
+
+/** set_overlay_animation's caret fields, written onto the typewriter entrance
+ * in `anim` (which the call has already updated). */
+function applyCaretInput(
+  o: { kind?: string },
+  anim: OverlayAnim,
+  input: Record<string, unknown>
+): void {
+  const named =
+    typeof input.caret === "boolean" ||
+    typeof input.caret_blink === "boolean" ||
+    isNum(input.caret_blinks) ||
+    typeof input.caret_hide === "boolean" ||
+    typeof input.caret_color === "string";
+  if (!named) return;
+  const edge = anim.in;
+  if (input.caret === false) {
+    if (edge?.caret) {
+      const next = { ...edge };
+      delete next.caret;
+      anim.in = next;
+    }
+    return;
+  }
+  if ((o.kind ?? "text") !== "text" || !edge || !edgeMotion(edge)?.animate.typed)
+    throw new ToolError("A caret rides a typewriter entrance on a title: set in_style typewriter on a title first.");
+  const caret: OverlayCaret = { ...(edge.caret ?? { blink: true }) };
+  if (typeof input.caret_blink === "boolean") caret.blink = input.caret_blink;
+  if (isNum(input.caret_blinks)) {
+    const n = Math.round(clamp(input.caret_blinks, 0, CARET_BLINKS_MAX));
+    if (n > 0) caret.blinks = n;
+    else delete caret.blinks;
+  }
+  if (typeof input.caret_hide === "boolean") {
+    if (input.caret_hide) caret.hide = true;
+    else delete caret.hide;
+  }
+  if (typeof input.caret_color === "string") caret.color = input.caret_color;
+  anim.in = { ...edge, caret };
+}
+
+/** set_overlay_animation's hit fields, written onto `anim`. A new hit takes
+ * the default length, darkens, and starts at the element's middle unless
+ * hit_at names the moment; the moment is held so the whole hit fits. */
+function applyHitInput(
+  o: { start: number; end: number },
+  anim: OverlayAnim,
+  input: Record<string, unknown>
+): void {
+  const raw = input.hit_style;
+  const named =
+    typeof raw === "string" ||
+    isNum(input.hit_at) ||
+    isNum(input.hit_seconds) ||
+    typeof input.hit_darken === "boolean";
+  if (!named) return;
+  if (raw === "none") {
+    delete anim.hit;
+    return;
+  }
+  if (typeof raw === "string" && !OVERLAY_HIT_STYLE_IDS.includes(raw))
+    throw new ToolError(`Unknown hit style: ${raw}. Use one of: ${OVERLAY_HIT_STYLE_IDS.join(", ")}.`);
+  const style = typeof raw === "string" ? raw : anim.hit?.style;
+  if (!style) throw new ToolError("Name hit_style to add a hit.");
+  const dur = Math.max(0.1, o.end - o.start);
+  const seconds = Math.min(
+    dur,
+    isNum(input.hit_seconds)
+      ? clamp(input.hit_seconds, OVERLAY_HIT_MIN_SECONDS, OVERLAY_HIT_MAX_SECONDS)
+      : (anim.hit?.seconds ?? OVERLAY_HIT_DEFAULT_SECONDS)
+  );
+  const at = isNum(input.hit_at) ? input.hit_at : (anim.hit?.at ?? (dur - seconds) / 2);
+  anim.hit = {
+    style,
+    at: Math.round(clamp(at, 0, Math.max(0, dur - seconds)) * 1000) / 1000,
+    seconds,
+    darken: typeof input.hit_darken === "boolean" ? input.hit_darken : (anim.hit?.darken ?? true),
+  };
 }
 
 function requireItem<T extends { id: string }>(pool: T[], id: unknown, label: string): T {
