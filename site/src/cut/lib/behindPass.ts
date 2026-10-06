@@ -20,8 +20,12 @@ import {
   hasGlyphMotion,
   maskComposite,
   overlayWords,
+  paintElementInto,
   wordSampleWindows,
+  type OverlayFrameState,
+  type PaintPhase,
 } from "@donkeycut/effects-kit";
+import { ElementFx, elementLook } from "@donkeycut/effects-kit";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { allowance, holdMemory } from "./memoryBudget";
 import { createRasterCanvas } from "./raster";

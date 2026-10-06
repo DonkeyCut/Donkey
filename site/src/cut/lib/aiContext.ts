@@ -680,6 +680,21 @@ function describeState(
     // Every overlay element on the title lanes: titles, shapes, stickers —
     // each entry carries its `kind`.
     overlays: s.overlays.map((o) => ({ id: o.id, ...describeOverlay(o) })),
+    // Each group's camera once, keys in seconds from the group's start
+    // (set_group_camera); the members carry only their groupId.
+    ...(() => {
+      const cams = groupCameras(s.overlays);
+      return cams.length
+        ? {
+            groupCameras: cams.map((c) => ({
+              groupId: c.groupId,
+              start: r(c.start),
+              keys: c.keys.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y), scale: r(k.scale), rotation: r(k.rotation) })),
+              ...(c.motionBlur ? { motionBlur: r(c.motionBlur) } : {}),
+            })),
+          }
+        : {};
+    })(),
     subtitles: {
       count: s.subtitles.cues.length,
       showOnVideo: s.subtitles.showOnVideo,
@@ -841,6 +856,8 @@ function describeOverlay(o: Overlay) {
     y: r(o.y),
     ...(o.rotation ? { rotation: o.rotation } : {}),
     ...(o.opacity !== undefined ? { opacity: r(o.opacity) } : {}),
+    ...(o.blur ? { blur: r(o.blur) } : {}),
+    ...(o.motionBlur ? { motionBlur: r(o.motionBlur) } : {}),
     ...(hasOverlayAnim(o.anim) ? { anim: o.anim } : {}),
     ...(o.kf?.length
       ? { keyframes: o.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }

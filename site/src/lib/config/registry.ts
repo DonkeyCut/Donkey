@@ -338,6 +338,67 @@ export const SETTINGS = defineSettings({
     description:
       "The color LUT sizes a clip is rendered through (standard, wide-gamut and the draft drawn mid-drag), the preview proxy's size and quality, and the largest LUT file the library takes.",
   },
+  cutSound: {
+    schema: z
+      .object({
+        // The ramp at the outer end of a split edit's sound, so the sound
+        // that leads or trails the picture never starts or stops on a click.
+        splitFadeSeconds: z.number().min(0).max(1),
+        // How much clearer the best alignment of a separate recording has to
+        // be than the runner-up before it is bound.
+        syncMinConfidence: z.number().min(1).max(10),
+        // How much of the camera's own sound the alignment listens to.
+        syncProbeSeconds: z.number().min(5).max(600),
+        // The longest recording searched end to end.
+        syncMaxSeconds: z.number().min(60).max(4 * 3600),
+      })
+      .strict(),
+    default: {
+      splitFadeSeconds: 0.03,
+      syncMinConfidence: 1.4,
+      syncProbeSeconds: 90,
+      syncMaxSeconds: 2 * 3600,
+    },
+    public: true,
+    title: "Sound editing",
+    description:
+      "The ramp on the sound a split edit carries past its picture, and how lining up a separately recorded sound listens, how sure it must be, and how long a recording it searches.",
+  },
+  cutMotion: {
+    schema: z.object({ motionBlur: z.number().min(0.05).max(1) }).strict(),
+    default: { motionBlur: 0.5 },
+    public: true,
+    title: "Motion blur",
+    description:
+      "The shutter a newly switched-on motion blur starts at, as a share of a 30fps frame. 0.5 is the half-open shutter of most filmed footage; higher streaks harder.",
+  },
+  cutLoudness: {
+    schema: z
+      .object({
+        // The integrated loudness each named target masters to, LUFS.
+        targets: z
+          .object({
+            social: z.number().min(-36).max(-5),
+            podcast: z.number().min(-36).max(-5),
+            broadcast: z.number().min(-36).max(-5),
+          })
+          .strict(),
+        // The target an export starts on; "off" leaves the mix as mixed.
+        defaultTarget: z.enum(["off", "social", "podcast", "broadcast"]),
+        // What a mastered mix's true peak is held under, dBTP.
+        truePeakCeiling: z.number().min(-9).max(0),
+      })
+      .strict(),
+    default: {
+      targets: { social: -14, podcast: -16, broadcast: -23 },
+      defaultTarget: "off",
+      truePeakCeiling: -1,
+    },
+    public: true,
+    title: "Export loudness",
+    description:
+      "The loudness each export target masters to (social, podcast, broadcast), the target an export starts on, and the true-peak ceiling a mastered mix is limited under.",
+  },
   experimentResults: {
     schema: z
       .object({

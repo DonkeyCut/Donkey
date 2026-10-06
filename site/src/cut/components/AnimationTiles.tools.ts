@@ -100,6 +100,8 @@ export const OVERLAY_ANIMATION_TOOLS = [
               scale: num("Size multiplier, 1 = the element's own size (0.1..4)"),
               rotation: num("Degrees clockwise, -180..180"),
               opacity: num("0..1"),
+              blur: num(`Blur, px at the 1080 short side, 0..${ELEMENT_BLUR_MAX}`),
+              ease: { type: "string", enum: [...EASE_IDS], description: "Curve into the next key" },
             },
             ["t"]
           ),

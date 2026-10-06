@@ -7,6 +7,7 @@ import { ColorField } from "@/cut/components/ColorField";
 import { FontPicker } from "@/cut/components/FontPicker";
 import { LETTER_SPACINGS, LINE_HEIGHTS, SoundQualityPanel, SoundQualityRow, TEXT_WIDTHS, StylePresetsRow } from "@/cut/components/Inspector";
 import { NumberField } from "@/cut/components/NumberField";
+import { GroupCameraSection, GroupMotionRows } from "@/cut/components/MotionControls";
 import { Field, Row, Section, SegGroup, SegToggle, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { parseNumberInput, parsePercentInput, parseSecondsInput, parseSpeedInput, ScrubValue } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
@@ -113,6 +114,8 @@ export function GroupPanel({ selection }: { selection: readonly NonNullable<Sele
         {!items.overlays.length && <SoundRows clips={items.clips} audios={items.audios} onOpenSound={() => setView("sound")} />}
         {onlyClips && <ClipPictureRows clips={items.clips} />}
         <TransformRows items={items} />
+        {items.overlays.length > 0 && !items.clips.length && !items.audios.length && <GroupMotionRows overlays={items.overlays} />}
+        {!group.mixed && group.value && <GroupCameraSection groupId={group.value} />}
         {onlyClips && <ClipBorderRows clips={items.clips} />}
         {onlyClips && <ClipShadowRows clips={items.clips} />}
       </div>

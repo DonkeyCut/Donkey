@@ -1,8 +1,10 @@
 import { textBoxSize } from "@/cut/lib/textFit";
 import { PLATE_PAD_X, hasOverlayKeys, keyAt, upsertKey, type OverlayKey } from "@donkeycut/effects-kit";
+import { cameraPoint, worldPoint, type CameraPose } from "@donkeycut/effects-kit";
+import { elementCameraAt } from "@/cut/lib/groupCamera";
 import { clipLen, type EditorState } from "@/cut/lib/store";
 import { frameOf, clampOverlayPos, clipKeyed, clipPoseAt, isShapeOverlay, isTextOverlay, rectOf, type FrameRect, type OverlayPatch, type Selection } from "@/cut/lib/types";
-import { captionStyle, laneHidden, trackPos } from "@/cut/lib/subtitles";
+import { captionStyle, cueAnchor, laneHidden, trackPos } from "@/cut/lib/subtitles";
 
 export const SELECTABLE_ITEM_KINDS = ["clip", "audio", "overlay", "cue"] as const;
 
@@ -23,11 +25,24 @@ type Position = {
   lane?: number;
   /** The item's angle at the gesture's start, degrees clockwise. */
   rotation: number;
+  /** A caption with its own spot moves that spot; the rest move their
+   * track's. */
+  own?: boolean;
   /** What a scale gesture grows: a shape or sticker's box, a title's size or
    * wrapping width, a clip's frame. A keyed item scales its key instead. */
   box?: { w: number; h?: number };
   text?: { size: number; wrapWidth?: number; width: number };
+  /** The group camera filming the item: its x, y and rotation above are on
+   * screen, and every write turns them back into the world. */
+  cam?: { pose: CameraPose; aspect: number };
 };
+
+/** A screen pose back in the item's own world; unchanged with no camera. */
+function toWorld(p: Position, x: number, y: number, rotation?: number) {
+  if (!p.cam) return { x, y, rotation };
+  const w = worldPoint(p.cam.pose, x, y, p.cam.aspect);
+  return { x: w.x, y: w.y, rotation: rotation === undefined ? undefined : Math.round(normDeg(rotation - p.cam.pose.rotation)) };
+}
 
 /** Into (-180, 180], the range every rotation is stored in. */
 export const normDeg = (deg: number) => ((((deg + 180) % 360) + 360) % 360) - 180;
@@ -39,10 +54,16 @@ export function previewSelectionSnapshot(s: EditorState, t: number): Position[] 
   const positions: Position[] = [];
   for (const o of s.overlays) {
     if (!selected.has(`overlay:${o.id}`) || o.hidden || o.kind === "effect") continue;
-    const key = hasOverlayKeys(o) ? keyAt(o, Math.max(0, Math.min(t - o.start, Math.max(0.1, o.end - o.start)))) : undefined;
+    const tl = Math.max(0, Math.min(t - o.start, Math.max(0.1, o.end - o.start)));
+    const key = hasOverlayKeys(o) ? keyAt(o, tl) : undefined;
+    // A filmed element is gestured where it shows: on screen, through its camera.
+    const pose = elementCameraAt(o, tl);
+    const frame = frameOf(s.aspect);
+    const cam = pose ? { pose, aspect: frame.w / frame.h } : undefined;
+    const seen = cam ? cameraPoint(cam.pose, key?.x ?? o.x, key?.y ?? o.y, cam.aspect) : { x: key?.x ?? o.x, y: key?.y ?? o.y };
     positions.push({
-      kind: "overlay", id: o.id, x: key?.x ?? o.x, y: key?.y ?? o.y, key, keys: o.kf,
-      rotation: key?.rotation ?? o.rotation ?? 0,
+      kind: "overlay", id: o.id, x: seen.x, y: seen.y, key, keys: o.kf, cam,
+      rotation: (key?.rotation ?? o.rotation ?? 0) + (cam?.pose.rotation ?? 0),
       box: isShapeOverlay(o) || o.kind === "sticker" ? { w: o.w, h: o.h } : undefined,
       text: isTextOverlay(o) ? { size: o.size, wrapWidth: o.wrapWidth, width: (textBoxSize(o, frameOf(s.aspect).w).width - (o.plate ? 2 * PLATE_PAD_X * o.size : 0)) / frameOf(s.aspect).w } : undefined,
     });
@@ -79,6 +100,8 @@ export function previewSelectionSnapshot(s: EditorState, t: number): Position[] 
 export function movePreviewSelection(s: EditorState, positions: Position[], dx: number, dy: number) {
   let minX = -Infinity, maxX = Infinity, minY = -Infinity, maxY = Infinity;
   for (const p of positions) {
+    // A filmed element may sit off screen while the camera is pushed in.
+    if (p.cam) continue;
     const f = p.kind === "clip" && !p.key ? p.frame : undefined;
     minX = Math.max(minX, Math.min(0, (f ? 0.05 - f.w : 0.02) - p.x));
     maxX = Math.min(maxX, Math.max(0, (f ? 0.95 : 0.98) - p.x));
@@ -89,10 +112,11 @@ export function movePreviewSelection(s: EditorState, positions: Position[], dx: 
   dy = Math.max(minY, Math.min(maxY, dy));
   const patches: Parameters<EditorState["updateDocTransient"]>[0] = { clips: [], overlays: [] };
   for (const p of positions) {
-    const x = p.x + dx, y = p.y + dy;
+    const { x, y } = toWorld(p, p.x + dx, p.y + dy);
     const keyed = p.key ? { kf: upsertKey(p.keys, { ...p.key, x, y }) } : null;
     if (p.kind === "overlay") patches.overlays!.push({ id: p.id, patch: keyed ?? { x, y } });
     else if (p.kind === "clip") patches.clips!.push({ id: p.id, patch: keyed ?? { frame: { ...p.frame!, x, y } } });
+    else if (p.own) s.setCuePosition(p.id, { x, y });
     else s.setSubtitleTrackMeta(p.lane!, { x, y });
   }
   if (patches.clips!.length || patches.overlays!.length) s.updateDocTransient(patches);
@@ -165,7 +189,7 @@ export function scalePreviewSelection(s: EditorState, positions: Position[], anc
         ? { size: Math.max(8, p.text.size * k), wrapWidth: p.text.wrapWidth === undefined ? undefined : p.text.wrapWidth * k }
         : { size: p.text.size, wrapWidth: Math.max(0.01, Math.min(2, (p.text.wrapWidth ?? p.text.width) * kx)) };
     }
-    return { p, x: clampOverlayPos(cx), y: clampOverlayPos(cy), own };
+    return { p, x: p.cam ? cx : clampOverlayPos(cx), y: p.cam ? cy : clampOverlayPos(cy), own };
   }));
 }
 

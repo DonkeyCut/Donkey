@@ -249,6 +249,7 @@ function LiveName({
       el.style.transformOrigin = "";
       el.style.opacity = "";
       el.style.clipPath = "";
+      el.style.filter = "";
       letters().forEach((kid, i) => {
         kid.style.transform = "";
         kid.style.opacity = "";
@@ -641,11 +642,13 @@ export function AnimationTiles({
   }
 
   const ids: string[] =
-    slot === "move"
-      ? HOLD_IDS
-      : slot === "loop"
-        ? OVERLAY_LOOP_STYLE_IDS
-        : OVERLAY_ANIM_STYLE_IDS.filter((s) => isText || !TEXT_ONLY_ANIM_STYLE_IDS.includes(s));
+    slot === "hit"
+      ? OVERLAY_HIT_STYLE_IDS
+      : slot === "move"
+        ? HOLD_IDS
+        : slot === "loop"
+          ? OVERLAY_LOOP_STYLE_IDS
+          : OVERLAY_ANIM_STYLE_IDS.filter((s) => isText || !TEXT_ONLY_ANIM_STYLE_IDS.includes(s));
 
   return (
     <div className="grid grid-cols-2 gap-[9px]">

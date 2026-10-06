@@ -20,6 +20,8 @@ import {
 import { diveView, slotReel, slotSeed, type DiveFocus, type DiveView } from "./dive";
 import { presetExtent } from "./motion/evaluate";
 import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys, type OverlayFrameState } from "./keys";
+import { ELEMENT_BLUR_MAX, hasCameraKeys, STREAK_MAX } from "./camera";
+import { ElementFx, elementLook } from "./elementFx";
 import { applyMaskToCanvas, isMaskAnimated } from "./mask";
 import { tracePolyShape } from "./shapePath";
 import type { LottieHandle } from "./lottie";
@@ -1268,22 +1270,37 @@ export async function renderOverlayFrames(
   // A dive flies into the element until it fills the frame, so its flight
   // takes the whole frame.
   const focus = divesAt(anim) ? await measureDiveFocus(overlay, width / height, env) : null;
-  const x0 = focus ? 0 : Math.max(0, Math.floor(extent.x0 * width - halfW));
-  const y0 = focus ? 0 : Math.max(0, Math.floor(extent.y0 * height - halfH));
-  const x1 = focus ? width : Math.min(width, Math.ceil(extent.x1 * width + halfW));
-  const y1 = focus ? height : Math.min(height, Math.ceil(extent.y1 * height + halfH));
+  // A camera can carry the element anywhere in the frame at any size, so its
+  // pictures take the whole frame too.
+  const filmed = hasCameraKeys(overlay.camera);
+  const whole = !!focus || filmed;
+  // Blur spills about three radii past the ink; a streak reaches half its
+  // longest length either side.
+  const blurs = [overlay.blur ?? 0, ...(overlay.kf ?? []).map((k) => k.blur ?? 0)];
+  const spill =
+    Math.min(ELEMENT_BLUR_MAX, Math.max(...blurs)) * 3 * scale +
+    (overlay.motionBlur ? (STREAK_MAX / 2) * scale : 0);
+  halfW += spill;
+  halfH += spill;
+  const x0 = whole ? 0 : Math.max(0, Math.floor(extent.x0 * width - halfW));
+  const y0 = whole ? 0 : Math.max(0, Math.floor(extent.y0 * height - halfH));
+  const x1 = whole ? width : Math.min(width, Math.ceil(extent.x1 * width + halfW));
+  const y1 = whole ? height : Math.min(height, Math.ceil(extent.y1 * height + halfH));
   const rw = Math.max(2, x1 - x0);
   const rh = Math.max(2, y1 - y0);
 
   const canvas = newCanvas(env, rw, rh);
-  const ctx = canvas.getContext("2d")!;
+  const target = canvas.getContext("2d")!;
   const maskScratch = overlay.mask ? newCanvas(env, 1, 1) : null;
+  // Blur and motion blur paint the posed element into a scratch first.
+  const fx = new ElementFx((w, h) => newCanvas(env, w, h));
 
   const drawAt = async (tLocal: number): Promise<Blob> => {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, rw, rh);
-    const ev = evalOverlayFrame(overlay, tLocal);
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.clearRect(0, 0, rw, rh);
+    const ev = evalOverlayFrame(overlay, tLocal, width / height);
     if (ev.opacity <= 0.001) return pngBlob(canvas, env); // fully transparent frame
+    const ctx = fx.begin(target, rw, rh, elementLook(ev, scale)) as CanvasRenderingContext2D;
     ctx.globalAlpha = ev.opacity;
     ctx.translate(-x0, -y0);
     // The pose places the element; the preset's travel rides on top of it.

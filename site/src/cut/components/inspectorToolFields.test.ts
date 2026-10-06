@@ -166,10 +166,13 @@ describe("inspector tool fields", () => {
     const rendered = (token: string) => new RegExp(`\\b${token}\\b`).test(panels);
     const tools = [
       ...INSPECTOR_TOOLS,
+      ...CAMERA_CARD_TOOLS,
       ...OVERLAY_ANIMATION_TOOLS,
       ...TRANSITIONS_TOOLS,
       ...EFFECTS_TOOLS,
       ...TIMELINE_TOOLS,
+      ...GROUP_PANEL_TOOLS,
+      ...SUBTITLES_TOOLS,
     ].filter((t) => ITEM_TOOLS.has(t.name));
     expect(tools.map((t) => t.name).sort()).toEqual([...ITEM_TOOLS].sort());
     const missing: string[] = [];

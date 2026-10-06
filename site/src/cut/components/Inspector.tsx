@@ -3305,6 +3305,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
           }}
         />
       </Row>
+      <ElementMotionRows overlay={o} />
       <HiddenRow overlay={o} />
     </Section>
   );

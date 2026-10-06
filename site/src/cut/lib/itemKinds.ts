@@ -156,7 +156,8 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
     duration: (o) => o.end - o.start,
     lane: (o) => o.lane ?? 0,
     at: (o, start) => ({ ...o, start, end: start + o.end - o.start }),
-    split: (o, at) => [{ ...o, end: at }, { ...o, start: at }],
+    // The tail keeps filming on the group camera's clock.
+    split: (o, at) => [{ ...o, end: at }, { ...o, start: at, ...(o.camera ? { camera: shiftCamera(o.camera, o.start - at) } : {}) }],
     clone: deep,
     assetIds: (o) => {
       if (isStickerOverlay(o)) return o.assetId ? [o.assetId] : [];

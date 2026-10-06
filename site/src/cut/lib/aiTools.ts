@@ -88,12 +88,17 @@ import {
 import type { AiPanelToolName } from "@/cut/components/AiPanel.tools";
 import type { OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
 import type { AudioToolName } from "@/cut/components/AudioPanel.tools";
+import type { CameraCardToolName } from "@/cut/components/CameraCardSection.tools";
 import type { EditorToolName } from "@/cut/components/Editor.tools";
 import type { EffectsToolName } from "@/cut/components/EffectsPanel.tools";
 import { SHAPE_KINDS, type ElementsToolName } from "@/cut/components/ElementsPanel.tools";
 import type { VideoGenToolName } from "@/cut/components/GeneratePanel.tools";
 import type { ImageGenToolName } from "@/cut/components/ImageGenPanel.tools";
 import type { InspectorToolName } from "@/cut/components/Inspector.tools";
+import type { GroupPanelToolName } from "@/cut/components/GroupPanel.tools";
+import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, ELEMENT_BLUR_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
+import { groupCameraOf, groupCameraPoseAt } from "@/cut/lib/groupCamera";
+import { cutMotion } from "@/cut/lib/motionSettings";
 import type { LibraryToolName } from "@/cut/components/LibraryView.tools";
 import type { PreviewToolName } from "@/cut/components/Preview.tools";
 import type { RemovalToolName } from "@/cut/components/RemovalPanel.tools";
@@ -700,6 +705,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
             ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
             ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
+            ...(isNum(k.blur) ? { blur: clamp(k.blur, 0, ELEMENT_BLUR_MAX) } : {}),
+            ...(k.ease !== undefined ? { ease: easeInput(k.ease) } : {}),
           },
           { transient: true }
         );
@@ -707,6 +714,53 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       kf = useEditor.getState().overlays.find((x) => x.id === o.id)?.kf;
     }
     return { id: o.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })) };
+  },
+
+  set_group_camera: (s, input) => {
+    const memberIds = Array.isArray(input.ids) ? input.ids.map(String) : [];
+    const groupId =
+      typeof input.group_id === "string" && input.group_id
+        ? input.group_id
+        : memberIds.map((id) => s.overlays.find((o) => o.id === id)?.groupId).find(Boolean);
+    if (!groupId) throw new ToolError("Pass group_id, or ids of elements in a group (group_items makes one).");
+    const view = groupCameraOf(s.overlays, groupId);
+    if (!view) throw new ToolError(`Group ${groupId} has no titles, shapes or stickers for a camera to film.`);
+    let keys = view.keys;
+    if (input.keys !== undefined) {
+      if (!Array.isArray(input.keys)) throw new ToolError("keys must be a list.");
+      keys = [];
+      for (const k of input.keys as Record<string, unknown>[]) {
+        if (!isNum(k.t)) throw new ToolError("Every key needs a time `t`.");
+        const t = clamp(k.t, 0, Math.max(0.1, view.end - view.start));
+        // Omitted fields hold the camera where it already was at that time.
+        const was = groupCameraPoseAt(view, t);
+        const key: CameraKey = {
+          t,
+          x: isNum(k.x) ? clamp(k.x, -1, 2) : was.x,
+          y: isNum(k.y) ? clamp(k.y, -1, 2) : was.y,
+          scale: isNum(k.scale) ? clamp(k.scale, CAMERA_SCALE_MIN, CAMERA_SCALE_MAX) : was.scale,
+          rotation: isNum(k.rotation) ? clamp(k.rotation, -180, 180) : was.rotation,
+          ...(k.ease !== undefined && easeInput(k.ease) ? { ease: easeInput(k.ease) } : {}),
+        };
+        keys = upsertCameraKey(keys, key);
+      }
+    }
+    const motionBlur =
+      isNum(input.shutter) && input.shutter > 0
+        ? clamp(input.shutter, 0.05, 1)
+        : input.motion_blur === true
+          ? view.motionBlur ?? cutMotion().motionBlur
+          : input.motion_blur === false || (isNum(input.shutter) && input.shutter <= 0)
+            ? undefined
+            : view.motionBlur;
+    s.setGroupCamera(groupId, { keys, ...(motionBlur ? { motionBlur } : {}) });
+    const next = groupCameraOf(useEditor.getState().overlays, groupId)!;
+    return {
+      groupId,
+      start: round2(next.start),
+      keys: next.keys.map((k) => ({ ...k, t: round2(k.t), x: round2(k.x), y: round2(k.y), scale: round2(k.scale) })),
+      motionBlur: next.motionBlur ?? null,
+    };
   },
 
   set_clip_keyframes: (s, input) => {
@@ -6332,6 +6386,13 @@ async function launchVideoJob(
  * position, rotation, opacity, hidden) plus the target kind's own fields.
  * Outline width is em for text (scales with the type) and design px for
  * shapes, so the interpretation follows the element being patched. */
+/** A key's ease from a call: a known curve, or linear (no ease) for
+ * "linear" and anything else. */
+function easeInput(v: unknown) {
+  if (!isEaseId(v)) throw new ToolError("ease must be one of the listed curves.");
+  return v === "linear" ? undefined : v;
+}
+
 function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "sticker" | "effect") {
   const patch: Record<string, unknown> = {};
   if (isNum(input.start)) patch.start = Math.max(0, input.start);
@@ -6343,6 +6404,12 @@ function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "
     patch.rotation = Math.round(clamp(input.rotation, -180, 180)) || undefined;
   if (isNum(input.opacity))
     patch.opacity = input.opacity >= 0.995 ? undefined : clamp(input.opacity, 0, 1);
+  if (kind !== "effect") {
+    if (isNum(input.blur)) patch.blur = input.blur <= 0.05 ? undefined : clamp(input.blur, 0, ELEMENT_BLUR_MAX);
+    if (isNum(input.shutter)) patch.motionBlur = input.shutter <= 0 ? undefined : clamp(input.shutter, 0.05, 1);
+    else if (input.motion_blur === true) patch.motionBlur = cutMotion().motionBlur;
+    if (input.motion_blur === false) patch.motionBlur = undefined;
+  }
   if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
   if (typeof input.name === "string") patch.name = input.name.trim().slice(0, 60) || undefined;
 

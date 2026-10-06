@@ -22,6 +22,18 @@ import {
   type GlyphPhase,
   type OverlayAnim,
 } from "./anim";
+import {
+  capStreak,
+  composeCamera,
+  designFrame,
+  hasCameraKeys,
+  MOTION_BLUR_FRAME,
+  REST_CAMERA,
+  type CameraKey,
+  type CameraPose,
+  type GroupCamera,
+} from "./camera";
+import { easeAt, type EaseId } from "./ease";
 
 /** A pose captured at `t` seconds into the element. Values are absolute, in
  * the same units as the element's own fields — `scale` multiplies the
@@ -33,6 +45,10 @@ export interface OverlayKey {
   scale: number;
   rotation: number; // degrees clockwise
   opacity: number; // 0..1
+  /** Gaussian blur, px at the 1080 short side; absent = the element's own. */
+  blur?: number;
+  /** The curve out of this key into the next; absent = constant rate. */
+  ease?: EaseId;
 }
 
 /** What an element looks like at one moment, before presets compose over it. */
@@ -42,6 +58,8 @@ export interface OverlayPose {
   scale: number;
   rotation: number;
   opacity: number;
+  /** Absent = sharp. */
+  blur?: number;
 }
 
 /** The fields `evalOverlayFrame` reads — every overlay kind has them. The
@@ -60,6 +78,9 @@ interface Posable {
   anim?: OverlayAnim;
   kf?: OverlayKey[];
   mask?: { kf?: { t: number }[] };
+  blur?: number;
+  motionBlur?: number;
+  camera?: GroupCamera;
 }
 
 /** Two keys closer than this are the same key. Half a frame at 30fps, so a
@@ -74,6 +95,7 @@ export function restingPose(o: Posable): OverlayPose {
     scale: 1,
     rotation: o.rotation ?? 0,
     opacity: o.opacity ?? 1,
+    ...(o.blur ? { blur: o.blur } : {}),
   };
 }
 
@@ -82,11 +104,18 @@ export function hasOverlayKeys(o: Posable): boolean {
   return !!o.kf && o.kf.length > 0;
 }
 
-/** Whether anything about the element moves — a preset, pose keys, or a
- * keyframed mask. An element that does not move renders as one still
- * picture. */
+/** Whether the element is drawn through the per-frame evaluator: something
+ * moves it (a preset, pose keys, its group's camera, a keyframed mask), or it
+ * is blurred, which every renderer applies to the posed picture as it draws.
+ * Any other element renders as one still picture. */
 export function isOverlayAnimated(o: Posable): boolean {
-  return hasOverlayAnim(o.anim) || hasOverlayKeys(o) || !!(o.mask?.kf && o.mask.kf.length > 0);
+  return (
+    hasOverlayAnim(o.anim) ||
+    hasOverlayKeys(o) ||
+    hasCameraKeys(o.camera) ||
+    (o.blur ?? 0) > 0 ||
+    !!(o.mask?.kf && o.mask.kf.length > 0)
+  );
 }
 
 /** Keys in play order. Callers may hand them over unsorted (a key added at the
@@ -100,7 +129,7 @@ export function sortedKeys<K extends { t: number }>(keys: K[]): K[] {
  * hold flat outside them, and hand the pair to `mix`. The pose track and the
  * mask track are both thin wrappers over this.
  */
-export function lerpKeys<K extends { t: number }>(
+export function lerpKeys<K extends { t: number; ease?: EaseId }>(
   keys: K[],
   tLocal: number,
   mix: (a: K, b: K, p: number) => K
@@ -115,7 +144,8 @@ export function lerpKeys<K extends { t: number }>(
   const b = ks[i + 1];
   const span = b.t - a.t;
   const p = span > 1e-6 ? (tLocal - a.t) / span : 0;
-  return mix(a, b, p);
+  // The first key's curve carries the move out of it into the next.
+  return mix(a, b, a.ease ? easeAt(a.ease, p) : p);
 }
 
 /** The pose at `tLocal` seconds into the element: interpolated between the
@@ -123,8 +153,11 @@ export function lerpKeys<K extends { t: number }>(
 export function poseAt(o: Posable, tLocal: number): OverlayPose {
   const keys = o.kf;
   if (!keys || keys.length === 0) return restingPose(o);
+  // A key with no blur of its own takes the element's.
+  const rest = o.blur ?? 0;
   const k = lerpKeys(keys, tLocal, (a, b, p) => {
     const mix = (u: number, v: number) => u + (v - u) * p;
+    const blur = mix(a.blur ?? rest, b.blur ?? rest);
     return {
       t: mix(a.t, b.t),
       x: mix(a.x, b.x),
@@ -134,9 +167,10 @@ export function poseAt(o: Posable, tLocal: number): OverlayPose {
       // turns 20° forward instead of 340° back.
       rotation: a.rotation + shortestTurn(a.rotation, b.rotation) * p,
       opacity: mix(a.opacity, b.opacity),
+      ...(blur > 0 ? { blur } : {}),
     };
   });
-  return poseOf(k);
+  return poseOf(k, rest);
 }
 
 /** The signed short-way-around turn from one angle to another, degrees. */
@@ -147,8 +181,16 @@ export function shortestTurn(from: number, to: number): number {
   return d;
 }
 
-function poseOf(k: OverlayKey): OverlayPose {
-  return { x: k.x, y: k.y, scale: k.scale, rotation: k.rotation, opacity: k.opacity };
+function poseOf(k: OverlayKey, restBlur = 0): OverlayPose {
+  const blur = k.blur ?? restBlur;
+  return {
+    x: k.x,
+    y: k.y,
+    scale: k.scale,
+    rotation: k.rotation,
+    opacity: k.opacity,
+    ...(blur > 0 ? { blur } : {}),
+  };
 }
 
 /** A key holding the element's pose at `t`, ready to be added. Capturing the
@@ -156,6 +198,26 @@ function poseOf(k: OverlayKey): OverlayPose {
  * it already sat until one of them is moved. */
 export function keyAt(o: Posable, t: number): OverlayKey {
   return { t, ...poseAt(o, t) };
+}
+
+/** The camera's pose at `tLocal` seconds into the element: eased between the
+ * surrounding keys, held outside them. Zoom moves by ratio, so a push from 1×
+ * to 4× feels as even as one from 2× to 8×. */
+export function cameraAt(cam: GroupCamera | undefined, tLocal: number): CameraPose {
+  if (!hasCameraKeys(cam)) return REST_CAMERA;
+  const k = lerpKeys<CameraKey>(cam.kf, tLocal, (a, b, p) => {
+    const mix = (u: number, v: number) => u + (v - u) * p;
+    const sa = Math.max(1e-3, a.scale);
+    const sb = Math.max(1e-3, b.scale);
+    return {
+      t: mix(a.t, b.t),
+      x: mix(a.x, b.x),
+      y: mix(a.y, b.y),
+      scale: sa * Math.pow(sb / sa, p),
+      rotation: a.rotation + shortestTurn(a.rotation, b.rotation) * p,
+    };
+  });
+  return { x: k.x, y: k.y, scale: k.scale, rotation: k.rotation };
 }
 
 /** Insert or replace a key, keeping the list in play order. A key dropped on
@@ -194,9 +256,59 @@ export interface OverlayFrameState extends OverlayPose {
   glyphLoop?: GlyphLoopPhase;
   /** How far the view has flown into the element's deepest ink (dive). */
   dive?: number;
+  /** The motion blur streak: how far the element's center travels on screen
+   * while the shutter is open, design px, centered on this moment. Absent
+   * when motion blur is off or the element is still. */
+  streak?: { x: number; y: number };
+  /** Whether the typing bar is lit; absent when the element has none. */
+  caret?: boolean;
+  /** Multiplies the element's colors (a hit that darkens); absent = 1. */
+  brightness?: number;
 }
 
-export function evalOverlayFrame(o: Posable, tLocal: number): OverlayFrameState {
+/**
+ * The element's frame state at `tLocal`, as every renderer draws it: the
+ * pose, the presets over it, its group's camera over both, and the motion
+ * blur streak. `aspect` (frame width / height) is required once a camera or
+ * motion blur is in play, since both work in on-screen distances.
+ */
+export function evalOverlayFrame(o: Posable, tLocal: number, aspect?: number): OverlayFrameState {
+  const own = ownFrame(o, tLocal);
+  const cam = hasCameraKeys(o.camera) ? o.camera : undefined;
+  const shutter = o.motionBlur || cam?.motionBlur || 0;
+  if (!cam && !shutter) return own;
+  if (!aspect || !Number.isFinite(aspect)) {
+    throw new Error("A camera or motion blur needs the frame's aspect to evaluate.");
+  }
+  const placed = cam ? composeCamera(own, cameraAt(cam, tLocal), aspect) : own;
+  if (!shutter) return placed;
+  // The element's own motion blur streaks its whole move on screen; the
+  // camera's streaks only what the camera does, with the element held still.
+  const whole = !!o.motionBlur;
+  const exposure = shutter * MOTION_BLUR_FRAME;
+  const dur = Math.max(0.1, o.end - o.start);
+  const t0 = Math.max(0, tLocal - exposure / 2);
+  const t1 = Math.min(dur, tLocal + exposure / 2);
+  if (t1 - t0 < 1e-6) return placed;
+  const at = (t: number) => {
+    const s = whole ? ownFrame(o, t) : own;
+    return cam ? composeCamera(s, cameraAt(cam, t), aspect) : s;
+  };
+  const a = at(t0);
+  const b = at(t1);
+  const f = designFrame(aspect);
+  // Velocity over the window that fits inside the element, scaled to the
+  // whole exposure, so the first and last frames streak like the rest.
+  const k = exposure / (t1 - t0);
+  const streak = capStreak(
+    ((b.x - a.x) * f.width + (b.dx - a.dx)) * k,
+    ((b.y - a.y) * f.height + (b.dy - a.dy)) * k
+  );
+  return streak ? { ...placed, streak } : placed;
+}
+
+/** The element's own frame state: its pose with the presets over it. */
+function ownFrame(o: Posable, tLocal: number): OverlayFrameState {
   const dur = Math.max(0.1, o.end - o.start);
   const pose = poseAt(o, tLocal);
   const ev = evalOverlayAnim(o.anim, tLocal, dur, (o.kind ?? "text") === "text");
@@ -226,7 +338,7 @@ export function poseExtent(o: Posable): {
   y1: number;
   scale: number;
 } {
-  const poses = hasOverlayKeys(o) ? sortedKeys(o.kf!).map(poseOf) : [restingPose(o)];
+  const poses = hasOverlayKeys(o) ? sortedKeys(o.kf!).map((k) => poseOf(k)) : [restingPose(o)];
   return {
     x0: Math.min(...poses.map((p) => p.x)),
     y0: Math.min(...poses.map((p) => p.y)),

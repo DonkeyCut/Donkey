@@ -6,6 +6,7 @@
  */
 
 import type { OverlayAnim } from "./anim";
+import type { GroupCamera } from "./camera";
 import type { EffectOverlay } from "./effects";
 import type { OverlayKey } from "./keys";
 import type { Mask } from "./mask";
@@ -42,6 +43,15 @@ export interface OverlayBase {
   /** Coverage that trims the element's pixels to a shape or to the person in
    * the shot (see mask.ts); absent = the whole element shows. */
   mask?: Mask;
+  /** Gaussian blur at rest, px at the 1080 design short side; pose keys may
+   * carry their own. Absent = sharp. */
+  blur?: number;
+  /** Motion blur: the shutter, 0..1 of a 30fps frame, streaking the
+   * element's whole on-screen movement. Absent = off. */
+  motionBlur?: number;
+  /** The camera of the group this element belongs to (see camera.ts), the
+   * same on every member, key times from this element's start. */
+  camera?: GroupCamera;
 }
 
 /** A custom drop shadow. Every field is optional — absent ones take the

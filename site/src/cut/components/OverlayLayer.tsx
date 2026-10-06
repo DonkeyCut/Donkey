@@ -18,6 +18,11 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
+import { drawStreak, elementAtMoment, paintElementCrop, streakTaps } from "@donkeycut/effects-kit";
+import { holdMemory } from "@/cut/lib/memoryBudget";
+import { elementCameraAt } from "@/cut/lib/groupCamera";
+import { cameraPoint, worldPoint } from "@donkeycut/effects-kit";
+import { CARET_GAP_EM, CARET_HEIGHT_EM, CARET_WIDTH_EM, typeCaret } from "@donkeycut/effects-kit";
 import { diveView, evalOverlayFrame, glyphStateAt, measureDiveFocus, paintElementInto, slotReel, slotSeed, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type DiveFocus, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
@@ -405,6 +410,7 @@ function WordText({
                 </span>
               );
             })}
+          {li === lines.length - 1 && tail}
         </span>
       ))}
     </>
@@ -632,7 +638,8 @@ function OverlayItem({
     isOverlayAnimated(o) && rehearsal !== "rest" && (running !== null || !ghost)
       ? evalOverlayFrame(
           running ? { ...o, anim: running.anim } : o,
-          running ? running.tLocal : Math.max(0, t - o.start)
+          running ? running.tLocal : Math.max(0, t - o.start),
+          frame.w / frame.h
         )
       : null;
   // The pose's own zoom is kept apart from the rest of the chain: the element
@@ -679,12 +686,51 @@ function OverlayItem({
   // keeps an invisible hit target (and the selection chrome) so editing
   // still works.
   const behindHidden = behindSubjectOverlay(o) && !editing;
+  // The typing bar, lit or dark by the evaluator's blink. It takes no room
+  // in the line — its negative margin gives back its width — so the text
+  // sits exactly where the painter, which draws the bar over nothing, puts it.
+  const caretWidth = `max(${2 * scale}px, ${CARET_WIDTH_EM}em)`;
+  const caretBar =
+    isText && !editing && live?.caret ? (
+      <span
+        aria-hidden
+        style={{
+          display: "inline-block",
+          width: caretWidth,
+          height: `${CARET_HEIGHT_EM}em`,
+          marginLeft: `${CARET_GAP_EM}em`,
+          marginRight: `calc(-1 * (${CARET_GAP_EM}em + ${caretWidth}))`,
+          verticalAlign: "middle",
+          background: typeCaret(o.anim)?.color ?? o.color,
+        }}
+      />
+    ) : null;
 
   // A dive flies the view into the element's deepest ink. Zoomed fifty times,
   // the few pixels the DOM and the canvas disagree on where a line's middle
   // sits become the width of the frame, so while it dives the element is
   // drawn by the kit's own painter — the picture the export draws.
   const diving = !!live?.dive && !editing && !behindHidden;
+  // Blur is a CSS filter inside the box, so the box's zoom would grow it:
+  // it is divided back out to land the radius every renderer draws.
+  const blurPx = (((live ? live.blur : o.blur) ?? 0) * scale) / poseZoom;
+  // A hit that darkens dims the element's own pixels, the same multiply the
+  // painters run; blur softens them. The DOM content, the dive canvas and the
+  // streak canvas all carry the one filter.
+  const blur = blurPx >= 0.1 ? `blur(${blurPx.toFixed(2)}px)` : "";
+  const dim = live?.brightness !== undefined ? `brightness(${live.brightness})` : "";
+  const blurFilter = blur && dim ? `${blur} ${dim}` : blur || dim || undefined;
+  // The dive canvas sits on the stage outside the box, so its blur takes the
+  // radius undivided.
+  const diveBlurPx = blurPx * poseZoom;
+  const diveFilter =
+    [diveBlurPx >= 0.1 ? `blur(${diveBlurPx.toFixed(2)}px)` : "", dim].filter(Boolean).join(" ") || undefined;
+  // Motion blur: while the element moves, the kit paints it and smears the
+  // picture along its streak; at rest the element is the plain DOM box.
+  const streakable =
+    !!(o.motionBlur || o.camera?.motionBlur) && !editing && !behindHidden && !diving && !ghost;
+  const [streakReady, setStreakReady] = useState(false);
+  const streaking = streakable && !!live?.streak && streakReady;
 
   const tLocal = Math.max(0, t - o.start);
   // The mask clips the content wrapper only, never the box itself — the
@@ -763,7 +809,8 @@ function OverlayItem({
         })()
       : {}),
     ...(maskCss ?? {}),
-    ...(diving ? { visibility: "hidden" as const } : {}),
+    ...(blurFilter ? { filter: blurFilter } : {}),
+    ...(diving || streaking ? { visibility: "hidden" as const } : {}),
     ...(reveal !== undefined
       ? { clipPath: `inset(0 ${(1 - Math.min(1, Math.max(0, reveal))) * 100}% 0 0)` }
       : {}),
@@ -993,7 +1040,10 @@ function OverlayItem({
           liveRotation = rotation;
           setSpin(rotation);
           rotationGuide(locked === null ? null : { clientX: cx, clientY: cy, quarter: locked });
-          writeTransform([{ id: o.id, patch: { rotation: rotation === 0 ? undefined : rotation } }]);
+          // The handle reads the angle on screen; a group camera's roll is
+          // the world's, so the element keeps the rest.
+          const own = Math.round(normDeg(rotation - (elementCameraAt(o, tLocal)?.rotation ?? 0)));
+          writeTransform([{ id: o.id, patch: { rotation: own === 0 ? undefined : own } }]);
           return;
         }
         let delta = normDeg(angleAt(ev) - start0);
@@ -1061,8 +1111,18 @@ function OverlayItem({
     // rest follow by the same delta.
     const members = groupSnapshot().map((m) => ({ id: m.id, x: m.x, y: m.y }));
     const self = members.find((m) => m.id === o.id) ?? { id: o.id, x: o.x, y: o.y };
+    // Under a group camera the pointer moves the element on screen; the
+    // members move by that much of their world.
+    const cam = elementCameraAt(o, tLocal);
+    const aspect = frame.w / frame.h;
+    const seen = cam ? cameraPoint(cam, self.x, self.y, aspect) : null;
     startDrag(e, {
       onMove: (dx, dy, ev) => {
+        if (cam && seen) {
+          const w = worldPoint(cam, seen.x + dx / stageWidth, seen.y + dy / stageHeight, aspect);
+          writeTransform(members.map((m) => ({ id: m.id, patch: { x: m.x + w.x - self.x, y: m.y + w.y - self.y } })));
+          return;
+        }
         const p = snap(o.id, self.x + dx / stageWidth, self.y + dy / stageHeight, ev);
         const ddx = clampPos(p.x) - self.x;
         const ddy = clampPos(p.y) - self.y;
@@ -1128,7 +1188,7 @@ function OverlayItem({
   return (
     <>
     {diving && live && (
-      <DiveCanvas o={o} live={live} stageWidth={stageWidth} stageHeight={stageHeight} />
+      <DiveCanvas o={o} live={live} stageWidth={stageWidth} stageHeight={stageHeight} filter={diveFilter} />
     )}
     <div
       ref={boxRef}
@@ -1181,6 +1241,19 @@ function OverlayItem({
           <StickerView sticker={o} stageWidth={stageWidth} stageHeight={stageHeight} t={t} />
         ) : null}
       </div>
+      {streakable && live && (
+        <StreakCanvas
+          o={o}
+          live={live}
+          tLocal={running ? running.tLocal : tLocal}
+          stageWidth={stageWidth}
+          stageHeight={stageHeight}
+          poseZoom={poseZoom}
+          filter={blurFilter}
+          mask={o.mask?.kind === "subject" ? maskCss : undefined}
+          onReady={setStreakReady}
+        />
+      )}
       {/* The twin can't mount until its size is read, so the in-box chrome
           holds through that first frame — a select never blinks. */}
       {!chromeLifted && chrome}
@@ -1343,6 +1416,7 @@ function GlyphText({
         return (
           <span key={li} style={{ display: "block", minHeight: "1em" }}>
             {chars}
+            {li === lineCount - 1 && tail}
           </span>
         );
       })}
@@ -1360,11 +1434,13 @@ function DiveCanvas({
   live,
   stageWidth,
   stageHeight,
+  filter,
 }: {
   o: Overlay;
   live: OverlayFrameState;
   stageWidth: number;
   stageHeight: number;
+  filter?: string;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const assets = useEditor((s) => (o.kind === "sticker" ? s.assets : null));
@@ -1410,8 +1486,162 @@ function DiveCanvas({
         width: stageWidth,
         height: stageHeight,
         opacity: live.opacity,
+        filter,
       }}
     />
+  );
+}
+
+/**
+ * A moving element with motion blur, painted by the kit and smeared along its
+ * streak: the picture every export draws. It rides inside the element's box,
+ * which carries the pose, so the on-screen streak is turned back into the
+ * box's own space (unrotated, unzoomed) before the smear. The element's
+ * picture is painted once, cropped to its ink, and repainted only while its
+ * pixels change on their own (typing, a wipe, a per-glyph move, words, a
+ * Lottie); each moving frame then costs a few element-sized draws. At rest it
+ * draws nothing and the box shows the element itself.
+ */
+function StreakCanvas({
+  o,
+  live,
+  tLocal,
+  stageWidth,
+  stageHeight,
+  poseZoom,
+  filter,
+  mask,
+  onReady,
+}: {
+  o: Overlay;
+  live: OverlayFrameState;
+  tLocal: number;
+  stageWidth: number;
+  stageHeight: number;
+  poseZoom: number;
+  filter?: string;
+  /** A front subject mask's CSS, laid over the stage-sized frame. */
+  mask?: CSSProperties;
+  onReady: (ready: boolean) => void;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const raster = useRef<{ canvas: HTMLCanvasElement; x: number; y: number } | null>(null);
+  const [painted, setPainted] = useState(0);
+  const assets = useEditor((s) => (o.kind === "sticker" ? s.assets : null));
+  const dpr = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(stageWidth * dpr));
+  const h = Math.max(1, Math.round(stageHeight * dpr));
+  // Pixels that change on their own repaint every frame; the rest paint once.
+  const selfMoving =
+    !!live.glyphs ||
+    !!live.glyphLoop ||
+    live.reveal !== undefined ||
+    live.textProgress !== undefined ||
+    !!overlayWords(o) ||
+    (o.kind === "sticker" && !!o.lottie);
+  const paintAt = selfMoving ? tLocal : 0;
+  const pending = useRef<number | null>(null);
+  const busy = useRef(false);
+  useEffect(() => {
+    pending.current = paintAt;
+    if (busy.current) return;
+    busy.current = true;
+    const env = cutRenderEnv(assets ?? []);
+    void (async () => {
+      try {
+        while (pending.current !== null) {
+          const at = pending.current;
+          pending.current = null;
+          const ev = evalOverlayFrame(o, at, w / h);
+          const { el, phase } = elementAtMoment(o, at, ev);
+          const canvas = raster.current?.canvas ?? document.createElement("canvas");
+          const origin = await paintElementCrop(canvas, el, w, h, env, { t: at, phase });
+          raster.current = { canvas, ...origin };
+        }
+        setPainted((n) => n + 1);
+      } finally {
+        busy.current = false;
+      }
+    })();
+  }, [o, paintAt, w, h, assets]);
+  // The picture and the smear canvas count toward the memory report.
+  useEffect(() => {
+    const release = holdMemory("overlayRasters", () => {
+      const r = raster.current?.canvas;
+      const c = ref.current;
+      return (r ? r.width * r.height * 4 : 0) + (c ? c.width * c.height * 4 : 0);
+    });
+    return () => {
+      release();
+      const r = raster.current?.canvas;
+      if (r) r.width = r.height = 1;
+      raster.current = null;
+      onReady(false);
+    };
+  }, [onReady]);
+  const streak = live.streak;
+  useLayoutEffect(() => {
+    const canvas = ref.current;
+    const pic = raster.current;
+    if (!canvas || !pic) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    if (!streak) {
+      // At rest the box shows the element; the canvas empties once.
+      if (canvas.style.display !== "none") {
+        canvas.style.display = "none";
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        onReady(false);
+      }
+      return;
+    }
+    // The on-screen streak in device px, turned into the box's own space.
+    const px = Math.min(w, h) / 1080;
+    const sx = streak.x * px;
+    const sy = streak.y * px;
+    const r = (-live.rotation * Math.PI) / 180;
+    const lx = (Math.cos(r) * sx - Math.sin(r) * sy) / poseZoom;
+    const ly = (Math.sin(r) * sx + Math.cos(r) * sy) / poseZoom;
+    // Grows in steps and never shrinks while mounted, so a changing streak
+    // does not reallocate the canvas every frame.
+    const cw = Math.max(canvas.width, Math.ceil((pic.canvas.width + Math.abs(lx) + 4) / 64) * 64);
+    const ch = Math.max(canvas.height, Math.ceil((pic.canvas.height + Math.abs(ly) + 4) / 64) * 64);
+    if (canvas.width !== cw) canvas.width = cw;
+    if (canvas.height !== ch) canvas.height = ch;
+    const ox = Math.floor((cw - pic.canvas.width) / 2);
+    const oy = Math.floor((ch - pic.canvas.height) / 2);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, cw, ch);
+    drawStreak(ctx, pic.canvas, ox, oy, {
+      streakX: lx,
+      streakY: ly,
+      taps: streakTaps(Math.hypot(streak.x, streak.y)),
+    });
+    canvas.style.display = "";
+    canvas.style.left = `${(pic.x - ox) / dpr}px`;
+    canvas.style.top = `${(pic.y - oy) / dpr}px`;
+    canvas.style.width = `${cw / dpr}px`;
+    canvas.style.height = `${ch / dpr}px`;
+    onReady(true);
+  }, [streak, live.rotation, poseZoom, painted, w, h, dpr, onReady]);
+  return (
+    <div
+      className="pointer-events-none absolute"
+      style={{
+        left: "50%",
+        top: "50%",
+        width: stageWidth,
+        height: stageHeight,
+        // The stage in the element's unposed frame, as the dive canvas sits.
+        transform: `translate(${-o.x * stageWidth}px, ${-o.y * stageHeight}px)`,
+        filter,
+        ...(mask ? { ...mask, maskPosition: "0px 0px", WebkitMaskPosition: "0px 0px" } : {}),
+      }}
+    >
+      <canvas ref={ref} width={1} height={1} className="absolute" style={{ display: "none" }} />
+    </div>
   );
 }
 

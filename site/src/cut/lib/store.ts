@@ -61,6 +61,8 @@ import type {
 } from "./types";
 import type { VideoProject } from "./genvideo/types";
 import { expandTimelineGroups, reorderTimelineClip, selectedGroupIds, setTimelineGroup } from "./timelineGroups";
+import { groupCameraOf, withGroupCamera, withoutCamera } from "./groupCamera";
+import type { CameraKey } from "@donkeycut/effects-kit";
 import { mapTimelineItems, pasteTimelineItems, splitTimelineItems, shiftedTimelineItems, timelineCopies, timelinePlacementDelta, timelineRange } from "./timelineItems";
 import { fillSlot } from "./genvideo/fillSlot";
 import { apiFetch, apiJson, getBackend, hasLocalCompute } from "./backend";
@@ -955,6 +957,13 @@ export interface EditorState {
   groupSelection: () => string | null;
   moveTimelineSelection: (delta: number) => number;
   ungroupSelection: () => void;
+  /** Write a group's camera onto every element member, keys in seconds from
+   * the group's start; null removes it. */
+  setGroupCamera: (
+    groupId: string,
+    cam: { keys: CameraKey[]; motionBlur?: number } | null,
+    opts?: { transient?: boolean }
+  ) => void;
   /** ⌘/⇧-click: add the item to the selection (or remove it if already in),
    * making it the new primary. */
   toggleSelect: (sel: NonNullable<Selection>) => void;
@@ -1046,6 +1055,7 @@ function rebaseShared(snaps: DocSnapshot[], then: SharedFields, now: SharedField
     new Set([...b].filter(([id, v]) => a.has(id) && a.get(id) !== v).map(([id]) => id));
   const beats = moved(then.beats, now.beats);
   const profiles = moved(then.profiles, now.profiles);
+  const sounds = moved(then.sounds, now.sounds);
   for (const snap of snaps) {
     if (now.guideLines !== then.guideLines) snap.guideLines = { v: [...now.guideLines.v], h: [...now.guideLines.h] };
     if (now.colorSpace !== then.colorSpace) snap.colorSpace = now.colorSpace;
@@ -2795,7 +2805,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         !st.clips.some((c) => c.assetId === id) &&
         !st.audioClips.some((c) => c.assetId === id)
       ) {
-        set((s) => ({ assets: s.assets.filter((a) => a.id !== id), timelines: timelinesWithout(s.timelines, id) }));
+        set((s) => ({ assets: remaining(s.assets), timelines: timelinesWithout(s.timelines, id) }));
         dropFile();
         return;
       }
@@ -2810,7 +2820,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             (sel.kind === "audio" && goneAudio.has(sel.id)));
         const multiSelection = s.multiSelection.filter(keep);
         return {
-          assets: s.assets.filter((a) => a.id !== id),
+          assets: remaining(s.assets),
           clips: s.clips.filter((c) => c.assetId !== id),
           audioClips: s.audioClips.filter((c) => c.assetId !== id),
           timelines: timelinesWithout(s.timelines, id),
@@ -4225,7 +4235,21 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       push();
       const groupId = uid();
       const grouped = setTimelineGroup(s, members, groupId);
-      set({ ...grouped, subtitles: { ...s.subtitles, cues: grouped.subtitles.cues }, multiSelection: members });
+      // A camera one of the old groups carried films the new one: the
+      // earliest such group's track, on the new group's clock.
+      const filmed = [...selectedGroupIds(s, members)]
+        .map((id) => groupCameraOf(s.overlays, id))
+        .filter((v) => !!v && (v.keys.length > 0 || !!v.motionBlur))
+        .sort((a, b) => a!.start - b!.start)[0];
+      const fresh = grouped.overlays.map((o) => (o.groupId === groupId ? withoutCamera(o) : o));
+      const overlays = filmed
+        ? (() => {
+            const start = Math.min(...fresh.filter((o) => o.groupId === groupId && o.kind !== "effect").map((o) => o.start));
+            const keys = filmed.keys.map((k) => ({ ...k, t: k.t + filmed.start - start }));
+            return withGroupCamera(fresh, groupId, { keys, motionBlur: filmed.motionBlur });
+          })()
+        : fresh;
+      set({ ...grouped, overlays, subtitles: { ...s.subtitles, cues: grouped.subtitles.cues }, multiSelection: members });
       return groupId;
     },
 

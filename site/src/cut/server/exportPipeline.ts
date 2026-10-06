@@ -35,6 +35,18 @@ function crossExpr(cut: number, half: number, rising: boolean): string {
   return `${rising ? "sin" : "cos"}(${p}*PI/2)`;
 }
 
+/** A split edit's ramp as a `volume` factor over its stream: the stretch
+ * `[from, from + len]` past the picture, opening from silence over `fade`
+ * at its start (a lead) or closing to silence over `fade` at its end (a
+ * tail); 1 everywhere else. */
+function splitExpr(from: number, len: number, fade: number, opening: boolean): string {
+  const f = Math.min(fade, len);
+  if (!(f > 0.0005)) return "";
+  return opening
+    ? `clip((t-(${num(from)}))/${num(f)},0,1)`
+    : `clip(((${num(from + len)})-t)/${num(f)},0,1)`;
+}
+
 /** The expressions folded into one `volume` filter, quoted so the graph
  * parser carries their commas whole.
  *
@@ -662,7 +674,11 @@ export function narrowSpecToRange(spec: ExportSpec): ExportSpec {
     ...spec,
     clips,
     ...(spec.overlayVideos
-      ? { overlayVideos: spec.overlayVideos.filter((o) => inside(o.start, o.start + spanLen(o))) }
+      ? {
+          overlayVideos: spec.overlayVideos.filter((o) =>
+            inside(o.start - (o.soundBack ?? 0), o.start + spanLen(o) + (o.soundAhead ?? 0))
+          ),
+        }
       : {}),
     audio: spec.audio.filter((a) => inside(a.start, a.start + spanLen(a))),
     overlays: spec.overlays.filter((o) => inside(o.start, o.end)),
@@ -1027,7 +1043,7 @@ export async function runExport(
         ...overlayVideos.filter((o) => !o.image),
       ]
         .map((c) => c.file)
-        .filter((f) => f && !turned.has(f))
+        .filter((f) => f && !turned.has(f) && !twinFiles.has(f))
     ),
   ];
   const audioPresence = new Map<string, boolean>();
@@ -2142,8 +2158,8 @@ export async function runExport(
           crossExpr(dur, crossHalf[j + 1] ?? 0, false),
         ]);
       filters.push(
-        audioRead(c, 0, dur) +
-          `${toStereo(c.file)}${vol}` +
+        audioRead(snd, 0, dur) +
+          `${toStereo(snd.file)}${vol}` +
           `apad=whole_dur=${num(dur)},atrim=0:${num(dur)}${afades}[a${j}]`
       );
     } else {
@@ -2241,11 +2257,12 @@ export async function runExport(
     expr: string
   ) => {
     if (toT - fromT <= 0.01 || src.muted || src.hidden || src.image) return;
-    if (!audioPresence.get(src.file)) return;
+    const snd = sounding(src);
+    if (!snd || !audioPresence.get(snd.file)) return;
     const lab = `xh${key}`;
     filters.push(
-      audioRead(src, fromT, toT) +
-        toStereo(src.file) +
+      audioRead(snd, fromT, toT) +
+        toStereo(snd.file) +
         `${soundChain(src.sound)}` +
         `${(src.volume ?? 1) !== 1 ? `volume=${num(src.volume ?? 1)},` : ""}anull${crossFilters([expr])},` +
         `adelay=${Math.max(0, Math.round(at * 1000))}:all=1[${lab}]`
@@ -2511,13 +2528,17 @@ export async function runExport(
     } else {
       filters.push(`[${onto}][${seg}]overlay=${pos}:${enable}:eof_action=pass${ovl}[${next}]`);
     }
-    if (!oc.muted && audioPresence.get(oc.file)) {
+    const osnd = sounding(oc);
+    if (!oc.muted && osnd && audioPresence.get(osnd.file)) {
       const vol = (oc.volume ?? 1) !== 1 ? `volume=${num(oc.volume ?? 1)},` : "";
-      // A cross dissolve reaches into the handle either side of its cut, so
-      // this stream starts before the clip's own head and runs past its tail;
-      // everything timed inside it shifts by that head reach.
-      const back = Math.min(oc.soundBack ?? 0, hs, headRoom(oc));
-      const ahead = Math.min(oc.soundAhead ?? 0, ts);
+      // A cross dissolve or a split edit reaches into the handle either side
+      // of the clip, so this stream starts before its own head and runs past
+      // its tail; everything timed inside it shifts by that head reach.
+      const lead = Math.min(oc.soundLead ?? 0, oc.start);
+      const back = Math.min(oc.soundBack ?? 0, Math.max(hs, lead), headRoom(osnd));
+      const ahead = Math.min(oc.soundAhead ?? 0, Math.max(ts, oc.soundTail ?? 0));
+      const splitIn = Math.min(lead, back);
+      const splitOut = Math.min(oc.soundTail ?? 0, ahead);
       // The picture's fade edges carry the sound with them; zoom edges don't.
       // A cross dissolve's ramps are equal-power and reach half level on the
       // cut, so they are a volume expression rather than a fade to silence.
@@ -2529,12 +2550,14 @@ export async function runExport(
       const crosses = crossFilters([
         crossExpr(back, hs, true),
         crossExpr(back + olen, ts, false),
+        splitIn > 0.01 ? splitExpr(back - splitIn, splitIn, oc.splitFade ?? 0, true) : "",
+        splitOut > 0.01 ? splitExpr(back + olen, splitOut, oc.splitFade ?? 0, false) : "",
       ]);
       const delayMs = Math.max(0, Math.round((oc.start - back) * 1000));
       const lab = `ovs${k}`;
       filters.push(
-        audioRead(oc, -back, olen + ahead) +
-          toStereo(oc.file) +
+        audioRead(osnd, -back, olen + ahead) +
+          toStereo(osnd.file) +
           `${soundChain(oc.sound)}${vol}${afades}anull` +
           `${crosses},adelay=${delayMs}:all=1[${lab}]`
       );
@@ -2734,49 +2757,56 @@ export async function runExport(
   // back between the untreated pieces. The treated piece is padded and
   // trimmed back to the length it went in at, so a chain that rings past its
   // input cannot push the rest of the sound late.
-  (spec.effects ?? [])
-    .filter((e) => isAudioEffect(e.effect))
-    .sort((a, b) => a.start - b.start)
-    .forEach((e, k) => {
-      const chain = audioFxFilters(e.effect, e.amount);
-      const from = Math.max(0, e.start);
-      const to = Math.min(e.end, spec.duration);
-      if (!chain || !(to > from)) return;
-      const len = to - from;
-      const fit = `${chain},apad=whole_dur=${num(len)},atrim=0:${num(len)},asetpts=PTS-STARTPTS`;
-      const head = from > 0.001;
-      const tail = to < spec.duration - 0.001;
-      // An effect covering the whole mix is the chain itself; nothing to splice.
-      if (!head && !tail) {
-        filters.push(`[${aLabel}]${fit}[afx${k}]`);
-        aLabel = `afx${k}`;
-        return;
-      }
-      const branches = 1 + (head ? 1 : 0) + (tail ? 1 : 0);
-      filters.push(
-        `[${aLabel}]asplit=${branches}` +
-          (head ? `[afxsh${k}]` : "") +
-          `[afxsw${k}]` +
-          (tail ? `[afxst${k}]` : "")
-      );
-      const parts: string[] = [];
-      if (head) {
-        filters.push(`[afxsh${k}]atrim=0:${num(from)},asetpts=PTS-STARTPTS[afxh${k}]`);
-        parts.push(`afxh${k}`);
-      }
-      filters.push(
-        `[afxsw${k}]atrim=${num(from)}:${num(to)},asetpts=PTS-STARTPTS,${fit}[afxw${k}]`
-      );
-      parts.push(`afxw${k}`);
-      if (tail) {
-        filters.push(`[afxst${k}]atrim=start=${num(to)},asetpts=PTS-STARTPTS[afxt${k}]`);
-        parts.push(`afxt${k}`);
-      }
-      filters.push(
-        `${parts.map((l) => `[${l}]`).join("")}concat=n=${parts.length}:v=0:a=1[afx${k}]`
-      );
-      aLabel = `afx${k}`;
-    });
+  // The same treatment runs on every stem, each labelled by its own `tag`.
+  const treatAudio = (input: string, tag: string): string => {
+    let label = input;
+    (spec.effects ?? [])
+      .filter((e) => isAudioEffect(e.effect))
+      .sort((a, b) => a.start - b.start)
+      .forEach((e, n) => {
+        const k = `${tag}${n}`;
+        const chain = audioFxFilters(e.effect, e.amount);
+        const from = Math.max(0, e.start);
+        const to = Math.min(e.end, spec.duration);
+        if (!chain || !(to > from)) return;
+        const len = to - from;
+        const fit = `${chain},apad=whole_dur=${num(len)},atrim=0:${num(len)},asetpts=PTS-STARTPTS`;
+        const head = from > 0.001;
+        const tail = to < spec.duration - 0.001;
+        // An effect covering the whole mix is the chain itself; nothing to splice.
+        if (!head && !tail) {
+          filters.push(`[${label}]${fit}[afx${k}]`);
+          label = `afx${k}`;
+          return;
+        }
+        const branches = 1 + (head ? 1 : 0) + (tail ? 1 : 0);
+        filters.push(
+          `[${label}]asplit=${branches}` +
+            (head ? `[afxsh${k}]` : "") +
+            `[afxsw${k}]` +
+            (tail ? `[afxst${k}]` : "")
+        );
+        const parts: string[] = [];
+        if (head) {
+          filters.push(`[afxsh${k}]atrim=0:${num(from)},asetpts=PTS-STARTPTS[afxh${k}]`);
+          parts.push(`afxh${k}`);
+        }
+        filters.push(
+          `[afxsw${k}]atrim=${num(from)}:${num(to)},asetpts=PTS-STARTPTS,${fit}[afxw${k}]`
+        );
+        parts.push(`afxw${k}`);
+        if (tail) {
+          filters.push(`[afxst${k}]atrim=start=${num(to)},asetpts=PTS-STARTPTS[afxt${k}]`);
+          parts.push(`afxt${k}`);
+        }
+        filters.push(
+          `${parts.map((l) => `[${l}]`).join("")}concat=n=${parts.length}:v=0:a=1[afx${k}]`
+        );
+        label = `afx${k}`;
+      });
+    return label;
+  };
+  aLabel = treatAudio(aLabel, "");
 
   // A PQ delivery: the finished HLG composite through the BT.2100 OOTF at
   // 1000 nits and the ST 2084 curve, one fixed lattice, then back to video.

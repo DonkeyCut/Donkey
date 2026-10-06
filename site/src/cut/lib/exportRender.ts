@@ -42,12 +42,15 @@ import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
+import { ElementFx, elementLook } from "@donkeycut/effects-kit";
+import { darkenCanvas } from "@donkeycut/effects-kit";
 import { applyEffectToCanvas, diveView, divesAt, evalOverlayFrame, measureDiveFocus, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type DiveFocus, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
 import { cutRenderEnv, renderElementCanvas, renderElementPng } from "./textRender";
+import { cardMatteKey } from "./cameraCard";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
 import type { ExportDoc } from "./renderSnapshot";
@@ -949,6 +952,26 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
     items,
     // Audio effect elements treat the finished mix over their own windows.
     effects: audioFxSpans(doc.overlays, duration),
+  };
+}
+
+/**
+ * The mix spec of one stem: the video clips' sound, or one soundtrack lane.
+ * Everything else is left out, while the duck envelope still comes from the
+ * whole mix — a music lane printed alone still dips under the voiceover the
+ * way it does in the mix — and the effect elements treat every stem over
+ * their own windows.
+ */
+export function stemMixSpec(spec: MixSpec, stem: StemDef): MixSpec {
+  const ducks = duckWindows(spec.items);
+  if (stem.lane === null) {
+    return { ...spec, items: spec.items.filter((i) => i.lane === undefined), ducks };
+  }
+  return {
+    ...spec,
+    clips: [{ file: "", in: 0, out: spec.duration, muted: true }],
+    items: spec.items.filter((i) => i.lane === stem.lane),
+    ducks,
   };
 }
 

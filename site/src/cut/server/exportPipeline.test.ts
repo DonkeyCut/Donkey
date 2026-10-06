@@ -1474,3 +1474,100 @@ describe("an HDR delivery", () => {
     expect(written.some((w) => w.file.endsWith("graphics.cube"))).toBe(false);
   });
 });
+
+describe("a mastered delivery", () => {
+  test("the encode pass writes the picture and the raw mix apart; the master joins them", async () => {
+    const runs = await runsFor({ clips: [clip("a.mp4")], loudness: -14, truePeakCeiling: -1 });
+    const enc = runs.find((a) => a.includes("-filter_complex"))!;
+    // The video output carries no audio map of its own.
+    const videoOut = enc.findIndex((a) => a.endsWith("encode.mp4"));
+    expect(enc.slice(0, videoOut).filter((a) => a === "-map")).toHaveLength(1);
+    const mixAt = enc.indexOf("/tmp/graph-test/mix.f32");
+    expect(enc.slice(videoOut, mixAt)).toContain("pcm_f32le");
+    expect(mastered).toEqual([
+      {
+        input: "/tmp/graph-test/mix.f32",
+        output: "/tmp/graph-test/master.f32",
+        opts: { sampleRate: 44100, channels: 2, targetLufs: -14, ceilingDbtp: -1 },
+      },
+    ]);
+    const mux = runs[runs.length - 1];
+    expect(mux).toContain("/tmp/graph-test/master.f32");
+    expect(arg(mux, "-c:v")).toBe("copy");
+    expect(arg(mux, "-c:a")).toBe("aac");
+    expect(mux[mux.length - 1]).toBe("/tmp/graph-test/out.mp4");
+  });
+
+  test("an unmastered delivery keeps its one-pass sound and plain remux", async () => {
+    const runs = await runsFor({ clips: [clip("a.mp4")] });
+    expect(mastered).toEqual([]);
+    expect(arg(runs[runs.length - 1], "-c")).toBe("copy");
+  });
+});
+
+describe("stems", () => {
+  const stemSpec: Partial<ExportSpec> = {
+    clips: [clip("a.mp4")],
+    overlayVideos: [{ file: "b.mp4", in: 0, out: 2, start: 1, track: 1, muted: false }],
+    audio: [
+      { file: "vo.mp3", in: 0, out: 2, start: 0, volume: 1, duck: 0.3 },
+      { file: "song.mp3", in: 0, out: 4, start: 0, volume: 0.5, lane: 1 },
+    ],
+    stemPlan: [
+      { name: "Dialogue", lane: null, file: "1 Dialogue.wav" },
+      { name: "Voiceover", lane: 0, file: "2 Voiceover.wav" },
+      { name: "Music", lane: 1, file: "3 Music.wav" },
+    ],
+  };
+
+  test("every stream the mix sums is split once into its stem, and the mix still sums them all", async () => {
+    const graph = await graphFor(stemSpec);
+    const splits = graph.filter((l) => /asplit=2\[[^\]]+m\]\[[^\]]+s\]$/.test(l));
+    // Track-0 sound, the upper-track clip's, the voiceover and the song.
+    expect(splits).toHaveLength(4);
+    const mix = graph.find((l) => l.endsWith("[amix]"))!;
+    expect(mix).toContain("amix=inputs=4");
+    expect(mix.match(/m\]/g)).toHaveLength(4);
+  });
+
+  test("each stem runs the delivery's length and lands as a 24-bit WAV, then packs into the zip", async () => {
+    const runs = await runsFor({ ...stemSpec, duration: 4 });
+    const enc = runs.find((a) => a.includes("-filter_complex"))!;
+    const graph = arg(enc, "-filter_complex").split(";");
+    for (let i = 0; i < 3; i++) {
+      expect(graph.some((l) => l.endsWith(`apad=whole_dur=4.000,atrim=0:4.000[stem${i}]`))).toBe(true);
+      expect(enc).toContain(`/tmp/graph-test/stem_${i}.wav`);
+    }
+    expect(enc.filter((a) => a === "pcm_s24le")).toHaveLength(3);
+    expect(packed).toEqual([
+      {
+        output: "/tmp/graph-test/out stems.zip",
+        files: [
+          { path: "/tmp/graph-test/stem_0.wav", name: "1 Dialogue.wav" },
+          { path: "/tmp/graph-test/stem_1.wav", name: "2 Voiceover.wav" },
+          { path: "/tmp/graph-test/stem_2.wav", name: "3 Music.wav" },
+        ],
+      },
+    ]);
+  });
+
+  test("an audio effect treats every stem as it treats the mix", async () => {
+    const graph = await graphFor({
+      ...stemSpec,
+      duration: 4,
+      effects: [{ effect: "echo", start: 0, end: 4 }],
+    });
+    expect(graph.some((l) => l.endsWith("[afx0]"))).toBe(true);
+    for (let i = 0; i < 3; i++) expect(graph.some((l) => l.endsWith(`[afxs${i}_0]`))).toBe(true);
+  });
+
+  test("a range cuts every stem to the delivered window", async () => {
+    const graph = await graphFor({ ...stemSpec, duration: 4, range: { start: 1, end: 3 } });
+    expect(graph.find((l) => l.endsWith("[stem2]"))).toContain("atrim=start=1.000:end=3.000");
+  });
+
+  test("a spec that asks for stems renders even when its source could copy", async () => {
+    const runs = await runsFor({ ...stemSpec, sourceSegments: [{ file: "a.mp4", from: 0, to: 4 }], target: "export" });
+    expect(runs.some((a) => a.includes("-filter_complex"))).toBe(true);
+  });
+});

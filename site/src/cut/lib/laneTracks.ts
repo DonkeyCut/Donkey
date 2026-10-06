@@ -1,6 +1,7 @@
 "use client";
 
 import { retimeOf, type Retimable, type SpeedNode } from "@donkeycut/effects-kit";
+import { shiftCamera } from "@donkeycut/effects-kit";
 
 /**
  * The lane-track coordinator: the one place for how items on the timeline's
@@ -293,7 +294,12 @@ const textAdapter: LaneAdapter<Overlay> = {
   view: (o) => ({ id: o.id, start: o.start, len: ITEM_KINDS.overlay.duration(o), lane: ITEM_KINDS.overlay.lane(o) }),
   apply: (patches) => useEditor.getState().updateOverlaysTransient(patches),
   movePatch: (o, start) => ({ id: o.id, patch: ITEM_KINDS.overlay.at(o, start) }),
-  trimLeftPatch: (o, newStart) => ({ id: o.id, patch: { start: newStart } }),
+  // A left trim moves the element's clock; its group camera shifts with it so
+  // the camera stays on the group's time.
+  trimLeftPatch: (o, newStart) => ({
+    id: o.id,
+    patch: { start: newStart, ...(o.camera ? { camera: shiftCamera(o.camera, o.start - newStart) } : {}) },
+  }),
   trimRightPatch: (o, newEnd) => ({ id: o.id, patch: { end: newEnd } }),
   leftFloor: () => 0,
   maxLen: () => Infinity,

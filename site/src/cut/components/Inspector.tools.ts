@@ -26,6 +26,7 @@ import {
   SPEED_CURVE_MIN,
   SPEED_CURVE_PRESET_IDS,
   speedCurvePresetCatalogText,
+  ELEMENT_BLUR_MAX,
   MASK_FEATHER_MAX,
   MASK_KINDS,
   MASK_RADIUS_MAX,
@@ -99,7 +100,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_overlay",
     description:
-      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/fill_opacity/radius/stroke; stickers take w/h. Every kind takes name, timing, position, rotation, opacity, hidden. This is the tool for 'make this text better' requests too. Pass ids to land one change on several elements at once (a group, every title in a run): fields a kind lacks are skipped on that element, and the whole write is one undo step.",
+      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/fill_opacity/radius/stroke; stickers take w/h. Every kind takes name, timing, position, rotation, opacity, blur, motion blur, hidden. This is the tool for 'make this text better' requests too. Pass ids to land one change on several elements at once (a group, every title in a run): fields a kind lacks are skipped on that element, and the whole write is one undo step.",
     inputSchema: obj({
       id: str("Overlay element id"),
       ids: { type: "array", items: { type: "string" }, description: "Several element ids to change together (instead of id)" },
@@ -129,6 +130,9 @@ export const INSPECTOR_TOOLS = [
       stroke_width: num("Outline width: em for titles (0..0.15), px at 1080 for shapes; 0 removes it"),
       rotation: num("Degrees clockwise, -180..180 (0 clears)"),
       opacity: num("Whole-element opacity 0..1 (1 clears)"),
+      blur: num(`Blur at rest, px at the 1080 short side, 0..${ELEMENT_BLUR_MAX} (0 clears); keys can carry their own (set_overlay_keyframes)`),
+      motion_blur: bool("Streak the element along its own on-screen movement while it moves (true starts at the default shutter); still frames stay sharp"),
+      shutter: num("Motion blur shutter, 0.05..1 of a 30fps frame (0.5 is the usual half-open shutter); setting it switches motion blur on"),
       hidden: bool("Hide the element without deleting it"),
       lane: num("Move the element to another row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }, []),
