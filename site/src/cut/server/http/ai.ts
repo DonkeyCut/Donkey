@@ -299,6 +299,11 @@ async function codexRun(
     `mcp_servers.cut.command=${JSON.stringify(mcp.command)}`,
     "-c",
     `mcp_servers.cut.args=${JSON.stringify(mcp.args)}`,
+    // Codex asks before an MCP tool runs by default, and `exec` can never ask:
+    // the call fails with "requires approval, but approval policy is never".
+    // The editor tools are the whole point of the run, so approve them all.
+    "-c",
+    `mcp_servers.cut.default_tools_approval_mode="approve"`,
     session ? prompt : `${systemPrompt()}\n\n${prompt}`
   );
 
