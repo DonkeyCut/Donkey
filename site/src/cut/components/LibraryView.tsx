@@ -766,52 +766,50 @@ export function LibraryView() {
 
         {/* The folders filed at this level, at the top and inside any folder
           alike. A new one is made here and a dropped one is filed here. */}
-        {shownFolders.length > 0 || folderCreating ? (
-          <FolderShelf
-            folders={shownFolders}
-            referenceOf={(f) => libraryFolderRef(f, folders)}
-            mime={LIBRARY_MOVE_MIME}
-            folderMime={LIBRARY_FOLDER_MOVE_MIME}
-            creating={folderCreating}
-            onCreatingChange={setFolderCreating}
-            statOf={(id) => ({
-              count:
-                all.filter((a) => (a.folderId ?? null) === id).length +
-                templates.filter((t) => (t.folderId ?? null) === id).length +
-                childrenOf(folders, id).length +
-                (notes.data?.notes ?? []).filter((n) => n.libraryLocation?.folderId === id && n.libraryLocation.residency === folders.find((f) => f.id === id)?.residency).length,
-            })}
-            badgeOf={(id) => {
-              const r = folders.find((f) => f.id === id)?.residency;
-              return bothShelves && r ? (
-                <ShelfBadge residency={r} offline={!live(r)} />
-              ) : null;
-            }}
-            picked={selected}
-            onPick={(e, id) => pickTile(e, folderSelId(id), order)}
-            renaming={renamingFolder}
-            onRenamingChange={setRenamingFolder}
-            onOpen={gotoFolder}
-            onShare={shareFolder}
-            onCreate={async (name) => {
-              if (!live(newShelf)) return;
-              const f = await createLibraryFolder(name, newShelf, newParent);
-              patch((d) => ({ ...d, folders: [...d.folders, f] }));
-            }}
-            onRename={renameFolder}
-            // A folder in a pick with others takes the pick to the confirm;
-            // alone, itself.
-            onDelete={(id) => {
-              const f = shownFolders.find((x) => x.id === id);
-              if (!f) return;
-              if (selected.has(folderSelId(id)) && pickSize > 1) setDeleting(pick);
-              else setDeleting({ ...NO_PICK, folders: [f] });
-            }}
-            onDropIds={(ids, fid) => void moveItems(ids, fid)}
-            onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
-            onDropFiles={(files, fid) => void upload(files, fid)}
-          />
-        ) : null}
+        <FolderShelf
+          folders={shownFolders}
+          referenceOf={(f) => libraryFolderRef(f, folders)}
+          mime={LIBRARY_MOVE_MIME}
+          folderMime={LIBRARY_FOLDER_MOVE_MIME}
+          creating={folderCreating}
+          onCreatingChange={setFolderCreating}
+          statOf={(id) => ({
+            count:
+              all.filter((a) => (a.folderId ?? null) === id).length +
+              templates.filter((t) => (t.folderId ?? null) === id).length +
+              childrenOf(folders, id).length +
+              (notes.data?.notes ?? []).filter((n) => n.libraryLocation?.folderId === id && n.libraryLocation.residency === folders.find((f) => f.id === id)?.residency).length,
+          })}
+          badgeOf={(id) => {
+            const r = folders.find((f) => f.id === id)?.residency;
+            return bothShelves && r ? (
+              <ShelfBadge residency={r} offline={!live(r)} />
+            ) : null;
+          }}
+          picked={selected}
+          onPick={(e, id) => pickTile(e, folderSelId(id), order)}
+          renaming={renamingFolder}
+          onRenamingChange={setRenamingFolder}
+          onOpen={gotoFolder}
+          onShare={shareFolder}
+          onCreate={async (name) => {
+            if (!live(newShelf)) return;
+            const f = await createLibraryFolder(name, newShelf, newParent);
+            patch((d) => ({ ...d, folders: [...d.folders, f] }));
+          }}
+          onRename={renameFolder}
+          // A folder in a pick with others takes the pick to the confirm;
+          // alone, itself.
+          onDelete={(id) => {
+            const f = shownFolders.find((x) => x.id === id);
+            if (!f) return;
+            if (selected.has(folderSelId(id)) && pickSize > 1) setDeleting(pick);
+            else setDeleting({ ...NO_PICK, folders: [f] });
+          }}
+          onDropIds={(ids, fid) => void moveItems(ids, fid)}
+          onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
+          onDropFiles={(files, fid) => void upload(files, fid)}
+        />
 
         <NotesView ref={noteView} library={{ folderId: openFolder, residency: openOwner ?? target, name: trail.at(-1)?.name ?? "Library" }} />
 

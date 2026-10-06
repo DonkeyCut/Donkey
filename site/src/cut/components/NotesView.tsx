@@ -620,7 +620,7 @@ export function NotesView({ library, ref }: Props = {}) {
 
       {/* The folders filed at this level, at the top and inside any folder
         alike. A new one is made here and a dropped one is filed here. */}
-      {!library && (shownFolders.length > 0 || folderCreating) ? (
+      {!library ? (
         <FolderShelf
           folders={shownFolders}
           mime={NOTES_MOVE_MIME}

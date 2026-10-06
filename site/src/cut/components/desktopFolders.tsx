@@ -37,6 +37,10 @@ export interface DeskFolder {
 // A folder sits in the grid's pick beside the items, under an id of its own
 // shape, so a folder and an item never collide in the one Set.
 const FOLDER_SEL = "folder:";
+// How long a settled create waits for its folder to reach the shelf before
+// the name it held lets go: a host that patches its cache on a timer lands
+// within it, one that bailed out never does.
+const LANDING_GRACE_MS = 1000;
 export const folderSelId = (id: string) => FOLDER_SEL + id;
 
 /** A pick taken apart: the folder ids and the item ids it holds. */
@@ -505,6 +509,27 @@ export function FolderShelf<F extends DeskFolder>({
   };
   const closeRename = () => setEditingId(null);
 
+  // A name sent to the host stays on the shelf as the folder it becomes until
+  // that folder lands in `folders`, so a create the server answers later
+  // leaves no gap. A create that fails, or settles without a new folder,
+  // lets the name go.
+  const [landing, setLanding] = useState<{ name: string; known: Set<string> } | null>(null);
+  if (landing && folders.some((f) => !landing.known.has(f.id))) setLanding(null);
+  const commitCreate = (name: string) => {
+    const pending = { name, known: new Set(folders.map((f) => f.id)) };
+    setLanding(pending);
+    const release = () => setLanding((l) => (l === pending ? null : l));
+    Promise.resolve(onCreate?.(name)).then(
+      () => setTimeout(release, LANDING_GRACE_MS),
+      release,
+    );
+    closeCreate();
+  };
+
+  // Nothing filed here and nothing being made: the shelf takes no room. The
+  // host keeps it mounted, so a name held for a create outlives the field.
+  if (folders.length === 0 && !creating && !landing) return null;
+
   const editRowClass = rows
     ? "flex items-center gap-2.5 rounded-lg px-2 py-1.5"
     : "flex w-[92px] flex-col items-start gap-1 px-2 pt-1.5";
@@ -697,6 +722,15 @@ export function FolderShelf<F extends DeskFolder>({
         );
       })}
 
+      {landing && (
+        <div className={editRowClass} data-no-marquee>
+          <FolderGlyph className={cn(editGlyphClass, "drop-shadow-sm")} />
+          <span className={cn("truncate text-xs font-medium leading-tight", !rows && "mt-0.5 max-w-full")}>
+            {landing.name}
+          </span>
+        </div>
+      )}
+
       {creating && (
         <div className={editRowClass} data-no-marquee>
           <FolderGlyph className={cn(editGlyphClass, "opacity-60")} />
@@ -709,8 +743,7 @@ export function FolderShelf<F extends DeskFolder>({
             onBlur={closeCreate}
             onKeyDown={(e) => {
               if (e.key === "Enter" && draft.trim()) {
-                void onCreate?.(draft.trim());
-                closeCreate();
+                commitCreate(draft.trim());
               } else if (e.key === "Escape") closeCreate();
             }}
           />

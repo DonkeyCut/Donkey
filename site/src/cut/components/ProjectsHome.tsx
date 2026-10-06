@@ -790,7 +790,7 @@ export function ProjectsHome() {
       onOpen={gotoFolder}
       onCreate={(n) => {
         const r = folderCreating ?? folderTarget;
-        void createFolder(r, n, r === folderOwner ? openFolder : null);
+        return createFolder(r, n, r === folderOwner ? openFolder : null);
       }}
       onRename={(id, n) => void renameFolder(residencyOfFolder(id), id, n)}
       // A folder in a pick with others takes the pick to the confirm; alone,
@@ -1137,7 +1137,7 @@ export function ProjectsHome() {
                 </p>
               )
           )}
-          {(shownFolders.length > 0 || folderCreating !== null) && renderShelf()}
+          {renderShelf()}
           {view === "gallery" ? renderGallery(mergedShown) : renderList(mergedShown)}
         </>
       )}
