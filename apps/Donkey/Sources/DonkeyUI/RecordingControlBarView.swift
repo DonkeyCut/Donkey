@@ -69,6 +69,17 @@ public final class RecordingControlBarModel: ObservableObject {
 
     public init() {}
 
+    // Keep the controls until an active movie has finished writing.
+    func requestClose() {
+        guard !isBusy else { return }
+        if isRecording {
+            onStop?()
+            return
+        }
+
+        onClose?()
+    }
+
     var selectedAudioInput: RecordingAudioInput? {
         audioInputs.first { $0.id == selectedAudioInputID }
     }
@@ -151,7 +162,7 @@ public struct RecordingControlBarView: View {
 
     private var controls: some View {
         HStack(spacing: 10) {
-            iconButton(symbol: "xmark", help: "Close") { model.onClose?() }
+            iconButton(symbol: "xmark", help: "Close") { model.requestClose() }
                 .disabled(model.isBusy)
 
             Divider().frame(height: 22)
