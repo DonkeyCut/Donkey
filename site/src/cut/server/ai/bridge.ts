@@ -75,6 +75,20 @@ export function unregisterSession(key: string) {
   sessionProjects.delete(key);
 }
 
+/** The chat stream carries a tool's output without its frames: the model
+ * gets them through the returned result, the page never draws them, and one
+ * watch_video's contact sheets would otherwise fill the turn journal. */
+function streamedOutput(output: unknown): unknown {
+  if (!output || typeof output !== "object" || Array.isArray(output)) {
+    return output;
+  }
+  const { image, images, ...rest } = output as Record<string, unknown>;
+  if (image === undefined && images === undefined) {
+    return output;
+  }
+  return { ...rest, imagesOmitted: true };
+}
+
 const TOOL_TIMEOUT_MS = 120_000; // subtitles generation can take a while
 
 function detachedTool(projectId: string, toolName: string, input: unknown): Promise<{ output?: unknown; errorText?: string }> {
@@ -105,7 +119,7 @@ export function callBrowserTool(
       return detachedTool(projectId, toolName, input).then((result) => {
         session?.writer.write(result.errorText !== undefined
           ? { type: "tool-output-error", toolCallId, errorText: result.errorText }
-          : { type: "tool-output-available", toolCallId, output: result.output ?? null });
+          : { type: "tool-output-available", toolCallId, output: streamedOutput(result.output ?? null) });
         return result;
       });
     }
@@ -133,7 +147,7 @@ export function callBrowserTool(
         if (r.errorText !== undefined) {
           session.writer.write({ type: "tool-output-error", toolCallId, errorText: r.errorText });
         } else {
-          session.writer.write({ type: "tool-output-available", toolCallId, output: r.output ?? null });
+          session.writer.write({ type: "tool-output-available", toolCallId, output: streamedOutput(r.output ?? null) });
         }
         resolve(r);
       },

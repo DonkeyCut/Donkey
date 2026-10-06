@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type { UIMessageChunk } from "ai";
 import { cancelTurnStream, followTurnStream, startTurnStream } from "./turnStreams";
-import { callBrowserTool, claimBrowserTool, detachSession, registerSession, unregisterSession } from "./bridge";
+import { callBrowserTool, claimBrowserTool, detachSession, registerSession, resolveBrowserTool, unregisterSession } from "./bridge";
 import { createProject, readProject } from "../projects";
 
 const root = await mkdtemp(path.join(os.tmpdir(), "donkey-chat-test-"));
@@ -92,4 +92,20 @@ test("an unclaimed tool transfers to the engine when the tab disconnects", async
   expect((await readProject(project.id))?.name).toBe("Transferred");
   expect(chunks.filter((chunk) => chunk.toolCallId === id).map((chunk) => chunk.type)).toEqual(["tool-input-available", "tool-output-available"]);
   unregisterSession("unclaimed");
+});
+
+test("frames reach the model and stay out of the turn journal", async () => {
+  const chunks: Record<string, unknown>[] = [];
+  registerSession("frames", { write: (chunk) => chunks.push(chunk) });
+  const pending = callBrowserTool("frames", "watch_video", { assetId: "a" });
+  const id = String(chunks[0].toolCallId);
+  const frame = `data:image/jpeg;base64,${"A".repeat(2_000_000)}`;
+  resolveBrowserTool("frames", id, { output: { duration: 10, image: frame, images: [frame, frame] } });
+  const result = (await pending).output as { image?: string; images?: string[] };
+  expect(result.image).toBe(frame);
+  expect(result.images).toEqual([frame, frame]);
+  const journaled = chunks.find((chunk) => chunk.type === "tool-output-available");
+  expect(journaled?.output).toEqual({ duration: 10, imagesOmitted: true });
+  expect(JSON.stringify(journaled).length).toBeLessThan(1000);
+  unregisterSession("frames");
 });
