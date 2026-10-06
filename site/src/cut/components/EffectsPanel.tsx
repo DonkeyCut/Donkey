@@ -80,7 +80,7 @@ const GROUPS = [
   { id: "audio", label: "Sound" },
 ] as const;
 
-const MOVING: EffectId[] = ["zoom", "grain", "vhs", "glitch", "lightleak", "flash", "shake"];
+const MOVING: EffectId[] = ["zoom", "grain", "vhs", "glitch", "lightleak", "flash", "shake", "huecycle"];
 
 const groupOf = (id: EffectId): EffectGroup =>
   isAudioEffect(id) ? "audio" : MOVING.includes(id) ? "moving" : "filters";

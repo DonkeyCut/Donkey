@@ -23,6 +23,8 @@ export type VisualEffectId =
   | "lightleak"
   | "flash"
   | "shake"
+  | "negative"
+  | "huecycle"
   /** The graded looks, placeable like any other effect. */
   | "vintage"
   | "horror"
@@ -66,6 +68,8 @@ export const EFFECT_IDS: VisualEffectId[] = [
   "lightleak",
   "flash",
   "shake",
+  "negative",
+  "huecycle",
   "vintage",
   "horror",
   "halation",
@@ -100,6 +104,37 @@ const lookOf = (effect: string): LookStyle | null =>
 
 export const ALL_EFFECT_IDS: EffectId[] = [...EFFECT_IDS, ...AUDIO_EFFECT_IDS];
 
+/** The picture treatments a clip can wear itself. */
+export type ClipEffectId = "grain" | "vhs" | "glitch" | "blur" | "vignette" | "lightleak" | "flash" | "negative" | "huecycle";
+
+/**
+ * The effects a clip wears treat that clip's picture alone, inside its mask,
+ * for the clip's whole length: a masked copy over the shot wears a negative
+ * and only the window turns. Zoom and shake move the frame, which a clip
+ * does with its own zoom and pose keys; the looks are the clip's grade.
+ */
+export const CLIP_EFFECT_IDS: ClipEffectId[] = [
+  "negative",
+  "huecycle",
+  "grain",
+  "vhs",
+  "glitch",
+  "blur",
+  "vignette",
+  "lightleak",
+  "flash",
+];
+
+/** One effect a clip wears; `amount` 0..1, absent = 0.5. */
+export interface ClipEffect {
+  effect: ClipEffectId;
+  amount?: number;
+}
+
+/** The effects with nothing to dial: a negative flips every color whatever
+ * the amount says. */
+export const AMOUNTLESS_EFFECTS: EffectId[] = ["negative"];
+
 export const EFFECT_LABELS: Record<EffectId, string> = {
   ...AUDIO_EFFECT_LABELS,
   zoom: "Zoom",
@@ -111,6 +146,8 @@ export const EFFECT_LABELS: Record<EffectId, string> = {
   lightleak: "Light leak",
   flash: "Flash",
   shake: "Shake",
+  negative: "Negative",
+  huecycle: "Color cycle",
   vintage: LOOK_LABELS.vintage,
   horror: LOOK_LABELS.horror,
   halation: LOOK_LABELS.halation,
@@ -238,6 +275,12 @@ export function defineEffect(id: string, recipe: EffectRecipe): void {
 /** Shake travel at full amount, in design px (1080 short side). Both recipes
  * read it so the export matches the preview. */
 const SHAKE_AMP = 22;
+
+/** How fast a color cycle turns the hue wheel, in turns per second, at the
+ * lowest and highest amount. */
+const HUE_TURNS_MIN = 0.1;
+const HUE_TURNS_MAX = 1.5;
+const hueTurns = (k: number) => HUE_TURNS_MIN + (HUE_TURNS_MAX - HUE_TURNS_MIN) * k;
 
 /** How far a zoom pushes in at full depth. The picture renders at this much
  * more than frame size and is cropped back around the focus point. */
@@ -372,6 +415,14 @@ export function effectPreviewState(
         dy: amp * 0.7 * Math.cos(tLocal * 47),
         zoom: 1 + (amp * 2) / 1080,
       };
+    }
+    case "negative":
+      // Every color flipped to its opposite: black to white, skin to cyan.
+      return { cssFilter: "invert(1)" };
+    case "huecycle": {
+      // The hue wheel turns at the amount's pace from the element's start.
+      const deg = (360 * hueTurns(k) * Math.max(0, tLocal)) % 360;
+      return { cssFilter: `hue-rotate(${fmt(deg)}deg)` };
     }
     default:
       return { cssFilter: "" };
@@ -733,6 +784,15 @@ export function effectFilterLines(
         `[efb${tag}][efc${tag}]overlay=0:0:${en}:eof_action=pass${chroma.overlay}[${outLabel}]`,
       ];
     }
+    case "negative":
+      // Each plane flips about its own legal range, so black and white swap
+      // exactly in a limited-range chain and the chroma mirrors about grey.
+      return [
+        `[${inLabel}]lutyuv=y='minval+maxval-val':u='minval+maxval-val':v='minval+maxval-val':${en}[${outLabel}]`,
+      ];
+    case "huecycle":
+      // The canvas recipe's turning wheel, in radians on the frame's clock.
+      return [`[${inLabel}]hue=H='2*PI*${fmt(hueTurns(k))}*(t-${fmt(start)})':${en}[${outLabel}]`];
     default:
       return null;
   }

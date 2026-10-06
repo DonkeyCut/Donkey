@@ -16,7 +16,7 @@ import { shiftSpan, type SpecSound } from "../lib/soundSource";
 import { masterRawMix, packStems } from "./exportAudio";
 import type { StemDef } from "../lib/stems";
 import { CLIP_MAX_ZOOM, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { audioFxFilters, buildClipLut, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipSound, type CodeFormat, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildClipLut, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -184,6 +184,8 @@ export interface ExportSpec {
      * spec carries only the id — the chain is built server-side). */
     look?: string;
     lookAmount?: number;
+    /** Effects the clip wears over its own picture, on its own clock. */
+    effects?: ClipEffect[];
     /** Hidden clips keep their slot but render black + silent. */
     hidden?: boolean;
     /** A still image: looped for the clip's length instead of trimmed. */
@@ -292,6 +294,8 @@ export interface ExportSpec {
      * overlays may carry alpha the look chain would flatten). */
     look?: string;
     lookAmount?: number;
+    /** Effects the clip wears over its own picture, under its mask. */
+    effects?: ClipEffect[];
     /** Client-painted grayscale coverage trimming this overlay's picture,
      * box-sized (a letterboxed segment pads out to its box when masked);
      * `subject` trims by the shared person matte instead. */
@@ -1340,6 +1344,19 @@ export async function runExport(
 
   const filters: string[] = [];
 
+  // A clip's own effects run on its segment's clock, from 0 to its length,
+  // over its framed picture: chain fragment `core` in, the treated fragment
+  // out. The fades, pad and mask that follow carry them, as in the preview.
+  const wearEffects = (core: string, effects: ClipEffect[] | undefined, len: number, w: number, h: number, pixFmt: string, tag: string) => {
+    for (const [n, e] of (effects ?? []).entries()) {
+      const lines = effectFilterLines(`${tag}fi${n}`, `${tag}fo${n}`, e.effect, e.amount, 0, len, w, h, `${tag}x${n}`, undefined, undefined, { ...chroma, pixFmt });
+      if (!lines) continue;
+      filters.push(`${core}[${tag}fi${n}]`, ...lines);
+      core = `[${tag}fo${n}]null`;
+    }
+    return core;
+  };
+
   // One color mapping per clip: the source conversion, the library LUT and
   // the grade baked into one 3D LUT (effects-kit colorPipeline.ts), written
   // to the job dir as .cube once per distinct recipe and applied with lut3d.
@@ -2056,7 +2073,10 @@ export async function runExport(
       // picture before the letterbox pad, so the bars stay the frame color.
       let core = framedTimebase(timebase, frame, `c${j}`, rmIn ? {} : c, rt, fps, filters);
       if (plan) core = plan.run(core, `c${j}`);
-      core += `,format=${segFmt}${padding}`;
+      core += `,format=${segFmt}`;
+      // The clip's effects treat its picture, ahead of the letterbox bars.
+      core = wearEffects(core, c.effects, dur, W, H, segFmt, `cw${j}`);
+      core += padding;
       // The look bakes in after grade + framing, before the edge effects, so
       // animations move already-graded pixels (matching the preview order). A
       // removal clip's look runs after the flatten below instead — the chain's
@@ -2482,6 +2502,7 @@ export async function runExport(
         core = `[olko${k}]null`;
       }
     }
+    core = wearEffects(core, oc.effects, olen, boxW, boxH, lookFmt, `ow${k}`);
     if (boxPad) core += boxPad;
     // The border ring lands after the look and box pad, before the edge
     // ramps, so it fades and masks with the clip like the preview.

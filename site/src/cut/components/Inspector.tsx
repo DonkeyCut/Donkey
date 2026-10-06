@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
 import { ClipAnimationTiles, previewBar } from "@/cut/components/TransitionsPanel";
+import { ClipEffectsSection } from "@/cut/components/ClipEffectsSection";
 import { TrackRow } from "@/cut/components/TrackRow";
 import {
   Select,
@@ -86,6 +87,7 @@ import {
   maskSizeAxes,
   penClosed,
   restingMaskFrame,
+  AMOUNTLESS_EFFECTS,
 } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
 import { bindRecording, unbindRecording } from "@/cut/lib/soundBind";
@@ -732,6 +734,7 @@ function ClipFramePanel({ clip }: { clip: VideoClip }) {
         {!clip.card && <ClipBorderSection clip={clip} />}
         {!clip.card && <ClipShadowSection clip={clip} />}
         <ClipMaskSection clip={clip} />
+        <ClipEffectsSection clip={clip} />
       </div>
     </>
   );
@@ -4500,7 +4503,7 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         {o.effect === "zoom" ? (
           <ZoomTarget overlay={o} />
-        ) : (
+        ) : AMOUNTLESS_EFFECTS.includes(o.effect) ? null : (
           <Row label="Amount">
             <ValueSlider
               label="Effect amount"

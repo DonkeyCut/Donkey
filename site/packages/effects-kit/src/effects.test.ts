@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { codeScale, EFFECT_IDS, effectFilterLines, effectPreviewState } from "./effects";
+import { CLIP_EFFECT_IDS, codeScale, EFFECT_IDS, effectFilterLines, effectPreviewState } from "./effects";
 
 // The bundled engine ffmpeg is LGPL: a recipe reaching for a GPL-only filter
 // renders on a dev machine (Homebrew ffmpeg) and fails in the shipped app.
@@ -43,6 +43,29 @@ const filterNamesOf = (lines: string[]): string[] => {
 };
 
 describe("effect recipes", () => {
+  test("every clip effect is a picture effect with both recipes", () => {
+    for (const id of CLIP_EFFECT_IDS) {
+      expect((EFFECT_IDS as string[]).includes(id)).toBe(true);
+      expect(effectFilterLines("in", "out", id, 0.5, 0, 2, 540, 960, "t")).not.toBe(null);
+    }
+  });
+
+  test("a negative flips every color whatever the amount", () => {
+    expect(effectPreviewState("negative", 0.1, 3).cssFilter).toBe("invert(1)");
+    expect(effectPreviewState("negative", 1, 0).cssFilter).toBe("invert(1)");
+  });
+
+  test("a color cycle turns the hue at the amount's pace, from its own start", () => {
+    // Amount 0.5 is 0.8 turns a second: a quarter second in is 72 degrees.
+    expect(effectPreviewState("huecycle", 0.5, 0).cssFilter).toBe("hue-rotate(0deg)");
+    expect(effectPreviewState("huecycle", 0.5, 0.25).cssFilter).toBe("hue-rotate(72deg)");
+    // A faster amount turns further over the same time.
+    const deg = (k: number) => Number(effectPreviewState("huecycle", k, 0.1).cssFilter.match(/[\d.]+/)![0]);
+    expect(deg(1)).toBeGreaterThan(deg(0.2));
+    // The export turns on the same clock, measured from the element's start.
+    expect(effectFilterLines("in", "out", "huecycle", 0.5, 2, 5, 1080, 1920, "t")![0]).toContain("hue=H='2*PI*0.8*(t-2)'");
+  });
+
   test("every effect exports through the LGPL-safe filter set", () => {
     for (const id of EFFECT_IDS) {
       const lines = effectFilterLines("in", "out", id, 0.7, 1, 4, 1080, 1920, "t");

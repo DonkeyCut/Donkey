@@ -25,7 +25,7 @@ import {
   type TextOverlay as KitTextOverlay,
   type WordEffectId,
 } from "@donkeycut/effects-kit";
-import type { CodeFormat, SourceProfile } from "@donkeycut/effects-kit";
+import type { ClipEffect, CodeFormat, SourceProfile } from "@donkeycut/effects-kit";
 import type { CameraCard } from "./cameraCard";
 import { getBackend, type CutBackend } from "./backend";
 import type { VideoProject } from "./genvideo/types";
@@ -677,6 +677,9 @@ export interface VideoClip {
   look?: LookStyle;
   /** Look strength 0..1; absent = 1 (full). */
   lookAmount?: number;
+  /** Effects this clip wears over its own picture, inside its mask, in
+   * order (absent = none). */
+  effects?: ClipEffect[];
   /** Hidden clips stay on the timeline (grayed) but render as black — excluded
    * from the played/exported picture without disturbing the layout. */
   hidden?: boolean;
@@ -1183,6 +1186,7 @@ export interface TemplateLayer {
    * removal stays behind, its matte baked from the footage it was cut from. */
   grade?: ColorGrade;
   mask?: Mask;
+  effects?: ClipEffect[];
   boxStyle?: BoxStyle;
   kf?: OverlayKey[];
   hidden?: boolean;

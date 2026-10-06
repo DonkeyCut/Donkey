@@ -840,6 +840,7 @@ const cardEntry = (tag: string) => ({
   removal: { rgb: `${tag}_rgb.mp4`, alpha: `${tag}_a.mp4` },
   grade: undefined,
   look: undefined,
+  effects: undefined,
   fit: "fill" as const,
   zoom: 1,
   panX: 0,
@@ -961,6 +962,7 @@ export async function buildExportPayload(
     animOut: sp.clip.animOut,
     look: sp.clip.look,
     lookAmount: sp.clip.lookAmount,
+    effects: sp.clip.effects,
     hidden: sp.clip.hidden,
     // A still: the server loops the image for the clip's length instead of
     // trimming a source span.
@@ -1067,6 +1069,7 @@ export async function buildExportPayload(
         pngs.push({ name: `removal_c${i}_a.mp4`, blob: pieces.alpha });
         clipEntries[i].removal = { rgb: `removal_c${i}_rgb.mp4`, alpha: `removal_c${i}_a.mp4` };
         clipEntries[i].grade = undefined;
+        clipEntries[i].effects = undefined;
       }
     }
   }
@@ -1187,6 +1190,7 @@ export async function buildExportPayload(
           color: specColor(assetById.get(c.assetId)),
           look: c.look,
           lookAmount: c.lookAmount,
+          effects: c.effects,
           mask: undefined as SpecMask | undefined,
           shadow: undefined as SpecMask | undefined,
           kf: posed(c).kf,
@@ -1276,6 +1280,7 @@ export async function buildExportPayload(
         entry.removal = { rgb: `removal_ov${i}_rgb.mp4`, alpha: `removal_ov${i}_a.mp4` };
         entry.grade = undefined;
         entry.look = undefined;
+        entry.effects = undefined;
       }
     }
   }

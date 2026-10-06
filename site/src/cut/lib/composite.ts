@@ -19,7 +19,7 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { applyDetail, applyLutToImageData, applyMaskToCanvas, detailActive, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
+import { applyDetail, applyEffectToCanvas, applyLutToImageData, applyMaskToCanvas, detailActive, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, retimeOf, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
 import { cameraCardLayout, cardActive, traceCardPath, type CardLayout } from "./cameraCard";
 import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
@@ -94,6 +94,10 @@ export class FrameCompositor {
   private gradeLutScratch: Surface | null = null;
   private lookScratch: Surface | null = null;
   private vignetteCanvas: Surface | null = null;
+  /** The clip's own effects: the picture copies into `clipFxCanvas` and
+   * each effect runs over it, `clipFxScratch` holding its self-copies. */
+  private clipFxCanvas: Surface | null = null;
+  private clipFxScratch: Surface | null = null;
   /** The masked/keyframed-layer pass: the layer draws into `layerScratch`,
    * its mask's coverage paints into `maskScratch`, a keyframed pose blits
    * through `poseScratch`, and the result composites back onto the frame. */
@@ -219,6 +223,8 @@ export class FrameCompositor {
     field:
       | "gradeCanvas"
       | "gradeLutScratch"
+      | "clipFxCanvas"
+      | "clipFxScratch"
       | "lookScratch"
       | "vignetteCanvas"
       | "layerScratch"
@@ -338,17 +344,32 @@ export class FrameCompositor {
    * spatial pass, then the look's color pass as a canvas filter, in the order
    * the export's chain runs. Source alpha rides through every pass, so
    * transparent stills keep their transparency. The look's post passes
-   * (vignette, grain, glow…) draw over the composited layer instead.
+   * (vignette, grain, glow…) draw over the composited layer instead. The
+   * clip's own effects run last, in the picture's pixels, so its mask and
+   * pose carry them with it.
    */
   private gradedSource(
     frame: Extract<Frame, { kind: "ready" }>,
-    clip: VideoClip | undefined
+    clip: VideoClip | undefined,
+    at: number
   ): CanvasImageSource {
     const recipe = this.recipeFor(clip, frame.source);
     const compiled = this.lutFor(clip, recipe);
     const detail = detailActive(clip?.grade) ? clip!.grade! : null;
     const lookCss = lookCssFilter(clip?.look, clip?.lookAmount);
-    if (!compiled && !detail && !lookCss) return frame.image;
+    const fx = clip?.effects?.length ? clip : null;
+    if (!compiled && !detail && !lookCss && !fx) return frame.image;
+    const graded = this.colorPasses(frame, compiled, detail, lookCss);
+    return fx ? this.clipEffects(graded, frame.width, frame.height, fx, at) : graded;
+  }
+
+  /** The LUT, the spatial pass and the look's color pass, in that order. */
+  private colorPasses(
+    frame: Extract<Frame, { kind: "ready" }>,
+    compiled: ClipLut | null,
+    detail: VideoClip["grade"] | null,
+    lookCss: string
+  ): CanvasImageSource {
     const w = frame.width;
     const h = frame.height;
     let picture: CanvasImageSource = frame.image;
@@ -394,6 +415,26 @@ export class FrameCompositor {
     ctx.drawImage(picture, 0, 0, w, h);
     ctx.filter = "none";
     return scratch;
+  }
+
+  /** The clip's effects over its picture, in order, on the clip's own clock:
+   * a color cycle turns from the clip's first frame and a flash pops there. */
+  private clipEffects(picture: CanvasImageSource, w: number, h: number, clip: VideoClip, at: number): CanvasImageSource {
+    const { surface: canvas } = this.scratch("clipFxCanvas", w, h);
+    const { surface: scratch } = this.scratch("clipFxScratch", w, h);
+    const ctx = canvas.getContext("2d") as Ctx | null;
+    if (!ctx) return picture;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(picture, 0, 0, w, h);
+    const tLocal = at - clip.start;
+    const len = retimeOf(clip).len;
+    for (const e of clip.effects!) {
+      applyEffectToCanvas(canvas, scratch, e.effect, e.amount, tLocal, grainTile, undefined, undefined, len);
+    }
+    return canvas as CanvasImageSource;
   }
 
   /**
@@ -445,7 +486,7 @@ export class FrameCompositor {
     clip: VideoClip | undefined,
     at: number
   ): CanvasImageSource {
-    const base = this.gradedSource(frame, clip);
+    const base = this.gradedSource(frame, clip, at);
     const r = clip?.removal;
     if (!r || !removalActive(r) || (clip && this.removalBypass === clip.id)) return base;
     const w = frame.width;

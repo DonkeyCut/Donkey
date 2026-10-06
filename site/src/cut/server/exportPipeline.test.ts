@@ -564,6 +564,49 @@ describe("clip masks in the filtergraph", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 
+  test("a masked overlay's own effects run on its clock, before the pad and the mask", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 6 })],
+      overlayVideos: [
+        {
+          file: "ov.mp4",
+          in: 0,
+          out: 2,
+          start: 1,
+          track: 1,
+          muted: true,
+          effects: [{ effect: "negative" }, { effect: "huecycle", amount: 0.5 }],
+          frame: { x: 0.5, y: 0.5, w: 0.5, h: 0.5 },
+          mask: { file: "mask_ov0.png" },
+        },
+      ],
+    });
+    const joined = g.join(";");
+    // Both effects gate on the segment's own clock, 0 to its 2s length, in
+    // the order the clip lists them.
+    const negAt = g.findIndex((c) => c.includes("lutyuv=y='minval+maxval-val'") && c.includes("gte(t,0)*lt(t,2)"));
+    const hueAt = g.findIndex((c) => c.includes("hue=H='2*PI*0.8*(t-0)'"));
+    const padAt = g.findIndex((c) => c.includes("pad=540:960") && c.includes("black@0.0"));
+    expect(negAt).toBeGreaterThanOrEqual(0);
+    expect(hueAt).toBeGreaterThan(negAt);
+    expect(padAt).toBeGreaterThan(hueAt);
+    expect(joined).toContain("alphamerge");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a track-0 clip's effects treat its picture ahead of the letterbox bars", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 3, effects: [{ effect: "negative" }] }), clip("b.mp4", { out: 2 })],
+    });
+    const fxAt = g.findIndex((c) => c.includes("lutyuv=y='minval+maxval-val'"));
+    expect(fxAt).toBeGreaterThanOrEqual(0);
+    // The chain the effect hands on to pads after it, and only the first clip
+    // wears it.
+    expect(g.slice(fxAt).some((c) => c.includes("[cw0fo0]null") && c.includes("pad=1080:1920"))).toBe(true);
+    expect(g.filter((c) => c.includes("lutyuv=y='minval+maxval-val'"))).toHaveLength(1);
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
   test("a mask under head/tail alpha fades keeps both", async () => {
     const g = await graphFor({
       clips: [clip("a.mp4", { out: 6 })],

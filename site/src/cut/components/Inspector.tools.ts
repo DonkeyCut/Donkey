@@ -31,6 +31,7 @@ import {
   MASK_KINDS,
   MASK_RADIUS_MAX,
   PEN_MIN_POINTS,
+  CLIP_EFFECT_IDS,
 } from "@donkeycut/effects-kit";
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { builtinLutCatalogText } from "@/cut/lib/builtinLuts";
@@ -358,6 +359,22 @@ export const INSPECTOR_TOOLS = [
       shadow_opacity: num("Shadow opacity 0..1 (default 0.35)"),
       clear: bool("Remove the box styling entirely"),
     }, ["clipId"]),
+  },
+  {
+    name: "set_clip_effects",
+    description:
+      `Set the effects a video clip wears over its own picture (${CLIP_EFFECT_IDS.join(", ")}). They treat that clip alone — inside its mask, under its pose — for its whole length, on the clip's own clock: a masked copy over the shot wearing negative and huecycle shows a color-cycling negative window while the shot around it plays untouched. add_effect places an element that treats the whole frame under its window. Pass the full list in order; [] removes them all. amount 0.05..1 (default 0.5) is the strength; for huecycle it is how fast the hue turns (0.5 is a turn every 1.25s); negative has none.`,
+    inputSchema: obj({
+      clipId: str("Video clip id"),
+      effects: {
+        type: "array",
+        description: "The clip's effects, applied in this order",
+        items: obj({
+          effect: { type: "string", enum: [...CLIP_EFFECT_IDS], description: "Effect id" },
+          amount: num("Strength 0.05..1 (default 0.5)"),
+        }, ["effect"]),
+      },
+    }, ["clipId", "effects"]),
   },
   {
     name: "set_speed",

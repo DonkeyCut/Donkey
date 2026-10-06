@@ -28,6 +28,9 @@ import { textSpots } from "./textPlace";
 import {
   OUTPUT_SPACES,
   ALL_EFFECT_IDS,
+  CLIP_EFFECT_IDS,
+  type ClipEffect,
+  type ClipEffectId,
   applyLutToImageData,
   autoGradeFromImageData,
   buildClipLut,
@@ -2970,6 +2973,23 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         flipH: !!next.flipH,
         flipV: !!next.flipV,
       };
+  },
+
+  set_clip_effects: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      if (!Array.isArray(input.effects)) throw new ToolError("effects must be a list; [] removes them all.");
+
+      // Each entry names a clip effect once, with an optional amount in range.
+      const effects: ClipEffect[] = [];
+      for (const e of input.effects as { effect?: unknown; amount?: unknown }[]) {
+        if (!(CLIP_EFFECT_IDS as unknown[]).includes(e?.effect))
+          throw new ToolError(`effect must be one of ${CLIP_EFFECT_IDS.join(", ")}.`);
+        const effect = e.effect as ClipEffectId;
+        if (effects.some((x) => x.effect === effect)) throw new ToolError(`${effect} is listed twice; a clip wears an effect once.`);
+        effects.push(isNum(e.amount) ? { effect, amount: Math.max(0.05, Math.min(1, e.amount)) } : { effect });
+      }
+      s.updateClip(clip.id, { effects: effects.length ? effects : undefined });
+      return { id: clip.id, effects };
   },
 
   set_clip_style: (s, input) => {
@@ -6097,6 +6117,7 @@ function sweepCandidates(s: Editor, kind: ItemKind): SweepCandidate[] {
  * call out, and every handler stays a single-item write. */
 const SWEEP_TARGETS: Readonly<Record<string, string>> = {
   set_clip_muted: "clipId",
+  set_clip_effects: "clipId",
   set_clip_hidden: "clipId",
   set_clip_volume: "clipId",
   set_split_edit: "clipId",

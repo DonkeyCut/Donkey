@@ -51,10 +51,10 @@
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.3,
-        "p95": 31.6,
-        "mean": 17.72,
-        "max": 32.9,
+        "p50": 15.8,
+        "p95": 32.6,
+        "mean": 18.51,
+        "max": 33.3,
         "n": 41
       },
       "longTasks": {
@@ -64,7 +64,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 61,
+      "liveSamples": 58,
       "machine": "desktop"
     },
     {
@@ -75,16 +75,16 @@
       "late": {
         "p50": 0,
         "p95": 1,
-        "mean": 0.15,
-        "max": 2,
+        "mean": 0.12,
+        "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.6,
-        "p95": 32.6,
-        "mean": 17.7,
-        "max": 49.6,
+        "p50": 15.8,
+        "p95": 31.5,
+        "mean": 17.46,
+        "max": 33,
         "n": 41
       },
       "longTasks": {
@@ -94,7 +94,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 67,
+      "liveSamples": 74,
       "machine": "desktop"
     },
     {
@@ -105,16 +105,16 @@
       "late": {
         "p50": 0,
         "p95": 0,
-        "mean": 0.07,
-        "max": 2,
+        "mean": 0.02,
+        "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.2,
-        "p95": 16.5,
-        "mean": 16.95,
-        "max": 76.7,
+        "p50": 15.6,
+        "p95": 15.9,
+        "mean": 15.07,
+        "max": 32.4,
         "n": 41
       },
       "longTasks": {
@@ -124,7 +124,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 79,
+      "liveSamples": 96,
       "machine": "desktop"
     },
     {
@@ -135,16 +135,16 @@
       "late": {
         "p50": 0,
         "p95": 0,
-        "mean": 0.02,
+        "mean": 0.01,
         "max": 1,
         "n": 81
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.2,
-        "p95": 15.7,
-        "mean": 14.77,
-        "max": 29.7,
+        "p50": 15.8,
+        "p95": 16.7,
+        "mean": 15.6,
+        "max": 32.1,
         "n": 81
       },
       "longTasks": {
@@ -165,16 +165,16 @@
       "late": {
         "p50": 0,
         "p95": 1,
-        "mean": 0.17,
-        "max": 2,
+        "mean": 0.15,
+        "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 14.9,
-        "p95": 30.2,
-        "mean": 17.04,
-        "max": 45,
+        "p50": 15.9,
+        "p95": 32.9,
+        "mean": 18.1,
+        "max": 33.3,
         "n": 41
       },
       "longTasks": {
@@ -184,7 +184,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 57,
+      "liveSamples": 64,
       "machine": "desktop"
     },
     {
@@ -196,15 +196,15 @@
         "p50": 0,
         "p95": 1,
         "mean": 0.17,
-        "max": 2,
+        "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 14.9,
-        "p95": 31.4,
-        "mean": 17.18,
-        "max": 51.8,
+        "p50": 15.8,
+        "p95": 32.6,
+        "mean": 18.48,
+        "max": 32.8,
         "n": 41
       },
       "longTasks": {
@@ -214,7 +214,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 60,
+      "liveSamples": 44,
       "machine": "desktop"
     },
     {
@@ -225,16 +225,16 @@
       "late": {
         "p50": 1,
         "p95": 1,
-        "mean": 0.9,
+        "mean": 0.88,
         "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 31.2,
-        "p95": 32.3,
-        "mean": 28.93,
-        "max": 32.6,
+        "p50": 32.3,
+        "p95": 33.1,
+        "mean": 30.26,
+        "max": 33.3,
         "n": 41
       },
       "longTasks": {
@@ -253,7 +253,7 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 1039,
+      "presented": 1038,
       "boundaryDrops": 0,
       "longTasks": {
         "p50": 0,
@@ -326,13 +326,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3243,
+      "presented": 3235,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 3243
+        "n": 3235
       },
       "stallShare": 0,
       "decay": {
@@ -363,13 +363,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 223,
+      "presented": 222,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
-        "mean": 0.01,
+        "mean": 0.02,
         "max": 0.03,
-        "n": 223
+        "n": 222
       },
       "stallShare": 0,
       "decay": {
@@ -400,13 +400,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 1028,
+      "presented": 1029,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 1028
+        "n": 1029
       },
       "stallShare": 0,
       "decay": {
@@ -514,7 +514,7 @@
       "presented": 3444,
       "lag": {
         "p50": 0.01,
-        "p95": 0.02,
+        "p95": 0.01,
         "mean": 0.01,
         "max": 0.02,
         "n": 3444
@@ -550,7 +550,7 @@
       "drops": 0,
       "presented": 3444,
       "lag": {
-        "p50": 0.01,
+        "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
@@ -603,11 +603,11 @@
         "reported": 0.04
       },
       "longTasks": {
-        "p50": 60,
-        "p95": 60,
-        "mean": 57,
-        "max": 60,
-        "n": 2
+        "p50": 55,
+        "p95": 55,
+        "mean": 55,
+        "max": 55,
+        "n": 1
       },
       "liveSamples": 10,
       "liveSources": 1,
@@ -621,30 +621,30 @@
       "bucket": "playback",
       "pass": true,
       "notes": [],
-      "drops": 0,
-      "presented": 3444,
+      "drops": 26,
+      "presented": 3422,
       "lag": {
         "p50": 0.01,
         "p95": 0.02,
         "mean": 0.01,
-        "max": 0.02,
-        "n": 3444
+        "max": 0.13,
+        "n": 3422
       },
       "stallShare": 0,
       "decay": {
         "first": 0,
-        "last": 0
+        "last": 0.019
       },
       "clock": {
         "lead": 0.04,
         "reported": 0.04
       },
       "longTasks": {
-        "p50": 0,
-        "p95": 0,
-        "mean": 0,
-        "max": 0,
-        "n": 0
+        "p50": 162,
+        "p95": 162,
+        "mean": 132.5,
+        "max": 162,
+        "n": 2
       },
       "liveSamples": 10,
       "liveSources": 1,
@@ -661,7 +661,7 @@
       "drops": 0,
       "presented": 3444,
       "lag": {
-        "p50": 0.01,
+        "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
@@ -696,13 +696,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 1618,
+      "presented": 1621,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 1618
+        "n": 1621
       },
       "stallShare": 0,
       "decay": {
@@ -765,18 +765,18 @@
       "bucket": "playback",
       "pass": true,
       "notes": [],
-      "drops": 3,
-      "presented": 1095,
+      "drops": 2,
+      "presented": 1094,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
-        "mean": 0.01,
+        "mean": 0.02,
         "max": 0.03,
         "n": 1092
       },
       "stallShare": 0,
       "decay": {
-        "first": 0.008,
+        "first": 0.005,
         "last": 0
       },
       "clock": {
@@ -784,10 +784,10 @@
         "reported": 0.04
       },
       "longTasks": {
-        "p50": 164,
-        "p95": 164,
-        "mean": 115.5,
-        "max": 164,
+        "p50": 156,
+        "p95": 156,
+        "mean": 108.5,
+        "max": 156,
         "n": 2
       },
       "liveSamples": 10,

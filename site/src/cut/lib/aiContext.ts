@@ -88,6 +88,7 @@ function clipEffects(clip: VideoClip, live: boolean, frame?: CardFrame) {
       ? { animOut: { style: clip.animOut.style, seconds: r(clip.animOut.seconds) } }
       : {}),
     ...color,
+    ...(clip.effects?.length ? { effects: clip.effects } : {}),
     ...(clip.boxStyle ? { boxStyle: clip.boxStyle } : {}),
     ...describeRemoval(clip, live),
     ...(clip.card ? { card: describeCameraCard(clip, live, frame) } : {}),
