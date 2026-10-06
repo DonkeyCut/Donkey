@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { CardActionsMenu } from "./CardActionsMenu";
 import { DeleteConfirm, foldersGoNote } from "./selectionMenu";
 import { LIBRARY_SQUARE } from "./LibraryCard";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
@@ -180,6 +181,7 @@ export function NotesView({ library, ref }: Props = {}) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [folderCreating, setFolderCreating] = useState(false);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
+  const [deletingNotes, setDeletingNotes] = useState<string[] | null>(null);
 
   const list = notes.data?.notes ?? [];
   const folders = notes.data?.folders ?? [];
@@ -421,13 +423,18 @@ export function NotesView({ library, ref }: Props = {}) {
     setEditing(null);
     popNote();
     if (!d) return;
+    removeNotes([d.id]);
+  };
+  const removeNotes = (ids: string[]) => {
+    const gone = new Set(ids);
     patchNotes(client, (prev) => ({
       ...prev,
-      notes: prev.notes.filter((n) => n.id !== d.id),
+      notes: prev.notes.filter((n) => !gone.has(n.id)),
     }));
+    setSelected((prev) => new Set([...prev].filter((id) => !gone.has(id))));
     // Behind any save still queued for it, whose later stamp would bring
     // the note back.
-    void queue(() => deleteNote(d.id).catch(() => reload()));
+    for (const id of ids) void queue(() => deleteNote(id).catch(() => reload()));
   };
 
   /** File a set of notes into a folder (or back to the top level). Each note
@@ -702,46 +709,74 @@ export function NotesView({ library, ref }: Props = {}) {
               .map((id) => labelName.get(id))
               .filter((name): name is string => !!name);
             return (
-              <button
+              <div
                 key={n.id}
                 data-sel-id={n.id}
-                draggable
-                onDragStart={(e) => onCardDragStart(e, n.id)}
-                onDragEnd={clearRefDrag}
                 className={cn(
-                  "flex cursor-pointer flex-col gap-1.5 text-left shadow-sm transition-transform hover:-translate-y-0.5",
-                  // A note is a file like the rest: the same square a sound
-                  // tile is, here and in the Library.
-                  "overflow-hidden rounded-xl p-3",
+                  "group relative rounded-xl transition-transform hover:-translate-y-0.5",
                   selected.has(n.id) && PICKED_RING,
                 )}
-                style={{
-                  backgroundColor: noteColor(n.colorIndex).background,
-                  color: NOTE_INK,
-                  width: LIBRARY_SQUARE,
-                  height: LIBRARY_SQUARE,
-                }}
-                onClick={() => openNote(n)}
               >
-                {n.title && <div className="truncate text-[13px] font-semibold">{n.title}</div>}
-                <NoteBodyPreview body={n.body} lines={5} className="text-[12px] opacity-80" />
-                {worn.length > 0 && (
-                  <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
-                    {worn.map((name) => (
-                      <span
-                        key={name}
-                        className="rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-medium"
-                      >
-                        {name}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </button>
+                <button
+                  draggable
+                  onDragStart={(e) => onCardDragStart(e, n.id)}
+                  onDragEnd={clearRefDrag}
+                  className={cn(
+                    "flex cursor-pointer flex-col gap-1.5 text-left shadow-sm",
+                    // A note is a file like the rest: the same square a sound
+                    // tile is, here and in the Library.
+                    "overflow-hidden rounded-xl p-3",
+                  )}
+                  style={{
+                    backgroundColor: noteColor(n.colorIndex).background,
+                    color: NOTE_INK,
+                    width: LIBRARY_SQUARE,
+                    height: LIBRARY_SQUARE,
+                  }}
+                  onClick={() => openNote(n)}
+                >
+                  {/* Clear of the actions button that takes the corner on hover. */}
+                  {n.title && <div className="truncate pr-6 text-[13px] font-semibold">{n.title}</div>}
+                  <NoteBodyPreview body={n.body} lines={5} className="text-[12px] opacity-80" />
+                  {worn.length > 0 && (
+                    <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
+                      {worn.map((name) => (
+                        <span
+                          key={name}
+                          className="rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-medium"
+                        >
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+                {/* The same menu every Library file carries. A picked note
+                    deletes the whole pick with it, the way a file does. */}
+                <CardActionsMenu
+                  className="absolute top-1.5 right-1.5"
+                  onDelete={() => setDeletingNotes(selected.has(n.id) ? [...selected].filter((id) => list.some((m) => m.id === id)) : [n.id])}
+                />
+              </div>
             );
           })}
         </Marquee>
       )}
+      <DeleteConfirm
+        open={deletingNotes !== null}
+        title={
+          deletingNotes?.length === 1
+            ? `Delete “${list.find((n) => n.id === deletingNotes[0])?.title.trim() || "Untitled note"}”?`
+            : `Delete ${deletingNotes?.length ?? 0} notes?`
+        }
+        description={`${deletingNotes?.length === 1 ? "It is" : "They are"} removed from your phone too.`}
+        onClose={() => setDeletingNotes(null)}
+        onConfirm={() => {
+          const ids = deletingNotes;
+          setDeletingNotes(null);
+          if (ids) removeNotes(ids);
+        }}
+      />
       <DeleteConfirm
         open={deletingFolder !== null}
         title={`Delete “${folders.find((f) => f.id === deletingFolder)?.name ?? "folder"}”?`}
