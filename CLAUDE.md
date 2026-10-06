@@ -4,9 +4,6 @@ Donkey is a video editor. Donkey Cut runs in the browser; the Mac app is a menu 
 whose only job is to let that page use the Mac's hardware — the local Cut engine (encoding,
 storage, speech-to-text) and screen recording.
 
-`docs/` holds supported product behavior and engineering guidance. Start with `docs/README.md`
-when changing supported behavior.
-
 Never infer semantic intent by string matching raw user input. Do not add phrase lists, prefixes, suffixes, regexes, app-name checks, greeting/help classifiers, or other natural-language command-text matching to decide what the user wants. Raw user text has too many variations to handle reliably. Pass the turn through an LLM or another typed model/runtime boundary first, get structured output, then do deterministic matching only on that structured output or on non-semantic technical fields.
 
 ## Performance
@@ -29,11 +26,10 @@ Before changing `site/` UI, routes, API handlers, or data access patterns:
 - Every database read and write goes through the Prisma client API. Never use `$queryRaw` or `$executeRaw`; an atomic counter is `updateMany` with `increment` guarded by a `where` on the current value, checked through its count.
 - Do not run database migrations, including `prisma migrate`, `prisma db push`, or any command that applies schema changes to Supabase or another database.
 - Keep Prisma table/model definitions out of `site/prisma/schema.prisma`. Put tables in logically grouped sibling `.prisma` files under `site/prisma/`; reserve `schema.prisma` for shared Prisma configuration such as generator and datasource blocks.
-- Treat `/prototype`, "the prototype route", or route-shaped prototype requests as work on the Next.js route under `site/`, not as a repository-root `prototype/` directory.
 
-## Cut Surfaces
+## Donkey Cut Surfaces
 
-Every Cut change has to hold on every surface, and the plan for it says how:
+Every Donkey Cut change has to hold on every surface, and the plan for it says how:
 
 - **Three residencies.** A project lives in the **browser** (OPFS in the page), on this **Mac** (the Bun engine inside the app, with the bundled command-line tools), or in the **cloud** (Postgres doc + R2 media, the work done by the container worker). People run all three — a Mac with or without the app, any browser, a cloud project — so a change holds in each of them. Work through the backend seam in `site/src/cut/lib/backend/`. Where one residency lacks the machinery for a job, hand the job to one that has it: the browser shelf imports links through the cloud worker, and the engine falls back to the same worker when its own tools come back empty-handed.
 - **Headed and headless.** Whatever the tab can do, the Bun engine and the worker runner can do: chat tools, rendering, media reads. Headless installs browser primitives — canvas, decoders, Web Audio, fonts — behind narrow seams (`lib/raster.ts`, the frame sink in `lib/mediaRead.ts`, the font installer in `lib/fontAssets.ts`, the kit's `surface.ts`) so one implementation serves both; reach for those seams before writing a second path.
@@ -43,22 +39,33 @@ Every Cut change has to hold on every surface, and the plan for it says how:
 - **The AI chat drives it too.** A functional change ships with its chat surface: a tool the assistant can call, and descriptions/system-prompt lines that teach the new capability. Derive tool schemas and prompt text from the same exported constants the UI uses (style id lists, model registries) so the catalog updates itself; check the tool files beside the component (`*.tools.ts`) and `site/src/cut/server/ai/catalog.ts`.
 - The chat surface is kept true, both directions. Removing or reshaping a feature means deleting its tool and its prompt/skill mentions in the same change — grep the catalog, the `*.tools.ts` files, the skills library, and `lib/aiTools.ts` for the old names, ids, and parameters. A tool that describes behavior the code no longer has, offers an option that no longer exists, or is missing a setting the UI gained is a bug: the model calls what the catalog teaches.
 
+## Code Style
+
+- Change only the lines the feature needs. Leave unrelated code, including its comments, untouched.
+- Fixing a bug starts with a test: write it, watch it fail, fix, watch it pass.
+- Flatten control flow with early `return` and `continue`.
+- Always use braces, even on a one-line `if`.
+- Separate logical blocks with a blank line. Give each new block a short comment on what it does and why, with an example when it helps.
+- Function names stay under 30 characters.
+- A parameter that switches behavior is an enum or string union. Booleans make call sites unreadable.
+- Name meaningful or recurring values as constants or enums; spec values such as HTTP status codes always get one. Self-explanatory one-offs stay inline.
+- Keep members private and exports minimal. Ask before widening any visibility.
+- Layer the code. Low-level mechanics (raw I/O, parsing, sockets, database access) live behind an abstraction that speaks domain terms, and each layer calls only the one directly below it: UI never reaches a query, driver, or raw client.
+
 ## Working Rules
 
-- Do not touch repository-root `prototype/` unless the user explicitly asks for that filesystem path. By default, assume requested product changes are for the Mac app or the site/landing page.
-- Ask before creating any new plan document.
+- GitHub Actions owns production deployments. Never deploy directly to Vercel, including `vercel deploy --prebuilt --prod`; push only when asked and let the workflow deploy from `main`.
 - All writing follows `docs/guides/writing-style.md` exactly, for documentation, marketing, and every other writing surface. Read it before writing. Engineering docs under `docs/` also follow the structure in `docs/guides/eng-doc-style.md`.
 - Write straight up — in prompts, docs, commits, code comments, summaries, and UI copy. State what a thing is, once, and stop. Never frame it against what it is not: no "X, not Y", no "X rather than Y", no "instead of Z", no "…, which is exactly what not to do". Cut filler.
-- Keep replies short and action-oriented. For implementation questions, give the recommendation first, then one to three short bullets on why; when the answer is obvious, just say what to do. Skip long explanations, caveats, and "one last thing" sections; flag a real blocker or risk with "One issue:" and explain it briefly.
+- Keep replies short and action-oriented. For implementation questions, give the recommendation first, then one to three short bullets on why; when the answer is obvious, just say what to do. Skip long explanations, caveats, and "one last thing" sections; flag a real blocker or risk with "One issue:" and explain it briefly. No praise, superlatives, or agreement filler; state the hard truth.
 - Never dress a fact up as an aside. No "worth knowing", "worth flagging", "worth calling out", "one thing to note", "for future reference", "the part that matters here" — and no other phrase that announces information as bonus insight. This holds anywhere in a reply, not just at the end. If it matters, state it plainly as part of the work; if it does not, cut it. A problem gets fixed in the same turn it is found, and anything that changes what the user does belongs in the body of the summary, said once.
 - Never ship a known gap. Finding a case that does not work — another type, another surface, another shelf — means fixing it in the same turn, before the summary. A line explaining what still fails is the work left undone; do the work. Ask only when closing it is a scope fork or a destructive action.
 - Make the decision and do it. Implement the obvious next step; never end with "if you want, I can…" or ask the user to say the word. Save questions for genuine scope forks and destructive actions.
-- Update guides in `docs/guides/` only for major features or durable supported-behavior changes. Do not update guide docs for small styling tweaks, layout adjustments, copy changes, or implementation-only refactors.
 - A guide edit is a net deletion, at a hard ratio: every word you add costs 1.5 words cut from what is already there. A change earns one sentence; a paragraph is a rewrite of what was there, shorter.
 - Keep guides explanatory. They should teach what the system is, how it works, and which boundaries matter; do not turn guides into feature inventories, implementation logs, duplicated code, or long file lists.
 - Optimize guides for readability: use plain language, short sections, and only the detail a maintainer needs to understand the supported boundary. Prefer trimming outdated or repetitive detail over adding more paragraphs.
 - Keep guide source entrypoints short and readable. Do not write exhaustive file inventories. Prefer a small maintainer map by subsystem or one to seven high-signal paths, and link to a source path only when it gives someone a clear place to start.
-- When asked to commit, group the working changes into logical commits by concern rather than one catch-all commit, then merge into `main`. Write messages as `type(scope): summary`, where `type` is a Conventional Commits kind (`feat`, `fix`, `docs`, `refactor`, `chore`, etc.) and `scope` is the area touched (e.g. `feat(site)`, `fix(app)`, `refactor(site)`); `scope` may be omitted when an area does not apply, as in `docs:`. Do not push unless asked.
+- When asked to commit, group the working changes into logical commits by concern rather than one catch-all commit, then merge into `main`. Write messages as `type(scope): summary`, where `type` is a Conventional Commits kind (`feat`, `fix`, `docs`, `refactor`, `chore`, etc.) and `scope` is the area touched (e.g. `feat(site)`, `fix(app)`, `refactor(site)`); `scope` may be omitted when an area does not apply, as in `docs:`. Do not push unless asked. Subject: imperative ("If applied, this commit will …"), 50 characters (72 hard limit), no trailing period. Body: one blank line after the subject, wrapped at 72, explains what and why; the code shows how.
 - End the commit subject with ` [rebuild]` when the change ships inside the Mac app and needs a new build: `apps/`, the Cut engine (`site/src/cut/engine/`, `site/src/cut/server/`, and the `site/src/cut/lib/` modules they compile in — `types`, `ports`, `hosts`, `looks`, `colorGrade`, `cueAlign`, `backend/`), or bundled tooling (`tools/`, the bundled-tools scripts). The label is what triggers a release, so an app change without it never reaches users; hosted-site-only changes take no label.
 - After a commit run finishes, ship iOS: when the committed changes touch `apps/ios/` and the working tree is clean, run `scripts/ship-ios-testflight.sh` once the merge into `main` lands, so the build reaches TestFlight. The script archives from the committed ref, so it goes after the commits.
 - Prefer deleting over documenting what was removed. Guides describe what is supported now, not what used to be.
