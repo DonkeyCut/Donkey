@@ -604,6 +604,29 @@ const NO_USAGE = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 } as const;
 
+/** Run the settled action and emit the chunks a single-tool turn emits: the
+ * call, its output, and the line. Null when the tool threw. */
+export async function playInstant(
+  action: ResolvedAction,
+  deps: CutAgentDeps,
+  emit: (chunk: Record<string, unknown>) => void
+): Promise<{ toolCallId: string; result: ReturnType<typeof toToolResult> } | null> {
+  const toolCallId = crypto.randomUUID();
+  let output: unknown;
+  try {
+    output = await deps.execTool(action.tool, action.args);
+  } catch {
+    return null;
+  }
+  const result = toToolResult(action.tool, output);
+  emit({ type: "tool-input-available", toolCallId, toolName: action.tool, input: action.args });
+  emit({ type: "tool-output-available", toolCallId, output: uiToolOutput(result.details) });
+  emit({ type: "text-start", id: "t1" });
+  emit({ type: "text-delta", id: "t1", delta: action.say });
+  emit({ type: "text-end", id: "t1" });
+  return { toolCallId, result };
+}
+
 /** Run the action the judgment settled on, stream it as the chunks a
  * single-tool turn emits, and leave the thread's context holding the ask,
  * the call, its result and the line — the four messages a model round would
@@ -620,19 +643,9 @@ async function runInstantAction(
   }
 ): Promise<boolean> {
   const { threadId, messages, lastUser, prompt, deps, emit } = ctx;
-  const toolCallId = crypto.randomUUID();
-  let output: unknown;
-  try {
-    output = await deps.execTool(action.tool, action.args);
-  } catch {
-    return false;
-  }
-  const result = toToolResult(action.tool, output);
-  emit({ type: "tool-input-available", toolCallId, toolName: action.tool, input: action.args });
-  emit({ type: "tool-output-available", toolCallId, output: uiToolOutput(result.details) });
-  emit({ type: "text-start", id: "t1" });
-  emit({ type: "text-delta", id: "t1", delta: action.say });
-  emit({ type: "text-end", id: "t1" });
+  const played = await playInstant(action, deps, emit);
+  if (!played) return false;
+  const { toolCallId, result } = played;
 
   const now = Date.now();
   const session: AgentMessage[] = [
@@ -672,10 +685,19 @@ async function runInstantAction(
   return true;
 }
 
+/** What the turn has looked at and run, as a mark. A turn the gate sent back
+ * that returns with the same mark has stopped moving. */
+export function workMark(records: LedgerRecord[], looks: Map<string, WatchedSource>): string {
+  return [
+    records.length,
+    ...[...looks.values()].map((l) => `${l.passes}:${l.coveredTo}:${l.observed.length}`),
+  ].join("|");
+}
+
 /** The turn's own work, judged before it closes. Fails open: a judgment that
  * cannot be asked lets the turn sign off. */
-async function gateVerdict(
-  reply: Message,
+export async function gateVerdict(
+  reply: string,
   request: string,
   records: LedgerRecord[],
   looks: Map<string, WatchedSource>,
@@ -685,12 +707,7 @@ async function gateVerdict(
 ) {
   const work = {
     request,
-    reply: Array.isArray(reply.content)
-      ? reply.content
-          .map((c) => (c.type === "text" ? c.text : ""))
-          .join("")
-          .trim()
-      : "",
+    reply: reply.trim(),
     ran: [...new Set(records.filter((r) => !r.error).map((r) => r.name))],
     failed: [...new Set(records.filter((r) => r.error).map((r) => `${r.name} (${r.error})`))],
     mutated: records.some((r) => !r.error && isMutatingTool(r.name)),
@@ -930,12 +947,12 @@ export function streamCutChat({
               // work answered in words leaves the project where it was, and
               // that is a fact the record carries.
               if (looks.size === 0 && records.some((r) => !r.error && isMutatingTool(r.name))) return false;
-              const mark = [
-                records.length,
-                ...[...looks.values()].map((l) => `${l.passes}:${l.coveredTo}:${l.observed.length}`),
-              ].join("|");
+              const mark = workMark(records, looks);
               if (mark === gateMark) return false; // sent back once, nothing moved
-              const verdict = await gateVerdict(msg, askText, records, looks, deps, settings, abortSignal);
+              const replyText = Array.isArray(msg.content)
+                ? msg.content.map((c) => (c.type === "text" ? c.text : "")).join("")
+                : "";
+              const verdict = await gateVerdict(replyText, askText, records, looks, deps, settings, abortSignal);
               if (!verdict) return false;
               gateMark = mark;
               gateRounds++;
