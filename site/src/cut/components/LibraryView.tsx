@@ -969,6 +969,9 @@ export function LibraryView() {
 
         <SelectionMenu menu={ctx.menu} onClose={ctx.close}>
           {ctx.menu?.ids.length === 0 ? <>
+            {(openFolder === null || newParent) && (
+              <DropdownMenuItem onClick={() => setFolderCreating(true)}><FolderPlus /> New folder</DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => noteView.current?.create()}><StickyNote /> Add note</DropdownMenuItem>
             <DropdownMenuItem onClick={() => setAddOpen(true)}><Upload /> Add media</DropdownMenuItem>
           </> : ctxFolder ? (
