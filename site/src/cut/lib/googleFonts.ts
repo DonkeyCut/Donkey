@@ -22,6 +22,9 @@ import "@fontsource/space-grotesk/400.css";
 import "@fontsource/space-grotesk/700.css";
 import "@fontsource/playfair-display/400.css";
 import "@fontsource/playfair-display/700.css";
+// The italics are the caption emphasis default's face (subtitles.ts).
+import "@fontsource/playfair-display/400-italic.css";
+import "@fontsource/playfair-display/700-italic.css";
 import "@fontsource/caveat/400.css";
 import "@fontsource/caveat/700.css";
 import "@fontsource/bebas-neue/400.css";

@@ -116,6 +116,8 @@ import {
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import { TEXT_SIZES, writeTextStyle } from "@/cut/lib/textStyle";
 import { formatTime } from "@/cut/lib/time";
+import { captionStyle, cueAnchor, trackPos } from "@/cut/lib/subtitles";
+import { cueEmphasis } from "@/cut/lib/captionEmphasis";
 import {
   fontStack,
   frameOf,
@@ -144,6 +146,7 @@ import {
   type Selection,
   type ShapeOverlay,
   type StickerOverlay,
+  type SubtitleCue,
   type TextOverlay,
   type VideoClip,
   ANIM_DEFAULT_SECONDS,
@@ -163,13 +166,16 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Field, ResetButton, Row, Section, SegGroup, SegToggle, Tip, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { ColorPanel } from "@/cut/components/ColorPanel";
 import { GroupPanel } from "@/cut/components/GroupPanel";
+import { ElementMotionRows } from "@/cut/components/MotionControls";
 import { RemovalPanel } from "@/cut/components/RemovalPanel";
+import { CameraCardSection } from "@/cut/components/CameraCardSection";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 
 /**
- * Whether the selection has a panel to show. Nothing selected, a subtitle cue
- * or a transition bar (the Transitions tab is its panel) leaves the panel out
- * and the preview takes the space.
+ * Whether the selection has a panel to show. Nothing selected or a transition
+ * bar (the Transitions tab is its panel) leaves the panel out and the preview
+ * takes the space. A subtitle cue opens its own small panel: its spot and its
+ * emphasized words.
  */
 export function useHasInspector() {
   return useEditor((s) => {
@@ -177,7 +183,11 @@ export function useHasInspector() {
     // Two or more items open the group panel over what they share, whatever
     // was clicked last; one item opens its own panel.
     if (s.multiSelection.filter((m) => m && m.kind !== "cue" && m.kind !== "transition").length >= 2) return true;
-    return s.selection.kind !== "cue" && s.selection.kind !== "transition";
+    if (s.selection.kind === "cue") {
+      const id = s.selection.id;
+      return s.subtitles.cues.some((c) => c.id === id);
+    }
+    return s.selection.kind !== "transition";
   });
 }
 
@@ -199,6 +209,9 @@ export function Inspector() {
   const overlay = useEditor((s) =>
     selection?.kind === "overlay" ? s.overlays.find((o) => o.id === selection.id) : undefined
   );
+  const cue = useEditor((s) =>
+    selection?.kind === "cue" ? s.subtitles.cues.find((c) => c.id === selection.id) : undefined
+  );
 
   // The layer floats over the editor: the preview runs the full width of the
   // row and passes under it. The button that brings a folded timeline back
@@ -219,6 +232,7 @@ export function Inspector() {
           clip={group ? undefined : clip}
           audio={group ? undefined : audio}
           overlay={group ? undefined : overlay}
+          cue={group ? undefined : cue}
           group={group ?? undefined}
         />
       ) : (
@@ -286,18 +300,20 @@ function InspectorColumn({
   clip,
   audio,
   overlay,
+  cue,
   group,
 }: {
   clip?: VideoClip;
   audio?: AudioClip;
   overlay?: Overlay;
+  cue?: SubtitleCue;
   group?: NonNullable<Selection>[];
 }) {
   const open = useEditor((s) => s.inspectorOpen);
   const setOpen = useEditor((s) => s.setInspectorOpen);
   // The open tab and the Home scroller's place hold per item for the
   // session, so coming back to an item lands on its panel as it was left.
-  const itemId = clip?.id ?? audio?.id ?? overlay?.id ?? (group ? `group:${group.map((g) => g.id).join()}` : PANEL_GLOBAL);
+  const itemId = clip?.id ?? audio?.id ?? overlay?.id ?? cue?.id ?? (group ? `group:${group.map((g) => g.id).join()}` : PANEL_GLOBAL);
   const [view, setView] = usePanelState<string>(itemId, "tab", "main");
   const homeScroll = useRememberedScroll(itemId, "main");
   const pick = useCallback(
@@ -372,6 +388,8 @@ function InspectorColumn({
                 ) : (
                   <StickerPanel overlay={overlay} />
                 )
+              ) : cue ? (
+                <CuePanel cue={cue} />
               ) : null}
             </ScrollArea>
           )}
@@ -1588,6 +1606,7 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             </Row>
           );
         })}
+        </>)}
         <Row label="Rotation">
           <ValueSlider
             label="Rotation"
@@ -3116,6 +3135,61 @@ function PositionRow({
   );
 }
 
+/** One caption's own settings: where it sits, and which of its words are set
+ * apart in the track's emphasis style (the Subtitles panel styles it). */
+function CuePanel({ cue }: { cue: SubtitleCue }) {
+  const subtitles = useEditor((s) => s.subtitles);
+  const posCk = useSliderCheckpoint();
+  const style = captionStyle(subtitles.style);
+  const track = trackPos(subtitles, style, cue.lane ?? 0);
+  const own = cue.x !== undefined && cue.y !== undefined;
+  const pose = cueAnchor(cue, track, style);
+  const setPos = (axis: "x" | "y", pct: number) => {
+    const v = Math.min(0.98, Math.max(0.02, pct / 100));
+    useEditor.getState().setCuePosition(cue.id, { ...pose, [axis]: v });
+  };
+  const words = cue.text.split(/\s+/).filter(Boolean);
+  const marked = new Set(cueEmphasis(cue));
+  return (
+    <div className="flex flex-col gap-1 px-3.5 pt-2 pb-4">
+      <Section
+        title="Own position"
+        info="A caption sits where its track does. With its own position it moves alone, here or by Option-dragging it in the preview."
+        enabled={own}
+        onEnabledChange={(on) => {
+          useEditor.getState().pushHistory();
+          useEditor.getState().setCuePosition(cue.id, on ? cueAnchor({}, track, style) : null);
+        }}
+      >
+        <PositionRow pose={pose} min={2} max={98} ck={posCk} onSet={setPos} />
+      </Section>
+      <Section
+        title="Emphasis"
+        info="Set words apart in the track's emphasis style, which the Subtitles panel's Options tab sets."
+      >
+        <div className="cue-emphasis flex flex-wrap gap-1 pb-1.5">
+          {words.map((w, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-pressed={marked.has(i)}
+              className={cn(
+                "rounded-md px-1.5 py-0.5 text-[12px] transition-colors",
+                marked.has(i)
+                  ? "bg-[#FFE94A]/80 font-semibold text-[#111114] italic"
+                  : "bg-secondary/60 text-foreground hover:bg-secondary"
+              )}
+              onClick={() => useEditor.getState().setCueEmphasis([{ id: cue.id, indices: [i] }])}
+            >
+              {w}
+            </button>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
 function TransformRows({ overlay: o }: { overlay: Overlay }) {
   const rotationCk = useSliderCheckpoint();
   const opacityCk = useSliderCheckpoint();
@@ -3264,7 +3338,7 @@ function KeyframeControls({ overlay: o }: { overlay: Overlay }) {
  * key list it is handed. The pose track and the mask track both mount it;
  * the mask track's diamond wears the timeline's amber so the two tracks
  * read apart everywhere. */
-function KeyRow({
+export function KeyRow({
   element,
   now,
   keys,

@@ -11,13 +11,18 @@ import { ValueSlider } from "@/cut/components/ValueSlider";
 import { GenerateSubtitlesAudio } from "@/cut/components/VoicePicker";
 import {
   CAPTION_STYLES,
+  captionEmphasis,
   captionWords,
   captionStyle,
+  EMPHASIS_SCALE_MAX,
+  EMPHASIS_SCALE_MIN,
   fmtCueTime,
   laneCues,
   subtitleLaneCount,
   trackLocale,
 } from "@/cut/lib/subtitles";
+import { cueEmphasis, emphasisRuns, wordIndicesIn } from "@/cut/lib/captionEmphasis";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
   cueWordCount,
   MAX_WORDS_PER_CUE,
@@ -358,6 +363,7 @@ function OptionsTab() {
           </div>
         </div>
       )}
+      <EmphasisRows />
       <div className="flex min-h-8 items-center justify-between text-xs font-medium">
         Position
         <Button
@@ -380,6 +386,87 @@ function OptionsTab() {
         Drag the caption on the video to reposition every subtitle.
       </p>
     </ScrollArea>
+  );
+}
+
+/** The emphasis style: how the words set apart in the transcript look on the
+ * video. The words themselves are picked in the Content tab. */
+function EmphasisRows() {
+  const subtitles = useEditor((s) => s.subtitles);
+  const em = captionEmphasis(subtitles);
+  const set = (patch: Parameters<ReturnType<typeof useEditor.getState>["setSubtitlesView"]>[0]) =>
+    useEditor.getState().setSubtitlesView(patch);
+  return (
+    <div className="sub-emphasis mt-1 flex flex-col gap-2.5 border-t border-border pt-3">
+      <div className="flex min-h-8 items-center justify-between text-xs font-medium">
+        Emphasis font
+        <FontPicker
+          className="sub-emphasis-font w-28"
+          value={em.font}
+          onChange={(v) => {
+            useEditor.getState().pushHistory();
+            set({ emphasisFont: v as FontId });
+          }}
+        />
+      </div>
+      <div className="flex min-h-8 items-center justify-between text-xs font-medium">
+        Emphasis color
+        <div className="sub-emphasis-color flex items-center">
+          <ColorField
+            value={em.color}
+            label="Emphasis color"
+            onBegin={() => useEditor.getState().pushHistory()}
+            onLive={(c) => set({ emphasisColor: c })}
+            onCommit={(c) => set({ emphasisColor: c })}
+          />
+        </div>
+      </div>
+      <label className="flex min-h-8 items-center justify-between text-xs font-medium">
+        Italic
+        <Switch
+          className="sub-emphasis-italic"
+          checked={em.italic}
+          onCheckedChange={(v) => {
+            useEditor.getState().pushHistory();
+            set({ emphasisItalic: v });
+          }}
+        />
+      </label>
+      <label className="flex min-h-8 items-center justify-between text-xs font-medium">
+        Bold
+        <Switch
+          className="sub-emphasis-weight"
+          checked={em.weight === 700}
+          onCheckedChange={(v) => {
+            useEditor.getState().pushHistory();
+            set({ emphasisWeight: v ? 700 : 400 });
+          }}
+        />
+      </label>
+      <div className="flex min-h-8 items-center justify-between text-xs font-medium">
+        Emphasis size
+        <div className="sub-emphasis-scale flex items-center gap-2">
+          <ValueSlider
+            label="Emphasis size"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={em.scale}
+            min={EMPHASIS_SCALE_MIN}
+            max={EMPHASIS_SCALE_MAX}
+            step={0.02}
+            snap={[1]}
+            format={(v) => `${v.toFixed(2)}×`}
+            parse={parseSpeedInput}
+            onDraft={(v) => set({ emphasisScale: v })}
+            onCommit={(v) => set({ emphasisScale: v })}
+          />
+        </div>
+      </div>
+      <p className="-mt-1 text-[11px] leading-relaxed text-muted-foreground">
+        Right-click a word in the transcript, or put the cursor on it and press ⌘B, to set it
+        apart in this style.
+      </p>
+    </div>
   );
 }
 
@@ -616,16 +703,61 @@ function caretOffset(el: HTMLElement): number {
 
 const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: number }) {
   const active = usePreviewSelector((t) => t >= cue.start && t < cue.end);
+  const readOnly = useEditor((s) => s.readOnly);
   const ref = useRef<HTMLSpanElement>(null);
   const [focused, setFocused] = useState(false);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    from: number;
+    to: number;
+    label: string;
+    on: boolean;
+  } | null>(null);
+  const marked = cueEmphasis(cue);
+  const markKey = marked.join(",");
 
   // The span is uncontrolled while focused (so the caret survives typing);
-  // outside edits (undo, regenerate) sync the DOM here.
+  // outside edits (undo, regenerate, emphasis) sync the DOM here.
   useEffect(() => {
     const el = ref.current;
-    if (el && document.activeElement !== el && el.textContent !== cue.text)
-      el.textContent = cue.text;
-  }, [cue.text]);
+    if (el && document.activeElement !== el) paintCue(el, cue.text, markKey ? markKey.split(",").map(Number) : []);
+  }, [cue.text, markKey]);
+
+  /** The words a character range of the caption touches, and whether they
+   * would all be emphasized by the toggle. Typing not yet committed is
+   * committed first, so the words are the ones on screen. */
+  const wordsAt = (from: number, to: number) => {
+    const el = ref.current;
+    if (!el) return null;
+    const typed = el.textContent ?? "";
+    const indices = wordIndicesIn(typed, from, to);
+    if (indices.length === 0) return null;
+    const words = typed.split(/\s+/).filter(Boolean);
+    const set = new Set(marked);
+    return {
+      typed,
+      indices,
+      on: !indices.every((i) => set.has(i)),
+      label: indices.map((i) => words[i]).join(" "),
+    };
+  };
+
+  const toggle = (from: number, to: number) => {
+    const el = ref.current;
+    const hit = wordsAt(from, to);
+    if (!el || !hit) return;
+    const st = useEditor.getState();
+    st.setCueText(cue.id, hit.typed);
+    st.setCueEmphasis([{ id: cue.id, indices: hit.indices, on: hit.on }]);
+    const live = useEditor.getState().subtitles.cues.find((c) => c.id === cue.id);
+    // While the caption is being edited the effect above leaves it alone, so
+    // the marks are painted here and the selection put back where it was.
+    if (live && document.activeElement === el) {
+      paintCue(el, hit.typed, cueEmphasis(live));
+      selectIn(el, from, to);
+    }
+  };
 
   // Follow along during playback.
   useEffect(() => {
@@ -694,6 +826,28 @@ const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: num
           }
         }}
       />{" "}
+      {menu && (
+        <DropdownMenu open onOpenChange={(o) => !o && setMenu(null)}>
+          <DropdownMenuContent
+            className="w-56"
+            sideOffset={0}
+            anchor={{ getBoundingClientRect: () => new DOMRect(menu.x, menu.y, 0, 0) }}
+            finalFocus={false}
+          >
+            <DropdownMenuItem
+              className="sub-emphasis-toggle"
+              onClick={() => {
+                toggle(menu.from, menu.to);
+                setMenu(null);
+              }}
+            >
+              <span className="truncate">
+                {menu.on ? `Emphasize “${menu.label}”` : `Remove emphasis from “${menu.label}”`}
+              </span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </span>
   );
 });

@@ -50,6 +50,8 @@ const ITEM_TOOLS = new Set([
   "set_clip_muted",
   "set_clip_hidden",
   "rename_item",
+  "set_group_camera",
+  "update_cue",
 ]);
 
 /** The panels that render an item's settings. */
@@ -124,6 +126,8 @@ const PANEL_NAME: Record<string, string> = {
   preset_id: "clip-grade-category-saved",
   // The source-colour select.
   profile: "clip-source-color",
+  // A caption's own spot is the cue panel's Own position switch.
+  follow_track: "setCuePosition",
 };
 
 /** The basic and detail grade sliders draw from the registries the tool's

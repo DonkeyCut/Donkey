@@ -58,11 +58,18 @@ export function previewSelectionSnapshot(s: EditorState, t: number): Position[] 
     });
   }
   const lanes = new Set<number>();
+  const style = captionStyle(s.subtitles.style);
   for (const cue of s.subtitles.cues) {
     const lane = cue.lane ?? 0;
-    if (!selected.has(`cue:${cue.id}`) || lanes.has(lane) || laneHidden(s.subtitles, lane)) continue;
+    if (!selected.has(`cue:${cue.id}`) || laneHidden(s.subtitles, lane)) continue;
+    if (cue.x !== undefined && cue.y !== undefined) {
+      const p = cueAnchor(cue, undefined, style);
+      positions.push({ kind: "cue", id: cue.id, lane, x: p.x, y: p.y, rotation: 0, own: true });
+      continue;
+    }
+    if (lanes.has(lane)) continue;
     lanes.add(lane);
-    const p = trackPos(s.subtitles, captionStyle(s.subtitles.style), lane);
+    const p = trackPos(s.subtitles, style, lane);
     positions.push({ kind: "cue", id: cue.id, lane, x: p.x!, y: p.y!, rotation: 0 });
   }
   return positions;
@@ -100,9 +107,12 @@ function writePoses(
   poses: { p: Position; x: number; y: number; rotation?: number; scale?: number; own?: OverlayPatch & Partial<FrameRect> }[],
 ) {
   const patches: DocPatches = { clips: [], overlays: [] };
-  for (const { p, x, y, rotation, scale, own } of poses) {
+  for (const seen of poses) {
+    const { p, scale, own } = seen;
+    const { x, y, rotation } = toWorld(p, seen.x, seen.y, seen.rotation);
     if (p.kind === "cue") {
-      s.setSubtitleTrackMeta(p.lane!, { x, y });
+      if (p.own) s.setCuePosition(p.id, { x, y });
+      else s.setSubtitleTrackMeta(p.lane!, { x, y });
       continue;
     }
     if (p.key) {
@@ -177,6 +187,6 @@ export function rotatePreviewSelection(s: EditorState, positions: Position[], ce
     if (p.kind === "cue") return { p, x: cx, y: cy };
     if (p.key) return { p, x: cx, y: cy, rotation };
     if (p.kind === "clip") return { p, x: cx - p.frame!.w / 2, y: cy - p.frame!.h / 2, rotation };
-    return { p, x: clampOverlayPos(cx), y: clampOverlayPos(cy), rotation };
+    return { p, x: p.cam ? cx : clampOverlayPos(cx), y: p.cam ? cy : clampOverlayPos(cy), rotation };
   }));
 }

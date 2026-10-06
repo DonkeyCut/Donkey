@@ -44,6 +44,7 @@ import type {
   Selection,
   ShapeKind,
   ShareFeatures,
+  SoundFrom,
   StoredAsset,
   SubtitleCue,
   SubtitlesBlock,
@@ -88,9 +89,12 @@ import { useGenNotify } from "./genNotify";
 import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
+import { cueEmphasis, emphasisField, joinEmphasis, remapEmphasis, sliceEmphasis, toggleEmphasis, withEmphasis } from "./captionEmphasis";
 import { clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
 import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
+import { soundRoom, soundSourceOf, soundWindow, SPLIT_EDIT_MAX_S } from "./soundSource";
+import { cutSound } from "./soundSettings";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
@@ -873,6 +877,17 @@ export interface EditorState {
   setSubtitleTrackMeta: (lane: number, patch: Partial<SubtitleTrackMeta>) => void;
   /** Commit a cue's edited text (empty text deletes the cue). */
   setCueText: (id: string, text: string) => void;
+  /** Set caption words on or off in the track's emphasis style, by cue id and
+   * display-word index; `on` absent flips each word. `clear` first removes
+   * every emphasized word (on `clear.lane` when given). One undo step. */
+  setCueEmphasis: (
+    edits: { id: string; indices: number[]; on?: boolean }[],
+    clear?: { lane?: number }
+  ) => void;
+  /** Give one caption its own anchor (frame fractions), or hand it back to
+   * its track's with null. Not an undo step on its own: a drag checkpoints
+   * once and writes many. */
+  setCuePosition: (id: string, pos: { x: number; y: number } | null) => void;
   /** Split a cue at a character offset — at real word timings when known. */
   splitCue: (id: string, charOffset: number) => void;
   mergeCueIntoPrev: (id: string) => void;
@@ -4214,7 +4229,16 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (s.readOnly || !selectedGroupIds(s, s.multiSelection).size) return;
       push();
       const ungrouped = setTimelineGroup(s, s.multiSelection, undefined);
-      set({ ...ungrouped, subtitles: { ...s.subtitles, cues: ungrouped.subtitles.cues } });
+      // An element out of its group leaves the group's camera behind.
+      const overlays = ungrouped.overlays.map((o) => (o.groupId ? o : withoutCamera(o)));
+      set({ ...ungrouped, overlays, subtitles: { ...s.subtitles, cues: ungrouped.subtitles.cues } });
+    },
+
+    setGroupCamera: (groupId, cam, opts) => {
+      const s = get();
+      if (s.readOnly || !s.overlays.some((o) => o.groupId === groupId)) return;
+      if (!opts?.transient) push();
+      set({ overlays: withGroupCamera(s.overlays, groupId, cam) });
     },
 
     toggleSelect: (sel) => set((s) => {
@@ -4529,7 +4553,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             // but the cue's own start/end are untouched.
             const written = cur.subtitles.cues.map((c) => {
               const t = byId.get(c.id);
-              return t && t !== c.text ? { ...c, text: t, words: undefined } : c;
+              return t && t !== c.text
+                ? withEmphasis(
+                    { ...c, text: t, words: undefined },
+                    remapEmphasis(c.text, t, cueEmphasis(c))
+                  )
+                : c;
             });
             // A rewritten line still reads at the project's word count: one
             // that came back long is cut, one that came back short is left as
@@ -4815,15 +4844,57 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         cue.words && cue.words.length === parts.length
           ? parts.map((w, i) => ({ ...cue.words![i], w }))
           : undefined;
+      // Emphasis stays on every word the edit kept, wherever it now sits.
+      const emphasis = remapEmphasis(cue.text, trimmed, cueEmphasis(cue));
       set((s) => ({
         subtitles: {
           ...s.subtitles,
           cues: trimmed
-            ? s.subtitles.cues.map((c) => (c.id === id ? { ...c, text: trimmed, words } : c))
+            ? s.subtitles.cues.map((c) =>
+                c.id === id ? withEmphasis({ ...c, text: trimmed, words }, emphasis) : c
+              )
             : s.subtitles.cues.filter((c) => c.id !== id),
         },
       }));
     },
+
+    setCueEmphasis: (edits, clear) => {
+      const by = new Map<string, { indices: number[]; on?: boolean }[]>();
+      for (const e of edits) {
+        const list = by.get(e.id);
+        if (list) list.push(e);
+        else by.set(e.id, [e]);
+      }
+      const cleared = (c: SubtitleCue) =>
+        !!clear && !!c.emphasis?.length && (clear.lane === undefined || (c.lane ?? 0) === clear.lane);
+      if (!get().subtitles.cues.some((c) => by.has(c.id) || cleared(c))) return;
+      push();
+      set((s) => ({
+        subtitles: {
+          ...s.subtitles,
+          cues: s.subtitles.cues.map((c) =>
+            (by.get(c.id) ?? []).reduce(
+              (cur, e) => toggleEmphasis(cur, e.indices, e.on),
+              cleared(c) ? withEmphasis(c, []) : c
+            )
+          ),
+        },
+      }));
+    },
+
+    setCuePosition: (id, pos) =>
+      set((s) => ({
+        subtitles: {
+          ...s.subtitles,
+          cues: s.subtitles.cues.map((c) => {
+            if (c.id !== id) return c;
+            const next: SubtitleCue = { ...c };
+            delete next.x;
+            delete next.y;
+            return pos ? { ...next, x: pos.x, y: pos.y } : next;
+          }),
+        },
+      })),
 
     splitCue: (id, charOffset) => {
       const s = get();
@@ -4836,6 +4907,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       let rightStart: number;
       let leftWords: SubtitleCue["words"];
       let rightWords: SubtitleCue["words"];
+      const marked = cueEmphasis(cue);
       if (cue.words && cue.words.length > 1) {
         // Word timings are intact: split on the word under the caret so both
         // halves keep real timestamps.
@@ -4858,18 +4930,28 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         leftEnd = rightStart = Math.round(t * 100) / 100;
       }
       push();
-      const left: SubtitleCue = {
-        ...cue,
-        end: leftEnd,
-        text: leftWords ? leftWords.map((w) => w.w).join(" ") : before,
-        words: leftWords,
-      };
+      const leftText = leftWords ? leftWords.map((w) => w.w).join(" ") : before;
+      const rightText = rightWords ? rightWords.map((w) => w.w).join(" ") : after;
+      // Each half keeps the emphasis of the words it took. A caret inside a
+      // word leaves a piece of it on both sides, and both pieces keep it.
+      const count = (t: string) => t.split(/\s+/).filter(Boolean).length;
+      const left: SubtitleCue = withEmphasis(
+        { ...cue, end: leftEnd, text: leftText, words: leftWords },
+        sliceEmphasis(marked, 0, count(leftText))
+      );
+      // The second half keeps the track and the spot the caption sat on.
       const right: SubtitleCue = {
         id: uid(),
         start: rightStart,
         end: cue.end,
-        text: rightWords ? rightWords.map((w) => w.w).join(" ") : after,
+        text: rightText,
         words: rightWords,
+        ...emphasisField(
+          sliceEmphasis(marked, count(cue.text) - count(rightText), Infinity)
+        ),
+        ...(cue.lane ? { lane: cue.lane } : {}),
+        ...(cue.x !== undefined ? { x: cue.x } : {}),
+        ...(cue.y !== undefined ? { y: cue.y } : {}),
       };
       set((cur) => ({
         subtitles: {
@@ -4891,12 +4973,19 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (i <= 0) return;
       push();
       const prev = cues[i - 1];
-      const merged: SubtitleCue = {
-        ...prev,
-        end: Math.max(prev.end, cue.end),
-        text: `${prev.text} ${cue.text}`.replace(/\s+/g, " ").trim(),
-        words: prev.words && cue.words ? [...prev.words, ...cue.words] : undefined,
-      };
+      const merged: SubtitleCue = withEmphasis(
+        {
+          ...prev,
+          end: Math.max(prev.end, cue.end),
+          text: `${prev.text} ${cue.text}`.replace(/\s+/g, " ").trim(),
+          words: prev.words && cue.words ? [...prev.words, ...cue.words] : undefined,
+        },
+        joinEmphasis(
+          cueEmphasis(prev),
+          prev.text.split(/\s+/).filter(Boolean).length,
+          cueEmphasis(cue)
+        )
+      );
       set((s) => ({
         subtitles: {
           ...s.subtitles,
@@ -6339,6 +6428,7 @@ export function assetIdsInUse(s: {
   overlays: Overlay[];
   transitions?: TimelineTransition[];
   subtitles?: { font?: string; cues?: SubtitleCue[] } | null;
+  assets?: readonly StoredAsset[];
 }): Set<string> {
   // Every item kind says where its asset ids sit; the caption track's font
   // is the one project-level reference beside them.

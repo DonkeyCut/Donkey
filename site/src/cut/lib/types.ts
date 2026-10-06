@@ -1209,6 +1209,11 @@ export const CAPTION_LOOK_KEYS = [
   "accentColor",
   "accentScale",
   "accentDim",
+  "emphasisFont",
+  "emphasisColor",
+  "emphasisItalic",
+  "emphasisWeight",
+  "emphasisScale",
 ] as const;
 export type CaptionLook = Partial<Pick<SubtitlesBlock, (typeof CAPTION_LOOK_KEYS)[number]>>;
 
@@ -1443,6 +1448,16 @@ export interface SubtitleCue {
    * (text swapped in place); adding/removing a word drops them and splitting
    * falls back to proportional timing. */
   words?: { t0: number; t1: number; w: string }[];
+  /** The words set apart in the track's emphasis style, as indices into the
+   * caption's display words (its text split on whitespace — the indexing
+   * `words` and the word effects use). Indices ride with their words: a
+   * re-cut, a split, a merge or a hand-edit that keeps a word keeps its
+   * emphasis, and timing changes never touch it. Absent = none. */
+  emphasis?: number[];
+  /** This caption's own anchor as frame fractions, over its track's. Absent
+   * = the track's. */
+  x?: number;
+  y?: number;
   /** Which subtitle track (row) this belongs to, 0-based — one language per
    * track (e.g. English on 0, Korean on 1), up to MAX_SUBTITLE_LANES. Absent
    * = the first track. Tracks are managed in the panel, so lanes never
@@ -1519,6 +1534,14 @@ export interface SubtitlesBlock {
   accentScale?: number;
   /** The opacity a word wears off its moment; absent = the effect's own. */
   accentDim?: number;
+  /** How an emphasized word (`SubtitleCue.emphasis`) is set apart; each
+   * absent field = CAPTION_EMPHASIS_DEFAULT's (lib/subtitles.ts). */
+  emphasisFont?: FontId;
+  emphasisColor?: string;
+  emphasisItalic?: boolean;
+  emphasisWeight?: 400 | 700;
+  /** Size multiplier over the caption's own size. */
+  emphasisScale?: number;
 }
 
 export const emptySubtitles = (): SubtitlesBlock => ({

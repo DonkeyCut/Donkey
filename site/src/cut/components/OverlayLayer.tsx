@@ -434,8 +434,9 @@ function SubtitleCaptions(props: {
 
 /** One track's active cue, rendered exactly like the export burn-in.
  * Nothing renders when there is no cue at the playhead (no speech). Dragging
- * the caption moves the whole track — the position is one per-track anchor,
- * not per-cue — and rides the same smart snapping and guide lines as titles. */
+ * the caption moves the whole track's anchor; an Option-drag moves only the
+ * caption on screen, and a caption that has its own spot moves alone on any
+ * drag. Both ride the same smart snapping and guide lines as titles. */
 function SubtitleCaption({
   lane,
   stageWidth,
@@ -500,13 +501,16 @@ function SubtitleCaption({
         }
         s.pushHistory();
         const { x: x0, y: y0 } = ov;
+        const alone = e.altKey || (cue.x !== undefined && cue.y !== undefined);
         startDrag(e, {
           onMove: (dx, dy, ev) => {
             const p = snap(subtitleBoxId(lane), x0 + dx / stageWidth, y0 + dy / stageHeight, ev);
-            useEditor.getState().setSubtitleTrackMeta(lane, {
+            const at = {
               x: Math.min(0.98, Math.max(0.02, p.x)),
               y: Math.min(0.98, Math.max(0.02, p.y)),
-            });
+            };
+            if (alone) useEditor.getState().setCuePosition(cue.id, at);
+            else useEditor.getState().setSubtitleTrackMeta(lane, at);
           },
           onUp: onSnapEnd,
         });

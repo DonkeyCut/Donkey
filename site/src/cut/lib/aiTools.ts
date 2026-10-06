@@ -185,12 +185,16 @@ import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
 import { sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
 import { applyOverlayPatchSettled, assetClipUses, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
-import { renderProjectFrame, renderProjectFrames } from "./exportRender";
+import { mixSpecFor, renderProjectFrame, renderProjectFrames } from "./exportRender";
+import { renderMix } from "./audioMix";
+import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./loudness";
 import { framesAt, readMediaFileSize } from "./mediaRead";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
-import { buildAiContext, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
-import { CAPTION_STYLES, laneCues, subtitleLaneCount } from "./subtitles";
+import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
+import { CARD_SIDES, newCard, normalizeCard, type CardSide } from "./cameraCard";
+import { CAPTION_STYLES, captionEmphasis, captionStyle, cueAnchor, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount, trackPos } from "./subtitles";
+import { cueEmphasis, emphasisIndicesOf } from "./captionEmphasis";
 import { findHighlights } from "./highlights";
 import { fuseTimeline, renderFusedTimeline, speechOnsets, speechOver } from "./watch/fuse";
 import {
@@ -2491,6 +2495,20 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       if (isNum(input.y)) patch.y = clamp(input.y, 0.02, 0.98);
       if (isNum(input.x)) patch.x = clamp(input.x, 0.02, 0.98);
+      if (typeof input.emphasis_font === "string") {
+        if (!allFonts().some((f) => f.id === input.emphasis_font))
+          throw new ToolError(`Unknown font id "${input.emphasis_font}".`);
+        patch.emphasisFont = input.emphasis_font;
+      }
+      if (typeof input.emphasis_color === "string") patch.emphasisColor = input.emphasis_color;
+      if (typeof input.emphasis_italic === "boolean") patch.emphasisItalic = input.emphasis_italic;
+      if (input.emphasis_weight !== undefined) {
+        if (input.emphasis_weight !== 400 && input.emphasis_weight !== 700)
+          throw new ToolError("emphasis_weight is 400 or 700.");
+        patch.emphasisWeight = input.emphasis_weight;
+      }
+      if (isNum(input.emphasis_scale))
+        patch.emphasisScale = clamp(input.emphasis_scale, EMPHASIS_SCALE_MIN, EMPHASIS_SCALE_MAX);
       const per = isNum(input.words_per_cue)
         ? clamp(Math.round(input.words_per_cue), MIN_WORDS_PER_CUE, MAX_WORDS_PER_CUE)
         : null;
@@ -2513,6 +2531,57 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         accentMode: cur.accentMode,
         accentScale: cur.accentScale,
         accentDim: cur.accentDim,
+        emphasis: captionEmphasis(cur),
+      };
+  },
+
+  set_caption_emphasis: (s, input) => {
+      const marks = Array.isArray(input.marks) ? (input.marks as Record<string, unknown>[]) : [];
+      if (marks.length === 0 && input.clear_all !== true)
+        throw new ToolError("Pass marks (cue_id with indices or words), or clear_all.");
+      // Every mark is resolved against its cue before anything is written, so
+      // one bad id or word leaves the track as it was.
+      const edits: { id: string; indices: number[]; on?: boolean }[] = [];
+      for (const m of marks) {
+        const cue = requireItem(s.subtitles.cues, m.cue_id, "subtitle cue");
+        const count = cue.text.split(/\s+/).filter(Boolean).length;
+        const indices: number[] = [];
+        if (Array.isArray(m.indices)) {
+          for (const i of m.indices) {
+            if (!isNum(i) || !Number.isInteger(i) || i < 0 || i >= count)
+              throw new ToolError(`Cue ${cue.id} has words 0..${count - 1}; index ${String(i)} is not one of them.`);
+            indices.push(i);
+          }
+        }
+        if (Array.isArray(m.words)) {
+          const found = emphasisIndicesOf(cue, m.words.map(String));
+          if (found.missing.length > 0)
+            throw new ToolError(
+              `Cue ${cue.id} reads "${cue.text}" and has no word ${found.missing.map((w) => `"${w}"`).join(", ")}.`
+            );
+          indices.push(...found.indices);
+        }
+        if (indices.length === 0) throw new ToolError(`Name the words of cue ${cue.id} by indices or words.`);
+        edits.push({ id: cue.id, indices, on: m.on !== false });
+      }
+      const clear =
+        input.clear_all === true
+          ? isNum(input.track)
+            ? { lane: Math.round(input.track) }
+            : {}
+          : undefined;
+      s.setCueEmphasis(edits, clear);
+      const cur = useEditor.getState().subtitles;
+      const touched = new Set(edits.map((e) => e.id));
+      return {
+        cues: cur.cues
+          .filter((c) => touched.has(c.id))
+          .map((c) => {
+            const words = c.text.split(/\s+/).filter(Boolean);
+            return { id: c.id, text: c.text, emphasis: cueEmphasis(c).map((i) => words[i]) };
+          }),
+        emphasizedCues: cur.cues.filter((c) => cueEmphasis(c).length > 0).length,
+        ...(cur.showOnVideo ? {} : { note: "Captions are hidden on the video; subtitles_set_view shows them." }),
       };
   },
 
@@ -4527,6 +4596,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   update_cue: (s, input) => {
       const cue = requireItem(s.subtitles.cues, input.id, "subtitle cue");
+      const clearPos = input.follow_track === true || input.x === null || input.y === null;
+      if (clearPos && (isNum(input.x) || isNum(input.y)))
+        throw new ToolError("Pass x/y for the caption's own spot, or follow_track to drop it — not both.");
       if (typeof input.text === "string") s.setCueText(cue.id, input.text);
       if (isNum(input.start) || isNum(input.end)) {
         const start = isNum(input.start) ? Math.max(0, input.start) : cue.start;
@@ -4534,8 +4606,38 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         if (end - start < 0.15) throw new ToolError("Cue must stay at least 0.15s long.");
         s.setCueTiming(cue.id, start, end);
       }
+      if (clearPos || isNum(input.x) || isNum(input.y)) {
+        const st = useEditor.getState();
+        const live = st.subtitles.cues.find((c) => c.id === cue.id);
+        if (live) {
+          // One side given keeps the other where the caption already sits.
+          const at = cueAnchor(
+            live,
+            trackPos(st.subtitles, captionStyle(st.subtitles.style), live.lane ?? 0),
+            captionStyle(st.subtitles.style)
+          );
+          st.pushHistory();
+          st.setCuePosition(
+            cue.id,
+            clearPos
+              ? null
+              : {
+                  x: clamp(isNum(input.x) ? input.x : at.x, 0.02, 0.98),
+                  y: clamp(isNum(input.y) ? input.y : at.y, 0.02, 0.98),
+                }
+          );
+        }
+      }
       const next = useEditor.getState().subtitles.cues.find((c) => c.id === cue.id);
-      return next ? { id: next.id, start: next.start, end: next.end, text: next.text } : { deleted: cue.id };
+      return next
+        ? {
+            id: next.id,
+            start: next.start,
+            end: next.end,
+            text: next.text,
+            ...(next.x !== undefined && next.y !== undefined ? { x: round2(next.x), y: round2(next.y) } : {}),
+          }
+        : { deleted: cue.id };
   },
 
   delete_cue: (s, input) => {

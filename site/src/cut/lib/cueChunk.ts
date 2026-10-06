@@ -19,6 +19,7 @@
  * own breaks, so they are split when they run long and never glued together.
  */
 
+import { cueEmphasis } from "./captionEmphasis";
 import type { SubtitleCue } from "./types";
 
 /** Words a caption holds when the project hasn't said otherwise. */
@@ -97,12 +98,13 @@ function streamOf(cues: readonly SubtitleCue[]): StreamWord[] {
     // is the honest reading then.
     const timed = cue.words && cue.words.length === tokens.length ? cue.words : null;
     const spread = timed ? null : spreadWordsEvenly(cue.text, cue.start, cue.end);
+    const marked = new Set(cueEmphasis(cue));
     tokens.forEach((w, i) => {
       const src = timed ? timed[i] : spread![i];
       const t0 = Math.max(src.t0, floor);
       const t1 = Math.max(src.t1, t0);
       floor = t1;
-      out.push({ w, t0, t1, measured: !!timed, from, id: cue.id });
+      out.push({ w, t0, t1, measured: !!timed, from, id: cue.id, em: marked.has(i) });
     });
   });
   return out;
@@ -156,11 +158,18 @@ export function chunkLaneCues(cues: readonly SubtitleCue[], per: number): Subtit
     const id = used.has(first.id) ? uid() : first.id;
     used.add(id);
     const measured = g.every((w) => w.measured);
+    const emphasis = g.flatMap((w, j) => (w.em ? [j] : []));
+    // A caption sits where the cue it opens on sat, the same cue whose id it
+    // takes.
+    const opener = ordered[first.from];
     return {
       id,
       start: round(start),
       end: round(end),
       text: g.map((w) => w.w).join(" "),
+      ...(emphasis.length > 0 ? { emphasis } : {}),
+      ...(opener?.x !== undefined ? { x: opener.x } : {}),
+      ...(opener?.y !== undefined ? { y: opener.y } : {}),
       ...(measured
         ? {
             words: g.map((w) => ({

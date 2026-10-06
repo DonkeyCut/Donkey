@@ -12,7 +12,12 @@ import {
   MAX_WORDS_PER_CUE,
   MIN_WORDS_PER_CUE,
 } from "@/cut/lib/cueChunk";
-import { CAPTION_STYLES } from "@/cut/lib/subtitles";
+import {
+  CAPTION_EMPHASIS_DEFAULT,
+  CAPTION_STYLES,
+  EMPHASIS_SCALE_MAX,
+  EMPHASIS_SCALE_MIN,
+} from "@/cut/lib/subtitles";
 import {
   WORD_EFFECT_MENU,
   WORD_POP_SCALE,
@@ -115,6 +120,41 @@ export const SUBTITLES_TOOLS = [
       x: num("Caption center x 0..1"),
       y: num("Caption center y 0..1"),
       background: bool("With `look`, also set the project background (default: whatever the look does — the designed looks paint it, plain and over-footage leave it alone)"),
+      emphasis_font: str(
+        `Font id the emphasized words are set in (set_caption_emphasis marks them; default ${CAPTION_EMPHASIS_DEFAULT.font})`
+      ),
+      emphasis_color: str(`Emphasized word color as hex (default ${CAPTION_EMPHASIS_DEFAULT.color})`),
+      emphasis_italic: bool(`Emphasized words in italic (default ${CAPTION_EMPHASIS_DEFAULT.italic})`),
+      emphasis_weight: {
+        type: "number",
+        enum: [400, 700],
+        description: `Emphasized word weight, 400 regular or 700 bold (default ${CAPTION_EMPHASIS_DEFAULT.weight})`,
+      },
+      emphasis_scale: num(
+        `Emphasized word size over the caption's own, ${EMPHASIS_SCALE_MIN}..${EMPHASIS_SCALE_MAX} (default ${CAPTION_EMPHASIS_DEFAULT.scale})`
+      ),
+    }),
+  },
+  {
+    name: "set_caption_emphasis",
+    description:
+      `Set chosen caption words apart in the track's emphasis style (set_caption_look emphasis_* fields; default a bold italic ${CAPTION_EMPHASIS_DEFAULT.font} serif in ${CAPTION_EMPHASIS_DEFAULT.color} at the caption's size) while the rest of the line stays as it is — the social-caption highlight on a product name, a number, the keyword of the call to action. Any word effect still plays on top. Each mark names a cue id and its words, either by 0-based index into the cue's text split on spaces or by the exact word as it appears in that cue (a word that appears twice marks both). Emphasis stays with its word through a words_per_cue re-cut, align_to_audio, retiming and edits that keep the word. editor_state lists each cue's emphasized words. Cadence: one or two meaningful words in a caption, then two or three plain captions before the next; never two emphasized captions in a row, and never a function word (the, and, to, of, is). One call marks the whole track; \`clear_all\` first wipes what is there.`,
+    inputSchema: obj({
+      marks: {
+        type: "array",
+        description: "Words to set on or off, any number of cues in one call (one undo step)",
+        items: obj(
+          {
+            cue_id: str("Cue id"),
+            indices: { type: "array", items: { type: "number" }, description: "0-based word indices in the cue's text" },
+            words: { type: "array", items: { type: "string" }, description: "Words exactly as they appear in the cue" },
+            on: bool("true sets the words apart (default), false returns them to the plain style"),
+          },
+          ["cue_id"]
+        ),
+      },
+      clear_all: bool("Remove every emphasized word before applying `marks` (on `track` when given, else every track)"),
+      track: num("With clear_all: the subtitle track to clear, 0-based"),
     }),
   },
   {
@@ -145,8 +185,18 @@ export const SUBTITLES_TOOLS = [
   },
   {
     name: "update_cue",
-    description: "Edit a subtitle cue's text or retime it (start/end seconds).",
-    inputSchema: obj({ id: str("Cue id"), ids: ids("id"), text: str("New text"), start: num("Start s"), end: num("End s") }),
+    description:
+      "Edit a subtitle cue's text, retime it (start/end seconds), or give it its own spot. A caption sits where its track does unless it has its own x/y: use it when one caption has to move for the picture under it — centered in the gap of a split layout, a lower third over a full-frame face, the top when the visual's content sits low — and follow_track to hand it back.",
+    inputSchema: obj({
+      id: str("Cue id"),
+      ids: ids("id"),
+      text: str("New text"),
+      start: num("Start s"),
+      end: num("End s"),
+      x: num("This caption's own center x 0..1 (its track's otherwise)"),
+      y: num("This caption's own center y 0..1 (its track's otherwise)"),
+      follow_track: bool("Drop this caption's own x/y so it sits where its track does"),
+    }),
   },
   {
     name: "delete_cue",

@@ -6,16 +6,19 @@ import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf, sanitizeGuideLines
 import { hasOverlayAnim, retimeOf, speedCurveOf, WHEEL_LABELS, WHEEL_ZONES, type ClipSound, type OutputSpace, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
-import { useMatteBakes } from "./removal/bakeJobs";
+import { matteBakesAvailable, useMatteBakes } from "./removal/bakeJobs";
+import { cardMatteKey, resolveCardShape } from "./cameraCard";
 import { deriveTransitionFields, getClipSpans, normalizeDocState, overlayLayers, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import type { VideoProject } from "./genvideo/types";
 import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
 import { laneCues, subtitleLaneCount } from "./subtitles";
+import { cueEmphasis } from "./captionEmphasis";
 import { watchSweepActive } from "./watch/sweep";
 import { libraryFontId, listLibraryFonts, listLutChoices } from "./linkedLibrary";
 import { savedGradesKnown } from "./gradePresets";
 import { sourceProfileOf } from "./baseFrame";
+import { groupCameras } from "./groupCamera";
 import {
   clipZoom,
   frameOf,
@@ -30,6 +33,7 @@ import {
   overlayName,
   type Overlay,
   type ProjectDoc,
+  type SubtitleCue,
   type SubtitlesBlock,
   type TimelineTransition,
   type VideoClip,
@@ -52,7 +56,7 @@ function transitionToNext(sp: ClipSpan, index: number, spans: ClipSpan[]) {
  * refs plus a compact summary of the manual grade (nonzero sliders verbatim;
  * curves as presence flags; the wheels by their tool names; the touched hue
  * bands by name). */
-function clipEffects(clip: VideoClip, live: boolean) {
+function clipEffects(clip: VideoClip, live: boolean, frame?: CardFrame) {
   const grade = clip.grade;
   const sliders: Record<string, number> = {};
   for (const [k, v] of Object.entries(grade ?? {})) {
@@ -204,7 +208,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
     if (kind === "cue") {
       const c = s.subtitles.cues.find((x) => x.id === id);
       return c
-        ? { kind, id, text: c.text, start: r(c.start), end: r(c.end), track: c.lane ?? 0 }
+        ? { kind, id, text: c.text, start: r(c.start), end: r(c.end), track: c.lane ?? 0, ...cueExtras(c) }
         : { kind, id };
     }
     // The selection's kind stays "overlay" (what select/delete take); the
@@ -575,7 +579,7 @@ function describeState(
       ...(sp.clip.kf?.length
         ? { keyframes: sp.clip.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
         : {}),
-      ...clipEffects(sp.clip, live),
+      ...clipEffects(sp.clip, live, { aspect: s.aspect, assetById }),
     })),
     // Video layers composited over track 0 in track order (the topmost
     // full-frame clip covers the rest). Each track carries its own
@@ -590,7 +594,7 @@ function describeState(
           const t = transitionToNext(sp, i, trackSpans);
           return t ? { transitionToNext: t } : {};
         })(),
-        ...clipEffects(sp.clip, live),
+        ...clipEffects(sp.clip, live, { aspect: s.aspect, assetById }),
       }));
     }),
     // Every transition bar in the doc. A bar is its own object on the
@@ -652,6 +656,13 @@ function describeState(
       ...(s.subtitles.wordHighlight ? { wordHighlight: true } : {}),
       ...(s.subtitles.accentMode ? { accentMode: s.subtitles.accentMode } : {}),
       ...(s.subtitles.accentColor ? { accentColor: s.subtitles.accentColor } : {}),
+      // The emphasis style, where it departs from the default
+      // (set_caption_look emphasis_*); the words wearing it ride on each cue.
+      ...(s.subtitles.emphasisFont ? { emphasisFont: s.subtitles.emphasisFont } : {}),
+      ...(s.subtitles.emphasisColor ? { emphasisColor: s.subtitles.emphasisColor } : {}),
+      ...(s.subtitles.emphasisItalic !== undefined ? { emphasisItalic: s.subtitles.emphasisItalic } : {}),
+      ...(s.subtitles.emphasisWeight !== undefined ? { emphasisWeight: s.subtitles.emphasisWeight } : {}),
+      ...(s.subtitles.emphasisScale !== undefined ? { emphasisScale: s.subtitles.emphasisScale } : {}),
       status: s.subtitleStatus,
       // A window of cues by default; when truncated the model calls get_state
       // for the whole transcript (e.g. "clean up all the captions").
@@ -662,9 +673,22 @@ function describeState(
         end: r(c.end),
         text: c.text,
         ...(subtitleTracks > 1 ? { track: c.lane ?? 0 } : {}),
+        ...cueExtras(c),
       })),
       cuesTruncated: s.subtitles.cues.length > cueCap,
     },
+  };
+}
+
+/** What a cue carries beyond its words and times: its emphasized words as
+ * [index, word] pairs (set_caption_emphasis), and its own x/y when it sits
+ * apart from its track (update_cue). Absent when it has neither. */
+function cueExtras(c: SubtitleCue) {
+  const marked = cueEmphasis(c);
+  const words = marked.length > 0 ? c.text.split(/\s+/).filter(Boolean) : [];
+  return {
+    ...(marked.length > 0 ? { emphasis: marked.map((i) => [i, words[i]] as const) } : {}),
+    ...(c.x !== undefined && c.y !== undefined ? { x: r(c.x), y: r(c.y) } : {}),
   };
 }
 

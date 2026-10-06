@@ -59,9 +59,19 @@ export interface CaptionWordOverrides {
   accentDim?: number;
 }
 
+/** The block-level emphasis style: how a caption's emphasized words are set
+ * apart. Absent fields = CAPTION_EMPHASIS_DEFAULT's. */
+export interface CaptionEmphasisOverrides {
+  emphasisFont?: FontId;
+  emphasisColor?: string;
+  emphasisItalic?: boolean;
+  emphasisWeight?: 400 | 700;
+  emphasisScale?: number;
+}
+
 /** A track's effective caption anchor plus the block's look overrides — what
  * `cueOverlay` reads to place and dress one cue. */
-export interface CaptionPos extends CaptionWordOverrides {
+export interface CaptionPos extends CaptionWordOverrides, CaptionEmphasisOverrides {
   x: number;
   y: number;
   size?: number;
@@ -86,6 +96,46 @@ export function trackPos(
     accentColor: subs.accentColor,
     accentScale: subs.accentScale,
     accentDim: subs.accentDim,
+    emphasisFont: subs.emphasisFont,
+    emphasisColor: subs.emphasisColor,
+    emphasisItalic: subs.emphasisItalic,
+    emphasisWeight: subs.emphasisWeight,
+    emphasisScale: subs.emphasisScale,
+  };
+}
+
+/** Where one caption sits: its own anchor where it has one, else its track's
+ * (see `trackPos`). Preview, drag and every burn-in read this. */
+export function cueAnchor(
+  cue: Pick<SubtitleCue, "x" | "y">,
+  track: { x?: number; y?: number } | undefined,
+  style: CaptionStyle
+): { x: number; y: number } {
+  return { x: cue.x ?? track?.x ?? style.x, y: cue.y ?? track?.y ?? style.y };
+}
+
+/** How emphasized caption words look when the track names nothing: a bold
+ * italic serif in yellow, at the caption's own size. */
+export const CAPTION_EMPHASIS_DEFAULT: Readonly<Required<WordFace>> = {
+  font: "playfair",
+  color: "#FFFF00",
+  italic: true,
+  weight: 700,
+  scale: 1,
+};
+
+/** The bounds an emphasis scale is held to. */
+export const EMPHASIS_SCALE_MIN = 0.8;
+export const EMPHASIS_SCALE_MAX = 1.6;
+
+/** A track's emphasis style with its defaults filled in. */
+export function captionEmphasis(subs?: CaptionEmphasisOverrides): Required<WordFace> {
+  return {
+    font: subs?.emphasisFont ?? CAPTION_EMPHASIS_DEFAULT.font,
+    color: subs?.emphasisColor ?? CAPTION_EMPHASIS_DEFAULT.color,
+    italic: subs?.emphasisItalic ?? CAPTION_EMPHASIS_DEFAULT.italic,
+    weight: subs?.emphasisWeight ?? CAPTION_EMPHASIS_DEFAULT.weight,
+    scale: subs?.emphasisScale ?? CAPTION_EMPHASIS_DEFAULT.scale,
   };
 }
 
@@ -367,7 +417,7 @@ export function cueOverlay(
   const size = Math.round(
     (pos?.size ?? style.size) * (isOpener && style.openerScale ? style.openerScale : 1)
   );
-  const x = pos?.x ?? style.x;
+  const { x, y } = cueAnchor(cue, pos, style);
   const text = wrapCaptionForSize(
     cue.text,
     size,
@@ -382,7 +432,7 @@ export function cueOverlay(
     start: cue.start,
     end: cue.end,
     x,
-    y: pos?.y ?? style.y,
+    y,
     size,
     font: pos?.font ?? style.font,
     weight: style.weight,
