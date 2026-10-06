@@ -403,25 +403,44 @@ export async function requireInferenceCredits(input: CreditPreflightInput) {
 }
 
 // Prisma raises P2034 when a transaction is aborted by a write conflict or
-// deadlock. A Serializable transaction rolls back entirely on conflict, so
-// nothing partially committed and the whole body is safe to re-run. Concurrent
-// writers against the same credit account routinely collide here — two
-// generations at once, the parallel signup grants, simultaneous Stripe webhook
-// deliveries for one checkout — so every credit transaction retries
-// transparently instead of surfacing the race to its caller.
+// deadlock; a conflict detected at COMMIT arrives as the driver adapter's raw
+// TransactionWriteConflict. A Serializable transaction rolls back
+// entirely on conflict, so nothing partially committed and the whole body is
+// safe to re-run. Concurrent writers against the same credit account routinely
+// collide here — two generations at once, a stock search's parallel judge
+// calls, the parallel signup grants, simultaneous Stripe webhook deliveries for
+// one checkout — so every credit transaction retries transparently and the
+// caller never sees the race.
+const writeConflictMaxAttempts = 10;
+const writeConflictBaseDelayMs = 20;
+const writeConflictMaxDelayMs = 500;
+
+function isWriteConflict(error: unknown) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === "P2034";
+  }
+  if (!(error instanceof Error) || error.name !== "DriverAdapterError") {
+    return false;
+  }
+  const cause = error.cause as { kind?: unknown } | undefined;
+  return cause?.kind === "TransactionWriteConflict";
+}
+
 async function withWriteConflictRetry<T>(run: () => Promise<T>): Promise<T> {
-  const maxAttempts = 5;
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await run();
     } catch (error) {
-      const isWriteConflict =
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2034";
-      if (!isWriteConflict || attempt >= maxAttempts) {
+      if (!isWriteConflict(error) || attempt >= writeConflictMaxAttempts) {
         throw error;
       }
     }
+
+    // Back off with full jitter so the colliding writers spread out; an
+    // immediate retry lands them on the same rows again. The first retry
+    // waits up to 40 ms, the fifth and later up to 500 ms.
+    const ceiling = Math.min(writeConflictMaxDelayMs, writeConflictBaseDelayMs * 2 ** attempt);
+    await new Promise((resolve) => setTimeout(resolve, Math.random() * ceiling));
   }
 }
 
