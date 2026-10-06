@@ -15,6 +15,7 @@ const SHARED_SKILLS = [
   "text-videos",
   "text-creativity",
   "editing-taste",
+  "talking-head-videos",
 ] as const;
 
 const SKILLS: Record<string, string> = {

@@ -717,6 +717,7 @@ export const AI_SKILL_AREAS: Record<string, string[]> = {
   "ai-generation": ["stock", "image_gen", "video_gen", "timeline"],
   "scene-productions": ["scene"],
   "editing-taste": ["timeline", "transitions"],
+  "talking-head-videos": ["timeline", "preview", "top_bar", "subtitles", "audio", "removal", "inspector", "elements", "animation", "stock", "image_gen", "transitions"],
   "media-and-library": ["library", "side_panel", "timeline"],
   "replicating-a-project": [],
   "replicating-a-video": ["timeline", "elements", "animation", "inspector"],
