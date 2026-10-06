@@ -26,6 +26,7 @@ import {
   type WordEffectId,
 } from "@donkeycut/effects-kit";
 import type { CodeFormat, SourceProfile } from "@donkeycut/effects-kit";
+import type { CameraCard } from "./cameraCard";
 import { getBackend, type CutBackend } from "./backend";
 import type { VideoProject } from "./genvideo/types";
 
@@ -697,6 +698,19 @@ export interface VideoClip {
    * a backdrop filled in behind it (see the kit's removal.ts). Absent = the
    * whole picture shows. */
   removal?: ClipRemoval;
+  /** Split edit: seconds the clip's sound starts before its picture (a
+   * J-cut), drawn from the source ahead of `in`. Absent = the sound starts
+   * with the picture. */
+  audioLead?: number;
+  /** Seconds the clip's sound carries on past its picture's end (an L-cut),
+   * drawn from the source past `out`. Absent = it stops with the picture. */
+  audioTail?: number;
+  /** The camera-card layout (see cameraCard.ts): the picture shows through a
+   * rounded card along the bottom or one side of the clip's box, and with
+   * `popOut` the speaker's matted head shows above it. The card places the footage
+   * itself, so the clip's fit, zoom, pan and box style stand aside while it
+   * is on. Absent = the clip frames as usual. */
+  card?: CameraCard;
 }
 
 // Color grading (the dual-renderer math) lives in the effects kit; the model
@@ -1172,6 +1186,9 @@ export interface TemplateLayer {
   boxStyle?: BoxStyle;
   kf?: OverlayKey[];
   hidden?: boolean;
+  /** The camera-card layout, without its matte: the clip it stands up
+   * bakes its own. */
+  card?: CameraCard;
   track: number;
   /** Came from video track 0 — re-materializes as a timeline clip, not an
    * overlay, so a template stands up its own footage. */

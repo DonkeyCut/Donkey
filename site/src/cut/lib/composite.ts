@@ -20,6 +20,7 @@
  */
 
 import { applyDetail, applyLutToImageData, applyMaskToCanvas, detailActive, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
+import { cameraCardLayout, cardActive, traceCardPath, type CardLayout } from "./cameraCard";
 import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
 import { clipRecipe, peekClipLut, requestClipLut, type ClipLut, type RecipeSource } from "./lutBuild";
@@ -116,6 +117,27 @@ export class FrameCompositor {
   /** The pixel pass of the grade's spatial controls, when the GPU cannot
    * run it: a scratch the CPU reads and writes. */
   private detailScratch: Surface | null = null;
+  /** The camera card: the pop-out builds in `cardPop` (rows down to the
+   * band's fade), and a card drawn at partial alpha or under a look's post
+   * passes flattens in `cardLayer` first, with the post copy in `cardPost`. */
+  private cardPop: Surface | null = null;
+  private cardLayer: Surface | null = null;
+  private cardPost: Surface | null = null;
+  /** The fade under the card edge, rebuilt only when the band moves. */
+  private cardFade: { ctx: Ctx; edge: number; bottom: number; fill: CanvasGradient } | null = null;
+  /** The card shadow's ink, rebuilt only when its opacity changes. */
+  private cardInk: { opacity: number; ink: string } | null = null;
+
+  /** Canvas px per design px for the card's lengths. Absent, the canvas's
+   * own short side sets it; the export's piece renderer draws one clip's box
+   * on a canvas of that box's size and names the frame's scale here. */
+  designScale: number | null = null;
+
+  /** Where a camera card's person matte comes from: the clip's baked matte
+   * at `at` timeline seconds as alpha coverage over its source frame, like
+   * `removalMatteProvider`. Null until the bake lands; the card draws
+   * without its pop-out until then. */
+  cardMatteProvider: ((clip: VideoClip, at: number) => CanvasImageSource | null) | null = null;
 
   /** What a clip's code values mean — its source profile, and whatever the
    * decode route adds — so the compositor can build the clip's color recipe.
@@ -641,7 +663,8 @@ export class FrameCompositor {
     return (
       !!clip &&
       (clipPosed(clip) ||
-        !!clip.boxStyle?.shadow ||
+        // A camera card casts its own shadow; the box style stands aside.
+        (!!clip.boxStyle?.shadow && !cardActive(clip)) ||
         !!(clip.mask && (clip.mask.kind !== "subject" || this.subjectMatteProvider)))
     );
   }
@@ -749,7 +772,7 @@ export class FrameCompositor {
       ctx.save();
       ctx.translate(Math.round(fx.dx ?? 0), Math.round(fx.dy ?? 0));
     }
-    const shade = this.shadowOf(out, clip.boxStyle?.shadow);
+    const shade = cardActive(clip) ? null : this.shadowOf(out, clip.boxStyle?.shadow);
     if (shade) ctx.drawImage(shade, 0, 0);
     ctx.drawImage(out, 0, 0);
     if (hasFx) ctx.restore();
@@ -804,6 +827,10 @@ export class FrameCompositor {
       this.drawFx(clip!, at, undefined, (plain) =>
         this.drawIntoRect(frame, rect, fill, alpha, at, zoom, plain)
       );
+      return;
+    }
+    if (clip && cardActive(clip)) {
+      this.drawCard(frame, rect, alpha, at, zoom, clip);
       return;
     }
     const ctx = this.ctx();
@@ -872,6 +899,213 @@ export class FrameCompositor {
   }
 
   /**
+   * Draw a camera-card clip into its box (see cameraCard.ts): the card's
+   * shadow, the picture through the card, and the matted head above the
+   * card's top edge, all from the one frame. A transition's zoom scales the
+   * whole layout about the box center inside the box, the way the export's
+   * engine zooms the card's rendered layer.
+   */
+  private drawCard(
+    frame: Extract<Frame, { kind: "ready" }>,
+    rect: FrameRect,
+    alpha: number,
+    at: number,
+    zoom: number,
+    clip: VideoClip
+  ) {
+    const ctx = this.ctx();
+    const card = clip.card;
+    if (!ctx || !card || alpha <= 0) return;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const ds = this.designScale ?? Math.min(W, H) / 1080;
+    const box = { x: rect.x * W, y: rect.y * H, w: rect.w * W, h: rect.h * H };
+    const L = cameraCardLayout(card, box, frame.width, frame.height, ds);
+    const src = this.removedSource(frame, clip, at);
+    // The matte is asked for only when the layout shows the head.
+    const matte = card.popOut ? (this.cardMatteProvider?.(clip, at) ?? null) : null;
+    const post = !!lookPost(clip.look, clip.lookAmount);
+    const a = Math.min(1, alpha);
+    if (a >= 0.999 && !post) {
+      this.paintCardShadow(ctx, L, box, zoom, card.shadow);
+      this.paintCardBody(ctx, L, box, zoom, src, matte, clip);
+      return;
+    }
+    // Flatten first: a fading card fades as one layer, the head over the
+    // card included, and a look's post passes stay inside what it shows.
+    const { surface: layer } = this.scratch("cardLayer", W, H);
+    const lctx = layer.getContext("2d") as Ctx | null;
+    if (!lctx) return;
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+    lctx.globalAlpha = 1;
+    lctx.globalCompositeOperation = "source-over";
+    lctx.clearRect(0, 0, W, H);
+    this.paintCardBody(lctx, L, box, zoom, src, matte, clip);
+    if (post) {
+      const { surface: copy } = this.scratch("cardPost", W, H);
+      const pctx = copy.getContext("2d") as Ctx | null;
+      if (pctx) {
+        pctx.setTransform(1, 0, 0, 1, 0, 0);
+        pctx.globalAlpha = 1;
+        pctx.globalCompositeOperation = "source-over";
+        pctx.clearRect(0, 0, W, H);
+        pctx.drawImage(layer, 0, 0);
+        this.applyLookPost(clip, box.x, box.y, box.w, box.h, 1, at, { canvas: copy, ctx: pctx });
+        lctx.globalCompositeOperation = "source-atop";
+        lctx.drawImage(copy, 0, 0);
+      }
+    }
+    // The shadow goes in under the finished picture.
+    lctx.globalCompositeOperation = "destination-over";
+    this.paintCardShadow(lctx, L, box, zoom, card.shadow);
+    lctx.globalCompositeOperation = "source-over";
+    const prev = ctx.globalAlpha;
+    ctx.globalAlpha = a;
+    ctx.drawImage(layer, 0, 0);
+    ctx.globalAlpha = prev;
+  }
+
+  /** Clip `c` to the box and scale the layout by `zoom` about its center. */
+  private enterCardBox(c: Ctx, box: { x: number; y: number; w: number; h: number }, zoom: number) {
+    c.beginPath();
+    c.rect(box.x, box.y, box.w, box.h);
+    c.clip();
+    if (zoom > 0 && Math.abs(zoom - 1) > 1e-4) {
+      const cx = box.x + box.w / 2;
+      const cy = box.y + box.h / 2;
+      c.translate(cx, cy);
+      c.scale(zoom, zoom);
+      c.translate(-cx, -cy);
+    }
+  }
+
+  /** The card's soft shadow, outside the card only: the card's own fill is
+   * clipped away and its shadow stays. */
+  private paintCardShadow(
+    c: Ctx,
+    L: CardLayout,
+    box: { x: number; y: number; w: number; h: number },
+    zoom: number,
+    opacity: number
+  ) {
+    if (!(opacity > 0) || !(L.shadowBlur > 0)) return;
+    let ink = this.cardInk;
+    if (!ink || ink.opacity !== opacity) {
+      ink = { opacity, ink: `rgba(0,0,0,${Math.min(1, opacity).toFixed(3)})` };
+      this.cardInk = ink;
+    }
+    const reach = 2 * L.shadowBlur;
+    c.save();
+    this.enterCardBox(c, box, zoom);
+    c.beginPath();
+    c.rect(L.card.x - reach, L.card.y - reach, L.card.w + 2 * reach, L.card.h + 2 * reach);
+    traceCardPath(c, L.card, L.radius);
+    c.clip("evenodd");
+    // A canvas shadow ignores the transform, so the blur follows the zoom
+    // by hand.
+    c.shadowColor = ink.ink;
+    c.shadowBlur = L.shadowBlur * (zoom > 0 ? zoom : 1);
+    c.shadowOffsetX = 0;
+    c.shadowOffsetY = 0;
+    c.fillStyle = "#000000";
+    c.beginPath();
+    traceCardPath(c, L.card, L.radius);
+    c.fill();
+    c.restore();
+  }
+
+  /** The picture through the card, then the head above it. */
+  private paintCardBody(
+    c: Ctx,
+    L: CardLayout,
+    box: { x: number; y: number; w: number; h: number },
+    zoom: number,
+    src: CanvasImageSource,
+    matte: CanvasImageSource | null,
+    clip: VideoClip
+  ) {
+    c.save();
+    this.enterCardBox(c, box, zoom);
+    c.save();
+    c.beginPath();
+    traceCardPath(c, L.card, L.radius);
+    c.clip();
+    this.drawCardPicture(c, src, L.picture, clip);
+    c.restore();
+    const pop = matte ? this.cardPopOut(L, src, matte, clip) : null;
+    if (pop) c.drawImage(pop, 0, 0);
+    c.restore();
+  }
+
+  /** The footage at its card placement, mirrored about its own center. */
+  private drawCardPicture(
+    c: Ctx,
+    img: CanvasImageSource,
+    P: { x: number; y: number; w: number; h: number },
+    clip: VideoClip
+  ) {
+    if (clip.flipH || clip.flipV) {
+      c.save();
+      c.translate(P.x + P.w / 2, P.y + P.h / 2);
+      c.scale(clip.flipH ? -1 : 1, clip.flipV ? -1 : 1);
+      c.drawImage(img, -P.w / 2, -P.h / 2, P.w, P.h);
+      c.restore();
+    } else {
+      c.drawImage(img, P.x, P.y, P.w, P.h);
+    }
+  }
+
+  /**
+   * The head above the card: the picture again, multiplied by the person
+   * matte drawn through the same placement, kept over the card's columns
+   * from the box top down to the card's top edge and faded out over the
+   * feather below it. Built on
+   * the rows the band reaches; null when the band has no rows on the canvas.
+   */
+  private cardPopOut(
+    L: CardLayout,
+    src: CanvasImageSource,
+    matte: CanvasImageSource,
+    clip: VideoClip
+  ): Surface | null {
+    const W = this.canvas.width;
+    const rows = Math.min(this.canvas.height, Math.ceil(L.band.bottom));
+    const top = Math.max(0, Math.floor(L.band.top));
+    if (rows <= top || L.band.edge <= L.band.top) return null;
+    const { surface: pop } = this.scratch("cardPop", W, rows);
+    const p = pop.getContext("2d") as Ctx | null;
+    if (!p) return null;
+    p.setTransform(1, 0, 0, 1, 0, 0);
+    p.globalAlpha = 1;
+    p.globalCompositeOperation = "source-over";
+    p.clearRect(0, 0, W, rows);
+    p.save();
+    p.beginPath();
+    p.rect(L.band.left, top, L.band.right - L.band.left, rows - top);
+    p.clip();
+    this.drawCardPicture(p, src, L.picture, clip);
+    p.globalCompositeOperation = "destination-in";
+    p.imageSmoothingEnabled = true;
+    this.drawCardPicture(p, matte, L.picture, clip);
+    p.restore();
+    if (L.band.bottom > L.band.edge) {
+      let fade = this.cardFade;
+      if (!fade || fade.ctx !== p || fade.edge !== L.band.edge || fade.bottom !== L.band.bottom) {
+        const fill = p.createLinearGradient(0, L.band.edge, 0, L.band.bottom);
+        fill.addColorStop(0, "rgba(0,0,0,0)");
+        fill.addColorStop(1, "rgba(0,0,0,1)");
+        fade = { ctx: p, edge: L.band.edge, bottom: L.band.bottom, fill };
+        this.cardFade = fade;
+      }
+      p.globalCompositeOperation = "destination-out";
+      p.fillStyle = fade.fill;
+      p.fillRect(L.band.left, L.band.edge, L.band.right - L.band.left, L.band.bottom - L.band.edge);
+      p.globalCompositeOperation = "source-over";
+    }
+    return pop;
+  }
+
+  /**
    * Draw one clip's layer over the frame, honouring its region, fit, pan, zoom,
    * alpha and any frame motion a transition puts on it.
    *
@@ -929,7 +1163,7 @@ export class FrameCompositor {
     // styled box (rounded corners, border) or a mirrored picture also routes
     // through the rect path, which knows how to draw those at full frame too.
     const rect = rectOf(clip ?? {});
-    if (!isFullRect(rect) || clip?.boxStyle || clip?.flipH || clip?.flipV) {
+    if (!isFullRect(rect) || clip?.boxStyle || clip?.flipH || clip?.flipV || (clip && cardActive(clip))) {
       this.drawIntoRect(frame, rect, !!clip && clipCovers(clip), alpha, at, zoom, clip);
       if (hasFx) ctx.restore();
       return;

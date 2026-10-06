@@ -20,10 +20,13 @@ import { exportsDir, projectDir, writeFileAt, readFileAt, saveExport } from "./b
 import { holdRegistered, registerBlobFile, releaseRegistered, resolveRegisteredBlob } from "./backend/browser/registry";
 import { captureCloudBackend } from "./backend/cloud";
 import { downloadFile, downloadFromUrl } from "./download";
-import { bitrateFor, canRenderInBrowser, renderProjectToMp4, type SourceExportProfile } from "./exportRender";
+import { bitrateFor, canRenderInBrowser, renderProjectToMp4, renderStemsArchive, type RenderedExport, type SourceExportProfile } from "./exportRender";
+import { planStems, type StemDef } from "./stems";
 import { putSigned } from "./media";
 import { withAssetColors } from "./mediaRead";
 import { renderRemovalPieces } from "./removalVideo";
+import { cardActive } from "./cameraCard";
+import { renderCardPieces } from "./cameraCardVideo";
 import { drawBlock } from "./blockSource";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipLen, clipSpeed, getClipSpans, openedTimeline, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
@@ -815,6 +818,26 @@ export function specColor(
   return { profile: asset.colorProfile ?? c.detected, matrix: c.matrix, fullRange: c.fullRange };
 }
 
+/** A camera card draws its own corners and shadow, so its clip's box style
+ * stands aside in every painted picture (mask corners, border, shadow). */
+const cardBoxless = (c: VideoClip): VideoClip => (cardActive(c) && c.boxStyle ? { ...c, boxStyle: undefined } : c);
+
+/** The spec fields of a camera-card clip whose layer ships as `<tag>`
+ * pieces: the pair stands in for the source, already framed to the box,
+ * graded, looked and mirrored, so the engine frames it 1:1 and applies none
+ * of those again. */
+const cardEntry = (tag: string) => ({
+  removal: { rgb: `${tag}_rgb.mp4`, alpha: `${tag}_a.mp4` },
+  grade: undefined,
+  look: undefined,
+  fit: "fill" as const,
+  zoom: 1,
+  panX: 0,
+  panY: 0,
+  flipH: undefined,
+  flipV: undefined,
+});
+
 /** Build the export spec + overlay PNGs from the cut. Media already lives in
  * the project folder — the spec references it by file name; only overlay PNGs
  * travel with the request. Shared by full exports and the low-res hover proxy. */
@@ -1007,7 +1030,20 @@ export async function buildExportPayload(
     // matte yet — the export shows the plain picture, like the preview); a
     // broken render throws and fails the export instead of silently dropping
     // the cutout.
-    if (removalActive(c.removal) && !c.hidden) {
+    if (cardActive(c) && !c.hidden) {
+      const rp = regionPx(c.frame, settings.width, settings.height);
+      const pieces = await renderCardPieces(spans[i].asset, spans[i].clip, doc.assets, {
+        fps: settings.fps,
+        frameW: settings.width,
+        frameH: settings.height,
+        box: rp ? { w: rp.rw, h: rp.rh } : { w: settings.width, h: settings.height },
+      });
+      if (pieces) {
+        pngs.push({ name: `card_c${i}_rgb.mp4`, blob: pieces.rgb });
+        pngs.push({ name: `card_c${i}_a.mp4`, blob: pieces.alpha });
+        Object.assign(clipEntries[i], cardEntry(`card_c${i}`));
+      }
+    } else if (removalActive(c.removal) && !c.hidden) {
       const pieces = await renderRemovalPieces(spans[i].asset, spans[i].clip, doc.assets, {
         fps: settings.fps,
         maxShort: Math.min(
@@ -1203,7 +1239,19 @@ export async function buildExportPayload(
     // applies no grade or look to it — both bake into the pieces here, the
     // way image overlays already carry their pixels ready-made.
     const oAsset = assetById.get(c.assetId);
-    if (removalActive(c.removal) && oAsset) {
+    if (cardActive(c) && oAsset) {
+      const pieces = await renderCardPieces(oAsset, c, doc.assets, {
+        fps: settings.fps,
+        frameW: settings.width,
+        frameH: settings.height,
+        box: { w: box.w, h: box.h },
+      });
+      if (pieces) {
+        pngs.push({ name: `card_ov${i}_rgb.mp4`, blob: pieces.rgb });
+        pngs.push({ name: `card_ov${i}_a.mp4`, blob: pieces.alpha });
+        Object.assign(entry, cardEntry(`card_ov${i}`));
+      }
+    } else if (removalActive(c.removal) && oAsset) {
       const pieces = await renderRemovalPieces(oAsset, c, doc.assets, {
         fps: settings.fps,
         maxShort: Math.min(

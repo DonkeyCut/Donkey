@@ -39,6 +39,7 @@ import {
 import { registerSourceColor, registerSourceSampler } from "@/cut/lib/previewCanvas";
 import { colorRead, previewFile, type ColorRead } from "@/cut/lib/sourceColor";
 import { backdropStill } from "@/cut/lib/backdropStills";
+import { cardMatteKey } from "@/cut/lib/cameraCard";
 import { createRasterCanvas, type RasterSurface } from "@/cut/lib/raster";
 import { disposeDetailGpu } from "@/cut/lib/detailGpu";
 
@@ -284,7 +285,8 @@ class Engine {
     private presentCanvas: HTMLCanvasElement | null
   ) {
     this.comp = new FrameCompositor(canvas);
-    this.comp.removalMatteProvider = (clip, at) => this.matteFor(clip, at);
+    this.comp.removalMatteProvider = (clip, at) => this.matteFor(clip.id, clip.removal?.matte, clip, at);
+    this.comp.cardMatteProvider = (clip, at) => this.matteFor(cardMatteKey(clip.id), clip.card?.matte, clip, at);
     // A clip's color recipe describes the frames its source hands over — the
     // file that source reads, read the way it reads it; a LUT built off the
     // thread repaints when it lands.
@@ -509,12 +511,17 @@ class Engine {
   }
 
   /**
-   * The alpha matte for a removal clip at timeline time `t`: the baked matte
-   * video read like any other source, its luma turned into alpha. Null while
-   * nothing has decoded yet — the picture draws plain until the matte lands.
+   * The alpha matte `m` — a removal clip's, or a camera card's — at timeline
+   * time `t`: the baked matte video read like any other source, its luma
+   * turned into alpha and held under `key`. Null while nothing has decoded
+   * yet — the picture draws plain until the matte lands.
    */
-  private matteFor(clip: VideoClip, at: number): CanvasImageSource | null {
-    const m = clip.removal?.matte;
+  private matteFor(
+    key: string,
+    m: { assetId: string; in: number } | undefined,
+    clip: VideoClip,
+    at: number
+  ): CanvasImageSource | null {
     if (!m) return null;
     const s = useEditor.getState();
     const asset = s.assets.find((a) => a.id === m.assetId);
@@ -538,12 +545,12 @@ class Engine {
     );
     const frame = src.frameAt(mt, 0, dur);
     if (!frame) return null;
-    const held = this.matteAlpha.get(clip.id);
+    const held = this.matteAlpha.get(key);
     // Re-insert on every touch so the cap below drops the clip drawn longest
     // ago.
-    this.matteAlpha.delete(clip.id);
+    this.matteAlpha.delete(key);
     if (held && held.ts === frame.timestamp) {
-      this.matteAlpha.set(clip.id, held);
+      this.matteAlpha.set(key, held);
       return held.canvas as CanvasImageSource;
     }
     const canvas = held?.canvas ?? createRasterCanvas(frame.width, frame.height);
@@ -556,7 +563,7 @@ class Engine {
     const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
     matteLumaToAlpha(img.data);
     ctx.putImageData(img, 0, 0);
-    this.matteAlpha.set(clip.id, { ts: frame.timestamp, canvas });
+    this.matteAlpha.set(key, { ts: frame.timestamp, canvas });
     if (this.matteAlpha.size > Engine.MATTE_ALPHA_MAX) {
       const oldest = this.matteAlpha.keys().next().value;
       if (oldest !== undefined) this.matteAlpha.delete(oldest);
@@ -722,51 +729,50 @@ class Engine {
    * The same ramps that dim the picture dim the sound: a clip fading out of a
    * dissolve takes its audio with it, an upper-track clip's transition carries
    * its own, and a live voiceover ducks the rest. A cross dissolve is the
-   * ramp on its own — the picture cuts and only these gains move — and it is
-   * the one thing here that makes a clip audible outside its own footprint,
-   * so both sides of the crossing are really playing at once.
+   * ramp on its own — the picture cuts and only these gains move. It and a
+   * split edit are what make a clip audible outside its own footprint, so
+   * both sides of a crossing really play at once.
    */
   private voicesAt(t: number, spans: ClipSpan[], master: ClipSpan | undefined): Voice[] {
     const s = useEditor.getState();
     const out: Voice[] = [];
     const duck = duckGainAt(s.audioClips, t);
-    if (master && !master.clip.muted && !master.clip.hidden && !assetIsSilent(master.asset)) {
+    if (master && !master.clip.muted && !master.clip.hidden && !spanSilent(master)) {
       const plan = trackZeroPlan(master, spans, t);
-      out.push({
-        id: master.clip.id,
-        ...voiceSpan(master),
-        gain: plan.gain * soundCrossGain(spans, master, t) * duck * (master.clip.volume ?? 1),
-      });
+      const v = voiceSpan(master);
+      if (v)
+        out.push({
+          id: master.clip.id,
+          ...v,
+          gain: plan.gain * soundCrossGain(spans, master, t) * duck * (master.clip.volume ?? 1),
+        });
     }
-    // The other half of a crossing: a neighbour playing into its handle, past
-    // its own footprint, carried by the cross ramp alone.
+    // The other half of a crossing, and a split edit's lead or tail: a clip
+    // playing into its handle, past its own footprint, carried by the cross
+    // and split ramps alone.
     for (const spans0 of [spans, ...this.overlaySpans()]) {
       for (const { span, gain } of crossHandles(spans0, t)) {
-        if (assetIsSilent(span.asset)) continue;
+        if (spanSilent(span)) continue;
         // The clip's own id, not a second voice: the handle is the same voice
         // carrying on past the cut, and a new id would stop and re-open it
         // there — a decode gap in the middle of the crossing.
-        out.push({
-          id: span.clip.id,
-          ...voiceSpan(span),
-          gain: gain * (span.clip.volume ?? 1) * duck,
-        });
+        const v = voiceSpan(span);
+        if (v) out.push({ id: span.clip.id, ...v, gain: gain * (span.clip.volume ?? 1) * duck });
       }
     }
-    for (const { span, clip, asset, gain } of this.liveOverlays(t)) {
-      if (clip.muted || clip.hidden || assetIsSilent(asset)) continue;
-      out.push({
-        id: clip.id,
-        ...voiceSpan(span),
-        gain: gain * (clip.volume ?? 1) * duck,
-      });
+    for (const { span, clip, gain } of this.liveOverlays(t)) {
+      if (clip.muted || clip.hidden || spanSilent(span)) continue;
+      const v = voiceSpan(span);
+      if (v) out.push({ id: clip.id, ...v, gain: gain * (clip.volume ?? 1) * duck });
     }
     for (const a of s.audioClips) {
       const asset = s.assets.find((x) => x.id === a.assetId);
-      if (!asset || a.hidden || assetIsSilent(asset)) continue;
+      if (!asset || a.hidden) continue;
       const rt = retimeOf(a);
       const len = Math.max(0.1, rt.len);
       if (t < a.start || t >= a.start + len) continue;
+      const v = audioVoice(a, asset, s.assets);
+      if (!v || (v.url === asset.url && assetIsSilent(asset))) continue;
       // Fade envelope: linear ramps at either end of the clip.
       const rel = t - a.start;
       const fi = a.fadeIn ?? 0;
@@ -776,16 +782,7 @@ class Engine {
       if (fo > 0 && rel > len - fo) g *= Math.max(0, (len - rel) / fo);
       // A ducking voiceover never ducks itself, or the others that duck.
       const dg = a.duck !== undefined && a.duck < 1 ? 1 : duck;
-      out.push({
-        id: a.id,
-        url: asset.url,
-        start: a.start,
-        in: a.in,
-        out: a.out,
-        retime: rt,
-        gain: a.volume * g * dg,
-        sound: a.sound,
-      });
+      out.push({ id: a.id, ...v, gain: a.volume * g * dg, sound: a.sound });
     }
     this.upcomingVoices(t, spans, duck, out);
     return out;
@@ -795,7 +792,9 @@ class Engine {
    * The clips that begin within `SOUND_LOOKAHEAD_S` of `t`, added to `out` so
    * the mixer opens them before the playhead arrives. Each carries the gain it
    * will have on its first frame; the frames inside the clip take over from
-   * there. A clip already voiced — the far side of a crossing — is left as it is.
+   * there. A clip's sound opens from where it first plays, its handle or split
+   * edit lead included. A clip already voiced — the far side of a crossing —
+   * is left as it is.
    */
   private upcomingVoices(t: number, spans: ClipSpan[], duck: number, out: Voice[]) {
     const s = useEditor.getState();
@@ -803,31 +802,22 @@ class Engine {
     const soon = (start: number) => start > t && start <= t + SOUND_LOOKAHEAD_S;
     for (const spans0 of [spans, ...this.overlaySpans()]) {
       for (const span of spans0) {
-        if (!soon(span.start) || have.has(span.clip.id)) continue;
-        if (span.clip.muted || span.clip.hidden || assetIsSilent(span.asset)) continue;
+        if (!soon(span.start - span.soundBack) || have.has(span.clip.id)) continue;
+        if (span.clip.muted || span.clip.hidden || spanSilent(span)) continue;
+        const v = voiceSpan(span);
+        if (!v) continue;
         have.add(span.clip.id);
-        out.push({
-          id: span.clip.id,
-          ...voiceSpan(span),
-          gain: (span.clip.volume ?? 1) * duck,
-        });
+        out.push({ id: span.clip.id, ...v, gain: span.soundLead ? 0 : (span.clip.volume ?? 1) * duck });
       }
     }
     for (const a of s.audioClips) {
       if (!soon(a.start) || have.has(a.id) || a.hidden) continue;
       const asset = s.assets.find((x) => x.id === a.assetId);
-      if (!asset || assetIsSilent(asset)) continue;
+      if (!asset) continue;
+      const v = audioVoice(a, asset, s.assets);
+      if (!v || (v.url === asset.url && assetIsSilent(asset))) continue;
       const dg = a.duck !== undefined && a.duck < 1 ? 1 : duck;
-      out.push({
-        id: a.id,
-        url: asset.url,
-        start: a.start,
-        in: a.in,
-        out: a.out,
-        retime: retimeOf(a),
-        gain: (a.fadeIn ?? 0) > 0 ? 0 : a.volume * dg,
-        sound: a.sound,
-      });
+      out.push({ id: a.id, ...v, gain: (a.fadeIn ?? 0) > 0 ? 0 : a.volume * dg, sound: a.sound });
     }
   }
 

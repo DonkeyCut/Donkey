@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { GRADE_BASIC_FIELDS, GRADE_DETAIL_FIELDS, WHEEL_LABELS, WHEEL_ZONES } from "@donkeycut/effects-kit";
 import { OVERLAY_ANIMATION_TOOLS } from "./AnimationTiles.tools";
+import { CAMERA_CARD_TOOLS } from "./CameraCardSection.tools";
 import { EFFECTS_TOOLS } from "./EffectsPanel.tools";
+import { GROUP_PANEL_TOOLS } from "./GroupPanel.tools";
 import { INSPECTOR_TOOLS } from "./Inspector.tools";
+import { SUBTITLES_TOOLS } from "./SubtitlesPanel.tools";
 import { TIMELINE_TOOLS } from "./Timeline.tools";
 import { TRANSITIONS_TOOLS } from "./TransitionsPanel.tools";
 
@@ -61,8 +64,11 @@ const PANEL_SOURCES = [
   "ColorWheel.tsx",
   "SpeedCurveStrip.tsx",
   "RemovalPanel.tsx",
+  "CameraCardSection.tsx",
   "AnimationTiles.tsx",
   "TransitionsPanel.tsx",
+  "GroupPanel.tsx",
+  "MotionControls.tsx",
 ];
 
 /** Parameters that say which item, or where it sits on the timeline — the
@@ -71,7 +77,7 @@ const PLACEMENT = new Set([
   "id", "ids", "clipId", "transitionId", "which", "kind", "effect",
   "start", "end", "in", "out", "at", "t", "track", "lane", "layout",
   "region", "region.x", "region.y", "region.w", "region.h",
-  "clear", "reset", "reset_all", "auto", "assetId",
+  "clear", "reset", "reset_all", "auto", "assetId", "group_id",
 ]);
 
 /** A parameter whose panel control reads the document under another name:

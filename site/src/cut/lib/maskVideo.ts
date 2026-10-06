@@ -1,6 +1,6 @@
 "use client";
 
-import { retimeOf } from "@donkeycut/effects-kit";
+import { removalActive, retimeOf } from "@donkeycut/effects-kit";
 
 /**
  * The person-matte video for the ffmpeg export path. The page — the only
@@ -30,8 +30,10 @@ import { ClipReader, renderFile, settleRenderColor, WORKING_VIDEO_CODECS } from 
 import type { ExportDoc } from "./renderSnapshot";
 import { createRasterCanvas } from "./raster";
 import { getClipSpans } from "./store";
-import { clipCovers, frameOf, isEffectOverlay, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset } from "./types";
+import { clipCovers, frameOf, isEffectOverlay, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset, type VideoClip } from "./types";
 import { liveReader } from "./liveReader";
+import { cardMatteKey } from "./cameraCard";
+import { matteStage } from "./cameraCardVideo";
 
 /** Encoded mask rate — the server's fps filter duplicates frames up to the
  * output rate, and a person moves little in 1/15s. */
@@ -111,6 +113,20 @@ export async function renderSubjectMask(
     if (!r) readers.set(asset.id, (r = liveReader(asset)));
     return r;
   };
+  // Baked mattes ride along: a cutout keys its clip and a card pops its head
+  // out above the card, so the segmenter sees the picture the preview draws.
+  // Each matte is staged once per mask frame, before its clip draws.
+  const mattes = new Map<string, ReturnType<typeof matteStage>>();
+  const stageFor = (key: string, m: Parameters<typeof matteStage>[0]) => {
+    if (!mattes.has(key)) mattes.set(key, matteStage(m, doc.assets));
+    return mattes.get(key) ?? null;
+  };
+  const stageMattes = async (clip: VideoClip, srcT: number) => {
+    if (removalActive(clip.removal)) await stageFor(clip.id, clip.removal?.matte)?.stage(srcT);
+    if (clip.card?.popOut) await stageFor(cardMatteKey(clip.id), clip.card.matte)?.stage(srcT);
+  };
+  comp.removalMatteProvider = (clip) => mattes.get(clip.id)?.get() ?? null;
+  comp.cardMatteProvider = (clip) => mattes.get(cardMatteKey(clip.id))?.get() ?? null;
 
   const output = new Output({ format: new Mp4OutputFormat(), target: new BufferTarget() });
   const video = new CanvasSource(mask, { codec, quality: new Quality({ bitrate: 1_000_000 }) });
@@ -130,9 +146,11 @@ export async function renderSubjectMask(
         const plan = trackZeroPlan(master, spans, t);
         if (plan.backdrop && !subjectClip(plan.backdrop.span.clip)) {
           const f = await readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at);
+          await stageMattes(plan.backdrop.span.clip, plan.backdrop.at);
           comp.drawLayer(f, plan.backdrop.span.clip, false, 1, t);
         }
         const f = await readerFor(master.asset).frameAt(sourceTimeAt(master, t));
+        await stageMattes(master.clip, sourceTimeAt(master, t));
         comp.drawLayer(f ?? MISSING_FRAME, master.clip, false, 1, t);
       }
       for (const layer of overlayPlan(overlayTracks, (track) => byTrack.get(track) ?? [], t)) {
@@ -140,6 +158,7 @@ export async function renderSubjectMask(
         const span = spanOfClip.get(layer.clip.id);
         if (!span) continue;
         const f = await readerFor(layer.asset).frameAt(sourceTimeAt(span, t));
+        await stageMattes(layer.clip, sourceTimeAt(span, t));
         comp.drawIntoRect(f, rectOf(layer.clip), clipCovers(layer.clip), layer.alpha, t, layer.zoom, layer.clip);
       }
       // Luma mask: black frame, the subject's alpha silhouette drawn white.
@@ -159,5 +178,6 @@ export async function renderSubjectMask(
     return null;
   } finally {
     for (const r of readers.values()) r.dispose();
+    for (const m of mattes.values()) m?.dispose();
   }
 }

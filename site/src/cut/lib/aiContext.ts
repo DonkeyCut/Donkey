@@ -90,6 +90,60 @@ function clipEffects(clip: VideoClip, live: boolean, frame?: CardFrame) {
     ...color,
     ...(clip.boxStyle ? { boxStyle: clip.boxStyle } : {}),
     ...describeRemoval(clip, live),
+    ...(clip.card ? { card: describeCameraCard(clip, live, frame) } : {}),
+  };
+}
+
+/** What a camera card's defaults read: the frame shape and the clip's
+ * source. */
+export interface CardFrame {
+  aspect: Aspect;
+  assetById: Map<string, MediaAsset>;
+}
+
+/** The clip's camera-card layout as set_camera_card speaks it — the side,
+ * top and width it shows at, with `auto` naming the ones that follow the
+ * frame shape and the source — with the head's person matte: "ready", a live bake's progress or error, "off" when
+ * the card hides the head, or owed until the editor bakes it — what a claim
+ * about the head showing must rest on. */
+export function describeCameraCard(clip: VideoClip, live: boolean, frame?: CardFrame) {
+  const c = clip.card;
+  if (!c) return null;
+  const fr = frameOf(frame?.aspect ?? "9:16");
+  const rect = rectOf(clip);
+  const asset = frame?.assetById.get(clip.assetId);
+  const shape = resolveCardShape(c, rect.w * fr.w, rect.h * fr.h, asset?.width ?? 0, asset?.height ?? 0);
+  const auto = [
+    ...(c.side === undefined ? ["side"] : []),
+    ...(c.top === undefined ? ["top"] : []),
+    ...(shape.side !== "bottom" && c.width === undefined ? ["width"] : []),
+  ];
+  const job = live ? useMatteBakes.getState().jobs[cardMatteKey(clip.id)] : undefined;
+  const matte = !c.popOut
+    ? "off"
+    : c.matte
+      ? "ready"
+      : job?.status === "running"
+        ? `baking (${Math.round(job.progress * 100)}%)`
+        : job?.status === "error"
+          ? `error: ${job.error ?? "failed"}`
+          : live && matteBakesAvailable
+            ? "starting"
+            : "owed: bakes when the project is open in the editor";
+  return {
+    side: shape.side,
+    top: r(shape.top),
+    ...(shape.side !== "bottom" ? { width: r(shape.width) } : {}),
+    ...(auto.length ? { auto } : {}),
+    radius: c.radius,
+    side_bleed: c.sideBleed,
+    pop_out: c.popOut,
+    feather: c.feather,
+    shadow: r(c.shadow),
+    ...(c.scale !== undefined ? { scale: r(c.scale) } : {}),
+    ...(c.offsetX !== undefined ? { offset_x: r(c.offsetX) } : {}),
+    ...(c.offsetY !== undefined ? { offset_y: r(c.offsetY) } : {}),
+    matte,
   };
 }
 

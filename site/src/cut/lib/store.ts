@@ -145,6 +145,7 @@ const clipTreatment = (c: VideoClip) => ({
   ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),
   ...(c.kf?.length ? { kf: c.kf } : {}),
   ...(c.hidden ? { hidden: true } : {}),
+  ...(c.card ? { card: { ...c.card, matte: undefined } } : {}),
 });
 
 /** One clip as a template layer, timed from the template's start. A track-0
@@ -183,6 +184,7 @@ const templateTreatment = (l: TemplateLayer) => ({
   ...(l.boxStyle ? { boxStyle: l.boxStyle } : {}),
   ...(l.kf?.length ? { kf: l.kf } : {}),
   ...(l.hidden ? { hidden: true } : {}),
+  ...(l.card ? { card: { ...l.card, matte: undefined } } : {}),
 });
 
 const MIN_LEN = 0.1;
@@ -2877,6 +2879,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
                 // subject matte is computed from whatever plays, so it stays.
                 ...(clip.mask && clip.mask.kind !== "subject" ? { mask: undefined } : {}),
                 removal: undefined,
+                // The card's layout stays; its matte belongs to the old
+                // picture, and the new one bakes its own.
+                ...(clip.card ? { card: { ...clip.card, matte: undefined } } : {}),
               }
             : c
         ),

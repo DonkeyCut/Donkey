@@ -123,13 +123,16 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
             },
           }
         : {}),
+      ...(c.card?.matte?.assetId ? { card: { ...c.card, matte: { ...c.card.matte, assetId: to(c.card.matte.assetId) } } } : {}),
     }),
     // A background removal's matte was baked from this project's footage,
     // and a clip arriving with a removal and no matte would start a fresh
-    // bake on its own.
+    // bake on its own. A camera card keeps its layout and bakes its own
+    // person matte where it lands.
     crossProject: (c) => {
       const out = { ...c };
       delete out.removal;
+      if (out.card) out.card = { ...out.card, matte: undefined };
       return out;
     },
   },

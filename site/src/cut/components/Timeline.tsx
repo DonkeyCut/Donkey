@@ -63,6 +63,7 @@ import type { VideoTrackPlacement } from "@/cut/lib/store";
 import { playheadAt, setSkim, skimAt, subscribePlayhead, usePlayhead, useSkim } from "@/cut/lib/playhead";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
+import { cardMatteKey } from "@/cut/lib/cameraCard";
 import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";

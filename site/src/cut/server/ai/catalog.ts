@@ -27,17 +27,19 @@ import {
   MAX_WORDS_PER_CUE,
   MIN_WORDS_PER_CUE,
 } from "@/cut/lib/cueChunk";
-import { CAPTION_STYLES } from "@/cut/lib/subtitles";
+import { CAPTION_EMPHASIS_DEFAULT, CAPTION_STYLES } from "@/cut/lib/subtitles";
 import { OUTPUT_SPACES, SOUND_PRESETS, wordEffectCatalog, WORD_EFFECT_IDS } from "@donkeycut/effects-kit";
 import { textMoveCatalog } from "@/cut/lib/textMotion";
 import { OVERLAY_ANIMATION_TOOLS } from "@/cut/components/AnimationTiles.tools";
 import { AUDIO_TOOLS } from "@/cut/components/AudioPanel.tools";
+import { CAMERA_CARD_TOOLS } from "@/cut/components/CameraCardSection.tools";
 import { EDITOR_TOOLS } from "@/cut/components/Editor.tools";
 import { EFFECT_TREATMENTS, EFFECTS_TOOLS } from "@/cut/components/EffectsPanel.tools";
 import { ELEMENTS_TOOLS } from "@/cut/components/ElementsPanel.tools";
 import { VIDEO_GEN_TOOLS } from "@/cut/components/GeneratePanel.tools";
 import { IMAGE_GEN_TOOLS } from "@/cut/components/ImageGenPanel.tools";
 import { INSPECTOR_TOOLS } from "@/cut/components/Inspector.tools";
+import { GROUP_PANEL_TOOLS } from "@/cut/components/GroupPanel.tools";
 import { LIBRARY_TOOLS } from "@/cut/components/LibraryView.tools";
 import { PREVIEW_TOOLS } from "@/cut/components/Preview.tools";
 import { REMOVAL_TOOLS } from "@/cut/components/RemovalPanel.tools";
@@ -264,6 +266,7 @@ Times are in seconds on the shared timeline. The playhead is currentTime; a skim
 - set_framing: per-clip Fit (letterbox) vs Fill (crop to cover the box), plus zoom 1..4 to push further in. Whenever the picture overflows, panX/panY position the crop window; in the preview a grey outline shows the part being cropped away, and the user drags that outline to slide the crop (dragging the clip itself moves its box). flipH mirrors the picture left for right and flipV top for bottom — a front-camera take that reads backward (mirrored text, a watch on the wrong wrist) wants flipH. The controls live in the Inspector under "Framing" when a video clip is selected, the mirror beside Rotation. Landscape footage usually wants fill + a pan that keeps the subject.
 - update_overlay_video also carries an overlay clip's resting transform: rotation, opacity and the mirror, alongside its region (layout/region) and zoom. Use these for a tilted or faded layer; set_clip_keyframes is for a transform that moves over time.
 - set_clip_style rounds a clip's corners, strokes a border ring, and casts a drop shadow from the clip's shape — mask included, so a circle-masked webcam gets a circular shadow. The floating-cam look is one recipe: put the clip on an upper track, region it small (update_overlay_video region or the preview handles), mask it with kind circle, and give it a soft shadow.
+- set_camera_card is a talking-head video's split section in one call, in any frame shape: a graphic fills the frame on a lower track, and the speaker's clip shows through a rounded card with their head popping out above the card's edge — across the bottom of a portrait frame, up one side of a square or landscape one, and \`side\` picks. The card and the head come from the same clip and the same frame; the head's person matte bakes for free and editor_state reports it under \`card.matte\`.
 - The user can copy/paste any selected segment (video, overlay video, audio, title) with ⌘C/⌘V; pastes aim for the playhead and slide right to free space.
 - Zoom: set_view pxPerSec (12..800) or fit. The timeline panel height: set_view timelineH (170..600).`,
 
@@ -393,6 +396,7 @@ Composite builds: these primitives compose. Stacked overlay video copies, masks 
 4. Work out the geometry as numbers before calling any tool. Any screen region converts to mask parameters by plain arithmetic: w and h are fractions of frame width and height — rect takes both, so it expresses any region on any aspect; a square's side rides frame width alone, and a shape meant to hold exact pixel proportions folds in project.frame's pixels — and x/y are the region's center measured from the item's own center. Write every piece's region and timing as numbers, check that together they lay out what the reference shows (coverage, spacing, alignment), then place them.
 5. Build one representative piece and capture_frame it against the reference. Then build the rest and capture_frame again, mid-reveal and at the end: every cell present, slices aligned into the whole picture, the target region covered edge to edge. Fix what's off at the right level: a wrong number re-sets in place (set_mask and the keyframe tools overwrite), a mistimed copy retimes, and a wrong cell plan means deleting the copies you added (delete_item) and laying them again from the corrected list — the pieces you placed are yours to tear down. The build is done when the captured frame matches the reference.
 All of it is regular timeline editing: free, live, and undoable.
+A speaker popping out of a card over a graphic is one tool: set_camera_card on the speaker's clip, with the graphic on a lower track. It draws the card and the head from one frame of one clip, so the two stay in register.
 Good TikTok titles: short punchy lines, high contrast (white/yellow + shadow or plate), size 72–110, keep inside the middle 80% of the frame (x 0.1..0.9, y 0.1..0.9), avoid the caption band (y≈0.8) when subtitles are on.
 Tasteful graphics: shapes read best as accents (a highlight box behind a stat, an arrow pointing at the subject, a color bar under a title) — semi-transparent fills (fill_opacity 0.2–0.5) sit better over footage than solid blocks. One or two stickers a scene; size 0.15–0.3 of the frame width.
 In the UI: the timeline toolbar adds Text; the Elements side-panel tab browses stickers and shapes and creates sticker images, and the Effects tab holds the effects — a click in any panel picks a tile, and dragging one onto the timeline is what places it; dragging in the preview places an element, a corner handle scales it, a side handle stretches one axis with the far side planted, the top handle rotates; the Inspector edits every field.`,

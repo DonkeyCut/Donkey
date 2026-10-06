@@ -718,8 +718,10 @@ function ClipFramePanel({ clip }: { clip: VideoClip }) {
       <SubviewHead title="Frame" />
       <div className="flex flex-col gap-1 px-3.5 pb-4">
         <ClipTransformSection clip={clip} />
-        <ClipBorderSection clip={clip} />
-        <ClipShadowSection clip={clip} />
+        <CameraCardSection clip={clip} />
+        {/* A camera card draws its own corners and shadow. */}
+        {!clip.card && <ClipBorderSection clip={clip} />}
+        {!clip.card && <ClipShadowSection clip={clip} />}
         <ClipMaskSection clip={clip} />
       </div>
     </>
@@ -1520,6 +1522,8 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             onCheckedChange={(v) => updateClip(clip.id, { hidden: v })}
           />
         </Row>
+        {/* A camera card places the footage itself (Frame view). */}
+        {!clip.card && (<>
         <Row label="Framing">
           <div className="clip-framing flex rounded-lg border border-input p-0.5">
             {(["fit", "fill"] as const).map((mode) => (

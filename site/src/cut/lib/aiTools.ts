@@ -160,6 +160,8 @@ import { requestSidePanel } from "./panelRequest";
 import {
   confirmMatteBake,
   ensureMatteBake,
+  ensureCardMatte,
+  jobTarget as matteJobTarget,
   matteBakesAvailable,
   useMatteBakes,
 } from "./removal/bakeJobs";
@@ -464,6 +466,16 @@ const MAX_COMPARE = 4;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
+/** A camera card places its clip's footage itself, so a framing write on
+ * one of `fields` would change nothing anyone sees: refused, naming the
+ * card's own controls. */
+function refuseCardFraming(clip: VideoClip, input: Record<string, unknown>, fields: string[]): void {
+  if (!clip.card || !fields.some((f) => input[f] !== undefined)) return;
+  throw new ToolError(
+    "This clip is laid out as a camera card, which places its footage itself: set_camera_card scale, offset_x and offset_y move it (flips still apply through set_framing)."
+  );
+}
+
 /** The row an element tool was aimed at, if it named one. Rows are how
  * elements stack, row 0 at the front: two on the same row slide clear of each
  * other, so a title that has to sit over a shape names a lower row than it. */
@@ -475,9 +487,11 @@ const aimedLane = (input: Record<string, unknown>): { lane?: number } | undefine
 type BrowserToolName = Exclude<
   | AiPanelToolName
   | AudioToolName
+  | CameraCardToolName
   | EditorToolName
   | EffectsToolName
   | ElementsToolName
+  | GroupPanelToolName
   | ImageGenToolName
   | InspectorToolName
   | LibraryToolName
@@ -2862,6 +2876,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         s.updateClip(clip.id, { boxStyle: undefined });
         return { id: clip.id, boxStyle: null };
       }
+      if (clip.card)
+        throw new ToolError(
+          "This clip is laid out as a camera card, which draws its own corners and shadow: set_camera_card radius and shadow set them."
+        );
       const bs = { ...clip.boxStyle };
       if (isNum(input.radius)) bs.radius = Math.max(0, input.radius) || undefined;
       if (isNum(input.border_width)) bs.borderWidth = Math.max(0, input.border_width) || undefined;
@@ -2895,6 +2913,52 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         bs.radius || bs.borderWidth || bs.shadow ? bs : undefined;
       s.updateClip(clip.id, { boxStyle });
       return { id: clip.id, boxStyle: boxStyle ?? null };
+  },
+
+  set_camera_card: (s, input) => {
+      const clip = requireItem(s.clips, input.clipId, "video clip");
+      if (input.clear === true) {
+        s.updateClip(clip.id, { card: undefined });
+        return { id: clip.id, card: null };
+      }
+      // Only what the call names changes; a first call starts from the
+      // defaults. Naming a side hands top and width back to its defaults
+      // unless the call names them too.
+      const side = input.side === "auto" ? undefined : (CARD_SIDES as readonly unknown[]).includes(input.side) ? (input.side as CardSide) : null;
+      if (input.side !== undefined && side === null)
+        throw new ToolError(`side must be one of ${[...CARD_SIDES, "auto"].join(", ")}.`);
+      const card = normalizeCard({
+        ...(clip.card ?? newCard()),
+        ...(input.side !== undefined ? { side: side ?? undefined, top: undefined, width: undefined } : {}),
+        ...(isNum(input.top) ? { top: input.top } : {}),
+        ...(isNum(input.width) ? { width: input.width } : {}),
+        ...(isNum(input.radius) ? { radius: input.radius } : {}),
+        ...(isNum(input.side_bleed) ? { sideBleed: input.side_bleed } : {}),
+        ...(typeof input.pop_out === "boolean" ? { popOut: input.pop_out } : {}),
+        ...(isNum(input.feather) ? { feather: input.feather } : {}),
+        ...(isNum(input.shadow) ? { shadow: input.shadow } : {}),
+        ...(isNum(input.scale) ? { scale: input.scale } : {}),
+        ...(isNum(input.offset_x) ? { offsetX: input.offset_x } : {}),
+        ...(isNum(input.offset_y) ? { offsetY: input.offset_y } : {}),
+      });
+      s.updateClip(clip.id, { card });
+      if (card.popOut) ensureCardMatte(clip.id);
+      const next = useEditor.getState().clips.find((c) => c.id === clip.id)!;
+      const owed = !!next.card?.popOut && !next.card.matte;
+      return {
+        id: clip.id,
+        card: describeCameraCard(next, true, {
+          aspect: useEditor.getState().aspect,
+          assetById: new Map(useEditor.getState().assets.map((a) => [a.id, a])),
+        }),
+        ...(owed
+          ? {
+              note: matteBakesAvailable
+                ? "The head's person matte is baking in the background — wait_for_renders reports when it lands. Until then the card shows without the head."
+                : "The card is set. The head's person matte bakes the next time the project is open in the editor; until then the card shows without the head.",
+            }
+          : {}),
+      };
   },
 
   set_removal: (s, input) => {
@@ -3393,14 +3457,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         };
       });
       const bakes = useMatteBakes.getState().jobs;
-      const cutouts = watchedBakes.map((clipId) => {
-        const j = bakes[clipId];
+      const cutouts = watchedBakes.map((key) => {
+        // A camera card's person matte reports beside the clip's cutout.
+        const { clipId, slot } = matteJobTarget(key);
+        const forCard = slot === "card" ? { for: "camera card" } : {};
+        const j = bakes[key];
         if (!j) {
-          const m = cur.clips.find((c) => c.id === clipId)?.removal?.matte;
-          return { clipId, status: "done" as const, ...(m ? { quality: m.quality } : {}) };
+          const c = cur.clips.find((x) => x.id === clipId);
+          const m = slot === "card" ? c?.card?.matte : c?.removal?.matte;
+          return { clipId, ...forCard, status: "done" as const, ...(m ? { quality: m.quality } : {}) };
         }
         return {
           clipId,
+          ...forCard,
           status: j.status,
           quality: j.quality,
           ...(j.error ? { error: j.error } : {}),
@@ -5899,6 +5968,7 @@ const SWEEP_TARGETS: Readonly<Record<string, string>> = {
   apply_saved_grade: "clipId",
   set_speed: "clipId",
   set_framing: "clipId",
+  set_camera_card: "clipId",
   set_transition: "clipId",
   delete_item: "id",
   update_cue: "id",

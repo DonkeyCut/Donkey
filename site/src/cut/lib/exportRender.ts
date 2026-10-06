@@ -1353,6 +1353,7 @@ export class FramePainter {
     // provider is a synchronous read of that map. Backdrop stills decode once
     // here, so mid-render reads are cache hits.
     this.comp.removalMatteProvider = (clip) => this.matteFrames.get(clip.id) ?? null;
+    this.comp.cardMatteProvider = (clip) => this.matteFrames.get(cardMatteKey(clip.id)) ?? null;
     this.comp.backdropImageProvider = (assetId) => backdropStill(this.doc.assets, assetId);
     const backdropIds = new Set(
       this.doc.clips
@@ -1460,13 +1461,23 @@ export class FramePainter {
     }
   }
 
-  /** Pull a removal clip's baked matte frame for timeline time `t` and stage
-   * it, luma turned to alpha, where the compositor's provider reads. A clip
+  /** Pull a clip's baked matte frames for timeline time `t` — its cutout's,
+   * and its camera card's when the card shows the head — and stage them,
+   * luma turned to alpha, where the compositor's providers read. A clip
    * whose bake is still owed stages nothing. */
   private async fetchRemovalMatte(span: ClipSpan, t: number): Promise<void> {
     const clip = span.clip;
-    const m = removalActive(clip.removal) ? clip.removal?.matte : undefined;
-    this.matteFrames.delete(clip.id);
+    await this.stageMatte(clip.id, span, t, removalActive(clip.removal) ? clip.removal?.matte : undefined);
+    await this.stageMatte(cardMatteKey(clip.id), span, t, clip.card?.popOut ? clip.card.matte : undefined);
+  }
+
+  private async stageMatte(
+    key: string,
+    span: ClipSpan,
+    t: number,
+    m: { assetId: string; in: number } | undefined
+  ): Promise<void> {
+    this.matteFrames.delete(key);
     if (!m) return;
     const asset = this.doc.assets.find((a) => a.id === m.assetId);
     if (!asset) return;

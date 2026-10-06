@@ -136,6 +136,7 @@ export function createChatgptServer(
     try {
       const { view, playback, download, editor } = await projects.withEditor(await run());
       const media = liftMedia(view);
+      liftDisplay(view);
       const text = describeProjectView(view) + (editor ? "\nThe Donkey Cut editor is open in the card." : "");
       return {
         content: [{ type: "text" as const, text }, ...media],
