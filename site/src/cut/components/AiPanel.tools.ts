@@ -9,6 +9,7 @@
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { WATCH_DETAIL_NOTES, WATCH_DETAILS } from "@/cut/lib/types";
+import { FACT_CLAIM_MAX_CHARS, FACT_CLAIMS_CEILING } from "@/lib/inference/factCheck";
 
 export const AI_PANEL_TOOLS = [
   {
@@ -179,6 +180,23 @@ export const AI_PANEL_TOOLS = [
         ),
       },
       ["url"]
+    ),
+  },
+  {
+    name: "check_facts",
+    description:
+      "Check factual claims against the web: each claim is searched on Google and comes back with a verdict (supported, contradicted, mixed, or unverifiable), the corrected value when the claim is wrong, a one-line note on what the sources say, and the pages the search found, each with its title and URL. A verdict needs at least two sources behind it, so a claim the search barely covers comes back unverifiable. Check every figure the narration or a title states — a number, a date, a price, a name, a release — before you show it on screen, passing each as its own specific claim worded the way the video says it. Report every contradicted, mixed or unverifiable claim to the user plainly, with what the sources say and where; change their words only when they ask. Sources come only from the search, so quote them as given. Spends credits: one web search per claim.",
+    inputSchema: obj(
+      {
+        claims: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: FACT_CLAIMS_CEILING,
+          description: `The specific statements to check, one fact each, under ${FACT_CLAIM_MAX_CHARS} characters`,
+        },
+        context: str("What the video is about, so an ambiguous claim is searched the way it is meant (optional)"),
+      },
+      ["claims"]
     ),
   },
   {

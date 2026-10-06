@@ -120,6 +120,8 @@ import type { TransitionsToolName } from "@/cut/components/TransitionsPanel.tool
 import { apiFetch, apiJson, getBackend } from "./backend";
 import { refFromAsset, refFromStockVideo, type AssetRef } from "./assetRef";
 import { chatOwner, tagChatAsset } from "./chatAssets";
+import { checkFacts, factCheckToolOutput } from "./factCheck";
+import { checkFactsInput } from "./webToolInputs";
 import { queueMessageFromAgent } from "./chatQueue";
 import { applyOwnership, useGenerate, type VideoAttempt, type VideoGenOptions } from "./generate";
 import { useGenScene } from "./genScene";
@@ -3830,6 +3832,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         })),
         ...(text ? { sourceText: text } : {}),
       };
+  },
+
+  check_facts: async (_s, input) => {
+      const checked = checkFactsInput(input);
+      if (!checked.ok) throw new ToolError(checked.error);
+      const { results } = await checkFacts(checked.claims, checked.context);
+      return factCheckToolOutput(results);
   },
 
   read_project: async (_s, input) => {

@@ -29,6 +29,7 @@ import { DocText, useDocText } from "./DocText";
 import { GeneratedAssetMenu } from "./GeneratedAssetMenu";
 import { scrimIconButton } from "./iconButton";
 import { HostedErrorText } from "./hostedError";
+import { SearchSuggestions } from "./SearchSuggestions";
 
 // Assets rendered inside chat messages. Anything the assistant makes previews
 // here as a media-first card and stays in the chat until the user moves it:
@@ -108,6 +109,7 @@ export function ToolOutputAssets({ output }: { output: unknown }) {
       ) : typeof o.jobId === "string" ? (
         <ChatVideoJobCard jobId={o.jobId} />
       ) : null}
+      <SearchSuggestions output={output} />
     </>
   );
 }

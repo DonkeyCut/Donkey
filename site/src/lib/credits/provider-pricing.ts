@@ -53,6 +53,11 @@ export function providerCreditPricing(
   if (normalizedProvider === "gemini") {
     return geminiCreditPricing(normalizedModel);
   }
+  // A Gemini call grounded in Google Search: the model's tokens, plus each
+  // search it ran, counted as generations.
+  if (normalizedProvider === geminiSearchProviderId) {
+    return geminiSearchCreditPricing(normalizedModel);
+  }
   // Gemini TTS ids are hardcoded (gemini-models.ts); speech bills per second of audio.
   if (normalizedProvider === "gemini-tts") {
     return geminiTtsCreditPricing(normalizedModel);
@@ -80,6 +85,20 @@ export function providerCreditPricing(
   }
 
   return undefined;
+}
+
+/** The provider a usage row names for a search-grounded Gemini call. */
+export const geminiSearchProviderId = "gemini-search";
+
+// Grounding with Google Search bills each search query the model runs, $14
+// per 1,000 on Gemini 3, on top of the model's own token rates. The route
+// reports the queries as generationCount.
+function geminiSearchCreditPricing(model: string): ProviderCreditPricing | undefined {
+  const tokens = geminiCreditPricing(model);
+  if (!tokens) {
+    return undefined;
+  }
+  return { ...tokens, generationCostMicros: usdWithMargin("0.014") };
 }
 
 // TypeSafe System One (Jev): $0.042 per 1M input tokens, output free

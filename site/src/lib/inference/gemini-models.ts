@@ -115,6 +115,9 @@ export const geminiModelRoles = {
   review: geminiModels.flash,
   // Hosted speech-to-text: the recorded mix in, word-timed cues out.
   transcription: geminiTranscribeModels.file,
+  // Checking a video's factual claims against Google Search: one grounded
+  // call per claim, sources taken from the search the model ran.
+  factCheck: geminiModels.flash,
 } as const;
 
 /** The role names, for a caller that says what it needs and lets the server

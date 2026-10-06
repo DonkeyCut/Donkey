@@ -11,6 +11,7 @@ import {
   type Usage,
 } from "@earendil-works/pi-ai";
 import { reportBalance } from "../hosted";
+import type { ToolDisplay } from "../toolDisplay";
 import type { DonkeyModel } from "./donkeyModel";
 
 // The transport adapter: pi Context in, Donkey's hosted Responses route out.

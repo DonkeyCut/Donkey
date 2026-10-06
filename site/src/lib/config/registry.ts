@@ -307,6 +307,23 @@ export const SETTINGS = defineSettings({
     description:
       "The most disk a browser spends on cached copies of cloud media. Past it, the least recently used copies go first.",
   },
+  factCheck: {
+    schema: z
+      .object({
+        maxClaims: z.number().int().min(1).max(40),
+        // Searches run side by side, this many at a time.
+        concurrency: z.number().int().min(1).max(10),
+        // A verdict other than unverifiable needs at least this many sources.
+        minSources: z.number().int().min(1).max(5),
+        maxSourcesPerClaim: z.number().int().min(1).max(10),
+      })
+      .strict(),
+    default: { maxClaims: 12, concurrency: 4, minSources: 2, maxSourcesPerClaim: 5 },
+    public: false,
+    title: "Fact check",
+    description:
+      "How claims are checked against the web: how many one request takes, how many searches run at once, how many sources a verdict needs, and how many sources each claim reports.",
+  },
   cutColor: {
     schema: z
       .object({

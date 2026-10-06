@@ -82,7 +82,7 @@ export function createGeminiResponsesProvider(
         statusCode: 400,
         code: "gemini_tool_unsupported",
         details: {
-          supportedTools: allowFunctionTools ? ["function"] : [],
+          supportedTools: allowFunctionTools ? ["function", webSearchToolType] : [],
         },
       });
     }
@@ -389,8 +389,42 @@ function geminiTools(rawTools: JsonValue | undefined): Tool[] {
   if (declarations.length > 0) {
     tools.push({ functionDeclarations: declarations });
   }
+  // `type: "web_search"` grounds the answer in Google Search; the sources the
+  // search returned come back as `sources` on the normalized response.
+  if (Array.isArray(rawTools) && rawTools.some((tool) => isJsonObject(tool) && tool.type === webSearchToolType)) {
+    tools.push({ googleSearch: {} });
+  }
 
   return tools;
+}
+
+const webSearchToolType = "web_search";
+
+/** The web pages a grounded answer drew on, the searches that found them, and
+ * Google's Search Suggestions block (HTML and CSS the terms require shown
+ * beside the answer), read off the candidate's grounding metadata. Only what
+ * the search returned is here: a URL the model wrote into its text never is. */
+export function groundingFromCandidate(candidate: JsonObject | undefined): {
+  sources: { url: string; title: string }[];
+  queries: string[];
+  searchSuggestions?: string;
+} {
+  const meta = candidate && isJsonObject(candidate.groundingMetadata) ? candidate.groundingMetadata : null;
+  if (!meta) return { sources: [], queries: [] };
+  const entry = isJsonObject(meta.searchEntryPoint) ? stringValue(meta.searchEntryPoint.renderedContent) : undefined;
+  const seen = new Set<string>();
+  const sources: { url: string; title: string }[] = [];
+  for (const chunk of Array.isArray(meta.groundingChunks) ? meta.groundingChunks : []) {
+    const web = isJsonObject(chunk) && isJsonObject(chunk.web) ? chunk.web : null;
+    const url = web ? stringValue(web.uri) : undefined;
+    if (!url || !/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    seen.add(url);
+    sources.push({ url, title: stringValue(web?.title) ?? stringValue(web?.domain) ?? new URL(url).hostname });
+  }
+  const queries = (Array.isArray(meta.webSearchQueries) ? meta.webSearchQueries : [])
+    .map((q) => (typeof q === "string" ? q.trim() : ""))
+    .filter(Boolean);
+  return { sources, queries, ...(entry ? { searchSuggestions: entry } : {}) };
 }
 
 // Caller-defined `type: "function"` tools (OpenAI Responses shape: name, description,
@@ -857,7 +891,9 @@ function systemInstructionFromBody(body: JsonObject): string | undefined {
 }
 
 function normalizedGeminiResponse(raw: JsonValue): JsonObject {
-  const partObjects = geminiCandidateParts(geminiCandidates(raw)[0]);
+  const candidate = geminiCandidates(raw)[0];
+  const partObjects = geminiCandidateParts(candidate);
+  const grounding = groundingFromCandidate(candidate);
   // Thought summaries (parts flagged `thought: true` when includeThoughts is on) must NOT land in
   // output_text — that field carries the structured JSON the caller parses. Keep them separate so the
   // reasoning can be persisted to the thread without corrupting the tool-call payload.
@@ -894,6 +930,10 @@ function normalizedGeminiResponse(raw: JsonValue): JsonObject {
     ],
     provider_output: raw,
     usage: isJsonObject(raw) ? raw.usageMetadata ?? null : null,
+    ...(grounding.sources.length > 0 || grounding.queries.length > 0
+      ? { sources: grounding.sources, search_queries: grounding.queries }
+      : {}),
+    ...(grounding.searchSuggestions ? { search_suggestions: grounding.searchSuggestions } : {}),
   };
 }
 
@@ -977,7 +1017,7 @@ function hasExplicitUnsupportedTools(
     if (!isJsonObject(tool)) {
       return true;
     }
-    return !(allowFunctionTools && tool.type === "function");
+    return !(allowFunctionTools && (tool.type === "function" || tool.type === webSearchToolType));
   });
 }
 

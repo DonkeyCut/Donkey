@@ -1,6 +1,7 @@
 import type { TSchema } from "typebox";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import type { AiToolDef } from "../aiToolDef";
+import { splitToolDisplay } from "../toolDisplay";
 import type { DonkeyToolDetails, WirePart } from "./donkeyStream";
 
 // The tool bridge: the shared AiToolDef catalog as pi AgentTools. Execution is
@@ -12,11 +13,25 @@ export type ExecTool = (name: string, args: Record<string, unknown>) => Promise<
 
 const DATA_URL = /^data:([^;,]+);base64,(.+)$/;
 
-/** A tool's raw output split for the wire: media (frames, audio) moves to its
- * own following user turn — Gemini degenerates when media shares a turn with a
- * functionResponse — and megabyte payloads stay out of the JSON the model and
- * the UI transcript carry. */
+/** A tool's raw output split for the wire: its `display` markup goes to the
+ * UI alone, media (frames, audio) moves to its own following user turn —
+ * Gemini degenerates when media shares a turn with a functionResponse — and
+ * megabyte payloads stay out of the JSON the model and the UI transcript carry. */
 export function toToolResult(name: string, output: unknown): AgentToolResult<DonkeyToolDetails> {
+  const split = splitToolDisplay(output);
+  const result = forModel(name, split.output);
+  return split.display ? { ...result, details: { ...result.details, display: split.display } } : result;
+}
+
+/** The output the chat UI shows: the model's response with the display
+ * markup put back. */
+export function uiToolOutput(details: DonkeyToolDetails | undefined): unknown {
+  const response = details?.response ?? null;
+  if (!details?.display || !response || typeof response !== "object" || Array.isArray(response)) return response;
+  return { ...response, display: details.display };
+}
+
+function forModel(name: string, output: unknown): AgentToolResult<DonkeyToolDetails> {
   if (output && typeof output === "object" && "audio" in output) {
     const { audio, ...rest } = output as { audio?: unknown; name?: unknown };
     const m = typeof audio === "string" ? DATA_URL.exec(audio) : null;

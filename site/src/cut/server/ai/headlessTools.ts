@@ -72,6 +72,7 @@ const PAGE_SESSION_TOOLS: ReadonlySet<string> = new Set([
   "template_add",
   "file_asset",
   "import_url",
+  "check_facts",
 ]);
 
 // Converting media is the one media job this process can do: ffmpeg is right

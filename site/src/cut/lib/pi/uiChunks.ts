@@ -1,5 +1,6 @@
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { DonkeyToolDetails } from "./donkeyStream";
+import { uiToolOutput } from "./tools";
 
 // The bridge from pi agent events to the AI-SDK UIMessageChunk stream AiPanel
 // already consumes: text opens/streams/closes per content block, tool calls
@@ -56,7 +57,7 @@ export function subscribeUiChunks(agent: Agent, emit: EmitChunk): () => void {
         emit({
           type: "tool-output-available",
           toolCallId: event.toolCallId,
-          output: result?.details?.response ?? null,
+          output: uiToolOutput(result?.details),
         });
       }
       return;

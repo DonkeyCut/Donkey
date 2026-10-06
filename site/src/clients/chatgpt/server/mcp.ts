@@ -32,6 +32,7 @@ import {
   type ProjectResult,
 } from "@/clients/chatgpt/server/projects";
 import { widgetHtml } from "@/clients/chatgpt/widget.generated";
+import { searchLinksOf, splitToolDisplay } from "@/cut/lib/toolDisplay";
 
 const idSchema = z.string().min(1).max(128);
 const readOnlyAnnotations = {
@@ -95,6 +96,18 @@ function liftMedia(view: ProjectView): MediaBlock[] {
     if ("audio" in out) out.audio = lift(out.audio);
   }
   return blocks;
+}
+
+/** A command's `display` markup (Google's Search Suggestions beside a grounded
+ * check) leaves its output; ChatGPT renders no markup from a tool result, so
+ * the output carries the same searches as links to show with the result. */
+function liftDisplay(view: ProjectView): void {
+  for (const result of view.results) {
+    const { output, display } = splitToolDisplay(result.output);
+    if (output === result.output) continue;
+    const links = (display?.searchSuggestions ?? []).flatMap(searchLinksOf);
+    result.output = links.length > 0 ? { ...(output as object), searchSuggestions: links } : output;
+  }
 }
 
 type Identity = { userId: string; scopes: string[]; grantId: string };
