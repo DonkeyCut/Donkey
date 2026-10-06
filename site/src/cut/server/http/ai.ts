@@ -21,7 +21,7 @@ import {
 } from "../ai/bridge";
 import { rewriteCaptions, translateCaptions } from "../ai/captions";
 import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
-import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, skillRelevanceBlock, systemPrompt } from "../ai/catalog";
+import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, systemPrompt } from "../ai/catalog";
 import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
 import { codexCommand } from "../tool-path";
 import { errorMessage } from "../util";
@@ -31,9 +31,6 @@ interface ChatBody {
   messages: UIMessage[];
   model: string;
   context?: unknown;
-  /** The skill the page's judge attached to this turn: a name, null for
-   * none, absent when the judge was not asked. */
-  skill?: string | null;
   /** Provider-native session/thread id from the previous turn, if any. */
   providerSession?: string;
 }
@@ -535,9 +532,7 @@ export const aiApi = {
     const sessionKey = crypto.randomUUID();
     const userText = lastUserText(body.messages);
     const attachments = lastUserAttachments(body.messages);
-    const skill =
-      body.skill === undefined ? "" : `\n\n${skillRelevanceBlock(typeof body.skill === "string" ? body.skill : null)}`;
-    const prompt = `${userText}${attachedAssetsBlock(attachments)}${skill}\n\n<editor_state>\n${JSON.stringify(body.context ?? {})}\n</editor_state>`;
+    const prompt = `${userText}${attachedAssetsBlock(attachments)}\n\n<editor_state>\n${JSON.stringify(body.context ?? {})}\n</editor_state>`;
 
     return startTurnStream(projectId, body.threadId, (signal) => createUIMessageStream({
       execute: async ({ writer }) => {

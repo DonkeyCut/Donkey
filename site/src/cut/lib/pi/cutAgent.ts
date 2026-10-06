@@ -40,7 +40,6 @@ import {
 } from "../queueTriage";
 import {
   editorSlice,
-  judgeTurnState,
   routeTurn,
   TURN_JUDGE_QUESTIONS,
   type CutJudgeSettings,
@@ -558,25 +557,6 @@ export async function judgeTurnAndAction(
   }
   if (onSight) route.intent = "complex";
   return { verdict: { route, skipped: onSight }, instant };
-}
-
-/** The skill the judge attaches to a turn the engine's own chat runs: the
- * page judges before the send and the engine carries the block on its
- * prompt. Null when no skill fits; undefined when the judge could not be
- * asked. */
-export async function judgeEngineSkill(
-  messages: UIMessage[],
-  context: unknown,
-  deps: CutAgentDeps
-): Promise<string | null | undefined> {
-  const settings = deps.judgeSettings ?? cutJudge();
-  if (!settings.skillSuggestion) return undefined;
-  try {
-    const { answers } = await askJudge(deps.judge, judgeTurnState(messages, context), TURN_JUDGE_QUESTIONS);
-    return routeTurn(answers as unknown as TurnJudgeAnswers, settings).skill;
-  } catch {
-    return undefined;
-  }
 }
 
 /** The declared catalog for a run: the core on every work turn, the routed

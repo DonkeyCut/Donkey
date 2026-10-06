@@ -61,7 +61,7 @@ Every knowledge surface is defined once — the catalog file ships in the engine
 | --- | --- | --- |
 | System prompt | ~13K chars (~3K tokens) | Claude: replaces the Agent SDK default. Codex: prepended to the first turn (a resumed session already has it). Gemini: the instructions field, every round. |
 | Tool catalog (127 tools in 19 areas) | ~140K chars (~35K tokens) whole | Claude/Codex: the MCP tool listing. Gemini: the core plus the routed areas per request. |
-| Skills library (16 docs) | ~97K chars (~24K tokens) total | The judge's pick rides the turn; list-skills and read-skill cover the rest. |
+| Skills library (16 docs) | ~97K chars (~24K tokens) total | Gemini: the judge's pick rides the turn. Claude/Codex: list-skills and read-skill. |
 | Editor snapshot | Grows with the project; media list and subtitle cues capped at 60 each | Attached to the newest user message as `<editor_state>`, rebuilt fresh every turn. |
 | Attachments | Metadata JSON per asset | `<attached_assets>` on the message that carried them; on the Gemini path the newest message also carries the actual payloads (frames, images, text contents). |
 | Full state | Uncapped | The get-state tool — the model calls it when the snapshot is stale or truncated. |

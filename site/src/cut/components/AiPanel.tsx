@@ -96,7 +96,7 @@ import {
   useSignedIn,
 } from "@/cut/lib/generate";
 import { useCreditsRecheck, useOutOfCredits } from "@/cut/lib/hosted";
-import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, judgeEngineSkill, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
+import { cutChatLive, dropPiSession, foldIntoCutChat, hydratePiSession, readPiSession, streamCutChat, triageQueuedMessages } from "@/cut/lib/pi/cutAgent";
 import { dueForRetriage, toolProgress } from "@/cut/lib/queueTriage";
 import { registerQueueSink } from "@/cut/lib/chatQueue";
 import { previewAt } from "@/cut/lib/playhead";
@@ -1108,13 +1108,10 @@ function ChatSession({
         // localBackend (read after the origin resolves), which carries the
         // account scope the engine requires on every data route.
         prepareSendMessagesRequest: async ({ messages }) => {
-          // The judge picks the turn's skill here, since the engine never
-          // calls hosted models; the engine carries it on its prompt.
-          const deps = productionDeps(projectId);
-          const [skill] = await Promise.all([
-            judgeEngineSkill(messages, deps.buildContext(), deps),
-            engineReady(),
-          ]);
+          // A CLI turn runs on the person's own model and calls nothing
+          // hosted on the way, so a free account keeps chatting on a local
+          // project; the model reads skills through read_skill.
+          await engineReady();
           return {
             api: localBackend.url("/api/cut/ai/chat"),
             body: {
@@ -1122,8 +1119,7 @@ function ChatSession({
               runtime: chatRuntime(),
               messages,
               model: currentModel(),
-              context: deps.buildContext(),
-              skill,
+              context: productionDeps(projectId).buildContext(),
               providerSession: sessionFor(currentModel()),
             },
           };
