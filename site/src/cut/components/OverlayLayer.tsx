@@ -1123,6 +1123,9 @@ function OverlayItem({
 
   return (
     <>
+    {diving && live && (
+      <DiveCanvas o={o} live={live} stageWidth={stageWidth} stageHeight={stageHeight} />
+    )}
     <div
       ref={boxRef}
       className={cn(
@@ -1174,9 +1177,6 @@ function OverlayItem({
           <StickerView sticker={o} stageWidth={stageWidth} stageHeight={stageHeight} t={t} />
         ) : null}
       </div>
-      {diving && live && (
-        <DiveCanvas o={o} live={live} stageWidth={stageWidth} stageHeight={stageHeight} />
-      )}
       {/* The twin can't mount until its size is read, so the in-box chrome
           holds through that first frame — a select never blinks. */}
       {!chromeLifted && chrome}
@@ -1347,9 +1347,8 @@ function GlyphText({
 }
 
 /**
- * A diving element, painted by the kit over a stage-sized canvas that rides
- * inside the element's box: the box carries the pose, the canvas the dive's
- * view, and the painter is the one the export draws with. One paint is in
+ * A diving element, painted by the kit over a stage-sized canvas. The painter
+ * applies the pose and dive before the frame clips it. One paint is in
  * flight at a time; a frame that arrives during it is painted next.
  */
 function DiveCanvas({
@@ -1377,7 +1376,7 @@ function DiveCanvas({
     if (busy.current) return;
     busy.current = true;
     const env = cutRenderEnv(assets ?? []);
-    // The element's own look, neutral: the box already carries its pose.
+    // The painter receives the pose separately from the element's look.
     const el = { ...o, rotation: undefined, opacity: undefined } as Overlay;
     void (async () => {
       try {
@@ -1390,7 +1389,7 @@ function DiveCanvas({
             height: h,
             scale: Math.min(w, h) / 1080,
           });
-          await paintElementInto(canvas, el, env, { dive: view });
+          await paintElementInto(canvas, el, env, { dive: view, pose: next });
         }
       } finally {
         busy.current = false;
@@ -1402,15 +1401,11 @@ function DiveCanvas({
       ref={ref}
       width={w}
       height={h}
-      className="pointer-events-none absolute"
+      className="pointer-events-none absolute inset-0"
       style={{
-        left: "50%",
-        top: "50%",
         width: stageWidth,
         height: stageHeight,
-        // The canvas spans the stage in the element's unposed frame: its
-        // origin sits the element's resting position back from the box center.
-        transform: `translate(${-o.x * stageWidth}px, ${-o.y * stageHeight}px)`,
+        opacity: live.opacity,
       }}
     />
   );

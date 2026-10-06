@@ -19,7 +19,7 @@ import {
 } from "./anim";
 import { diveView, slotReel, slotSeed, type DiveFocus, type DiveView } from "./dive";
 import { presetExtent } from "./motion/evaluate";
-import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys } from "./keys";
+import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys, type OverlayFrameState } from "./keys";
 import { applyMaskToCanvas, isMaskAnimated } from "./mask";
 import { tracePolyShape } from "./shapePath";
 import type { LottieHandle } from "./lottie";
@@ -131,15 +131,17 @@ export interface PaintFrame {
   phase?: PaintPhase;
 }
 
-/** What a pixel-changing animation contributes to one picture: how much of the
- * element is uncovered, and where its characters sit. The transform styles
- * never come through here — they ride the drawn picture instead. */
+/** What a pixel-changing animation contributes to one picture: its reveal,
+ * glyph motion, and the pose and view a dive paints inside the frame. */
 export interface PaintPhase {
   reveal?: number;
   glyphs?: GlyphPhase;
   glyphLoop?: GlyphLoopPhase;
   /** The view a dive draws the whole picture under (see `diveView`). */
   dive?: DiveView;
+  /** A dive's pose is painted before frame clipping, so a half-size title
+   * still fills the output frame when its flight lands. */
+  pose?: Pick<OverlayFrameState, "x" | "y" | "dx" | "dy" | "scale" | "rotation">;
 }
 
 /**
@@ -679,6 +681,19 @@ export function applyDiveView(
   ctx.translate(-v.fx, -v.fy);
 }
 
+// Place the element inside the output surface before the dive fills it.
+function applyPaintPose(
+  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+  pose: NonNullable<PaintPhase["pose"]>,
+  rest: { x: number; y: number },
+  frame: PaintFrame
+): void {
+  ctx.translate(pose.x * frame.width + pose.dx * frame.scale, pose.y * frame.height + pose.dy * frame.scale);
+  ctx.rotate((pose.rotation * Math.PI) / 180);
+  ctx.scale(pose.scale, pose.scale);
+  ctx.translate(-rest.x * frame.width, -rest.y * frame.height);
+}
+
 /** Whether either edge of an element dives, so a renderer knows to measure
  * the focus and give the flight the whole frame. */
 export function divesAt(anim: OverlayAnim | undefined): boolean {
@@ -952,7 +967,9 @@ export async function paintElementInto(
   ctx.clearRect(0, 0, width, height);
 
   ctx.globalAlpha = overlay.opacity ?? 1;
-  if (overlay.rotation) {
+  if (phase?.pose) {
+    applyPaintPose(ctx, phase.pose, overlay, frame);
+  } else if (overlay.rotation) {
     const cx = overlay.x * width;
     const cy = overlay.y * height;
     ctx.translate(cx, cy);
@@ -1270,12 +1287,7 @@ export async function renderOverlayFrames(
     ctx.globalAlpha = ev.opacity;
     ctx.translate(-x0, -y0);
     // The pose places the element; the preset's travel rides on top of it.
-    ctx.translate(ev.x * width + ev.dx * scale, ev.y * height + ev.dy * scale);
-    ctx.rotate((ev.rotation * Math.PI) / 180);
-    ctx.scale(ev.scale, ev.scale);
-    // Back to the origin the painters draw around, so they stay unaware of
-    // any of this.
-    ctx.translate(-overlay.x * width, -overlay.y * height);
+    applyPaintPose(ctx, ev, overlay, frame);
     // A dive's view goes inside the pose, so the type is drawn as vectors at
     // the size it is seen and stays sharp however far in the flight gets.
     if (focus && ev.dive) applyDiveView(ctx, diveView(ev.dive, focus, ev, overlay, frame));

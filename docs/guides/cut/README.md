@@ -26,7 +26,7 @@ AI is hosted whatever the home: image, video, and voiceover generation and the a
 
 ## The preview
 
-The preview scrubs and plays from per-clip decoders held in memory. It shows a frame the moment it arrives and refines behind it, so the timeline always answers and a jump lands on a picture. Every cache is bounded by one memory budget sized to the machine. The performance guide holds the frame budget and how a change is measured.
+The preview shows ready frames immediately and refines them as decoding catches up. Dive paints inside the output frame, so a title's scale and rotation preserve full-frame coverage. The performance guide covers memory and measurement.
 
 Background previews capture a project operation and a render document before asynchronous work starts. The operation carries the project, residency, document version, capabilities, and transport. The preview queue coalesces edits and drains the final edit when the editor closes. Cloud exports requested from a document store that document in the queued job, so a later edit cannot change the export's input.
 

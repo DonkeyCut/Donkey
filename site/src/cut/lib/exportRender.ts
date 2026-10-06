@@ -1197,7 +1197,7 @@ async function drawStamps(
         ? {
             ...layer.phase,
             ...(ev?.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
-            ...(dive ? { dive } : {}),
+            ...(dive && ev ? { dive, pose: ev } : {}),
           }
         : undefined;
     const bitmap =
@@ -1222,6 +1222,12 @@ async function drawStamps(
     const cx = layer.overlay.x * canvas.width;
     const cy = layer.overlay.y * canvas.height;
     const posed = (c: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => {
+      // A dive's pose is already inside its frame-sized picture.
+      if (dive) {
+        c.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        return;
+      }
+
       c.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
       c.rotate((ev.rotation * Math.PI) / 180);
       c.scale(ev.scale, ev.scale);
