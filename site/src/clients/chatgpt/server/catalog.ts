@@ -33,13 +33,17 @@ const HIDDEN = new Set([
 
 const DESCRIPTIONS: Record<string, string> = {
   set_removal: "Cut out a subject or background on any video track. mode auto starts the free person matte; custom tracks the subject described in subject and spends credits; off keeps the stored matte and settings. remove background keeps the subject, and remove subject keeps its surroundings. refine requests the paid quality upgrade when the user asks for it. Matting continues in the editor: inspect_project reports each clip's removal readiness and progress. Check readiness before claiming completion, then capture_frame to inspect the result. The user can select an exact instance with the Cutout inspector's brush and Apply controls. Read background-removal for the workflow.",
-  check_facts: "Check factual claims against the web: each claim is searched on Google and comes back with a verdict (supported, contradicted, mixed, or unverifiable), the corrected value when the claim is wrong, a one-line note on what the sources say, and the pages the search found, each with its title and URL. A verdict needs at least two sources behind it, so a claim the search barely covers comes back unverifiable. Check every figure the narration or a title states — a number, a date, a price, a name, a release — before it goes on screen, passing each as its own specific claim worded the way the video says it. Report every contradicted, mixed or unverifiable claim to the user plainly, with what the sources say and where; change their words only when they ask. The output's searchSuggestions are the Google searches behind the verdicts: show them to the user as links, with their text and URLs as given, wherever you report the results. Spends credits: one web search per claim.",
   stock_search: "Search the bundled catalogs for footage, images, character references, and sound effects. Stock is free. Use stock_add to import a result, then inspect it before choosing where it belongs in the cut.",
+};
+
+// What ChatGPT needs on top of the shared description.
+const ADDENDA: Record<string, string> = {
+  check_facts: "The output's searchSuggestions are the Google searches behind the verdicts: show them to the user as links, with their text and URLs as given, wherever you report the results.",
 };
 
 export const COMMANDS: AiToolDef[] = PROJECT_TOOLS.filter((tool) => !HIDDEN.has(tool.name)).map((tool) => ({
   ...tool,
-  description: DESCRIPTIONS[tool.name] ?? chatgptDescription(tool.description),
+  description: DESCRIPTIONS[tool.name] ?? [chatgptDescription(tool.description), ADDENDA[tool.name]].filter(Boolean).join(" "),
 }));
 export const COMMAND_NAMES = COMMANDS.map((tool) => tool.name);
 

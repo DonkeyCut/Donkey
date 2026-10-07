@@ -68,7 +68,7 @@ describe("grounding metadata", () => {
 });
 
 describe("the adapter's grounded call", () => {
-  test("web_search turns on Google Search, and the response carries the sources", async () => {
+  test("the fact-check search turns on Google Search, and the response carries the sources", async () => {
     let sent: Record<string, unknown> | null = null;
     const provider = createGeminiResponsesProvider(
       {
@@ -89,14 +89,16 @@ describe("the adapter's grounded call", () => {
           caches: {},
         }) as never,
     );
-    const request = responseCreateRequestSchema.parse({
-      donkeyProvider: "gemini",
-      model: "gemini-test",
-      instructions: "Check it.",
-      input: "Claim: The Eiffel Tower is 300 m tall.",
-      tools: [{ type: "web_search" }],
-      text: { format: { type: "json_schema", name: "fact_check", schema: FACT_ANSWER_SCHEMA } },
-    });
+    const request = {
+      ...responseCreateRequestSchema.parse({
+        donkeyProvider: "gemini",
+        model: "gemini-test",
+        instructions: "Check it.",
+        input: "Claim: The Eiffel Tower is 300 m tall.",
+        text: { format: { type: "json_schema", name: "fact_check", schema: FACT_ANSWER_SCHEMA } },
+      }),
+      search: "google_search" as const,
+    };
     expect(provider.canCreateResponse?.(request)).toBe(true);
     const result = await provider.createResponse!(request);
     const config = (sent as unknown as { config: Record<string, unknown> }).config;
@@ -127,10 +129,12 @@ describe("the adapter's grounded call", () => {
     expect(shaped.sources.some((s) => s.url.includes("made-up.example"))).toBe(false);
   });
 
-  test("an ungrounded request keeps web_search out unless Gemini was named", () => {
+  test("a request body can never turn the search on, even naming Gemini", () => {
     const provider = createGeminiResponsesProvider({}, () => ({}) as never);
-    const request = responseCreateRequestSchema.parse({ input: "x", tools: [{ type: "web_search" }] });
-    expect(provider.canCreateResponse?.(request)).toBe(false);
+    for (const donkeyProvider of [undefined, "gemini"] as const) {
+      const request = responseCreateRequestSchema.parse({ donkeyProvider, input: "x", tools: [{ type: "web_search" }] });
+      expect(provider.canCreateResponse?.(request)).toBe(false);
+    }
   });
 });
 

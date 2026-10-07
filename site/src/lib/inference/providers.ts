@@ -22,7 +22,10 @@ export type JsonValue =
 export type JsonObject = { [key: string]: JsonValue };
 
 export type ChatCompletionRequest = z.infer<typeof chatCompletionRequestSchema>;
-export type ResponseCreateRequest = z.infer<typeof responseCreateRequestSchema>;
+// `search` grounds the answer in a web search the provider runs. Only a route
+// that bills the searches sets it; a request body never can.
+export type ResponseSearch = "google_search";
+export type ResponseCreateRequest = z.infer<typeof responseCreateRequestSchema> & { search?: ResponseSearch };
 export type AssetGenerationRequest = z.infer<typeof assetGenerationRequestSchema>;
 
 export type InferenceModel = {

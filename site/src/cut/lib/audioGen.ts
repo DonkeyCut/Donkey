@@ -1,7 +1,7 @@
 "use client";
 
 import { bytesFromBase64 } from "./bytes";
-import { NO_CREDITS_MESSAGE } from "./credits";
+import { readHostedError } from "./hostedError";
 import { hostedPost } from "./hosted";
 import { importFileToProject } from "./media";
 import { NoCreditsError } from "./tts";
@@ -23,26 +23,8 @@ export const MUSIC_VARIANTS: { id: MusicVariant; label: string; hint: string }[]
   { id: "song", label: "Full track", hint: "~2 min" },
 ];
 
-async function readError(res: Response, fallback: string): Promise<string> {
-  if (res.status === 401) return "Sign in to Donkey to generate music.";
-  const body = (await res.json().catch(() => null)) as {
-    error?: unknown;
-    message?: unknown;
-    details?: { message?: unknown };
-  } | null;
-  const message = [body?.message, body?.error].find(
-    (v): v is string => typeof v === "string" && v.length > 0
-  );
-  if (res.status === 402) return NO_CREDITS_MESSAGE;
-  // The provider's own error (`details.message`) names the actual rejection (a
-  // filtered prompt, a timeout); the top-level message is generic.
-  const detail = body?.details?.message;
-  const full =
-    message && typeof detail === "string" && detail && detail !== message
-      ? `${message} (${detail})`
-      : message;
-  return full ?? fallback;
-}
+const readError = (res: Response, fallback: string) =>
+  readHostedError(res, "Sign in to Donkey to generate music.", fallback);
 
 /** Display name for the track: the prompt, tidied and capped. */
 function musicName(prompt: string) {

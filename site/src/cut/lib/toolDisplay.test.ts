@@ -22,7 +22,7 @@ const supported = {
 describe("check_facts output", () => {
   test("suggestions move from each result to display, once each", () => {
     const out = factCheckToolOutput([supported, { ...supported, claim: "Again." }, { claim: "Broken.", error: "failed" }]);
-    expect(out.display).toEqual({ searchSuggestions: [BLOCK] });
+    expect(toolDisplayOf(out)).toEqual({ searchSuggestions: [BLOCK] });
     expect(out.results.some((r) => "searchSuggestions" in r)).toBe(false);
     expect(out.note).toContain("1 of 3");
   });

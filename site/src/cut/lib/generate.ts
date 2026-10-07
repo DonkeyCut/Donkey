@@ -17,6 +17,7 @@ import {
   upsertRenderInDoc,
 } from "./genvideo/docWriter";
 import { NO_CREDITS_MESSAGE } from "./credits";
+import { readHostedError } from "./hostedError";
 import { CUT_APP_BASE } from "./nav";
 import { hostedFetch, hostedPost } from "./hosted";
 import { enrichAsset, importFileToProject, uploadProjectImage } from "./media";
@@ -275,27 +276,8 @@ interface GenerationResponse {
   metadata?: Record<string, unknown>;
 }
 
-async function readError(res: Response, fallback: string): Promise<string> {
-  if (res.status === 401) return "Sign in to Donkey to generate media.";
-  const body = (await res.json().catch(() => null)) as {
-    error?: unknown;
-    message?: unknown;
-    details?: { message?: unknown } | null;
-  } | null;
-  const message = [body?.message, body?.error].find(
-    (v): v is string => typeof v === "string" && v.length > 0
-  );
-  if (res.status === 402) return NO_CREDITS_MESSAGE;
-  // The provider tucks the real reason (a safety block, a rejected prompt) under
-  // details.message; the top-level message is only a generic headline. Append it so a
-  // failure explains itself instead of stopping at "…generation failed."
-  const detail =
-    typeof body?.details?.message === "string" && body.details.message.trim()
-      ? body.details.message.trim()
-      : null;
-  if (detail && detail !== message) return message ? `${message} ${detail}` : detail;
-  return message ?? fallback;
-}
+const readError = (res: Response, fallback: string) =>
+  readHostedError(res, "Sign in to Donkey to generate media.", fallback);
 
 const providerError = (error: unknown): string | null => {
   if (typeof error === "string" && error) return error;

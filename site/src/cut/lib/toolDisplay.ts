@@ -1,8 +1,8 @@
 // What a tool hands the person and keeps from the model. A tool output's
 // `display` key carries markup the chat shows beside the result (Google's
 // Search Suggestions for a grounded check); the chat loop moves it off the
-// response the model reads, and the ChatGPT adapter moves it into the
-// widget-only metadata.
+// response the model reads, and the ChatGPT adapter turns it into links in the
+// output the model reads.
 
 export interface ToolDisplay {
   /** Search Suggestions blocks, HTML and CSS from the search provider, shown
@@ -18,7 +18,7 @@ export function splitToolDisplay(output: unknown): { output: unknown; display?: 
   return shaped ? { output: rest, display: shaped } : { output: rest };
 }
 
-export interface SearchLink {
+interface SearchLink {
   query: string;
   url: string;
 }

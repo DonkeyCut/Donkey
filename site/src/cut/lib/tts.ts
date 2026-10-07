@@ -2,7 +2,7 @@
 
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { bytesFromBase64 } from "./bytes";
-import { NO_CREDITS_MESSAGE } from "./credits";
+import { readHostedError } from "./hostedError";
 import { hostedPost } from "./hosted";
 import { cutJudge } from "./chatRuntime";
 import { askJudge, choice } from "./judge";
@@ -226,26 +226,8 @@ interface PcmClip {
  * buy credits alongside the message. */
 export class NoCreditsError extends Error {}
 
-async function readError(res: Response, fallback: string): Promise<string> {
-  if (res.status === 401) return "Sign in to Donkey to generate voiceovers.";
-  const body = (await res.json().catch(() => null)) as {
-    error?: unknown;
-    message?: unknown;
-    details?: { message?: unknown };
-  } | null;
-  const message = [body?.message, body?.error].find(
-    (v): v is string => typeof v === "string" && v.length > 0
-  );
-  if (res.status === 402) return NO_CREDITS_MESSAGE;
-  // The provider's own error (`details.message`) names the actual rejection
-  // ("input too long", a rate limit, …); the top-level message is generic.
-  const detail = body?.details?.message;
-  const full =
-    message && typeof detail === "string" && detail && detail !== message
-      ? `${message} (${detail})`
-      : message;
-  return full ?? fallback;
-}
+const readError = (res: Response, fallback: string) =>
+  readHostedError(res, "Sign in to Donkey to generate voiceovers.", fallback);
 
 /** One hosted Gemini speech call: text in, decoded PCM out. A direction is a
  * natural-language delivery instruction ("Say warmly, like an old friend");

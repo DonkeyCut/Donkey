@@ -40,6 +40,7 @@ import {
   type JsonValue,
   type ResponseCreateRequest,
   type ResponseCreateResult,
+  type ResponseSearch,
   type ResponseStreamEvent,
   type ResponseStreamResult,
   type TextCompletionResult,
@@ -82,7 +83,7 @@ export function createGeminiResponsesProvider(
         statusCode: 400,
         code: "gemini_tool_unsupported",
         details: {
-          supportedTools: allowFunctionTools ? ["function", webSearchToolType] : [],
+          supportedTools: allowFunctionTools ? ["function"] : [],
         },
       });
     }
@@ -91,6 +92,7 @@ export function createGeminiResponsesProvider(
     const requestParameters = geminiGenerateContentParameters(
       request.body,
       model,
+      request.search,
     );
     return { model, requestParameters };
   }
@@ -361,8 +363,9 @@ function streamChunkText(chunk: GenerateContentResponse): string {
 function geminiGenerateContentParameters(
   body: JsonObject,
   model: string,
+  search: ResponseSearch | undefined,
 ): GenerateContentParameters {
-  const tools = geminiTools(body.tools);
+  const tools = geminiTools(body.tools, search);
   const generationConfig = generationConfigFromBody(body);
   const systemInstruction = systemInstructionFromBody(body);
   const config: GenerateContentConfig = {
@@ -382,23 +385,21 @@ function geminiGenerateContentParameters(
   };
 }
 
-function geminiTools(rawTools: JsonValue | undefined): Tool[] {
+function geminiTools(rawTools: JsonValue | undefined, search: ResponseSearch | undefined): Tool[] {
   const tools: Tool[] = [];
 
   const declarations = functionDeclarationsFromTools(rawTools);
   if (declarations.length > 0) {
     tools.push({ functionDeclarations: declarations });
   }
-  // `type: "web_search"` grounds the answer in Google Search; the sources the
+  // The route's search grounds the answer in Google Search; the sources the
   // search returned come back as `sources` on the normalized response.
-  if (Array.isArray(rawTools) && rawTools.some((tool) => isJsonObject(tool) && tool.type === webSearchToolType)) {
+  if (search === "google_search") {
     tools.push({ googleSearch: {} });
   }
 
   return tools;
 }
-
-const webSearchToolType = "web_search";
 
 /** The web pages a grounded answer drew on, the searches that found them, and
  * Google's Search Suggestions block (HTML and CSS the terms require shown
@@ -1017,7 +1018,7 @@ function hasExplicitUnsupportedTools(
     if (!isJsonObject(tool)) {
       return true;
     }
-    return !(allowFunctionTools && (tool.type === "function" || tool.type === webSearchToolType));
+    return !(allowFunctionTools && tool.type === "function");
   });
 }
 

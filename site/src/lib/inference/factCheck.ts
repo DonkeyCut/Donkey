@@ -5,29 +5,27 @@ import { z } from "zod";
 // verdict and its note are the model's; every source comes from the search's
 // own grounding record, so a URL the model made up can never reach a reply.
 
-export const FACT_VERDICTS = ["supported", "contradicted", "mixed", "unverifiable"] as const;
-export type FactVerdict = (typeof FACT_VERDICTS)[number];
+const FACT_VERDICTS = ["supported", "contradicted", "mixed", "unverifiable"] as const;
+type FactVerdict = (typeof FACT_VERDICTS)[number];
 
 export const FACT_CLAIM_MAX_CHARS = 500;
-export const FACT_CONTEXT_MAX_CHARS = 2000;
-/** The most claims a request may carry; the route's setting may hold fewer. */
-export const FACT_CLAIMS_CEILING = 40;
+const FACT_CONTEXT_MAX_CHARS = 2000;
+/** The most claims a request may carry. The tool schema teaches the same cap. */
+export const FACT_CLAIMS_MAX = 12;
 
 export const factCheckRequestSchema = z
   .object({
-    claims: z.array(z.string().trim().min(1).max(FACT_CLAIM_MAX_CHARS)).min(1).max(FACT_CLAIMS_CEILING),
+    claims: z.array(z.string().trim().min(1).max(FACT_CLAIM_MAX_CHARS)).min(1).max(FACT_CLAIMS_MAX),
     context: z.string().trim().max(FACT_CONTEXT_MAX_CHARS).optional(),
   })
   .strict();
-
-export type FactCheckRequest = z.infer<typeof factCheckRequestSchema>;
 
 export interface FactSource {
   url: string;
   title: string;
 }
 
-export interface FactCheckResult {
+interface FactCheckResult {
   claim: string;
   verdict: FactVerdict;
   /** The right value, when the claim has it wrong. */

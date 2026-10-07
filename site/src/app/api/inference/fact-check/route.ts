@@ -21,7 +21,12 @@ import {
 } from "@/lib/inference/factCheck";
 import { geminiModelRoles } from "@/lib/inference/gemini-models";
 import { isJsonObject, toJsonValue } from "@/lib/inference/json";
-import { InferenceProviderError, type JsonObject, type JsonValue } from "@/lib/inference/providers";
+import {
+  InferenceProviderError,
+  type JsonObject,
+  type JsonValue,
+  type ResponseCreateRequest,
+} from "@/lib/inference/providers";
 import {
   inferenceErrorCode,
   inferenceProviderErrorResponse,
@@ -53,13 +58,7 @@ const GROUNDING_REDIRECT_HOST = "vertexaisearch.cloud.google.com";
 const REDIRECT_TIMEOUT_MS = 4000;
 
 async function resolveSource(source: FactSource): Promise<FactSource> {
-  let host: string;
-  try {
-    host = new URL(source.url).hostname;
-  } catch {
-    return source;
-  }
-  if (host !== GROUNDING_REDIRECT_HOST) return source;
+  if (URL.parse(source.url)?.hostname !== GROUNDING_REDIRECT_HOST) return source;
   const res = await fetch(source.url, {
     method: "GET",
     redirect: "manual",
@@ -69,6 +68,22 @@ async function resolveSource(source: FactSource): Promise<FactSource> {
   // A link that does not resolve is still the link the search returned.
   if (!location || !/^https?:\/\//i.test(location)) return source;
   return { url: location, title: source.title };
+}
+
+/** The first `max` distinct pages behind the search's links. Links resolve a
+ * batch at a time, only as many as the pages still missing, so a search that
+ * returned a dozen links costs as many fetches as the claim reports. */
+async function resolveSources(sources: FactSource[], max: number): Promise<FactSource[]> {
+  const kept: FactSource[] = [];
+  let next = 0;
+  while (kept.length < max && next < sources.length) {
+    const batch = sources.slice(next, next + max - kept.length);
+    next += batch.length;
+    for (const page of await Promise.all(batch.map(resolveSource))) {
+      if (kept.length < max && !kept.some((k) => k.url === page.url)) kept.push(page);
+    }
+  }
+  return kept;
 }
 
 function sourcesOf(body: JsonValue): FactSource[] {
@@ -123,13 +138,9 @@ export const POST = withDonkeyAuth(async (request) => {
     return validationErrorResponse(parsed.error);
   }
   const settings = await getGlobalSetting("factCheck");
-  const { claims, context } = parsed.data;
-  if (claims.length > settings.maxClaims) {
-    return NextResponse.json(
-      { error: "too_many_claims", message: `Check at most ${settings.maxClaims} claims at a time.` },
-      { status: 400 },
-    );
-  }
+  // A claim asked twice is searched and billed once.
+  const claims = [...new Set(parsed.data.claims)];
+  const { context } = parsed.data;
 
   const model = geminiModelRoles.factCheck;
   const bypassCredits = shouldBypassDonkeyInferenceCredits(request.donkey);
@@ -152,18 +163,21 @@ export const POST = withDonkeyAuth(async (request) => {
   const registry = createProviderRegistry();
   const errors: unknown[] = [];
   // Each call charges on its own; the response reports their total and the
-  // balance the last one left.
+  // lowest balance any of them left, which is the latest one whatever order
+  // their promises settle in.
   const tally: { charged: bigint; remaining: bigint | null } = { charged: zeroCreditMicros, remaining: null };
   const results = await inPool(claims, settings.concurrency, async (claim): Promise<FactCheckOutcome> => {
     try {
-      const call = responseCreateRequestSchema.parse({
-        donkeyProvider: "gemini",
-        model,
-        instructions: FACT_CHECK_INSTRUCTIONS,
-        input: factCheckPrompt(claim, context),
-        tools: [{ type: "web_search" }],
-        text: { format: { type: "json_schema", name: "fact_check", schema: FACT_ANSWER_SCHEMA } },
-      });
+      const call: ResponseCreateRequest = {
+        ...responseCreateRequestSchema.parse({
+          donkeyProvider: "gemini",
+          model,
+          instructions: FACT_CHECK_INSTRUCTIONS,
+          input: factCheckPrompt(claim, context),
+          text: { format: { type: "json_schema", name: "fact_check", schema: FACT_ANSWER_SCHEMA } },
+        }),
+        search: "google_search",
+      };
       const provider = registry.responsesProvider(call);
       const result = await provider.createResponse?.(call);
       if (!result) {
@@ -186,10 +200,11 @@ export const POST = withDonkeyAuth(async (request) => {
           userId: request.donkey.userId,
         });
         tally.charged += recorded.creditCostMicros;
-        tally.remaining = recorded.remainingBalanceMicros;
+        const left = recorded.remainingBalanceMicros;
+        tally.remaining = tally.remaining === null || left < tally.remaining ? left : tally.remaining;
       }
       const outputText = isJsonObject(body) && typeof body.output_text === "string" ? body.output_text : "";
-      const sources = await Promise.all(sourcesOf(body).map(resolveSource));
+      const sources = await resolveSources(sourcesOf(body), settings.maxSourcesPerClaim);
       return shapeFactCheck(claim, outputText, sources, {
         minSources: settings.minSources,
         maxSources: settings.maxSourcesPerClaim,
