@@ -16,8 +16,6 @@ import { awaitingFrame, startTrace, stopTrace, traceReport } from "./perfTrace";
 import { markSignedBatch } from "./mediaLinks";
 import { prefetchCloudMedia } from "./mediaSync";
 import { playheadAt } from "./playhead";
-import { bindCutTracking } from "./chatRuntime";
-import { trackFootage } from "./tracking";
 import { projectDuration, useEditor } from "./store";
 
 export function installDevHooks(): void {
@@ -54,10 +52,6 @@ export function installDevHooks(): void {
     // The export eval starts a real export through the store, the way the
     // dialog does, and watches the dock's feed for the file.
     useExports,
-    // The tracking check reads a clip's raw landmarks beside the keys the
-    // tracker wrote, to see where the path parts from the picture.
-    trackFootage,
-    bindCutTracking,
   };
   // The perf eval arms and reads the frame trace through here. Off until
   // `start()` is called, so an ordinary dev session records nothing.

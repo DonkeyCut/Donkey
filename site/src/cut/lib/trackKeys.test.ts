@@ -116,7 +116,6 @@ describe("following a target", () => {
       axis: [{ x: 0.5, y: 0.5 - 0.2 * (9 / 16) }, { x: 0.5, y: 0.5 + 0.2 * (9 / 16) }],
     };
     const keys = followKeys(
-      { kind: "clip", clip: clip() },
       "9:16",
       t,
       [at(0.5, 0.5), turned],
@@ -131,7 +130,7 @@ describe("following a target", () => {
   });
 
   test("moments without the target write no key", () => {
-    const keys = followKeys({ kind: "clip", clip: clip() }, "9:16", times(3), [at(0.5, 0.5), null, at(0.6, 0.5)], { x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }, "move", 0);
+    const keys = followKeys("9:16", times(3), [at(0.5, 0.5), null, at(0.6, 0.5)], { x: 0.5, y: 0.5, scale: 1, rotation: 0, opacity: 1 }, "move", 0);
     expect(keys.map((k) => k.x)).toEqual([0.5, 0.6]);
   });
 });

@@ -13,7 +13,7 @@
 // compile until it has an entry, and `itemKinds.test.ts` walks the table so
 // every entry proves it copies and pastes.
 
-import { KEY_EPSILON, maskKeyAt, poseAt, retimeOf, shiftCamera, type Mask, type OverlayAnim, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
+import { KEY_EPSILON, maskKeyAt, poseAt, retimeOf, shiftCamera, sortedKeys, type EaseId, type Mask, type OverlayAnim, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
 import { splitEmphasis, withEmphasis } from "./captionEmphasis";
 import {
   clipPoseAt,
@@ -81,16 +81,40 @@ export interface ItemKindDef<K extends ItemKind> {
 
 const deep = <T>(v: T): T => (v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T));
 
+/** How finely an eased move cut in two is redrawn as straight steps. */
+const SPLIT_EASE_STEP = 1 / 30;
+
 /** A key track cut at `cut` seconds into its item. Each half keeps the keys on
  * its side, closed by a key holding the value at the cut, and the right
  * half's keys count from its own start — so both halves play what the whole
- * did. A tracked mask keys every frame, and a split copy has to hold it. */
-function splitKeys<K extends { t: number }>(keys: K[] | undefined, cut: number, valueAt: (t: number) => K): [K[] | undefined, K[] | undefined] {
+ * did. A tracked mask keys every frame, and a split copy has to hold it. An
+ * eased move the cut lands in has no named curve for either part, so it is
+ * redrawn as straight steps along the original curve. */
+function splitKeys<K extends { t: number; ease?: EaseId }>(
+  keys: K[] | undefined,
+  cut: number,
+  valueAt: (t: number) => K
+): [K[] | undefined, K[] | undefined] {
   if (!keys || keys.length === 0) return [keys, keys];
-  const edge = valueAt(cut);
+  const sorted = sortedKeys(keys);
+
+  // The eased move under the cut, as plain keys every step along its curve.
+  // Example: a sine.inOut move from 0s to 4s cut at 1s plays the same curve
+  // through 0–1s on the left and 1–4s on the right.
+  const i = sorted.findIndex((k, n) => k.t < cut - KEY_EPSILON && sorted[n + 1]?.t > cut + KEY_EPSILON);
+  const eased = i >= 0 && sorted[i].ease ? sorted[i] : null;
+  const steps = eased ? Math.ceil((sorted[i + 1].t - eased.t) / SPLIT_EASE_STEP) : 0;
+  const along = Array.from({ length: Math.max(0, steps - 1) }, (_, n) => {
+    const t = eased!.t + ((n + 1) * (sorted[i + 1].t - eased!.t)) / steps;
+    return { ...valueAt(t), t, ease: undefined };
+  });
+  const plain = sorted.map((k) => (k === eased ? { ...k, ease: undefined } : k));
+  const all = [...plain, ...along].sort((a, b) => a.t - b.t);
+
+  const edge = { ...valueAt(cut), ease: undefined };
   return [
-    [...keys.filter((k) => k.t < cut - KEY_EPSILON), { ...edge, t: cut }],
-    [{ ...edge, t: 0 }, ...keys.filter((k) => k.t > cut + KEY_EPSILON).map((k) => ({ ...k, t: k.t - cut }))],
+    [...all.filter((k) => k.t < cut - KEY_EPSILON), { ...edge, t: cut }],
+    [{ ...edge, t: 0 }, ...all.filter((k) => k.t > cut + KEY_EPSILON).map((k) => ({ ...k, t: k.t - cut }))],
   ];
 }
 
@@ -144,9 +168,11 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
       const [keysL, keysR] = splitTracks(c, at - c.start, (t) => clipPoseAt(c, t));
       // A split edit stays on the outer edges: the new cut between the halves
       // carries none.
+      // The right half's effects carry on from where the cut leaves them.
+      const effectsR = c.effects?.length ? { effectsFrom: (c.effectsFrom ?? 0) + (at - c.start) } : {};
       return [
         { ...left, ...keysL, transition: undefined, transitionStyle: undefined, animOut: undefined, audioTail: undefined },
-        { ...right, ...keysR, animIn: undefined, audioLead: undefined },
+        { ...right, ...keysR, ...effectsR, animIn: undefined, audioLead: undefined },
       ];
     },
     clone: deep,

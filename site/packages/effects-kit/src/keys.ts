@@ -122,12 +122,10 @@ export function sortedKeys<K extends { t: number }>(keys: K[]): K[] {
   return [...keys].sort((a, b) => a.t - b.t);
 }
 
-function inOrder(keys: { t: number }[]): boolean {
-  for (let i = 1; i < keys.length; i++) {
-    if (keys[i].t < keys[i - 1].t) return false;
-  }
-  return true;
-}
+/** Each stored track in play order, sorted once: a track is replaced on
+ * every edit and never changed in place, so a tracked mask's key per frame
+ * costs one sort when it lands and nothing on the frames that read it. */
+const playOrder = new WeakMap<object, { t: number }[]>();
 
 /**
  * The interpolation core every key track shares: find the surrounding keys,
@@ -139,10 +137,11 @@ export function lerpKeys<K extends { t: number; ease?: EaseId }>(
   tLocal: number,
   mix: (a: K, b: K, p: number) => K
 ): K {
-  // Stored tracks are already in order, and a tracked mask carries a key per
-  // frame: reading them in place and halving the search keeps a playback
-  // frame free of a copy and a sort.
-  const ks = inOrder(keys) ? keys : sortedKeys(keys);
+  let ks = playOrder.get(keys) as K[] | undefined;
+  if (!ks) {
+    ks = sortedKeys(keys);
+    playOrder.set(keys, ks);
+  }
   if (tLocal <= ks[0].t) return ks[0];
   const last = ks[ks.length - 1];
   if (tLocal >= last.t) return last;

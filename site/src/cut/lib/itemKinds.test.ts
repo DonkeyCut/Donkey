@@ -5,7 +5,7 @@ import { ITEM_KINDS, ITEM_KIND_IDS, clipboardItemAcross, clipboardItemAssetIds, 
 import { payloadAssets } from "./cutClipboard";
 import { setPlayhead } from "./playhead";
 import { assetIdsInUse, useEditor } from "./store";
-import { emptySubtitles, type MediaAsset, type Selection } from "./types";
+import { clipPoseAt, emptySubtitles, type MediaAsset, type Selection } from "./types";
 
 /**
  * Every kind of item the timeline can select is one entry in the item-kind
@@ -165,6 +165,34 @@ describe("splitting keyed items", () => {
     const [, right] = ITEM_KINDS.overlay.split!(o as never, 1);
     expect(right.kf![0]).toMatchObject({ t: 0, x: 0.3 });
     expect(right.mask!.kf![0]).toMatchObject({ t: 0, x: 0.1 });
+  });
+
+  test("a clip's effects carry on through the cut", () => {
+    const clip = { id: "e1", assetId: "v0", start: 10, in: 0, out: 4, track: 0, effects: [{ effect: "huecycle" }], effectsFrom: 0.5 };
+    const [left, right] = ITEM_KINDS.clip.split!(clip as never, 12);
+    expect(left.effectsFrom).toBe(0.5);
+    expect(right.effectsFrom).toBeCloseTo(2.5, 9);
+  });
+
+  test("an eased move keeps its curve on both sides of the cut", () => {
+    const clip = {
+      id: "e2", assetId: "v0", start: 0, in: 0, out: 4, track: 1,
+      kf: [{ ...poseKey(0, 0), ease: "sine.inOut" as const }, poseKey(4, 1)],
+    };
+    const whole = (t: number) => clipPoseAt(clip as never, t).x;
+    const [left, right] = ITEM_KINDS.clip.split!(clip as never, 1);
+    for (const t of [0.25, 0.5, 0.9]) expect(clipPoseAt(left, t).x).toBeCloseTo(whole(t), 2);
+    for (const t of [0.2, 1, 2.5]) expect(clipPoseAt(right, t).x).toBeCloseTo(whole(1 + t), 2);
+  });
+
+  test("a clip's mask keys stay on its footage through a head trim and a speed change", () => {
+    const key = (t: number) => ({ t, x: 0, y: 0, w: 0.5, h: 0.5, rotation: 0, feather: 0 });
+    const clip = { id: "m1", assetId: "v0", start: 0, in: 0, out: 4, track: 0, muted: false, mask: { kind: "rect" as const, kf: [key(1), key(3)] } };
+    useEditor.setState({ clips: [clip] });
+    useEditor.getState().updateClipTransient("m1", { start: 0.5, in: 0.5 });
+    expect(useEditor.getState().clips[0].mask!.kf!.map((k) => k.t)).toEqual([0.5, 2.5]);
+    useEditor.getState().setClipSpeed("m1", 2);
+    expect(useEditor.getState().clips[0].mask!.kf!.map((k) => k.t)).toEqual([0.25, 1.25]);
   });
 
   test("an element's press stays at its moment on the timeline", () => {

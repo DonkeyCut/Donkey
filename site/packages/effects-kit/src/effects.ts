@@ -104,16 +104,13 @@ const lookOf = (effect: string): LookStyle | null =>
 
 export const ALL_EFFECT_IDS: EffectId[] = [...EFFECT_IDS, ...AUDIO_EFFECT_IDS];
 
-/** The picture treatments a clip can wear itself. */
-export type ClipEffectId = "grain" | "vhs" | "glitch" | "blur" | "vignette" | "lightleak" | "flash" | "negative" | "huecycle";
-
 /**
  * The effects a clip wears treat that clip's picture alone, inside its mask,
  * for the clip's whole length: a masked copy over the shot wears a negative
  * and only the window turns. Zoom and shake move the frame, which a clip
  * does with its own zoom and pose keys; the looks are the clip's grade.
  */
-export const CLIP_EFFECT_IDS: ClipEffectId[] = [
+export const CLIP_EFFECT_IDS = [
   "negative",
   "huecycle",
   "grain",
@@ -123,7 +120,15 @@ export const CLIP_EFFECT_IDS: ClipEffectId[] = [
   "vignette",
   "lightleak",
   "flash",
-];
+] as const satisfies readonly VisualEffectId[];
+
+/** The picture treatments a clip can wear itself. */
+export type ClipEffectId = (typeof CLIP_EFFECT_IDS)[number];
+
+/** How an effect meets the canvas edge: `opaque` paints the whole canvas (a
+ * frame), `keep` paints only where the picture is (a clip's own picture,
+ * which may be a still with clear corners). */
+export type EffectEdges = "opaque" | "keep";
 
 /** One effect a clip wears; `amount` 0..1, absent = 0.5. */
 export interface ClipEffect {
@@ -443,7 +448,8 @@ export function applyEffectToCanvas(
   grainTileFor: (tick: number) => CanvasImageSource | null,
   focus?: { x: number; y: number },
   ramp?: number,
-  dur?: number
+  dur?: number,
+  edges: EffectEdges = "opaque"
 ): void {
   const state = effectPreviewState(effect, amount, tLocal, focus, ramp, dur);
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
@@ -453,10 +459,36 @@ export function applyEffectToCanvas(
   const H = canvas.height;
   const scale = Math.min(W, H) / 1080;
 
+  // Paint laid over the picture. A clear picture edge takes it only where
+  // the picture is: a plain paint lands atop, and a blended one is first cut
+  // to the picture's coverage on the scratch.
+  const over = (mode: GlobalCompositeOperation, alpha: number, paint: (c: CanvasRenderingContext2D) => void) => {
+    const direct = edges === "opaque" || mode === "source-over";
+    const target = direct ? ctx : sctx;
+    target.save();
+    target.globalAlpha = direct ? alpha : 1;
+    target.globalCompositeOperation = edges === "keep" && mode === "source-over" ? "source-atop" : direct ? mode : "source-over";
+    if (!direct) target.clearRect(0, 0, W, H);
+    paint(target);
+    target.restore();
+    if (direct) return;
+    sctx.save();
+    sctx.globalCompositeOperation = "destination-in";
+    sctx.drawImage(canvas, 0, 0);
+    sctx.restore();
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.globalCompositeOperation = mode;
+    ctx.drawImage(scratch, 0, 0);
+    ctx.restore();
+  };
+
   const needsRedraw = state.cssFilter || state.dx || state.dy || (state.zoom && state.zoom !== 1);
   if (needsRedraw) {
     sctx.clearRect(0, 0, W, H);
     sctx.drawImage(canvas, 0, 0);
+    // Over a clear edge the old picture would show through the redraw.
+    if (edges === "keep") ctx.clearRect(0, 0, W, H);
     ctx.save();
     if (state.cssFilter) ctx.filter = state.cssFilter;
     const zoom = state.zoom ?? 1;
@@ -506,15 +538,11 @@ export function applyEffectToCanvas(
     ctx.restore();
   }
 
-  if (state.washes) {
-    ctx.save();
-    for (const w of state.washes) {
-      ctx.globalCompositeOperation = w.mode;
-      ctx.globalAlpha = w.alpha;
-      ctx.fillStyle = w.color;
-      ctx.fillRect(0, 0, W, H);
-    }
-    ctx.restore();
+  for (const w of state.washes ?? []) {
+    over(w.mode, w.alpha, (c) => {
+      c.fillStyle = w.color;
+      c.fillRect(0, 0, W, H);
+    });
   }
 
   if (state.leak) {
@@ -525,17 +553,15 @@ export function applyEffectToCanvas(
     g.addColorStop(0.38, "rgba(255,150,60,0.5)");
     g.addColorStop(0.72, "rgba(255,120,40,0)");
     g.addColorStop(1, "rgba(255,120,40,0)");
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.globalCompositeOperation = "screen";
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
+    const fill = (style: CanvasGradient) => (c: CanvasRenderingContext2D) => {
+      c.fillStyle = style;
+      c.fillRect(0, 0, W, H);
+    };
     // The screen pass lights the darks and dies on a bright frame; a plain
     // pass at a fraction of the alpha tints the brights, so the bloom reads
     // on footage of any brightness.
-    ctx.globalAlpha = alpha * LEAK_TINT;
-    ctx.globalCompositeOperation = "source-over";
-    ctx.fillRect(0, 0, W, H);
+    over("screen", alpha, fill(g));
+    over("source-over", alpha * LEAK_TINT, fill(g));
     // The streak bands, each a linear gradient along its own tilt, blended
     // the same two ways as the bloom.
     for (const s of state.leak.streaks) {
@@ -553,27 +579,19 @@ export function applyEffectToCanvas(
       sg.addColorStop(cl(s.p - 2 * s.w), "rgba(255,200,140,0)");
       sg.addColorStop(cl(s.p), "rgba(255,200,140,0.9)");
       sg.addColorStop(cl(s.p + 2 * s.w), "rgba(255,200,140,0)");
-      ctx.fillStyle = sg;
-      ctx.globalAlpha = s.alpha;
-      ctx.globalCompositeOperation = "screen";
-      ctx.fillRect(0, 0, W, H);
-      ctx.globalAlpha = s.alpha * LEAK_TINT;
-      ctx.globalCompositeOperation = "source-over";
-      ctx.fillRect(0, 0, W, H);
+      over("screen", s.alpha, fill(sg));
+      over("source-over", s.alpha * LEAK_TINT, fill(sg));
     }
-    ctx.restore();
   }
 
   if (state.grain) {
     const tile = grainTileFor(Math.floor(tLocal * 30));
     if (tile) {
-      ctx.save();
-      ctx.globalAlpha = state.grain;
-      ctx.globalCompositeOperation = "overlay";
-      for (let y = 0; y < H; y += 256) {
-        for (let x = 0; x < W; x += 256) ctx.drawImage(tile, x, y);
-      }
-      ctx.restore();
+      over("overlay", state.grain, (c) => {
+        for (let y = 0; y < H; y += 256) {
+          for (let x = 0; x < W; x += 256) c.drawImage(tile, x, y);
+        }
+      });
     }
   }
 
@@ -588,19 +606,63 @@ export function applyEffectToCanvas(
     );
     g.addColorStop(0, "rgba(0,0,0,0)");
     g.addColorStop(1, `rgba(0,0,0,${Math.min(0.85, state.vignette)})`);
-    ctx.save();
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
+    over("source-over", 1, (c) => {
+      c.fillStyle = g;
+      c.fillRect(0, 0, W, H);
+    });
   }
 
   if (state.flash) {
-    ctx.save();
-    ctx.globalAlpha = state.flash;
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, W, H);
-    ctx.restore();
+    over("source-over", state.flash, (c) => {
+      c.fillStyle = "#FFFFFF";
+      c.fillRect(0, 0, W, H);
+    });
   }
+}
+
+/**
+ * A clip's effects over its picture, in order, at `tLocal` on the effects'
+ * clock. A run of effects that are a canvas filter and nothing else — a
+ * negative, a color cycle, a blur — draws once with the filters joined, and
+ * paint lands only where the picture is, so a still's clear corners stay
+ * clear.
+ */
+export function applyClipEffects(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  scratch: HTMLCanvasElement | OffscreenCanvas,
+  effects: readonly ClipEffect[],
+  tLocal: number,
+  grainTileFor: (tick: number) => CanvasImageSource | null
+): void {
+  let filters: string[] = [];
+  const flush = () => {
+    if (filters.length > 0) redrawFiltered(canvas, scratch, filters.join(" "));
+    filters = [];
+  };
+  for (const e of effects) {
+    const { cssFilter, ...passes } = effectPreviewState(e.effect, e.amount, tLocal);
+    if (Object.values(passes).every((v) => v === undefined)) {
+      if (cssFilter) filters.push(cssFilter);
+      continue;
+    }
+    flush();
+    applyEffectToCanvas(canvas, scratch, e.effect, e.amount, tLocal, grainTileFor, undefined, undefined, undefined, "keep");
+  }
+  flush();
+}
+
+/** The canvas redrawn through `filter`, alpha and all. */
+function redrawFiltered(canvas: HTMLCanvasElement | OffscreenCanvas, scratch: HTMLCanvasElement | OffscreenCanvas, filter: string) {
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
+  const sctx = scratch.getContext("2d") as CanvasRenderingContext2D | null;
+  if (!ctx || !sctx) return;
+  sctx.clearRect(0, 0, canvas.width, canvas.height);
+  sctx.drawImage(canvas, 0, 0);
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.filter = filter;
+  ctx.drawImage(scratch, 0, 0);
+  ctx.restore();
 }
 
 /* ---------------------------------------------------------------- ffmpeg */

@@ -145,6 +145,7 @@ const clipTreatment = (c: VideoClip) => ({
   ...(c.grade ? { grade: c.grade } : {}),
   ...(c.mask ? { mask: c.mask } : {}),
   ...(c.effects?.length ? { effects: c.effects } : {}),
+  ...(c.effects?.length && c.effectsFrom ? { effectsFrom: c.effectsFrom } : {}),
   ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),
   ...(c.kf?.length ? { kf: c.kf } : {}),
   ...(c.hidden ? { hidden: true } : {}),
@@ -185,6 +186,7 @@ const templateTreatment = (l: TemplateLayer) => ({
   ...(l.grade ? { grade: l.grade } : {}),
   ...(l.mask ? { mask: l.mask } : {}),
   ...(l.effects?.length ? { effects: l.effects } : {}),
+  ...(l.effects?.length && l.effectsFrom ? { effectsFrom: l.effectsFrom } : {}),
   ...(l.boxStyle ? { boxStyle: l.boxStyle } : {}),
   ...(l.kf?.length ? { kf: l.kf } : {}),
   ...(l.hidden ? { hidden: true } : {}),
@@ -1301,6 +1303,23 @@ function overlaysClearOf(overlays: Overlay[], ids: Set<string>): Overlay[] {
     return by ? { ...o, start: o.start + by, end: o.end + by } : o;
   });
   return settleCameras(overlays, cleared);
+}
+
+/**
+ * A clip with `patch` applied. A mask keyed on the clip's own picture stays
+ * on its footage when the patch retimes the clip: a key at source second 2
+ * still lands on source second 2 after a head trim or a speed change, so a
+ * tracked outline keeps tracing the hand it was drawn around.
+ */
+function patchClip(c: VideoClip, patch: Partial<VideoClip>): VideoClip {
+  const next = { ...c, ...patch };
+  const kf = next.mask?.kf;
+  if (!kf?.length || "mask" in patch) return next;
+  const was = retimeOf(c);
+  const now = retimeOf(next);
+  if (was.key === now.key) return next;
+  const moved = kf.map((k) => ({ ...k, t: now.tAt(was.srcAt(k.t)) })).sort((a, b) => a.t - b.t);
+  return { ...next, mask: { ...next.mask!, kf: moved } };
 }
 
 /** Apply a source trim or speed change with the shared same-row collision rule. */
@@ -3695,7 +3714,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     updateClipTransient: (id, patch) =>
       set((s) => ({
-        clips: s.clips.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+        clips: s.clips.map((c) => (c.id === id ? patchClip(c, patch) : c)),
       })),
 
     updateClipsTransient: (patches) =>
@@ -3704,7 +3723,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         return {
           clips: s.clips.map((c) => {
             const patch = byId.get(c.id);
-            return patch ? { ...c, ...patch } : c;
+            return patch ? patchClip(c, patch) : c;
           }),
         };
       }),
@@ -3716,7 +3735,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           const byId = new Map(patches.clips.map((p) => [p.id, p.patch]));
           out.clips = s.clips.map((c) => {
             const patch = byId.get(c.id);
-            return patch ? { ...c, ...patch } : c;
+            return patch ? patchClip(c, patch) : c;
           });
         }
         if (patches.audioClips?.length) {

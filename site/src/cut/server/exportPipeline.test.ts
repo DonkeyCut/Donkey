@@ -611,6 +611,24 @@ describe("clip masks in the filtergraph", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 
+  test("a track-0 clip wears its effects over its look, as the preview does", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 3, look: "vintage", effects: [{ effect: "negative" }] }), clip("b.mp4", { out: 2 })],
+    });
+    const lookAt = g.findIndex((c) => c.includes("[lki0]"));
+    const fxAt = g.findIndex((c) => c.includes("lutyuv=y='minval+maxval-val'"));
+    expect(lookAt).toBeGreaterThanOrEqual(0);
+    expect(fxAt).toBeGreaterThan(lookAt);
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a split's right half carries its effects' clock on", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 3, effects: [{ effect: "huecycle", amount: 0.5 }], effectsFrom: 2 }), clip("b.mp4", { out: 2 })],
+    });
+    expect(g.some((c) => c.includes("hue=H='2*PI*0.8*(t--2)'"))).toBe(true);
+  });
+
   test("a mask under head/tail alpha fades keeps both", async () => {
     const g = await graphFor({
       clips: [clip("a.mp4", { out: 6 })],

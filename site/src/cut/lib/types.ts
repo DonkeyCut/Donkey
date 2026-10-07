@@ -684,6 +684,9 @@ export interface VideoClip {
   /** Effects this clip wears over its own picture, inside its mask, in
    * order (absent = none). */
   effects?: ClipEffect[];
+  /** Seconds the effects have already run at the clip's first frame, so a
+   * split's right half carries on where the left stopped (absent = 0). */
+  effectsFrom?: number;
   /** Hidden clips stay on the timeline (grayed) but render as black — excluded
    * from the played/exported picture without disturbing the layout. */
   hidden?: boolean;
@@ -1191,6 +1194,7 @@ export interface TemplateLayer {
   grade?: ColorGrade;
   mask?: Mask;
   effects?: ClipEffect[];
+  effectsFrom?: number;
   boxStyle?: BoxStyle;
   kf?: OverlayKey[];
   hidden?: boolean;

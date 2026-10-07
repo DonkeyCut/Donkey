@@ -14,28 +14,19 @@
  * surface agree on what a track means.
  */
 
-import { evalOverlayFrame, type Mask, type MaskKey, type OverlayKey } from "@donkeycut/effects-kit";
+import { evalOverlayFrame, type Mask, type MaskKey, type MaskPoint, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
+import type { Settings } from "@/lib/config/registry";
 import { clipCovers, clipZoom, contentRect, frameOf, rectOf, type Aspect, type Overlay, type VideoClip } from "./types";
-
-export interface Pt {
-  x: number;
-  y: number;
-}
 
 /** One moment of a target: its outline, its center, and two points along
  * its own axis, whose angle is the target's turn and whose length its size. */
 export interface TrackSample {
-  outline: Pt[];
-  center: Pt;
-  axis: [Pt, Pt];
+  outline: MaskPoint[];
+  center: MaskPoint;
+  axis: [MaskPoint, MaskPoint];
 }
 
-export interface TrackTuning {
-  smoothCutoff: number;
-  smoothBeta: number;
-  bridgeSeconds: number;
-  keyTolerance: number;
-}
+type TrackTuning = Pick<Settings["cutTracking"], "smoothCutoff" | "smoothBeta" | "bridgeSeconds">;
 
 /** The derivative's own smoothing cutoff, Hz — the one-euro default. */
 const DERIVATIVE_CUTOFF = 1;
@@ -56,7 +47,7 @@ const flatten = (s: TrackSample): number[] => [
 
 function unflatten(v: number[]): TrackSample {
   const n = (v.length - 6) / 2;
-  const at = (i: number): Pt => ({ x: v[i * 2], y: v[i * 2 + 1] });
+  const at = (i: number): MaskPoint => ({ x: v[i * 2], y: v[i * 2 + 1] });
   return {
     outline: Array.from({ length: n }, (_, i) => at(i)),
     center: at(n),
@@ -141,7 +132,7 @@ export function pictureToFrame(
   clip: VideoClip,
   picture: { width: number; height: number },
   aspect: Aspect
-): (p: Pt) => Pt {
+): (p: MaskPoint) => MaskPoint {
   const fr = frameOf(aspect);
   const r = rectOf(clip);
   const box = { x: r.x * fr.w, y: r.y * fr.h, w: r.w * fr.w, h: r.h * fr.h };
@@ -160,15 +151,13 @@ export function pictureToFrame(
 /** An item a track writes onto: a video clip or an overlay element. */
 export type TrackItem = { kind: "clip"; clip: VideoClip } | { kind: "overlay"; overlay: Overlay };
 
-const itemStart = (item: TrackItem) => (item.kind === "clip" ? item.clip.start : item.overlay.start);
-
 /**
  * A frame point as an offset from the item's mask anchor, in the item's own
  * unposed space at `tLocal`: a clip's masks sit before its pose, so its
  * region center is the anchor; an element's mask paints under the element's
  * transform, so the point is carried back through it.
  */
-function toMaskSpace(item: TrackItem, aspect: Aspect, tLocal: number): (p: Pt) => Pt {
+function toMaskSpace(item: TrackItem, aspect: Aspect, tLocal: number): (p: MaskPoint) => MaskPoint {
   if (item.kind === "clip") {
     const r = rectOf(item.clip);
     const ax = r.x + r.w / 2;
@@ -194,8 +183,8 @@ function toMaskSpace(item: TrackItem, aspect: Aspect, tLocal: number): (p: Pt) =
  * A pen mask that traces the target: one key per kept moment, each carrying
  * the outline there. Where the target is gone the outline folds to a point at
  * its last place, so the masked picture shows nothing until it returns.
- * `times` are timeline seconds; `frame` holds the settled samples already
- * placed in the project frame.
+ * `times` are seconds into the item; `frame` holds the settled samples
+ * already placed in the project frame.
  */
 export function trackedMask(
   item: TrackItem,
@@ -212,7 +201,7 @@ export function trackedMask(
 
   // Each moment's outline in the item's mask space.
   const outlines = frame.map((s, i) => {
-    const local = toMaskSpace(item, aspect, times[i] - itemStart(item));
+    const local = toMaskSpace(item, aspect, times[i]);
     if (s) last = s.center;
     const pts = s ? s.outline : Array.from({ length: corners }, () => last);
     return pts.map(local);
@@ -220,7 +209,7 @@ export function trackedMask(
   const kept = keepTurns(times, outlines.map((o) => o.flatMap((p) => [p.x, p.y])), tolerance);
   const feather = base.feather ?? 0;
   const kf: MaskKey[] = kept.map((i) => ({
-    t: round4(times[i] - itemStart(item)),
+    t: round4(times[i]),
     x: 0,
     y: 0,
     w: 1,
@@ -243,34 +232,24 @@ export function trackedMask(
   };
 }
 
-/** Where an item rests before a follow moves it: its center in frame
- * fractions, its scale, turn and opacity. */
-export interface RestPose {
-  x: number;
-  y: number;
-  scale: number;
-  rotation: number;
-  opacity: number;
-}
-
 /**
  * Pose keys that carry an item with the target. The item keeps where it sits
  * relative to the target at the first tracked moment — beside a head, over a
  * hand — and from there moves with it; `move_scale` also grows and shrinks
  * with the target's size, `move_scale_turn` also turns with it. Moments where
- * the target is gone write no key, so the item holds.
+ * the target is gone write no key, so the item holds. `times` are seconds
+ * into the item.
  */
 export function followKeys(
-  item: TrackItem,
   aspect: Aspect,
   times: number[],
   frame: (TrackSample | null)[],
-  rest: RestPose,
+  rest: OverlayPose,
   mode: FollowMode,
   tolerance: number
 ): OverlayKey[] {
   const fr = frameOf(aspect);
-  const px = (p: Pt) => ({ x: p.x * fr.w, y: p.y * fr.h });
+  const px = (p: MaskPoint) => ({ x: p.x * fr.w, y: p.y * fr.h });
   const measure = (s: TrackSample) => {
     const a = px(s.axis[0]);
     const b = px(s.axis[1]);
@@ -299,7 +278,7 @@ export function followKeys(
     poses.push({
       i,
       key: {
-        t: round4(times[i] - itemStart(item)),
+        t: round4(times[i]),
         x: round4((m.c.x + ox) / fr.w),
         y: round4((m.c.y + oy) / fr.h),
         scale: round4(rest.scale * grow),

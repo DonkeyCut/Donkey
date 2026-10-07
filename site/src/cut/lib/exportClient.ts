@@ -30,7 +30,7 @@ import { drawBlock } from "./blockSource";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipLen, clipSpeed, getClipSpans, openedTimeline, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
+import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type Mask, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng, renderStillPng } from "./textRender";
 import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
@@ -484,6 +484,12 @@ interface SpecMask {
  * server re-stamps the output fps over it. */
 const MASK_SAMPLE_FPS = 15;
 
+/** The rate a moving mask samples at: the matte cadence, or the export's own
+ * frame rate for a mask keyed more densely than that. A tracked outline
+ * moves on every frame, and a coarser sample would step behind the hand. */
+const maskSampleFps = (mask: Mask | undefined, dur: number, fps: number) =>
+  (mask?.kf?.length ?? 0) / Math.max(dur, 1e-3) > MASK_SAMPLE_FPS ? Math.max(fps, MASK_SAMPLE_FPS) : MASK_SAMPLE_FPS;
+
 /** Paint a clip's mask coverage for its export segment: one luma PNG for a
  * resting mask, a 15fps sampled sequence for a keyframed one. Keyframed
  * opacity folds into the luma — a clip fading under its pose track exports
@@ -496,6 +502,7 @@ async function renderClipMaskPictures(
   W: number,
   H: number,
   dur: number,
+  fps: number,
   tag: string,
   pngs: ExportPayload["pngs"]
 ): Promise<SpecMask | undefined> {
@@ -548,8 +555,9 @@ async function renderClipMaskPictures(
     pngs.push({ name, blob: await blobAt(0) });
     return { file: name };
   }
-  const step = 1 / MASK_SAMPLE_FPS;
-  const n = Math.max(1, Math.round(dur * MASK_SAMPLE_FPS));
+  const rate = maskSampleFps(m, dur, fps);
+  const step = 1 / rate;
+  const n = Math.max(1, Math.round(dur * rate));
   const frames: { file: string; duration: number }[] = [];
   for (let i = 0; i < n; i++) {
     const name = `${tag}_f${i}.png`;
@@ -666,6 +674,7 @@ async function renderClipShadowPictures(
   W: number,
   H: number,
   dur: number,
+  fps: number,
   tag: string,
   pngs: ExportPayload["pngs"],
   assets: MediaAsset[]
@@ -757,8 +766,9 @@ async function renderClipShadowPictures(
       pngs.push({ name, blob: await blobAt(0) });
       return { file: name };
     }
-    const step = 1 / MASK_SAMPLE_FPS;
-    const n = Math.max(1, Math.round(dur * MASK_SAMPLE_FPS));
+    const rate = maskSampleFps(mask, dur, fps);
+    const step = 1 / rate;
+    const n = Math.max(1, Math.round(dur * rate));
     const frames: { file: string; duration: number }[] = [];
     for (let i = 0; i < n; i++) {
       const name = `${tag}_f${i}.png`;
@@ -951,6 +961,7 @@ export async function buildExportPayload(
     look: sp.clip.look,
     lookAmount: sp.clip.lookAmount,
     effects: sp.clip.effects,
+    effectsFrom: sp.clip.effectsFrom,
     hidden: sp.clip.hidden,
     // A still: the server loops the image for the clip's length instead of
     // trimming a source span.
@@ -989,6 +1000,7 @@ export async function buildExportPayload(
       settings.width,
       settings.height,
       dur,
+      settings.fps,
       `mask_c${i}`,
       pngs
     );
@@ -1018,6 +1030,7 @@ export async function buildExportPayload(
       settings.width,
       settings.height,
       dur,
+      settings.fps,
       `shadow_c${i}`,
       pngs,
       doc.assets
@@ -1050,13 +1063,16 @@ export async function buildExportPayload(
           2160,
           Math.round(Math.min(settings.width, settings.height) * clipZoom(c))
         ),
-        bakeLook: false,
+        // Effects bake into the keyed layer after the look, as the preview
+        // wears them, so the look bakes in with them.
+        bakeLook: !!c.effects?.length,
       });
       if (pieces) {
         pngs.push({ name: `removal_c${i}_rgb.mp4`, blob: pieces.rgb });
         pngs.push({ name: `removal_c${i}_a.mp4`, blob: pieces.alpha });
         clipEntries[i].removal = { rgb: `removal_c${i}_rgb.mp4`, alpha: `removal_c${i}_a.mp4` };
         clipEntries[i].grade = undefined;
+        if (c.effects?.length) clipEntries[i].look = undefined;
         clipEntries[i].effects = undefined;
       }
     }
@@ -1179,6 +1195,7 @@ export async function buildExportPayload(
           look: c.look,
           lookAmount: c.lookAmount,
           effects: c.effects,
+          effectsFrom: c.effectsFrom,
           mask: undefined as SpecMask | undefined,
           shadow: undefined as SpecMask | undefined,
           kf: posed(c).kf,
@@ -1208,6 +1225,7 @@ export async function buildExportPayload(
       settings.width,
       settings.height,
       olen,
+      settings.fps,
       `mask_ov${i}`,
       pngs
     );
@@ -1233,6 +1251,7 @@ export async function buildExportPayload(
       settings.width,
       settings.height,
       olen,
+      settings.fps,
       `shadow_ov${i}`,
       pngs,
       doc.assets

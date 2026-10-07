@@ -186,6 +186,8 @@ export interface ExportSpec {
     lookAmount?: number;
     /** Effects the clip wears over its own picture, on its own clock. */
     effects?: ClipEffect[];
+    /** Seconds that clock has run at the clip's first frame. */
+    effectsFrom?: number;
     /** Hidden clips keep their slot but render black + silent. */
     hidden?: boolean;
     /** A still image: looped for the clip's length instead of trimmed. */
@@ -296,6 +298,8 @@ export interface ExportSpec {
     lookAmount?: number;
     /** Effects the clip wears over its own picture, under its mask. */
     effects?: ClipEffect[];
+    /** Seconds that clock has run at the clip's first frame. */
+    effectsFrom?: number;
     /** Client-painted grayscale coverage trimming this overlay's picture,
      * box-sized (a letterboxed segment pads out to its box when masked);
      * `subject` trims by the shared person matte instead. */
@@ -1347,12 +1351,15 @@ export async function runExport(
 
   const filters: string[] = [];
 
-  // A clip's own effects run on its segment's clock, from 0 to its length,
-  // over its framed picture: chain fragment `core` in, the treated fragment
-  // out. The fades, pad and mask that follow carry them, as in the preview.
-  const wearEffects = (core: string, effects: ClipEffect[] | undefined, len: number, w: number, h: number, pixFmt: string, tag: string) => {
-    for (const [n, e] of (effects ?? []).entries()) {
-      const lines = effectFilterLines(`${tag}fi${n}`, `${tag}fo${n}`, e.effect, e.amount, 0, len, w, h, `${tag}x${n}`, undefined, undefined, { ...chroma, pixFmt });
+  // A clip's own effects run on its segment's clock over its framed
+  // picture, after its look: chain fragment `core` in, the treated fragment
+  // out. The clock starts `from` seconds in (a split's right half carries
+  // on), so the effects begin at -from on the segment's clock. The fades,
+  // pad and mask that follow carry them, as in the preview.
+  const wearEffects = (core: string, c: { effects?: ClipEffect[]; effectsFrom?: number }, len: number, w: number, h: number, pixFmt: string, tag: string) => {
+    const from = c.effectsFrom ?? 0;
+    for (const [n, e] of (c.effects ?? []).entries()) {
+      const lines = effectFilterLines(`${tag}fi${n}`, `${tag}fo${n}`, e.effect, e.amount, -from, len, w, h, `${tag}x${n}`, undefined, undefined, { ...chroma, pixFmt });
       if (!lines) continue;
       filters.push(`${core}[${tag}fi${n}]`, ...lines);
       core = `[${tag}fo${n}]null`;
@@ -2077,21 +2084,24 @@ export async function runExport(
       let core = framedTimebase(timebase, frame, `c${j}`, rmIn ? {} : c, rt, fps, filters);
       if (plan) core = plan.run(core, `c${j}`);
       core += `,format=${segFmt}`;
-      // The clip's effects treat its picture, ahead of the letterbox bars.
-      core = wearEffects(core, c.effects, dur, W, H, segFmt, `cw${j}`);
-      core += padding;
       // The look bakes in after grade + framing, before the edge effects, so
       // animations move already-graded pixels (matching the preview order). A
       // removal clip's look runs after the flatten below instead — the chain's
-      // internal blends would drop the keyed layer's alpha.
-      if (c.look && !rmIn) {
+      // internal blends would drop the keyed layer's alpha. A clip wearing
+      // effects takes its look on the picture ahead of the letterbox bars, so
+      // the effects can treat the looked picture there, as the preview does.
+      const lookAt = (at: string) => {
+        if (!c.look || rmIn) return at;
         const lines = lookFilterLines(`lki${j}`, `lko${j}`, c.look, c.lookAmount, H, clipFmt, `c${j}`, depth);
-        if (lines) {
-          filters.push(`${core}[lki${j}]`);
-          filters.push(...lines);
-          core = `[lko${j}]null`;
-        }
-      }
+        if (!lines) return at;
+        filters.push(`${at}[lki${j}]`);
+        filters.push(...lines);
+        return `[lko${j}]null`;
+      };
+      const wears = !!c.effects?.length;
+      if (wears) core = wearEffects(lookAt(core), c, dur, W, H, segFmt, `cw${j}`);
+      core += padding;
+      if (!wears) core = lookAt(core);
       // The border ring lands after the look (true stroke color) and before
       // the fades, so it fades and masks with the clip like the preview.
       const brIdx = clipBorderInput.get(j);
@@ -2505,7 +2515,7 @@ export async function runExport(
         core = `[olko${k}]null`;
       }
     }
-    core = wearEffects(core, oc.effects, olen, boxW, boxH, lookFmt, `ow${k}`);
+    core = wearEffects(core, oc, olen, boxW, boxH, lookFmt, `ow${k}`);
     if (boxPad) core += boxPad;
     // The border ring lands after the look and box pad, before the edge
     // ramps, so it fades and masks with the clip like the preview.

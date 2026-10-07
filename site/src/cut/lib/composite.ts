@@ -19,7 +19,7 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { applyDetail, applyEffectToCanvas, applyLutToImageData, applyMaskToCanvas, detailActive, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, retimeOf, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
+import { applyClipEffects, applyDetail, applyLutToImageData, applyMaskToCanvas, detailActive, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
 import { cameraCardLayout, traceCardPath, type CardLayout } from "./cameraCard";
 import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
@@ -84,6 +84,10 @@ const REC709_SOURCE: RecipeSource = { profile: "rec709" };
 
 /** How many clips a compositor remembers the last drawn LUT for. */
 const LAST_LUT_MAX = 64;
+
+/** Whether the clip wears its effects on its framed picture. A keyed clip
+ * wears them on its source picture instead (see `gradedSource`). */
+const framedEffects = (clip: VideoClip) => !!clip.effects?.length && !removalActive(clip.removal);
 
 export class FrameCompositor {
   /** Scratch buffers, kept for the compositor's life: the grade pass, the
@@ -344,9 +348,10 @@ export class FrameCompositor {
    * spatial pass, then the look's color pass as a canvas filter, in the order
    * the export's chain runs. Source alpha rides through every pass, so
    * transparent stills keep their transparency. The look's post passes
-   * (vignette, grain, glow…) draw over the composited layer instead. The
-   * clip's own effects run last, in the picture's pixels, so its mask and
-   * pose carry them with it.
+   * (vignette, grain, glow…) draw over the composited layer instead. A
+   * keyed clip wears its own effects here, in the picture's pixels, the way
+   * the export's keyed pieces bake them; every other clip wears them framed,
+   * in the mask and pose pass.
    */
   private gradedSource(
     frame: Extract<Frame, { kind: "ready" }>,
@@ -357,10 +362,10 @@ export class FrameCompositor {
     const compiled = this.lutFor(clip, recipe);
     const detail = detailActive(clip?.grade) ? clip!.grade! : null;
     const lookCss = lookCssFilter(clip?.look, clip?.lookAmount);
-    const fx = clip?.effects?.length ? clip : null;
+    const fx = clip?.effects?.length && removalActive(clip.removal) ? clip : null;
     if (!compiled && !detail && !lookCss && !fx) return frame.image;
     const graded = this.colorPasses(frame, compiled, detail, lookCss);
-    return fx ? this.clipEffects(graded, frame.width, frame.height, fx, at) : graded;
+    return fx ? (this.clipEffects(graded, frame.width, frame.height, fx, at) as CanvasImageSource) : graded;
   }
 
   /** The LUT, the spatial pass and the look's color pass, in that order. */
@@ -417,24 +422,28 @@ export class FrameCompositor {
     return scratch;
   }
 
-  /** The clip's effects over its picture, in order, on the clip's own clock:
-   * a color cycle turns from the clip's first frame and a flash pops there. */
-  private clipEffects(picture: CanvasImageSource, w: number, h: number, clip: VideoClip, at: number): CanvasImageSource {
+  /** The clip's effects over `picture`'s `src` rect, in order, on the
+   * effects' own clock: a color cycle turns from the clip's first frame (or
+   * from where a split left it) and a flash pops there. */
+  private clipEffects(
+    picture: CanvasImageSource,
+    w: number,
+    h: number,
+    clip: VideoClip,
+    at: number,
+    src = { x: 0, y: 0, w, h }
+  ): Surface {
     const { surface: canvas } = this.scratch("clipFxCanvas", w, h);
     const { surface: scratch } = this.scratch("clipFxScratch", w, h);
     const ctx = canvas.getContext("2d") as Ctx | null;
-    if (!ctx) return picture;
+    if (!ctx) return canvas;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(picture, 0, 0, w, h);
-    const tLocal = at - clip.start;
-    const len = retimeOf(clip).len;
-    for (const e of clip.effects!) {
-      applyEffectToCanvas(canvas, scratch, e.effect, e.amount, tLocal, grainTile, undefined, undefined, len);
-    }
-    return canvas as CanvasImageSource;
+    ctx.drawImage(picture, src.x, src.y, src.w, src.h, 0, 0, w, h);
+    applyClipEffects(canvas, scratch, clip.effects ?? [], at - clip.start + (clip.effectsFrom ?? 0), grainTile);
+    return canvas;
   }
 
   /**
@@ -709,6 +718,7 @@ export class FrameCompositor {
       (clipPosed(clip) ||
         // A camera card casts its own shadow; the box style stands aside.
         (!!clip.boxStyle?.shadow && !clip.card) ||
+        framedEffects(clip) ||
         !!(clip.mask && (clip.mask.kind !== "subject" || this.subjectMatteProvider)))
     );
   }
@@ -752,12 +762,29 @@ export class FrameCompositor {
         kf: undefined,
         rotation: undefined,
         opacity: undefined,
+        ...(framedEffects(clip) ? { effects: undefined } : {}),
         ...(clip.boxStyle ? { boxStyle: { ...clip.boxStyle, shadow: undefined } } : {}),
       });
     } finally {
       this.canvas = prev;
     }
     const rect = rectOf(clip);
+
+    // The clip's effects treat its framed picture, look and all, ahead of
+    // the mask and pose — the export's chain runs them on the framed segment
+    // the same way. Example: a vignette darkens the corners of the clip's box,
+    // wherever the source's own corners were cropped to.
+    if (framedEffects(clip)) {
+      const bx = Math.max(0, Math.floor(rect.x * W));
+      const by = Math.max(0, Math.floor(rect.y * H));
+      const bw = Math.min(W, Math.ceil((rect.x + rect.w) * W)) - bx;
+      const bh = Math.min(H, Math.ceil((rect.y + rect.h) * H)) - by;
+      if (bw > 0 && bh > 0) {
+        const worn = this.clipEffects(layer as CanvasImageSource, bw, bh, clip, at, { x: bx, y: by, w: bw, h: bh });
+        lctx.clearRect(bx, by, bw, bh);
+        lctx.drawImage(worn as CanvasImageSource, bx, by);
+      }
+    }
     const { surface: cover } = this.scratch("maskScratch", W, H);
     if (mask && mask.kind !== "subject") {
       applyMaskToCanvas(

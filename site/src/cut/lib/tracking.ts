@@ -18,7 +18,8 @@ import { cutTracking } from "./chatRuntime";
 import { framesAt } from "./mediaRead";
 import { visionFileset, withQuietWasmLogs } from "./mediapipe";
 import { trackTargetOf, type TrackTarget } from "./trackTargets";
-import type { Pt, TrackSample } from "./trackKeys";
+import type { MaskPoint } from "@donkeycut/effects-kit";
+import type { TrackSample } from "./trackKeys";
 
 const HAND_MODEL = "/mediapipe/hand_landmarker.task";
 const FACE_MODEL = "/mediapipe/face_landmarker.task";
@@ -68,7 +69,7 @@ export async function trackFootage(
   const order = times.map((_, i) => i).sort((a, b) => times[a] - times[b]);
   const out: (TrackSample | null)[] = times.map(() => null);
   const detector = await openDetector(target, settings.minConfidence);
-  let prev: Pt | null = null;
+  let prev: MaskPoint | null = null;
   let seen = 0;
   let clock = -1;
   try {
@@ -146,10 +147,10 @@ async function openDetector(target: TrackTarget, confidence: number): Promise<De
  * there. `aspect` is the frame's width over height: hulls, angles and
  * distances are measured in square pixels. `prev` is the target's center a
  * frame earlier, which keeps the track on the same hand, face or body. */
-export function sampleOf(target: TrackTarget, found: Landmarks[], aspect: number, prev: Pt | null): TrackSample | null {
+export function sampleOf(target: TrackTarget, found: Landmarks[], aspect: number, prev: MaskPoint | null): TrackSample | null {
   const pad = trackTargetOf(target).pad;
-  const sq = (p: Pt): Pt => ({ x: p.x * aspect, y: p.y });
-  const unsq = (p: Pt): Pt => ({ x: p.x / aspect, y: p.y });
+  const sq = (p: MaskPoint): MaskPoint => ({ x: p.x * aspect, y: p.y });
+  const unsq = (p: MaskPoint): MaskPoint => ({ x: p.x / aspect, y: p.y });
   const unsqAll = (s: TrackSample): TrackSample => ({
     outline: s.outline.map(unsq),
     center: unsq(s.center),
@@ -219,7 +220,7 @@ export function sampleOf(target: TrackTarget, found: Landmarks[], aspect: number
 /** The hand on the asked-for side of the picture. With both in view, side
  * decides; with one, it stays the tracked hand while it is near where that
  * hand was, and otherwise counts when it sits on that half of the picture. */
-function pickHand(found: Landmarks[], side: "left_hand" | "right_hand", prev: Pt | null): Landmarks | null {
+function pickHand(found: Landmarks[], side: "left_hand" | "right_hand", prev: MaskPoint | null): Landmarks | null {
   if (found.length === 0) return null;
   const left = side === "left_hand";
   if (found.length >= 2) {
@@ -234,7 +235,7 @@ function pickHand(found: Landmarks[], side: "left_hand" | "right_hand", prev: Pt
 
 /** The detection nearest where the target was; the largest when the track
  * has no history. Null when every detection is too far to be the same one. */
-function pickNearest(found: Landmarks[], prev: Pt | null, centerOf: (l: Landmarks) => Pt): Landmarks | null {
+function pickNearest(found: Landmarks[], prev: MaskPoint | null, centerOf: (l: Landmarks) => MaskPoint): Landmarks | null {
   if (found.length === 0) return null;
   if (!prev) {
     const spread = (l: Landmarks) => {
@@ -259,31 +260,31 @@ function chainLoop(edges: { start: number; end: number }[]): number[] {
   return loop;
 }
 
-const mean = (pts: Pt[]): Pt => ({
+const mean = (pts: MaskPoint[]): MaskPoint => ({
   x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
   y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
 });
 
-const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist = (a: MaskPoint, b: MaskPoint) => Math.hypot(a.x - b.x, a.y - b.y);
 
 /** Points in order around `c`, starting from the top. */
-function aroundCenter(pts: Pt[], c: Pt): Pt[] {
-  const angle = (p: Pt) => (Math.atan2(p.y - c.y, p.x - c.x) + Math.PI * 2.5) % (Math.PI * 2);
+function aroundCenter(pts: MaskPoint[], c: MaskPoint): MaskPoint[] {
+  const angle = (p: MaskPoint) => (Math.atan2(p.y - c.y, p.x - c.x) + Math.PI * 2.5) % (Math.PI * 2);
   return [...pts].sort((a, b) => angle(a) - angle(b));
 }
 
 /** Points pushed out from `c` by `pad` of their distance. */
-const grow = (pts: Pt[], c: Pt, pad: number): Pt[] =>
+const grow = (pts: MaskPoint[], c: MaskPoint, pad: number): MaskPoint[] =>
   pts.map((p) => ({ x: c.x + (p.x - c.x) * (1 + pad), y: c.y + (p.y - c.y) * (1 + pad) }));
 
 /** The convex hull of `pts`, grown by `pad` and resampled to RING_POINTS
  * corners at even angles around its middle, so outlines from different
  * frames line up corner for corner. Null for fewer than three points. */
-export function hullRing(pts: Pt[], pad: number): Pt[] | null {
+export function hullRing(pts: MaskPoint[], pad: number): MaskPoint[] | null {
   const hull = convexHull(pts);
   if (hull.length < 3) return null;
   const c = mean(hull);
-  const ring: Pt[] = [];
+  const ring: MaskPoint[] = [];
   for (let k = 0; k < RING_POINTS; k++) {
     const theta = (k / RING_POINTS) * Math.PI * 2 - Math.PI / 2;
     const d = { x: Math.cos(theta), y: Math.sin(theta) };
@@ -304,19 +305,19 @@ export function hullRing(pts: Pt[], pad: number): Pt[] | null {
   return grow(ring, c, pad);
 }
 
-const cross = (u: Pt, v: Pt) => u.x * v.y - u.y * v.x;
+const cross = (u: MaskPoint, v: MaskPoint) => u.x * v.y - u.y * v.x;
 
 /** Andrew's monotone chain, counter-clockwise without repeats. */
-function convexHull(input: Pt[]): Pt[] {
+function convexHull(input: MaskPoint[]): MaskPoint[] {
   const pts = [...input].sort((a, b) => a.x - b.x || a.y - b.y);
   if (pts.length < 3) return pts;
-  const turn = (o: Pt, a: Pt, b: Pt) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
-  const lower: Pt[] = [];
+  const turn = (o: MaskPoint, a: MaskPoint, b: MaskPoint) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: MaskPoint[] = [];
   for (const p of pts) {
     while (lower.length >= 2 && turn(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
     lower.push(p);
   }
-  const upper: Pt[] = [];
+  const upper: MaskPoint[] = [];
   for (let i = pts.length - 1; i >= 0; i--) {
     const p = pts[i];
     while (upper.length >= 2 && turn(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();

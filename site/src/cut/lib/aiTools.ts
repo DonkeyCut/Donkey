@@ -30,7 +30,6 @@ import {
   ALL_EFFECT_IDS,
   CLIP_EFFECT_IDS,
   type ClipEffect,
-  type ClipEffectId,
   applyLutToImageData,
   autoGradeFromImageData,
   buildClipLut,
@@ -2972,9 +2971,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Each entry names a clip effect once, with an optional amount in range.
       const effects: ClipEffect[] = [];
       for (const e of input.effects as { effect?: unknown; amount?: unknown }[]) {
-        if (!(CLIP_EFFECT_IDS as unknown[]).includes(e?.effect))
-          throw new ToolError(`effect must be one of ${CLIP_EFFECT_IDS.join(", ")}.`);
-        const effect = e.effect as ClipEffectId;
+        const effect = CLIP_EFFECT_IDS.find((id) => id === e?.effect);
+        if (!effect) throw new ToolError(`effect must be one of ${CLIP_EFFECT_IDS.join(", ")}.`);
         if (effects.some((x) => x.effect === effect)) throw new ToolError(`${effect} is listed twice; a clip wears an effect once.`);
         effects.push(isNum(e.amount) ? { effect, amount: Math.max(0.05, Math.min(1, e.amount)) } : { effect });
       }
