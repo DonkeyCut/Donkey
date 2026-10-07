@@ -48,6 +48,7 @@ import type {
   TemplateMedia,
   TemplateSaveInput,
 } from "./types";
+import { landedSoundFrom } from "./projectTemplate";
 import { IMAGE_CLIP_SECONDS, isLinkedAssetType, mediaUrl } from "./types";
 
 
@@ -1167,10 +1168,13 @@ export async function addTemplateToProject(
   const s = useEditor.getState();
   // Each copied media file (in template.media order) becomes a project asset;
   // the layer/audio media indices resolve against this array. Enrichment gives
-  // the new clips their filmstrip thumbnails and waveform peaks.
-  const assetIds = media.map((m, i) => {
+  // the new clips their filmstrip thumbnails and waveform peaks. A video's
+  // separate recording binds to the copy of it.
+  const assetIds = media.map(() => crypto.randomUUID().slice(0, 8));
+  media.forEach((m, i) => {
+    const soundFrom = landedSoundFrom(m, assetIds);
     const asset: MediaAsset = {
-      id: crypto.randomUUID().slice(0, 8),
+      id: assetIds[i],
       fileName: m.fileName,
       name: m.name,
       type: m.type,
@@ -1178,10 +1182,10 @@ export async function addTemplateToProject(
       width: m.width,
       height: m.height,
       url: urls[i],
+      ...(soundFrom ? { soundFrom } : {}),
     };
     s.addAsset(asset);
     void enrichAsset(asset);
-    return asset.id;
   });
   s.insertTemplate(template, assetIds, at ?? playheadAt());
 }
@@ -1225,11 +1229,15 @@ export async function addProjectTemplateToTimeline(
     )
   );
   const s = useEditor.getState();
-  const assetIds = template.media.map((m, i) => {
-    const existing = s.assets.find((a) => a.fileName === m.fileName);
-    if (existing) return existing.id;
+  // A media file still in the project plays as it stands; a re-registered
+  // one binds to its separate recording again.
+  const existing = template.media.map((m) => s.assets.find((a) => a.fileName === m.fileName));
+  const assetIds = existing.map((a) => a?.id ?? crypto.randomUUID().slice(0, 8));
+  template.media.forEach((m, i) => {
+    if (existing[i]) return;
+    const soundFrom = landedSoundFrom(m, assetIds);
     const asset: MediaAsset = {
-      id: crypto.randomUUID().slice(0, 8),
+      id: assetIds[i],
       fileName: m.fileName,
       name: m.name,
       type: m.type,
@@ -1237,10 +1245,10 @@ export async function addProjectTemplateToTimeline(
       width: m.width,
       height: m.height,
       url: urls[i] ?? mediaUrl(projectId, m.fileName),
+      ...(soundFrom ? { soundFrom } : {}),
     };
     s.addAsset(asset);
     void enrichAsset(asset);
-    return asset.id;
   });
   useEditor.getState().insertTemplate(template, assetIds, at ?? playheadAt());
 }

@@ -14,7 +14,7 @@ import { blendInto, SYNTH_EDGE, synthWeight } from "@/cut/lib/frameSynth";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
 import { assetIsSilent, clipCovers, rectOf } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
-import { soundSourceOf, soundWindow } from "@/cut/lib/soundSource";
+import { OWN_SOUND, soundSourceOf, soundWindow } from "@/cut/lib/soundSource";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { hdrCanvasSupport } from "@/cut/lib/hdrCanvas";
@@ -169,15 +169,13 @@ export function engineLog(msg: string): void {
  */
 const SOUND_LOOKAHEAD_S = 3;
 
-const OWN_TRACK = { offset: 0, limit: Infinity };
-
 const voiceSpan = (sp: ClipSpan) => {
   // The handles a crossing or a split edit reaches into play at the pace of
   // the footage beside them, so the voice's span widens through the clip's
   // own map and its retime is rebuilt over the wider span. A recording bound
   // to the video is read through the same map, on its own clock, and starts
   // late where it rolled after the camera did.
-  const w = soundWindow(sp.clip, sp.sound ?? OWN_TRACK, -sp.soundBack, sp.len + sp.soundAhead);
+  const w = soundWindow(sp.clip, sp.sound ?? OWN_SOUND, -sp.soundBack, sp.len + sp.soundAhead);
   if (!w) return null;
   return {
     url: (sp.sound?.asset ?? sp.asset).url,

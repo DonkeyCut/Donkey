@@ -13,13 +13,16 @@
  */
 
 import { retimeOf, speedCurveOf, srcSpan, type Retimable, type SpeedNode } from "@donkeycut/effects-kit";
-import { assetIsSilent, type StoredAsset } from "./types";
+import { assetIsSilent, type ClipSpan, type MediaAsset, type StoredAsset } from "./types";
 
 type Sourced = Pick<StoredAsset, "id" | "type" | "duration" | "soundFrom">;
 
 /** The longest a split edit carries a clip's sound past its picture, either
  * side, in seconds. */
 export const SPLIT_EDIT_MAX_S = 5;
+
+/** A file's own track: read from its own clock, as far as it goes. */
+export const OWN_SOUND = { offset: 0, limit: Infinity } as const;
 
 /** The sound a video plays: its own file's track, or the recording bound to
  * it, with the seconds added to its source time to land on that file. */
@@ -45,7 +48,7 @@ export function soundSourceOf<A extends Sourced>(
     if (rec && !assetIsSilent(rec))
       return { asset: rec, offset: from.offset, limit: rec.duration > 0 ? rec.duration : Infinity, bound: true };
   }
-  return { asset, offset: 0, limit: Infinity, bound: false };
+  return { asset, ...OWN_SOUND, bound: false };
 }
 
 const isMap = <A>(v: readonly A[] | ReadonlyMap<string, A>): v is ReadonlyMap<string, A> => v instanceof Map;
@@ -140,4 +143,26 @@ export function specSound<A extends Sourced>(
   const src = soundSourceOf(asset, assets);
   if (!src.bound) return undefined;
   return { file: fileOf(src.asset), offset: src.offset, duration: src.asset.duration };
+}
+
+/** A clip's sound as a spec entry carries it: the recording bound to its
+ * video, and a split edit's reach past its picture with the ramp at the far
+ * end. `fileOf` names files the way the spec does. */
+export function spanSoundSpec(sp: ClipSpan, fileOf: (a: MediaAsset) => string) {
+  return {
+    ...(sp.sound
+      ? { soundFrom: { file: fileOf(sp.sound.asset), offset: sp.sound.offset, duration: sp.sound.asset.duration } }
+      : {}),
+    ...(sp.soundLead || sp.soundTail
+      ? { soundLead: sp.soundLead ?? 0, soundTail: sp.soundTail ?? 0, splitFade: sp.splitFade ?? 0 }
+      : {}),
+  };
+}
+
+/** Whether a span plays sound off a bound recording or past its picture —
+ * what a renderer without either would get wrong. A clip that plays nothing
+ * (hidden, muted, a still, a silent file with no recording) never does. */
+export function spanUsesSoundFeature(sp: ClipSpan): boolean {
+  const sounds = !sp.clip.hidden && !sp.clip.muted && (!!sp.sound || !assetIsSilent(sp.asset));
+  return sounds && (!!sp.sound || !!sp.soundLead || !!sp.soundTail);
 }

@@ -15,6 +15,7 @@ import {
   type AssetType,
   type MediaAsset,
   type ProjectDoc,
+  type SoundFrom,
   type StoredAsset,
   type TemplateAudio,
   type TemplateLayer,
@@ -265,3 +266,11 @@ export const mediaTypeFits = (source: AssetType, replacement: AssetType): boolea
   source === "audio" || isLinkedAssetType(source)
     ? replacement === source
     : replacement === "video" || replacement === "image";
+
+/** The binding a template media entry lands with, onto the project assets
+ * `ids` the entries landed as: a video's recording binds to whatever the
+ * recording's entry landed as. Absent when the recording did not land. */
+export function landedSoundFrom(m: TemplateMedia, ids: readonly string[]): SoundFrom | undefined {
+  const rec = m.soundFrom ? ids[m.soundFrom.media] : undefined;
+  return rec && m.soundFrom ? { assetId: rec, offset: m.soundFrom.offset } : undefined;
+}

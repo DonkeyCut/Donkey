@@ -95,7 +95,7 @@ import { cueEmphasis, emphasisField, joinEmphasis, remapEmphasis, sliceEmphasis,
 import { clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
 import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
-import { soundRoom, soundSourceOf, soundWindow, SPLIT_EDIT_MAX_S } from "./soundSource";
+import { OWN_SOUND, soundRoom, soundSourceOf, soundWindow, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { cutSound } from "./soundSettings";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
@@ -1562,7 +1562,7 @@ export function cutTranscribeSpec(
         }
       : null;
   };
-  const own = (asset: MediaAsset) => ({ asset, offset: 0, limit: Infinity });
+  const own = (asset: MediaAsset) => ({ asset, ...OWN_SOUND });
   const audio: Item[] = [];
   for (const a of s.audioClips) {
     const asset = assetById.get(a.assetId);
@@ -1711,8 +1711,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       let next = a;
       if (grids.has(a.id) && grids.get(a.id) !== a.beats) next = { ...next, beats: grids.get(a.id) };
       if (profiles.has(a.id) && profiles.get(a.id) !== a.colorProfile)
-        next = withColorProfile(next, profiles.get(a.id));
-      if (sounds.has(a.id) && sounds.get(a.id) !== a.soundFrom) next = withSoundFrom(next, sounds.get(a.id));
+        next = withAssetField(next, "colorProfile", profiles.get(a.id));
+      if (sounds.has(a.id) && sounds.get(a.id) !== a.soundFrom) next = withAssetField(next, "soundFrom", sounds.get(a.id));
       return next;
     });
     const beatsMoved = withBeats.some((a, i) => a !== assets[i]);
@@ -2619,7 +2619,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (!asset || get().readOnly || asset.colorProfile === profile) return;
       push();
       set((s) => ({
-        assets: s.assets.map((a) => (a.id === id ? withColorProfile(a, profile) : a)),
+        assets: s.assets.map((a) => (a.id === id ? withAssetField(a, "colorProfile", profile) : a)),
       }));
     },
 
@@ -2631,7 +2631,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       // The source's transcript was heard off the sound it had; the sweep
       // hears the new one.
       set((s) => ({
-        assets: s.assets.map((a) => (a.id === id ? { ...withSoundFrom(a, from), speech: undefined } : a)),
+        assets: s.assets.map((a) => (a.id === id ? { ...withAssetField(a, "soundFrom", from), speech: undefined } : a)),
       }));
     },
 
@@ -2782,7 +2782,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const remaining = (assets: MediaAsset[]) =>
         assets
           .filter((a) => a.id !== id)
-          .map((a) => (a.soundFrom?.assetId === id ? withSoundFrom(a, undefined) : a));
+          .map((a) => (a.soundFrom?.assetId === id ? withAssetField(a, "soundFrom", undefined) : a));
       for (const snap of history) scrub(snap);
       for (const snap of future) scrub(snap);
       if (pending) scrub(pending.snap);
@@ -4194,15 +4194,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         style: t.style,
         ...(t.hidden ? { hidden: true } : {}),
       }));
-      // A video's separate recording binds to the landed copy of it.
-      const bound = new Map<string, SoundFrom>();
-      template.media.forEach((m, i) => {
-        const video = assetIds[i];
-        const rec = m.soundFrom ? assetIds[m.soundFrom.media] : undefined;
-        if (video && rec && m.soundFrom) bound.set(video, { assetId: rec, offset: m.soundFrom.offset });
-      });
       set((s) => ({
-        ...(bound.size ? { assets: s.assets.map((a) => (bound.has(a.id) ? { ...a, soundFrom: bound.get(a.id) } : a)) } : {}),
         clips: [...s.clips, ...newClips, ...newLayers].sort((a, b) => a.start - b.start),
         audioClips: [...s.audioClips, ...newAudio],
         overlays: [...s.overlays, ...newTexts],
@@ -5251,19 +5243,17 @@ function beatsEdited(prev: MediaAsset[], next: MediaAsset[]): boolean {
   });
 }
 
-/** The asset with the person's source profile override set or cleared. The
- * header's record in `color` is left as it is. */
-function withColorProfile<A extends StoredAsset>(asset: A, profile: SourceProfile | undefined): A {
-  const { colorProfile: _was, ...rest } = asset;
+/** The asset with one optional setting set, or cleared off it entirely: the
+ * person's source profile override (the header's record in `color` is left
+ * as it is) or its bound recording. */
+function withAssetField<A extends StoredAsset, K extends "colorProfile" | "soundFrom">(
+  asset: A,
+  key: K,
+  value: StoredAsset[K] | undefined
+): A {
+  const { [key]: _was, ...rest } = asset;
   void _was;
-  return (profile ? { ...rest, colorProfile: profile } : rest) as A;
-}
-
-/** The asset with its bound recording set or cleared. */
-function withSoundFrom<A extends StoredAsset>(asset: A, from: SoundFrom | undefined): A {
-  const { soundFrom: _was, ...rest } = asset;
-  void _was;
-  return (from ? { ...rest, soundFrom: from } : rest) as A;
+  return (value ? { ...rest, [key]: value } : rest) as A;
 }
 
 /** A stored asset in the current shape. Projects saved while the override

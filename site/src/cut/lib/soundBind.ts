@@ -12,7 +12,7 @@ import { useEditor } from "./store";
 import { assetIsSilent, type MediaAsset } from "./types";
 import { queueWatchSweep } from "./watch/sweep";
 
-export interface BoundSound {
+interface BoundSound {
   assetId: string;
   audioAssetId: string;
   /** Recording seconds = video seconds + offset. */

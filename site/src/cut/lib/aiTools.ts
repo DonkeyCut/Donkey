@@ -3942,7 +3942,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       const chatId = chatOwner();
       const toCopy = built.sourceAssets.filter((a) => !mapping.has(a.id));
-      const landed = await landReferenceAssets(ref, toCopy, projectId, chatId);
+      const landed = await landReferenceAssets(ref, toCopy, projectId, chatId, new Set(mapping.keys()));
       const landedBySource = new Map(landed.map((l) => [l.sourceId, l.asset]));
       const assetIds = built.assetByMedia.map(
         (sid) => mapping.get(sid) ?? landedBySource.get(sid)?.id ?? ""
@@ -5880,10 +5880,11 @@ async function landReferenceAssets(
   ref: ReferenceProject,
   sources: StoredAsset[],
   projectId: string,
-  chatId: string | null
+  chatId: string | null,
+  mapped?: ReadonlySet<string>
 ): Promise<LandedAsset[]> {
   if (sources.length === 0) return [];
-  return landReferenceAssetsInto(ref, sources, projectId, { chatId }).catch((e) => {
+  return landReferenceAssetsInto(ref, sources, projectId, { chatId, mapped }).catch((e) => {
     throw new ToolError(e instanceof Error ? e.message : "Could not copy the reference's media.");
   });
 }

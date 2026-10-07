@@ -277,7 +277,7 @@ export function crossHandles(spans: ClipSpan[], t: number): { span: ClipSpan; ga
  * silence where an L-cut's tail closes. The offline fold and the ffmpeg graph
  * write the same ramps.
  */
-export function splitEditGain(sp: ClipSpan, t: number): number {
+function splitEditGain(sp: ClipSpan, t: number): number {
   const lead = sp.soundLead ?? 0;
   const tail = sp.soundTail ?? 0;
   const end = sp.start + sp.len;

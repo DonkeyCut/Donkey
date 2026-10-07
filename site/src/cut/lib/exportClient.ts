@@ -35,12 +35,11 @@ import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, pa
 import { renderElementFrames, renderElementPng } from "./textRender";
 import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
-import { specSound } from "./soundSource";
+import { soundSourceOf, spanSoundSpec, spanUsesSoundFeature, specSound } from "./soundSource";
 import type {
   Aspect,
   AudioClip,
   ClipAnim,
-  ClipSpan,
   MediaAsset,
   Overlay,
   Selection,
@@ -800,18 +799,8 @@ function renderClipBorderPng(
   return rasterCanvasToPng(canvas);
 }
 
-/** A clip's sound as the spec carries it: the recording bound to its video,
- * and a split edit's reach past its picture with the ramp at the far end. */
-function specSpanSound(sp: ClipSpan) {
-  return {
-    ...(sp.sound
-      ? { soundFrom: { file: sp.sound.asset.fileName, offset: sp.sound.offset, duration: sp.sound.asset.duration } }
-      : {}),
-    ...(sp.soundLead || sp.soundTail
-      ? { soundLead: sp.soundLead ?? 0, soundTail: sp.soundTail ?? 0, splitFade: sp.splitFade ?? 0 }
-      : {}),
-  };
-}
+/** The spec names a file by its name in the project's media folder. */
+const specFile = (a: MediaAsset) => a.fileName;
 
 /** What a source's code values mean, for the spec: the profile the header
  * settled (with the person's override), and the matrix and range the file
@@ -929,7 +918,7 @@ export async function buildExportPayload(
       : undefined;
 
   const clipEntries = spans.map((sp) => ({
-    ...specSpanSound(sp),
+    ...spanSoundSpec(sp, specFile),
     file: sp.asset.fileName,
     in: sp.clip.in,
     out: sp.clip.out,
@@ -1163,7 +1152,7 @@ export async function buildExportPayload(
       .filter(({ c }) => !c.hidden && c.start < duration)
       .map(({ c, sp, ramp }) => {
         const entry = {
-          ...specSpanSound(sp),
+          ...spanSoundSpec(sp, specFile),
           file: assetById.get(c.assetId)!.fileName,
           in: c.in,
           out: c.out,
@@ -1637,10 +1626,17 @@ export function downloadExport(jobId: string, outName: string, backend: CutBacke
  * not know — a range export would come back as the whole cut, a typed name
  * as the project's — so what the settings ask of the engine is checked
  * against what it says it carries, and the export refuses with the fix. */
-/** Whether the cut plays a bound recording or a split edit anywhere. */
+/** Whether the cut plays a bound recording or a split edit anywhere: on a
+ * clip of any track that sounds, or on the soundtrack. */
 function cutUsesSoundFeatures(doc: ExportDoc): boolean {
-  const bound = new Set(doc.assets.filter((a) => a.soundFrom).map((a) => a.id));
-  return doc.clips.some((c) => bound.has(c.assetId) || !!c.audioLead || !!c.audioTail);
+  const byId = new Map(doc.assets.map((a) => [a.id, a]));
+  const soundtrack = doc.audioClips.some((a) => {
+    const asset = byId.get(a.assetId);
+    return !!asset && !a.hidden && soundSourceOf(asset, byId).bound;
+  });
+  if (soundtrack) return true;
+  const tracks = new Set(doc.clips.map((c) => c.track));
+  return [...tracks].some((t) => getClipSpans(doc.clips, doc.assets, t).some(spanUsesSoundFeature));
 }
 
 async function assertEngineCarries(

@@ -150,22 +150,26 @@ export interface LandedAsset {
  * a font installs so titles set in it draw, and each copy remembers where it
  * came from, so the same source pasted or replicated twice lands once. A
  * chat's copies preview on its cards; a keyboard paste is the user's own
- * import.
+ * import. `mapped` names the reference sources the caller plays from assets
+ * of its own, which never copy across.
  */
 export async function landReferenceAssets(
   ref: ReferenceProject,
   sources: StoredAsset[],
   projectId: string,
-  opts: { chatId?: string | null } = {}
+  opts: { chatId?: string | null; mapped?: ReadonlySet<string> } = {}
 ): Promise<LandedAsset[]> {
   const out: LandedAsset[] = [];
   const toCopy: StoredAsset[] = [];
-  // A video bound to a separate recording brings the recording with it.
+  // A video bound to a separate recording brings the recording with it,
+  // unless the caller plays that recording's part from its own asset; the
+  // copy then plays its own track.
   const refAssets = new Map(ref.doc.assets.map((a) => [a.id, a]));
   const wanted = [...sources];
   for (const source of sources) {
     const rec = source.soundFrom && refAssets.get(source.soundFrom.assetId);
-    if (rec && !wanted.some((w) => w.id === rec.id)) wanted.push(rec);
+    if (!rec || opts.mapped?.has(rec.id) || wanted.some((w) => w.id === rec.id)) continue;
+    wanted.push(rec);
   }
   for (const source of wanted) {
     const have = useEditor

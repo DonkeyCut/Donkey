@@ -26,7 +26,7 @@
 /** The rate both signals are compared at. */
 export const SYNC_RATE = 16000;
 /** Samples per envelope hop: 20 ms. */
-export const ENV_HOP = 320;
+const ENV_HOP = 320;
 export const ENV_HOP_S = ENV_HOP / SYNC_RATE;
 /** Hops the slow level drift is measured over, taken out of the envelope. */
 const DETREND_HOPS = 50;
@@ -35,9 +35,9 @@ const PEAK_EXCLUDE_S = 1;
 /** The least of either signal that has to overlap at a lag for it to count. */
 const MIN_OVERLAP_SHARE = 0.5;
 /** How far the fine pass searches either side of the coarse answer. */
-export const FINE_REACH_S = 0.06;
+const FINE_REACH_S = 0.06;
 /** How much of the camera's sound the fine pass compares. */
-export const FINE_SECONDS = 4;
+const FINE_SECONDS = 4;
 /** Confidence reported when the runner-up does not agree at all. */
 const CONFIDENCE_CAP = 99;
 
@@ -45,7 +45,8 @@ const CONFIDENCE_CAP = 99;
  * Folds decoded chunks of any rate and channel count into one mono signal at
  * `SYNC_RATE`: channels averaged, then each output sample the mean of the
  * input samples it covers — a box filter, enough to keep the fold from
- * aliasing what the correlation compares.
+ * aliasing what the correlation compares. A rate below `SYNC_RATE` (a voice
+ * recorder's 8 kHz) holds each input sample for the outputs it spans.
  */
 export class MonoResampler {
   private out: Float32Array;
@@ -69,8 +70,10 @@ export class MonoResampler {
       this.sum += v / k;
       this.count++;
       const next = this.pos + step;
-      if (Math.floor(next) > Math.floor(this.pos)) {
-        this.emit(this.sum / this.count);
+      const outputs = Math.floor(next) - Math.floor(this.pos);
+      if (outputs > 0) {
+        const v = this.sum / this.count;
+        for (let o = 0; o < outputs; o++) this.emit(v);
         this.sum = 0;
         this.count = 0;
       }
@@ -97,10 +100,6 @@ export class MonoResampler {
   drain(into: (mono: Float32Array) => void): void {
     if (this.n > 0) into(this.out.subarray(0, this.n));
     this.n = 0;
-  }
-
-  get length(): number {
-    return this.n;
   }
 }
 
@@ -150,7 +149,7 @@ export function envelopeOf(mono: Float32Array): Float32Array {
 /** The envelope with its slow drift taken out and scaled to unit variance,
  * so the correlation weighs where loudness moves, whatever level a device
  * recorded. */
-export function normalizeEnvelope(env: Float32Array): Float64Array {
+function normalizeEnvelope(env: Float32Array): Float64Array {
   const n = env.length;
   const out = new Float64Array(n);
   if (n === 0) return out;
@@ -214,7 +213,7 @@ function fft(re: Float64Array, im: Float64Array, inverse: boolean): void {
  * Cross-correlation of `a` against `b` at every lag where they overlap:
  * `at(k)` is Σ a[i]·b[i + k], for k from −(a.length − 1) to b.length − 1.
  */
-export function crossCorrelate(
+function crossCorrelate(
   a: ArrayLike<number>,
   b: ArrayLike<number>
 ): { at: (k: number) => number; min: number; max: number } {
@@ -247,7 +246,7 @@ export function crossCorrelate(
 
 /** The coarse answer: the lag, in hops, at which the camera's envelope sits
  * best inside the recording's, and how clearly it beats the runner-up. */
-export interface CoarseSync {
+interface CoarseSync {
   lag: number;
   confidence: number;
 }
@@ -296,7 +295,7 @@ export function coarseSync(camera: Float32Array, recording: Float32Array): Coars
  * earlier than the coarse answer), or null when no shift stands out. Polarity
  * is ignored: two microphones can face the source from opposite sides.
  */
-export function fineSync(camera: Float32Array, recording: Float32Array, reach: number): number | null {
+function fineSync(camera: Float32Array, recording: Float32Array, reach: number): number | null {
   if (camera.length < 64 || recording.length < camera.length + 2 * reach) return null;
   const xc = crossCorrelate(camera, recording);
   let best = -1;
@@ -321,7 +320,7 @@ export function fineSync(camera: Float32Array, recording: Float32Array, reach: n
 
 /** The loudest `seconds` of a signal at `SYNC_RATE`, by hop energy: where the
  * fine pass has the most to compare. Returns the first sample. */
-export function loudestStretch(mono: Float32Array, seconds: number): number {
+function loudestStretch(mono: Float32Array, seconds: number): number {
   const len = Math.min(mono.length, Math.round(seconds * SYNC_RATE));
   if (len >= mono.length) return 0;
   let sum = 0;
@@ -349,38 +348,6 @@ export interface SyncAnswer {
   refined: boolean;
 }
 
-/**
- * Both passes over two whole signals in hand, each at `SYNC_RATE` and each
- * with the source second its first sample sits at. The tools stream the
- * recording through `EnvelopeBuilder` instead, since a long one cannot be
- * held whole, and read the fine window on its own; this is the same
- * arithmetic for signals already decoded.
- */
-export function syncSignals(
-  camera: Float32Array,
-  cameraStart: number,
-  recording: Float32Array,
-  recordingStart: number
-): SyncAnswer | null {
-  const coarse = coarseSync(envelopeOf(camera), envelopeOf(recording));
-  if (!coarse) return null;
-  const offset = recordingStart - cameraStart + coarse.lag * ENV_HOP_S;
-  const reach = Math.round(FINE_REACH_S * SYNC_RATE);
-  const from = loudestStretch(camera, FINE_SECONDS);
-  const cam = camera.subarray(from, from + Math.round(FINE_SECONDS * SYNC_RATE));
-  // Where the camera's stretch starts in the recording, by the coarse answer.
-  const recAt = Math.round((cameraStart + from / SYNC_RATE + offset - recordingStart) * SYNC_RATE) - reach;
-  const shift =
-    recAt >= 0 && recAt + cam.length + 2 * reach <= recording.length
-      ? fineSync(cam, recording.subarray(recAt, recAt + cam.length + 2 * reach), reach)
-      : null;
-  return {
-    offset: shift === null ? offset : offset + shift / SYNC_RATE,
-    confidence: coarse.confidence,
-    refined: shift !== null,
-  };
-}
-
 /** Decoded audio of any rate and channel count, chunk by chunk, starting at
  * `timestamp` source seconds. */
 export interface SyncChunk {
@@ -390,7 +357,7 @@ export interface SyncChunk {
 }
 
 /** Reads a span of each file's sound, wherever it lives. */
-export interface SyncReader {
+interface SyncReader {
   camera: (from: number, to: number) => AsyncIterable<SyncChunk>;
   recording: (from: number, to: number) => AsyncIterable<SyncChunk>;
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 
 import { richDoc, RICH_CLIP_S } from "./fixtures/richDoc";
-import { clampLayersToAssets, templateFromDoc } from "./projectTemplate";
+import { clampLayersToAssets, landedSoundFrom, templateFromDoc } from "./projectTemplate";
 import { resolveTransitions, useEditor } from "./store";
 import { emptySubtitles, isStickerOverlay, isTextOverlay, type MediaAsset, type TemplateSaveInput } from "./types";
 
@@ -132,7 +132,7 @@ describe("insertTemplate", () => {
   const MAP: Record<string, string> = { v0: "b0", v1: "b1", m0: "bm", s0: "bs", f0: "" };
   const idsFor = (assetByMedia: string[], map = MAP) => assetByMedia.map((id) => map[id] ?? "");
 
-  test("a video's bound recording travels with it and binds to the landed copy", () => {
+  test("a video's bound recording travels with it, and lands onto the copies only", () => {
     const doc = richDoc();
     const withRec = {
       ...doc,
@@ -146,9 +146,15 @@ describe("insertTemplate", () => {
     const r0 = assetByMedia.indexOf("r0");
     expect(r0).toBeGreaterThanOrEqual(0);
     expect(template.media[v0].soundFrom).toEqual({ media: r0, offset: 0.25 });
+    // The copies bind at landing: v0's entry onto whatever r0 landed as.
+    const landed = assetByMedia.map((id) => `new-${id}`);
+    expect(landedSoundFrom(template.media[v0], landed)).toEqual({ assetId: "new-r0", offset: 0.25 });
+    expect(landedSoundFrom(template.media[v0], landed.map((id, i) => (i === r0 ? "" : id)))).toBeUndefined();
+    // Placing the template on the project's own footage leaves that footage's
+    // sound as it was: b0 plays the reference's part, not its take.
     useEditor.setState({ assets: [...useEditor.getState().assets, asset("br", "audio", 60)] });
     useEditor.getState().insertTemplate({ ...template, id: "t", addedAt: 0 }, idsFor(assetByMedia, { ...MAP, r0: "br" }), 0);
-    expect(useEditor.getState().assets.find((a) => a.id === "b0")?.soundFrom).toEqual({ assetId: "br", offset: 0.25 });
+    expect(useEditor.getState().assets.find((a) => a.id === "b0")?.soundFrom).toBeUndefined();
   });
 
   test("stands the whole edit up on other footage, treatment and all", () => {

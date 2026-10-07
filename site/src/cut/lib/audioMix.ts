@@ -28,7 +28,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { decodeAudioSpan } from "./mediaRead";
 import { fitSpan, retimeFits } from "./retimeFit";
-import { shiftSpan, soundWindow, type SoundWindow, type SpecSound } from "./soundSource";
+import { OWN_SOUND, shiftSpan, soundWindow, type SoundWindow, type SpecSound } from "./soundSource";
 
 /** One track-0 clip's audio in the sequential fold. A spacer (no file) only
  * shapes time. */
@@ -222,7 +222,7 @@ type Sounded = {
 const soundRead = (c: Sounded, back = 0, ahead = 0): (SoundWindow & { file: string }) | null => {
   const len = retimeOf(c).len;
   const from = c.soundFrom;
-  const w = soundWindow(c, from ? { offset: from.offset, limit: from.duration } : { offset: 0, limit: Infinity }, -back, len + ahead);
+  const w = soundWindow(c, from ? { offset: from.offset, limit: from.duration } : OWN_SOUND, -back, len + ahead);
   return w && { ...w, file: from ? from.file : c.file };
 };
 

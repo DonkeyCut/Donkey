@@ -34,7 +34,7 @@ import { audioFxSpans } from "./audioEffects";
 import { duckWindows, renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
 import { masterInPlace } from "./loudness";
 import { STEM_CHANNELS, STEM_RATE, wavBytes, wavChunks, writeStoredZip, type StemDef } from "./stems";
-import { specSound } from "./soundSource";
+import { spanSoundSpec, specSound } from "./soundSource";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { ensureClipLuts, sourceLookup } from "./lutBuild";
 import { colorRead, type ColorRead, type ReadFile } from "./sourceColor";
@@ -889,14 +889,6 @@ function trackZeroFades(spans: ClipSpan[], i: number): { fadeIn: number; fadeOut
  * while the picture keeps them, and everything after the first gap plays early.
  */
 export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => string): MixSpec {
-  // A clip's sound past its picture (a split edit) and the recording bound to
-  // its video, as the fold reads them.
-  const spanSound = (sp: ClipSpan) => ({
-    ...(sp.sound ? { soundFrom: { file: resolve(sp.sound.asset), offset: sp.sound.offset, duration: sp.sound.asset.duration } } : {}),
-    ...(sp.soundLead || sp.soundTail
-      ? { soundLead: sp.soundLead, soundTail: sp.soundTail, splitFade: sp.splitFade }
-      : {}),
-  });
   const duration = projectDuration(doc);
   const spans = getClipSpans(doc.clips, doc.assets, 0);
   const byId = new Map(doc.assets.map((a) => [a.id, a]));
@@ -923,7 +915,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
         crossOut: ramps[i].crossOut,
         soundBack: sp.soundBack,
         soundAhead: sp.soundAhead,
-        ...spanSound(sp),
+        ...spanSoundSpec(sp, resolve),
       });
     });
   }
@@ -971,7 +963,7 @@ export function mixSpecFor(doc: ExportDoc, resolve: (asset: MediaAsset) => strin
             soundCross: sp.soundOut,
             soundBack: sp.soundBack,
             soundAhead: sp.soundAhead,
-            ...spanSound(sp),
+            ...spanSoundSpec(sp, resolve),
           },
         ]);
 
