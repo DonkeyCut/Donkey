@@ -39,6 +39,8 @@ final class ScreenRecordingController {
     private var windowSizeTask: Task<Void, Never>?
     private var recordingStart: Date?
     private var timer: Timer?
+    /// Quits waiting on the movie in flight, answered once it is written or abandoned.
+    private var quitWaiters: [@MainActor () -> Void] = []
 
     init() {
         model.onSelectMode = { [weak self] mode in self?.selectMode(mode) }
@@ -90,6 +92,30 @@ final class ScreenRecordingController {
         }
     }
 
+    // MARK: - Quit
+
+    /// Whether a movie is being written: from the start of capture until its file is finalized.
+    var isWriting: Bool { recorder != nil }
+
+    /// Stops the recording in flight and calls `done` once its file is finalized, so quitting the
+    /// app mid-recording still leaves a playable movie. A capture still starting stops as soon as
+    /// it is running.
+    func finishBeforeQuit(_ done: @escaping @MainActor () -> Void) {
+        guard isWriting else {
+            done()
+            return
+        }
+
+        quitWaiters.append(done)
+        stopRecording()
+    }
+
+    private func releaseQuit() {
+        let waiters = quitWaiters
+        quitWaiters = []
+        waiters.forEach { $0() }
+    }
+
     // MARK: - Arm / cancel
 
     private func arm() {
@@ -116,7 +142,6 @@ final class ScreenRecordingController {
     }
 
     private func cancel() {
-        guard !model.isBusy else { return }
         stopWindowSizeUpdates()
         teardownOverlays()
         recordingDim.close()
@@ -336,15 +361,22 @@ final class ScreenRecordingController {
             model.isRecording = true
             model.statusMessage = nil
             startTimer()
+
+            // A quit asked for while capture was starting stops it now that there is a file.
+            if !quitWaiters.isEmpty {
+                stopRecording()
+            }
         } catch ScreenRecordingError.screenRecordingPermissionDenied {
             self.recorder = nil
             recordingDim.close()
             model.statusMessage = "Allow Screen Recording in System Settings, then try again."
             openScreenRecordingSettings()
+            releaseQuit()
         } catch {
             self.recorder = nil
             recordingDim.close()
             model.statusMessage = "Couldn't start recording."
+            releaseQuit()
         }
     }
 
@@ -371,6 +403,7 @@ final class ScreenRecordingController {
         recordingDim.close()
         phase = .idle
         controlBar.close()
+        releaseQuit()
     }
 
     private func finishAfterRecording() {
@@ -381,6 +414,7 @@ final class ScreenRecordingController {
         model.isRecording = false
         model.isBusy = false
         controlBar.close()
+        releaseQuit()
     }
 
     // MARK: - Target resolution

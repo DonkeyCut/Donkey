@@ -57,6 +57,16 @@ final class DonkeyAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         false
     }
 
+    /// Quit, Install Update, and logging out all wait for a recording in flight to finish writing,
+    /// so the movie is playable.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let screenRecordingController, screenRecordingController.isWriting else { return .terminateNow }
+        screenRecordingController.finishBeforeQuit {
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         phoneLinkListener?.stop()
         cutEngineSupervisor?.stop()
