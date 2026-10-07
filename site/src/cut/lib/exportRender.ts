@@ -33,7 +33,7 @@ import { drawBlock } from "./blockSource";
 import { audioFxSpans } from "./audioEffects";
 import { duckWindows, renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
 import { masterInPlace } from "./loudness";
-import { wavBytes, wavChunks, writeStoredZip, type StemDef } from "./stems";
+import { STEM_CHANNELS, STEM_RATE, wavBytes, wavChunks, writeStoredZip, type StemDef } from "./stems";
 import { specSound } from "./soundSource";
 import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { ensureClipLuts, sourceLookup } from "./lutBuild";
@@ -1211,12 +1211,11 @@ export async function renderStemsArchive(
   stems: StemDef[],
   opts: Pick<RenderOptions, "resolve" | "signal">
 ): Promise<RenderedExport> {
-  if (stems.length === 0) throw new Error("Nothing in this cut makes a sound to split into stems.");
   const duration = projectDuration(doc);
   const from = Math.max(0, settings.range?.start ?? 0);
   const span = deliverySpan(settings.range, duration);
-  const rate = settings.audioSampleRate ?? AUDIO_RATE;
-  const count = settings.audioChannels ?? AUDIO_CHANNELS;
+  const rate = STEM_RATE;
+  const count = STEM_CHANNELS;
   const spec = mixSpecFor(doc, opts.resolve);
   // The length the export's own mix comes out at, slice included.
   const total = Math.max(1, Math.ceil(duration * rate));

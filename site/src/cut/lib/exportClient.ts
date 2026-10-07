@@ -16,7 +16,7 @@ import {
   reserveBrowserExportJob,
   updateBrowserExportJob,
 } from "./backend/browser/exportJobs";
-import { exportsDir, projectDir, writeFileAt, readFileAt, saveExport } from "./backend/browser/opfs";
+import { deleteExport as dropStoredExport, exportsDir, projectDir, writeFileAt, readFileAt, saveExport } from "./backend/browser/opfs";
 import { holdRegistered, registerBlobFile, releaseRegistered, resolveRegisteredBlob } from "./backend/browser/registry";
 import { captureCloudBackend } from "./backend/cloud";
 import { downloadFile, downloadFromUrl } from "./download";
@@ -1646,10 +1646,11 @@ function cutUsesSoundFeatures(doc: ExportDoc): boolean {
 async function assertEngineCarries(
   settings: ExportSettings,
   doc: ExportDoc,
-  /** The engine encodes this one in ffmpeg; a tab render only hands it the
-   * finished files. */
-  engineRenders = true
+  /** Who encodes the file: the engine in ffmpeg, or this tab, which only
+   * hands the engine the finished files. */
+  renderer: "engine" | "tab"
 ): Promise<void> {
+  const engineRenders = renderer === "engine";
   const wants: [EngineFeature, boolean, string][] = [
     // An older engine would deliver the mix unmastered and drop the stems.
     ["export.loudness", engineRenders && settings.loudness !== undefined, "master the loudness"],
@@ -1690,7 +1691,7 @@ export async function createExportJob(
 ): Promise<string> {
   const backend = projectOperation(projectId).backend;
   const outName = exportOutName(settings);
-  if (backend.kind === "local") await assertEngineCarries(settings, doc);
+  if (backend.kind === "local") await assertEngineCarries(settings, doc, "engine");
   const payload = await buildExportPayload(projectId, doc, settings, "export");
   const res = await postExport(projectId, payload, outName, backend);
   const body = await apiJson<{ id?: string }>(res);
@@ -1841,7 +1842,7 @@ async function runEngineExport(
   opts: NonNullable<Parameters<typeof runBrowserExport>[3]>,
   backend: CutBackend
 ): Promise<string> {
-  await assertEngineCarries(settings, doc, false);
+  await assertEngineCarries(settings, doc, "tab");
   const claim = await backend.fetch("/api/cut/export/client", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1941,7 +1942,9 @@ async function runEngineExport(
 }
 
 /** A browser-resident project's stems, rendered in this tab and shelved
- * beside the video they go with. */
+ * beside the video they go with. The two land together: stems that fail or
+ * are canceled take the saved video with them. A failure is final, since the
+ * cloud fallback mixes its stems in this same tab. */
 async function saveStems(
   projectId: string,
   doc: ExportDoc,
@@ -1960,6 +1963,11 @@ async function saveStems(
     } finally {
       void stems.discard();
     }
+  } catch (err) {
+    await dropStoredExport(projectId, videoName);
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    if (err instanceof ExportRefusedError) throw err;
+    throw new ExportRefusedError(`The stems could not be saved: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
     releaseRegistered(`/api/cut/projects/${projectId}/`);
   }

@@ -132,21 +132,26 @@ export function isDeliveryName(name: string): boolean {
   return EXPORT_CONTAINERS.some((c) => lower.endsWith(c.ext)) || isStemsName(name);
 }
 
-/** The stems archive that rides beside a video: "Trip.mp4" → "Trip stems.zip". */
-export const STEMS_SUFFIX = " stems.zip";
 export const STEMS_MIME = "application/zip";
 
+/** The stems archive that rides beside a video: "Trip.mp4" → "Trip stems.zip". */
 export function stemsArchiveName(videoName: string): string {
-  return `${exportBaseName(videoName)}${STEMS_SUFFIX}`;
+  return `${exportBaseName(videoName)} stems.zip`;
 }
 
 export function isStemsName(name: string): boolean {
   return name.toLowerCase().endsWith(".zip");
 }
 
-/** The media type of a delivered file, by its name. */
-export function deliveryMime(name: string): string {
-  return isStemsName(name) ? STEMS_MIME : containerOfName(name).mime;
+/** What an export lands: the file alone, or the file with its stems zip
+ * beside it, whose name it claims too. */
+export type ExportFiles = "file" | "fileAndStems";
+
+/** Whether a stored export job asked for stems, however it was queued: a
+ * tab render's claim, a document export, or a built spec with a stem plan. */
+export function jobWantsStems(stored: unknown): boolean {
+  const s = stored as { stems?: boolean; fromDoc?: { stems?: boolean }; spec?: { stemPlan?: unknown[] } } | null;
+  return !!(s?.stems || s?.fromDoc?.stems || s?.spec?.stemPlan?.length);
 }
 
 /**

@@ -14,7 +14,7 @@ import { withSpecColors } from "./fileColor";
 import { alignRecording } from "./soundAlign";
 import { shiftSpan, type SpecSound } from "../lib/soundSource";
 import { masterRawMix, packStems } from "./exportAudio";
-import type { StemDef } from "../lib/stems";
+import { STEM_CHANNELS, STEM_RATE, type StemDef } from "../lib/stems";
 import { CLIP_MAX_ZOOM, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
 import { audioFxFilters, buildClipLut, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
@@ -394,8 +394,6 @@ export interface ExportSpec {
 
 /** The rate the graph mixes at: every read resamples to it. */
 const MIX_RATE = 44100;
-/** The rate stems are written at, the rate the tab's own stems mix at. */
-const STEM_RATE = 48000;
 
 /** What the pipeline needs from its caller's job record: the staging dir the
  * overlay PNGs were written into, the output path, and the mutable fields the
@@ -766,6 +764,11 @@ export function runFfmpeg(
       else reject(new Error(`ffmpeg exited with code ${code}.\n${job.log.slice(-8).join("")}`));
     });
   });
+}
+
+/** End a render whose job was canceled or timed out between passes. */
+function stopIfCanceled(job: RenderHandle) {
+  if (job.error) throw new Error(job.error);
 }
 
 /** The pipeline's edges into the world: staged-media checks, list-file
@@ -2219,7 +2222,7 @@ export async function runExport(
       );
     } else {
       filters.push(
-        `anullsrc=r=44100:cl=stereo,atrim=0:${num(dur)},asetpts=PTS-STARTPTS[a${j}]`
+        `anullsrc=r=${MIX_RATE}:cl=stereo,atrim=0:${num(dur)},asetpts=PTS-STARTPTS[a${j}]`
       );
     }
   });
@@ -2923,7 +2926,7 @@ export async function runExport(
   const stemLabels = stemPlan.map((_, i) => {
     const ins = stemInputs[i];
     let label = `stm${i}`;
-    if (ins.length === 0) filters.push(`anullsrc=r=44100:cl=stereo,atrim=0:${num(spec.duration)}[${label}]`);
+    if (ins.length === 0) filters.push(`anullsrc=r=${MIX_RATE}:cl=stereo,atrim=0:${num(spec.duration)}[${label}]`);
     else if (ins.length === 1) label = ins[0];
     else {
       filters.push(
@@ -2943,16 +2946,21 @@ export async function runExport(
     "-map", `[${label}]`,
     "-c:a", "pcm_s24le",
     "-ar", String(STEM_RATE),
-    "-ac", "2",
+    "-ac", String(STEM_CHANNELS),
     "-t", num(span),
     stemFiles[i].path,
   ]);
 
   // A mastered delivery takes its sound out of this pass as raw float, so the
   // master can run the tab's own loudness code over it before it is encoded.
+  // The raw mix comes out in the delivery's own rate and layout, so the
+  // master weighs the same channels the tab's master does: a mono delivery
+  // is measured as mono, a 5.1 one with its surround weights.
   const master = spec.loudness !== undefined;
   if (master && spec.truePeakCeiling === undefined) throw new Error("A mastered export needs its true-peak ceiling.");
   const mixPath = path.join(job.tmpDir, "mix.f32");
+  const mixRate = spec.audioSampleRate ?? MIX_RATE;
+  const mixChannels = spec.audioChannels ?? 2;
 
   const enc = await io.videoEncoder(spec.codec ?? "h264");
 
@@ -2974,23 +2982,30 @@ export async function runExport(
       "-t", num(span),
       encodePath,
       ...(master
-        ? ["-map", `[${aLabel}]`, "-c:a", "pcm_f32le", "-ar", String(MIX_RATE), "-ac", "2", "-f", "f32le", "-t", num(span), mixPath]
+        ? ["-map", `[${aLabel}]`, "-c:a", "pcm_f32le", "-ar", String(mixRate), "-ac", String(mixChannels), "-f", "f32le", "-t", num(span), mixPath]
         : []),
       ...stemOutputs,
     ],
     (t) => (job.progress = Math.min(0.99, t / Math.max(0.1, span)))
   );
 
+  // The master and the stems pack run in this process, out of a cancel's
+  // reach, so the job is checked after each: a canceled render never goes on
+  // to write its file.
   const masteredPath = path.join(job.tmpDir, "master.f32");
   if (master) {
     await io.masterRawMix(mixPath, masteredPath, {
-      sampleRate: MIX_RATE,
-      channels: 2,
+      sampleRate: mixRate,
+      channels: mixChannels,
       targetLufs: spec.loudness!,
       ceilingDbtp: spec.truePeakCeiling!,
     });
+    stopIfCanceled(job);
   }
-  if (stemPlan.length > 0) await io.packStems(stemFiles, job.stemsPath!);
+  if (stemPlan.length > 0) {
+    await io.packStems(stemFiles, job.stemsPath!);
+    stopIfCanceled(job);
+  }
 
   // ffmpeg's autorotation already baked each source's display matrix into the
   // pixels, so the encode's frames are upright. But for a complex filtergraph it
@@ -3007,7 +3022,7 @@ export async function runExport(
     "-i", encodePath,
     ...(master
       ? [
-          "-f", "f32le", "-ar", String(MIX_RATE), "-ac", "2", "-i", masteredPath,
+          "-f", "f32le", "-ar", String(mixRate), "-ac", String(mixChannels), "-i", masteredPath,
           "-map", "0:v", "-map", "1:a", "-c:v", "copy", ...audioCodecArgs(spec), "-t", num(span),
         ]
       : ["-map", "0", "-c", "copy"]),

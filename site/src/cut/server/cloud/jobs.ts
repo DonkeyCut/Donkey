@@ -10,7 +10,7 @@ import { getProject } from "./projects";
 import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./mediaCdn";
 import { del, head, overlayKey, overlayPrefix, presignPut, projectExportKey } from "./r2";
 import { contentTypeFor } from "../serveFile";
-import { containerOfName, deliveryContainer, exportBaseName, specMediaFiles, STEMS_MIME, stemsArchiveName, type ExportContainer } from "../../lib/exportDelivery";
+import { containerOfName, deliveryContainer, exportBaseName, jobWantsStems, specMediaFiles, STEMS_MIME, stemsArchiveName, type ExportContainer, type ExportFiles } from "../../lib/exportDelivery";
 import { LOUDNESS_IDS, type LoudnessId } from "../../lib/loudnessSettings";
 import type { DocExportAudio } from "../../lib/exportPresets";
 import { addUsage, outputByteCeiling, quotaCheck } from "./usage";
@@ -143,13 +143,17 @@ async function dropUnregisteredExport(
   row: Pick<JobRow, "projectId" | "outName">
 ): Promise<void> {
   if (!row.projectId || !row.outName) return;
-  const key = projectExportKey(userId, row.projectId, row.outName);
-  const registered = await prisma.cutMediaObject.findUnique({
-    where: { r2Key: key },
-    select: { id: true },
+
+  // Stems land before the file and go with it. Each key is weighed on its own:
+  // a plain export can share its stems' name with a zip an older export
+  // registered, and that zip stays.
+  const keys = [row.outName, stemsArchiveName(row.outName)].map((name) => projectExportKey(userId, row.projectId!, name));
+  const registered = await prisma.cutMediaObject.findMany({
+    where: { r2Key: { in: keys } },
+    select: { r2Key: true },
   });
-  // Stems land before the file, and go with it.
-  if (!registered) await del([key, projectExportKey(userId, row.projectId, stemsArchiveName(row.outName))]);
+  const kept = new Set(registered.map((r) => r.r2Key));
+  await del(keys.filter((k) => !kept.has(k)));
 }
 
 /** Engine job status ("queued" | "running" | "done" | "error") from a row's
@@ -194,8 +198,8 @@ async function exportName(
   projectId: string,
   baseName: string,
   container: ExportContainer | undefined,
-  tx: Prisma.TransactionClient | typeof prisma = prisma,
-  stems = false
+  tx: Prisma.TransactionClient | typeof prisma,
+  claim: ExportFiles
 ) {
   // The spec's container names the extension, the same way the engine's
   // `containerExtension` does; a name alone (a tab's own claim) says it by its
@@ -221,7 +225,7 @@ async function exportName(
   ]);
   for (let n = 1; ; n++) {
     const candidate = n === 1 ? `${base}${ext}` : `${base} ${n}${ext}`;
-    if (!taken.has(candidate) && !(stems && taken.has(stemsArchiveName(candidate)))) return candidate;
+    if (!taken.has(candidate) && !(claim === "fileAndStems" && taken.has(stemsArchiveName(candidate)))) return candidate;
   }
 }
 
@@ -242,7 +246,7 @@ export async function queueDocExport(
   // What the render may land. The worker holds its own output to it, so a
   // queued export cannot pass this gate and then write past the account's cap.
   const maxBytes = await exportByteCeiling(userId);
-  const outName = await exportName(userId, projectId, project.name, undefined, prisma, audio.stems === true);
+  const outName = await exportName(userId, projectId, project.name, undefined, prisma, audio.stems ? "fileAndStems" : "file");
   const row = await prisma.cutRenderJob.create({
     data: {
       userId,
@@ -478,7 +482,7 @@ export const jobsCloud = {
               body.outName?.trim() || project?.name || "export",
               body.spec.container,
               prisma,
-              (body.spec.stemPlan?.length ?? 0) > 0
+              body.spec.stemPlan?.length ? "fileAndStems" : "file"
             )
           : target === "hls"
             ? "master.m3u8"
@@ -570,7 +574,7 @@ export const jobsCloud = {
   async exportClientPresign(userId: string, req: Request) {
     try {
       const body = (await req.json()) as { projectId?: string; outName?: string; bytes?: number; stems?: boolean };
-      const stems = body.stems === true;
+      const claim: ExportFiles = body.stems === true ? "fileAndStems" : "file";
       const projectId = body.projectId;
       if (!projectId) return err("projectId is required.", 400);
       if (!(await getProject(userId, projectId))) return err("Project not found.", 400);
@@ -591,7 +595,7 @@ export const jobsCloud = {
       // completion would then fail on the unique key with the render already
       // spent. The row is the reservation.
       const row = await prisma.$transaction(async (tx) => {
-        const outName = await exportName(userId, projectId, body.outName ?? "export.mp4", undefined, tx, stems);
+        const outName = await exportName(userId, projectId, body.outName ?? "export.mp4", undefined, tx, claim);
         return tx.cutRenderJob.create({
           data: {
             userId,
@@ -601,7 +605,7 @@ export const jobsCloud = {
             // nothing ever claims it.
             state: "running",
             progress: 0,
-            spec: stems ? { client: true, stems: true } : { client: true },
+            spec: claim === "fileAndStems" ? { client: true, stems: true } : { client: true },
             outName,
           },
         });
@@ -609,7 +613,7 @@ export const jobsCloud = {
       const key = projectExportKey(userId, projectId, row.outName!);
       const type = containerOfName(row.outName!).mime;
       // The stems zip lands beside the file, under the name claimed with it.
-      const stemsUrl = stems
+      const stemsUrl = claim === "fileAndStems"
         ? await presignPut(projectExportKey(userId, projectId, stemsArchiveName(row.outName!)), STEMS_MIME)
         : undefined;
       return Response.json({
@@ -642,7 +646,10 @@ export const jobsCloud = {
       if (!body.jobId) return err("jobId is required.", 400);
       // The row the presign reserved carries the project and the name, so the
       // client cannot claim a different one at completion time.
-      const row = await findJob(userId, body.jobId);
+      const row = await prisma.cutRenderJob.findFirst({
+        where: { id: body.jobId, userId },
+        select: { ...jobRowSelect, spec: true },
+      });
       if (!row || row.kind !== "export" || !row.projectId || !row.outName) {
         return err("Export not found.", 400);
       }
@@ -651,15 +658,18 @@ export const jobsCloud = {
       const key = projectExportKey(userId, projectId, outName);
       const object = await head(key);
       if (!object) return err("The export was not uploaded.", 400);
-      // A render that asked for stems uploaded them before the file.
-      const spec = (
-        await prisma.cutRenderJob.findUnique({ where: { id: row.id }, select: { spec: true } })
-      )?.spec as { stems?: boolean } | null;
-      const stemsName = spec?.stems ? stemsArchiveName(outName) : null;
-      const stemsKey = stemsName ? projectExportKey(userId, projectId, stemsName) : null;
-      const stemsObject = stemsKey ? await head(stemsKey) : null;
-      if (stemsKey && !stemsObject) return err("The stems were not uploaded.", 400);
-      const bytes = object.bytes + (stemsObject?.bytes ?? 0);
+
+      // A render that asked for stems uploaded them before the file. Each file
+      // is its own row at its own size, so deleting one frees what it held.
+      const files = [{ r2Key: key, fileName: outName, mime: containerOfName(outName).mime, bytes: object.bytes }];
+      if (jobWantsStems(row.spec)) {
+        const stemsName = stemsArchiveName(outName);
+        const stemsKey = projectExportKey(userId, projectId, stemsName);
+        const stemsObject = await head(stemsKey);
+        if (!stemsObject) return err("The stems were not uploaded.", 400);
+        files.push({ r2Key: stemsKey, fileName: stemsName, mime: STEMS_MIME, bytes: stemsObject.bytes });
+      }
+      const bytes = files.reduce((sum, f) => sum + f.bytes, 0);
       // The account is charged what landed, so the quota is checked against it.
       // A file past the ceiling is dropped rather than charged: the row would
       // otherwise put the account over its cap for good, and the bytes it holds
@@ -674,32 +684,16 @@ export const jobsCloud = {
         return over;
       }
       await prisma.$transaction(async (tx) => {
-        await tx.cutMediaObject.create({
-          data: {
+        await tx.cutMediaObject.createMany({
+          data: files.map((f) => ({
+            ...f,
             userId,
             projectId,
-            r2Key: key,
-            fileName: outName,
-            mime: containerOfName(outName).mime,
-            bytes: BigInt(bytes),
+            bytes: BigInt(f.bytes),
             kind: "export",
             uploadState: "complete",
-          },
+          })),
         });
-        if (stemsKey && stemsName && stemsObject) {
-          await tx.cutMediaObject.create({
-            data: {
-              userId,
-              projectId,
-              r2Key: stemsKey,
-              fileName: stemsName,
-              mime: STEMS_MIME,
-              bytes: BigInt(stemsObject.bytes),
-              kind: "export",
-              uploadState: "complete",
-            },
-          });
-        }
         await addUsage(tx, userId, bytes);
         await tx.cutRenderJob.update({
           where: { id: row.id },

@@ -9,7 +9,6 @@ import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
 import { obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { EXPORT_RESOLUTIONS } from "@/cut/lib/exportPresets";
 import { LOUDNESS_CHOICES } from "@/cut/lib/loudnessSettings";
-import { SETTINGS } from "@/lib/config/registry";
 import { GUIDE_IDS, GUIDE_PRESETS } from "@/cut/lib/guides";
 
 export const TOP_BAR_TOOLS = [
@@ -57,7 +56,7 @@ export const TOP_BAR_TOOLS = [
   {
     name: "open_export",
     description:
-      `Open the export dialog: Best uses original resolution, frame rate, supported H.264/HEVC codec and audio settings. Whole files, trims and compatible sequences copy compressed video; joined audio is encoded at source settings. Effects or incompatible joins render with source settings. Other presets are Share, Social 4K, Small and Master. Controls include file name, whole video or selection range, MP4/MOV, H.264/HEVC/ProRes, resolution (${EXPORT_RESOLUTIONS.map((r) => r.label).join(", ")}, Source), frame rate, quality or custom bitrate, AAC/PCM, the project's color space (SDR, or HDR as HLG or PQ — a 10-bit HEVC or ProRes file; H.264 greys out), an SRT captions file, Loudness (${LOUDNESS_CHOICES.map((c) => (c.id === "off" ? c.label : `${c.label} ${SETTINGS.cutLoudness.default.targets[c.id]} LUFS`)).join(", ")} by default: one gain sets the mix's integrated loudness, and a limiter holds true peaks under ${SETTINGS.cutLoudness.default.truePeakCeiling} dBTP), and Stems (a zip of one 24-bit WAV per lane, the video clips' dialogue then each soundtrack lane, full length and unmastered, saved beside the video). measure_level with mix: true reads the mix's loudness first. Exporting itself stays a user action.`,
+      `Open the export dialog: Best uses original resolution, frame rate, supported H.264/HEVC codec and audio settings. Whole files, trims and compatible sequences copy compressed video; joined audio is encoded at source settings. Effects or incompatible joins render with source settings. Other presets are Share, Social 4K, Small and Master. Controls include file name, whole video or selection range, MP4/MOV, H.264/HEVC/ProRes, resolution (${EXPORT_RESOLUTIONS.map((r) => r.label).join(", ")}, Source), frame rate, quality or custom bitrate, AAC/PCM, the project's color space (SDR, or HDR as HLG or PQ — a 10-bit HEVC or ProRes file; H.264 greys out), an SRT captions file, Loudness (${LOUDNESS_CHOICES.map((c) => `${c.label}: ${c.detail}`).join("; ")}. Each target's LUFS, the true-peak ceiling and the choice an export starts on are account settings the dialog shows. One gain sets the mix's integrated loudness, and a limiter holds true peaks under the ceiling), and Stems (a zip of one 24-bit WAV per lane, the video clips' dialogue then each soundtrack lane, full length and unmastered, saved beside the video). measure_level with mix: true reads the mix's loudness first. Exporting itself stays a user action.`,
     inputSchema: obj({}),
   },
 ] as const satisfies readonly AiToolDef[];

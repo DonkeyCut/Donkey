@@ -27,6 +27,8 @@ const probedDims = new Map<string, { width: number; height: number }>();
 /** The masters and stem packs the last run asked for. */
 let mastered: { input: string; output: string; opts: Parameters<ExportPipelineIO["masterRawMix"]>[2] }[] = [];
 let packed: { files: { path: string; name: string }[]; output: string }[] = [];
+/** A pass to cancel the job during, the way the dock's cancel lands mid-render. */
+let cancelDuring: "master" | "stems" | null = null;
 
 const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
   const ffmpegCalls: string[][] = [];
@@ -55,10 +57,12 @@ const runsFor = async (over: Partial<ExportSpec>): Promise<string[][]> => {
       codec === "hevc" ? "libx265" : codec.startsWith("prores") ? "prores_ks" : "libx264",
     masterRawMix: async (input, output, opts) => {
       mastered.push({ input, output, opts });
+      if (cancelDuring === "master") job.error = "Export canceled.";
       return {} as Awaited<ReturnType<ExportPipelineIO["masterRawMix"]>>;
     },
     packStems: async (files, output) => {
       packed.push({ files, output });
+      if (cancelDuring === "stems") job.error = "Export canceled.";
     },
     runFfmpeg: async (_job, args) => {
       ffmpegCalls.push(args);
@@ -1555,6 +1559,25 @@ describe("a mastered delivery", () => {
     expect(mux[mux.length - 1]).toBe("/tmp/graph-test/out.mp4");
   });
 
+  test("a mono delivery masters its mono mix, the layout the tab masters", async () => {
+    const runs = await runsFor({ clips: [clip("a.mp4")], loudness: -14, truePeakCeiling: -1, audioChannels: 1, audioSampleRate: 48000 });
+    const enc = runs.find((a) => a.includes("-filter_complex"))!;
+    const mix = enc.slice(enc.indexOf("pcm_f32le"));
+    expect(arg(mix, "-ac")).toBe("1");
+    expect(arg(mix, "-ar")).toBe("48000");
+    expect(mastered[0].opts).toMatchObject({ sampleRate: 48000, channels: 1 });
+    expect(arg(runs[runs.length - 1], "-ac")).toBe("1");
+  });
+
+  test("a cancel during the master ends the render before the file is written", async () => {
+    cancelDuring = "master";
+    try {
+      await expect(runsFor({ clips: [clip("a.mp4")], loudness: -14, truePeakCeiling: -1 })).rejects.toThrow("Export canceled.");
+    } finally {
+      cancelDuring = null;
+    }
+  });
+
   test("an unmastered delivery keeps its one-pass sound and plain remux", async () => {
     const runs = await runsFor({ clips: [clip("a.mp4")] });
     expect(mastered).toEqual([]);
@@ -1621,6 +1644,23 @@ describe("stems", () => {
   test("a range cuts every stem to the delivered window", async () => {
     const graph = await graphFor({ ...stemSpec, duration: 4, range: { start: 1, end: 3 } });
     expect(graph.find((l) => l.endsWith("[stem2]"))).toContain("atrim=start=1.000:end=3.000");
+  });
+
+  test("a cancel while the stems pack ends the render before the file is written", async () => {
+    cancelDuring = "stems";
+    try {
+      await expect(runsFor({ ...stemSpec, duration: 4 })).rejects.toThrow("Export canceled.");
+    } finally {
+      cancelDuring = null;
+    }
+  });
+
+  test("stems print at 48 kHz stereo whatever the delivery carries", async () => {
+    const runs = await runsFor({ ...stemSpec, duration: 4, audioChannels: 1, audioSampleRate: 44100 });
+    const enc = runs.find((a) => a.includes("-filter_complex"))!;
+    const stem = enc.slice(enc.indexOf("pcm_s24le"));
+    expect(arg(stem, "-ar")).toBe("48000");
+    expect(arg(stem, "-ac")).toBe("2");
   });
 
   test("a spec that asks for stems renders even when its source could copy", async () => {

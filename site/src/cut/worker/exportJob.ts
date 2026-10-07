@@ -9,7 +9,7 @@ import { prisma, registerObjectIn, storageTransaction, type ClaimedJob } from ".
 import { deleteObjects, downloadToFile, exportKey, mediaKey, mimeFor, uploadFile } from "./r2";
 import { overlayKey } from "../server/cloud/r2";
 import { STORAGE_FULL } from "../lib/operationFailure";
-import { specMediaFiles, stemsArchiveName } from "../lib/exportDelivery";
+import { specMediaFiles, STEMS_MIME, stemsArchiveName } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
 import { bindCutColor } from "../lib/colorSettings";
 import { bindCutSound } from "../lib/soundSettings";
@@ -213,30 +213,28 @@ export async function runExportJob(
         (await stat(handle.outPath)).size + (handle.stemsPath ? (await stat(handle.stemsPath)).size : 0);
       if (size > stored.maxBytes) throw new Error(STORAGE_FULL);
     }
-    const stemsKey = stemsName ? exportKey(job.userId, projectId, stemsName) : null;
-    const uploaded = [key, ...(stemsKey ? [stemsKey] : [])];
+    // The file and, when asked for, its stems: each its own object and row,
+    // charged at its own size.
+    const files = [
+      { key, path: handle.outPath, fileName: outName, mime, kind: preview ? "preview" : "export" },
+      ...(stemsName
+        ? [{ key: exportKey(job.userId, projectId, stemsName), path: handle.stemsPath!, fileName: stemsName, mime: STEMS_MIME, kind: "export" }]
+        : []),
+    ] as const;
+    const uploaded = files.map((f) => f.key);
     try {
-      const bytes = await uploadFile(key, handle.outPath, mime);
-      const stemsBytes = stemsKey ? await uploadFile(stemsKey, handle.stemsPath!, mimeFor(stemsName!)) : 0;
+      const sizes: number[] = [];
+      for (const f of files) sizes.push(await uploadFile(f.key, f.path, f.mime));
       await storageTransaction(async (tx) => {
-        await registerObjectIn(tx, {
-          userId: job.userId,
-          projectId,
-          r2Key: key,
-          fileName: outName,
-          mime,
-          bytes,
-          kind: preview ? "preview" : "export",
-        });
-        if (stemsKey) {
+        for (const [i, f] of files.entries()) {
           await registerObjectIn(tx, {
             userId: job.userId,
             projectId,
-            r2Key: stemsKey,
-            fileName: stemsName!,
-            mime: mimeFor(stemsName!),
-            bytes: stemsBytes,
-            kind: "export",
+            r2Key: f.key,
+            fileName: f.fileName,
+            mime: f.mime,
+            bytes: sizes[i],
+            kind: f.kind,
           });
         }
       });

@@ -15,6 +15,7 @@ import { renderMix as mixAudio } from "./audioMix";
 import { apiFetch } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { mediaUrl, type SubtitleCue } from "./types";
+import { wavHeader } from "./wav";
 
 /** Mirror of the engine's TranscribeSpec (server/transcribe.ts) minus projectId. */
 export interface CloudTranscribeSpec {
@@ -72,22 +73,7 @@ export function renderMix(
 /** 16-bit PCM WAV (RIFF) from mono 16 kHz float samples. */
 export function encodeWav(samples: Float32Array): Blob {
   const data = new DataView(new ArrayBuffer(44 + samples.length * 2));
-  const ascii = (off: number, s: string) => {
-    for (let i = 0; i < s.length; i++) data.setUint8(off + i, s.charCodeAt(i));
-  };
-  ascii(0, "RIFF");
-  data.setUint32(4, 36 + samples.length * 2, true);
-  ascii(8, "WAVE");
-  ascii(12, "fmt ");
-  data.setUint32(16, 16, true);
-  data.setUint16(20, 1, true); // PCM
-  data.setUint16(22, 1, true); // mono
-  data.setUint32(24, RATE, true);
-  data.setUint32(28, RATE * 2, true);
-  data.setUint16(32, 2, true);
-  data.setUint16(34, 16, true);
-  ascii(36, "data");
-  data.setUint32(40, samples.length * 2, true);
+  new Uint8Array(data.buffer).set(wavHeader(samples.length, 1, RATE, 16));
   for (let i = 0; i < samples.length; i++) {
     const v = Math.max(-1, Math.min(1, samples[i]));
     data.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);

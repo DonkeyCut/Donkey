@@ -40,7 +40,7 @@ const BLOCK_STEPS = 4;
 const SHORT_TERM_STEPS = 30;
 
 /** One K-weighting biquad, as a/b with a0 = 1. */
-export interface Biquad {
+interface Biquad {
   b: [number, number, number];
   a: [number, number, number];
 }
@@ -80,10 +80,13 @@ export function kWeighting(sampleRate: number): [Biquad, Biquad] {
 }
 
 /** Channel weights for a layout: front channels count once, the surrounds
- * 1.41 (+1.5 dB), and the LFE not at all. Mono and stereo are all ones. */
-export function channelWeights(channels: number): number[] {
+ * 1.41 (+1.5 dB), and the LFE not at all. Mono counts as the two speakers
+ * it plays on, so a mono file and the stereo file of the same sound read
+ * the same. */
+function channelWeights(channels: number): number[] {
   // L R C LFE Ls Rs
   if (channels === 6) return [1, 1, 1, 0, 1.41, 1.41];
+  if (channels === 1) return [2];
   return Array.from({ length: channels }, () => 1);
 }
 
@@ -238,12 +241,11 @@ export class LoudnessMeter {
 
   constructor(
     readonly sampleRate: number,
-    readonly channels: number,
-    opts: { weights?: number[] } = {}
+    readonly channels: number
   ) {
     this.stages = kWeighting(sampleRate);
     this.state = Array.from({ length: channels }, () => new Float64Array(8));
-    this.weights = opts.weights ?? channelWeights(channels);
+    this.weights = channelWeights(channels);
     this.stepLength = Math.round(sampleRate * STEP_S);
     this.interp = new Interpolator(sampleRate);
     // The stream opens on silence: the first samples interpolate against
@@ -340,19 +342,8 @@ export class LoudnessMeter {
       ext.set(tail, 0);
       truePeak = Math.max(truePeak, scanBetween(this.interp, ext, truePeak));
     }
-    const steps = this.steps;
-    const blocks: number[] = [];
-    for (let j = 0; j + BLOCK_STEPS <= steps.length; j++) {
-      let p = 0;
-      for (let k = 0; k < BLOCK_STEPS; k++) p += steps[j + k];
-      blocks.push(p / BLOCK_STEPS);
-    }
-    const shortTerm: number[] = [];
-    for (let j = 0; j + SHORT_TERM_STEPS <= steps.length; j++) {
-      let p = 0;
-      for (let k = 0; k < SHORT_TERM_STEPS; k++) p += steps[j + k];
-      shortTerm.push(p / SHORT_TERM_STEPS);
-    }
+    const blocks = windowMeans(this.steps, BLOCK_STEPS);
+    const shortTerm = windowMeans(this.steps, SHORT_TERM_STEPS);
     return {
       integratedLufs: integratedFrom(blocks),
       truePeakDbtp: 20 * Math.log10(truePeak || 1e-10),
@@ -363,6 +354,17 @@ export class LoudnessMeter {
       seconds: this.samples / this.sampleRate,
     };
   }
+}
+
+/** The mean power of every `n`-step window, one step apart. */
+function windowMeans(steps: number[], n: number): number[] {
+  const means: number[] = [];
+  for (let j = 0; j + n <= steps.length; j++) {
+    let p = 0;
+    for (let k = 0; k < n; k++) p += steps[j + k];
+    means.push(p / n);
+  }
+  return means;
 }
 
 /** The loudest point between samples in `x` that could beat `floor`. Points
@@ -396,7 +398,7 @@ export function integratedFrom(blocks: number[]): number {
 
 /** Loudness range from short-term powers (EBU Tech 3342): gate at −70 LUFS
  * and 20 LU under the mean, then the 10th to the 95th percentile. */
-export function rangeFrom(shortTerm: number[]): number {
+function rangeFrom(shortTerm: number[]): number {
   const abs = fromLufs(ABSOLUTE_GATE);
   const loud = shortTerm.filter((p) => p > abs);
   if (loud.length === 0) return 0;
@@ -427,13 +429,24 @@ export function measureLoudness(channels: ArrayLike<number>[], sampleRate: numbe
  * whole mix measured on the page's thread. */
 export async function measureLoudnessSliced(channels: Float32Array[], sampleRate: number): Promise<LoudnessMeasure> {
   const meter = new LoudnessMeter(sampleRate, channels.length);
+  for await (const slice of halfSeconds(channels, sampleRate, "view")) meter.push(slice);
+  return meter.result();
+}
+
+/** How a slice of a buffer comes out: a view onto it, or a copy that later
+ * writes to the buffer cannot change. */
+type SliceKind = "view" | "copy";
+
+/** Planar buffers in half-second slices, yielding the thread after each, so
+ * a long mix never holds it for the whole of its length. */
+async function* halfSeconds(channels: Float32Array[], sampleRate: number, kind: SliceKind): AsyncGenerator<Float32Array[]> {
   const slice = Math.max(1, Math.round(sampleRate / 2));
   const length = channels[0]?.length ?? 0;
   for (let i = 0; i < length; i += slice) {
-    meter.push(channels.map((c) => c.subarray(i, Math.min(length, i + slice))));
+    const end = Math.min(length, i + slice);
+    yield channels.map((c) => (kind === "view" ? c.subarray(i, end) : c.slice(i, end)));
     await new Promise<void>((r) => setTimeout(r, 0));
   }
-  return meter.result();
 }
 
 /** A measurement rounded for a reply: two decimals, and null where there is
@@ -452,7 +465,7 @@ export function roundedLoudness(m: LoudnessMeasure) {
 
 /** What a master does to a mix: one static gain, and the limiter only when
  * the gained mix would cross the ceiling. */
-export interface MasterPlan {
+interface MasterPlan {
   gainDb: number;
   limit: boolean;
   /** The true peak the gain alone would leave, dBTP. */
@@ -702,19 +715,10 @@ export async function masterInPlace(
   channels: Float32Array[],
   opts: { sampleRate: number; targetLufs: number; ceilingDbtp: number }
 ): Promise<MasterReport> {
-  const slice = Math.max(1, Math.round(opts.sampleRate / 2));
-  const length = channels[0]?.length ?? 0;
-  const pause = () => new Promise<void>((r) => setTimeout(r, 0));
   let at = 0;
   return masterStream(
-    async function* () {
-      for (let i = 0; i < length; i += slice) {
-        // A copy: the limiter's writes land behind the read, on the same
-        // arrays.
-        yield channels.map((c) => c.slice(i, Math.min(length, i + slice)));
-        await pause();
-      }
-    },
+    // Copies: the limiter's writes land behind the read, on the same arrays.
+    () => halfSeconds(channels, opts.sampleRate, "copy"),
     (chunk) => {
       chunk.forEach((c, k) => channels[k].set(c, at));
       at += chunk[0].length;

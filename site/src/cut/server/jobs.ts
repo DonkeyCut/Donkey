@@ -5,7 +5,7 @@ import path from "node:path";
 import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { containerExtension, runExport, type ExportSpec } from "./exportPipeline";
-import { exportBaseName, stemsArchiveName } from "../lib/exportDelivery";
+import { exportBaseName, stemsArchiveName, type ExportFiles } from "../lib/exportDelivery";
 import { exportsDir, mediaPath, projectDir, readProject, setActiveJobGuard } from "./projects";
 import { errorMessage } from "./util";
 
@@ -140,6 +140,9 @@ function startRun(job: Job, spec: ExportSpec) {
   job.startedAt = Date.now();
   void runExport(job, spec, (file) => mediaPath(spec.projectId, file))
     .then(async () => {
+      // A cancel that landed after the last pass settled the row already;
+      // its file goes the way a failed render's does.
+      if (job.status !== "running") throw new Error(job.error ?? "Export canceled.");
       if (job.target === "preview") await publishPreview(job);
       job.status = "done";
     })
@@ -217,7 +220,7 @@ export function cancelJob(id: string) {
 /** Export file named after the project, with a " 2", " 3"… suffix when the
  * name is already taken by a file on disk or an export still in flight. An
  * export with stems needs its stems' name free too. */
-async function exportName(projectId: string, projectName: string, ext: string, stems = false) {
+async function exportName(projectId: string, projectName: string, ext: string, files: ExportFiles) {
   const base = exportBaseName(projectName);
   const taken = new Set(
     await readdir(exportsDir(projectId)).catch(() => [] as string[])
@@ -232,7 +235,7 @@ async function exportName(projectId: string, projectName: string, ext: string, s
   }
   for (let n = 1; ; n++) {
     const candidate = n === 1 ? `${base}${ext}` : `${base} ${n}${ext}`;
-    if (!taken.has(candidate) && !(stems && taken.has(stemsArchiveName(candidate)))) return candidate;
+    if (!taken.has(candidate) && !(files === "fileAndStems" && taken.has(stemsArchiveName(candidate)))) return candidate;
   }
 }
 
@@ -240,10 +243,10 @@ async function exportName(projectId: string, projectName: string, ext: string, s
 // its outName is assigned, so two jobs racing through their first awaits could
 // otherwise both claim "<Project>.mp4" and overwrite each other's render.
 let namingQueue: Promise<unknown> = Promise.resolve();
-function claimExportName(job: Job, projectName: string, ext: string, stems = false): Promise<void> {
+function claimExportName(job: Job, projectName: string, ext: string, files: ExportFiles): Promise<void> {
   const claim = namingQueue.then(async () => {
-    job.outName = await exportName(job.projectId, projectName, ext, stems);
-    if (stems) job.stemsPath = path.join(exportsDir(job.projectId), stemsArchiveName(job.outName));
+    job.outName = await exportName(job.projectId, projectName, ext, files);
+    if (files === "fileAndStems") job.stemsPath = path.join(exportsDir(job.projectId), stemsArchiveName(job.outName));
   });
   namingQueue = claim.catch(() => {});
   return claim;
@@ -299,7 +302,7 @@ export async function createJob(form: FormData): Promise<Job> {
     if (!doc) throw new Error("Project not found.");
     job.projectName = doc.name;
     if (preview) job.outName = "preview.mp4";
-    else await claimExportName(job, spec.name ?? doc.name, containerExtension(spec), !!spec.stemPlan?.length);
+    else await claimExportName(job, spec.name ?? doc.name, containerExtension(spec), spec.stemPlan?.length ? "fileAndStems" : "file");
     job.outPath = path.join(
       preview ? path.join(projectDir(spec.projectId), ".previews") : exportsDir(spec.projectId),
       preview ? `${job.id}.mp4` : job.outName
@@ -351,8 +354,8 @@ export async function createClientJob(
   projectId: string,
   container: ExportSpec["container"],
   name?: string,
-  /** The tab hands in a stems zip beside the file. */
-  stems = false
+  /** Whether the tab hands in a stems zip beside the file. */
+  files: ExportFiles = "file"
 ): Promise<Job> {
   assertLocalRuntime();
   sweepClientJobs();
@@ -377,7 +380,7 @@ export async function createClientJob(
     const doc = await readProject(projectId);
     if (!doc) throw new Error("Project not found.");
     job.projectName = doc.name;
-    await claimExportName(job, name ?? doc.name, containerExtension({ container }), stems);
+    await claimExportName(job, name ?? doc.name, containerExtension({ container }), files);
     job.outPath = path.join(exportsDir(projectId), job.outName);
     await mkdir(path.dirname(job.outPath), { recursive: true });
   } catch (err) {

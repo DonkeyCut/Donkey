@@ -14,6 +14,7 @@
 
 import { srcSpan, type Retime } from "@donkeycut/effects-kit";
 import { fitSpan } from "../lib/retimeFit";
+import { wavHeader } from "../lib/wav";
 import { num } from "./util";
 
 /** The bake's sample rate: what the graphs resample every input to. */
@@ -109,25 +110,8 @@ export async function bakeRetimedAudio(
 export function wavFloat32(channels: Float32Array[], sampleRate: number): Uint8Array {
   const n = channels[0]?.length ?? 0;
   const ch = Math.max(1, channels.length);
-  const dataBytes = n * ch * 4;
-  const buf = new ArrayBuffer(44 + dataBytes);
-  const view = new DataView(buf);
-  const ascii = (at: number, s: string) => {
-    for (let i = 0; i < s.length; i++) view.setUint8(at + i, s.charCodeAt(i));
-  };
-  ascii(0, "RIFF");
-  view.setUint32(4, 36 + dataBytes, true);
-  ascii(8, "WAVE");
-  ascii(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 3, true); // IEEE float
-  view.setUint16(22, ch, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * ch * 4, true);
-  view.setUint16(32, ch * 4, true);
-  view.setUint16(34, 32, true);
-  ascii(36, "data");
-  view.setUint32(40, dataBytes, true);
+  const buf = new ArrayBuffer(44 + n * ch * 4);
+  new Uint8Array(buf).set(wavHeader(n, ch, sampleRate, 32, "float"));
   const samples = new Float32Array(buf, 44, n * ch);
   for (let i = 0; i < n; i++)
     for (let c = 0; c < ch; c++) samples[i * ch + c] = channels[c]?.[i] ?? 0;

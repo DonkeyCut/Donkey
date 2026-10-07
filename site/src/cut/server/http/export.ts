@@ -48,7 +48,7 @@ export const exportApi = {
         stems?: boolean;
       };
       if (!body.projectId) return Response.json({ error: "Missing project." }, { status: 400 });
-      const job = await createClientJob(body.projectId, body.container, body.name?.trim() || undefined, body.stems === true);
+      const job = await createClientJob(body.projectId, body.container, body.name?.trim() || undefined, body.stems === true ? "fileAndStems" : "file");
       if (job.status === "error") return Response.json({ error: job.error }, { status: 400 });
       return Response.json({ id: job.id, outName: job.outName });
     } catch (e) {

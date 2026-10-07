@@ -3,7 +3,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { crc32, pcm24, planStems, wavBytes, wavChunks, wavHeader, writeStoredZip } from "./stems";
+import { crc32, pcm24, planStems, wavBytes, wavChunks, writeStoredZip } from "./stems";
+import { wavHeader } from "./wav";
 
 const asset = (id: string, over: Record<string, unknown> = {}) => ({ id, type: "audio" as const, name: `${id}.mp3`, ...over });
 const video = (id: string) => ({ id, type: "video" as const, name: `${id}.mp4` });
@@ -62,7 +63,7 @@ describe("stem plan", () => {
 
 describe("WAV", () => {
   test("a 24-bit header that counts its data", () => {
-    const h = new DataView(wavHeader(48000, 2, 48000).buffer);
+    const h = new DataView(wavHeader(48000, 2, 48000, 24).buffer);
     expect(h.getUint32(40, true)).toBe(48000 * 2 * 3);
     expect(h.getUint16(34, true)).toBe(24);
     expect(wavBytes(48000, 2)).toBe(44 + 48000 * 6);

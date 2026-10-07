@@ -2,6 +2,7 @@
 
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { bytesFromBase64 } from "./bytes";
+import { wavHeader } from "./wav";
 import { readHostedError } from "./hostedError";
 import { hostedPost } from "./hosted";
 import { cutJudge } from "./chatRuntime";
@@ -293,24 +294,7 @@ function assembleWav(clips: PcmClip[], offsets: number[]): Blob {
     data[i] = Math.max(-32768, Math.min(32767, mix[i]));
   }
 
-  const header = new DataView(new ArrayBuffer(44));
-  const write = (at: number, s: string) => {
-    for (let i = 0; i < s.length; i++) header.setUint8(at + i, s.charCodeAt(i));
-  };
-  write(0, "RIFF");
-  header.setUint32(4, 36 + data.byteLength, true);
-  write(8, "WAVE");
-  write(12, "fmt ");
-  header.setUint32(16, 16, true);
-  header.setUint16(20, 1, true); // PCM
-  header.setUint16(22, 1, true); // mono
-  header.setUint32(24, rate, true);
-  header.setUint32(28, rate * 2, true);
-  header.setUint16(32, 2, true);
-  header.setUint16(34, 16, true);
-  write(36, "data");
-  header.setUint32(40, data.byteLength, true);
-  return new Blob([header.buffer, data.buffer], { type: "audio/wav" });
+  return new Blob([wavHeader(total, 1, rate, 16), data.buffer], { type: "audio/wav" });
 }
 
 export interface SpeechLayout {

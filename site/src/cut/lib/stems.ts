@@ -13,6 +13,7 @@
  */
 
 import { assetIsSilent, type AudioClip, type MediaAsset, type VideoClip } from "./types";
+import { wavHeader } from "./wav";
 
 /** One stem: what it is called, the file it lands in, and what it carries —
  * the sound of every video clip (`lane` null), or one soundtrack lane. */
@@ -88,35 +89,16 @@ export function planStems(doc: StemDoc): StemDef[] {
 
 /** Stems are 24-bit: headroom for a mix that peaks over full scale before
  * its master, and the width an audio editor works in. */
-export const STEM_BYTES_PER_SAMPLE = 3;
+const STEM_BYTES_PER_SAMPLE = 3;
+
+/** Every stem's rate and layout, whichever renderer prints it: 48 kHz
+ * stereo, what an audio editor opens a session at. */
+export const STEM_RATE = 48000;
+export const STEM_CHANNELS = 2;
 
 /** The size of a WAV file holding `frames` frames. */
 export function wavBytes(frames: number, channels: number): number {
   return 44 + frames * channels * STEM_BYTES_PER_SAMPLE;
-}
-
-/** A 24-bit PCM WAV header. RIFF counts in 32 bits, so a stem past 4 GB
- * (about four hours of stereo at 48 kHz) is refused. */
-export function wavHeader(frames: number, channels: number, sampleRate: number): Uint8Array {
-  const data = frames * channels * STEM_BYTES_PER_SAMPLE;
-  if (data + 36 > 0xffffffff) throw new Error("A stem this long does not fit in a WAV file.");
-  const b = new Uint8Array(44);
-  const v = new DataView(b.buffer);
-  const ascii = (at: number, s: string) => [...s].forEach((ch, i) => (b[at + i] = ch.charCodeAt(0)));
-  ascii(0, "RIFF");
-  v.setUint32(4, 36 + data, true);
-  ascii(8, "WAVE");
-  ascii(12, "fmt ");
-  v.setUint32(16, 16, true);
-  v.setUint16(20, 1, true);
-  v.setUint16(22, channels, true);
-  v.setUint32(24, sampleRate, true);
-  v.setUint32(28, sampleRate * channels * STEM_BYTES_PER_SAMPLE, true);
-  v.setUint16(32, channels * STEM_BYTES_PER_SAMPLE, true);
-  v.setUint16(34, STEM_BYTES_PER_SAMPLE * 8, true);
-  ascii(36, "data");
-  v.setUint32(40, data, true);
-  return b;
 }
 
 /** Planar float samples [from, to) as interleaved 24-bit PCM. Past ±1 is
@@ -161,7 +143,7 @@ export function crc32(data: Uint8Array, crc = 0): number {
 /** A file in a stored (uncompressed) zip. PCM barely compresses, so every
  * entry is stored and the archive is written straight through, its size and
  * checksum known before its bytes go out. */
-export interface ZipEntry {
+interface ZipEntry {
   name: string;
   size: number;
   crc: number;
@@ -187,7 +169,7 @@ const writer = (size: number) => {
 
 /** The local header that goes before an entry's bytes. A file of 4 GB or
  * more carries its sizes in a Zip64 field. */
-export function zipLocalHeader(entry: ZipEntry): Uint8Array {
+function zipLocalHeader(entry: ZipEntry): Uint8Array {
   const name = new TextEncoder().encode(entry.name);
   const big = entry.size >= MAX32;
   const w = writer(30 + name.length + (big ? 20 : 0));
@@ -215,7 +197,7 @@ export function zipLocalHeader(entry: ZipEntry): Uint8Array {
 /** The central directory and end records for entries whose local headers
  * start at `offsets`, the directory itself starting at `at`. Zip64 records
  * join when a size or an offset passes 4 GB. */
-export function zipDirectory(entries: ZipEntry[], offsets: number[], at: number): Uint8Array {
+function zipDirectory(entries: ZipEntry[], offsets: number[], at: number): Uint8Array {
   const enc = new TextEncoder();
   const parts: Uint8Array[] = [];
   entries.forEach((e, i) => {
@@ -334,7 +316,7 @@ export async function* wavChunks(
   count: number,
   sampleRate: number
 ): AsyncGenerator<Uint8Array> {
-  yield wavHeader(frames, count, sampleRate);
+  yield wavHeader(frames, count, sampleRate, STEM_BYTES_PER_SAMPLE * 8);
   const slice = Math.max(1, sampleRate);
   for (let i = 0; i < frames; i += slice) {
     yield pcm24(channels, i, Math.min(frames, i + slice), count);

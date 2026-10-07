@@ -1382,11 +1382,7 @@ export async function measureSourceLevel(
       const n = chunk.channels[0]?.length ?? 0;
       if (n > 0) {
         const rate = chunk.sampleRate;
-        const meter = (metered.meter ??= new LoudnessMeter(
-          rate,
-          chunk.channels.length,
-          chunk.channels.length === 1 ? { weights: [2] } : {}
-        ));
+        const meter = (metered.meter ??= new LoudnessMeter(rate, chunk.channels.length));
         // A decode opens on the packet before `from` and may run past `to`;
         // only the asked span is measured.
         const a = Math.max(0, Math.round((from - chunk.timestamp) * rate));

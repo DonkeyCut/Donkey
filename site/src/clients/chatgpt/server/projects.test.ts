@@ -96,6 +96,18 @@ describe("ChatGPT cloud projects", () => {
       },
     });
   });
+  test("an export that never asked for stems reports none, even beside an older zip of its name", async () => {
+    const { tools, db } = createTestContext();
+    const row = { id: "job", kind: "export", projectId: "mine", state: "done", progress: 1, outputKey: "cut/owner/mine/exports/Trip.mp4", outName: "Trip.mp4" };
+    db.cutRenderJob.findFirst.mockResolvedValue({ ...row, spec: { fromDoc: { preset: "original" } } });
+    db.cutMediaObject.findFirst.mockImplementation(async (args: unknown) => {
+      const where = (args as { where: { r2Key?: string; fileName?: string } }).where;
+      return where.r2Key ? { r2Key: where.r2Key } : { fileName: where.fileName };
+    });
+    expect((await tools.exportStatus("job")).view.export?.stems).toBeUndefined();
+    db.cutRenderJob.findFirst.mockResolvedValue({ ...row, spec: { fromDoc: { preset: "original", stems: true } } });
+    expect((await tools.exportStatus("job")).view.export?.stems).toBe("Trip stems.zip");
+  });
   test("collected artifacts are reported as expired with no playback URL", async () => {
     const { tools, db } = createTestContext();
     db.cutRenderJob.findFirst.mockResolvedValue({

@@ -78,7 +78,7 @@ describe("integrated loudness", () => {
 
   test("a mono source weighted as the two channels it plays on reads as that stereo pair", () => {
     const x = sine(1000, -20, 10);
-    const mono = new LoudnessMeter(RATE, 1, { weights: [2] });
+    const mono = new LoudnessMeter(RATE, 1);
     mono.push([x]);
     const pair = measureLoudness(stereo(x), RATE);
     expect(Math.abs(mono.result().integratedLufs - pair.integratedLufs)).toBeLessThan(0.01);
@@ -267,6 +267,14 @@ describe("master in place", () => {
     // The limiter takes a little off the top of these hot bursts; the
     // integrated level lands within a unit of the target.
     expect(Math.abs(after.integratedLufs - -14)).toBeLessThan(1);
+  });
+
+  test("a mono delivery lands as loud as the stereo delivery of the same sound", async () => {
+    const mono = [sine(1000, -30, 5)];
+    const pair = stereo(sine(1000, -30, 5));
+    const one = await masterInPlace(mono, { sampleRate: RATE, targetLufs: -14, ceilingDbtp: -1 });
+    const two = await masterInPlace(pair, { sampleRate: RATE, targetLufs: -14, ceilingDbtp: -1 });
+    expect(one.plan.gainDb).toBeCloseTo(two.plan.gainDb, 2);
   });
 
   test("a clean gain when no limiting is needed", async () => {

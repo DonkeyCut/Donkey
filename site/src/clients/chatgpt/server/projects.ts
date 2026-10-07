@@ -8,7 +8,7 @@ import { ADOPT_COMMAND, type AdoptedAsset } from "@/cut/lib/commandBatch";
 import { NO_CARD_OPEN, queueCommands, waitForJob, type CommandCall, type CommandJobResult, type JobRow } from "@/cut/server/cloud/commands";
 import { needsWorker, queueDocExport, queueImportUrl } from "@/cut/server/cloud/jobs";
 import type { DocExportAudio } from "@/cut/lib/exportPresets";
-import { stemsArchiveName } from "@/cut/lib/exportDelivery";
+import { jobWantsStems, stemsArchiveName } from "@/cut/lib/exportDelivery";
 import { cutLimitsFor } from "@/cut/server/cloud/limits";
 import { previewFromDoc } from "@/cut/server/cloud/previewJobs";
 import { mediaObjectUrl, mediaUrlLifetime } from "@/cut/server/cloud/mediaCdn";
@@ -215,8 +215,9 @@ export function projectTools(
       view.export.error = "The export file was deleted. Export again.";
       return { view, playback: null, download: null };
     }
-    // Stems land beside the video under its name, in the project's exports.
-    if (row.outName) {
+    // Stems land beside the video under its name, in the project's exports,
+    // when this job asked for them.
+    if (row.outName && jobWantsStems(row.spec)) {
       const stems = await db.cutMediaObject.findFirst({
         where: {
           userId: identity.userId,

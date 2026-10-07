@@ -115,7 +115,7 @@ describe("stems beside a tab render", () => {
   });
 
   test("the stems land under the video's name, before the video settles the job", async () => {
-    const job = await jobs.createClientJob(projectId, "mp4", undefined, true);
+    const job = await jobs.createClientJob(projectId, "mp4", undefined, "fileAndStems");
     expect(job.outName).toBe("Stem Render.mp4");
     expect(await jobs.completeClientStems(job.id, bytes("zip bytes"))).not.toBeNull();
     const zip = path.join(projects.exportsDir(projectId), "Stem Render stems.zip");
@@ -130,7 +130,7 @@ describe("stems beside a tab render", () => {
     const plain = await jobs.createClientJob(projectId, "mp4");
     expect(plain.outName).toBe("Stem Render 2.mp4");
     jobs.releaseClientJob(plain.id);
-    const stemmed = await jobs.createClientJob(projectId, "mp4", undefined, true);
+    const stemmed = await jobs.createClientJob(projectId, "mp4", undefined, "fileAndStems");
     expect(stemmed.outName).toBe("Stem Render 3.mp4");
     jobs.releaseClientJob(stemmed.id);
   });
@@ -140,7 +140,7 @@ describe("stems beside a tab render", () => {
     expect(await jobs.completeClientStems(plain.id, bytes("zip"))).toBeNull();
     jobs.releaseClientJob(plain.id);
 
-    const job = await jobs.createClientJob(projectId, "mov", undefined, true);
+    const job = await jobs.createClientJob(projectId, "mov", undefined, "fileAndStems");
     await jobs.completeClientStems(job.id, bytes("zip"));
     const zip = path.join(projects.exportsDir(projectId), jobs.getJob(job.id)!.outName.replace(/\.mov$/, " stems.zip"));
     expect(await exists(zip)).toBe(true);
@@ -148,6 +148,33 @@ describe("stems beside a tab render", () => {
     // The release removes in the background.
     await new Promise((r) => setTimeout(r, 20));
     expect(await exists(zip)).toBe(false);
+  });
+});
+
+describe("an engine render canceled late", () => {
+  test("a render that finishes after its cancel ends canceled and leaves no file", async () => {
+    const projectId = (await projects.createProject("Late Cancel")).id;
+    let finish = () => {};
+    const render = spyOn(pipeline, "runExport").mockImplementation(async (job) => {
+      // The encode pass has exited; the master runs on in this process.
+      job.proc = { kill: () => true } as unknown as pipeline.RenderHandle["proc"];
+      await new Promise<void>((resolve) => (finish = resolve));
+      await writeFile(job.outPath, "mp4");
+    });
+    try {
+      const form = new FormData();
+      form.set("spec", JSON.stringify({ projectId, target: "export" }));
+      const job = await jobs.createJob(form);
+      while (job.status === "queued") await new Promise((r) => setTimeout(r, 5));
+      jobs.cancelJob(job.id);
+      finish();
+      await new Promise((r) => setTimeout(r, 20));
+      expect(job.status).toBe("error");
+      expect(job.error).toBe("Export canceled.");
+      expect(await exists(job.outPath)).toBe(false);
+    } finally {
+      render.mockRestore();
+    }
   });
 });
 
