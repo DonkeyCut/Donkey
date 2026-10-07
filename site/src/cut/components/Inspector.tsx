@@ -3441,14 +3441,14 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
   // stores — an element sits in the same spot at any aspect, and the number
   // means the same thing on a square as on a widescreen.
   const setPos = (axis: "x" | "y", pct: number) => {
-    const v = clampOverlayPos(pct / 100);
+    const v = clampOverlayPos(pct / 100, o);
     if (keyed) return setKey({ [axis]: v });
     useEditor.getState().updateOverlayTransient(o.id, { [axis]: v });
   };
   return (
     <Section title="Transform">
       <KeyframeControls overlay={o} />
-      <PositionRow pose={pose} min={2} max={98} ck={posCk} onSet={setPos} />
+      <PositionRow pose={pose} min={clampOverlayPos(-Infinity, o) * 100} max={clampOverlayPos(Infinity, o) * 100} ck={posCk} onSet={setPos} />
       {keyed && (
         <Row label="Scale">
           <ValueSlider

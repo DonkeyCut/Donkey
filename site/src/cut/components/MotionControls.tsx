@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import {
   CAMERA_SCALE_MAX,
   CAMERA_SCALE_MIN,
+  CAMERA_WORLD_MAX,
+  CAMERA_WORLD_MIN,
   EASE_IDS,
   EASE_LABELS,
   ELEMENT_BLUR_MAX,
@@ -145,28 +147,15 @@ function BlurRow({
   );
 }
 
-/**
- * One element's blur, the ease of its key under the playhead, and its motion
- * blur. Blur is part of the pose: with keys in play it edits the key at the
- * playhead, like position and opacity do.
- */
+/** One element's motion rows: the ease of its key under the playhead, then
+ * the blur and motion blur rows a selection shares. */
 export function ElementMotionRows({ overlay: o }: { overlay: Overlay }) {
   const now = usePreviewTime();
-  const blurCk = useSliderCheckpoint();
-  const shutterCk = useSliderCheckpoint();
-  const keyed = hasOverlayKeys(o);
   const tLocal = local(o, now);
-  const pose = poseAt(o, tLocal);
-  const here = keyed ? keyIndexAt(o.kf, tLocal) : -1;
+  const here = hasOverlayKeys(o) ? keyIndexAt(o.kf, tLocal) : -1;
   const key = here >= 0 ? o.kf![here] : undefined;
-  const setBlur = (v: number) => {
-    const blur = Math.max(0, Math.min(ELEMENT_BLUR_MAX, v));
-    if (keyed) return st().setOverlayKey(o.id, tLocal, { blur }, { transient: true });
-    st().updateOverlayTransient(o.id, { blur: blur > 0.05 ? blur : undefined });
-  };
   return (
     <>
-      <BlurRow blur={{ value: keyed ? (pose.blur ?? 0) : (o.blur ?? 0), mixed: false }} onSet={setBlur} ck={blurCk} />
       {key && (
         <EaseRow
           ease={key.ease}
@@ -176,14 +165,7 @@ export function ElementMotionRows({ overlay: o }: { overlay: Overlay }) {
           }}
         />
       )}
-      <MotionBlurRows
-        shutter={o.motionBlur ? { value: o.motionBlur, mixed: false } : null}
-        ck={shutterCk}
-        onChange={(motionBlur, phase) => {
-          if (phase === "once") st().pushHistory();
-          st().updateOverlayTransient(o.id, { motionBlur });
-        }}
-      />
+      <GroupMotionRows overlays={[o]} />
     </>
   );
 }
@@ -242,7 +224,7 @@ export function GroupCameraSection({ groupId }: { groupId: string }) {
   const pose = groupCameraPoseAt(view, tGroup);
   const here = keyIndexAt(view.keys, tGroup);
   const key = here >= 0 ? view.keys[here] : undefined;
-  const write = (keys: CameraKey[], motionBlur = view.motionBlur) =>
+  const write = (keys: CameraKey[], motionBlur: number | undefined) =>
     st().setGroupCamera(groupId, { keys, ...(motionBlur ? { motionBlur } : {}) }, { transient: true });
   // Read the live track at each write, so a drag layers on its own frames.
   const live = () => groupCameraOf(st().overlays, groupId) ?? view;
@@ -279,8 +261,8 @@ export function GroupCameraSection({ groupId }: { groupId: string }) {
               label={`Camera ${axis.toUpperCase()}`}
               className="w-9 text-muted-foreground"
               value={pose[axis] * 100}
-              min={-100}
-              max={200}
+              min={CAMERA_WORLD_MIN * 100}
+              max={CAMERA_WORLD_MAX * 100}
               step={0.5}
               keyStep={1}
               snap={[50]}

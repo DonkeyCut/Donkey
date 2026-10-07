@@ -721,14 +721,12 @@ function OverlayItem({
   // A hit that darkens dims the element's own pixels, the same multiply the
   // painters run; blur softens them. The DOM content, the dive canvas and the
   // streak canvas all carry the one filter.
-  const blur = blurPx >= 0.1 ? `blur(${blurPx.toFixed(2)}px)` : "";
   const dim = live?.brightness !== undefined ? `brightness(${live.brightness})` : "";
-  const blurFilter = blur && dim ? `${blur} ${dim}` : blur || dim || undefined;
+  const filterOf = (px: number) => [px >= 0.1 ? `blur(${px.toFixed(2)}px)` : "", dim].filter(Boolean).join(" ") || undefined;
+  const blurFilter = filterOf(blurPx);
   // The dive canvas sits on the stage outside the box, so its blur takes the
   // radius undivided.
-  const diveBlurPx = blurPx * poseZoom;
-  const diveFilter =
-    [diveBlurPx >= 0.1 ? `blur(${diveBlurPx.toFixed(2)}px)` : "", dim].filter(Boolean).join(" ") || undefined;
+  const diveFilter = filterOf(blurPx * poseZoom);
   // Motion blur: while the element moves, the kit paints it and smears the
   // picture along its streak; at rest the element is the plain DOM box.
   const streakable =
@@ -813,7 +811,6 @@ function OverlayItem({
         })()
       : {}),
     ...(maskCss ?? {}),
-    ...(blurFilter ? { filter: blurFilter } : {}),
     ...(diving || streaking ? { visibility: "hidden" as const } : {}),
     ...(reveal !== undefined
       ? { clipPath: `inset(0 ${(1 - Math.min(1, Math.max(0, reveal))) * 100}% 0 0)` }
@@ -850,7 +847,7 @@ function OverlayItem({
     const all = useEditor.getState().overlays;
     return o.groupId ? all.filter((x) => x.groupId === o.groupId) : [o];
   };
-  const clampPos = clampOverlayPos;
+  const clampPos = (v: number) => clampOverlayPos(v, o);
 
   /**
    * Commit a live transform. Position and rotation are pose: on a keyframed
@@ -925,6 +922,16 @@ function OverlayItem({
     const d0 = Math.max(8, reach(e.clientX, e.clientY));
     const members = groupSnapshot();
     const self = members.find((m) => m.id === o.id) ?? members[0];
+    // Under a group camera the center's walk is on screen; the members move
+    // by that much of their world.
+    const cam = elementCameraAt(o, tLocal);
+    const aspect = frame.w / frame.h;
+    const seen = cam ? cameraPoint(cam, self.x, self.y, aspect) : null;
+    const worldWalk = (mx: number, my: number) => {
+      if (!cam || !seen) return { x: mx, y: my };
+      const w = worldPoint(cam, seen.x + mx, seen.y + my, aspect);
+      return { x: w.x - self.x, y: w.y - self.y };
+    };
     const textSizes = new Map(members.filter(isTextOverlay).map((m) => [m.id, textBoxSize(m, frame.w)]));
     const stickerSize = (v: number) => Math.min(1.5, Math.max(0.02, v));
     // A sticker's resting height as a frame fraction: the one it stores, or
@@ -997,15 +1004,17 @@ function OverlayItem({
         // rotated back to the screen and into frame fractions.
         const wx = axis.x ? ((kx - 1) * axis.x * ow) / 2 : 0;
         const wy = axis.y ? ((ky - 1) * axis.y * oh) / 2 : isTextOverlay(self) ? ((ky - 1) * oh) / 2 : 0;
-        const mx = (wx * Math.cos(rad) + wy * Math.sin(rad)) / stageWidth;
-        const my = (-wx * Math.sin(rad) + wy * Math.cos(rad)) / stageHeight;
+        const walk = worldWalk(
+          (wx * Math.cos(rad) + wy * Math.sin(rad)) / stageWidth,
+          (-wx * Math.sin(rad) + wy * Math.cos(rad)) / stageHeight
+        );
         writeTransform(
           members.map((m) => ({
             id: m.id,
             patch: {
               ...scaled(m, k),
-              x: clampPos(self.x + kx * (m.x - self.x) + mx),
-              y: clampPos(self.y + ky * (m.y - self.y) + my),
+              x: clampPos(self.x + kx * (m.x - self.x) + walk.x),
+              y: clampPos(self.y + ky * (m.y - self.y) + walk.y),
             },
           }))
         );
@@ -1124,7 +1133,7 @@ function OverlayItem({
       onMove: (dx, dy, ev) => {
         if (cam && seen) {
           const w = worldPoint(cam, seen.x + dx / stageWidth, seen.y + dy / stageHeight, aspect);
-          writeTransform(members.map((m) => ({ id: m.id, patch: { x: m.x + w.x - self.x, y: m.y + w.y - self.y } })));
+          writeTransform(members.map((m) => ({ id: m.id, patch: { x: clampPos(m.x + w.x - self.x), y: clampPos(m.y + w.y - self.y) } })));
           return;
         }
         const p = snap(o.id, self.x + dx / stageWidth, self.y + dy / stageHeight, ev);
@@ -1207,6 +1216,9 @@ function OverlayItem({
       onPointerDown={beginMove}
       onDoubleClick={isText ? () => setEditing(true) : undefined}
     >
+      {/* The filter sits outside the mask and the wipe, so the element blurs
+          after them — the order every renderer draws in. */}
+      <div style={blurFilter ? { filter: blurFilter } : undefined}>
       <div style={contentStyle}>
         {behindHidden ? (
           <span className="opacity-0">{shownText}</span>
@@ -1248,6 +1260,7 @@ function OverlayItem({
         ) : o.kind === "sticker" ? (
           <StickerView sticker={o} stageWidth={stageWidth} stageHeight={stageHeight} t={t} />
         ) : null}
+      </div>
       </div>
       {streakable && live && (
         <StreakCanvas
@@ -1514,6 +1527,10 @@ function DiveCanvas({
  * Lottie); each moving frame then costs a few element-sized draws. At rest it
  * draws nothing and the box shows the element itself.
  */
+/** How far behind the playhead a self-moving element's streak picture may
+ * run, seconds: a few frames of paint latency. */
+const STREAK_STALE_S = 0.1;
+
 function StreakCanvas({
   o,
   live,
@@ -1537,13 +1554,15 @@ function StreakCanvas({
   onReady: (ready: boolean) => void;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const raster = useRef<{ canvas: HTMLCanvasElement; x: number; y: number } | null>(null);
+  const raster = useRef<{ canvas: HTMLCanvasElement; scratch: HTMLCanvasElement; x: number; y: number; at: number } | null>(null);
   const [painted, setPainted] = useState(0);
   const assets = useEditor((s) => (o.kind === "sticker" ? s.assets : null));
   const dpr = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);
   const w = Math.max(1, Math.round(stageWidth * dpr));
   const h = Math.max(1, Math.round(stageHeight * dpr));
-  // Pixels that change on their own repaint every frame; the rest paint once.
+  // Pixels that change on their own repaint every frame while the element
+  // streaks; at rest the DOM box shows them and nothing paints. The rest
+  // paint once.
   const selfMoving =
     !!live.glyphs ||
     !!live.glyphLoop ||
@@ -1551,42 +1570,51 @@ function StreakCanvas({
     live.textProgress !== undefined ||
     !!overlayWords(o) ||
     (o.kind === "sticker" && !!o.lottie);
+  const moving = !!live.streak;
   const paintAt = selfMoving ? tLocal : 0;
   const pending = useRef<number | null>(null);
   const busy = useRef(false);
+  // The loop reads the newest element and size at each paint, so a change
+  // that lands while a paint is in flight is the next one painted.
+  const latest = useRef({ o, w, h, assets });
   useEffect(() => {
+    latest.current = { o, w, h, assets };
+    if (selfMoving && !moving && raster.current) return;
     pending.current = paintAt;
     if (busy.current) return;
     busy.current = true;
-    const env = cutRenderEnv(assets ?? []);
     void (async () => {
       try {
         while (pending.current !== null) {
           const at = pending.current;
           pending.current = null;
-          const ev = evalOverlayFrame(o, at, w / h);
-          const { el, phase } = elementAtMoment(o, at, ev);
+          const cur = latest.current;
+          const ev = evalOverlayFrame(cur.o, at, cur.w / cur.h);
+          const { el, phase } = elementAtMoment(cur.o, at, ev);
           const canvas = raster.current?.canvas ?? document.createElement("canvas");
-          const origin = await paintElementCrop(canvas, el, w, h, env, { t: at, phase });
-          raster.current = { canvas, ...origin };
+          const scratch = raster.current?.scratch ?? document.createElement("canvas");
+          const origin = await paintElementCrop(canvas, el, cur.w, cur.h, cutRenderEnv(cur.assets ?? []), { t: at, phase, maskScratch: scratch });
+          raster.current = { canvas, scratch, ...origin, at };
+          setPainted((n) => n + 1);
         }
-        setPainted((n) => n + 1);
       } finally {
         busy.current = false;
       }
     })();
-  }, [o, paintAt, w, h, assets]);
-  // The picture and the smear canvas count toward the memory report.
+  }, [o, paintAt, w, h, assets, selfMoving, moving]);
+  // The picture, its mask scratch and the smear canvas count toward the
+  // memory report.
   useEffect(() => {
     const release = holdMemory("overlayRasters", () => {
-      const r = raster.current?.canvas;
+      const r = raster.current;
       const c = ref.current;
-      return (r ? r.width * r.height * 4 : 0) + (c ? c.width * c.height * 4 : 0);
+      const px = (x: { width: number; height: number } | null | undefined) => (x ? x.width * x.height * 4 : 0);
+      return px(r?.canvas) + px(r?.scratch) + px(c);
     });
     return () => {
       release();
-      const r = raster.current?.canvas;
-      if (r) r.width = r.height = 1;
+      const r = raster.current;
+      if (r) r.canvas.width = r.canvas.height = r.scratch.width = r.scratch.height = 1;
       raster.current = null;
       onReady(false);
     };
@@ -1598,7 +1626,9 @@ function StreakCanvas({
     if (!canvas || !pic) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    if (!streak) {
+    // A self-moving picture from another moment shows the DOM box until the
+    // paint for this one lands.
+    if (!streak || (selfMoving && Math.abs(pic.at - tLocal) > STREAK_STALE_S)) {
       // At rest the box shows the element; the canvas empties once.
       if (canvas.style.display !== "none") {
         canvas.style.display = "none";
@@ -1637,7 +1667,7 @@ function StreakCanvas({
     canvas.style.width = `${cw / dpr}px`;
     canvas.style.height = `${ch / dpr}px`;
     onReady(true);
-  }, [streak, live.rotation, poseZoom, painted, w, h, dpr, onReady]);
+  }, [streak, live.rotation, poseZoom, painted, w, h, dpr, onReady, selfMoving, tLocal]);
   return (
     <div
       className="pointer-events-none absolute"
@@ -1649,10 +1679,15 @@ function StreakCanvas({
         // The stage in the element's unposed frame, as the dive canvas sits.
         transform: `translate(${-o.x * stageWidth}px, ${-o.y * stageHeight}px)`,
         filter,
-        ...(mask ? { ...mask, maskPosition: "0px 0px", WebkitMaskPosition: "0px 0px" } : {}),
       }}
     >
-      <canvas ref={ref} width={1} height={1} className="absolute" style={{ display: "none" }} />
+      {/* The mask clips inside the filter, so the streak blurs after it. */}
+      <div
+        className="absolute inset-0"
+        style={mask ? { ...mask, maskPosition: "0px 0px", WebkitMaskPosition: "0px 0px" } : undefined}
+      >
+        <canvas ref={ref} width={1} height={1} className="absolute" style={{ display: "none" }} />
+      </div>
     </div>
   );
 }

@@ -1060,6 +1060,31 @@ export async function renderElementCanvas(
   return canvas;
 }
 
+/** The picture of an element that holds still: the full-frame picture with
+ * the element's own blur baked in, so a blurred element that never moves
+ * costs one picture for its whole span. */
+export async function renderStillCanvas(
+  overlay: Overlay,
+  width: number,
+  height: number,
+  env: RenderEnv
+): Promise<HTMLCanvasElement> {
+  const canvas = await renderElementCanvas(overlay, width, height, env);
+  const look = elementLook({ blur: overlay.blur }, Math.min(width, height) / 1080);
+  if (!look) return canvas;
+  const soft = newCanvas(env, width, height);
+  const ctx = soft.getContext("2d")!;
+  if ("filter" in ctx) ctx.filter = `blur(${look.blur.toFixed(2)}px)`;
+  ctx.drawImage(canvas, 0, 0);
+  canvas.width = canvas.height = 1;
+  return soft;
+}
+
+/** `renderStillCanvas` as a PNG. */
+export async function renderStillPng(overlay: Overlay, width: number, height: number, env: RenderEnv): Promise<Blob> {
+  return pngBlob(await renderStillCanvas(overlay, width, height, env), env);
+}
+
 /** Paint one element over the whole of a canvas the caller owns, cleared
  * first — the full-frame picture `renderElementPng` encodes, drawn into a
  * surface that is reused frame after frame. */
@@ -1342,7 +1367,8 @@ export function elementAtMoment(
  * box in a `width` × `height` frame, its shape mask applied. Returns where the
  * crop's top-left sits in the frame. The preview's motion blur smears this
  * picture: a few element-sized draws a frame where a frame-sized picture
- * would cost the whole stage.
+ * would cost the whole stage. `maskScratch` is the caller's own canvas for
+ * the mask pass, held across paints.
  */
 export async function paintElementCrop(
   canvas: HTMLCanvasElement,
@@ -1350,7 +1376,7 @@ export async function paintElementCrop(
   width: number,
   height: number,
   env: RenderEnv,
-  opts: { t: number; phase?: PaintPhase }
+  opts: { t: number; phase?: PaintPhase; maskScratch: HTMLCanvasElement }
 ): Promise<{ x: number; y: number }> {
   const scale = Math.min(width, height) / 1080;
   const frame: PaintFrame = { width, height, scale, t: opts.t, phase: opts.phase };
@@ -1371,7 +1397,7 @@ export async function paintElementCrop(
   ctx.translate(-x, -y);
   await paintElement(ctx, el, frame, env);
   if (el.mask && el.mask.kind !== "subject") {
-    applyMaskToCanvas(ctx, newCanvas(env, 1, 1), el.mask, opts.t, frame, { x: el.x, y: el.y }, ctx.getTransform());
+    applyMaskToCanvas(ctx, opts.maskScratch, el.mask, opts.t, frame, { x: el.x, y: el.y }, ctx.getTransform());
   }
   return { x, y };
 }

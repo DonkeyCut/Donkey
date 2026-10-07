@@ -105,15 +105,13 @@ export function hasOverlayKeys(o: Posable): boolean {
 }
 
 /** Whether the element is drawn through the per-frame evaluator: something
- * moves it (a preset, pose keys, its group's camera, a keyframed mask), or it
- * is blurred, which every renderer applies to the posed picture as it draws.
- * Any other element renders as one still picture. */
+ * moves it (a preset, pose keys, its group's camera, a keyframed mask). Any
+ * other element renders as one still picture, its own blur baked in. */
 export function isOverlayAnimated(o: Posable): boolean {
   return (
     hasOverlayAnim(o.anim) ||
     hasOverlayKeys(o) ||
     hasCameraKeys(o.camera) ||
-    (o.blur ?? 0) > 0 ||
     !!(o.mask?.kf && o.mask.kf.length > 0)
   );
 }

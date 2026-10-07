@@ -1,4 +1,4 @@
-import { cameraAt, hasCameraKeys, type CameraKey, type CameraPose, type GroupCamera } from "@donkeycut/effects-kit";
+import { cameraAt, hasCameraKeys, shiftCamera, type CameraKey, type CameraPose, type GroupCamera } from "@donkeycut/effects-kit";
 import type { Overlay } from "./types";
 
 /**
@@ -18,7 +18,7 @@ export interface GroupCameraView {
 }
 
 /** The elements a group's camera films: every member with a pose. */
-export function cameraMembers(overlays: readonly Overlay[], groupId: string): Overlay[] {
+function cameraMembers(overlays: readonly Overlay[], groupId: string): Overlay[] {
   return overlays.filter((o) => o.groupId === groupId && o.kind !== "effect");
 }
 
@@ -73,6 +73,40 @@ export function withGroupCamera(
       ...(live.motionBlur ? { motionBlur: live.motionBlur } : {}),
     };
     return { ...o, camera } as Overlay;
+  });
+}
+
+/**
+ * Keep each group's camera on the timeline after some elements moved in time.
+ * A group whose filmed members all moved by the same amount carries its
+ * camera with it. A group torn apart — one member moved, or pushed aside —
+ * keeps every member filming the same timeline moments, so each moved copy
+ * shifts back by its own move. Returns `after` itself when nothing changed.
+ */
+export function settleCameras(before: readonly Overlay[], after: Overlay[]): Overlay[] {
+  const was = new Map(before.map((o) => [o.id, o.start]));
+  const moves = new Map<string, number>();
+  for (const o of after) {
+    const from = was.get(o.id);
+    if (o.camera && from !== undefined) moves.set(o.id, o.start - from);
+  }
+
+  // A group is torn when its members' moves disagree.
+  const torn = new Set<string>();
+  const first = new Map<string, number>();
+  for (const o of after) {
+    const d = moves.get(o.id);
+    if (d === undefined || !o.groupId) continue;
+    const seen = first.get(o.groupId);
+    if (seen === undefined) first.set(o.groupId, d);
+    else if (Math.abs(seen - d) > 1e-9) torn.add(o.groupId);
+  }
+  if (!torn.size) return after;
+
+  return after.map((o) => {
+    const d = moves.get(o.id) ?? 0;
+    if (!o.camera || !o.groupId || !torn.has(o.groupId) || Math.abs(d) < 1e-9) return o;
+    return { ...o, camera: shiftCamera(o.camera, -d) } as Overlay;
   });
 }
 

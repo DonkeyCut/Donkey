@@ -3,6 +3,7 @@ import { groupRemap } from "@donkeycut/effects-kit";
 import { adoptTransitionFields, assetIdsInUse, clipLen, closeMicroGaps, cutTranscribeSpec, deriveTransitionFields, docOverlays, getClipSpans, liftClipLooks, moveOverlayGroup, overlayLaneOrder, normalizeElementLanes, parkedTransitions, placeInRun, projectDuration, rippleInsert, separateOverlaps, serializeDoc, useEditor, DOC_KEYS, docFieldsEdited } from "./store";
 import type React from "react";
 import { runAiTool } from "./aiTools";
+import { withGroupCamera } from "./groupCamera";
 import { selectedMembers, startLaneMove } from "./laneTracks";
 import { expandTimelineGroups } from "./timelineGroups";
 import { timelineItem } from "./timelineItems";
@@ -779,6 +780,60 @@ describe("title lanes", () => {
           .overlays.filter((o) => (o.lane ?? 0) === 1)
           .map((o) => ({ start: o.start, end: o.end }))
       );
+    });
+  });
+
+  describe("group camera on a lone move", () => {
+    const push = [
+      { t: 0, x: 0.5, y: 0.5, scale: 1, rotation: 0 },
+      { t: 2, x: 0.5, y: 0.5, scale: 2, rotation: 0 },
+    ];
+
+    test("moving one member keeps its camera on the timeline", () => {
+      const a = title({ start: 0, end: 4, groupId: "g" });
+      const b = title({ start: 0, end: 4, lane: 1, groupId: "g" });
+      useEditor.setState({ overlays: withGroupCamera([a, b], "g", { keys: push }) });
+      s().updateOverlay(b.id, { start: 1 });
+      // b now starts 1s later, so the push at timeline 2s sits 1s into it.
+      expect(overlayById(a.id).camera!.kf.map((k) => k.t)).toEqual([0, 2]);
+      expect(overlayById(b.id).camera!.kf.map((k) => k.t)).toEqual([-1, 1]);
+    });
+
+    test("a member pushed clear of a moved group keeps its camera on the timeline", () => {
+      const x = title({ start: 0, end: 2, groupId: "m" });
+      const y = title({ start: 10, end: 11, lane: 1, groupId: "m" });
+      const a = title({ start: 3, end: 6, groupId: "g" });
+      const b = title({ start: 3, end: 6, lane: 1, groupId: "g" });
+      useEditor.setState({ overlays: [x, y, ...withGroupCamera([a, b], "g", { keys: push })] });
+      s().updateOverlaysTransient([{ id: x.id, patch: { start: 2, end: 4 } }]);
+      moveOverlayGroup(x, 2);
+      // a slid to 4 to clear the mover; the push still lands at timeline 5s.
+      expect(overlayById(a.id).start).toBeCloseTo(4);
+      expect(overlayById(a.id).camera!.kf.map((k) => k.t)).toEqual([-1, 1]);
+      expect(overlayById(b.id).camera!.kf.map((k) => k.t)).toEqual([0, 2]);
+    });
+
+    test("the chat places a grouped element beyond the frame", async () => {
+      const a = title({ start: 0, end: 4, groupId: "g" });
+      const b = title({ start: 0, end: 4, lane: 1 });
+      useEditor.setState({ overlays: [a, b] });
+      await runAiTool("update_overlay", { id: a.id, x: 1.4, y: -0.3 });
+      await runAiTool("update_overlay", { id: b.id, x: 1.4 });
+      expect(overlayById(a.id).x).toBeCloseTo(1.4);
+      expect(overlayById(a.id).y).toBeCloseTo(-0.3);
+      expect(overlayById(b.id).x).toBeCloseTo(0.98);
+      await runAiTool("set_overlay_keyframes", { id: a.id, keys: [{ t: 1, x: 1.8 }] });
+      expect(overlayById(a.id).kf![0].x).toBeCloseTo(1.8);
+    });
+
+    test("a whole group moving carries its camera", () => {
+      const a = title({ start: 5, end: 7, groupId: "g" });
+      const b = title({ start: 9, end: 13, lane: 1, groupId: "g" });
+      useEditor.setState({ overlays: withGroupCamera([a, b], "g", { keys: push }) });
+      s().updateOverlaysTransient([{ id: a.id, patch: { start: 6, end: 8 } }]);
+      moveOverlayGroup(a, 1);
+      expect(overlayById(a.id).camera!.kf.map((k) => k.t)).toEqual([0, 2]);
+      expect(overlayById(b.id).camera!.kf.map((k) => k.t)).toEqual([-4, -2]);
     });
   });
 

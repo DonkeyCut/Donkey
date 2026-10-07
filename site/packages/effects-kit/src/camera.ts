@@ -49,6 +49,11 @@ export interface CameraPose {
 
 export const REST_CAMERA: CameraPose = { x: 0.5, y: 0.5, scale: 1, rotation: 0 };
 
+/** The world a group's camera films, in frame fractions: the frame and one
+ * frame beyond each edge. Its look-at point and its members sit inside it. */
+export const CAMERA_WORLD_MIN = -1;
+export const CAMERA_WORLD_MAX = 2;
+
 /** How far the camera may pull back and push in. */
 export const CAMERA_SCALE_MIN = 0.25;
 export const CAMERA_SCALE_MAX = 8;
@@ -97,13 +102,10 @@ export function worldPoint(
   return { x: cam.x + v.x / aspect, y: cam.y + v.y };
 }
 
-/** A screen-space offset as a world-space one: the inverse of `cameraVector`. */
-export function worldVector(cam: CameraPose, dx: number, dy: number): { x: number; y: number } {
-  const r = (-cam.rotation * Math.PI) / 180;
-  const k = 1 / Math.max(1e-6, cam.scale);
-  const c = Math.cos(r) * k;
-  const s = Math.sin(r) * k;
-  return { x: c * dx - s * dy, y: s * dx + c * dy };
+/** A screen-space offset as a world-space one: `cameraVector` through the
+ * inverse pose (the turn undone, the zoom inverted). */
+function worldVector(cam: CameraPose, dx: number, dy: number): { x: number; y: number } {
+  return cameraVector({ ...cam, rotation: -cam.rotation, scale: 1 / Math.max(1e-6, cam.scale) }, dx, dy);
 }
 
 /**
@@ -151,7 +153,7 @@ export const STREAK_MIN = 0.75;
  * either way, and the cap bounds what a frame costs to draw. */
 export const STREAK_MAX = 96;
 /** Design px between two taps along a streak. */
-export const STREAK_TAP_SPACING = 4;
+const STREAK_TAP_SPACING = 4;
 /** The most copies one streak is drawn from. */
 export const STREAK_TAPS_MAX = 24;
 

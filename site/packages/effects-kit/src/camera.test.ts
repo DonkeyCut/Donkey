@@ -155,9 +155,9 @@ describe("blur on the pose track", () => {
     expect(evalOverlayFrame(o, 1).blur).toBeCloseTo(2);
   });
 
-  test("a still blurred element draws through the evaluator", () => {
-    expect(isOverlayAnimated(el({ blur: 3 }))).toBe(true);
-    expect(isOverlayAnimated(el({ blur: 0 }))).toBe(false);
+  test("a still blurred element renders as one picture", () => {
+    expect(isOverlayAnimated(el({ blur: 3 }))).toBe(false);
+    expect(isOverlayAnimated(el({ blur: 3, kf: [key(0), key(2, { blur: 0 })] }))).toBe(true);
   });
 });
 

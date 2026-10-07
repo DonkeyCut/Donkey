@@ -27,6 +27,14 @@ describe("groupEdit", () => {
     expect(0.8 + edge.dy).toBeCloseTo(0.98);
   });
 
+  test("grouped elements move across the camera's world", () => {
+    const items = [{ x: 1.4, y: 0.5, groupId: "g" }, { x: 0.6, y: 0.5, groupId: "g" }];
+    const right = selectionTranslation(items, { x: 1.1, y: 0.5 });
+    expect(1.4 + right.dx).toBeCloseTo(1.5);
+    const far = selectionTranslation(items, { x: 5, y: 0.5 });
+    expect(1.4 + far.dx).toBeCloseTo(2);
+  });
+
   test("the summary counts by kind", () => {
     const overlays = [
       { kind: "shape" } as Overlay, { kind: "shape" } as Overlay, { text: "hi" } as Overlay,

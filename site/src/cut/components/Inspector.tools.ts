@@ -7,6 +7,8 @@
  */
 
 import {
+  CAMERA_WORLD_MAX,
+  CAMERA_WORLD_MIN,
   GRADE_BASIC_FIELDS,
   GRADE_DETAIL_FIELDS,
   GRADE_HUE_MAX,
@@ -111,8 +113,8 @@ export const INSPECTOR_TOOLS = [
       text: str("New text (titles)"),
       start: num("Start s"),
       end: num("End s"),
-      x: num("Center x 0..1"),
-      y: num("Center y 0..1"),
+      x: num(`Center x 0..1; a grouped element reaches ${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX}, off the frame, for its group camera`),
+      y: num(`Center y 0..1; a grouped element reaches ${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX}`),
       size: num("Font size px at 1080w (titles)"),
       color: str("CSS text color (titles)"),
       font: str("Font id (titles; see the graphics skill)"),

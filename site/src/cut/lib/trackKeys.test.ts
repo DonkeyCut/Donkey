@@ -93,6 +93,13 @@ describe("a tracked mask", () => {
     expect(m.points![0].x).toBeCloseTo(-0.05, 6);
   });
 
+  test("an element with motion blur or a group camera still takes a tracked mask", () => {
+    const overlay = { id: "o1", kind: "shape", start: 0, end: 1, x: 0.3, y: 0.5, motionBlur: 0.5, groupId: "g", camera: { kf: [{ t: 0, x: 0.5, y: 0.5, scale: 2, rotation: 0 }] } } as unknown as Overlay;
+    const m = trackedMask({ kind: "overlay", overlay }, "9:16", [0], [at(0.3, 0.5)], {}, 0)!;
+    // The camera's 2× zoom about the center moves the element to x 0.1.
+    expect(m.points![0].x).toBeCloseTo(0.05, 6);
+  });
+
   test("straight stretches drop their middle keys", () => {
     const t = times(30);
     const m = trackedMask({ kind: "clip", clip: clip() }, "9:16", t, t.map((s) => at(0.2 + s * 0.3, 0.5)), {}, 0.0015)!;

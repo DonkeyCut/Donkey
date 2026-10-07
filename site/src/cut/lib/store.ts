@@ -61,7 +61,7 @@ import type {
 } from "./types";
 import type { VideoProject } from "./genvideo/types";
 import { expandTimelineGroups, reorderTimelineClip, selectedGroupIds, setTimelineGroup } from "./timelineGroups";
-import { groupCameraOf, withGroupCamera, withoutCamera } from "./groupCamera";
+import { groupCameraOf, settleCameras, withGroupCamera, withoutCamera } from "./groupCamera";
 import type { CameraKey } from "@donkeycut/effects-kit";
 import { mapTimelineItems, pasteTimelineItems, splitTimelineItems, shiftedTimelineItems, timelineCopies, timelinePlacementDelta, timelineRange } from "./timelineItems";
 import { fillSlot } from "./genvideo/fillSlot";
@@ -1188,8 +1188,15 @@ export function applyOverlayPatchSettled(id: string, patch: OverlayPatch) {
   const p = { ...patch };
   if ("start" in p && !("end" in p) && p.start !== undefined)
     p.end = p.start + (before.end - before.start);
+  const was = st.overlays;
   st.updateOverlayTransient(id, p);
   settleOverlayFootprint(id, p);
+
+  // A member that moved alone, or pushed one aside, leaves its group's camera
+  // on the timeline.
+  const moved = useEditor.getState().overlays;
+  const settled = settleCameras(was, moved);
+  if (settled !== moved) useEditor.setState({ overlays: settled });
 }
 
 function settleOverlayFootprint(id: string, patch: OverlayPatch) {
@@ -1289,10 +1296,11 @@ function overlaysClearOf(overlays: Overlay[], ids: Set<string>): Overlay[] {
     }
   }
   if (shifted.size === 0) return overlays;
-  return overlays.map((o) => {
+  const cleared = overlays.map((o) => {
     const by = shifted.get(o.id);
     return by ? { ...o, start: o.start + by, end: o.end + by } : o;
   });
+  return settleCameras(overlays, cleared);
 }
 
 /** Apply a source trim or speed change with the shared same-row collision rule. */
@@ -4241,12 +4249,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         .filter((v) => !!v && (v.keys.length > 0 || !!v.motionBlur))
         .sort((a, b) => a!.start - b!.start)[0];
       const fresh = grouped.overlays.map((o) => (o.groupId === groupId ? withoutCamera(o) : o));
-      const overlays = filmed
-        ? (() => {
-            const start = Math.min(...fresh.filter((o) => o.groupId === groupId && o.kind !== "effect").map((o) => o.start));
-            const keys = filmed.keys.map((k) => ({ ...k, t: k.t + filmed.start - start }));
-            return withGroupCamera(fresh, groupId, { keys, motionBlur: filmed.motionBlur });
-          })()
+      const at = groupCameraOf(fresh, groupId);
+      const overlays = filmed && at
+        ? withGroupCamera(fresh, groupId, {
+            keys: filmed.keys.map((k) => ({ ...k, t: k.t + filmed.start - at.start })),
+            motionBlur: filmed.motionBlur,
+          })
         : fresh;
       set({ ...grouped, overlays, subtitles: { ...s.subtitles, cues: grouped.subtitles.cues }, multiSelection: members });
       return groupId;

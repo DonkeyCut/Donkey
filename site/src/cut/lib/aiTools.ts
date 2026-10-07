@@ -108,7 +108,7 @@ import type { VideoGenToolName } from "@/cut/components/GeneratePanel.tools";
 import type { ImageGenToolName } from "@/cut/components/ImageGenPanel.tools";
 import type { InspectorToolName } from "@/cut/components/Inspector.tools";
 import type { GroupPanelToolName } from "@/cut/components/GroupPanel.tools";
-import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, ELEMENT_BLUR_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
+import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, ELEMENT_BLUR_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
 import { groupCameraOf, groupCameraPoseAt } from "@/cut/lib/groupCamera";
 import { cutMotion } from "@/cut/lib/motionSettings";
 import type { LibraryToolName } from "@/cut/components/LibraryView.tools";
@@ -721,8 +721,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           o.id,
           clamp(k.t, 0, dur),
           {
-            ...(isNum(k.x) ? { x: clamp(k.x, 0.02, 0.98) } : {}),
-            ...(isNum(k.y) ? { y: clamp(k.y, 0.02, 0.98) } : {}),
+            ...(isNum(k.x) ? { x: clampOverlayPos(k.x, o) } : {}),
+            ...(isNum(k.y) ? { y: clampOverlayPos(k.y, o) } : {}),
             ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
             ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
             ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
@@ -757,23 +757,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const was = groupCameraPoseAt(view, t);
         const key: CameraKey = {
           t,
-          x: isNum(k.x) ? clamp(k.x, -1, 2) : was.x,
-          y: isNum(k.y) ? clamp(k.y, -1, 2) : was.y,
+          x: isNum(k.x) ? clamp(k.x, CAMERA_WORLD_MIN, CAMERA_WORLD_MAX) : was.x,
+          y: isNum(k.y) ? clamp(k.y, CAMERA_WORLD_MIN, CAMERA_WORLD_MAX) : was.y,
           scale: isNum(k.scale) ? clamp(k.scale, CAMERA_SCALE_MIN, CAMERA_SCALE_MAX) : was.scale,
           rotation: isNum(k.rotation) ? clamp(k.rotation, -180, 180) : was.rotation,
-          ...(k.ease !== undefined && easeInput(k.ease) ? { ease: easeInput(k.ease) } : {}),
         };
+        const ease = k.ease !== undefined ? easeInput(k.ease) : undefined;
+        if (ease) key.ease = ease;
         keys = upsertCameraKey(keys, key);
       }
     }
-    const motionBlur =
-      isNum(input.shutter) && input.shutter > 0
-        ? clamp(input.shutter, 0.05, 1)
-        : input.motion_blur === true
-          ? view.motionBlur ?? cutMotion().motionBlur
-          : input.motion_blur === false || (isNum(input.shutter) && input.shutter <= 0)
-            ? undefined
-            : view.motionBlur;
+    const motionBlur = shutterInput(input, view.motionBlur);
     s.setGroupCamera(groupId, { keys, ...(motionBlur ? { motionBlur } : {}) });
     const next = groupCameraOf(useEditor.getState().overlays, groupId)!;
     return {
@@ -2890,7 +2884,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const targets = (ids ?? [String(input.id)]).map((id) => requireItem(s.overlays, id, "overlay element"));
       // One undo step for the whole write, however many elements it lands on.
       s.pushHistory();
-      for (const o of targets) applyOverlayPatchSettled(o.id, overlayPatch(input, o.kind ?? "text"));
+      for (const o of targets) applyOverlayPatchSettled(o.id, overlayPatch(input, o.kind ?? "text", o));
       const report = (id: string) => {
         const next = useEditor.getState().overlays.find((x) => x.id === id)!;
         return {
@@ -6578,6 +6572,16 @@ async function launchVideoJob(
  * position, rotation, opacity, hidden) plus the target kind's own fields.
  * Outline width is em for text (scales with the type) and design px for
  * shapes, so the interpretation follows the element being patched. */
+/** A shutter from a call: `shutter` (0 or less turns it off), or
+ * `motion_blur` true for the current one or the default, false for off;
+ * neither keeps `current`. */
+function shutterInput(input: Record<string, unknown>, current: number | undefined): number | undefined {
+  if (isNum(input.shutter)) return input.shutter > 0 ? clamp(input.shutter, 0.05, 1) : undefined;
+  if (input.motion_blur === true) return current ?? cutMotion().motionBlur;
+  if (input.motion_blur === false) return undefined;
+  return current;
+}
+
 /** A key's ease from a call: a known curve, or linear (no ease) for
  * "linear" and anything else. */
 function easeInput(v: unknown) {
@@ -6585,22 +6589,24 @@ function easeInput(v: unknown) {
   return v === "linear" ? undefined : v;
 }
 
-function overlayPatch(input: Record<string, unknown>, kind: "text" | "shape" | "sticker" | "effect") {
+function overlayPatch(
+  input: Record<string, unknown>,
+  kind: "text" | "shape" | "sticker" | "effect",
+  place?: { groupId?: string }
+) {
   const patch: Record<string, unknown> = {};
   if (isNum(input.start)) patch.start = Math.max(0, input.start);
   if (isNum(input.end)) patch.end = input.end;
   if (isNum(input.lane)) patch.lane = Math.max(0, Math.round(input.lane));
-  if (isNum(input.x)) patch.x = clamp(input.x, 0.02, 0.98);
-  if (isNum(input.y)) patch.y = clamp(input.y, 0.02, 0.98);
+  if (isNum(input.x)) patch.x = clampOverlayPos(input.x, place);
+  if (isNum(input.y)) patch.y = clampOverlayPos(input.y, place);
   if (isNum(input.rotation))
     patch.rotation = Math.round(clamp(input.rotation, -180, 180)) || undefined;
   if (isNum(input.opacity))
     patch.opacity = input.opacity >= 0.995 ? undefined : clamp(input.opacity, 0, 1);
   if (kind !== "effect") {
     if (isNum(input.blur)) patch.blur = input.blur <= 0.05 ? undefined : clamp(input.blur, 0, ELEMENT_BLUR_MAX);
-    if (isNum(input.shutter)) patch.motionBlur = input.shutter <= 0 ? undefined : clamp(input.shutter, 0.05, 1);
-    else if (input.motion_blur === true) patch.motionBlur = cutMotion().motionBlur;
-    if (input.motion_blur === false) patch.motionBlur = undefined;
+    if (isNum(input.shutter) || typeof input.motion_blur === "boolean") patch.motionBlur = shutterInput(input, undefined);
   }
   if (typeof input.hidden === "boolean") patch.hidden = input.hidden || undefined;
   if (typeof input.name === "string") patch.name = input.name.trim().slice(0, 60) || undefined;

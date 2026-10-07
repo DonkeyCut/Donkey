@@ -8,7 +8,7 @@
  * until every side catches up.
  */
 
-import { EASE_IDS, ELEMENT_BLUR_MAX } from "@donkeycut/effects-kit";
+import { CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, EASE_IDS, ELEMENT_BLUR_MAX } from "@donkeycut/effects-kit";
 import {
   CARET_BLINK_SECONDS,
   CARET_BLINKS_MAX,
@@ -120,8 +120,8 @@ export const OVERLAY_ANIMATION_TOOLS = [
           items: obj(
             {
               t: num("Seconds from the element's start"),
-              x: num("Center x, fraction of frame width 0..1"),
-              y: num("Center y, fraction of frame height 0..1"),
+              x: num(`Center x, fraction of frame width 0..1 (${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX} for a grouped element)`),
+              y: num(`Center y, fraction of frame height 0..1 (${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX} for a grouped element)`),
               scale: num("Size multiplier, 1 = the element's own size (0.1..4)"),
               rotation: num("Degrees clockwise, -180..180"),
               opacity: num("0..1"),

@@ -1,6 +1,8 @@
 import type { GuideId, GuideLines } from "./guides";
 import {
   type OutputSpace,
+  CAMERA_WORLD_MAX,
+  CAMERA_WORLD_MIN,
   EFFECT_LABELS,
   behindSubjectMask,
   overlayKind,
@@ -83,8 +85,10 @@ export function normalizeAspect(a: string | undefined | null): Aspect | null {
 /** An overlay's center, held far enough inside the frame that the element it
  * belongs to always has a grabbable piece on screen. Every path that writes a
  * position — dragging in the preview, the inspector's own fields — passes
- * through it, so no route can strand an element off-frame. */
-export const clampOverlayPos = (v: number) => Math.min(0.98, Math.max(0.02, v));
+ * through it, so no route can strand an element off-frame. An element in a
+ * group may sit anywhere in the camera's world, for a camera to pan to. */
+export const clampOverlayPos = (v: number, o?: { groupId?: string }) =>
+  o?.groupId ? Math.min(CAMERA_WORLD_MAX, Math.max(CAMERA_WORLD_MIN, v)) : Math.min(0.98, Math.max(0.02, v));
 
 /** Output frame in pixels. The short side is pinned to 1080 — the design
  * short side that text scaling and overlay math assume — and the long side

@@ -249,12 +249,14 @@ function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoCl
     });
   };
   const poses = overlays.map(overlayPose);
+  // A grouped element reaches across the camera's world.
+  const grouped = overlays.find((o) => o.groupId);
   const center = selectionCenter(poses);
   const rotation = sharedNumber([...poses.map((p) => p.rotation), ...clips.map((c) => clipPose(c).rotation)]);
   const opacity = sharedNumber([...poses.map((p) => p.opacity), ...clips.map((c) => clipPose(c).opacity)]);
   const move = (axis: "x" | "y", pct: number) => {
-    const target = { ...center, [axis]: clampOverlayPos(pct / 100) };
-    const { dx, dy } = selectionTranslation(poses, target);
+    const target = { ...center, [axis]: pct / 100 };
+    const { dx, dy } = selectionTranslation(poses.map((p, i) => ({ ...p, groupId: overlays[i].groupId })), target);
     overlays.forEach((o, i) => setOverlay(o, { x: poses[i].x + dx, y: poses[i].y + dy }));
   };
   const rotate = (v: number) => {
@@ -294,8 +296,8 @@ function TransformRows({ items }: { items: { overlays: Overlay[]; clips: VideoCl
                 label={`${axis.toUpperCase()} position`}
                 className="w-9 text-muted-foreground"
                 value={center[axis] * 100}
-                min={2}
-                max={98}
+                min={clampOverlayPos(-Infinity, grouped) * 100}
+                max={clampOverlayPos(Infinity, grouped) * 100}
                 step={0.5}
                 keyStep={1}
                 snap={[50]}

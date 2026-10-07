@@ -5,6 +5,7 @@ import {
   WORD_BASELINE_DROP,
   renderElementCanvas as kitRenderElementCanvas,
   renderElementPng as kitRenderElementPng,
+  renderStillPng as kitRenderStillPng,
   renderOverlayFrames as kitRenderOverlayFrames,
   LINE_HEIGHT,
   type OverlayFrameSet,
@@ -180,6 +181,11 @@ export function renderElementPng(
   phase?: PaintPhase
 ): Promise<Blob> {
   return kitRenderElementPng(overlay, width, height, cutRenderEnv(assets), phase);
+}
+
+/** An element that holds still as one full-frame PNG, its blur baked in. */
+export function renderStillPng(overlay: Overlay, width: number, height: number, assets: MediaAsset[] = []): Promise<Blob> {
+  return kitRenderStillPng(overlay, width, height, cutRenderEnv(assets));
 }
 
 /** The element drawn on a canvas at the export resolution, for a picture

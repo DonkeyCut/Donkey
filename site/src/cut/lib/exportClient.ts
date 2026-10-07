@@ -31,7 +31,7 @@ import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipLen, clipSpeed, getClipSpans, openedTimeline, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
-import { renderElementFrames, renderElementPng } from "./textRender";
+import { renderElementFrames, renderElementPng, renderStillPng } from "./textRender";
 import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
 import { soundSourceOf, spanSoundSpec, spanUsesSoundFeature, specSound } from "./soundSource";
@@ -1378,7 +1378,7 @@ export async function buildExportPayload(
       });
       continue;
     }
-    const png = await renderElementPng(o, settings.width, settings.height, doc.assets);
+    const png = await renderStillPng(o, settings.width, settings.height, doc.assets);
     const key = `overlay_${i}.png`;
     pngs.push({ name: key, blob: png });
     overlays.push({

@@ -53,7 +53,7 @@ import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { MatteAlpha, matteStamp } from "./matteAlpha";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
-import { cutRenderEnv, renderElementCanvas, renderElementPng } from "./textRender";
+import { cutRenderEnv, renderElementCanvas, renderElementPng, renderStillPng } from "./textRender";
 import { cardMatteKey } from "./cameraCard";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
@@ -749,13 +749,11 @@ class StampCache {
   async bitmapFor(layer: StampedLayer): Promise<ImageBitmap> {
     let bitmap = this.drawn.get(layer);
     if (!bitmap) {
-      const png = await renderElementPng(
-        layer.overlay,
-        this.width,
-        this.height,
-        this.assets,
-        layer.phase
-      );
+      // A layer with no animation holds still, its blur baked into the
+      // picture; an animated one is neutral and softens as it is drawn.
+      const png = layer.anim
+        ? await renderElementPng(layer.overlay, this.width, this.height, this.assets, layer.phase)
+        : await renderStillPng(layer.overlay, this.width, this.height, this.assets);
       bitmap = await createImageBitmap(png);
       this.drawn.set(layer, bitmap);
     }

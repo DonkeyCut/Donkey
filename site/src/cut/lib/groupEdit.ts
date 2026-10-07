@@ -36,14 +36,17 @@ export function selectionCenter(items: readonly { x: number; y: number }[]): { x
  * an element can sit at, so the set never folds in on itself.
  */
 export function selectionTranslation(
-  items: readonly { x: number; y: number }[], target: { x: number; y: number },
+  items: readonly { x: number; y: number; groupId?: string }[], target: { x: number; y: number },
 ): { dx: number; dy: number } {
   if (!items.length) return { dx: 0, dy: 0 };
   const center = selectionCenter(items);
-  const lo = clampOverlayPos(0), hi = clampOverlayPos(1);
-  const xs = items.map((it) => it.x), ys = items.map((it) => it.y);
-  const dx = Math.max(lo - Math.min(...xs), Math.min(hi - Math.max(...xs), target.x - center.x));
-  const dy = Math.max(lo - Math.min(...ys), Math.min(hi - Math.max(...ys), target.y - center.y));
+  const room = (axis: "x" | "y") => ({
+    lo: Math.max(...items.map((it) => clampOverlayPos(-Infinity, it) - it[axis])),
+    hi: Math.min(...items.map((it) => clampOverlayPos(Infinity, it) - it[axis])),
+  });
+  const rx = room("x"), ry = room("y");
+  const dx = Math.max(rx.lo, Math.min(rx.hi, target.x - center.x));
+  const dy = Math.max(ry.lo, Math.min(ry.hi, target.y - center.y));
   return { dx, dy };
 }
 

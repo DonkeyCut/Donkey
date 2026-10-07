@@ -51,10 +51,20 @@ export function elementLook(
   };
 }
 
+/** A context back to plain drawing: identity transform, full alpha,
+ * source-over, no filter. */
+function reset(c: Ctx): void {
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalAlpha = 1;
+  c.globalCompositeOperation = "source-over";
+  if ("filter" in c) c.filter = "none";
+}
+
 /**
  * Draw `src` along the streak onto a cleared `ctx`, with (x, y) the place it
  * would sit with no streak. The caller's transform applies, so a streak given
- * in an element's own space smears in that space.
+ * in an element's own space smears in that space. A streak has at least two
+ * taps (`streakTaps`).
  */
 export function drawStreak(
   ctx: Ctx,
@@ -64,10 +74,6 @@ export function drawStreak(
   look: Pick<ElementLook, "streakX" | "streakY" | "taps">
 ): void {
   const n = look.taps;
-  if (n < 2) {
-    ctx.drawImage(src, x, y);
-    return;
-  }
   const op = ctx.globalCompositeOperation;
   const alpha = ctx.globalAlpha;
   ctx.globalCompositeOperation = "lighter";
@@ -109,10 +115,7 @@ export class ElementFx {
     if (!look) return ctx;
     this.picture = this.fit(this.picture, width, height);
     const c = this.picture.getContext("2d") as Ctx;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.globalAlpha = 1;
-    c.globalCompositeOperation = "source-over";
-    if ("filter" in c) c.filter = "none";
+    reset(c);
     c.clearRect(0, 0, this.picture.width, this.picture.height);
     return c;
   }
@@ -126,18 +129,13 @@ export class ElementFx {
     if (look.taps >= 2) {
       this.smear = this.fit(this.smear, src.width, src.height);
       const s = this.smear.getContext("2d") as Ctx;
-      s.setTransform(1, 0, 0, 1, 0, 0);
-      s.globalAlpha = 1;
-      s.globalCompositeOperation = "source-over";
-      if ("filter" in s) s.filter = "none";
+      reset(s);
       s.clearRect(0, 0, this.smear.width, this.smear.height);
       drawStreak(s, src, 0, 0, look);
       src = this.smear;
     }
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = "source-over";
+    reset(ctx);
     if (look.blur > 0 && "filter" in ctx) ctx.filter = `blur(${look.blur.toFixed(2)}px)`;
     ctx.drawImage(src, 0, 0);
     ctx.restore();
