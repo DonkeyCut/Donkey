@@ -3,12 +3,14 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { FolderPlus, Loader2, Plus, StickyNote } from "lucide-react";
+import { FolderPlus, Loader2, Plus, StickyNote, Trash2 } from "lucide-react";
+import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { noteInLibraryFolder, noteInNotesFolder, noteRef, type NoteLocation } from "@/cut/lib/noteReference";
 import { setRefDragData, clearRefDrag } from "@/cut/lib/assetRef";
 import type { Residency } from "@/cut/lib/residency";
 import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
   deleteNote,
   deleteNoteFolder,
@@ -28,10 +30,11 @@ import { cutNotes } from "@/cut/lib/chatRuntime";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
+import { additiveClick } from "@/cut/lib/hostKeys";
 import { PICKED_RING } from "@/cut/lib/assetPick";
-import { FolderCrumb, FolderShelf, Marquee } from "./desktopFolders";
+import { FolderCrumb, FolderShelf, Marquee, useTilePicks } from "./desktopFolders";
 import { CardActionsMenu } from "./CardActionsMenu";
-import { DeleteConfirm, foldersGoNote } from "./selectionMenu";
+import { DeleteConfirm, SelectionMenu, foldersGoNote, pickLabel, useSelectionMenu } from "./selectionMenu";
 import { LIBRARY_SQUARE } from "./LibraryCard";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
 import { NoteBodyPreview } from "./NoteBodyPreview";
@@ -178,7 +181,6 @@ export function NotesView({ library, ref }: Props = {}) {
     writes.current = run;
     return run;
   };
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [folderCreating, setFolderCreating] = useState(false);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const [deletingNotes, setDeletingNotes] = useState<string[] | null>(null);
@@ -217,6 +219,15 @@ export function NotesView({ library, ref }: Props = {}) {
   const shown = list.filter((n) => library
     ? noteInLibraryFolder(n, library.folderId, library.folderId === null ? undefined : library.residency)
     : noteInNotesFolder(n, openFolder));
+  // Notes pick the way every tile grid does, and a pick reaches only the
+  // notes on screen: a note picked in another folder never rides a delete.
+  const shownIds = shown.map((n) => n.id);
+  const { picked: selected, setPicked: setSelected, pick: pickTile } = useTilePicks(shownIds);
+  const pick = shown.filter((n) => selected.has(n.id));
+  // A note inside the pick carries the whole pick; outside it, itself.
+  const setOf = (n: CutNote) => (selected.has(n.id) ? pick : [n]);
+  const ctx = useSelectionMenu({ picked: selected, setPicked: setSelected, shown: shownIds });
+  const ctxSet = ctx.menu ? shown.filter((n) => ctx.menu!.ids.includes(n.id)) : [];
   // What the composer shows: the buffer while it belongs to the note the URL
   // names, and the stored note otherwise. A note nobody has typed into has no
   // buffer, and one still being written has no stored note.
@@ -431,7 +442,6 @@ export function NotesView({ library, ref }: Props = {}) {
       ...prev,
       notes: prev.notes.filter((n) => !gone.has(n.id)),
     }));
-    setSelected((prev) => new Set([...prev].filter((id) => !gone.has(id))));
     // Behind any save still queued for it, whose later stamp would bring
     // the note back.
     for (const id of ids) void queue(() => deleteNote(id).catch(() => reload()));
@@ -579,9 +589,18 @@ export function NotesView({ library, ref }: Props = {}) {
   // The open note is portaled over the app; this is how it finds the column
   // this list scrolls in and holds it still.
   const pageRef = useRef<HTMLDivElement>(null);
+  useDeleteKey(pageRef, pick.length > 0 ? () => setDeletingNotes(pick.map((n) => n.id)) : null);
+  // What the confirm names: each note by its title.
+  const deletingNames = (deletingNotes ?? []).map((id) => ({
+    name: list.find((n) => n.id === id)?.title.trim() || "Untitled note",
+  }));
 
   return (
-    <div ref={pageRef} className={library ? (shown.length > 0 ? "mb-6" : undefined) : "mx-auto w-full max-w-6xl px-10 py-9"}>
+    <div
+      ref={pageRef}
+      className={library ? (shown.length > 0 ? "mb-6" : undefined) : "mx-auto w-full max-w-6xl px-10 py-9"}
+      onContextMenu={ctx.onContextMenu}
+    >
       {failedDraft && <p role="alert" className="py-3 text-sm text-destructive">Could not save the note. <button className="underline" onClick={() => { edit(failedDraft); openAt(failedDraft.id); setFailedDraft(null); }}>Reopen and retry</button></p>}
       {/* One note at a time, over the whole window. The list stays mounted
           behind it, so closing comes back to the same scroll position. */}
@@ -711,13 +730,15 @@ export function NotesView({ library, ref }: Props = {}) {
             return (
               <div
                 key={n.id}
-                data-sel-id={n.id}
                 className={cn(
                   "group relative rounded-xl transition-transform hover:-translate-y-0.5",
                   selected.has(n.id) && PICKED_RING,
                 )}
               >
+                {/* The button carries the tile's mark, so a right-click on it
+                    opens the selection menu. */}
                 <button
+                  data-sel-id={n.id}
                   draggable
                   onDragStart={(e) => onCardDragStart(e, n.id)}
                   onDragEnd={clearRefDrag}
@@ -733,7 +754,14 @@ export function NotesView({ library, ref }: Props = {}) {
                     width: LIBRARY_SQUARE,
                     height: LIBRARY_SQUARE,
                   }}
-                  onClick={() => openNote(n)}
+                  onClick={(e) => {
+                    if (!additiveClick(e)) {
+                      openNote(n);
+                      return;
+                    }
+                    e.preventDefault();
+                    pickTile(e, n.id, shownIds);
+                  }}
                 >
                   {/* Clear of the actions button that takes the corner on hover. */}
                   {n.title && <div className="truncate pr-6 text-[13px] font-semibold">{n.title}</div>}
@@ -755,20 +783,21 @@ export function NotesView({ library, ref }: Props = {}) {
                     deletes the whole pick with it, the way a file does. */}
                 <CardActionsMenu
                   className="absolute top-1.5 right-1.5"
-                  onDelete={() => setDeletingNotes(selected.has(n.id) ? [...selected].filter((id) => list.some((m) => m.id === id)) : [n.id])}
+                  onDelete={() => setDeletingNotes(setOf(n).map((m) => m.id))}
                 />
               </div>
             );
           })}
         </Marquee>
       )}
+      <SelectionMenu menu={ctxSet.length > 0 ? ctx.menu : null} onClose={ctx.close}>
+        <DropdownMenuItem variant="destructive" onClick={() => setDeletingNotes(ctxSet.map((n) => n.id))}>
+          <Trash2 /> Delete
+        </DropdownMenuItem>
+      </SelectionMenu>
       <DeleteConfirm
         open={deletingNotes !== null}
-        title={
-          deletingNotes?.length === 1
-            ? `Delete “${list.find((n) => n.id === deletingNotes[0])?.title.trim() || "Untitled note"}”?`
-            : `Delete ${deletingNotes?.length ?? 0} notes?`
-        }
+        title={`Delete ${pickLabel([], deletingNames, ["note", "notes"], 0)}?`}
         description={`${deletingNotes?.length === 1 ? "It is" : "They are"} removed from your phone too.`}
         onClose={() => setDeletingNotes(null)}
         onConfirm={() => {

@@ -16,6 +16,7 @@ import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { clearRefDrag, setRefDragData, type AssetRef } from "@/cut/lib/assetRef";
+import { reportSwallowed } from "@/cut/lib/report";
 import { formatBytes } from "@/lib/bytes";
 import { RefDropZone } from "./RefDropZone";
 import { cn } from "@/lib/utils";
@@ -515,20 +516,28 @@ export function FolderShelf<F extends DeskFolder>({
   // lets the name go.
   const [landing, setLanding] = useState<{ name: string; known: Set<string> } | null>(null);
   if (landing && folders.some((f) => !landing.known.has(f.id))) setLanding(null);
+  // A failed create says so on the shelf until the next one, and reaches
+  // error tracking.
+  const [failed, setFailed] = useState<string | null>(null);
   const commitCreate = (name: string) => {
     const pending = { name, known: new Set(folders.map((f) => f.id)) };
     setLanding(pending);
+    setFailed(null);
     const release = () => setLanding((l) => (l === pending ? null : l));
     Promise.resolve(onCreate?.(name)).then(
       () => setTimeout(release, LANDING_GRACE_MS),
-      release,
+      (err: unknown) => {
+        release();
+        setFailed(err instanceof Error && err.message ? err.message : "Could not create folder.");
+        reportSwallowed(`[cut] folder create failed for ${name}`, err);
+      },
     );
     closeCreate();
   };
 
   // Nothing filed here and nothing being made: the shelf takes no room. The
   // host keeps it mounted, so a name held for a create outlives the field.
-  if (folders.length === 0 && !creating && !landing) return null;
+  if (folders.length === 0 && !creating && !landing && !failed) return null;
 
   const editRowClass = rows
     ? "flex items-center gap-2.5 rounded-lg px-2 py-1.5"
@@ -748,6 +757,12 @@ export function FolderShelf<F extends DeskFolder>({
             }}
           />
         </div>
+      )}
+
+      {failed && (
+        <p role="alert" className="w-full px-2 text-xs text-destructive">
+          {failed}
+        </p>
       )}
     </div>
   );

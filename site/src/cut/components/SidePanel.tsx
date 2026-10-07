@@ -1050,7 +1050,7 @@ function ProjectFilesPanel({
       )}
       {/* The shelf scrolls with the grid, so one sweep reaches both. */}
       <ScrollArea className="min-h-0 flex-1" contentClassName="pt-1 pb-3.5">
-        {openFolder === null && (folders.length > 0 || creatingIds !== null) && (
+        {openFolder === null && (
           <div className="shrink-0 px-3.5">
             <FolderShelf
               rows
@@ -1962,58 +1962,56 @@ function LibraryPanel({ projectId, onImport }: {
               />
             </div>
           )}
-          {shelfFolders.length > 0 ? (
-            <div className="shrink-0 px-3.5">
-              <FolderShelf
-                rows
-                folders={shelfFolders}
-                referenceOf={(f) => libraryFolderRef(f, folders)}
-                mime={LIBRARY_MOVE_MIME}
-                folderMime={LIBRARY_FOLDER_MOVE_MIME}
-                statOf={(id) => ({
-                  count:
-                    all.filter((a) => folderOf(a) === id).length +
-                    templates.filter((t) => (t.folderId ?? null) === id).length +
-                    childrenOf(folders, id).length,
-                })}
-                badgeOf={(id) => {
-                  const r = folders.find((f) => f.id === id)?.residency;
-                  return bothShelves && r ? <ShelfBadge residency={r} /> : null;
-                }}
-                picked={picked}
-                onPick={(e, id) => pick(e, folderSelId(id), order)}
-                renaming={renamingFolder}
-                onRenamingChange={setRenamingFolder}
-                onOpen={(id) => setOpenFolder(id)}
-                onRename={renameFolder}
-                // A folder in a pick with others takes the pick to the
-                // confirm; alone, itself.
-                onDelete={(id) => {
-                  const f = folders.find((x) => x.id === id);
-                  if (!f) return;
-                  const size = pickSet.folders.length + pickSet.items.length;
-                  if (picked.has(folderSelId(id)) && size > 1) setDeleting(pickSet);
-                  else setDeleting({ folders: [f], items: [] });
-                }}
-                onDropIds={(ids, fid) => ids.forEach((id) => void move(id, fid))}
-                onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
-                onRefDrop={(ref, fid) => {
-                  // Project media dropped on a folder tile (a Media card or a
-                  // timeline clip): save it to the library, filed in that folder.
-                  // The copy lands on the project's own shelf, so a folder on the
-                  // other one can't take it.
-                  if (ref.scope !== "project") return;
-                  if (folders.find((f) => f.id === fid)?.residency !== activeResidency()) return;
-                  const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
-                  if (!asset) return;
-                  void saveAssetToLibrary(projectId, asset)
-                    .then((saved) => moveLibraryItem(saved.residency, saved.id, fid))
-                    .then(() => void reload())
-                    .catch(() => {});
-                }}
-              />
-            </div>
-          ) : null}
+          <div className="shrink-0 px-3.5">
+            <FolderShelf
+              rows
+              folders={shelfFolders}
+              referenceOf={(f) => libraryFolderRef(f, folders)}
+              mime={LIBRARY_MOVE_MIME}
+              folderMime={LIBRARY_FOLDER_MOVE_MIME}
+              statOf={(id) => ({
+                count:
+                  all.filter((a) => folderOf(a) === id).length +
+                  templates.filter((t) => (t.folderId ?? null) === id).length +
+                  childrenOf(folders, id).length,
+              })}
+              badgeOf={(id) => {
+                const r = folders.find((f) => f.id === id)?.residency;
+                return bothShelves && r ? <ShelfBadge residency={r} /> : null;
+              }}
+              picked={picked}
+              onPick={(e, id) => pick(e, folderSelId(id), order)}
+              renaming={renamingFolder}
+              onRenamingChange={setRenamingFolder}
+              onOpen={(id) => setOpenFolder(id)}
+              onRename={renameFolder}
+              // A folder in a pick with others takes the pick to the
+              // confirm; alone, itself.
+              onDelete={(id) => {
+                const f = folders.find((x) => x.id === id);
+                if (!f) return;
+                const size = pickSet.folders.length + pickSet.items.length;
+                if (picked.has(folderSelId(id)) && size > 1) setDeleting(pickSet);
+                else setDeleting({ folders: [f], items: [] });
+              }}
+              onDropIds={(ids, fid) => ids.forEach((id) => void move(id, fid))}
+              onDropFolders={(ids, fid) => void moveFolders(ids, fid)}
+              onRefDrop={(ref, fid) => {
+                // Project media dropped on a folder tile (a Media card or a
+                // timeline clip): save it to the library, filed in that folder.
+                // The copy lands on the project's own shelf, so a folder on the
+                // other one can't take it.
+                if (ref.scope !== "project") return;
+                if (folders.find((f) => f.id === fid)?.residency !== activeResidency()) return;
+                const asset = useEditor.getState().assets.find((a) => a.id === ref.id);
+                if (!asset) return;
+                void saveAssetToLibrary(projectId, asset)
+                  .then((saved) => moveLibraryItem(saved.residency, saved.id, fid))
+                  .then(() => void reload())
+                  .catch(() => {});
+              }}
+            />
+          </div>
           {shownTemplates.length > 0 && (
             <div className="shrink-0 px-3.5 pb-3">
               <div className="grid grid-cols-2 gap-2.5">
