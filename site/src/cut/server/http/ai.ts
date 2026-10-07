@@ -24,8 +24,20 @@ import {
 import { rewriteCaptions, translateCaptions } from "../ai/captions";
 import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
 import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, skillRelevanceBlock, systemPrompt } from "../ai/catalog";
-import { declaresTool, declareTurn, dropTurn, takeWidened, turnTools, widenTurn, type EngineRoute, type HandledAsk } from "../ai/turnCatalog";
+import {
+  declaresTool,
+  declareTurn,
+  dropTurn,
+  handledSchema,
+  routeSchema,
+  takeWidened,
+  turnTools,
+  widenTurn,
+  type EngineRoute,
+  type HandledAsk,
+} from "../ai/turnCatalog";
 import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
+import { messageText } from "../../lib/messageText";
 import { codexCommand } from "../tool-path";
 import { errorMessage } from "../util";
 
@@ -41,20 +53,6 @@ interface ChatBody {
   /** Asks the editor carried out on its own since the provider's last turn. */
   handled?: HandledAsk[];
 }
-
-const routeSchema = z.object({
-  intent: z.enum(["chat", "simple", "complex"]),
-  areas: z.array(z.string().max(100)).max(100),
-  skill: z.string().max(200).nullable().optional(),
-  gate: z.boolean(),
-});
-
-const handledSchema = z.array(z.object({
-  ask: z.string().max(100_000),
-  tool: z.string().max(200),
-  args: z.unknown(),
-  say: z.string().max(10_000),
-})).max(50);
 
 // The steer a Codex turn resumes on once request_tools widened its catalog.
 const WIDENED_STEER = "The tool areas you requested are declared now. Carry on with the request.";
@@ -84,10 +82,7 @@ function lastUserText(messages: UIMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== "user") continue;
-    return m.parts
-      .map((p) => (p.type === "text" ? p.text : ""))
-      .join("")
-      .trim();
+    return messageText(m);
   }
   return "";
 }
@@ -324,13 +319,16 @@ async function runCodex(
       ask = WIDENED_STEER;
       continue;
     }
-    const steer = body.route?.gate ? await askPageGate(sessionKey, run.reply) : null;
+    // A failed run already showed its error and the page stopped reading:
+    // only a run that completed asks the gate, as on the Claude path.
+    const steer = run.end === "done" && body.route?.gate ? await askPageGate(sessionKey, run.reply) : null;
     if (!steer || signal.aborted) return;
     ask = steer;
   }
 }
 
-/** One `codex exec` run; returns the session it ran in and its last line. */
+/** One `codex exec` run; returns the session it ran in, its last line, and
+ * how it ended. */
 async function codexRun(
   emit: UIChunkWriter["write"],
   prompt: string,
@@ -339,12 +337,13 @@ async function codexRun(
   base: string,
   sessionKey: string,
   signal: AbortSignal
-): Promise<{ thread: string | undefined; reply: string }> {
+): Promise<{ thread: string | undefined; reply: string; end: TurnEnd }> {
   signal.throwIfAborted();
   const codex = await codexCommand();
   const mcp = mcpCommand(base, sessionKey);
   let thread = session;
   let reply = "";
+  let end: TurnEnd = "done";
   const args = ["exec"];
   if (session) args.push("resume", session);
   args.push("--json", "--skip-git-repo-check", "-m", model);
@@ -417,6 +416,7 @@ async function codexRun(
           reply = ev.item.text;
           say(ev.item.text);
         } else if (ev.type === "error" || ev.type === "turn.failed") {
+          end = "failed";
           emit({ type: "error", errorText: stopText(ev.error?.message ?? ev.message) });
           if (ev.type === "turn.failed") settle();
         } else if (ev.type === "turn.completed") {
@@ -450,12 +450,13 @@ async function codexRun(
         // clap puts the real diagnostic on the first `error:` line; the tail is
         // just Usage/`try '--help'` boilerplate. Surface the error line if present.
         const detail = lines.find((l) => /^error[:\s]/i.test(l)) ?? lines.slice(-2).join(" ");
+        end = "failed";
         emit({ type: "error", errorText: `Codex exited with code ${code}. ${detail}`.trim() });
       }
       resolve();
     });
   });
-  return { thread, reply };
+  return { thread, reply, end };
 }
 
 /**

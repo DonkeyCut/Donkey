@@ -208,8 +208,8 @@ export function areaTools(areas: Iterable<string>): AiToolDef[] {
 }
 
 /** The tool a turn calls to widen its catalog when the routed areas left out
- * what the ask needs. Loop-local: it lives outside the catalog, executes in
- * the chat loop, and never reaches a host or the engine. */
+ * what the ask needs. It lives outside the catalog: the hosted loop runs it
+ * in the chat loop, and the engine runs it for a Claude or Codex turn. */
 export const REQUEST_TOOLS_DEF: AiToolDef = {
   name: "request_tools",
   description:

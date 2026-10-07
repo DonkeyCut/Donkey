@@ -34,7 +34,7 @@ export async function foldIntoEngineChat(
 /** Answer the engine's quality gate for a signing-off turn: the steer for its
  * next pass, or null to let it close. A gate the engine no longer holds is
  * dropped. */
-export async function answerEngineGate(sessionKey: string | null, gateId: string, steer: string | null): Promise<void> {
+export async function answerEngineGate(sessionKey: string, gateId: string, steer: string | null): Promise<void> {
   await localBackend.fetch("/api/cut/ai/gate", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sessionKey, gateId, steer }),

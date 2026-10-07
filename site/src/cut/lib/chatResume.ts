@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai";
+import { messageText } from "./messageText";
 
 // A turn the page lost — a reload, a closed tab, a dropped connection, or a
 // tool that needed the page while no tab was attached — resumes itself when
@@ -78,14 +79,10 @@ export function unfinishedAsk(
   return ask;
 }
 
-export function askText(ask: UIMessage): string {
-  return ask.parts.map((part) => (part.type === "text" ? part.text : "")).join("").trim();
-}
-
 /** The continuation a resumed turn opens with. It carries the ask itself, so
  * a provider session that never received it still knows the job. */
 export function resumePrompt(ask: UIMessage): string {
-  const text = askText(ask);
+  const text = messageText(ask);
   return [
     "The editor page went away before your reply to this message finished:",
     "",

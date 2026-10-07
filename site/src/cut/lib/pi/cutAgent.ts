@@ -29,6 +29,7 @@ import {
   type ResolvedAction,
 } from "../instantAction";
 import { askJudge } from "../judge";
+import { messageText } from "../messageText";
 import {
   placeQueuedRows,
   queueTriageQuestions,
@@ -39,7 +40,6 @@ import {
   type TriageRow,
 } from "../queueTriage";
 import {
-  editorSlice,
   routeTurn,
   TURN_JUDGE_QUESTIONS,
   type CutJudgeSettings,
@@ -47,21 +47,13 @@ import {
   type TurnJudgeAnswers,
   type TurnRoute,
 } from "../turnJudge";
-import {
-  QUALITY_QUESTIONS,
-  QUALITY_STEER_PREFIX,
-  qualityState,
-  qualityVerdict,
-  recordLook,
-  type QualityAnswers,
-  type QualityStep,
-  type WatchedSource,
-} from "../turnQuality";
+import { QUALITY_STEER_PREFIX, type QualityStep } from "../turnQuality";
 import { enforceContextBudget } from "./contextBudget";
 import { donkeyModel, type ChatThinkingLevel } from "./donkeyModel";
-import { isMutatingTool, ledgerText, recordCall, type LedgerRecord } from "./mutationLedger";
+import { ledgerText } from "./mutationLedger";
 import { makeDonkeyStream, type DonkeyToolDetails, type PostFn, type WireCarrier, type WirePart } from "./donkeyStream";
 import { toAgentTools, toToolResult, uiToolOutput, type ExecTool } from "./tools";
+import { TurnGate } from "./turnGate";
 import { subscribeUiChunks } from "./uiChunks";
 
 // The chat turn runner on the pi agent harness. Each turn: one typed judgment
@@ -406,10 +398,7 @@ function toolsRanIn(m: UIMessage): string[] {
 function legacySession(history: UIMessage[]): AgentMessage[] {
   const out: AgentMessage[] = [];
   for (const m of history) {
-    let text = m.parts
-      .map((p) => (p.type === "text" ? p.text : ""))
-      .join("")
-      .trim();
+    let text = messageText(m);
     if (m.role === "user") {
       const meta = (m.metadata as { attachments?: unknown[] } | undefined)?.attachments;
       if (Array.isArray(meta) && meta.length > 0) text += attachedAssetsBlock(meta);
@@ -577,10 +566,7 @@ async function buildPrompt(
   deps: CutAgentDeps,
   context: unknown = deps.buildContext()
 ): Promise<UserMessage & WireCarrier> {
-  let text = (lastUser?.parts ?? [])
-    .map((p) => (p.type === "text" ? p.text : ""))
-    .join("")
-    .trim();
+  let text = lastUser ? messageText(lastUser) : "";
   const wireParts: WirePart[] = [];
   const meta = (lastUser?.metadata as { attachments?: unknown[] } | undefined)?.attachments;
   if (Array.isArray(meta) && meta.length > 0) {
@@ -685,43 +671,6 @@ async function runInstantAction(
   return true;
 }
 
-/** What the turn has looked at and run, as a mark. A turn the gate sent back
- * that returns with the same mark has stopped moving. */
-export function workMark(records: LedgerRecord[], looks: Map<string, WatchedSource>): string {
-  return [
-    records.length,
-    ...[...looks.values()].map((l) => `${l.passes}:${l.coveredTo}:${l.observed.length}`),
-  ].join("|");
-}
-
-/** The turn's own work, judged before it closes. Fails open: a judgment that
- * cannot be asked lets the turn sign off. */
-export async function gateVerdict(
-  reply: string,
-  request: string,
-  records: LedgerRecord[],
-  looks: Map<string, WatchedSource>,
-  deps: CutAgentDeps,
-  settings: CutJudgeSettings,
-  abortSignal?: AbortSignal
-) {
-  const work = {
-    request,
-    reply: reply.trim(),
-    ran: [...new Set(records.filter((r) => !r.error).map((r) => r.name))],
-    failed: [...new Set(records.filter((r) => r.error).map((r) => `${r.name} (${r.error})`))],
-    mutated: records.some((r) => !r.error && isMutatingTool(r.name)),
-    sources: [...looks.values()],
-    editor: editorSlice(deps.buildContext()),
-  };
-  try {
-    const { answers } = await askJudge(deps.judge, qualityState(work), QUALITY_QUESTIONS, abortSignal);
-    return qualityVerdict(answers as unknown as QualityAnswers, work, settings);
-  } catch {
-    return null;
-  }
-}
-
 /** One chat turn on the pi harness, streamed as UI chunks. Same contract as
  * the legacy streamGeminiChat, plus the thread id that keys the session. */
 export function streamCutChat({
@@ -747,10 +696,7 @@ export function streamCutChat({
       try {
         const gateStart = performance.now();
         const lastUser = messages.findLast((m) => m.role === "user");
-        const askText = (lastUser?.parts ?? [])
-          .map((p) => (p.type === "text" ? p.text : ""))
-          .join("")
-          .trim();
+        const askText = lastUser ? messageText(lastUser) : "";
         const context = deps.buildContext();
         const promptPromise = buildPrompt(lastUser, deps, context);
         const settings = deps.judgeSettings ?? cutJudge();
@@ -805,16 +751,8 @@ export function streamCutChat({
           let scenePlannedThisTurn = false;
           let rounds = 0;
           let extensions = 0;
-          // Everything this turn ran, harvested off the tool results in code.
-          const records: LedgerRecord[] = [];
-          // What this turn has looked at, and how many times the quality gate
-          // has already sent it back to work.
-          const looks = new Map<string, WatchedSource>();
-          let gateRounds = 0;
-          // What the turn had looked at and run the last time the gate held
-          // it. A turn that comes back with the same record has stopped
-          // moving, and sending it back again would only spin.
-          let gateMark = "";
+          // What this turn ran and looked at, judged when it signs off.
+          const gate = new TurnGate(askText);
 
           // The catalog this run declares. The speculative run waits a bounded
           // moment for the route; a route that has landed narrows the tools
@@ -877,7 +815,7 @@ export function streamCutChat({
               // The skill the judge attached rides the same way, from the
               // first round it is known for.
               const skill = withTools && settings.skillSuggestion && settled ? skillRelevanceBlock(settled.skill) : null;
-              const ledger = ledgerText(records, deps.debris?.() ?? []);
+              const ledger = ledgerText(gate.records, deps.debris?.() ?? []);
               const tail = [skill, ledger].filter((t): t is string => !!t).join("\n\n");
               if (!tail) return out;
               return [...out, { role: "user", content: tail, timestamp: 0 }];
@@ -915,8 +853,7 @@ export function streamCutChat({
                 ? (result.content.find((c) => c.type === "text") as { text?: string } | undefined)
                     ?.text || "failed"
                 : undefined;
-              recordCall(records, toolCall.name, details?.response, errorText);
-              if (!isError) recordLook(looks, toolCall.name, details?.response);
+              gate.record(toolCall.name, details?.response, errorText);
               return undefined;
             },
             // The quality gate: a round that asks for no tools is the turn
@@ -935,28 +872,16 @@ export function streamCutChat({
                 !withTools ||
                 abortSignal?.aborted ||
                 cancelled?.() ||
-                gateRounds >= settings.qualityRounds ||
-                !settings.qualityGate ||
                 rounds >= roundCeiling - 1 ||
                 (Array.isArray(msg.content) && msg.content.some((c) => c.type === "toolCall"))
               )
                 return false;
-              // The gate judges work grounded in footage: a turn that looked
-              // at a source can be held to what it saw. A turn that opened no
-              // source is measurable too when it changed nothing — an ask for
-              // work answered in words leaves the project where it was, and
-              // that is a fact the record carries.
-              if (looks.size === 0 && records.some((r) => !r.error && isMutatingTool(r.name))) return false;
-              const mark = workMark(records, looks);
-              if (mark === gateMark) return false; // sent back once, nothing moved
               const replyText = Array.isArray(msg.content)
                 ? msg.content.map((c) => (c.type === "text" ? c.text : "")).join("")
                 : "";
-              const verdict = await gateVerdict(replyText, askText, records, looks, deps, settings, abortSignal);
+              const verdict = await gate.hold(replyText, deps, settings, abortSignal);
               if (!verdict) return false;
-              gateMark = mark;
-              gateRounds++;
-              deps.hooks?.onQualityGate?.(verdict.step, gateRounds);
+              deps.hooks?.onQualityGate?.(verdict.step, gate.held);
               agent.followUp({ role: "user", content: verdict.steer, timestamp: Date.now() });
               return false;
             },

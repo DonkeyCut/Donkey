@@ -20,12 +20,13 @@ const WATCH_RESULT = {
   source: { assetId: "a1", name: "reference.mp4", duration: 71.6 },
 };
 
-function routeAnswers(areas: string[]) {
+function routeAnswers(areas: string[], intent: "chat" | "complex") {
+  const sure = (choice: string) => (choice === intent ? 0.9 : 0.05);
   const out: Record<string, unknown> = {
     intent: {
       type: "choice",
-      choice: "complex",
-      probabilities: { chat: 0.02, simple: 0.08, complex: 0.9 },
+      choice: intent,
+      probabilities: { chat: sure("chat"), simple: sure("simple"), complex: sure("complex") },
       confidence: 0.9,
     },
     skill: { type: "choice", choice: "none", probabilities: { none: 0.9 }, confidence: 0.9 },
@@ -50,7 +51,9 @@ function qualityAnswers(finished: number) {
   };
 }
 
-function deps(opts: { finished?: number; delayMs?: number; settings?: Partial<CutAgentDeps["judgeSettings"]> } = {}) {
+function deps(
+  opts: { finished?: number; delayMs?: number; intent?: "chat" | "complex"; settings?: Partial<CutAgentDeps["judgeSettings"]> } = {}
+) {
   const asks: string[][] = [];
   const d: CutAgentDeps = {
     post: async () => new Response(null, { status: 500 }),
@@ -58,7 +61,7 @@ function deps(opts: { finished?: number; delayMs?: number; settings?: Partial<Cu
       const questions = Object.keys((payload as { questions?: Record<string, unknown> }).questions ?? {});
       asks.push(questions);
       if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
-      const answers = questions.includes("finished") ? qualityAnswers(opts.finished ?? 0.9) : routeAnswers(["timeline"]);
+      const answers = questions.includes("finished") ? qualityAnswers(opts.finished ?? 0.9) : routeAnswers(["timeline"], opts.intent ?? "complex");
       return new Response(JSON.stringify({ model: "jev-latest", answers, usage: {} }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -84,6 +87,13 @@ describe("judgeEngineTurn", () => {
     expect(decision?.route.skill).toBeNull();
     expect(decision?.route.gate).toBe(true);
     expect(decision?.instant).toBeNull();
+  });
+
+  test("a chat verdict carries no gate", async () => {
+    const { deps: d } = deps({ intent: "chat" });
+    const decision = await judgeEngineTurn([user("u1", "what does ripple delete do?")], d);
+    expect(decision?.route.intent).toBe("chat");
+    expect(decision?.route.gate).toBe(false);
   });
 
   test("skill suggestion off leaves the skill out of the route", async () => {
@@ -170,9 +180,9 @@ describe("EngineGate", () => {
     const { deps: d, asks } = deps({ finished: 0.1 });
     const gate = new EngineGate("what happens in this video?");
     gate.record("watch_video", WATCH_RESULT, undefined);
-    const steer = await gate.steer("It opens on a yellow title.", d);
+    const steer = await gate.steer("g1", "It opens on a yellow title.", d);
     expect(steer).toContain("from=20");
-    expect(await gate.steer("It opens on a yellow title.", d)).toBeNull();
+    expect(await gate.steer("g2", "It opens on a yellow title.", d)).toBeNull();
     expect(asks.filter((q) => q.includes("finished")).length).toBe(1);
   });
 
@@ -180,7 +190,7 @@ describe("EngineGate", () => {
     const { deps: d, asks } = deps({ finished: 0.01 });
     const gate = new EngineGate("mute the first clip");
     gate.record("set_clip_muted", { id: "c1", muted: true }, undefined);
-    expect(await gate.steer("Muted it.", d)).toBeNull();
+    expect(await gate.steer("g1", "Muted it.", d)).toBeNull();
     expect(asks.length).toBe(0);
   });
 
@@ -188,7 +198,17 @@ describe("EngineGate", () => {
     const { deps: d, asks } = deps({ finished: 0.1, settings: { qualityGate: false } });
     const gate = new EngineGate("what happens in this video?");
     gate.record("watch_video", WATCH_RESULT, undefined);
-    expect(await gate.steer("It opens on a yellow title.", d)).toBeNull();
+    expect(await gate.steer("g1", "It opens on a yellow title.", d)).toBeNull();
     expect(asks.length).toBe(0);
+  });
+
+  test("a replayed gate the turn already answered is not judged again", async () => {
+    const { deps: d, asks } = deps({ finished: 0.1 });
+    const gate = new EngineGate("what happens in this video?");
+    gate.record("watch_video", WATCH_RESULT, undefined);
+    expect(await gate.steer("g1", "It opens on a yellow title.", d)).toContain("from=20");
+    gate.record("watch_video", { ...WATCH_RESULT, coveredTo: 40 }, undefined);
+    expect(await gate.steer("g1", "It opens on a yellow title.", d)).toBeUndefined();
+    expect(asks.filter((q) => q.includes("finished")).length).toBe(1);
   });
 });

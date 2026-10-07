@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { AiToolDef } from "@/cut/lib/aiToolDef";
 import { AI_TOOLS, areaTools, CORE_TOOLS, REQUEST_TOOLS_DEF, TOOL_AREA_NAMES } from "./catalog";
 
@@ -5,32 +6,39 @@ import { AI_TOOLS, areaTools, CORE_TOOLS, REQUEST_TOOLS_DEF, TOOL_AREA_NAMES } f
 // turn the way it judges a Gemini one and sends the route with the request;
 // the MCP proxy lists this turn's catalog, a call outside it is refused, and
 // `request_tools` widens it. A turn sent without a route (no credits to judge
-// with, or an older page) declares the whole catalog and the model decides.
+// with, or a judgment that missed its wait) declares the whole catalog and
+// the model decides.
 
-/** The judged route an engine turn carries. Mirrors the page's TurnRoute. */
-export interface EngineRoute {
-  intent: "chat" | "simple" | "complex";
-  areas: string[];
-  /** The skill to attach: a name, null for none, absent when skill
-   * suggestion is off. */
-  skill?: string | null;
-  /** The page answers the quality gate when the turn signs off. */
-  gate: boolean;
-}
+/** The judged route an engine turn carries: the page's route plus whether
+ * the page answers the quality gate when the turn signs off. The skill is a
+ * name, null for none, absent when skill suggestion is off. */
+export const routeSchema = z.object({
+  intent: z.enum(["chat", "simple", "complex"]),
+  areas: z.array(z.string().max(100)).max(100),
+  skill: z.string().max(200).nullable().optional(),
+  gate: z.boolean(),
+});
 
-/** An ask the page settled to one known action and ran with no model round,
+/** Asks the page settled to one known action and ran with no model round,
  * reported to the provider's session on its next turn. */
-export interface HandledAsk {
-  ask: string;
-  tool: string;
-  args: unknown;
-  say: string;
-}
+export const handledSchema = z
+  .array(
+    z.object({
+      ask: z.string().max(100_000),
+      tool: z.string().max(200),
+      args: z.unknown(),
+      say: z.string().max(10_000),
+    })
+  )
+  .max(50);
+
+export type EngineRoute = z.infer<typeof routeSchema>;
+export type HandledAsk = z.infer<typeof handledSchema>[number];
 
 /** How the provider picks up a widened catalog. Claude refreshes its listing
  * on the proxy's list_changed notice; Codex reads it once per run, so the
  * turn resumes in a fresh run to see the new tools. */
-export type CatalogRefresh = "live" | "next-run";
+type CatalogRefresh = "live" | "next-run";
 
 interface TurnTools {
   /** The declared areas; null declares the whole catalog. */

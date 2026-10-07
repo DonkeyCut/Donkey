@@ -9,6 +9,7 @@ import {
   TOOL_AREAS,
 } from "@/cut/server/ai/catalog";
 import { choice, noul, type ChoiceAnswer, type Entry, type NoulAnswer } from "./judge";
+import { messageText } from "./messageText";
 
 // The chat harness's understanding boundary for one composer turn: one typed
 // judgment over the newest message, the recent turns, and a thin slice of the
@@ -103,12 +104,7 @@ const RECENT_TURNS = 5;
  * attached, and the parts of the editor snapshot that change what an ask
  * means. No urls, no media. */
 export function judgeTurnState(messages: UIMessage[], context: unknown): Entry {
-  const text = (m: UIMessage) =>
-    m.parts
-      .map((p) => (p.type === "text" ? p.text : ""))
-      .join("")
-      .trim()
-      .slice(0, TEXT_CAP);
+  const text = (m: UIMessage) => messageText(m).slice(0, TEXT_CAP);
   const last = messages.findLast((m) => m.role === "user");
   const before = last ? messages.slice(0, messages.indexOf(last)) : messages;
   const recent = before

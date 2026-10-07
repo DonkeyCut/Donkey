@@ -2,10 +2,10 @@ import type { UIMessage, UIMessageChunk } from "ai";
 import type { EngineRoute, HandledAsk } from "@/cut/server/ai/turnCatalog";
 import { cutJudge } from "../chatRuntime";
 import type { ResolvedAction } from "../instantAction";
-import { recordLook, type WatchedSource } from "../turnQuality";
-import { gateVerdict, judgeTurnAndAction, playInstant, workMark, type CutAgentDeps } from "./cutAgent";
-import { isMutatingTool, recordCall, type LedgerRecord } from "./mutationLedger";
+import { messageText } from "../messageText";
+import { judgeTurnAndAction, playInstant, type CutAgentDeps } from "./cutAgent";
 import { toToolResult } from "./tools";
+import { TurnGate } from "./turnGate";
 
 // A Claude or Codex turn judged the way a Gemini turn is. The page asks the
 // judge before the send: a turn settled to one known action runs in the
@@ -18,7 +18,7 @@ import { toToolResult } from "./tools";
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** What the judgment settled for an engine turn. */
-export interface EngineDecision {
+interface EngineDecision {
   route: EngineRoute;
   instant: ResolvedAction | null;
 }
@@ -43,7 +43,9 @@ export async function judgeEngineTurn(
       intent: route.intent,
       areas: route.areas,
       ...(settings.skillSuggestion && { skill: route.skill }),
-      gate: settings.qualityGate,
+      // A chat verdict runs with no tools, so it has no work to hold up: the
+      // hosted loop skips the gate for it too.
+      gate: settings.qualityGate && route.intent !== "chat",
     },
     instant: landed.instant,
   };
@@ -87,7 +89,7 @@ export function handledSince(messages: UIMessage[]): HandledAsk[] {
       break;
     }
     const before = messages[i - 1];
-    const ask = before?.role === "user" ? before.parts.map((p) => (p.type === "text" ? p.text : "")).join("").trim() : "";
+    const ask = before?.role === "user" ? messageText(before) : "";
     out.unshift({ ask, ...handled });
   }
   return out;
@@ -97,49 +99,33 @@ export function handledSince(messages: UIMessage[]): HandledAsk[] {
  * The quality gate for one engine turn. The page executes every tool call
  * the CLI makes, so it keeps the turn's record here; when the engine asks at
  * sign-off, the record and the reply are judged the way the hosted loop
- * judges them, under the same rounds cap and the same stand-downs.
+ * judges them.
  */
 export class EngineGate {
-  private records: LedgerRecord[] = [];
-  private looks = new Map<string, WatchedSource>();
-  private rounds = 0;
-  private mark = "";
+  private readonly gate: TurnGate;
+  // The gates this turn answered. A reconnect replays the turn's journal from
+  // its start, and an answered gate must not be judged or billed again.
+  private readonly answered = new Set<string>();
 
-  constructor(private readonly ask: string) {}
+  constructor(ask: string) {
+    this.gate = new TurnGate(ask);
+  }
 
   /** One tool call the page ran for the turn. */
   record(name: string, output: unknown, errorText: string | undefined): void {
     const response = errorText === undefined ? toToolResult(name, output).details?.response : undefined;
-    recordCall(this.records, name, response, errorText);
-    if (errorText === undefined) {
-      recordLook(this.looks, name, response);
-    }
+    this.gate.record(name, response, errorText);
   }
 
-  /** The steer for the turn's next pass, or null to let it close. */
-  async steer(reply: string, deps: CutAgentDeps, signal?: AbortSignal): Promise<string | null> {
-    const settings = deps.judgeSettings ?? cutJudge();
-    if (!settings.qualityGate || this.rounds >= settings.qualityRounds) {
-      return null;
+  /** The steer for the turn's next pass, null to let it close, or undefined
+   * for a gate this turn already answered. */
+  async steer(gateId: string, reply: string, deps: CutAgentDeps, signal?: AbortSignal): Promise<string | null | undefined> {
+    if (this.answered.has(gateId)) {
+      return undefined;
     }
+    this.answered.add(gateId);
 
-    // The hosted loop's stand-downs: a turn that changed the project without
-    // looking at a source has nothing measurable, and one sent back that
-    // returns with the same record has stopped moving.
-    if (this.looks.size === 0 && this.records.some((r) => !r.error && isMutatingTool(r.name))) {
-      return null;
-    }
-    const mark = workMark(this.records, this.looks);
-    if (mark === this.mark) {
-      return null;
-    }
-
-    const verdict = await gateVerdict(reply, this.ask, this.records, this.looks, deps, settings, signal);
-    if (!verdict) {
-      return null;
-    }
-    this.mark = mark;
-    this.rounds++;
-    return verdict.steer;
+    const verdict = await this.gate.hold(reply, deps, deps.judgeSettings ?? cutJudge(), signal);
+    return verdict?.steer ?? null;
   }
 }

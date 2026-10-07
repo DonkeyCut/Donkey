@@ -47,10 +47,18 @@ function setOut(out: boolean) {
  * readout follows every call without a request of its own. `settled` counts
  * calls that answered with no balance, for which the readout asks the balance
  * route once the charge has had a moment to land. */
-export const useHostedBalance = create<{ balance: string | null; settled: number }>(() => ({
+export const useHostedBalance = create<{ balance: string | null; reportedAt: number; settled: number }>(() => ({
   balance: null,
+  reportedAt: 0,
   settled: 0,
 }));
+
+/** The account's balance in dollars: a read from the balance route at
+ * `readAt`, unless a charged call reported a balance after it. */
+export function knownBalance(read: string, readAt: number): number {
+  const { balance, reportedAt } = useHostedBalance.getState();
+  return Number(balance !== null && reportedAt > readAt ? balance : read);
+}
 
 /** A hosted call that answered with no balance was charged after its
  * response left; the re-read waits for the charge to land. */
@@ -73,7 +81,7 @@ export function reportBalance(balance: string | undefined) {
     useHostedBalance.setState((s) => ({ settled: s.settled + 1 }));
     return;
   }
-  useHostedBalance.setState({ balance });
+  useHostedBalance.setState({ balance, reportedAt: Date.now() });
 }
 
 async function noteBalance(res: Response) {
