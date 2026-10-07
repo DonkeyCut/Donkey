@@ -77,7 +77,7 @@ export const CARD_SCALE_MIN = 0.5;
 export const CARD_SCALE_MAX = 3;
 export const CARD_OFFSET_MAX = 1;
 /** The shadow's blur, design px. */
-export const CARD_SHADOW_BLUR = 60;
+const CARD_SHADOW_BLUR = 60;
 
 /** Boxes at least this wide for their height take a side card. */
 const SIDE_ASPECT = 0.999;
@@ -176,7 +176,7 @@ export function aboveShare(aspect: number): number {
 
 /** The side a card takes in a box of `boxAspect` (width / height) when it
  * names none. */
-export const defaultCardSide = (boxAspect: number): CardSide => (boxAspect >= SIDE_ASPECT ? "right" : "bottom");
+const defaultCardSide = (boxAspect: number): CardSide => (boxAspect >= SIDE_ASPECT ? "right" : "bottom");
 
 /** A side card's default width share in a box of `boxAspect`. */
 export function defaultCardWidth(boxAspect: number): number {
@@ -323,9 +323,6 @@ export function traceCardPath(p: PathSink, card: Box, radius: number): void {
 export function newCard(): CameraCard {
   return { ...CARD_DEFAULTS };
 }
-
-/** Whether a clip lays out as a camera card. */
-export const cardActive = (c: { card?: CameraCard }): boolean => !!c.card;
 
 /** The key a card's matte job and staged matte frame go under, beside the
  * clip's own cutout under its bare id. */

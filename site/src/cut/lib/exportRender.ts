@@ -47,9 +47,10 @@ import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./st
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { ElementFx, elementLook } from "@donkeycut/effects-kit";
 import { darkenCanvas } from "@donkeycut/effects-kit";
-import { applyEffectToCanvas, diveView, divesAt, evalOverlayFrame, measureDiveFocus, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, MATTE_FPS, matteLumaToAlpha, planAnimatedLayers, type DiveFocus, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
+import { applyEffectToCanvas, diveView, divesAt, evalOverlayFrame, measureDiveFocus, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type DiveFocus, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
+import { MatteAlpha, matteStamp } from "./matteAlpha";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
 import { cutRenderEnv, renderElementCanvas, renderElementPng } from "./textRender";
@@ -1448,11 +1449,9 @@ export class FramePainter {
    * with the layer frames (readers are async) and read synchronously by the
    * compositor's provider mid-draw. */
   private matteFrames = new Map<string, CanvasImageSource>();
-  /** Per-clip conversion scratch for those mattes (luma frame → alpha). */
-  private matteScratch = new Map<string, RasterSurface>();
-  /** Which matte frame each scratch currently holds, so the luma → alpha
-   * pixel pass runs once per matte frame. */
-  private matteStamp = new Map<string, string>();
+  /** Per-clip conversion of those mattes (luma frame → alpha), run once per
+   * matte frame. */
+  private matteAlpha = new Map<string, MatteAlpha>();
   /** Text layers, deepest lane first — so a walk of them is a walk up the stack. */
   private stacked: StampedLayer[] = [];
   private spans: ClipSpan[] = [];
@@ -1640,29 +1639,15 @@ export class FramePainter {
     if (!asset) return;
     const dur = Math.max(0.001, asset.duration);
     const mt = Math.max(0, Math.min(sourceTimeAt(span, t) - m.in, dur - 0.001));
-    const frame = await this.readerFor(asset).frameAt(mt);
-    if (frame.kind !== "ready") return;
-    let scratch = this.matteScratch.get(key);
+    let alpha = this.matteAlpha.get(key);
+    if (!alpha) this.matteAlpha.set(key, (alpha = new MatteAlpha()));
     // The matte advances at its own baked rate below the export's, so a
-    // converted frame is reused until the read crosses into the next one —
-    // the pixel pass is per matte frame, never per output frame.
-    const stamp = `${m.assetId}:${Math.floor(mt * MATTE_FPS)}`;
-    if (scratch && this.matteStamp.get(key) === stamp) {
-      this.matteFrames.set(key, scratch as CanvasImageSource);
-      return;
-    }
-    if (!scratch) this.matteScratch.set(key, (scratch = createRasterCanvas(frame.width, frame.height)));
-    if (scratch.width !== frame.width) scratch.width = frame.width;
-    if (scratch.height !== frame.height) scratch.height = frame.height;
-    const ctx = scratch.getContext("2d") as CanvasRenderingContext2D | null;
-    if (!ctx) return;
-    ctx.clearRect(0, 0, scratch.width, scratch.height);
-    ctx.drawImage(frame.image, 0, 0, scratch.width, scratch.height);
-    const img = ctx.getImageData(0, 0, scratch.width, scratch.height);
-    matteLumaToAlpha(img.data);
-    ctx.putImageData(img, 0, 0);
-    this.matteStamp.set(key, stamp);
-    this.matteFrames.set(key, scratch as CanvasImageSource);
+    // converted frame is reused until the read crosses into the next one.
+    const stamp = matteStamp(m.assetId, mt);
+    const held = alpha.held(stamp);
+    const frame = held ? null : await this.readerFor(asset).frameAt(mt);
+    const img = held ?? (frame?.kind === "ready" ? alpha.of(frame, stamp) : null);
+    if (img) this.matteFrames.set(key, img);
   }
 
   /** Draw the whole cut at timeline time `t` onto the canvas. */

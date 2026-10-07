@@ -11,46 +11,15 @@
  * head, the preview's own degrade.
  */
 
-import { matteLumaToAlpha, removalActive, retimeOf, type ClipRemoval } from "@donkeycut/effects-kit";
+import { removalActive, retimeOf } from "@donkeycut/effects-kit";
 import { openCanvasVideo } from "./canvasVideo";
-import { FrameCompositor, type Frame } from "./composite";
+import { FrameCompositor } from "./composite";
 import { ensureClipLuts } from "./lutBuild";
-import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "./raster";
+import { matteStage } from "./matteAlpha";
+import { createRasterCanvas, decodeRasterImageUrl } from "./raster";
 import { splitFrame, type RemovalPieces } from "./removalVideo";
 import type { MediaAsset, VideoClip } from "./types";
 import { liveReader } from "./liveReader";
-import type { ClipReader } from "./exportRender";
-
-type Matte = NonNullable<ClipRemoval["matte"]>;
-
-/** One baked matte read alongside the clip: the frame staged per output
- * frame, luma turned to alpha in a canvas kept for the whole render. */
-export function matteStage(m: Matte | undefined, assets: MediaAsset[]) {
-  const asset = m ? assets.find((a) => a.id === m.assetId) : undefined;
-  if (!m || !asset) return null;
-  const reader: ClipReader = liveReader(asset);
-  const canvas: RasterSurface = createRasterCanvas(2, 2);
-  const dur = Math.max(0.1, asset.duration || 0.1);
-  let ready = false;
-  return {
-    async stage(srcT: number) {
-      ready = false;
-      const f: Frame = await reader.frameAt(Math.min(Math.max(0, srcT - m.in), dur - 0.001));
-      if (f.kind !== "ready") return;
-      if (canvas.width !== f.width) canvas.width = f.width;
-      if (canvas.height !== f.height) canvas.height = f.height;
-      const ctx = canvas.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D;
-      ctx.clearRect(0, 0, f.width, f.height);
-      ctx.drawImage(f.image, 0, 0);
-      const px = ctx.getImageData(0, 0, f.width, f.height);
-      matteLumaToAlpha(px.data);
-      ctx.putImageData(px, 0, 0);
-      ready = true;
-    },
-    get: () => (ready ? (canvas as CanvasImageSource) : null),
-    dispose: () => reader.dispose(),
-  };
-}
 
 /**
  * Render one card clip's layer over its segment at `fps`, `box` pixels wide

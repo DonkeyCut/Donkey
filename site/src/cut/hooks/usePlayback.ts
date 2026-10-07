@@ -9,7 +9,7 @@ import {
   projectDuration,
   useEditor,
 } from "@/cut/lib/store";
-import { headSrc, matteLumaToAlpha, retimeOf, smoothsAt } from "@donkeycut/effects-kit";
+import { headSrc, retimeOf, smoothsAt } from "@donkeycut/effects-kit";
 import { blendInto, SYNTH_EDGE, synthWeight } from "@/cut/lib/frameSynth";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
 import { assetIsSilent, clipCovers, rectOf } from "@/cut/lib/types";
@@ -39,7 +39,7 @@ import {
 import { registerSourceColor, registerSourceSampler } from "@/cut/lib/previewCanvas";
 import { colorRead, previewFile, type ColorRead } from "@/cut/lib/sourceColor";
 import { backdropStill } from "@/cut/lib/backdropStills";
-import { cardMatteKey } from "@/cut/lib/cameraCard";
+import { MatteAlpha } from "@/cut/lib/matteAlpha";
 import { createRasterCanvas, type RasterSurface } from "@/cut/lib/raster";
 import { disposeDetailGpu } from "@/cut/lib/detailGpu";
 
@@ -249,12 +249,13 @@ class Engine {
   /** Whether the tick being drawn is a playing one — read by the matte
    * provider, which the compositor calls mid-frame. */
   private renderPlaying = false;
-  /** Per removal clip: the last decoded matte luma frame converted to alpha,
+  /** Per matte read: the last decoded matte luma frame converted to alpha,
    * so the conversion runs once per new frame rather than once per draw. Keyed
-   * by clip — two clips reading the same matte at different times each keep
-   * their own frame — and bounded LRU, so a long session's re-bakes and
-   * deleted clips never pile up canvases. */
-  private matteAlpha = new Map<string, { ts: number; canvas: RasterSurface }>();
+   * by the matte's mapping — a card that takes over its cutout's matte shares
+   * the cutout's conversion, while two clips reading one matte at different
+   * times each keep their own — and bounded LRU, so a long session's re-bakes
+   * and deleted clips never pile up canvases. */
+  private matteAlpha = new Map<string, MatteAlpha>();
   private static readonly MATTE_ALPHA_MAX = 8;
   /** Per clip, the canvas its smoothed slow motion is blended on. Bounded
    * like the mattes: the clips drawn longest ago give theirs up. */
@@ -283,8 +284,8 @@ class Engine {
     private presentCanvas: HTMLCanvasElement | null
   ) {
     this.comp = new FrameCompositor(canvas);
-    this.comp.removalMatteProvider = (clip, at) => this.matteFor(clip.id, clip.removal?.matte, clip, at);
-    this.comp.cardMatteProvider = (clip, at) => this.matteFor(cardMatteKey(clip.id), clip.card?.matte, clip, at);
+    this.comp.removalMatteProvider = (clip, at) => this.matteFor(clip.removal?.matte, clip, at);
+    this.comp.cardMatteProvider = (clip, at) => this.matteFor(clip.card?.matte, clip, at);
     // A clip's color recipe describes the frames its source hands over — the
     // file that source reads, read the way it reads it; a LUT built off the
     // thread repaints when it lands.
@@ -511,11 +512,10 @@ class Engine {
   /**
    * The alpha matte `m` — a removal clip's, or a camera card's — at timeline
    * time `t`: the baked matte video read like any other source, its luma
-   * turned into alpha and held under `key`. Null while nothing has decoded
-   * yet — the picture draws plain until the matte lands.
+   * turned into alpha and held under the read's mapping. Null while nothing
+   * has decoded yet — the picture draws plain until the matte lands.
    */
   private matteFor(
-    key: string,
     m: { assetId: string; in: number } | undefined,
     clip: VideoClip,
     at: number
@@ -529,8 +529,9 @@ class Engine {
     // Coverage tolerates far less resolution than the picture, and the luma →
     // alpha read below is a per-frame pixel pass; capping the matte's decode
     // keeps that pass off the frame budget.
+    const key = mappingKey(asset.id, retimeOf(clip), clip.start, m.in);
     const src = this.pool.get(
-      mappingKey(asset.id, retimeOf(clip), clip.start, m.in),
+      key,
       asset,
       Math.min(this.decodeHeight(), 480)
     );
@@ -543,30 +544,16 @@ class Engine {
     );
     const frame = src.frameAt(mt, 0, dur);
     if (!frame) return null;
-    const held = this.matteAlpha.get(key);
-    // Re-insert on every touch so the cap below drops the clip drawn longest
+    const alpha = this.matteAlpha.get(key) ?? new MatteAlpha();
+    // Re-insert on every touch so the cap below drops the matte drawn longest
     // ago.
     this.matteAlpha.delete(key);
-    if (held && held.ts === frame.timestamp) {
-      this.matteAlpha.set(key, held);
-      return held.canvas as CanvasImageSource;
-    }
-    const canvas = held?.canvas ?? createRasterCanvas(frame.width, frame.height);
-    if (canvas.width !== frame.width) canvas.width = frame.width;
-    if (canvas.height !== frame.height) canvas.height = frame.height;
-    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
-    if (!ctx) return null;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(frame.image, 0, 0, canvas.width, canvas.height);
-    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    matteLumaToAlpha(img.data);
-    ctx.putImageData(img, 0, 0);
-    this.matteAlpha.set(key, { ts: frame.timestamp, canvas });
+    this.matteAlpha.set(key, alpha);
     if (this.matteAlpha.size > Engine.MATTE_ALPHA_MAX) {
       const oldest = this.matteAlpha.keys().next().value;
       if (oldest !== undefined) this.matteAlpha.delete(oldest);
     }
-    return canvas as CanvasImageSource;
+    return alpha.of(frame, String(frame.timestamp));
   }
 
   /**

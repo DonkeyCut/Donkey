@@ -118,6 +118,15 @@ export function cueAnchor(
   return { x: cue.x ?? track?.x ?? style.x, y: cue.y ?? track?.y ?? style.y };
 }
 
+/** Where one caption sits in `subs`, its track and style filled in. */
+export function cueSpot(
+  subs: SubtitlesBlock,
+  cue: Pick<SubtitleCue, "x" | "y" | "lane">
+): { x: number; y: number } {
+  const style = captionStyle(subs.style);
+  return cueAnchor(cue, trackPos(subs, style, cue.lane ?? 0), style);
+}
+
 /** How emphasized caption words look when the track names nothing: a bold
  * italic serif in yellow, at the caption's own size. */
 export const CAPTION_EMPHASIS_DEFAULT: Readonly<Required<WordFace>> = {

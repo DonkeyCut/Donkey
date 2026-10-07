@@ -10,10 +10,11 @@
  * channel, which is why the layer travels as a pair.
  */
 
-import { matteLumaToAlpha, removalActive, retimeOf } from "@donkeycut/effects-kit";
+import { removalActive, retimeOf } from "@donkeycut/effects-kit";
 import { openCanvasVideo, scaledEvenSize } from "./canvasVideo";
-import { FrameCompositor, type Frame } from "./composite";
+import { FrameCompositor } from "./composite";
 import { ensureClipLuts } from "./lutBuild";
+import { matteStage } from "./matteAlpha";
 import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "./raster";
 import type { MediaAsset, VideoClip } from "./types";
 import { liveReader } from "./liveReader";
@@ -69,17 +70,15 @@ export async function renderRemovalPieces(
 ): Promise<RemovalPieces | null> {
   const r = clip.removal;
   if (!removalActive(r) || !r) return null;
-  const matteAsset = r.matte ? assets.find((a) => a.id === r.matte!.assetId) : undefined;
-  if (!matteAsset) return null;
+  const matte = matteStage(r.matte, assets);
+  if (!matte) return null;
 
   const rt = retimeOf(clip);
   const still = asset.type === "image";
   const dur = Math.max(0.1, rt.len);
   const frames = Math.max(1, Math.ceil(dur * opts.fps));
-  const baked = clip.removal!.matte;
 
   const reader = liveReader(asset);
-  const matteReader = matteAsset ? liveReader(matteAsset) : null;
   try {
     const first = await reader.frameAt(still ? 0 : clip.in);
     if (first.kind !== "ready") throw new Error("The removal clip's picture could not be read.");
@@ -116,7 +115,6 @@ export async function renderRemovalPieces(
     comp.sourceProvider = () => reader.colorRead.recipe();
     const bakeClip = opts.bakeLook ? clip : { ...clip, look: undefined };
     await ensureClipLuts([comp.recipeFor(bakeClip)]);
-    const matteFrame = createRasterCanvas(2, 2);
     // The alpha plane's staging buffer, rewritten whole every frame.
     const alphaPlane = new ImageData(w, h);
     const backdrops = new Map<string, CanvasImageSource | null>();
@@ -126,25 +124,7 @@ export async function renderRemovalPieces(
       backdrops.set(r.backdrop.assetId, img ? img.source : null);
     }
     comp.backdropImageProvider = (assetId) => backdrops.get(assetId) ?? null;
-    let matteReady: Frame | null = null;
-    comp.removalMatteProvider = () => {
-      if (matteReady?.kind !== "ready") return null;
-      // Luma to alpha, once per staged frame.
-      const mw = matteReady.width;
-      const mh = matteReady.height;
-      if (matteFrame.width !== mw || matteFrame.height !== mh) {
-        matteFrame.width = mw;
-        matteFrame.height = mh;
-      }
-      const mctx = matteFrame.getContext("2d", {
-        willReadFrequently: true,
-      }) as CanvasRenderingContext2D;
-      mctx.drawImage(matteReady.image, 0, 0);
-      const mpx = mctx.getImageData(0, 0, mw, mh);
-      matteLumaToAlpha(mpx.data);
-      mctx.putImageData(mpx, 0, 0);
-      return matteFrame as CanvasImageSource;
-    };
+    comp.removalMatteProvider = () => matte.get();
 
     for (let i = 0; i < frames; i++) {
       const s = Math.min(dur - 1 / (opts.fps * 2), i / opts.fps);
@@ -156,12 +136,7 @@ export async function renderRemovalPieces(
         alphaCtx.fillStyle = "#000000";
         alphaCtx.fillRect(0, 0, w, h);
       } else {
-        matteReady = null;
-        if (matteReader && baked) {
-          const mdur = Math.max(0.1, matteAsset!.duration || 0.1);
-          const mt = Math.min(Math.max(0, srcT - baked.in), mdur - 0.001);
-          matteReady = await matteReader.frameAt(mt);
-        }
+        await matte.stage(srcT);
         const layer = comp.removedLayer(frame, bakeClip, clip.start + s, {
           bakeLookPost: opts.bakeLook,
         });
@@ -173,6 +148,6 @@ export async function renderRemovalPieces(
     return { rgb: await rgbOut.finish(), alpha: await alphaOut.finish() };
   } finally {
     reader.dispose();
-    matteReader?.dispose();
+    matte.dispose();
   }
 }

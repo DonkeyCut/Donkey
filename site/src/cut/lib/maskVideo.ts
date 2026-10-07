@@ -33,7 +33,7 @@ import { getClipSpans } from "./store";
 import { clipCovers, frameOf, isEffectOverlay, isTextOverlay, rectOf, subjectMasked, type ClipSpan, type MediaAsset, type VideoClip } from "./types";
 import { liveReader } from "./liveReader";
 import { cardMatteKey } from "./cameraCard";
-import { matteStage } from "./cameraCardVideo";
+import { matteStage } from "./matteAlpha";
 
 /** Encoded mask rate — the server's fps filter duplicates frames up to the
  * output rate, and a person moves little in 1/15s. */

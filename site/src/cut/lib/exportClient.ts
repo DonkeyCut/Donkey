@@ -25,7 +25,6 @@ import { planStems, type StemDef } from "./stems";
 import { putSigned } from "./media";
 import { withAssetColors } from "./mediaRead";
 import { renderRemovalPieces } from "./removalVideo";
-import { cardActive } from "./cameraCard";
 import { renderCardPieces } from "./cameraCardVideo";
 import { drawBlock } from "./blockSource";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
@@ -819,7 +818,7 @@ export function specColor(
 
 /** A camera card draws its own corners and shadow, so its clip's box style
  * stands aside in every painted picture (mask corners, border, shadow). */
-const cardBoxless = (c: VideoClip): VideoClip => (cardActive(c) && c.boxStyle ? { ...c, boxStyle: undefined } : c);
+const cardBoxless = (c: VideoClip): VideoClip => (c.card && c.boxStyle ? { ...c, boxStyle: undefined } : c);
 
 /** The spec fields of a camera-card clip whose layer ships as `<tag>`
  * pieces: the pair stands in for the source, already framed to the box,
@@ -1031,7 +1030,7 @@ export async function buildExportPayload(
     // matte yet — the export shows the plain picture, like the preview); a
     // broken render throws and fails the export instead of silently dropping
     // the cutout.
-    if (cardActive(c) && !c.hidden) {
+    if (c.card && !c.hidden) {
       const rp = regionPx(c.frame, settings.width, settings.height);
       const pieces = await renderCardPieces(spans[i].asset, spans[i].clip, doc.assets, {
         fps: settings.fps,
@@ -1242,7 +1241,7 @@ export async function buildExportPayload(
     // applies no grade or look to it — both bake into the pieces here, the
     // way image overlays already carry their pixels ready-made.
     const oAsset = assetById.get(c.assetId);
-    if (cardActive(c) && oAsset) {
+    if (c.card && oAsset) {
       const pieces = await renderCardPieces(oAsset, c, doc.assets, {
         fps: settings.fps,
         frameW: settings.width,

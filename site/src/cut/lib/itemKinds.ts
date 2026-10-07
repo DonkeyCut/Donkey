@@ -14,7 +14,7 @@
 // every entry proves it copies and pastes.
 
 import { KEY_EPSILON, maskKeyAt, poseAt, retimeOf, shiftCamera, type Mask, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
-import { cueEmphasis, sliceEmphasis, withEmphasis } from "./captionEmphasis";
+import { splitEmphasis, withEmphasis } from "./captionEmphasis";
 import {
   clipPoseAt,
   fontAssetId,
@@ -228,13 +228,11 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
       const offset = Math.round(c.text.length * ((at - c.start) / (c.end - c.start)));
       const leftText = left?.length ? left.map((w) => w.w).join(" ") : c.text.slice(0, offset).trim() || c.text;
       const rightText = right?.length ? right.map((w) => w.w).join(" ") : c.text.slice(offset).trim() || c.text;
-      // Each half keeps the emphasis of the words it took, a word cut in two
-      // on both sides.
-      const marked = cueEmphasis(c);
-      const count = (t: string) => t.split(/\s+/).filter(Boolean).length;
+      // Each half keeps the emphasis of the words it took.
+      const [leftMarks, rightMarks] = splitEmphasis(c, leftText, rightText);
       return [
-        withEmphasis({ ...c, end: at, text: leftText, words: left?.length ? left : undefined }, sliceEmphasis(marked, 0, count(leftText))),
-        withEmphasis({ ...c, start: at, text: rightText, words: right?.length ? right : undefined }, sliceEmphasis(marked, Math.max(0, count(c.text) - count(rightText)), Infinity)),
+        withEmphasis({ ...c, end: at, text: leftText, words: left?.length ? left : undefined }, leftMarks),
+        withEmphasis({ ...c, start: at, text: rightText, words: right?.length ? right : undefined }, rightMarks),
       ];
     },
     clone: deep,

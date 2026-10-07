@@ -91,7 +91,7 @@ import { useGenNotify } from "./genNotify";
 import { clampPlayhead, playheadAt, previewAt, setPlayhead, setSkim } from "./playhead";
 import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
-import { cueEmphasis, emphasisField, joinEmphasis, remapEmphasis, sliceEmphasis, toggleEmphasis, withEmphasis } from "./captionEmphasis";
+import { cueEmphasis, mergeEmphasis, remapEmphasis, splitEmphasis, toggleEmphasis, withEmphasis } from "./captionEmphasis";
 import { clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
 import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { liftMoveTracks } from "./textMotion";
@@ -4935,7 +4935,6 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       let rightStart: number;
       let leftWords: SubtitleCue["words"];
       let rightWords: SubtitleCue["words"];
-      const marked = cueEmphasis(cue);
       if (cue.words && cue.words.length > 1) {
         // Word timings are intact: split on the word under the caret so both
         // halves keep real timestamps.
@@ -4960,27 +4959,26 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       push();
       const leftText = leftWords ? leftWords.map((w) => w.w).join(" ") : before;
       const rightText = rightWords ? rightWords.map((w) => w.w).join(" ") : after;
-      // Each half keeps the emphasis of the words it took. A caret inside a
-      // word leaves a piece of it on both sides, and both pieces keep it.
-      const count = (t: string) => t.split(/\s+/).filter(Boolean).length;
+      // Each half keeps the emphasis of the words it took.
+      const [leftMarks, rightMarks] = splitEmphasis(cue, leftText, rightText);
       const left: SubtitleCue = withEmphasis(
         { ...cue, end: leftEnd, text: leftText, words: leftWords },
-        sliceEmphasis(marked, 0, count(leftText))
+        leftMarks
       );
       // The second half keeps the track and the spot the caption sat on.
-      const right: SubtitleCue = {
-        id: uid(),
-        start: rightStart,
-        end: cue.end,
-        text: rightText,
-        words: rightWords,
-        ...emphasisField(
-          sliceEmphasis(marked, count(cue.text) - count(rightText), Infinity)
-        ),
-        ...(cue.lane ? { lane: cue.lane } : {}),
-        ...(cue.x !== undefined ? { x: cue.x } : {}),
-        ...(cue.y !== undefined ? { y: cue.y } : {}),
-      };
+      const right: SubtitleCue = withEmphasis(
+        {
+          id: uid(),
+          start: rightStart,
+          end: cue.end,
+          text: rightText,
+          words: rightWords,
+          ...(cue.lane ? { lane: cue.lane } : {}),
+          ...(cue.x !== undefined ? { x: cue.x } : {}),
+          ...(cue.y !== undefined ? { y: cue.y } : {}),
+        },
+        rightMarks
+      );
       set((cur) => ({
         subtitles: {
           ...cur.subtitles,
@@ -5008,11 +5006,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           text: `${prev.text} ${cue.text}`.replace(/\s+/g, " ").trim(),
           words: prev.words && cue.words ? [...prev.words, ...cue.words] : undefined,
         },
-        joinEmphasis(
-          cueEmphasis(prev),
-          prev.text.split(/\s+/).filter(Boolean).length,
-          cueEmphasis(cue)
-        )
+        mergeEmphasis(prev, cue)
       );
       set((s) => ({
         subtitles: {

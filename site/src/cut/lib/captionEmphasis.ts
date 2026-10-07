@@ -31,11 +31,6 @@ export function cueEmphasis(cue: Pick<SubtitleCue, "text" | "emphasis">): number
   return out;
 }
 
-/** The field as a cue stores it: absent when nothing is marked. */
-export function emphasisField(marked: readonly number[]): { emphasis?: number[] } {
-  return marked.length > 0 ? { emphasis: [...marked] } : {};
-}
-
 /** The cue with `indices` set on or off; `on` absent flips each one. */
 export function toggleEmphasis(
   cue: SubtitleCue,
@@ -51,27 +46,69 @@ export function toggleEmphasis(
   return withEmphasis(cue, cueEmphasis({ text: cue.text, emphasis: [...marked] }));
 }
 
-/** The cue carrying exactly `marked`. */
+/** The cue carrying exactly `marked`, the field absent when nothing is. */
 export function withEmphasis(cue: SubtitleCue, marked: readonly number[]): SubtitleCue {
   const out: SubtitleCue = { ...cue };
   delete out.emphasis;
-  return { ...out, ...emphasisField(marked) };
+  if (marked.length > 0) out.emphasis = [...marked];
+  return out;
 }
 
-/** The emphasis of words [from, to) of a cue, re-indexed from 0 — one half of
- * a split. */
-export function sliceEmphasis(marked: readonly number[], from: number, to: number): number[] {
+/** The emphasis of words [from, to) of a cue, re-indexed from 0. */
+function sliceEmphasis(marked: readonly number[], from: number, to: number): number[] {
   return marked.filter((i) => i >= from && i < to).map((i) => i - from);
 }
 
-/** Two cues' emphasis joined, the second's words following the first's
- * `count` — a merge. */
-export function joinEmphasis(
-  first: readonly number[],
-  count: number,
-  second: readonly number[]
+/** A split's two halves of `cue`'s emphasis: the left takes the marks of its
+ * first words, the right those of its last. A word cut in two is in both
+ * halves, so both pieces keep its mark. */
+export function splitEmphasis(
+  cue: Pick<SubtitleCue, "text" | "emphasis">,
+  leftText: string,
+  rightText: string
+): [number[], number[]] {
+  const marked = cueEmphasis(cue);
+  const from = Math.max(0, displayWords(cue.text).length - displayWords(rightText).length);
+  return [sliceEmphasis(marked, 0, displayWords(leftText).length), sliceEmphasis(marked, from, Infinity)];
+}
+
+/** A merge's emphasis: `first`'s marks, then `second`'s after its words. */
+export function mergeEmphasis(
+  first: Pick<SubtitleCue, "text" | "emphasis">,
+  second: Pick<SubtitleCue, "text" | "emphasis">
 ): number[] {
-  return [...first, ...second.map((i) => i + count)];
+  const count = displayWords(first.text).length;
+  return [...cueEmphasis(first), ...cueEmphasis(second).map((i) => i + count)];
+}
+
+/** A cue's emphasized words as [index, word] pairs. */
+export function emphasizedWords(cue: Pick<SubtitleCue, "text" | "emphasis">): [number, string][] {
+  const marked = cueEmphasis(cue);
+  if (marked.length === 0) return [];
+  const words = displayWords(cue.text);
+  return marked.map((i) => [i, words[i]]);
+}
+
+/** What a toggle over characters [from, to) of `typed` — the caption's text
+ * as it is on screen, maybe not yet saved — would do: the words it names,
+ * whether it turns them on, and their label. The cue's saved emphasis is
+ * carried onto the typed words first, so the answer is about the words the
+ * person sees. Null when the range touches no word. */
+export function typedToggle(
+  cue: Pick<SubtitleCue, "text" | "emphasis">,
+  typed: string,
+  from: number,
+  to: number
+): { indices: number[]; on: boolean; label: string } | null {
+  const indices = wordIndicesIn(typed, from, to);
+  if (indices.length === 0) return null;
+  const marked = new Set(remapEmphasis(cue.text, typed, cueEmphasis(cue)));
+  const words = displayWords(typed);
+  return {
+    indices,
+    on: !indices.every((i) => marked.has(i)),
+    label: indices.map((i) => words[i]).join(" "),
+  };
 }
 
 /** A word reduced to what identifies it across a rewrite: case and the

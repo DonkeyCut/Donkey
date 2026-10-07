@@ -52,8 +52,8 @@ export const CAMERA_CARD_TOOLS = [
       ),
       shadow: num(`Card shadow opacity 0..1, 0 for none (default ${CARD_DEFAULTS.shadow})`),
       scale: num(`Footage size over the default placement, ${CARD_SCALE_MIN}..${CARD_SCALE_MAX} (default 1)`),
-      offset_x: num(`Footage shift right, fraction of the frame width, -${CARD_OFFSET_MAX}..${CARD_OFFSET_MAX} (default 0)`),
-      offset_y: num(`Footage shift down, fraction of the frame height, -${CARD_OFFSET_MAX}..${CARD_OFFSET_MAX} (default 0)`),
+      offset_x: num(`Footage shift right, fraction of the clip's box width, -${CARD_OFFSET_MAX}..${CARD_OFFSET_MAX} (default 0)`),
+      offset_y: num(`Footage shift down, fraction of the clip's box height, -${CARD_OFFSET_MAX}..${CARD_OFFSET_MAX} (default 0)`),
     }),
   },
 ] as const satisfies readonly AiToolDef[];

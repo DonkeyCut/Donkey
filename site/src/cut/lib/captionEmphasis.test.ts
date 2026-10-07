@@ -5,6 +5,7 @@ import {
   emphasisIndicesOf,
   emphasisRuns,
   remapEmphasis,
+  typedToggle,
   toggleEmphasis,
   wordIndicesIn,
 } from "./captionEmphasis";
@@ -122,6 +123,15 @@ describe("picking words", () => {
     const runs = emphasisRuns("a  big win", [1, 2]);
     expect(runs.map((r) => r.text).join("")).toBe("a  big win");
     expect(runs.filter((r) => r.em).map((r) => r.text)).toEqual(["big", "win"]);
+  });
+
+  test("a toggle on unsaved typing reads the emphasis on the words typed", () => {
+    const cue: SubtitleCue = { id: "c", start: 0, end: 1, text: "buy Notion now", emphasis: [1] };
+    const typed = "please buy Notion now";
+    const at = typed.indexOf("Notion");
+    expect(typedToggle(cue, typed, at, at + 6)).toEqual({ indices: [2], on: false, label: "Notion" });
+    const buy = typed.indexOf("buy");
+    expect(typedToggle(cue, typed, buy, buy + 3)?.on).toBe(true);
   });
 
   test("toggling flips each word and drops the field when empty", () => {

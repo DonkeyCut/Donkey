@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -23,7 +22,7 @@ import {
   type CameraCard,
   type CardSide,
 } from "@/cut/lib/cameraCard";
-import { ensureCardMatte, retryCardMatte, useMatteBakes } from "@/cut/lib/removal/bakeJobs";
+import { retryCardMatte, useMatteBakes } from "@/cut/lib/removal/bakeJobs";
 import { useEditor } from "@/cut/lib/store";
 import { frameOf, rectOf, type VideoClip } from "@/cut/lib/types";
 import { ResetButton, Row, Section, useSliderCheckpoint } from "@/cut/components/panelBits";
@@ -50,13 +49,6 @@ export function CameraCardSection({ clip }: { clip: VideoClip }) {
   const job = useMatteBakes((s) => s.jobs[cardMatteKey(clip.id)]);
   const aspect = useEditor((s) => s.aspect);
   const asset = useEditor((s) => s.assets.find((a) => a.id === clip.assetId));
-  // The head's matte is owed while the card shows it; the doc sweep starts
-  // it too, so this only makes the start immediate.
-  const owes = !!card?.popOut && !card.matte;
-  useEffect(() => {
-    if (owes) ensureCardMatte(clip.id);
-  }, [owes, clip.id]);
-
   const current = () => st().clips.find((c) => c.id === clip.id)?.card;
   const draft = (patch: Partial<CameraCard>) => {
     const c = current();

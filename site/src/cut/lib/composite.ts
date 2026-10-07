@@ -20,7 +20,7 @@
  */
 
 import { applyDetail, applyEffectToCanvas, applyLutToImageData, applyMaskToCanvas, detailActive, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, retimeOf, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
-import { cameraCardLayout, cardActive, traceCardPath, type CardLayout } from "./cameraCard";
+import { cameraCardLayout, traceCardPath, type CardLayout } from "./cameraCard";
 import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
 import { clipRecipe, peekClipLut, requestClipLut, type ClipLut, type RecipeSource } from "./lutBuild";
@@ -708,7 +708,7 @@ export class FrameCompositor {
       !!clip &&
       (clipPosed(clip) ||
         // A camera card casts its own shadow; the box style stands aside.
-        (!!clip.boxStyle?.shadow && !cardActive(clip)) ||
+        (!!clip.boxStyle?.shadow && !clip.card) ||
         !!(clip.mask && (clip.mask.kind !== "subject" || this.subjectMatteProvider)))
     );
   }
@@ -816,7 +816,7 @@ export class FrameCompositor {
       ctx.save();
       ctx.translate(Math.round(fx.dx ?? 0), Math.round(fx.dy ?? 0));
     }
-    const shade = cardActive(clip) ? null : this.shadowOf(out, clip.boxStyle?.shadow);
+    const shade = clip.card ? null : this.shadowOf(out, clip.boxStyle?.shadow);
     if (shade) ctx.drawImage(shade, 0, 0);
     ctx.drawImage(out, 0, 0);
     if (hasFx) ctx.restore();
@@ -873,7 +873,7 @@ export class FrameCompositor {
       );
       return;
     }
-    if (clip && cardActive(clip)) {
+    if (clip?.card) {
       this.drawCard(frame, rect, alpha, at, zoom, clip);
       return;
     }
@@ -1207,7 +1207,7 @@ export class FrameCompositor {
     // styled box (rounded corners, border) or a mirrored picture also routes
     // through the rect path, which knows how to draw those at full frame too.
     const rect = rectOf(clip ?? {});
-    if (!isFullRect(rect) || clip?.boxStyle || clip?.flipH || clip?.flipV || (clip && cardActive(clip))) {
+    if (!isFullRect(rect) || clip?.boxStyle || clip?.flipH || clip?.flipV || !!clip?.card) {
       this.drawIntoRect(frame, rect, !!clip && clipCovers(clip), alpha, at, zoom, clip);
       if (hasFx) ctx.restore();
       return;

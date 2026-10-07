@@ -76,6 +76,7 @@ import {
   type OverlayAnimStyle,
   type OverlayLoopStyle,
   CARET_BLINKS_MAX,
+  displayWords,
   edgeMotion,
   edgePreset,
   OVERLAY_HIT_DEFAULT_SECONDS,
@@ -212,8 +213,8 @@ import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
 import { CARD_SIDES, newCard, normalizeCard, type CardSide } from "./cameraCard";
-import { CAPTION_STYLES, captionEmphasis, captionStyle, cueAnchor, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount, trackPos } from "./subtitles";
-import { cueEmphasis, emphasisIndicesOf } from "./captionEmphasis";
+import { CAPTION_STYLES, captionEmphasis, cueSpot, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount } from "./subtitles";
+import { cueEmphasis, emphasisIndicesOf, emphasizedWords } from "./captionEmphasis";
 import { findHighlights } from "./highlights";
 import { fuseTimeline, renderFusedTimeline, speechOnsets, speechOver } from "./watch/fuse";
 import {
@@ -2662,7 +2663,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const edits: { id: string; indices: number[]; on?: boolean }[] = [];
       for (const m of marks) {
         const cue = requireItem(s.subtitles.cues, m.cue_id, "subtitle cue");
-        const count = cue.text.split(/\s+/).filter(Boolean).length;
+        const count = displayWords(cue.text).length;
         const indices: number[] = [];
         if (Array.isArray(m.indices)) {
           for (const i of m.indices) {
@@ -2694,10 +2695,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         cues: cur.cues
           .filter((c) => touched.has(c.id))
-          .map((c) => {
-            const words = c.text.split(/\s+/).filter(Boolean);
-            return { id: c.id, text: c.text, emphasis: cueEmphasis(c).map((i) => words[i]) };
-          }),
+          .map((c) => ({ id: c.id, text: c.text, emphasis: emphasizedWords(c).map(([, w]) => w) })),
         emphasizedCues: cur.cues.filter((c) => cueEmphasis(c).length > 0).length,
         ...(cur.showOnVideo ? {} : { note: "Captions are hidden on the video; subtitles_set_view shows them." }),
       };
@@ -4806,11 +4804,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const live = st.subtitles.cues.find((c) => c.id === cue.id);
         if (live) {
           // One side given keeps the other where the caption already sits.
-          const at = cueAnchor(
-            live,
-            trackPos(st.subtitles, captionStyle(st.subtitles.style), live.lane ?? 0),
-            captionStyle(st.subtitles.style)
-          );
+          const at = cueSpot(st.subtitles, live);
           st.pushHistory();
           st.setCuePosition(
             cue.id,

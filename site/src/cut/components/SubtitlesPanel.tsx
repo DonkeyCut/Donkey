@@ -21,7 +21,7 @@ import {
   subtitleLaneCount,
   trackLocale,
 } from "@/cut/lib/subtitles";
-import { cueEmphasis, emphasisRuns, wordIndicesIn } from "@/cut/lib/captionEmphasis";
+import { cueEmphasis, emphasisRuns, typedToggle } from "@/cut/lib/captionEmphasis";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
   cueWordCount,
@@ -785,8 +785,7 @@ const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: num
     label: string;
     on: boolean;
   } | null>(null);
-  const marked = cueEmphasis(cue);
-  const markKey = marked.join(",");
+  const markKey = cueEmphasis(cue).join(",");
 
   // The span is uncontrolled while focused (so the caret survives typing);
   // outside edits (undo, regenerate, emphasis) sync the DOM here.
@@ -795,23 +794,15 @@ const CueSpan = memo(function CueSpan({ cue, gap }: { cue: SubtitleCue; gap: num
     if (el && document.activeElement !== el) paintCue(el, cue.text, markKey ? markKey.split(",").map(Number) : []);
   }, [cue.text, markKey]);
 
-  /** The words a character range of the caption touches, and whether they
-   * would all be emphasized by the toggle. Typing not yet committed is
-   * committed first, so the words are the ones on screen. */
+  /** The words a character range of the caption touches, and whether the
+   * toggle turns them on. Typing not yet committed is committed first, so the
+   * words are the ones on screen. */
   const wordsAt = (from: number, to: number) => {
     const el = ref.current;
     if (!el) return null;
     const typed = el.textContent ?? "";
-    const indices = wordIndicesIn(typed, from, to);
-    if (indices.length === 0) return null;
-    const words = typed.split(/\s+/).filter(Boolean);
-    const set = new Set(marked);
-    return {
-      typed,
-      indices,
-      on: !indices.every((i) => set.has(i)),
-      label: indices.map((i) => words[i]).join(" "),
-    };
+    const hit = typedToggle(cue, typed, from, to);
+    return hit ? { typed, ...hit } : null;
   };
 
   const toggle = (from: number, to: number) => {

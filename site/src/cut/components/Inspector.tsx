@@ -88,6 +88,7 @@ import {
   penClosed,
   restingMaskFrame,
   AMOUNTLESS_EFFECTS,
+  displayWords,
 } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
 import { bindRecording, unbindRecording } from "@/cut/lib/soundBind";
@@ -127,7 +128,7 @@ import {
 import { patchLibrary, refetchLibrary, useLibrary } from "@/cut/lib/queries";
 import { TEXT_SIZES, writeTextStyle } from "@/cut/lib/textStyle";
 import { formatTime } from "@/cut/lib/time";
-import { captionStyle, cueAnchor, trackPos } from "@/cut/lib/subtitles";
+import { cueSpot } from "@/cut/lib/subtitles";
 import { cueEmphasis } from "@/cut/lib/captionEmphasis";
 import {
   fontStack,
@@ -3365,15 +3366,13 @@ function PositionRow({
 function CuePanel({ cue }: { cue: SubtitleCue }) {
   const subtitles = useEditor((s) => s.subtitles);
   const posCk = useSliderCheckpoint();
-  const style = captionStyle(subtitles.style);
-  const track = trackPos(subtitles, style, cue.lane ?? 0);
   const own = cue.x !== undefined && cue.y !== undefined;
-  const pose = cueAnchor(cue, track, style);
+  const pose = cueSpot(subtitles, cue);
   const setPos = (axis: "x" | "y", pct: number) => {
     const v = Math.min(0.98, Math.max(0.02, pct / 100));
     useEditor.getState().setCuePosition(cue.id, { ...pose, [axis]: v });
   };
-  const words = cue.text.split(/\s+/).filter(Boolean);
+  const words = displayWords(cue.text);
   const marked = new Set(cueEmphasis(cue));
   return (
     <div className="flex flex-col gap-1 px-3.5 pt-2 pb-4">
@@ -3383,7 +3382,7 @@ function CuePanel({ cue }: { cue: SubtitleCue }) {
         enabled={own}
         onEnabledChange={(on) => {
           useEditor.getState().pushHistory();
-          useEditor.getState().setCuePosition(cue.id, on ? cueAnchor({}, track, style) : null);
+          useEditor.getState().setCuePosition(cue.id, on ? cueSpot(subtitles, { lane: cue.lane }) : null);
         }}
       >
         <PositionRow pose={pose} min={2} max={98} ck={posCk} onSet={setPos} />

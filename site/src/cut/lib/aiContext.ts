@@ -13,7 +13,7 @@ import type { VideoProject } from "./genvideo/types";
 import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
 import { laneCues, subtitleLaneCount } from "./subtitles";
-import { cueEmphasis } from "./captionEmphasis";
+import { emphasizedWords } from "./captionEmphasis";
 import { watchSweepActive } from "./watch/sweep";
 import { libraryFontId, listLibraryFonts, listLutChoices } from "./linkedLibrary";
 import { savedGradesKnown } from "./gradePresets";
@@ -97,7 +97,7 @@ function clipEffects(clip: VideoClip, live: boolean, frame?: CardFrame) {
 
 /** What a camera card's defaults read: the frame shape and the clip's
  * source. */
-export interface CardFrame {
+interface CardFrame {
   aspect: Aspect;
   assetById: Map<string, MediaAsset>;
 }
@@ -754,10 +754,9 @@ function describeState(
  * [index, word] pairs (set_caption_emphasis), and its own x/y when it sits
  * apart from its track (update_cue). Absent when it has neither. */
 function cueExtras(c: SubtitleCue) {
-  const marked = cueEmphasis(c);
-  const words = marked.length > 0 ? c.text.split(/\s+/).filter(Boolean) : [];
+  const emphasis = emphasizedWords(c);
   return {
-    ...(marked.length > 0 ? { emphasis: marked.map((i) => [i, words[i]] as const) } : {}),
+    ...(emphasis.length > 0 ? { emphasis } : {}),
     ...(c.x !== undefined && c.y !== undefined ? { x: r(c.x), y: r(c.y) } : {}),
   };
 }
