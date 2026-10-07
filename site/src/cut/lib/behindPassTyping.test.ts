@@ -90,4 +90,31 @@ describe("the behind pass types", () => {
     expect([...entryOf(pass).byWord.keys()].some((k) => k < 0)).toBe(false);
     pass.dispose();
   });
+
+  test("the live pass paints each typed count once, and titles typing together take turns", async () => {
+    const pass = new SubjectMaskCompositor();
+    const painted: string[] = [];
+    const inner = pass as unknown as { drawTyped: (o: TextOverlay, ...rest: unknown[]) => Promise<void> };
+    const drawTyped = inner.drawTyped.bind(pass);
+    inner.drawTyped = (o, ...rest) => {
+      painted.push(o.id);
+      return drawTyped(o, ...rest);
+    };
+    const second: TextOverlay = { ...title, id: "cta2", y: 0.7 };
+    const frame = createRasterCanvas(W, H) as HTMLCanvasElement;
+    const settle = () => new Promise((r) => setTimeout(r, 200));
+
+    // The same moment asked for on two frames before its picture lands.
+    pass.draw(frame, [title], [], title.start + 0.4);
+    pass.draw(frame, [title], [], title.start + 0.4);
+    await settle();
+    expect(painted).toEqual([title.id]);
+
+    // Two titles typing at once, each asking for a new count every frame.
+    painted.length = 0;
+    for (const t of [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]) pass.draw(frame, [title, second], [], title.start + t);
+    await settle();
+    expect(painted).toContain(second.id);
+    pass.dispose();
+  });
 });

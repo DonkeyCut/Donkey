@@ -12,7 +12,9 @@ import {
 } from "./anim";
 import { evalOverlayFrame } from "./keys";
 import { MOTION, presetsFor } from "./motion/catalog";
-import { darkenCanvas, paintElement, planAnimatedLayers, renderOverlayFrames, type RenderEnv } from "./render";
+import { WORD_EFFECT_IDS } from "./words/catalog";
+import { darkenCanvas, ElementFx, elementLook } from "./elementFx";
+import { paintElement, planAnimatedLayers, renderOverlayFrames, type RenderEnv } from "./render";
 import type { ShapeOverlay, TextOverlay } from "./types";
 
 const B = CARET_BLINK_SECONDS;
@@ -153,6 +155,22 @@ describe("the press", () => {
     expect(d[2 * 4 + 3]).toBe(0);
   });
 
+  test("a darkening hit dims the element and leaves the frame under it", () => {
+    const c = new Canvas(4, 4);
+    const ctx = c.getContext("2d") as unknown as CanvasRenderingContext2D;
+    ctx.fillStyle = "rgb(0, 0, 200)";
+    ctx.fillRect(0, 0, 4, 4);
+    const fx = new ElementFx((w, h) => new Canvas(w, h) as unknown as HTMLCanvasElement);
+    const into = fx.begin(ctx, 4, 4, elementLook({ brightness: 0.5 }, 1));
+    expect(into).not.toBe(ctx);
+    into.fillStyle = "rgb(200, 200, 200)";
+    into.fillRect(0, 0, 2, 4);
+    fx.end(ctx);
+    const d = ctx.getImageData(0, 0, 4, 4).data;
+    expect(d[0]).toBeCloseTo(100, -1);
+    expect(d[2 * 4 + 2]).toBe(200);
+  });
+
   test("the frame sampler plays the press frame by frame and holds the rest still", async () => {
     const o: ShapeOverlay = { id: "s", kind: "shape", shape: "rect", start: 0, end: 4, x: 0.5, y: 0.5, w: 0.2, h: 0.1, fill: "#ffffff", anim: press(true) };
     const set = await renderOverlayFrames(o, 540, 960, 30, env);
@@ -161,6 +179,27 @@ describe("the press", () => {
     // Two still pieces share one picture; the 0.3s press is nine frames.
     expect(set.images.length).toBe(1 + 9);
     expect(set.entries[0].image).toBe(set.entries[set.entries.length - 1].image);
+  });
+
+  test("a press over a loop costs one cycle and the press, however long the element runs", async () => {
+    const o: ShapeOverlay = { id: "s", kind: "shape", shape: "rect", start: 0, end: 60, x: 0.5, y: 0.5, w: 0.2, h: 0.1, fill: "#ffffff", anim: { ...press(false), loop: { style: "pulse", speed: 1 } } };
+    const set = await renderOverlayFrames(o, 270, 480, 30, env);
+    expect(set.entries.reduce((a, e) => a + e.duration, 0)).toBeCloseTo(60, 6);
+    expect(set.images.length).toBeLessThan(200);
+  });
+
+  test("a press over a word effect costs the word pictures and the press", async () => {
+    const o: TextOverlay = { id: "t", text: "one two three four", start: 0, end: 60, x: 0.5, y: 0.5, size: 60, font: "sf", weight: 700, color: "#fff", plate: false, shadow: false, anim: { ...press(false), words: { style: WORD_EFFECT_IDS[0] } } };
+    const set = await renderOverlayFrames(o, 270, 480, 30, env);
+    expect(set.entries.reduce((a, e) => a + e.duration, 0)).toBeCloseTo(60, 6);
+    expect(set.images.length).toBeLessThan(200);
+  });
+
+  test("a blink over a loop keeps the bar's turns", async () => {
+    const o: TextOverlay = { id: "t", text: "LINK", start: 0, end: 20, x: 0.5, y: 0.5, size: 60, font: "sf", weight: 700, color: "#fff", plate: false, shadow: false, anim: { ...typed({ blink: true }), loop: { style: "pulse", speed: 1 } } };
+    const set = await renderOverlayFrames(o, 270, 480, 30, env);
+    expect(set.entries.reduce((a, e) => a + e.duration, 0)).toBeCloseTo(20, 6);
+    expect(set.images.length).toBeLessThan(200);
   });
 
   test("the frame sampler draws a blink as two pictures", async () => {

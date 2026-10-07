@@ -78,7 +78,7 @@ import {
   CARET_BLINKS_MAX,
   displayWords,
   edgeMotion,
-  edgePreset,
+  keepCaret,
   OVERLAY_HIT_DEFAULT_SECONDS,
   OVERLAY_HIT_MAX_SECONDS,
   OVERLAY_HIT_MIN_SECONDS,
@@ -620,8 +620,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           throw new ToolError(`Unknown ${slot} style: ${raw}`);
         if ((TEXT_ONLY_ANIM_STYLE_IDS as string[]).includes(raw) && (o.kind ?? "text") !== "text")
           throw new ToolError(`${raw} animates titles only.`);
-        // A caret stays with an entrance that still types.
-        const caret = edgePreset(raw)?.animate.typed ? anim[slot]?.caret : undefined;
+        const caret = keepCaret(anim[slot], raw);
         anim[slot] = {
           style: raw as OverlayAnimStyle,
           seconds: secs ?? anim[slot]?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
@@ -6199,7 +6198,7 @@ function applyCaretInput(
     if (input.caret_hide) caret.hide = true;
     else delete caret.hide;
   }
-  if (typeof input.caret_color === "string") caret.color = input.caret_color;
+  if (typeof input.caret_color === "string") caret.color = hexColor(input.caret_color, "caret_color");
   anim.in = { ...edge, caret };
 }
 

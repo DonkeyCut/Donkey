@@ -45,7 +45,7 @@ import {
   OVERLAY_ANIM_MIN_SECONDS,
   CARET_BLINKS_MAX,
   edgeMotion,
-  edgePreset,
+  keepCaret,
   OVERLAY_HIT_DEFAULT_SECONDS,
   OVERLAY_HIT_MAX_SECONDS,
   OVERLAY_HIT_MIN_SECONDS,
@@ -2746,14 +2746,6 @@ function WordSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonl
   );
 }
 
-/** A caret with one setting taken out, so an absent field reads as its
- * default. */
-function caretWithout(caret: OverlayCaret, key: "blinks"): OverlayCaret {
-  const next = { ...caret };
-  delete next[key];
-  return next;
-}
-
 /** The typing bar of a typewriter entrance: on or off, whether it blinks once
  * typing stops, how many times, whether it goes after, and its color. */
 function CaretSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
@@ -2782,7 +2774,10 @@ function CaretSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readon
   };
   const setBlinks = (v: number) => {
     if (!caret) return;
-    write(v > 0 ? { ...caret, blinks: Math.round(v) } : caretWithout(caret, "blinks"));
+    // No blinks count reads as blinking for good.
+    const { blinks: _drop, ...rest } = caret;
+    void _drop;
+    write(v > 0 ? { ...caret, blinks: Math.round(v) } : rest);
   };
   return (
     <>
@@ -3129,6 +3124,7 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
       writeOverlayAnim(o, anim, { [slot]: undefined }, peers);
       return;
     }
+    const caret = slot === "in" ? keepCaret(anim.in, style) : undefined;
     const patch: Partial<OverlayAnim> =
       slot === "loop"
         ? { loop: { style: style as OverlayLoopStyle, speed: anim.loop?.speed ?? 1 } }
@@ -3136,10 +3132,7 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
             [slot]: {
               style: style as OverlayAnimStyle,
               seconds: seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
-              // A caret stays with an entrance that still types.
-              ...(slot === "in" && anim.in?.caret && edgePreset(style)?.animate.typed
-                ? { caret: anim.in.caret }
-                : {}),
+              ...(caret ? { caret } : {}),
             },
           };
     useEditor.getState().pushHistory();

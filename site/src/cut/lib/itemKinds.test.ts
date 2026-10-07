@@ -166,4 +166,17 @@ describe("splitting keyed items", () => {
     expect(right.kf![0]).toMatchObject({ t: 0, x: 0.3 });
     expect(right.mask!.kf![0]).toMatchObject({ t: 0, x: 0.1 });
   });
+
+  test("an element's press stays at its moment on the timeline", () => {
+    const o = {
+      id: "h1", kind: "shape", start: 0, end: 4, x: 0.5, y: 0.5,
+      anim: { hit: { style: "press", at: 2.5, seconds: 0.3 } },
+    };
+    const [left, right] = ITEM_KINDS.overlay.split!(o as never, 1);
+    expect(left.anim?.hit).toBeUndefined();
+    expect(right.anim!.hit!.at).toBeCloseTo(1.5, 9);
+    const [early, late] = ITEM_KINDS.overlay.split!(o as never, 3);
+    expect(early.anim!.hit!.at).toBe(2.5);
+    expect(late.anim?.hit).toBeUndefined();
+  });
 });

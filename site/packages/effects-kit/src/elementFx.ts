@@ -1,5 +1,6 @@
 /**
- * Drawing an element soft: its blur and its motion streak.
+ * Drawing an element soft: its blur and its motion streak, and the darkening
+ * a hit gives it.
  *
  * Both act on the element's posed picture as it lands on screen, so every
  * renderer does the same three steps: pose the element into a scratch surface
@@ -29,26 +30,46 @@ export interface ElementLook {
   streakY: number;
   /** How many copies the streak is drawn from; 0 = no streak. */
   taps: number;
+  /** What a hit leaves of the element's color, 0..1; 1 = untouched. */
+  brightness: number;
 }
 
 /** A blur below this many output px is invisible and skipped. */
 const BLUR_FLOOR = 0.1;
 
 /** The look an evaluated frame asks for at `scale` output px per design px,
- * or null when the element draws sharp. */
+ * or null when the element draws sharp and at its own color. */
 export function elementLook(
-  ev: { blur?: number; streak?: { x: number; y: number } },
+  ev: { blur?: number; streak?: { x: number; y: number }; brightness?: number },
   scale: number
 ): ElementLook | null {
   const blur = (ev.blur ?? 0) * scale;
   const taps = ev.streak ? streakTaps(Math.hypot(ev.streak.x, ev.streak.y)) : 0;
-  if (blur < BLUR_FLOOR && taps === 0) return null;
+  const brightness = ev.brightness ?? 1;
+  if (blur < BLUR_FLOOR && taps === 0 && !(brightness < 1)) return null;
   return {
     blur: blur < BLUR_FLOOR ? 0 : blur,
     streakX: taps ? ev.streak!.x * scale : 0,
     streakY: taps ? ev.streak!.y * scale : 0,
     taps,
+    brightness,
   };
+}
+
+/**
+ * Multiply every color already on a surface by `brightness` (0..1), leaving
+ * alpha alone: black laid source-atop at 1 - brightness. The surface has to
+ * hold the element by itself, or whatever sits under it darkens too.
+ */
+export function darkenCanvas(ctx: Ctx, width: number, height: number, brightness: number): void {
+  if (!(brightness < 1)) return;
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-atop";
+  ctx.globalAlpha = Math.min(1, 1 - Math.max(0, brightness));
+  ctx.fillStyle = "#000000";
+  ctx.fillRect(0, 0, width, height);
+  ctx.restore();
 }
 
 /** A context back to plain drawing: identity transform, full alpha,
@@ -120,7 +141,7 @@ export class ElementFx {
     return c;
   }
 
-  /** Lay the painted element onto `ctx` with its streak and blur. */
+  /** Lay the painted element onto `ctx` with its streak, darkening and blur. */
   end(ctx: Ctx): void {
     const look = this.look;
     this.look = null;
@@ -134,6 +155,8 @@ export class ElementFx {
       drawStreak(s, src, 0, 0, look);
       src = this.smear;
     }
+    // The scratch holds the element alone, so a hit darkens its pixels only.
+    darkenCanvas(src.getContext("2d") as Ctx, src.width, src.height, look.brightness);
     ctx.save();
     reset(ctx);
     if (look.blur > 0 && "filter" in ctx) ctx.filter = `blur(${look.blur.toFixed(2)}px)`;

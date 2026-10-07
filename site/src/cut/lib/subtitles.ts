@@ -511,7 +511,7 @@ function faceEntry(cue: SubtitleCue, pos: CaptionEmphasisOverrides | undefined):
 
 /** Per display word: the emphasis face, or nothing. Null when no word in the
  * cue is emphasized. */
-export function cueFaces(
+function cueFaces(
   cue: SubtitleCue,
   pos: CaptionEmphasisOverrides | undefined
 ): (WordFace | undefined)[] | null {

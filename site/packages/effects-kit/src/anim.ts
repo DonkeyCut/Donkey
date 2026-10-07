@@ -190,7 +190,7 @@ export const loopMotion = (slot: OverlayLoop | undefined): MotionPreset | undefi
 export const moveMotion = (slot: OverlayMove | undefined): MotionPreset | undefined =>
   slot ? holdPreset(slot.style) : undefined;
 
-export const hitMotion = (slot: OverlayHit | undefined): MotionPreset | undefined =>
+const hitMotion = (slot: OverlayHit | undefined): MotionPreset | undefined =>
   slot ? hitPreset(slot.style) : undefined;
 
 // ── the registries, read from the catalog ─────────────────────────────────
@@ -537,9 +537,8 @@ export function evalOverlayAnim(
  * the preset's pose folded onto what the other slots left, as one piece. */
 function applyHit(state: OverlayAnimState, slot: OverlayHit, tLocal: number): void {
   const preset = hitMotion(slot);
-  const secs = slot.seconds > 0 ? slot.seconds : OVERLAY_HIT_DEFAULT_SECONDS;
-  const q = (tLocal - slot.at) / secs;
-  if (!preset || q <= 0 || q >= 1) return;
+  const q = (tLocal - slot.at) / slot.seconds;
+  if (!preset || !(q > 0 && q < 1)) return;
   const pose = evalWhole(preset, q, false);
   state.dx += pose.dx;
   state.dy += pose.dy;
@@ -558,9 +557,8 @@ export function hitWindow(
 ): { start: number; end: number } | null {
   const slot = anim?.hit;
   if (!slot || !hitMotion(slot)) return null;
-  const secs = slot.seconds > 0 ? slot.seconds : OVERLAY_HIT_DEFAULT_SECONDS;
   const start = Math.max(0, Math.min(dur, slot.at));
-  const end = Math.max(start, Math.min(dur, slot.at + secs));
+  const end = Math.max(start, Math.min(dur, slot.at + slot.seconds));
   return end - start > 1e-3 ? { start, end } : null;
 }
 
@@ -570,6 +568,12 @@ export function hitScale(anim: OverlayAnim | undefined): number {
   let s = 1;
   for (const key of preset?.animate.scale ?? []) s = Math.max(s, key.v[0], key.v[1]);
   return s;
+}
+
+/** The typing bar an entrance keeps when it changes to `style`: the bar stays
+ * while the new entrance still types. */
+export function keepCaret(edge: OverlayEdge | undefined, style: string): OverlayCaret | undefined {
+  return edgePreset(style)?.animate.typed ? edge?.caret : undefined;
 }
 
 /** The element's typing bar, when its entrance types and carries one. */
@@ -608,14 +612,19 @@ export function caretToggles(anim: OverlayAnim | undefined, dur: number): number
   const caret = typeCaret(anim);
   if (!caret) return [];
   const typedBy = Math.min(anim!.in!.seconds, dur);
+
+  // A bar that holds after typing turns off once, when it hides.
+  if (!caret.blink) return caret.hide && typedBy > 0 && typedBy < dur ? [typedBy] : [];
+
+  // A blink flips every CARET_BLINK_SECONDS once typing stops, lit first. A
+  // counted blink ends dark, then lights again for good unless it hides:
+  // two blinks flip at 1, 2, 3 (hide) or 1, 2, 3, 4 (stay) half-cycles.
+  const flips = caret.blinks !== undefined && caret.blinks > 0 ? caret.blinks * 2 - (caret.hide ? 1 : 0) : Infinity;
   const out: number[] = [];
-  const half = CARET_BLINK_SECONDS / 2;
-  // Every flip lands on a half-blink boundary after typing stops; each one
-  // is kept when the bar reads differently on its two sides.
-  for (let k = 0; typedBy + k * CARET_BLINK_SECONDS < dur; k++) {
+  for (let k = 1; k <= flips; k++) {
     const t = typedBy + k * CARET_BLINK_SECONDS;
-    if (t <= 0) continue;
-    if (caretOn(anim, t - half, dur) !== caretOn(anim, t + half, dur)) out.push(t);
+    if (t >= dur) break;
+    out.push(t);
   }
   return out;
 }

@@ -11,7 +11,6 @@
 
 import {
   applyWordDraw,
-  darkenCanvas,
   diveView,
   divesAt,
   evalOverlayFrame,
@@ -79,27 +78,29 @@ function rasterSliceAt(o: Overlay, tLocal: number): number {
  * Which picture an element needs at one moment: its word slice, how many
  * characters a typewriter has typed (-1 = the whole text), and whether the
  * typing bar is lit — the same reading the front path's painters take from
- * the evaluator. One record, rewritten in place every time it is read.
+ * the evaluator. A whole-text picture keys at zero or above (two per word
+ * slice, bar dark and lit); a typing picture keys below zero, one per typed
+ * count.
  */
-const look = { word: -1, chars: -1, caret: false, key: 0 };
+interface Look {
+  key: number;
+  word: number;
+  chars: number;
+  caret: boolean;
+}
 
-/** Fill `look` for `o` at `tLocal` and return its picture key. A whole-text
- * picture keys at zero or above (two per word slice, bar dark and lit); a
- * typing picture keys below zero, one per typed count. */
-function lookAt(o: Overlay, tLocal: number, ev: OverlayFrameState): number {
-  look.word = rasterSliceAt(o, tLocal);
-  look.caret = ev.caret === true;
+/** The picture `o` needs at `tLocal`. */
+function lookAt(o: Overlay, tLocal: number, ev: OverlayFrameState): Look {
+  const word = rasterSliceAt(o, tLocal);
+  const caret = ev.caret === true;
   const n = isTextOverlay(o) ? o.text.length : 0;
-  look.chars =
+  const chars =
     isTextOverlay(o) && ev.textProgress !== undefined
       ? Math.max(0, Math.min(n, Math.ceil(ev.textProgress * n)))
       : -1;
-  const bar = look.caret ? 1 : 0;
-  look.key =
-    look.chars < 0
-      ? (look.word + 1) * 2 + bar
-      : -1 - (((look.word + 1) * (n + 1) + look.chars) * 2 + bar);
-  return look.key;
+  const bar = caret ? 1 : 0;
+  const key = chars < 0 ? (word + 1) * 2 + bar : -1 - (((word + 1) * (n + 1) + chars) * 2 + bar);
+  return { key, word, chars, caret };
 }
 
 /** The phase a picture with its typing bar lit is painted at. */
@@ -168,17 +169,17 @@ const entryBytes = (e: { byWord: Map<number, ImageBitmap> }): number => {
 };
 
 /** One element's pictures: whole-text ones by word slice and bar, and the
- * typing picture it is on. `want` is the typing picture it is waiting for. */
+ * typing picture it is on. `pending` holds the keys being drawn, `want` the
+ * typing picture it is waiting for, and `typedAt` when the pump last served
+ * it, so elements typing at once take turns. */
 interface RasterEntry {
   of: Overlay;
   byWord: Map<number, ImageBitmap>;
   pending: Set<number>;
   usedAt: number;
   last: ImageBitmap | null;
-  want: number | null;
-  wantWord: number;
-  wantChars: number;
-  wantCaret: boolean;
+  want: Look | null;
+  typedAt: number;
 }
 
 export class SubjectMaskCompositor {
@@ -211,6 +212,8 @@ export class SubjectMaskCompositor {
    * latest count it reached. */
   private typeSurface: HTMLCanvasElement | null = null;
   private typing = false;
+  /** Typing pictures painted, the clock the pump takes turns on. */
+  private typed = 0;
   private typeArgs: { w: number; h: number; assets: MediaAsset[] } = { w: 1, h: 1, assets: [] };
   /** Frames this pass has drawn, which is the clock the pictures are given
    * back on: an element drawn on the frame being composited is the one the
@@ -219,8 +222,8 @@ export class SubjectMaskCompositor {
   private readonly releaseMemory = holdMemory("overlayRasters", () => {
     let n = 0;
     for (const e of this.rasters.values()) n += entryBytes(e);
-    const dark = this.darkSurface ? this.darkSurface.width * this.darkSurface.height * 4 : 0;
-    return n + this.fx.bytes() + dark;
+    const typing = this.typeSurface ? this.typeSurface.width * this.typeSurface.height * 4 : 0;
+    return n + this.fx.bytes() + typing;
   });
   private person: HTMLCanvasElement | null = null;
   /** Scratch for blurred and motion-blurred behind elements. */
@@ -261,9 +264,7 @@ export class SubjectMaskCompositor {
         usedAt: this.pass,
         last: null,
         want: null,
-        wantWord: -1,
-        wantChars: -1,
-        wantCaret: false,
+        typedAt: -1,
       };
       this.rasters.set(o.id, entry);
     }
@@ -300,32 +301,29 @@ export class SubjectMaskCompositor {
   }
 
   /**
-   * The picture `look` names (see `lookAt`), or while it is being drawn the
-   * last one this element landed, so a typing title moves on a frame late
-   * and never blinks out.
+   * The picture `look` names, or while it is being drawn the last one this
+   * element landed, so a typing title moves on a frame late and never blinks
+   * out.
    */
-  private rasterFor(o: Overlay, w: number, h: number, assets: MediaAsset[]): ImageBitmap | null {
+  private rasterFor(o: Overlay, look: Look, w: number, h: number, assets: MediaAsset[]): ImageBitmap | null {
     const entry = this.entryFor(o);
-    const key = look.key;
-    const hit = entry.byWord.get(key);
+    const hit = entry.byWord.get(look.key);
     if (hit) return hit;
-    if (key < 0) {
-      if (entry.want !== key) {
-        entry.want = key;
-        entry.wantWord = look.word;
-        entry.wantChars = look.chars;
-        entry.wantCaret = look.caret;
-      }
-      this.typeArgs.w = w;
-      this.typeArgs.h = h;
-      this.typeArgs.assets = assets;
-      this.pumpTyping();
-    } else if (!entry.pending.has(key)) {
-      entry.pending.add(key);
+    if (look.key >= 0) {
+      // Done typing: a typed count still queued is a picture nothing shows.
+      entry.want = null;
+      if (entry.pending.has(look.key)) return entry.last;
+      entry.pending.add(look.key);
       // Neutral picture: position aside, the per-frame pose owns rotation and
       // opacity, so baking them here would apply each of them twice.
-      void this.drawRaster(o, w, h, assets, key, look.word, look.caret).catch(() => {});
+      void this.drawRaster(o, w, h, assets, look.key, look.word, look.caret).catch(() => {});
+      return entry.last;
     }
+    if (!entry.pending.has(look.key)) entry.want = look;
+    this.typeArgs.w = w;
+    this.typeArgs.h = h;
+    this.typeArgs.assets = assets;
+    this.pumpTyping();
     return entry.last;
   }
 
@@ -354,30 +352,22 @@ export class SubjectMaskCompositor {
   }
 
   /** One typing picture, painted on the shared surface. */
-  private async drawTyped(
-    o: Overlay,
-    w: number,
-    h: number,
-    assets: MediaAsset[],
-    key: number,
-    word: number,
-    chars: number,
-    caret: boolean
-  ): Promise<void> {
-    this.typeSurface ??= scratchCanvas();
-    if (this.typeSurface.width !== w) this.typeSurface.width = w;
-    if (this.typeSurface.height !== h) this.typeSurface.height = h;
+  private async drawTyped(o: Overlay, w: number, h: number, assets: MediaAsset[], look: Look): Promise<void> {
+    const surface = (this.typeSurface ??= scratchCanvas());
+    if (surface.width !== w) surface.width = w;
+    if (surface.height !== h) surface.height = h;
     await paintElementInto(
-      this.typeSurface,
-      this.pictureOf(o, word, chars),
+      surface,
+      this.pictureOf(o, look.word, look.chars),
       cutRenderEnv(assets),
-      caret ? CARET_LIT : undefined
+      look.caret ? CARET_LIT : undefined
     );
-    this.land(o, key, await createImageBitmap(this.typeSurface));
+    this.land(o, look.key, await createImageBitmap(surface));
   }
 
   /** Paint the typing pictures elements are waiting on, one after another,
-   * each at the latest count its element asked for. */
+   * each at the latest count its element asked for. Elements typing at once
+   * take turns: the one served longest ago goes next. */
   private pumpTyping(): void {
     if (this.typing) return;
     this.typing = true;
@@ -386,18 +376,16 @@ export class SubjectMaskCompositor {
         for (;;) {
           let next: RasterEntry | null = null;
           for (const e of this.rasters.values()) {
-            if (e.want !== null) {
-              next = e;
-              break;
-            }
+            if (e.want && (!next || e.typedAt < next.typedAt)) next = e;
           }
           if (!next) break;
-          const key = next.want!;
-          next.want = null;
+          const entry = next;
+          const look = entry.want!;
+          entry.want = null;
+          entry.typedAt = this.typed++;
+          entry.pending.add(look.key);
           const { w, h, assets } = this.typeArgs;
-          await this.drawTyped(next.of, w, h, assets, key, next.wantWord, next.wantChars, next.wantCaret).catch(
-            () => {}
-          );
+          await this.drawTyped(entry.of, w, h, assets, look).catch(() => entry.pending.delete(look.key));
         }
       } finally {
         this.typing = false;
@@ -433,13 +421,11 @@ export class SubjectMaskCompositor {
     for (const o of overlays) {
       if (!behindSubjectOverlay(o) || !drawable(o) || t < o.start || t > o.end) continue;
       const tLocal = Math.max(0, t - o.start);
-      const key = lookAt(o, tLocal, evalOverlayFrame(o, tLocal, w / h));
-      const entry = this.entryFor(o);
-      if (entry.byWord.has(key)) continue;
-      const { word, chars, caret } = look;
+      const look = lookAt(o, tLocal, evalOverlayFrame(o, tLocal, w / h));
+      if (this.entryFor(o).byWord.has(look.key)) continue;
       try {
-        if (key < 0) await this.drawTyped(o, w, h, assets, key, word, chars, caret);
-        else await this.drawRaster(o, w, h, assets, key, word, caret);
+        if (look.key < 0) await this.drawTyped(o, w, h, assets, look);
+        else await this.drawRaster(o, w, h, assets, look.key, look.word, look.caret);
       } catch {
         // The overlay just draws in front when its raster is missing.
       }
@@ -457,6 +443,11 @@ export class SubjectMaskCompositor {
   dispose(): void {
     this.clear();
     this.fx.dispose();
+    if (this.typeSurface) {
+      this.typeSurface.width = 1;
+      this.typeSurface.height = 1;
+      this.typeSurface = null;
+    }
     this.releaseMemory();
   }
 
@@ -580,8 +571,6 @@ export class SubjectMaskCompositor {
    * the element moves under it. The surfaces live and die with this pass. */
   private stampSurface: HTMLCanvasElement | null = null;
   private stampScratch: HTMLCanvasElement | null = null;
-  /** Where an element a hit darkens is drawn alone (see `darkTarget`). */
-  private darkSurface: HTMLCanvasElement | null = null;
   mattedStamp(
     o: { mask?: { invert?: boolean; feather?: number } },
     w: number,
@@ -607,17 +596,6 @@ export class SubjectMaskCompositor {
       (o.mask?.feather ?? 0) * (Math.min(w, h) / 1080)
     );
     return this.stampSurface;
-  }
-
-  /** The darkening surface, cleared and sized to the frame. */
-  private darkTarget(w: number, h: number): CanvasRenderingContext2D {
-    this.darkSurface ??= scratchCanvas();
-    if (this.darkSurface.width !== w) this.darkSurface.width = w;
-    if (this.darkSurface.height !== h) this.darkSurface.height = h;
-    const c = this.darkSurface.getContext("2d")!;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, w, h);
-    return c;
   }
 
   /**
@@ -682,8 +660,7 @@ export class SubjectMaskCompositor {
     for (const o of active) {
       const tLocal = Math.max(0, t - o.start);
       const ev = evalOverlayFrame(o, tLocal, W / H);
-      lookAt(o, tLocal, ev);
-      const bmp = this.rasterFor(o, W, H, assets);
+      const bmp = this.rasterFor(o, lookAt(o, tLocal, ev), W, H, assets);
       if (!bmp) continue;
       // One cached picture per element here, so a per-glyph ramp or loop runs
       // its motion over the whole box as a single letter would.
@@ -692,12 +669,9 @@ export class SubjectMaskCompositor {
       if (alphaOf <= 0.001) continue;
       const cx = o.x * W;
       const cy = o.y * H;
-      // A hit that darkens is drawn alone first, so the darkening lands on
-      // the element's pixels and not on the frame under it. A blurred or
-      // streaking element poses into the scratch and lands soft.
-      const dark = ev.brightness !== undefined && ev.brightness < 1;
-      const c = dark ? this.darkTarget(W, H) : ctx;
-      const target = this.fx.begin(c, W, H, elementLook(ev, scale)) as CanvasRenderingContext2D;
+      // A blurred, streaking or darkening element poses into the scratch
+      // alone and lands softened or dimmed.
+      const target = this.fx.begin(ctx, W, H, elementLook(ev, scale)) as CanvasRenderingContext2D;
       target.save();
       target.globalAlpha = alphaOf;
       target.translate(
@@ -718,11 +692,7 @@ export class SubjectMaskCompositor {
       }
       target.drawImage(bmp, 0, 0, W, H);
       target.restore();
-      this.fx.end(c);
-      if (dark) {
-        darkenCanvas(c, W, H, ev.brightness!);
-        ctx.drawImage(c.canvas, 0, 0);
-      }
+      this.fx.end(ctx);
     }
 
     // The person back on top, its edge softened by the widest feather any

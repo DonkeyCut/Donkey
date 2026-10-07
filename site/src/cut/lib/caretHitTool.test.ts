@@ -61,6 +61,14 @@ describe("set_overlay_animation caret and hit", () => {
     expect(overlays()[0].anim?.in?.caret).toBeUndefined();
   });
 
+  test("a caret colour has to be a hex colour", async () => {
+    const o = await aTitle();
+    await runAiTool("set_overlay_animation", { id: o.id, in_style: "typewriter", caret: true, caret_color: "#f50" });
+    expect(overlays()[0].anim?.in?.caret?.color).toBe("#ff5500");
+    expect(await failure({ id: o.id, caret_color: "accent" })).toContain("hex colour");
+    expect(overlays()[0].anim?.in?.caret?.color).toBe("#ff5500");
+  });
+
   test("a caret without a typing entrance is refused", async () => {
     const o = await aTitle();
     await runAiTool("set_overlay_animation", { id: o.id, in_style: "fade" });

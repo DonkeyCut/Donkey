@@ -13,7 +13,7 @@
 // compile until it has an entry, and `itemKinds.test.ts` walks the table so
 // every entry proves it copies and pastes.
 
-import { KEY_EPSILON, maskKeyAt, poseAt, retimeOf, shiftCamera, type Mask, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
+import { KEY_EPSILON, maskKeyAt, poseAt, retimeOf, shiftCamera, type Mask, type OverlayAnim, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
 import { splitEmphasis, withEmphasis } from "./captionEmphasis";
 import {
   clipPoseAt,
@@ -110,6 +110,20 @@ function splitTracks(
   ];
 }
 
+/** An element's press cut at `cut` seconds into it: each half keeps it
+ * while its window reaches that half, the right half counting from its own
+ * start, so the press lands where it did on the timeline. */
+function splitHit(anim: OverlayAnim | undefined, cut: number): [OverlayAnim | undefined, OverlayAnim | undefined] {
+  const hit = anim?.hit;
+  if (!hit) return [anim, anim];
+  const { hit: _drop, ...rest } = anim;
+  void _drop;
+  return [
+    hit.at < cut ? anim : rest,
+    hit.at + hit.seconds > cut ? { ...rest, hit: { ...hit, at: hit.at - cut } } : rest,
+  ];
+}
+
 function splitMedia<T extends VideoClip | AudioClip>(item: T, at: number): [T, T] {
   const cut = retimeOf(item).srcAt(at - item.start);
   return item.reverse
@@ -190,9 +204,10 @@ export const ITEM_KINDS: { [K in ItemKind]: ItemKindDef<K> } = {
     // The tail keeps filming on the group camera's clock.
     split: (o, at) => {
       const [keysL, keysR] = splitTracks(o, at - o.start, (t) => poseAt(o, t));
+      const [animL, animR] = splitHit(o.anim, at - o.start);
       return [
-        { ...o, ...keysL, end: at },
-        { ...o, ...keysR, start: at, ...(o.camera ? { camera: shiftCamera(o.camera, o.start - at) } : {}) },
+        { ...o, ...keysL, anim: animL, end: at },
+        { ...o, ...keysR, anim: animR, start: at, ...(o.camera ? { camera: shiftCamera(o.camera, o.start - at) } : {}) },
       ];
     },
     clone: deep,

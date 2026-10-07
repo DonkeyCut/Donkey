@@ -46,7 +46,6 @@ import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { ElementFx, elementLook } from "@donkeycut/effects-kit";
-import { darkenCanvas } from "@donkeycut/effects-kit";
 import { applyEffectToCanvas, diveView, divesAt, evalOverlayFrame, measureDiveFocus, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type DiveFocus, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
@@ -734,11 +733,9 @@ async function stampText(doc: ExportDoc): Promise<StampedLayer[]> {
 class StampCache {
   private drawn = new Map<StampedLayer, ImageBitmap>();
   private maskFrames = new Map<StampedLayer, { t: number; bitmap: ImageBitmap }>();
-  /** Scratch for blurred and motion-blurred stamps, made on first use. */
+  /** Scratch for blurred, motion-blurred and darkening stamps, made on first
+   * use. */
   readonly fx = new ElementFx(createRasterCanvas);
-  /** Where an element a hit darkens is drawn alone, so the darkening lands on
-   * its pixels and not on the frame under it. Made on the first such frame. */
-  private dark: RasterSurface | null = null;
 
   constructor(
     private width: number,
@@ -780,23 +777,6 @@ class StampCache {
     return bitmap;
   }
 
-  /** What the scratch surfaces hold: the blur and streak scratch, and the
-   * darkening surface once a hit has made it. */
-  scratchBytes(): number {
-    return this.fx.bytes() + (this.dark ? canvasBytes(this.dark.width * this.dark.height) : 0);
-  }
-
-  /** The darkening surface, cleared, at the frame's size. */
-  darkTarget(): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
-    this.dark ??= createRasterCanvas(this.width, this.height);
-    const c = this.dark.getContext("2d") as
-      | CanvasRenderingContext2D
-      | OffscreenCanvasRenderingContext2D;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, this.width, this.height);
-    return c;
-  }
-
   /** Where a diving element flies into, measured once per look. */
   diveFocus(o: Overlay): Promise<DiveFocus> {
     return measureDiveFocus(o, this.width / this.height, cutRenderEnv(this.assets));
@@ -819,7 +799,6 @@ class StampCache {
   }
 
   dispose() {
-    this.dark = null;
     for (const bitmap of this.drawn.values()) bitmap.close();
     this.drawn.clear();
     for (const hit of this.maskFrames.values()) hit.bitmap.close();
@@ -1301,13 +1280,9 @@ async function drawStamps(
       const w = Math.max(1, o.w * canvas.width);
       const aspect = layer.lottie.width > 0 ? layer.lottie.width / layer.lottie.height : 1;
       const h = w / aspect;
-      // A hit that darkens is drawn alone first, so the darkening lands on
-      // the sticker's pixels; a blurred or streaking one poses into the
-      // scratch and lands soft.
-      const look = elementLook(ev, scale);
-      const dark = ev.brightness !== undefined && ev.brightness < 1;
-      const c = dark ? stamps.darkTarget() : ctx;
-      const lc = stamps.fx.begin(c, canvas.width, canvas.height, look);
+      // A blurred, streaking or darkening sticker poses into the scratch
+      // alone and lands softened or dimmed.
+      const lc = stamps.fx.begin(ctx, canvas.width, canvas.height, elementLook(ev, scale));
       lc.save();
       lc.globalAlpha = ev.opacity;
       lc.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
@@ -1315,11 +1290,7 @@ async function drawStamps(
       lc.scale(ev.scale, ev.scale);
       lc.drawImage(layer.lottie.seek(t - (layer.animStart ?? layer.start)), -w / 2, -h / 2, w, h);
       lc.restore();
-      stamps.fx.end(c);
-      if (dark) {
-        darkenCanvas(c, canvas.width, canvas.height, ev.brightness!);
-        ctx.drawImage(c.canvas, 0, 0);
-      }
+      stamps.fx.end(ctx);
       continue;
     }
     // Unkeyed, the bitmap bakes the element's own rotation/opacity and only
@@ -1388,11 +1359,9 @@ async function drawStamps(
       c.translate(-cx, -cy);
       c.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     };
-    // A blurred or streaking element poses into the scratch first and lands
-    // softened; a sharp one draws straight onto the frame. A hit that darkens
-    // needs a surface holding the element alone: the matte's, or the dark one.
+    // A blurred, streaking or darkening element poses into the scratch alone
+    // and lands softened or dimmed; a sharp one draws straight onto the frame.
     const look = elementLook(ev, scale);
-    const dark = ev.brightness !== undefined && ev.brightness < 1;
     const lay = (into: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => {
       const target = stamps.fx.begin(into, canvas.width, canvas.height, look);
       target.save();
@@ -1400,7 +1369,6 @@ async function drawStamps(
       posed(target);
       target.restore();
       stamps.fx.end(into);
-      if (dark) darkenCanvas(into, canvas.width, canvas.height, ev.brightness!);
     };
     if (subjectFront) {
       // Pose the stamp inside the matte surface, so the matte stays put in
@@ -1408,10 +1376,6 @@ async function drawStamps(
       // lands first and the matte trims after, so the person's edge stays
       // sharp over a moving element, as the preview shows it.
       ctx.drawImage(subject!.mattedStamp(layer.overlay, canvas.width, canvas.height, lay), 0, 0);
-    } else if (dark) {
-      const c = stamps.darkTarget();
-      lay(c);
-      ctx.drawImage(c.canvas, 0, 0);
     } else {
       lay(ctx);
     }
@@ -1437,7 +1401,7 @@ export class FramePainter {
   private readonly releaseMemory = holdMemory("exportReaders", () => {
     let n = 0;
     for (const r of this.readers.values()) n += canvasBytes(readerPoolFrames(r) * r.sourcePixels);
-    return n + this.stamps.scratchBytes();
+    return n + this.stamps.fx.bytes();
   });
   /** Frames drawn, which is the clock the readers' eviction order runs on. */
   private frameNo = 0;

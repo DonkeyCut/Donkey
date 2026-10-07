@@ -158,27 +158,6 @@ export interface PaintPhase {
 }
 
 /**
- * Multiply every color already on a surface by `brightness` (0..1), leaving
- * alpha alone: black laid source-atop at 1 - brightness. The surface has to
- * hold the element by itself, or whatever sits under it darkens too.
- */
-export function darkenCanvas(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  width: number,
-  height: number,
-  brightness: number
-): void {
-  if (!(brightness < 1)) return;
-  ctx.save();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalCompositeOperation = "source-atop";
-  ctx.globalAlpha = Math.min(1, 1 - Math.max(0, brightness));
-  ctx.fillStyle = "#000000";
-  ctx.fillRect(0, 0, width, height);
-  ctx.restore();
-}
-
-/**
  * A shape's pixel geometry in the output frame — the one place the fractions
  * become pixels, shared by the canvas painter and testable on its own.
  * Line/arrow thickness rides the shape's `h`; the arrow head scales with the
@@ -560,16 +539,19 @@ async function paintText(
   // as the preview's bar.
   const caretColor = phase?.caret ? (typeCaret(overlay.anim)?.color ?? overlay.color) : null;
   const alphaOf = ctx.globalAlpha;
+  // How far the type's top sits over a baseline, in the current font.
+  const ascentAt = (baseline: CanvasTextBaseline) => {
+    ctx.textBaseline = baseline;
+    return ctx.measureText("Hg").actualBoundingBoxAscent;
+  };
   const drawCaret = (right: number) => {
     if (!caretColor) return;
     const y = cy - totalH / 2 + lineH * (lines.length - 0.5);
     ctx.save();
     ctx.font = cssFont;
-    ctx.textBaseline = "alphabetic";
-    const base = ctx.measureText("Hg").actualBoundingBoxAscent;
+    const base = ascentAt("alphabetic");
     const xh = ctx.measureText("x").actualBoundingBoxAscent;
-    ctx.textBaseline = "middle";
-    const mid = ctx.measureText("Hg").actualBoundingBoxAscent;
+    const mid = ascentAt("middle");
     const off =
       Number.isFinite(base) && Number.isFinite(mid) && Number.isFinite(xh) ? base - mid - xh / 2 : 0;
     ctx.shadowColor = "transparent";
@@ -645,10 +627,6 @@ async function paintText(
   // gives the gap exactly, in whatever engine is drawing: the ascent is
   // reported from the alignment point, so the difference between the two is the
   // distance between them.
-  const ascentAt = (baseline: CanvasTextBaseline) => {
-    ctx.textBaseline = baseline;
-    return ctx.measureText("Hg").actualBoundingBoxAscent;
-  };
   const alphabetic = ascentAt("alphabetic");
   const middle = ascentAt("middle");
   const drop =
@@ -1420,6 +1398,9 @@ export interface OverlayFrameSet {
   entries: { image: number; duration: number }[];
 }
 
+/** How a sampled picture shows the typing bar. */
+type BarLook = "lit" | "dark";
+
 /**
  * Sample an animated element into frames at `fps`: the In and Out windows
  * frame by frame, the middle as one still (or one loop cycle, repeated by
@@ -1514,10 +1495,13 @@ export async function renderOverlayFrames(
   // Blur and motion blur paint the posed element into a scratch first.
   const fx = new ElementFx((w, h) => newCanvas(env, w, h));
 
-  const drawAt = async (tLocal: number): Promise<Blob> => {
+  // `bar` paints the typing bar lit or dark whatever `tLocal` says, so a
+  // cycle drawn once serves every blink it repeats under.
+  const drawAt = async (tLocal: number, bar?: BarLook): Promise<Blob> => {
     target.setTransform(1, 0, 0, 1, 0, 0);
     target.clearRect(0, 0, rw, rh);
     const ev = evalOverlayFrame(overlay, tLocal, width / height);
+    if (bar) ev.caret = bar === "lit";
     if (ev.opacity <= 0.001) return pngBlob(canvas, env); // fully transparent frame
     const ctx = fx.begin(target, rw, rh, elementLook(ev, scale)) as CanvasRenderingContext2D;
     ctx.globalAlpha = ev.opacity;
@@ -1545,9 +1529,6 @@ export async function renderOverlayFrames(
         maskTransform
       );
     }
-    // The region holds this element alone, so a hit's darkening lands on its
-    // own pixels.
-    if (ev.brightness !== undefined) darkenCanvas(ctx, rw, rh, ev.brightness);
     fx.end(target);
     return pngBlob(canvas, env);
   };
@@ -1561,22 +1542,12 @@ export async function renderOverlayFrames(
 
   const step = 1 / fps;
   const period = loopPeriod(anim) ?? lottieDur;
-  // A hit and a blinking bar change the middle at their own moments.
   const hit = hitWindow(anim, dur);
   const toggles = (overlay.kind ?? "text") === "text" ? caretToggles(anim, dur) : [];
-  const timed = !!hit || toggles.length > 0;
   // A keyframed pose, a camera, a move, or a keyframed mask changes on its
   // own schedule across the whole element, so there is no still middle and no cycle to
-  // repeat: sample the element frame by frame. So does a hit or a blink over
-  // a middle that already cycles.
-  if (
-    keyed ||
-    filmed ||
-    anim?.move ||
-    isMaskAnimated(overlay.mask) ||
-    (accent && anim?.loop) ||
-    (timed && (!!accent || !!period))
-  ) {
+  // repeat: sample the element frame by frame.
+  if (keyed || filmed || anim?.move || isMaskAnimated(overlay.mask) || (accent && anim?.loop)) {
     const n = Math.max(1, Math.round(dur * fps));
     for (let i = 0; i < n; i++) {
       await push(i * step, i === n - 1 ? dur - (n - 1) * step : step);
@@ -1594,63 +1565,86 @@ export async function renderOverlayFrames(
       await push(i * step, i === n - 1 ? inS - (n - 1) * step : step);
     }
   }
-  const middle = dur - inS - outS;
-  if (middle > 1e-3) {
-    if (timed && !accent && !period) {
-      // The middle holds still between the hit and the bar's turns: one
-      // picture per look (bar lit, bar dark), reused across every still
-      // piece, and the hit frame by frame.
-      const a0 = inS;
-      const b0 = dur - outS;
-      const cuts = [a0, b0, ...toggles];
-      if (hit) cuts.push(hit.start, hit.end);
-      const marks = [...new Set(cuts.filter((t) => t >= a0 && t <= b0))].sort((x, y) => x - y);
-      const stills = new Map<boolean, number>();
-      for (let i = 0; i + 1 < marks.length; i++) {
-        const a = marks[i];
-        const b = marks[i + 1];
-        if (b - a < 1e-4) continue;
-        if (hit && a >= hit.start - 1e-6 && b <= hit.end + 1e-6) {
-          const n = Math.max(1, Math.round((b - a) * fps));
-          for (let j = 0; j < n; j++) await push(a + j * step, j === n - 1 ? b - a - (n - 1) * step : step);
-          continue;
-        }
-        const lit = caretOn(anim, (a + b) / 2, dur) === true;
-        let image = stills.get(lit);
-        if (image === undefined) {
-          images.push(await drawAt((a + b) / 2));
-          image = images.length - 1;
-          stills.set(lit, image);
-        }
-        entries.push({ image, duration: b - a });
-      }
-    } else if (accent) {
-      // The picture changes as the effect walks the line, and nowhere else:
-      // one frame per span the engine says holds still covers the middle
-      // however long it runs. The last one absorbs the rounding, so the
-      // pieces sum to the middle exactly.
+  const a0 = inS;
+  const b0 = dur - outS;
+
+  // Pictures the middle reuses, by what they show: a word span or a cycle
+  // frame with the bar lit or dark.
+  const kept = new Map<string, number>();
+  const keep = async (key: string, t: number, bar?: BarLook): Promise<number> => {
+    let image = kept.get(key);
+    if (image === undefined) {
+      images.push(await drawAt(t, bar));
+      image = images.length - 1;
+      kept.set(key, image);
+    }
+    return image;
+  };
+
+  // The moment a cycle frame is drawn at, moved by whole periods off the
+  // hit, so the cycle repeated around the press never carries it.
+  const calm = (t: number): number => {
+    if (!hit || !period) return t;
+    for (let u = t; u < b0; u += period) if (u < hit.start || u >= hit.end) return u;
+    return t;
+  };
+
+  // One stretch of the middle between the hit and the bar's turns, drawn as
+  // the middle draws when nothing interrupts it: one frame per word span,
+  // one cycle repeated by reference, or one still.
+  const fill = async (a: number, b: number, bar?: BarLook) => {
+    if (accent) {
       const spans = wordSampleWindows((overlay as TextOverlay).text, accent, dur, fps)
-        .map((w) => ({ a: Math.max(inS, w.start), b: Math.min(dur - outS, w.end) }))
+        .map((w, i) => ({ i, a: Math.max(a, w.start), b: Math.min(b, w.end) }))
         .filter((w) => w.b - w.a > 1e-3);
-      if (spans.length > 0) spans[spans.length - 1].b = dur - outS;
-      for (const w of spans) await push((w.a + w.b) / 2, w.b - w.a);
-      if (spans.length === 0) await push(inS + middle / 2, middle);
-    } else if (period) {
-      // One cycle of pictures, repeated by reference to cover the middle.
+      if (spans.length === 0) {
+        entries.push({ image: await keep(`still:${bar}`, (a + b) / 2, bar), duration: b - a });
+        return;
+      }
+      // The last one absorbs the rounding, so the pieces sum to the stretch.
+      spans[0].a = a;
+      spans[spans.length - 1].b = b;
+      for (const w of spans) {
+        entries.push({ image: await keep(`word${w.i}:${bar}`, (w.a + w.b) / 2, bar), duration: w.b - w.a });
+      }
+      return;
+    }
+    if (period) {
+      // One cycle of pictures, repeated by reference, on the cycle's own
+      // clock from the middle's start.
       const n = Math.max(2, Math.min(Math.round(period * fps), 180));
       const cycleStep = period / n;
-      const cycleStart = images.length;
-      for (let j = 0; j < n; j++) images.push(await drawAt(inS + j * cycleStep));
-      let remaining = middle;
-      let j = 0;
-      while (remaining > 1e-4) {
-        const d = Math.min(cycleStep, remaining);
-        entries.push({ image: cycleStart + (j % n), duration: d });
-        remaining -= d;
-        j++;
+      let t = a;
+      while (b - t > 1e-4) {
+        const j = Math.floor((t - a0) / cycleStep + 1e-6);
+        const next = Math.min(b, a0 + (j + 1) * cycleStep);
+        const image = await keep(`cycle${j % n}:${bar}`, calm(a0 + (j % n) * cycleStep), bar);
+        entries.push({ image, duration: next - t });
+        t = next;
       }
-    } else {
-      await push(inS + middle / 2, middle);
+      return;
+    }
+    entries.push({ image: await keep(`still:${bar}`, (a + b) / 2, bar), duration: b - a });
+  };
+
+  // A hit and a blinking bar change the middle at their own moments: it is
+  // cut there, the hit plays frame by frame, and every stretch between fills
+  // as an uninterrupted middle would.
+  if (b0 - a0 > 1e-3) {
+    const cuts = [a0, b0, ...toggles];
+    if (hit) cuts.push(hit.start, hit.end);
+    const marks = [...new Set(cuts.filter((t) => t >= a0 && t <= b0))].sort((x, y) => x - y);
+    for (let i = 0; i + 1 < marks.length; i++) {
+      const a = marks[i];
+      const b = marks[i + 1];
+      if (b - a < 1e-4) continue;
+      if (hit && a >= hit.start - 1e-6 && b <= hit.end + 1e-6) {
+        const n = Math.max(1, Math.round((b - a) * fps));
+        for (let j = 0; j < n; j++) await push(a + j * step, j === n - 1 ? b - a - (n - 1) * step : step);
+        continue;
+      }
+      const on = caretOn(anim, (a + b) / 2, dur);
+      await fill(a, b, on === undefined ? undefined : on ? "lit" : "dark");
     }
   }
   if (outS > 1e-3) {
