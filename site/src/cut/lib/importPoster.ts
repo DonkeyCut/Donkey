@@ -9,7 +9,7 @@ export type ImportPosterFrame = { blob: Blob; width: number; height: number; dur
 
 /** A frame from the file, with the clip's display size so its tile can take the finished asset's shape. */
 export function importPoster(
-  file: Blob,
+  file: Blob | string,
   size: number,
   signal: AbortSignal,
 ): Promise<ImportPosterFrame> {

@@ -18,7 +18,9 @@ import {
   SPECIMEN_INK,
 } from "@/cut/lib/fontSpecimen";
 import { PeakStrip } from "./AudioPanel";
+import { ImportVideoPoster } from "./ImportVideoPoster";
 import { MediaTransport } from "./MediaTransport";
+import { showsNoPicture } from "@/cut/lib/videoPicture";
 import { cn } from "@/lib/utils";
 
 // The asset lightbox: the big version of a stock, generated, or chat asset
@@ -32,6 +34,9 @@ import { cn } from "@/lib/utils";
 // The shape a picture takes when the file reports none: a video with no
 // decodable picture, or media that fails to load.
 const FALLBACK_RATIO = 16 / 9;
+
+// The side of the square whose area a frame decoded for the viewer covers.
+const VIEWER_FRAME_SIZE = 720;
 
 export function Lightbox() {
   const item = useLightbox((s) => s.item);
@@ -227,7 +232,9 @@ function LightboxMedia({
   const mediaStyle = ratio ? { aspectRatio: ratio } : undefined;
 
   if (item.kind === "video") {
-    return <VideoBody item={item} ratio={ratio} style={mediaStyle} onRatio={onRatio} />;
+    // Keyed to the source: a copy swapped in for an undecodable master starts
+    // the element, and what it found, over.
+    return <VideoBody key={item.src} item={item} ratio={ratio} style={mediaStyle} onRatio={onRatio} />;
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- static/project image, client-only page
@@ -265,6 +272,10 @@ function VideoBody({
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(item.duration ?? 0);
   const [muted, setMuted] = useState(false);
+  // The element loaded with no picture — a ProRes master, which no browser's
+  // media element decodes. The sound still plays; the viewer shows a frame
+  // decoded from the file while the shelf makes a copy it can play.
+  const [blank, setBlank] = useState(false);
 
   const toggle = () => {
     const el = videoRef.current;
@@ -305,10 +316,35 @@ function VideoBody({
         onLoadedMetadata={(e) => {
           const el = e.currentTarget;
           setDuration(loadedDuration(el, item));
+          // A blank picture takes its shape from the decoded frame below.
+          if (showsNoPicture(el)) {
+            setBlank(true);
+            return;
+          }
           onRatio(ratioOf(el.videoWidth, el.videoHeight));
         }}
-        onError={() => onRatio(FALLBACK_RATIO)}
+        onError={(e) => {
+          if (showsNoPicture(e.currentTarget)) setBlank(true);
+          else onRatio(FALLBACK_RATIO);
+        }}
       />
+      {blank && !item.poster && (
+        <div className="pointer-events-none absolute inset-0">
+          <ImportVideoPoster
+            source={item.src}
+            name={item.name}
+            size={VIEWER_FRAME_SIZE}
+            onShape={(s) => onRatio(ratioOf(s.width, s.height))}
+            onUnreadable={() => onRatio(FALLBACK_RATIO)}
+          />
+        </div>
+      )}
+      {blank && (
+        <span className="pointer-events-none absolute top-3 left-3 flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[11px] text-white backdrop-blur-sm">
+          <Loader2 className="size-3 animate-spin" />
+          Preparing playback
+        </span>
+      )}
       <MediaTransport
         playing={playing}
         time={time}

@@ -166,7 +166,8 @@ export function LibraryImportCard({
         />
       ) : file && mediaType === "video" ? (
         <ImportVideoPoster
-          file={file}
+          source={file}
+          name={file.name}
           size={Math.ceil(Math.sqrt(area ?? LIBRARY_TILE_AREA))}
           onShape={measured}
           onFrame={setFrame}

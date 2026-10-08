@@ -15,10 +15,12 @@ import { useCutBase } from "@/cut/lib/nav";
 function Asset({ asset, token }: { asset: SharedLibraryAsset; token: string }) {
   const src = `/api/cut-shared/library/${encodeURIComponent(token)}/media/${encodeURIComponent(asset.id)}`;
   const poster = asset.hasPoster ? `${src}?poster=1` : undefined;
+  // A master the browser cannot decode plays from its copy; the download is the master.
+  const play = asset.hasProxy ? `${src}?proxy=1` : undefined;
   return <LibraryCard
     asset={{ ...asset, addedAt: 0, residency: "cloud" }}
     area={asset.type === "video" || asset.type === "image" ? LIBRARY_TILE_AREA : LIBRARY_AUDIO_TILE_AREA}
-    sharedMedia={{ src, poster, downloadHref: `${src}?download=1` }}
+    sharedMedia={{ src, play, poster, downloadHref: `${src}?download=1` }}
   />;
 }
 

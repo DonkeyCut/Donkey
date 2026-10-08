@@ -7,20 +7,27 @@ import { importPoster, type ImportPosterFrame } from "@/cut/lib/importPoster";
 import { holdMemory } from "@/cut/lib/memoryBudget";
 
 type Props = {
-  file: File;
+  /** The video: a dropped file, or a stored file's URL. */
+  source: Blob | string;
+  name: string;
   size: number;
   onShape?: (shape: { width: number; height: number }) => void;
   /** The decoded frame while the tile holds it, and undefined once it lets go. */
   onFrame?: (frame: ImportPosterFrame | undefined) => void;
+  /** No frame could be decoded from the video. */
+  onUnreadable?: () => void;
 };
 
-/** A local frame while the original file is being imported to any shelf. */
-export function ImportVideoPoster({ file, size, onShape, onFrame }: Props) {
+/** A frame decoded from the video itself, through the WASM decoder where the
+ * browser has none: what stands in for a clip still arriving on a shelf, or
+ * one whose media element cannot show its picture. */
+export function ImportVideoPoster({ source, name, size, onShape, onFrame, onUnreadable }: Props) {
   const [visible, setVisible] = useState(false);
   const [poster, setPoster] = useState<string>();
   const [unreadable, setUnreadable] = useState(false);
   const measured = useEffectEvent((shape: { width: number; height: number }) => onShape?.(shape));
   const framed = useEffectEvent((frame: ImportPosterFrame | undefined) => onFrame?.(frame));
+  const failed = useEffectEvent(() => onUnreadable?.());
   const ref = useCallback((node: HTMLDivElement | null) => {
     if (!node) return;
     const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
@@ -33,7 +40,7 @@ export function ImportVideoPoster({ file, size, onShape, onFrame }: Props) {
     const abort = new AbortController();
     let url: string | undefined;
     let release: (() => void) | undefined;
-    void importPoster(file, size, abort.signal).then((frame) => {
+    void importPoster(source, size, abort.signal).then((frame) => {
       if (abort.signal.aborted) return;
       const { blob, width, height } = frame;
       if (width && height) measured({ width, height });
@@ -43,7 +50,9 @@ export function ImportVideoPoster({ file, size, onShape, onFrame }: Props) {
       setPoster(url);
     }).catch(() => {
       // A missing local decoder leaves the import running on its chosen shelf.
-      if (!abort.signal.aborted) setUnreadable(true);
+      if (abort.signal.aborted) return;
+      setUnreadable(true);
+      failed();
     });
     return () => {
       abort.abort();
@@ -52,13 +61,13 @@ export function ImportVideoPoster({ file, size, onShape, onFrame }: Props) {
       setPoster(undefined);
       framed(undefined);
     };
-  }, [file, size, visible]);
+  }, [source, size, visible]);
 
   return (
     <div ref={ref} className="size-full">
       {poster ? (
         // eslint-disable-next-line @next/next/no-img-element -- local decoded frame
-        <img src={poster} alt={file.name} className="size-full object-cover" />
+        <img src={poster} alt={name} className="size-full object-cover" />
       ) : unreadable ? (
         <div className="flex size-full items-center justify-center bg-muted text-muted-foreground">
           <Film className="size-8" aria-label="Video" />

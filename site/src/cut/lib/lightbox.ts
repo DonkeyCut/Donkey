@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import type { AssetRef } from "./assetRef";
-import { libraryAssetName, libraryMediaUrl, libraryPosterUrl, type LibraryAsset } from "./library";
+import { libraryAssetName, libraryPlaybackUrl, libraryPosterUrl, type LibraryAsset } from "./library";
 import type { MediaAsset } from "./types";
 
 // The asset lightbox: a full-screen viewer opened from stock tiles, generated
@@ -72,7 +72,7 @@ export const lightboxItemFromLibrary = (
   bare = false,
 ): LightboxItem => ({
   kind: a.type,
-  src: libraryMediaUrl(a.fileName, a.residency),
+  src: libraryPlaybackUrl(a),
   // The title read off the clip is what it is called wherever it is shown, so
   // the viewer captions it that way and an import from here lands under it.
   name: libraryAssetName(a),

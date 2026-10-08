@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { isLinkedAssetType, type AssetType } from "@/cut/lib/types";
-import { Film, Image as ImageIcon, Music, Type } from "lucide-react";
+import { Film, Image as ImageIcon, Loader2, Music, Type } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CardActionsMenu } from "@/cut/components/CardActionsMenu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -11,6 +12,7 @@ import { RenameInput } from "@/cut/components/RenameInput";
 import { ShelfBadge } from "@/cut/components/ShelfBadge";
 import { AudioCardFace } from "@/cut/components/AudioPanel";
 import { CopyNameLabel } from "@/cut/components/AssetRefs";
+import { ImportVideoPoster } from "@/cut/components/ImportVideoPoster";
 import { FontSpecimen } from "@/cut/components/FontSpecimen";
 import { useInView } from "@/cut/hooks/useInView";
 import { useMediaFileSize } from "@/cut/hooks/useMediaFileSize";
@@ -19,7 +21,10 @@ import { setLibraryDragData } from "@/cut/lib/assetDrag";
 import { refFromLibrary } from "@/cut/lib/assetRef";
 import { openExternal } from "@/cut/lib/hostBridge";
 import { fileKind } from "@/cut/lib/media";
-import { libraryAssetName, libraryMediaUrl, libraryPosterUrl, downloadLibraryAsset, type LibraryAsset } from "@/cut/lib/library";
+import { libraryAssetName, libraryMediaUrl, libraryPlaybackUrl, libraryPosterUrl, downloadLibraryAsset, type LibraryAsset, type LibraryData } from "@/cut/lib/library";
+import { ensureLibraryProxy, libraryProxyKey, useLibraryProxies } from "@/cut/lib/libraryProxy";
+import { patchLibrary } from "@/cut/lib/queries";
+import { showsNoPicture } from "@/cut/lib/videoPicture";
 import { LUT_FILE_ICON, LUT_MARK_ICON } from "@/cut/lib/linkedLibrary";
 import { lightboxItemFromLibrary, type LightboxItem } from "@/cut/lib/lightbox";
 import { availableResidencies } from "@/cut/lib/residency";
@@ -35,7 +40,9 @@ export const LIBRARY_AUDIO_TILE_AREA = LIBRARY_TILE_AREA * 0.7 ** 2;
  * sounds, LUTs, fonts, notes and templates. */
 export const LIBRARY_SQUARE = Math.round(Math.sqrt(LIBRARY_AUDIO_TILE_AREA));
 
-type SharedMedia = { src: string; poster?: string; downloadHref: string };
+/** A share viewer's media URLs: the file, what plays when a copy stands in
+ * for an undecodable master, its cover, and the download. */
+type SharedMedia = { src: string; play?: string; poster?: string; downloadHref: string };
 
 /** A Library tile's box. Pictures take their own aspect at the shared area;
  * every other file is the square the sound tile is. Without an area the tile
@@ -193,9 +200,12 @@ export function LibraryCard({
   // metadata across the network the moment the page opened.
   const [tileRef, seen] = useInView<HTMLDivElement>();
   const src = sharedMedia?.src ?? libraryMediaUrl(a.fileName, a.residency);
+  // What the card and the viewer play: a master the browser cannot decode
+  // plays from its copy. The size pill and the download stay the master's.
+  const playSrc = sharedMedia ? (sharedMedia.play ?? sharedMedia.src) : libraryPlaybackUrl(a);
   const poster = sharedMedia ? sharedMedia.poster : libraryPosterUrl(a);
   const view = (): LightboxItem => sharedMedia ? {
-    kind: a.type, src, name: libraryAssetName(a), prompt: "", assetId: null, bare: true,
+    kind: a.type, src: playSrc, name: libraryAssetName(a), prompt: "", assetId: null, bare: true,
     duration: a.duration, poster, ...(a.width && a.height ? { ratio: a.width / a.height } : {}),
   } : lightboxItemFromLibrary(a, !onUse);
 
@@ -207,6 +217,23 @@ export function LibraryCard({
   // shimmering slab, so a clip that lands while the page is open takes its
   // place in the grid at once and resolves into itself a moment later.
   const [painted, setPainted] = useState(false);
+  // The source whose element loaded with no picture: a ProRes master, which
+  // no browser's media element decodes. The card shows a frame decoded from
+  // the file and asks its shelf for a playable copy, which becomes `playSrc`.
+  const [blankSrc, setBlankSrc] = useState<string>();
+  const blank = blankSrc === playSrc;
+  const client = useQueryClient();
+  const patch = useCallback(
+    (fn: (d: LibraryData) => LibraryData) => patchLibrary(client, fn),
+    [client],
+  );
+  const proxyState = useLibraryProxies((s) => s.jobs[libraryProxyKey(a)]);
+  const noPicture = (el: HTMLVideoElement) => {
+    if (!showsNoPicture(el)) return;
+    setBlankSrc(playSrc);
+    // A share viewer can't build anything on the owner's shelf.
+    if (!sharedMedia) void ensureLibraryProxy(a, patch);
+  };
   // The size pill only shows on hover, so the lookup waits for the first one.
   // A font wears its size in the footer at rest, so that one asks as it scrolls
   // into view.
@@ -322,7 +349,7 @@ export function LibraryCard({
                   <video
                     crossOrigin={MEDIA_CORS}
                     ref={videoRef}
-                    src={`${src}#t=${posterT}`}
+                    src={`${playSrc}#t=${posterT}`}
                     poster={poster}
                     muted
                     loop
@@ -331,9 +358,15 @@ export function LibraryCard({
                     className="size-full object-cover"
                     // Whichever lands first: a clip with a stored poster paints
                     // from that, one without paints its own first frame.
-                    onLoadedMetadata={() => setPainted(true)}
+                    onLoadedMetadata={(e) => {
+                      setPainted(true);
+                      noPicture(e.currentTarget);
+                    }}
                     onLoadedData={() => setPainted(true)}
-                    onError={() => setPainted(true)}
+                    onError={(e) => {
+                      setPainted(true);
+                      noPicture(e.currentTarget);
+                    }}
                   />
                   {/* The source's own cover — a video's thumbnail where it came
                       from — is the face at rest: the element's poster gives way as
@@ -351,6 +384,39 @@ export function LibraryCard({
                       onLoad={() => setPainted(true)}
                       onError={() => setPainted(true)}
                     />
+                  )}
+                  {blank && !poster && (
+                    <div data-drag-omit className="pointer-events-none absolute inset-0">
+                      <ImportVideoPoster
+                        source={playSrc}
+                        name={a.name}
+                        size={Math.ceil(Math.sqrt(area ?? LIBRARY_TILE_AREA))}
+                      />
+                    </div>
+                  )}
+                  {blank && proxyState && (
+                    // Where the playable copy stands: built while the card
+                    // shows a frame, or the reason none could be made.
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <span
+                              data-drag-omit
+                              className="absolute bottom-1.5 left-1.5 flex items-center gap-1 rounded-md bg-black/65 px-1.5 py-0.5 text-[10px] text-white"
+                            />
+                          }
+                        >
+                          {proxyState.kind === "making" && <Loader2 className="size-3 animate-spin" />}
+                          {proxyState.kind === "making" ? "Preparing" : "Can't play"}
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs">
+                          {proxyState.kind === "making"
+                            ? "Making a copy this browser can play"
+                            : proxyState.error}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   )}
                 </>
               )

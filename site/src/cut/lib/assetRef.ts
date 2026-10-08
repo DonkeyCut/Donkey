@@ -183,7 +183,8 @@ export const refFromLibrary = (a: LibraryAsset): AssetRef => ({
   // A ref outlives the session it was made in — it is saved with the chat
   // thread — so it carries the shelf route rather than a minted URL that
   // expires inside the hour.
-  url: libraryRouteUrl(a.fileName, a.residency),
+  // A master the browser cannot decode is shown and read through its copy.
+  url: libraryRouteUrl(a.proxyFile ?? a.fileName, a.residency),
   ...(isLinkedAssetType(a.type) ? {} : { duration: a.duration }),
   ...(a.width !== undefined ? { width: a.width } : {}),
   ...(a.height !== undefined ? { height: a.height } : {}),
