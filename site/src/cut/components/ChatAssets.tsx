@@ -80,7 +80,9 @@ export function ChatProjectAsset({ assetId }: { assetId: string }) {
 
 /** The assets a finished tool call produced, from its typed output fields:
  * `assetId` for landed media, `jobId` for a video render still in flight,
- * `stillAssetId` for a staged render's opening frame (shown above its job). */
+ * `stillAssetId` for a staged render's opening frame (shown above its job).
+ * A tool that only reads or points at existing media names it `id` or
+ * `sourceId`, so it gets no card. */
 export function ToolOutputAssets({ output }: { output: unknown }) {
   if (!output || typeof output !== "object") return null;
   const o = output as {

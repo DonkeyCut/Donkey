@@ -131,6 +131,7 @@ import { MentionedText, MentionTextarea, RefChips, RefThumb } from "./AssetRefs"
 import { ComposerQueue, type QueuedMessage } from "./ComposerQueue";
 import { DictationBody } from "./MicDictation";
 import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
+import { attachedRefKeys, cardIsAttached } from "@/cut/lib/chatCards";
 import { HostedErrorText } from "./hostedError";
 import { useMicTranscription } from "@/cut/lib/micTranscribe";
 
@@ -1345,6 +1346,9 @@ function ChatSession({
     () => visible ? recoverSceneCall(messages, threadId, savedScene) : messages,
     [messages, threadId, savedScene, visible],
   );
+  // What the user attached in this thread: an import of one of these needs no
+  // card of its own under the reply.
+  const attachedKeys = useMemo(() => attachedRefKeys(displayMessages), [displayMessages]);
 
   // The scene card is part of the conversation, not a pinned banner: it
   // renders right under the turn that planned the scene (the newest
@@ -2029,7 +2033,7 @@ function ChatSession({
           )}
           {displayMessages.map((m) => (
             <Fragment key={m.id}>
-              <MessageView message={m} />
+              <MessageView message={m} attachedKeys={attachedKeys} />
               {m.id === sceneAnchorId && <SceneCard threadId={threadId} />}
             </Fragment>
           ))}
@@ -2679,8 +2683,10 @@ function ThoughtBlock({ text }: { text: string }) {
 
 const MessageView = memo(function MessageView({
   message,
+  attachedKeys,
 }: {
   message: UIMessage;
+  attachedKeys: string;
 }) {
   // A continuation is the panel's own doing; the reply it brings reads as the
   // ask's reply.
@@ -2727,7 +2733,8 @@ const MessageView = memo(function MessageView({
     .filter((part) => part.type.startsWith("tool-") || part.type === "dynamic-tool")
     .map((part) => part as unknown as { state: string; output?: unknown })
     .filter((p) => p.state === "output-available")
-    .map((p) => p.output);
+    .map((p) => p.output)
+    .filter((o) => !cardIsAttached(o, attachedKeys));
   // The source's own words for anything the turn pulled off the web (a tweet's
   // body, a video's title/description). It renders as a quote beside the media
   // — straight from the tool output, so the model never has to retype it.

@@ -1104,7 +1104,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (asset.block) throw new ToolError("This placeholder has no source file.");
     const sizeBytes = asset.sizeBytes ?? await readMediaFileSize(asset.url);
     return {
-      assetId: asset.id, name: asset.name, fileName: asset.fileName, kind: asset.type,
+      id: asset.id, name: asset.name, fileName: asset.fileName, kind: asset.type,
       sizeBytes, fileSize: formatBytes(sizeBytes), duration: round2(asset.duration), width: asset.width, height: asset.height,
     };
   },
@@ -2301,7 +2301,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (video.type !== "video") throw new ToolError(`"${video.name}" is not a video.`);
       if (input.clear === true || input.audio_asset_id === null) {
         unbindRecording(video.id);
-        return { assetId: video.id, soundFrom: null, note: `"${video.name}" plays its own sound again.` };
+        return { id: video.id, soundFrom: null, note: `"${video.name}" plays its own sound again.` };
       }
       return syncVideoSound(s, video, input.audio_asset_id, clip);
   },
@@ -3333,7 +3333,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         id: next.id,
         kind: "clip",
-        assetId: asset.id,
+        sourceId: asset.id,
         name: asset.name,
         start: round2(next.start),
         lenBefore: round2(before),
@@ -3352,7 +3352,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         id: next.id,
         kind: "audio",
-        assetId: asset.id,
+        sourceId: asset.id,
         name: asset.name,
         start: round2(next.start),
         lenBefore: round2(before),
@@ -3366,7 +3366,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // A Lottie document animates and a still does not; the flag is read off
       // the source, so it moves with it or the export plays the wrong one.
       s.updateOverlay(overlay.id, { assetId: asset.id, lottie: isLottieAsset(asset) || undefined });
-      return { id: overlay.id, kind: "sticker", assetId: asset.id, name: asset.name };
+      return { id: overlay.id, kind: "sticker", sourceId: asset.id, name: asset.name };
     }
     throw new ToolError(
       `Nothing with id "${id}" carries a source. Clips, soundtrack clips and stickers do; text and shapes are edited with update_overlay.`
@@ -3955,6 +3955,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         duration: round2(vid || sfx ? asset.duration : IMAGE_CLIP_SECONDS),
         addedToTimeline: addToTimeline,
         clipId,
+        fromRef: { scope: "stock", id },
       };
   },
 
@@ -4319,6 +4320,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...(place
           ? { addedToTimeline: true, clip: placeAssetOnTimeline(asset, input) }
           : { addedToTimeline: false }),
+        fromRef: { scope: "library", id: lib.id },
       };
   },
 
@@ -5265,7 +5267,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       );
       const next = useEditor.getState().assets.find((a) => a.id === asset.id)!;
       return {
-        assetId: next.id,
+        id: next.id,
         profile: sourceProfileOf(next),
         detected,
         clips: useEditor.getState().clips.filter((c) => c.assetId === next.id).map((c) => c.id),
@@ -6272,8 +6274,10 @@ async function syncVideoSound(s: Editor, video: MediaAsset, audioId: unknown, cl
   const bound = await bindRecording(video.id, rec.id, clip).catch((e: unknown) => {
     throw new ToolError(e instanceof Error ? e.message : "Could not line the recording up.");
   });
+  const { assetId, ...rest } = bound;
   return {
-    ...bound,
+    id: assetId,
+    ...rest,
     note: `Every clip of "${video.name}" (${bound.clips} on the timeline) now plays "${rec.name}"; recording second = video second ${bound.offset < 0 ? "−" : "+"} ${Math.abs(bound.offset)}.${bound.refined ? "" : " Aligned to the nearest 20 ms; the waveforms had no sharp detail to place it closer."}`,
   };
 }
