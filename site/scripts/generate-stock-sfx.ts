@@ -710,6 +710,7 @@ const CATALOG: CatalogItem[] = [
     ["swipe-left", 0.6, "A fast swipe transition, a short airy slide to the left.", ["transition", "swipe", "slide", "left", "fast"]],
     ["swipe-right", 0.6, "A fast swipe transition, a short airy slide to the right.", ["transition", "swipe", "slide", "right", "fast"]],
     ["static-cut", 0.6, "A short burst of static as a cut, a TV channel change.", ["transition", "static", "cut", "channel", "tv"]],
+    ["tv-off", 1, "An old CRT television turning off: a loud burst of bright white-noise static that darkens fast, its highest hiss dying first, under a high electronic zap sweeping down in pitch to silence, all in under a second.", ["transition", "tv", "off", "crt", "power down"]],
     ["tape-rewind", 1.2, "A quick tape rewind squeal as a transition.", ["transition", "rewind", "tape", "squeal", "back"]],
     ["light-sweep", 1.2, "A light sweep transition, a soft shimmering pass.", ["transition", "light", "sweep", "shimmer", "pass"]],
     ["cinematic-boom-whoosh", 1.5, "A cinematic transition, a whoosh into a deep boom impact.", ["transition", "whoosh", "boom", "impact", "cinematic"]],
