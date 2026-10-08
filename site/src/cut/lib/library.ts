@@ -75,6 +75,10 @@ export interface LibraryAsset {
   fileName: string;
   /** Uploaded source retained when playback needs conversion. */
   originalFile?: string;
+  /** The playable copy of a master the browser cannot decode (a ProRes
+   * file): what the shelf's cards and viewer play. `fileName` stays the
+   * master, which a project copies. */
+  proxyFile?: string;
   name: string;
   type: AssetType;
   duration: number;
@@ -170,6 +174,11 @@ export const libraryMediaUrl = (fileName: string, residency: Residency) => {
   return libraryRouteUrl(fileName, residency);
 };
 
+/** The file a card or the viewer plays: the playable copy of a master the
+ * browser cannot decode, else the file itself. A project copies the master. */
+export const libraryPlaybackUrl = (a: Pick<LibraryAsset, "fileName" | "proxyFile" | "residency">) =>
+  libraryMediaUrl(a.proxyFile ?? a.fileName, a.residency);
+
 /** Mint edge URLs for everything a cloud listing names — media, covers, and
  * the files templates draw from. Best-effort: a shelf reads through the route
  * when this fails. */
@@ -177,7 +186,7 @@ async function mintCloudMediaUrls(shelf: LibraryData): Promise<void> {
   const files = [
     ...new Set(
       [
-        ...shelf.assets.flatMap((a) => [a.fileName, a.posterFile]),
+        ...shelf.assets.flatMap((a) => [a.fileName, a.posterFile, a.proxyFile]),
         ...shelf.templates.flatMap((t) => t.media.map((m) => m.fileName)),
       ].filter((f): f is string => !!f),
     ),

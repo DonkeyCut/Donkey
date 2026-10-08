@@ -101,6 +101,7 @@ export function createLibrarySharing(
         return [{ id: v.id, name: v.title || v.name, fileName: v.fileName, type: v.type, duration: v.duration,
           ...(v.width && v.height ? { width: v.width, height: v.height } : {}),
           ...(v.posterFile ? { hasPoster: true } : {}),
+          ...(v.proxyFile ? { hasProxy: true } : {}),
         }];
       });
       const body: SharedLibraryPage = {
@@ -125,12 +126,15 @@ export function createLibrarySharing(
         file: z.string().min(1).max(512).optional(),
         download: z.enum(["1"]).optional(),
         poster: z.enum(["1"]).optional(),
+        proxy: z.enum(["1"]).optional(),
         resolve: z.enum(["1"]).optional(),
       }).safeParse(Object.fromEntries(new URL(req.url).searchParams));
       if (!query.success) return err("Invalid media request.", 400);
       let folderId: string | null;
       let fileName: string;
       let mediaObjectId: string | undefined;
+      // The playable copy is an object of kind "proxy" beside the library's files.
+      let proxyFile: string | undefined;
       if (query.data.template) {
         if (query.data.poster || target.kind !== "folder" || query.data.template !== assetId) return err("Not found.", 404);
         const row = await db.cutTemplate.findFirst({ where: { id: assetId, userId: share.userId } });
@@ -151,6 +155,10 @@ export function createLibrarySharing(
           const posterFile = assetView(row, { fileName: "" }).posterFile;
           if (!posterFile) return err("Not found.", 404);
           fileName = posterFile;
+        } else if (query.data.proxy) {
+          proxyFile = assetView(row, { fileName: "" }).proxyFile;
+          if (!proxyFile) return err("Not found.", 404);
+          fileName = proxyFile;
         } else {
           mediaObjectId = row.mediaObjectId;
           fileName = "";
@@ -162,7 +170,8 @@ export function createLibrarySharing(
             select: { id: true, name: true, parentId: true } })))) return err("Not found.", 404);
       }
       const object = await db.cutMediaObject.findFirst({
-        where: { userId: share.userId, kind: "library", uploadState: "complete",
+        where: { userId: share.userId, kind: proxyFile ? "proxy" : "library", uploadState: "complete",
+          ...(proxyFile ? { projectId: null } : {}),
           ...(mediaObjectId ? { id: mediaObjectId } : { fileName }) },
       });
       if (!object) return err("Not found.", 404);

@@ -26,6 +26,8 @@ export type SharedLibraryAsset = {
   width?: number;
   height?: number;
   hasPoster?: boolean;
+  /** Whether the asset has a playable copy of an undecodable master. */
+  hasProxy?: boolean;
 };
 export type SharedLibraryPage = {
   name: string;

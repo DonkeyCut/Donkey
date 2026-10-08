@@ -55,6 +55,9 @@ type StoredAsset = {
   /** The source's cover image, stored beside the media and served by the same
    * route — an import from a site that publishes one carries it. */
   posterFile?: string;
+  /** The playable copy of a master this browser cannot decode (a ProRes
+   * file), built beside it; what the shelf's cards and viewer play. */
+  proxyFile?: string;
   /** A linked item's identity, computed by the page before the file was
    * shelved; a LUT's row also says what kind of table it holds. */
   contentKey?: string;
@@ -137,6 +140,7 @@ async function list(): Promise<Response> {
   for (const name of new Set([
     ...idx.assets.map((a) => a.fileName),
     ...idx.assets.flatMap((a) => (a.posterFile ? [a.posterFile] : [])),
+    ...idx.assets.flatMap((a) => (a.proxyFile ? [a.proxyFile] : [])),
     ...idx.templates.flatMap((t) => t.media.map((m) => m.fileName)),
   ])) {
     await register(name);
@@ -248,6 +252,7 @@ function takeAssets(idx: LibraryIndex, ids: ReadonlySet<string>): string[] {
     if (!ids.has(a.id)) return true;
     files.push(a.fileName);
     if (a.posterFile) files.push(a.posterFile);
+    if (a.proxyFile) files.push(a.proxyFile);
     return false;
   });
   return files;
@@ -283,6 +288,56 @@ async function removeAsset(id: string): Promise<Response> {
     return json({ ok: true });
   } catch (e) {
     return caught(e, "Could not delete.");
+  }
+}
+
+/**
+ * Build the playable copy of a video this browser cannot decode (a ProRes
+ * master) beside it, and name it on the asset: in this page when it has a
+ * 10-bit encoder, else on the Mac's engine when the app is there. With
+ * neither, the ask fails and says so.
+ */
+async function makeProxy(req: Request, id: string): Promise<Response> {
+  try {
+    const { maxHeight, crf } = (await req.json()) as { maxHeight?: number; crf?: number };
+    if (!Number.isFinite(maxHeight) || !Number.isFinite(crf)) return err("maxHeight and crf are required.", 400);
+    const asset = (await readIndex()).assets.find((a) => a.id === id);
+    if (!asset) return err("Library asset not found.", 404);
+    if (asset.type !== "video") return err("Only a video takes a playable copy.", 400);
+    const dir = await store.libraryMediaDir(true);
+    if (!dir) return err("Browser storage is unavailable.", 500);
+    if (asset.proxyFile && (await store.readFileAt(dir, asset.proxyFile))) return json(asset);
+    const master = await store.readFileAt(dir, asset.fileName);
+    if (!master) return err("Media file not found.", 404);
+
+    // Loaded on the ask: the encoder pulls in the decoders and the muxer.
+    const { encodeProxyInPage, proxyNameFor, proxyOnTheMac } = await import("../../proxyEncode");
+    const { probeMediaColor } = await import("../../mediaRead");
+    const { code } = await probeMediaColor(master);
+    const from = { matrix: code.matrix, fullRange: code.fullRange };
+    let fileName = (await encodeProxyInPage(master, from, dir, asset.fileName, maxHeight!, () => {}))?.fileName;
+    if (!fileName) {
+      const blob = await proxyOnTheMac(async () => master, asset.fileName, maxHeight!, crf!);
+      if (!blob) return err("This browser can't make a playable copy of this video. Open the Donkey app to make one.", 422);
+      fileName = await store.saveLibraryMedia(blob, proxyNameFor(asset.fileName));
+    }
+    const landed = fileName;
+    try {
+      // The asset may have been deleted while the copy was built.
+      const updated = await mutateIndex((idx) => {
+        const live = idx.assets.find((a) => a.id === id);
+        if (!live) throw new Error("Library asset not found.");
+        live.proxyFile = landed;
+        return live;
+      });
+      await register(landed);
+      return json(updated);
+    } catch (e) {
+      await dropFiles([landed]);
+      throw e;
+    }
+  } catch (e) {
+    return caught(e, "Could not make the playable copy.");
   }
 }
 
@@ -713,6 +768,9 @@ export async function dispatchLibraryRoute(
     // import-url, presign, complete: the cloud's, not this shelf's.
     return null;
   }
+
+  // /library/:id/proxy
+  if (rest.length === 2 && rest[1] === "proxy" && method === "POST") return makeProxy(req(), rest[0]);
 
   // /library/:id
   if (rest.length === 1 && method === "DELETE") return removeAsset(rest[0]);

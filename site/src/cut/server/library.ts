@@ -10,6 +10,7 @@ import { isLinkedAssetType, type AssetType } from "@/cut/lib/types";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
 import { mediaPath as projectMediaPath, readProject } from "./projects";
+import { makeProxy, proxyNameFor } from "./proxy";
 import { templateExtras } from "./templateExtras";
 import { exists, uniqueName, writeJsonAtomic } from "./util";
 
@@ -39,6 +40,10 @@ export interface LibraryAsset extends LinkedMeta {
   fileName: string;
   /** Uploaded source retained when playback needs conversion. */
   originalFile?: string;
+  /** The playable copy of a master the browser cannot decode (a ProRes
+   * file): what the shelf's cards and viewer play. `fileName` stays the
+   * master, which a project copies. */
+  proxyFile?: string;
   name: string;
   type: AssetType;
   duration: number;
@@ -416,6 +421,7 @@ function takeAssets(idx: LibraryIndex, ids: ReadonlySet<string>): string[] {
     files.push(a.fileName);
     if (a.posterFile) files.push(a.posterFile);
     if (a.originalFile) files.push(a.originalFile);
+    if (a.proxyFile) files.push(a.proxyFile);
     return false;
   });
   return files;
@@ -443,6 +449,41 @@ export async function removeAsset(id: string) {
     return takeAssets(idx, new Set([id]));
   });
   await removeFiles(files);
+}
+
+/** The copies being built, by asset id, so a second ask joins the first. */
+const proxyBuilds = new Map<string, Promise<LibraryAsset>>();
+
+/** Build the playable copy of a library video the browser cannot decode (a
+ * ProRes master) beside it, with the proxy code the project preview uses, and
+ * name it on the asset. An asset that already has one comes back as it is. */
+export function makeLibraryProxy(id: string, opts: { maxHeight: number; crf: number }): Promise<LibraryAsset> {
+  const running = proxyBuilds.get(id);
+  if (running) return running;
+  const build = (async () => {
+    const asset = (await readIndex()).assets.find((a) => a.id === id);
+    if (!asset) throw new Error("Library asset not found.");
+    if (asset.type !== "video") throw new Error("Only a video takes a playable copy.");
+    if (asset.proxyFile && (await exists(libMediaPath(asset.proxyFile)))) return asset;
+    const fileName = await freeName(proxyNameFor(asset.fileName));
+    const out = libMediaPath(fileName);
+    try {
+      const handle = { tmpDir: "", outPath: out, progress: 0, log: [] as string[] };
+      await makeProxy(handle, libMediaPath(asset.fileName), out, opts);
+      // The asset may have been deleted while the copy was built.
+      return await mutateIndex((idx) => {
+        const live = idx.assets.find((a) => a.id === id);
+        if (!live) throw new Error("Library asset not found.");
+        live.proxyFile = fileName;
+        return live;
+      });
+    } catch (error) {
+      await rm(out, { force: true });
+      throw error;
+    }
+  })().finally(() => proxyBuilds.delete(id));
+  proxyBuilds.set(id, build);
+  return build;
 }
 
 export function getAsset(id: string) {

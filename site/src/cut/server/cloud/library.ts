@@ -21,6 +21,8 @@ import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./medi
 import { getProject, takenMediaNames } from "./projects";
 import { copy, del, head, libraryKey, presignPut, projectMediaKey } from "./r2";
 import { addUsage, quotaCheck } from "./usage";
+import { renderJobCheck } from "./limits";
+import { wakeRenderWorker } from "./wake";
 import { libraryTypeOf } from "@/cut/lib/libraryFileType";
 import { itemName } from "@/cut/lib/itemName";
 import type { AssetType } from "@/cut/lib/types";
@@ -29,12 +31,22 @@ import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspiratio
 /** Cap on one signed-URL batch, matching the project media batch. */
 const PRESIGN_GET_BATCH_MAX = 500;
 
+/** The one job that builds an asset's playable copy, so a second ask joins it. */
+export const libraryProxyJobId = (assetId: string) => `library-proxy-${assetId}`;
+
+/** The objects under this account's library prefix: its files, and the
+ * playable copies (kind "proxy", no project) built beside them. */
+const LIBRARY_PREFIX_OBJECTS = { projectId: null, kind: { in: ["library", "proxy"] } };
+
 /** Descriptive fields the engine derives with ffprobe; the cloud stores them on
  * the row, supplied by the client (which probed in the browser) or copied from
  * the source project doc. */
 interface AssetMeta {
   name?: string;
   originalFile?: string;
+  /** File name of the playable copy of an undecodable master, a quota-exempt
+   * object (kind "proxy") under this account's library prefix. */
+  proxyFile?: string;
   /** The short name the titling model read off the clip itself, standing in
    * for the file's own name wherever the asset is shown. Written once, by
    * cloud/clipTitle.ts. */
@@ -89,7 +101,7 @@ type MediaObjectRow = {
 
 async function takenLibraryNames(userId: string): Promise<Set<string>> {
   const rows = await prisma.cutMediaObject.findMany({
-    where: { userId, kind: "library" },
+    where: { userId, ...LIBRARY_PREFIX_OBJECTS },
     select: { fileName: true },
   });
   return new Set(rows.map((r) => r.fileName));
@@ -104,6 +116,7 @@ export function assetView(
     id: row.id,
     fileName: obj.fileName,
     ...(meta.originalFile ? { originalFile: meta.originalFile } : {}),
+    ...(meta.proxyFile ? { proxyFile: meta.proxyFile } : {}),
     name: meta.name ?? obj.fileName,
     type: meta.type ?? libraryTypeOf(obj.fileName) ?? "video",
     duration: meta.duration ?? 0,
@@ -236,9 +249,15 @@ export async function deleteLibraryAssetCascade(
   const original = originalName
     ? await prisma.cutMediaObject.findFirst({ where: { userId, kind: "library", fileName: originalName } })
     : null;
-  const objects = [obj, poster, original].filter((o): o is NonNullable<typeof o> => !!o);
+  // The playable copy is derived from this asset alone, so it leaves too.
+  const proxyName = ((asset.meta ?? {}) as AssetMeta).proxyFile;
+  const proxy = proxyName
+    ? await prisma.cutMediaObject.findFirst({ where: { userId, projectId: null, kind: "proxy", fileName: proxyName } })
+    : null;
+  const objects = [obj, poster, original, proxy].filter((o): o is NonNullable<typeof o> => !!o);
+  // An exempt object never counted toward usage, so it frees nothing.
   const freed = objects
-    .filter((o) => o.uploadState === "complete")
+    .filter((o) => o.uploadState === "complete" && !o.quotaExempt)
     .reduce((n, o) => n + Number(o.bytes), 0);
   await prisma.$transaction(async (tx) => {
     if (opts?.tombstone) {
@@ -680,6 +699,43 @@ export const libraryCloud = {
     }
   },
 
+  /** Queue the playable copy of a library video the browser cannot decode.
+   * A row that already names one answers with itself, and a job already on
+   * its way answers with that job. */
+  async proxy(userId: string, id: string) {
+    try {
+      const asset = await prisma.cutLibraryAsset.findFirst({ where: { id, userId, deletedAt: null } });
+      if (!asset) return err("Library asset not found.", 404);
+      const obj = await prisma.cutMediaObject.findFirst({ where: { id: asset.mediaObjectId, userId } });
+      if (!obj) return err("Library asset not found.", 404);
+      const view = assetView(asset, obj);
+      if (view.type !== "video") return err("Only a video takes a playable copy.", 400);
+      if (view.proxyFile) return Response.json(view);
+      const jobId = libraryProxyJobId(id);
+      const existing = await prisma.cutRenderJob.findFirst({ where: { id: jobId, userId } });
+      if (existing && (existing.state === "queued" || existing.state === "running")) {
+        wakeRenderWorker();
+        return Response.json({ jobId });
+      }
+      const capped = await renderJobCheck(userId);
+      if (capped) return capped;
+      const spec = { target: "library", assetId: id } as Prisma.InputJsonValue;
+      if (existing) {
+        // A finished or failed run goes again under the same id.
+        await prisma.cutRenderJob.updateMany({
+          where: { id: jobId, userId },
+          data: { state: "queued", progress: 0, error: null, claimedAt: null, spec },
+        });
+      } else {
+        await prisma.cutRenderJob.create({ data: { id: jobId, userId, projectId: null, kind: "proxy", spec } });
+      }
+      wakeRenderWorker();
+      return Response.json({ jobId });
+    } catch (e) {
+      return caught(e, "Could not make the playable copy.");
+    }
+  },
+
   async remove(userId: string, id: string) {
     try {
       // Idempotent: a delete replayed from the iOS app's journal after the
@@ -714,7 +770,7 @@ export const libraryCloud = {
         ? await prisma.cutMediaObject.findMany({
             where: {
               userId,
-              kind: "library",
+              ...LIBRARY_PREFIX_OBJECTS,
               uploadState: "complete",
               fileName: { in: wanted },
             },

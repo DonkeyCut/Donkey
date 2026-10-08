@@ -10,6 +10,7 @@ import {
   listFolders,
   listLibrary,
   listTemplates,
+  makeLibraryProxy,
   moveItem,
   removeAsset,
   updateFolder,
@@ -101,6 +102,19 @@ export const libraryApi = {
       return Response.json(await renameTemplate(id, name ?? ""));
     } catch (e) {
       return caught(e, "Could not rename the template.");
+    }
+  },
+
+  /** Build the playable copy of a video the browser cannot decode. */
+  async proxy(req: Request, { id }: { id: string }) {
+    try {
+      const body = (await req.json()) as { maxHeight?: number; crf?: number };
+      if (!Number.isFinite(body.maxHeight) || !Number.isFinite(body.crf)) {
+        return err("maxHeight and crf are required.", 400);
+      }
+      return Response.json(await makeLibraryProxy(id, { maxHeight: body.maxHeight!, crf: body.crf! }));
+    } catch (e) {
+      return caught(e, "Could not make the playable copy.");
     }
   },
 

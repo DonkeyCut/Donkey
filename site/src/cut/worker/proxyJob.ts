@@ -8,6 +8,8 @@ import { probeDuration } from "../server/frames";
 import { dedupeName } from "../server/cloud/util";
 import { prisma, registerObject, unregisterObjects, type ClaimedJob } from "./db";
 import { deleteObjects, downloadToFile, mediaKey, uploadFile } from "./r2";
+import { runLibraryProxyJob } from "./libraryProxyJob";
+import type { LibraryAsset } from "../server/library";
 
 /** What a proxy job records in CutRenderJob.result — the same shape the
  * engine's synchronous proxy route returns. */
@@ -55,7 +57,11 @@ export async function runProxyJob(
   handle: RenderHandle,
   isCanceled: () => boolean,
   io: ProxyJobIO = defaultIO
-): Promise<ProxyResult> {
+): Promise<ProxyResult | LibraryAsset> {
+  // A library video's playable copy lands on the shelf, not in a project.
+  if ((job.spec as { target?: string } | null)?.target === "library") {
+    return runLibraryProxyJob(job, handle, isCanceled);
+  }
   const { file } = (job.spec ?? {}) as { file?: string };
   if (!file) throw new Error("Proxy job has no file.");
   const projectId = job.projectId;
