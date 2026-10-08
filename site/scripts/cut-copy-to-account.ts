@@ -6,8 +6,9 @@
  * so quota, usage and media rows land exactly as an in-app "Move to Cloud"
  * leaves them. The source folder is left alone.
  *
- * Run from site/ with production credentials in the environment:
- *   bun run scripts/cut-copy-to-account.ts "<project folder>" <email>
+ * Run from site/ against production. Bun loads .env.development unless
+ * NODE_ENV says otherwise, so the script refuses to run without it:
+ *   NODE_ENV=production bun run scripts/cut-copy-to-account.ts "<project folder>" <email>
  */
 
 import fs from "node:fs/promises";
@@ -20,7 +21,14 @@ import { prisma } from "../src/lib/prisma";
 
 const [dir, email] = process.argv.slice(2);
 if (!dir || !email) {
-  console.error('usage: bun run scripts/cut-copy-to-account.ts "<project folder>" <email>');
+  console.error('usage: NODE_ENV=production bun run scripts/cut-copy-to-account.ts "<project folder>" <email>');
+  process.exit(1);
+}
+
+// Without NODE_ENV=production, Bun reads .env.development and the copy lands
+// in the local database, where no real account sees it.
+if (process.env.NODE_ENV !== "production") {
+  console.error("Set NODE_ENV=production so the copy reaches the production database.");
   process.exit(1);
 }
 
