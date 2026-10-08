@@ -41,6 +41,7 @@ import { pollCloudJob } from "./cloudJob";
 import { cutColor } from "./colorSettings";
 import { uploadProjectMediaTo } from "./media";
 import { audioTrackOf, frameSinkIsCustom, openMedia, probeMediaFile, videoTrackOf } from "./mediaRead";
+import { encoderLead } from "./encoderLead";
 import { forgetLocalMediaUrl, storedMediaUrl } from "./mediaSync";
 import { ensureProresDecoder } from "./proresDecoder";
 import { convertPlanes, isPlanarFormat, planesPassThrough, proxySize } from "./proxyPlanes";
@@ -336,9 +337,13 @@ export async function proxyInPage(
         }
       }
       if (audio && audioSource) {
+        // Each sample goes in early by the encoder's priming, so the edit list
+        // trims it and the proxy's sound stays on its picture.
+        const lead = await encoderLead("aac", await audio.getSampleRate(), await audio.getNumberOfChannels());
         const sounds = new AudioSampleSink(audio);
         for await (const sample of sounds.samples()) {
           try {
+            sample.setTimestamp(sample.timestamp - lead);
             await audioSource.add(sample);
           } finally {
             sample.close();

@@ -1,8 +1,30 @@
 diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.cjs b/node_modules/mediabunny/dist/bundles/mediabunny.cjs
-index f984c84..39c0530 100644
+index f984c84..9c9d93a 100644
 --- a/node_modules/mediabunny/dist/bundles/mediabunny.cjs
 +++ b/node_modules/mediabunny/dist/bundles/mediabunny.cjs
-@@ -24644,11 +24644,13 @@ var Mediabunny = (() => {
+@@ -12381,6 +12381,21 @@ var Mediabunny = (() => {
+                 frameCount: flags & 1 /* FrameCount */ ? view2.getUint32(4, false) : null,
+                 fileSize: flags & 2 /* FileSize */ ? view2.getUint32(8, false) : null
+               };
++              // Gapless start (Donkey patch): the LAME/Lavc tag after the Xing fields
++              // holds the encoder delay, and the decoder adds 529 samples of priming on
++              // top. The audio starts after both, as ffmpeg plays it, so the first
++              // frames carry negative timestamps.
++              const tagAt = result.startPos + xingOffset + 8 + (flags & 1 ? 4 : 0) + (flags & 2 ? 4 : 0) + (flags & 4 ? 100 : 0) + (flags & 8 ? 4 : 0);
++              let tagSlice = this.reader.requestSlice(tagAt, 24);
++              if (isThenable(tagSlice)) tagSlice = await tagSlice;
++              if (tagSlice && this.nextTimestampInSamples === 0) {
++                const tag = readBytes(tagSlice, 24);
++                const id = String.fromCharCode(tag[0], tag[1], tag[2], tag[3]);
++                if (id === "LAME" || id === "Lavf" || id === "Lavc") {
++                  const delay = (tag[21] << 4) | (tag[22] >> 4);
++                  this.nextTimestampInSamples = -(delay + 529);
++                }
++              }
+             }
+           }
+           return;
+@@ -24644,11 +24659,13 @@ var Mediabunny = (() => {
      }
    };
    var computeMaxQueueSize = (decodedSampleQueueSize) => {
@@ -18,7 +40,7 @@ index f984c84..39c0530 100644
        this.codec = codec;
        this.decoderConfig = decoderConfig;
        this.rotation = rotation;
-@@ -24658,6 +24660,13 @@ var Mediabunny = (() => {
+@@ -24658,6 +24675,13 @@ var Mediabunny = (() => {
        this.customDecoder = null;
        this.customDecoderCallSerializer = new CallSerializer();
        this.customDecoderQueueSize = 0;
@@ -32,7 +54,7 @@ index f984c84..39c0530 100644
        this.inputTimestamps = [];
        // Timestamps input into the decoder, sorted.
        this.sampleQueue = [];
-@@ -24689,6 +24698,17 @@ var Mediabunny = (() => {
+@@ -24689,6 +24713,17 @@ var Mediabunny = (() => {
            if (!(sample instanceof VideoSample)) {
              throw new TypeError("The argument passed to onSample must be a VideoSample.");
            }
@@ -50,7 +72,7 @@ index f984c84..39c0530 100644
            this.finalizeAndEmitSample(sample);
          };
          this.customDecoder.onError = (error) => {
-@@ -24744,6 +24764,7 @@ var Mediabunny = (() => {
+@@ -24744,6 +24779,7 @@ var Mediabunny = (() => {
          const stack = new Error("Decoding error").stack;
          this.decoder = new VideoDecoder({
            output: (frame) => {
@@ -58,7 +80,7 @@ index f984c84..39c0530 100644
              try {
                colorHandler(frame);
              } catch (error) {
-@@ -24760,13 +24781,10 @@ var Mediabunny = (() => {
+@@ -24760,13 +24796,10 @@ var Mediabunny = (() => {
      }
      getDecodeQueueSize() {
        if (this.customDecoder) {
@@ -74,7 +96,7 @@ index f984c84..39c0530 100644
        }
      }
      decode(packet) {
-@@ -24824,6 +24842,13 @@ var Mediabunny = (() => {
+@@ -24824,6 +24857,13 @@ var Mediabunny = (() => {
              }
            }
          }
@@ -88,7 +110,7 @@ index f984c84..39c0530 100644
          this.decoder.decode(packet.toEncodedVideoChunk());
          this.decodeAlphaData(packet);
        }
-@@ -24940,6 +24965,49 @@ var Mediabunny = (() => {
+@@ -24940,6 +24980,49 @@ var Mediabunny = (() => {
        sample.setFlip(this.flip);
        this.onSample(sample);
      }
@@ -138,7 +160,7 @@ index f984c84..39c0530 100644
      async mergeAlpha(color, alpha) {
        const resolver = promiseWithResolvers();
        this.mergeAlphaPromises.push(resolver.promise);
-@@ -24968,6 +25036,11 @@ var Mediabunny = (() => {
+@@ -24968,6 +25051,11 @@ var Mediabunny = (() => {
      async flush() {
        if (this.customDecoder) {
          await this.customDecoderCallSerializer.call(() => this.customDecoder.flush());
@@ -150,7 +172,7 @@ index f984c84..39c0530 100644
        } else {
          assert(this.decoder);
          await Promise.all([
-@@ -24992,6 +25065,7 @@ var Mediabunny = (() => {
+@@ -24992,6 +25080,7 @@ var Mediabunny = (() => {
          }
          this.sampleQueue.length = 0;
        }
@@ -158,7 +180,7 @@ index f984c84..39c0530 100644
        this.currentPacketIndex = 0;
        this.raslSkipped = false;
      }
-@@ -25248,6 +25322,18 @@ var Mediabunny = (() => {
+@@ -25248,6 +25337,18 @@ var Mediabunny = (() => {
      if (decoderOptions.optimizeForLatency !== void 0 && typeof decoderOptions.optimizeForLatency !== "boolean") {
        throw new TypeError("decoderOptions.optimizeForLatency, when provided, must be a boolean.");
      }
@@ -177,7 +199,7 @@ index f984c84..39c0530 100644
    };
    var VideoSampleSink = class extends BaseMediaSampleSink {
      /** Creates a new {@link VideoSampleSink} for the given {@link InputVideoTrack}. */
-@@ -25276,12 +25362,19 @@ var Mediabunny = (() => {
+@@ -25276,12 +25377,19 @@ var Mediabunny = (() => {
        let decoderConfig = await this._track.getDecoderConfig();
        const timeResolution = await this._track.getTimeResolution();
        assert(codec && decoderConfig);
@@ -200,10 +222,32 @@ index f984c84..39c0530 100644
      /** @internal */
      _createPacketSink() {
 diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.mjs b/node_modules/mediabunny/dist/bundles/mediabunny.mjs
-index e675b1f..fc4477d 100644
+index e675b1f..5a114ed 100644
 --- a/node_modules/mediabunny/dist/bundles/mediabunny.mjs
 +++ b/node_modules/mediabunny/dist/bundles/mediabunny.mjs
-@@ -24487,11 +24487,13 @@ var BaseMediaSampleSink = class {
+@@ -12224,6 +12224,21 @@ var Mp3Demuxer = class extends Demuxer {
+               frameCount: flags & 1 /* FrameCount */ ? view2.getUint32(4, false) : null,
+               fileSize: flags & 2 /* FileSize */ ? view2.getUint32(8, false) : null
+             };
++            // Gapless start (Donkey patch): the LAME/Lavc tag after the Xing fields
++            // holds the encoder delay, and the decoder adds 529 samples of priming on
++            // top. The audio starts after both, as ffmpeg plays it, so the first
++            // frames carry negative timestamps.
++            const tagAt = result.startPos + xingOffset + 8 + (flags & 1 ? 4 : 0) + (flags & 2 ? 4 : 0) + (flags & 4 ? 100 : 0) + (flags & 8 ? 4 : 0);
++            let tagSlice = this.reader.requestSlice(tagAt, 24);
++            if (isThenable(tagSlice)) tagSlice = await tagSlice;
++            if (tagSlice && this.nextTimestampInSamples === 0) {
++              const tag = readBytes(tagSlice, 24);
++              const id = String.fromCharCode(tag[0], tag[1], tag[2], tag[3]);
++              if (id === "LAME" || id === "Lavf" || id === "Lavc") {
++                const delay = (tag[21] << 4) | (tag[22] >> 4);
++                this.nextTimestampInSamples = -(delay + 529);
++              }
++            }
+           }
+         }
+         return;
+@@ -24487,11 +24502,13 @@ var BaseMediaSampleSink = class {
    }
  };
  var computeMaxQueueSize = (decodedSampleQueueSize) => {
@@ -219,7 +263,7 @@ index e675b1f..fc4477d 100644
      this.codec = codec;
      this.decoderConfig = decoderConfig;
      this.rotation = rotation;
-@@ -24501,6 +24503,13 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24501,6 +24518,13 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
      this.customDecoder = null;
      this.customDecoderCallSerializer = new CallSerializer();
      this.customDecoderQueueSize = 0;
@@ -233,7 +277,7 @@ index e675b1f..fc4477d 100644
      this.inputTimestamps = [];
      // Timestamps input into the decoder, sorted.
      this.sampleQueue = [];
-@@ -24532,6 +24541,17 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24532,6 +24556,17 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
          if (!(sample instanceof VideoSample)) {
            throw new TypeError("The argument passed to onSample must be a VideoSample.");
          }
@@ -251,7 +295,7 @@ index e675b1f..fc4477d 100644
          this.finalizeAndEmitSample(sample);
        };
        this.customDecoder.onError = (error) => {
-@@ -24587,6 +24607,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24587,6 +24622,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
        const stack = new Error("Decoding error").stack;
        this.decoder = new VideoDecoder({
          output: (frame) => {
@@ -259,7 +303,7 @@ index e675b1f..fc4477d 100644
            try {
              colorHandler(frame);
            } catch (error) {
-@@ -24603,13 +24624,10 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24603,13 +24639,10 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
    }
    getDecodeQueueSize() {
      if (this.customDecoder) {
@@ -275,7 +319,7 @@ index e675b1f..fc4477d 100644
      }
    }
    decode(packet) {
-@@ -24667,6 +24685,13 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24667,6 +24700,13 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
            }
          }
        }
@@ -289,7 +333,7 @@ index e675b1f..fc4477d 100644
        this.decoder.decode(packet.toEncodedVideoChunk());
        this.decodeAlphaData(packet);
      }
-@@ -24783,6 +24808,49 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24783,6 +24823,49 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
      sample.setFlip(this.flip);
      this.onSample(sample);
    }
@@ -339,7 +383,7 @@ index e675b1f..fc4477d 100644
    async mergeAlpha(color, alpha) {
      const resolver = promiseWithResolvers();
      this.mergeAlphaPromises.push(resolver.promise);
-@@ -24811,6 +24879,11 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24811,6 +24894,11 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
    async flush() {
      if (this.customDecoder) {
        await this.customDecoderCallSerializer.call(() => this.customDecoder.flush());
@@ -351,7 +395,7 @@ index e675b1f..fc4477d 100644
      } else {
        assert(this.decoder);
        await Promise.all([
-@@ -24835,6 +24908,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
+@@ -24835,6 +24923,7 @@ var VideoDecoderWrapper = class extends DecoderWrapper {
        }
        this.sampleQueue.length = 0;
      }
@@ -359,7 +403,7 @@ index e675b1f..fc4477d 100644
      this.currentPacketIndex = 0;
      this.raslSkipped = false;
    }
-@@ -25091,6 +25165,18 @@ var validateVideoSinkDecoderOptions = (decoderOptions) => {
+@@ -25091,6 +25180,18 @@ var validateVideoSinkDecoderOptions = (decoderOptions) => {
    if (decoderOptions.optimizeForLatency !== void 0 && typeof decoderOptions.optimizeForLatency !== "boolean") {
      throw new TypeError("decoderOptions.optimizeForLatency, when provided, must be a boolean.");
    }
@@ -378,7 +422,7 @@ index e675b1f..fc4477d 100644
  };
  var VideoSampleSink = class extends BaseMediaSampleSink {
    /** Creates a new {@link VideoSampleSink} for the given {@link InputVideoTrack}. */
-@@ -25119,12 +25205,19 @@ var VideoSampleSink = class extends BaseMediaSampleSink {
+@@ -25119,12 +25220,19 @@ var VideoSampleSink = class extends BaseMediaSampleSink {
      let decoderConfig = await this._track.getDecoderConfig();
      const timeResolution = await this._track.getTimeResolution();
      assert(codec && decoderConfig);
@@ -401,10 +445,32 @@ index e675b1f..fc4477d 100644
    /** @internal */
    _createPacketSink() {
 diff --git a/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs b/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
-index c828e19..ecf530c 100644
+index c828e19..d0af8d1 100644
 --- a/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
 +++ b/node_modules/mediabunny/dist/bundles/mediabunny.node.cjs
-@@ -24650,8 +24650,10 @@ var Mediabunny = (() => {
+@@ -12378,6 +12378,21 @@ var Mediabunny = (() => {
+                 frameCount: flags & 1 /* FrameCount */ ? view2.getUint32(4, false) : null,
+                 fileSize: flags & 2 /* FileSize */ ? view2.getUint32(8, false) : null
+               };
++              // Gapless start (Donkey patch): the LAME/Lavc tag after the Xing fields
++              // holds the encoder delay, and the decoder adds 529 samples of priming on
++              // top. The audio starts after both, as ffmpeg plays it, so the first
++              // frames carry negative timestamps.
++              const tagAt = result.startPos + xingOffset + 8 + (flags & 1 ? 4 : 0) + (flags & 2 ? 4 : 0) + (flags & 4 ? 100 : 0) + (flags & 8 ? 4 : 0);
++              let tagSlice = this.reader.requestSlice(tagAt, 24);
++              if (isThenable(tagSlice)) tagSlice = await tagSlice;
++              if (tagSlice && this.nextTimestampInSamples === 0) {
++                const tag = readBytes(tagSlice, 24);
++                const id = String.fromCharCode(tag[0], tag[1], tag[2], tag[3]);
++                if (id === "LAME" || id === "Lavf" || id === "Lavc") {
++                  const delay = (tag[21] << 4) | (tag[22] >> 4);
++                  this.nextTimestampInSamples = -(delay + 529);
++                }
++              }
+             }
+           }
+           return;
+@@ -24650,8 +24665,10 @@ var Mediabunny = (() => {
      return decodedSampleQueueSize === 0 ? 40 : 8;
    };
    var VideoDecoderWrapper = class extends DecoderWrapper {
@@ -416,7 +482,7 @@ index c828e19..ecf530c 100644
        this.codec = codec;
        this.decoderConfig = decoderConfig;
        this.rotation = rotation;
-@@ -24661,6 +24663,12 @@ var Mediabunny = (() => {
+@@ -24661,6 +24678,12 @@ var Mediabunny = (() => {
        this.customDecoder = null;
        this.customDecoderCallSerializer = new CallSerializer();
        this.customDecoderQueueSize = 0;
@@ -429,7 +495,7 @@ index c828e19..ecf530c 100644
        this.inputTimestamps = [];
        // Timestamps input into the decoder, sorted.
        this.sampleQueue = [];
-@@ -24692,6 +24700,17 @@ var Mediabunny = (() => {
+@@ -24692,6 +24715,17 @@ var Mediabunny = (() => {
            if (!(sample instanceof VideoSample)) {
              throw new TypeError("The argument passed to onSample must be a VideoSample.");
            }
@@ -447,7 +513,7 @@ index c828e19..ecf530c 100644
            this.finalizeAndEmitSample(sample);
          };
          this.customDecoder.onError = (error) => {
-@@ -24763,7 +24782,7 @@ var Mediabunny = (() => {
+@@ -24763,7 +24797,7 @@ var Mediabunny = (() => {
      }
      getDecodeQueueSize() {
        if (this.customDecoder) {
@@ -456,7 +522,7 @@ index c828e19..ecf530c 100644
        } else {
          assert(this.decoder);
          return Math.max(
-@@ -24827,6 +24846,12 @@ var Mediabunny = (() => {
+@@ -24827,6 +24861,12 @@ var Mediabunny = (() => {
              }
            }
          }
@@ -469,7 +535,7 @@ index c828e19..ecf530c 100644
          this.decoder.decode(packet.toEncodedVideoChunk());
          this.decodeAlphaData(packet);
        }
-@@ -24943,6 +24968,49 @@ var Mediabunny = (() => {
+@@ -24943,6 +24983,49 @@ var Mediabunny = (() => {
        sample.setFlip(this.flip);
        this.onSample(sample);
      }
@@ -519,7 +585,7 @@ index c828e19..ecf530c 100644
      async mergeAlpha(color, alpha) {
        const resolver = promiseWithResolvers();
        this.mergeAlphaPromises.push(resolver.promise);
-@@ -24971,6 +25039,11 @@ var Mediabunny = (() => {
+@@ -24971,6 +25054,11 @@ var Mediabunny = (() => {
      async flush() {
        if (this.customDecoder) {
          await this.customDecoderCallSerializer.call(() => this.customDecoder.flush());
@@ -531,7 +597,7 @@ index c828e19..ecf530c 100644
        } else {
          assert(this.decoder);
          await Promise.all([
-@@ -25251,6 +25324,18 @@ var Mediabunny = (() => {
+@@ -25251,6 +25339,18 @@ var Mediabunny = (() => {
      if (decoderOptions.optimizeForLatency !== void 0 && typeof decoderOptions.optimizeForLatency !== "boolean") {
        throw new TypeError("decoderOptions.optimizeForLatency, when provided, must be a boolean.");
      }
@@ -550,7 +616,7 @@ index c828e19..ecf530c 100644
    };
    var VideoSampleSink = class extends BaseMediaSampleSink {
      /** Creates a new {@link VideoSampleSink} for the given {@link InputVideoTrack}. */
-@@ -25279,12 +25364,19 @@ var Mediabunny = (() => {
+@@ -25279,12 +25379,19 @@ var Mediabunny = (() => {
        let decoderConfig = await this._track.getDecoderConfig();
        const timeResolution = await this._track.getTimeResolution();
        assert(codec && decoderConfig);
@@ -841,3 +907,29 @@ index 9465e3b..4af78f2 100644
      }
      /** @internal */
      _createPacketSink() {
+diff --git a/node_modules/mediabunny/dist/modules/src/mp3/mp3-demuxer.js b/node_modules/mediabunny/dist/modules/src/mp3/mp3-demuxer.js
+index a7b3aa6..7cd67f4 100644
+--- a/node_modules/mediabunny/dist/modules/src/mp3/mp3-demuxer.js
++++ b/node_modules/mediabunny/dist/modules/src/mp3/mp3-demuxer.js
+@@ -103,6 +103,21 @@ export class Mp3Demuxer extends Demuxer {
+                                 ? view.getUint32(8, false)
+                                 : null,
+                         };
++                        // Gapless start (Donkey patch): the LAME/Lavc tag after the Xing fields
++                        // holds the encoder delay, and the decoder adds 529 samples of priming on
++                        // top. The audio starts after both, as ffmpeg plays it, so the first
++                        // frames carry negative timestamps.
++                        const tagAt = result.startPos + xingOffset + 8 + (flags & 1 ? 4 : 0) + (flags & 2 ? 4 : 0) + (flags & 4 ? 100 : 0) + (flags & 8 ? 4 : 0);
++                        let tagSlice = this.reader.requestSlice(tagAt, 24);
++                        if (isThenable(tagSlice)) tagSlice = await tagSlice;
++                        if (tagSlice && this.nextTimestampInSamples === 0) {
++                          const tag = readBytes(tagSlice, 24);
++                          const id = String.fromCharCode(tag[0], tag[1], tag[2], tag[3]);
++                          if (id === "LAME" || id === "Lavf" || id === "Lavc") {
++                            const delay = (tag[21] << 4) | (tag[22] >> 4);
++                            this.nextTimestampInSamples = -(delay + 529);
++                          }
++                        }
+                     }
+                 }
+                 return;
