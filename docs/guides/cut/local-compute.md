@@ -55,7 +55,7 @@ Imports and the assistant's conversion tool prepare playable H.264/AAC media thr
 
 ## ProRes masters and preview proxies
 
-ProRes is the one format kept as shot. The master stays in the project and is what every export reads; beside it lands a 10-bit HEVC preview proxy, carried into the Rec.709 matrix and tagged so that every decoder draws its values untouched. The asset's color record still describes the master, so the grade is the same picture either way. The proxy is built where the project lives — the engine for a Mac project, the worker for a cloud one (quota-exempt; the master counts), and for a browser project the page itself when it can encode 10-bit frames (Chrome; WebKit cannot), else the Mac when the app is there. Until it lands, and on a browser that can make none, the preview decodes the master through a WASM decoder: the same picture, slower. That is the one fallback, and the Color panel says so.
+ProRes is the one format kept as shot. The master stays in the project and every export reads it; beside it lands a 10-bit HEVC preview proxy carried into Rec.709 and tagged so every decoder draws its values untouched, while the asset's color record still describes the master. The proxy is built where the project lives: the engine on a Mac, the worker in the cloud, and in a browser the page itself when it can encode 10-bit frames, else the Mac. Until it lands the preview decodes the master through a WASM decoder, the one fallback, and the Color panel says so. A library video gets the same proxy on its shelf when a card shows no picture; cards and the viewer play it, and projects still copy the master.
 
 ## Rules
 
