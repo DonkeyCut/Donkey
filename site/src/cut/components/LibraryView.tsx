@@ -882,6 +882,7 @@ export function LibraryView() {
                         area={tile.pending.mediaType === "video" || tile.pending.mediaType === "image" ? TILE_AREA : audioArea}
                         onRetry={() => retryPending(tile.pending)}
                         onDismiss={() => dropPending(tile.pending.id)}
+                        opensOn="click"
                       />
                     );
                   const a = tile.asset;

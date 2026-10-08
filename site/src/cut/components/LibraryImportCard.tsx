@@ -18,6 +18,7 @@ import {
   libraryTileBox,
 } from "@/cut/components/LibraryCard";
 import { lutFileName } from "@/cut/lib/library";
+import type { ImportPosterFrame } from "@/cut/lib/importPoster";
 import { openLocalImport } from "@/cut/lib/localImportPreview";
 import { setLibraryImportShape, type LibraryArrival } from "@/cut/lib/libraryIntake";
 import { fileKind } from "@/cut/lib/media";
@@ -32,6 +33,7 @@ export function LibraryImportCard({
   onRetry,
   onDismiss,
   onUse,
+  opensOn = "doubleClick",
 }: {
   item: LibraryArrival;
   /** The finished card's area; unset, the tile fills its grid cell. */
@@ -39,9 +41,14 @@ export function LibraryImportCard({
   onRetry: () => void;
   onDismiss: () => void;
   onUse?: () => void;
+  /** The gesture that opens the viewer: a click on the library page, where a
+   * click opens every card, and a double-click in the editor's panel. */
+  opensOn?: "click" | "doubleClick";
 }) {
   const elapsed = useElapsed(item.error ? null : item.startedAt);
   const [previewUrl, setPreviewUrl] = useState<string>();
+  // The clip's decoded frame and length while its poster holds them.
+  const [frame, setFrame] = useState<ImportPosterFrame>();
   const file = item.file;
   const mediaType = item.mediaType;
   const font = mediaType === "font";
@@ -49,8 +56,15 @@ export function LibraryImportCard({
   const canPreview = !!file && !!previewKind && !item.error;
   // Only media goes on a timeline; a font or LUT is used from its own menu.
   const use = canPreview ? onUse : undefined;
+  // The viewer opens at the shape the tile measured, wearing the frame the
+  // tile shows, so it looks like the finished asset from the first paint.
   const openPreview = () => {
-    if (file && previewKind) openLocalImport(file, previewKind);
+    if (!file || !previewKind) return;
+    openLocalImport(file, previewKind, {
+      ...item.shape,
+      duration: frame?.duration,
+      poster: frame?.blob,
+    });
   };
   const tileRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -90,7 +104,8 @@ export function LibraryImportCard({
       role={canPreview ? "button" : undefined}
       tabIndex={canPreview ? 0 : undefined}
       aria-label={canPreview ? `Preview ${item.name}` : undefined}
-      onDoubleClick={canPreview ? openPreview : undefined}
+      onClick={canPreview && opensOn === "click" ? openPreview : undefined}
+      onDoubleClick={canPreview && opensOn === "doubleClick" ? openPreview : undefined}
       onKeyDown={canPreview ? (event) => {
         if (event.target !== event.currentTarget) return;
         if (event.key !== "Enter" && event.key !== " ") return;
@@ -150,7 +165,12 @@ export function LibraryImportCard({
           onLoad={(event) => measured({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
         />
       ) : file && mediaType === "video" ? (
-        <ImportVideoPoster file={file} size={Math.ceil(Math.sqrt(area ?? LIBRARY_TILE_AREA))} onShape={measured} />
+        <ImportVideoPoster
+          file={file}
+          size={Math.ceil(Math.sqrt(area ?? LIBRARY_TILE_AREA))}
+          onShape={measured}
+          onFrame={setFrame}
+        />
       ) : file && !mediaType ? (
         <div className="flex size-full flex-col items-center justify-center gap-2 text-muted-foreground">
           <FileIcon className="size-8" />
