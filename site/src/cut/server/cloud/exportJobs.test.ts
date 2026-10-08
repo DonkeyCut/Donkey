@@ -75,3 +75,17 @@ test("a released plain render leaves a registered stems zip of the same name", a
   await jobsCloud.exportClientRelease("u", "j");
   expect(deleted).toEqual(["cut/u/p/exports/Trip.mp4"]);
 });
+
+test("a released plain render leaves the unregistered stems of an export still landing", async () => {
+  // "Trip.mov" with stems has uploaded "Trip stems.zip" and not completed;
+  // the plain "Trip.mp4" fails and gives its name back.
+  job = { id: "j", kind: "export", projectId: "p", outName: "Trip.mp4", state: "running", spec: { client: true } };
+  await jobsCloud.exportClientRelease("u", "j");
+  expect(deleted).toEqual(["cut/u/p/exports/Trip.mp4"]);
+});
+
+test("a released render with stems takes its own unregistered stems", async () => {
+  job = { id: "j", kind: "export", projectId: "p", outName: "Trip.mp4", state: "running", spec: { client: true, stems: true } };
+  await jobsCloud.exportClientRelease("u", "j");
+  expect(deleted).toEqual(["cut/u/p/exports/Trip.mp4", "cut/u/p/exports/Trip stems.zip"]);
+});

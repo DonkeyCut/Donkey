@@ -140,14 +140,15 @@ async function exportByteCeiling(userId: string): Promise<number | null> {
  * it: the bytes have no media row, so nothing else would ever find them. */
 async function dropUnregisteredExport(
   userId: string,
-  row: Pick<JobRow, "projectId" | "outName">
+  row: Pick<JobRow, "projectId" | "outName" | "spec">
 ): Promise<void> {
   if (!row.projectId || !row.outName) return;
 
-  // Stems land before the file and go with it. Each key is weighed on its own:
-  // a plain export can share its stems' name with a zip an older export
-  // registered, and that zip stays.
-  const keys = [row.outName, stemsArchiveName(row.outName)].map((name) => projectExportKey(userId, row.projectId!, name));
+  // Stems land before the file and go with it, for a render that asked for
+  // them. A plain export's stems name can belong to another export's zip,
+  // registered or still landing, and that zip stays.
+  const names = jobWantsStems(row.spec) ? [row.outName, stemsArchiveName(row.outName)] : [row.outName];
+  const keys = names.map((name) => projectExportKey(userId, row.projectId!, name));
   const registered = await prisma.cutMediaObject.findMany({
     where: { r2Key: { in: keys } },
     select: { r2Key: true },
@@ -717,7 +718,10 @@ export const jobsCloud = {
    */
   async exportClientRelease(userId: string, jobId: string) {
     try {
-      const row = await findJob(userId, jobId);
+      const row = await prisma.cutRenderJob.findFirst({
+        where: { id: jobId, userId },
+        select: { ...jobRowSelect, spec: true },
+      });
       if (row && row.kind === "export" && (row.state === "running" || row.state === "queued")) {
         await dropUnregisteredExport(userId, row);
         await prisma.cutRenderJob.updateMany({
@@ -793,7 +797,11 @@ export const jobsCloud = {
       (r) => r.state === "running" && r.claimedAt === null && r.updatedAt.getTime() < staleBefore
     );
     for (const row of stale) {
-      await dropUnregisteredExport(userId, row).catch(() => {});
+      // The spec says whether the render landed stems; only these few rows read it.
+      await prisma.cutRenderJob
+        .findUnique({ where: { id: row.id }, select: { spec: true } })
+        .then((found) => (found ? dropUnregisteredExport(userId, { ...row, spec: found.spec }) : undefined))
+        .catch(() => {});
       await prisma.cutRenderJob
         .updateMany({ where: { id: row.id, state: "running" }, data: { state: "dismissed" } })
         .catch(() => {});
