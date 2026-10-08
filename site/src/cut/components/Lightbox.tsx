@@ -29,8 +29,15 @@ import { cn } from "@/lib/utils";
 // loads; audio gets a waveform player and text files render formatted
 // (markdown, CSV table, plain text).
 
+// The shape a picture takes when the file reports none: a video with no
+// decodable picture, or media that fails to load.
+const FALLBACK_RATIO = 16 / 9;
+
 export function Lightbox() {
   const item = useLightbox((s) => s.item);
+  // The shape the media reported on load, for an item opened without one.
+  // Keyed to its src, so the next item starts unmeasured.
+  const [measured, setMeasured] = useState<{ src: string; ratio: number } | null>(null);
   const [adding, setAdding] = useState(false);
   // Keyed to the added item's src, so opening a different item clears the
   // "Added" confirmation without a reset effect.
@@ -98,8 +105,13 @@ export function Lightbox() {
   // With a known aspect the dialog width follows it — capped so the media
   // stays within 68vh tall and 860px/92vw wide — and the media box carries the
   // same ratio, so nothing shifts when the file loads. Audio and text use
-  // fixed reading widths instead.
-  const ratio = item.ratio;
+  // fixed reading widths instead. A picture opened without an aspect stays
+  // hidden until the file reports one, so the viewer only ever shows the
+  // media at its own shape.
+  const ratio = item.ratio ?? (measured?.src === item.src ? measured.ratio : undefined);
+  const picture = item.kind === "video" || item.kind === "image";
+  const unshaped = picture && !ratio;
+  const onRatio = (r: number) => setMeasured({ src: item.src, ratio: r });
   const width =
     item.kind === "audio"
       ? "min(92vw, 480px)"
@@ -119,7 +131,7 @@ export function Lightbox() {
       onClick={() => useLightbox.getState().close()}
     >
       <div
-        className="relative flex max-h-full flex-col gap-3"
+        className={cn("relative flex max-h-full flex-col gap-3", unshaped && "invisible")}
         style={{ width }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -131,7 +143,7 @@ export function Lightbox() {
           <X className="size-4" />
         </button>
 
-        <LightboxMedia item={item} ratio={ratio} />
+        <LightboxMedia item={item} ratio={ratio} onRatio={onRatio} />
 
         {!item.bare && (
           <div className="flex min-h-0 flex-col gap-3 overflow-y-auto">
@@ -197,9 +209,12 @@ export function Lightbox() {
 function LightboxMedia({
   item,
   ratio,
+  onRatio,
 }: {
   item: LightboxItem;
   ratio?: number;
+  /** Reports the media's own width ÷ height once it loads. */
+  onRatio: (ratio: number) => void;
 }) {
   if (item.kind === "audio") return <AudioBody item={item} />;
   if (item.kind === "text") return <TextBody item={item} />;
@@ -212,7 +227,7 @@ function LightboxMedia({
   const mediaStyle = ratio ? { aspectRatio: ratio } : undefined;
 
   if (item.kind === "video") {
-    return <VideoBody item={item} ratio={ratio} style={mediaStyle} />;
+    return <VideoBody item={item} ratio={ratio} style={mediaStyle} onRatio={onRatio} />;
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element -- static/project image, client-only page
@@ -222,6 +237,8 @@ function LightboxMedia({
       alt={item.name}
       className={mediaClass}
       style={mediaStyle}
+      onLoad={(e) => onRatio(ratioOf(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight))}
+      onError={() => onRatio(FALLBACK_RATIO)}
     />
   );
 }
@@ -232,10 +249,12 @@ function VideoBody({
   item,
   ratio,
   style,
+  onRatio,
 }: {
   item: LightboxItem;
   ratio?: number;
   style?: { aspectRatio: number };
+  onRatio: (ratio: number) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   // Playing is what the element reports, never what was asked of it: an
@@ -283,7 +302,12 @@ function VideoBody({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(loadedDuration(e.currentTarget, item))}
+        onLoadedMetadata={(e) => {
+          const el = e.currentTarget;
+          setDuration(loadedDuration(el, item));
+          onRatio(ratioOf(el.videoWidth, el.videoHeight));
+        }}
+        onError={() => onRatio(FALLBACK_RATIO)}
       />
       <MediaTransport
         playing={playing}
@@ -301,6 +325,11 @@ function VideoBody({
       />
     </div>
   );
+}
+
+/** Width ÷ height of loaded media, or the fallback when it reports no size. */
+function ratioOf(width: number, height: number) {
+  return width && height ? width / height : FALLBACK_RATIO;
 }
 
 /** The length the transport runs on once the file's metadata is in: what the
