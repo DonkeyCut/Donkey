@@ -11,7 +11,8 @@ export default function robots(): MetadataRoute.Robots {
     rules: {
       userAgent: "*",
       allow: "/",
-      disallow: ["/api/", "/app/", "/sign-in", "/sign-up", "/unsubscribe"],
+      // Auth pages stay crawlable so Google can read their noindex metadata.
+      disallow: ["/api/", "/app/", "/unsubscribe"],
     },
     sitemap: `${DONKEYCUT_CANONICAL}/sitemap.xml`,
   };

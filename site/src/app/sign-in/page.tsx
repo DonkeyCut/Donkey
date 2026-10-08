@@ -5,6 +5,8 @@ import { AuthPage, type AuthSearchParams } from "@/app/_components/landing/AuthP
 export const metadata: Metadata = {
   title: "Log in | Donkey",
   description: "Log in to Donkey Cut.",
+  // Crawlers can follow the public links while keeping login out of search.
+  robots: { index: false, follow: true },
 };
 
 export const instant = true;
