@@ -5,6 +5,9 @@ import DonkeyRuntime
 import DonkeyUI
 import ScreenCaptureKit
 
+/// How long a quit waits on a movie still finalizing before it goes through anyway.
+private let quitDeadline: Duration = .seconds(15)
+
 /// Coordinates the whole screen-recording flow: the menu bar toggle, the center-bottom control bar,
 /// the region/window pickers, and the recorder. It is the single source of truth — the menu bar glyph
 /// and the control bar both render from this controller's state, so a click on either surface routes
@@ -39,8 +42,9 @@ final class ScreenRecordingController {
     private var windowSizeTask: Task<Void, Never>?
     private var recordingStart: Date?
     private var timer: Timer?
-    /// Quits waiting on the movie in flight, answered once it is written or abandoned.
-    private var quitWaiters: [@MainActor () -> Void] = []
+    /// Quits waiting on the movie in flight, answered once it is written or abandoned, or after
+    /// `quitDeadline` when finalizing stalls.
+    private let quitWaiters = QuitWaiters(deadline: quitDeadline)
 
     init() {
         model.onSelectMode = { [weak self] mode in self?.selectMode(mode) }
@@ -106,14 +110,12 @@ final class ScreenRecordingController {
             return
         }
 
-        quitWaiters.append(done)
+        quitWaiters.add(done)
         stopRecording()
     }
 
     private func releaseQuit() {
-        let waiters = quitWaiters
-        quitWaiters = []
-        waiters.forEach { $0() }
+        quitWaiters.release()
     }
 
     // MARK: - Arm / cancel
