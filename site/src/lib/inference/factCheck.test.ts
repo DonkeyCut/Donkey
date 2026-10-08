@@ -191,4 +191,17 @@ describe("factCheckRequestSchema", () => {
     expect(factCheckRequestSchema.safeParse({ claims: ["A"], extra: 1 }).success).toBe(false);
     expect(factCheckRequestSchema.safeParse({ claims: ["x".repeat(501)] }).success).toBe(false);
   });
+
+  test("tidies what a model sends: spacing, blank and repeated claims, a long context", () => {
+    const parsed = factCheckRequestSchema.safeParse({
+      claims: ["  The  tower is\n300 m ", "   ", "The tower is 300 m"],
+      context: " " + "c".repeat(2500),
+    });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.claims).toEqual(["The tower is 300 m"]);
+    // The context keeps its first 2000 characters, the contract's cap.
+    expect(parsed.data?.context?.length).toBe(2000);
+    expect(factCheckRequestSchema.safeParse({ claims: ["  ", ""] }).success).toBe(false);
+    expect(factCheckRequestSchema.safeParse({ claims: ["A"], context: "  " }).data?.context).toBeUndefined();
+  });
 });

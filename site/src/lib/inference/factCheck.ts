@@ -13,10 +13,21 @@ const FACT_CONTEXT_MAX_CHARS = 2000;
 /** The most claims a request may carry. The tool schema teaches the same cap. */
 export const FACT_CLAIMS_MAX = 12;
 
+/** Claims as a model writes them, tidied before the cap applies: runs of
+ * whitespace collapse, blank claims drop, and repeats are checked once. */
+const tidyClaims = (claims: string[]) => [...new Set(claims.map((c) => c.replace(/\s+/g, " ").trim()).filter(Boolean))];
+
 export const factCheckRequestSchema = z
   .object({
-    claims: z.array(z.string().trim().min(1).max(FACT_CLAIM_MAX_CHARS)).min(1).max(FACT_CLAIMS_MAX),
-    context: z.string().trim().max(FACT_CONTEXT_MAX_CHARS).optional(),
+    claims: z
+      .array(z.string())
+      .transform(tidyClaims)
+      .pipe(z.array(z.string().max(FACT_CLAIM_MAX_CHARS)).min(1).max(FACT_CLAIMS_MAX)),
+    // A long context keeps its opening, and a blank one is left out.
+    context: z
+      .string()
+      .transform((c) => c.trim().slice(0, FACT_CONTEXT_MAX_CHARS) || undefined)
+      .optional(),
   })
   .strict();
 
