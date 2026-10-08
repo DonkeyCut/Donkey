@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { planAnimatedLayers } from "@donkeycut/effects-kit";
 import { foldClips } from "./audioMix";
-import { bitrateFor, mixSpecFor } from "./exportRender";
+import { bitrateFor, exportFrameAt, mixSpecFor } from "./exportRender";
 import type { ExportDoc } from "./renderSnapshot";
 import type { MediaAsset, VideoClip } from "./types";
 
@@ -165,4 +166,40 @@ describe("bitrateFor by delivery", () => {
     expect(bitrateFor({ ...base, codec: "h264", bitrate: 1_234_000 })).toBe(1_234_000);
     expect(bitrateFor({ ...base, codec: "prores4444", bitrate: 1_234_000 })).not.toBe(1_234_000);
   });
+});
+
+describe("exportFrameAt", () => {
+  // A title whose glyph ramps the kit cuts at every output frame: each frame
+  // of the render reads the window that starts on that frame, the moment the
+  // preview shows there.
+  const title = {
+    id: "t",
+    kind: "text",
+    text: "READY?",
+    start: 2.8333,
+    end: 3.7,
+    x: 0.5,
+    y: 0.5,
+    anim: { in: { style: "glitch", seconds: 0.3 }, out: { style: "flicker", seconds: 0.5 } },
+  } as Parameters<typeof planAnimatedLayers>[0];
+  const layers = planAnimatedLayers(title, title.end);
+
+  const starts: [string, number][] = [
+    ["from the start", 0],
+    ["from a range start", 2.1],
+  ];
+  for (const [label, from] of starts) {
+    test(`each frame lands in its own window ${label}`, () => {
+      const first = Math.ceil(title.start * 30 - 1e-3);
+      for (let k = first; k / 30 < title.end - 1e-6; k++) {
+        const t = exportFrameAt(from, k - Math.round(from * 30), 30);
+        const layer = layers.find((l) => l.start <= t && t < l.end);
+        expect(layer).toBeDefined();
+        expect(Math.abs(t - k / 30)).toBeLessThan(1e-9);
+        if (k / 30 > title.end - 0.5) {
+          expect(layer!.start).toBeCloseTo(k / 30, 9);
+        }
+      }
+    });
+  }
 });

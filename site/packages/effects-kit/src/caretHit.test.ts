@@ -7,6 +7,7 @@ import {
   evalOverlayAnim,
   hasOverlayAnim,
   hitWindow,
+  OVERLAY_HIT_DEFAULT_SECONDS,
   OVERLAY_HIT_STYLE_IDS,
   type OverlayAnim,
 } from "./anim";
@@ -140,6 +141,12 @@ describe("the press", () => {
     expect(hitWindow(press(true), 4)).toEqual({ start: 1, end: 1.3 });
     expect(hitWindow({ hit: { style: "press", at: 3.9, seconds: 0.3 } }, 4)!.end).toBe(4);
     expect(hitWindow({ hit: { style: "gone", at: 1, seconds: 0.3 } }, 4)).toBeNull();
+  });
+
+  test("a stored press without seconds plays for the default length", () => {
+    const bare = { hit: { style: "press", at: 1 } } as unknown as OverlayAnim;
+    expect(hitWindow(bare, 4)).toEqual({ start: 1, end: 1 + OVERLAY_HIT_DEFAULT_SECONDS });
+    expect(evalOverlayAnim(bare, 1.1, 4)).not.toEqual(evalOverlayAnim(bare, 2, 4));
   });
 
   test("darkenCanvas multiplies color and leaves alpha", () => {

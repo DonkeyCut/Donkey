@@ -34,6 +34,21 @@ import {
   MASK_RADIUS_MAX,
   PEN_MIN_POINTS,
   CLIP_EFFECT_IDS,
+  FLASH_RHYTHMS,
+  FLASH_RATE_MAX,
+  FLASH_RATE_MIN,
+  FLASH_TONES,
+  TEXT_WEIGHTS,
+  TEXT_TEXTURES,
+  DOODLE_INKS_MAX,
+  LETTER_SPACING_MAX,
+  LETTER_SPACING_MIN,
+  PATTERN_KINDS,
+  SHADOW_BLUR_MAX,
+  SHADOW_OFFSET_MAX,
+  STRIPE_GAP_MAX,
+  STRIPE_LINE_MAX,
+  STRIPE_LINE_MIN,
 } from "@donkeycut/effects-kit";
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { builtinLutCatalogText } from "@/cut/lib/builtinLuts";
@@ -105,7 +120,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_overlay",
     description:
-      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/fill_opacity/radius/stroke; stickers take w/h. Every kind takes name, timing, position, rotation, opacity, blur, motion blur, hidden. This is the tool for 'make this text better' requests too. Pass ids to land one change on several elements at once (a group, every title in a run): fields a kind lacks are skipped on that element, and the whole write is one undo step.",
+      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/inks/fill_opacity/radius/stroke/pattern/shadow; stickers take w/h. A shadow on a title or shape takes color, blur, opacity and offset; a colored shadow at shadow_y 0 is a glow. Every kind takes name, timing, position, rotation, opacity, blur, motion blur, hidden. This is the tool for 'make this text better' requests too. Pass ids to land one change on several elements at once (a group, every title in a run): fields a kind lacks are skipped on that element, and the whole write is one undo step.",
     inputSchema: obj({
       id: str("Overlay element id"),
       ids: { type: "array", items: { type: "string" }, description: "Several element ids to change together (instead of id)" },
@@ -118,19 +133,38 @@ export const INSPECTOR_TOOLS = [
       size: num("Font size px at 1080w (titles)"),
       color: str("CSS text color (titles)"),
       font: str("Font id (titles; see the graphics skill)"),
-      weight: { type: "number", enum: [400, 700], description: "Font weight (titles)" },
+      weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Font weight (titles): 400 regular, 700 bold, 800 extra bold, 900 black" },
       italic: bool("Italic (titles)"),
       align: { type: "string", enum: ["left", "center", "right"], description: "Multi-line alignment (titles)" },
-      letter_spacing: num("Tracking in em (titles; 0 = normal)"),
+      letter_spacing: num(`Tracking in em, ${LETTER_SPACING_MIN}..${LETTER_SPACING_MAX} (titles; 0 = normal, negative sets display type tight)`),
       line_height: num("Line height multiplier (titles; default 1.25)"),
       wrap_width: num("Text box width as a frame-width fraction, 0.01..2; 0 restores auto width. Text wraps and height follows content."),
-      shadow: bool("Drop shadow (titles)"),
+      shadow: bool("Drop shadow on or off (titles and shapes); the shadow_* fields switch it on"),
+      shadow_color: str("Shadow hex color, e.g. #00E5FF (titles and shapes)"),
+      shadow_blur: num(`Shadow blur, px at 1080, 0..${SHADOW_BLUR_MAX} (titles and shapes)`),
+      shadow_opacity: num("Shadow opacity 0..1 (titles and shapes)"),
+      shadow_y: num(`Shadow drop, px at 1080, -${SHADOW_OFFSET_MAX}..${SHADOW_OFFSET_MAX}; 0 with a bright color makes a glow (titles and shapes)`),
       plate: bool("Backdrop plate (titles)"),
+      texture: {
+        type: "string",
+        enum: [...TEXT_TEXTURES, "none"],
+        description: 'Titles: grain inside the letters: "stipple" breaks each letter into spray-paint specks along its left edge, solid by its middle (the gritty teaser title); "none" makes the type solid again',
+      },
       w: num("Width, fraction of frame width (shapes/stickers)"),
       h: num("Height, fraction of frame height (shapes/stickers; a sticker's 0 returns it to the source's aspect)"),
       fill: str("Fill color (shapes)"),
+      inks: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: DOODLE_INKS_MAX,
+        description: `Doodle shapes: up to ${DOODLE_INKS_MAX} more paints beside the fill; each mark takes one of them or the fill. The list replaces the old one; [] leaves the fill alone`,
+      },
       fill_opacity: num("Fill opacity 0..1 (rect/ellipse)"),
       radius: num("Rect corner radius, px at 1080 short side"),
+      pattern: { type: "string", enum: [...PATTERN_KINDS, "none"], description: 'Shapes (not line/arrow): the fill color laid as a pattern clipped to the outline — "stripes" are parallel lines with clear gaps (a loading bar); "none" makes the fill solid' },
+      pattern_width: num(`Stripe line thickness, px at 1080, ${STRIPE_LINE_MIN}..${STRIPE_LINE_MAX} (default 2)`),
+      pattern_gap: num(`Clear space between stripes, px at 1080, 0..${STRIPE_GAP_MAX} (default 1)`),
+      pattern_angle: num("Stripe direction in degrees clockwise, -90..90; 0 = vertical lines"),
       stroke_color: str("Outline color — text or shape"),
       stroke_width: num("Outline width: em for titles (0..0.15), px at 1080 for shapes; 0 removes it"),
       rotation: num("Degrees clockwise, -180..180 (0 clears)"),
@@ -205,13 +239,13 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_clip_keyframes",
     description:
-      "Give a video clip (any track) a keyframed pose track: each key is a whole pose at a time measured in seconds from the clip's own start — center position in frame fractions, scale multiplier on its fitted size, rotation, opacity — moving linearly between keys and holding outside them. Omitted fields on a key take the clip's pose at that moment. Pass an empty list to clear the track and return the clip to its region. Use for pans, push-ins, picture-in-picture flights, spins, and fades on video itself.",
+      `Give a video clip (any track) a keyframed pose track: each key is a whole pose at a time measured in seconds from the clip's own start — center position in frame fractions, scale multiplier on its fitted size, rotation, opacity, blur — moving linearly between keys and holding outside them. Omitted fields on a key take the clip's pose at that moment. Pass an empty list to clear the track and return the clip to its region. Use for pans, push-ins, picture-in-picture flights, spins, and fades on video itself. blur softens the picture (px at the 1080 short side, 0..${ELEMENT_BLUR_MAX}); motion_blur streaks the picture along its keyed movement, so a panel that flies in with blur keyed from high to 0 and a shutter on lands as a smear that settles sharp.`,
     inputSchema: obj(
       {
         clipId: str("Video clip id"),
         keys: {
           type: "array",
-          description: "Keys in any order; two at the same time collapse to one",
+          description: "Keys in any order; two at the same time collapse to one; omit to keep the track and change only the motion blur",
           items: obj(
             {
               t: num("Seconds from the clip's start"),
@@ -220,12 +254,15 @@ export const INSPECTOR_TOOLS = [
               scale: num("Size multiplier, 1 = the clip's fitted size (0.1..4)"),
               rotation: num("Degrees clockwise, -180..180"),
               opacity: num("0..1"),
+              blur: num(`Blur, px at the 1080 short side, 0..${ELEMENT_BLUR_MAX}`),
             },
             ["t"]
           ),
         },
+        motion_blur: bool("Streak the clip along its keyed movement while it moves (true starts at the default shutter); false switches it off; omitted keeps it"),
+        shutter: num("Motion blur shutter, 0.05..1 of a 30fps frame (0.5 is the usual half-open shutter); setting it switches motion blur on"),
       },
-      ["clipId", "keys"]
+      ["clipId"]
     ),
   },
   {
@@ -365,7 +402,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_clip_effects",
     description:
-      `Set the effects a video clip wears over its own picture (${CLIP_EFFECT_IDS.join(", ")}). They treat that clip alone — inside its mask, under its pose — for its whole length, on the clip's own clock: a masked copy over the shot wearing negative and huecycle shows a color-cycling negative window while the shot around it plays untouched. add_effect places an element that treats the whole frame under its window. Pass the full list in order; [] removes them all. amount 0.05..1 (default 0.5) is the strength; for huecycle it is how fast the hue turns (0.5 is a turn every 1.25s); negative has none.`,
+      `Set the effects a video clip wears over its own picture (${CLIP_EFFECT_IDS.join(", ")}). They treat that clip alone — inside its mask, under its pose — for its whole length, on the clip's own clock: a masked copy over the shot wearing negative and huecycle shows a color-cycling negative window while the shot around it plays untouched. add_effect places an element that treats the whole frame under its window. Pass the full list in order; [] removes them all. amount 0.05..1 (default 0.5) is the strength; for huecycle it is how fast the hue turns (0.5 is a turn every 1.25s); negative has none. A flash takes add_effect's tone, rate and rhythm on the clip's own clock: a white flicker at rate 12–15, amount 0.15–0.25, pops a masked shot's exposure unevenly while the black around the mask stays black.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
       effects: {
@@ -374,6 +411,9 @@ export const INSPECTOR_TOOLS = [
         items: obj({
           effect: { type: "string", enum: [...CLIP_EFFECT_IDS], description: "Effect id" },
           amount: num("Strength 0.05..1 (default 0.5)"),
+          tone: { type: "string", enum: [...FLASH_TONES], description: 'flash only: "white" (default) or "black"' },
+          rate: num(`flash only: strobe pulses a second, ${FLASH_RATE_MIN}..${FLASH_RATE_MAX}; omit for one pop at the clip's start`),
+          rhythm: { type: "string", enum: [...FLASH_RHYTHMS], description: 'flash with a rate only: "strobe" (default) or "flicker", each pulse its own strength, some skipped' },
         }, ["effect"]),
       },
     }, ["clipId", "effects"]),

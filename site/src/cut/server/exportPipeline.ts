@@ -7,6 +7,7 @@ export type { SpecClipColor };
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions } from "./util";
+import { xfadeTransition } from "./transitionExpr";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
@@ -15,8 +16,8 @@ import { alignRecording } from "./soundAlign";
 import { shiftSpan, type SpecSound } from "../lib/soundSource";
 import { masterRawMix, packStems } from "./exportAudio";
 import { STEM_CHANNELS, STEM_RATE, type StemDef } from "../lib/stems";
-import { CLIP_MAX_ZOOM, regionPx, TRANSITION_XFADE, TRANSITION_ZOOM, type ColorGrade, type TransitionStyle } from "../lib/types";
-import { audioFxFilters, buildClipLut, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { CLIP_MAX_ZOOM, CLIP_MIN_SECONDS, clipFrameAt, regionPx, TRANSITION_ZOOM, type ColorGrade } from "../lib/types";
+import { audioFxFilters, buildClipLut, elementLook, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, effectRecipe, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -175,6 +176,9 @@ export interface ExportSpec {
      * zoom renders as the fade plus zoom ramps on both segments' overlap
      * windows. */
     transitionStyle?: string;
+    /** Softness of that transition's reveal edge (lib/transitionShape.ts);
+     * absent = hard. */
+    transitionFeather?: number;
     /** This clip's own entrance/exit animation, baked into the segment's
      * head/tail window: fade (audio follows), zoom, pop, or a slide
      * against black. Unknown styles render as a fade. */
@@ -215,7 +219,11 @@ export interface ExportSpec {
      * the picture's center (frame fractions), scale multiplies it, rotation
      * turns it. Opacity keys ride the painted mask's luma, so the graph
      * never needs an animatable alpha filter. */
-    kf?: { t: number; x: number; y: number; scale: number; rotation: number; opacity: number }[];
+    kf?: OverlayKey[];
+    /** Motion blur shutter, 0..1 of a 30fps frame, streaking the keyed
+     * movement; absent = off. Key blur and the streak soften the posed
+     * segment frame by frame. */
+    motionBlur?: number;
     /** Client-painted border ring (a stroked rounded rect along the clip's
      * box, transparent elsewhere), full-frame sized; overlaid onto the
      * segment before fades, masks and pose so it rides the clip. */
@@ -309,7 +317,9 @@ export interface ExportSpec {
       subject?: { invert?: boolean; feather?: number };
     };
     /** Keyframed pose track, seconds from this overlay's start. */
-    kf?: { t: number; x: number; y: number; scale: number; rotation: number; opacity: number }[];
+    kf?: OverlayKey[];
+    /** Motion blur shutter, as on `clips`. */
+    motionBlur?: number;
     /** Client-painted border ring, box-sized (a letterboxed segment pads out
      * to its box when bordered); overlaid onto the segment so it rides the
      * clip through fades, masks and pose. */
@@ -383,6 +393,14 @@ export interface ExportSpec {
     focus?: { x: number; y: number };
     /** Seconds a zoom takes to reach its depth. */
     ramp?: number;
+    /** A light leak's course. */
+    leak?: LeakCourse;
+    /** The kind a glitch is pinned to. */
+    glitch?: GlitchKind;
+    /** A flash's tone, strobe rate and rhythm. */
+    tone?: FlashTone;
+    rate?: number;
+    rhythm?: FlashRhythm;
     /** Its row in the element stack; lane 0 is the top. */
     lane?: number;
     start: number;
@@ -600,8 +618,23 @@ function ffColor(hex: string | undefined): string {
 
 /** The `setpts` that lays a trimmed span at its rate: the plain division for
  * one rate, the map's polyline for a curve (quoted: it carries commas). */
-const retimedPts = (rt: Retime) =>
-  rt.uniform ? `(PTS-STARTPTS)/${num(rt.rate)}` : fexpr(setptsExpr(rt));
+/** The longest a source frame may stay on screen: footage runs at 1 fps or
+ * more, so a trim reaching this far before the in point keeps the frame
+ * already showing there. */
+const SOURCE_PREROLL = 1;
+
+/** A footage clip's source span, timed from its in point: the frame on
+ * screen at the in point comes along (stamped before 0) and the re-stamp to
+ * the output rate shows it on the clip's first frame. */
+const sourceSpan = (idx: number, c: { in: number; out: number }, rt: Retime) =>
+  `[${idx}:v]trim=${num(Math.max(0, c.in - SOURCE_PREROLL))}:${num(c.out)},setpts=${retimedPts(rt, c.in)}`;
+
+/** A curve clamps everything before its first knot to 0; the preroll keeps
+ * its own seconds before 0, as one rate does, so a trim at 0 drops it. */
+const retimedPts = (rt: Retime, from: number) =>
+  rt.uniform
+    ? `(PTS-${num(from)}/TB)/${num(rt.rate)}`
+    : fexpr(`${setptsExpr(rt, from)}+min(T-${num(from)},0)/TB`);
 
 /** Timeline length of a media clip's span through its rate or curve. */
 /** ffmpeg's motion-compensated interpolation, laying `fps` frames over the
@@ -609,6 +642,11 @@ const retimedPts = (rt: Retime) =>
  * overlapped-block compensation, with its scene-change guard on so a cut
  * inside the footage is never blended across. */
 const MOTION_INTERPOLATE = "mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=fdiff";
+
+/** Footage re-stamped to the output rate from 0: each output frame shows the
+ * last source frame that has started by its time, as the preview's decoder
+ * does. A 25 fps source at 30 fps holds its first frame twice. */
+const sourceAt = (fps: number) => `fps=${fps}:round=up:start_time=0`;
 
 /**
  * The head of a footage clip's picture chain: its retimed, framed source at
@@ -629,12 +667,13 @@ function framedTimebase(
   fps: number,
   filters: string[]
 ): string {
-  const plain = `${timebase},fps=${fps},${framing},setsar=1`;
+  const plain = `${timebase},${sourceAt(fps)},${framing},setsar=1`;
   if (c.image || !c.smoothSlow) return plain;
   const runs = slowRuns(rt, 1 / fps);
   if (runs.length === 0) return plain;
   const interp = `minterpolate=fps=${fps}:${MOTION_INTERPOLATE}`;
-  const framed = `${timebase},${framing},setsar=1`;
+  // Interpolation starts on the first frame at or after the in point.
+  const framed = `${timebase},trim=start=0,${framing},setsar=1`;
   if (runs.length === 1 && runs[0][0] <= 1e-6 && runs[0][1] >= rt.len - 1e-6) {
     return `${framed},${interp}`;
   }
@@ -649,7 +688,7 @@ function framedTimebase(
   filters.push(`${framed},split=${pieces.length}${pieces.map((_, k) => `[smi${tag}_${k}]`).join("")}`);
   pieces.forEach((pc, k) => {
     filters.push(
-      `[smi${tag}_${k}]trim=${num(pc.from)}:${num(pc.to)},setpts=PTS-STARTPTS,${pc.slow ? interp : `fps=${fps}`}[smo${tag}_${k}]`
+      `[smi${tag}_${k}]trim=${num(pc.from)}:${num(pc.to)},setpts=PTS-STARTPTS,${pc.slow ? interp : sourceAt(fps)}[smo${tag}_${k}]`
     );
   });
   filters.push(
@@ -658,8 +697,50 @@ function framedTimebase(
   return `[smo${tag}]null`;
 }
 
+/** Concat-list times are kept to the microsecond. */
+const CONCAT_US = 1e6;
+
+/** A window edge in seconds, to the microsecond: a time floored to the
+ * tenth of a millisecond still opens on the frame it sits just under. */
+const edge = (t: number) => t.toFixed(6);
+
+/**
+ * An ffconcat slideshow of pictures laid end to end from 0, each held until
+ * its `to` second. Every duration is the gap between two microsecond-rounded
+ * ends, so a long run of one-frame pictures never drifts off the timeline.
+ * A picture whose end does not move past the one before is left out. Each
+ * picture opens at the output rate: the demuxer stamps the slideshow in its
+ * first picture's timebase, and a still's default of 25 fps would round
+ * every start to 40 ms and drop one 30 fps picture in five.
+ */
+function concatList(holds: { file: string; to: number }[], fps: number): string {
+  const lines = ["ffconcat version 1.0"];
+  let at = 0;
+  for (const h of holds) {
+    const end = Math.round(h.to * CONCAT_US);
+    if (end <= at) {
+      continue;
+    }
+    lines.push(`file '${h.file}'`, `option framerate ${fps}`, `duration ${((end - at) / CONCAT_US).toFixed(6)}`);
+    at = end;
+  }
+  return lines.join("\n") + "\n";
+}
+
+/** How far past a whole frame a time may sit, in frames, and still count as
+ * on it: rounding in a sum of clip lengths never pushes a cut a frame late. */
+const GRID_SLACK = 1e-3;
+
+/** The first output frame at or after `t` seconds. */
+const gridFrame = (t: number, fps: number) => Math.ceil(t * fps - GRID_SLACK);
+
+/** Filters that hold a stream to exactly `count` frames at `fps`: a short
+ * one repeats its last frame, a long one is cut. */
+const gridHold = (count: number, fps: number) =>
+  `tpad=stop_mode=clone:stop=${count},trim=end_frame=${count},setpts=PTS-STARTPTS,fps=${fps}`;
+
 const spanLen = (c: { in: number; out: number; speed?: number; speedCurve?: SpeedNode[]; reverse?: boolean }) =>
-  Math.max(0.1, retimeOf(c).len);
+  Math.max(CLIP_MIN_SECONDS, retimeOf(c).len);
 
 /** Seconds a range keeps on either side of itself beyond what a join or a
  * sound handle reaches, so a boundary never lands on a frame the neighbor
@@ -1157,22 +1238,24 @@ export async function runExport(
     const o = spec.overlays[k];
     if (o.frames?.length && o.blank) {
       const blank = path.join(job.tmpDir, path.basename(o.blank));
-      const lines = ["ffconcat version 1.0"];
-      if (o.start > 1e-3) lines.push(`file '${blank}'`, `duration ${num(o.start)}`);
+      // Blank up to the element, each picture to its end, blank after it.
+      const holds: { file: string; to: number }[] = [];
+      if (o.start > 1e-3) holds.push({ file: blank, to: o.start });
       let cursor = o.start;
       for (const f of o.frames) {
-        if (f.duration < 1e-4) continue;
-        lines.push(
-          `file '${path.join(job.tmpDir, path.basename(f.file))}'`,
-          `duration ${num(f.duration)}`
-        );
         cursor += f.duration;
+        // A sliver no frame falls in stretches the hold before it.
+        if (f.duration < 1e-4 && holds.length > 0) {
+          holds[holds.length - 1].to = cursor;
+          continue;
+        }
+        holds.push({ file: path.join(job.tmpDir, path.basename(f.file)), to: cursor });
       }
       if (spec.duration - cursor > 1e-3) {
-        lines.push(`file '${blank}'`, `duration ${num(spec.duration - cursor)}`);
+        holds.push({ file: blank, to: spec.duration });
       }
       const list = path.join(job.tmpDir, `overlay_anim_${k}.ffconcat`);
-      await io.writeFile(list, lines.join("\n") + "\n");
+      await io.writeFile(list, concatList(holds, fps));
       animOverlayInput.set(k, nInputs++);
       inputs.push("-f", "concat", "-safe", "0", "-i", list);
     } else if (o.file) {
@@ -1219,16 +1302,19 @@ export async function runExport(
     tag: string
   ): Promise<number | undefined> => {
     if (mk.frames?.length) {
-      const lines = ["ffconcat version 1.0"];
+      const holds: { file: string; to: number }[] = [];
+      let cursor = 0;
       for (const f of mk.frames) {
-        if (f.duration < 1e-4) continue;
-        lines.push(
-          `file '${path.join(job.tmpDir, path.basename(f.file))}'`,
-          `duration ${num(f.duration)}`
-        );
+        cursor += f.duration;
+        // A sliver no frame falls in stretches the hold before it.
+        if (f.duration < 1e-4 && holds.length > 0) {
+          holds[holds.length - 1].to = cursor;
+          continue;
+        }
+        holds.push({ file: path.join(job.tmpDir, path.basename(f.file)), to: cursor });
       }
       const list = path.join(job.tmpDir, `${tag}.ffconcat`);
-      await io.writeFile(list, lines.join("\n") + "\n");
+      await io.writeFile(list, concatList(holds, fps));
       const idx = nInputs++;
       inputs.push("-f", "concat", "-safe", "0", "-i", list);
       return idx;
@@ -1328,23 +1414,20 @@ export async function runExport(
   for (const [lane, entries] of [...captionLanes.entries()].sort((a, b) => a[0] - b[0])) {
     entries.sort((a, b) => a.start - b.start);
     const blank = path.join(job.tmpDir, "sub_blank.png");
-    const lines = ["ffconcat version 1.0"];
+    const holds: { file: string; to: number }[] = [];
     let cursor = 0;
     for (const c of entries) {
       const from = Math.max(c.start, cursor);
       if (c.end - from < 1e-3) continue;
-      if (from - cursor > 1e-3) lines.push(`file '${blank}'`, `duration ${num(from - cursor)}`);
-      lines.push(
-        `file '${path.join(job.tmpDir, path.basename(c.file))}'`,
-        `duration ${num(c.end - from)}`
-      );
+      if (from - cursor > 1e-3) holds.push({ file: blank, to: from });
+      holds.push({ file: path.join(job.tmpDir, path.basename(c.file)), to: c.end });
       cursor = c.end;
     }
     if (spec.duration - cursor > 1e-3) {
-      lines.push(`file '${blank}'`, `duration ${num(spec.duration - cursor)}`);
+      holds.push({ file: blank, to: spec.duration });
     }
     const list = path.join(job.tmpDir, `captions_${lane}.ffconcat`);
-    await io.writeFile(list, lines.join("\n") + "\n");
+    await io.writeFile(list, concatList(holds, fps));
     captionInputs.push(nInputs++);
     inputs.push("-f", "concat", "-safe", "0", "-i", list);
   }
@@ -1354,12 +1437,13 @@ export async function runExport(
   // A clip's own effects run on its segment's clock over its framed
   // picture, after its look: chain fragment `core` in, the treated fragment
   // out. The clock starts `from` seconds in (a split's right half carries
-  // on), so the effects begin at -from on the segment's clock. The fades,
+  // on), and `lead` more when the clip's first frame falls after its start,
+  // so the effects begin at -(from + lead) on the segment's clock. The fades,
   // pad and mask that follow carry them, as in the preview.
-  const wearEffects = (core: string, c: { effects?: ClipEffect[]; effectsFrom?: number }, len: number, w: number, h: number, pixFmt: string, tag: string) => {
-    const from = c.effectsFrom ?? 0;
+  const wearEffects = (core: string, c: { effects?: ClipEffect[]; effectsFrom?: number }, len: number, w: number, h: number, pixFmt: string, tag: string, lead: number) => {
+    const from = (c.effectsFrom ?? 0) + lead;
     for (const [n, e] of (c.effects ?? []).entries()) {
-      const lines = effectFilterLines(`${tag}fi${n}`, `${tag}fo${n}`, e.effect, e.amount, -from, len, w, h, `${tag}x${n}`, undefined, undefined, { ...chroma, pixFmt });
+      const lines = effectFilterLines(`${tag}fi${n}`, `${tag}fo${n}`, e.effect, e.amount, -from, len, w, h, `${tag}x${n}`, undefined, undefined, { ...chroma, pixFmt }, e);
       if (!lines) continue;
       filters.push(`${core}[${tag}fi${n}]`, ...lines);
       core = `[${tag}fo${n}]null`;
@@ -1688,6 +1772,23 @@ export async function runExport(
     }
   }
 
+  // The output frames each track-0 clip owns. The frame at time t shows the
+  // clip that has started by t, as the preview does, so a clip runs from
+  // the first frame at or after its start to the first one at or after its
+  // end: a cut at frame 106.3 lands on frame 107. A clip that holds no frame
+  // of its own still shows one, and the next clip takes it back.
+  const segFrames: { first: number; count: number }[] = [];
+  {
+    let next = 0;
+    spec.clips.forEach((c, j) => {
+      const count = Math.max(1, gridFrame(clipStarts[j] + clipDur(c), fps) - next);
+      segFrames.push({ first: next, count });
+      next += count;
+    });
+  }
+  /** Seconds from clip j's start to its first frame. */
+  const segLead = (j: number) => segFrames[j].first / fps - clipStarts[j];
+
   // The shared person matte, split once per subject-mask consumer: elements
   // trimmed to (or off) the person, and subject-masked clips on any track.
   // Each consumer takes one split, negates it when inverted, and blurs it by
@@ -1747,34 +1848,154 @@ export async function runExport(
     kf.some((k) => Math.abs(k[field] - kf[0][field]) > 1e-6);
   /** The rotate/scale filters a keyed segment runs before positioning, on
    * its own local clock. `boxW`/`boxH` give the constant rotate canvas. */
+  /** The key clock on a stream whose time 0 sits `startAt` seconds into the
+   * item: `(t-1.500)` for an element starting at 1.5 s on the timeline,
+   * `(t+0.023)` for a segment whose first frame lands 0.023 s in. */
+  const keyClock = (startAt: number): string => {
+    if (startAt > 1e-9) {
+      return `(t-${num(startAt)})`;
+    }
+    return startAt < -1e-9 ? `(t+${num(-startAt)})` : "t";
+  };
   const poseTransformFilters = (
     kf: OverlayKey[],
     boxW: number,
-    boxH: number
+    boxH: number,
+    lead: number
   ): string => {
     const ks = sortedKeys(kf);
+    const v = keyClock(-lead);
     let chain = "";
     if (varies(ks, "rotation") || Math.abs(ks[0].rotation) > 1e-6) {
       const diag = 2 * Math.ceil(Math.hypot(boxW, boxH) / 2);
-      const rot = piecewiseExpr(unwrappedRotation(ks), "t");
+      const rot = piecewiseExpr(unwrappedRotation(ks), v);
       chain += `,rotate=a='${rot}*PI/180':ow=${diag}:oh=${diag}:c=black@0.0`;
     }
     if (varies(ks, "scale") || Math.abs(ks[0].scale - 1) > 1e-6) {
-      const sc = piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.scale })), "t");
+      const sc = piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.scale })), v);
       chain += `,scale=w='trunc(iw*${sc}/2)*2':h=-2:eval=frame`;
     }
     return chain;
   };
   /** The overlay x/y expressions placing a keyed segment's center at its
    * pose, with the key clock offset to `startAt` on the consuming stream's
-   * timeline (0 for a local-clock base). */
+   * timeline (minus the lead for a segment-clock base). */
   const posePositionExprs = (kf: OverlayKey[], startAt: number): { x: string; y: string } => {
     const ks = sortedKeys(kf);
-    const v = startAt > 1e-9 ? `(t-${num(startAt)})` : "t";
+    const v = keyClock(startAt);
     return {
       x: `'${piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.x })), v)}*${W}-w/2'`,
       y: `'${piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.y })), v)}*${H}-h/2'`,
     };
+  };
+  // ---- Keyed blur and motion blur on a posed segment ----------------------
+  // The kit evaluator samples the clip's key blur and motion streak on every
+  // output frame, eases and all, so the graph softens what the preview does.
+  // The segment pads onto a constant canvas with room for the smear and the
+  // blur, premultiplies, averages copies shifted along the streak (the
+  // preview's additive taps), and blurs with a Gaussian whose sigma sendcmd
+  // sets frame by frame. Each stage runs only over the frames that soften,
+  // so an 8-frame settle costs nothing for the rest of the clip.
+  const softenPose = (
+    cur: string,
+    c: Parameters<typeof clipFrameAt>[0] & { kf?: OverlayKey[] },
+    dur: number,
+    boxW: number,
+    boxH: number,
+    toAlpha: string,
+    tag: string,
+    lead: number
+  ): string => {
+    if (!c.kf?.length || (!c.motionBlur && !c.kf.some((k) => k.blur))) return cur;
+    const even = (n: number) => 2 * Math.ceil(n / 2);
+    const q = (v: number) => Math.round(v * 20) / 20;
+
+    // Per-frame blur sigma and streak, output px, on the segment's clock;
+    // the kit samples the clip `lead` seconds further in, where it stands.
+    const n = Math.max(1, Math.round(dur * fps));
+    const blurs: { t: number; v: number }[] = [];
+    const sx: { t: number; v: number }[] = [];
+    const sy: { t: number; v: number }[] = [];
+    let first = -1;
+    let last = -1;
+    let taps = 0;
+    let maxBlur = 0;
+    let reachX = 0;
+    let reachY = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / fps;
+      const look = elementLook(clipFrameAt(c, t + lead, W / H), outScale);
+      const b = q(look?.blur ?? 0);
+      const x = look && look.taps >= 2 ? q(look.streakX) : 0;
+      const y = look && look.taps >= 2 ? q(look.streakY) : 0;
+      blurs.push({ t, v: b });
+      sx.push({ t, v: x });
+      sy.push({ t, v: y });
+      if (!b && !x && !y) {
+        continue;
+      }
+      if (first < 0) {
+        first = i;
+      }
+      last = i;
+      taps = Math.max(taps, x || y ? (look?.taps ?? 0) : 0);
+      maxBlur = Math.max(maxBlur, b);
+      reachX = Math.max(reachX, Math.abs(x) / 2);
+      reachY = Math.max(reachY, Math.abs(y) / 2);
+    }
+    if (first < 0) return cur;
+    const on = `enable='between(t,${num(Math.max(0, (first - 0.5) / fps))},${num((last + 0.5) / fps)})'`;
+
+    // The canvas holds the largest posed picture, its smear and its blur.
+    const ks = c.kf;
+    const turns = ks.some((k) => Math.abs(k.rotation) > 1e-6);
+    const diag = 2 * Math.ceil(Math.hypot(boxW, boxH) / 2);
+    const grow = Math.max(1, ...ks.map((k) => k.scale));
+    const spread = Math.ceil(3 * maxBlur);
+    const cw = even((turns ? diag : boxW) * grow + 2 * (Math.ceil(reachX) + spread));
+    const ch = even((turns ? diag : boxH) * grow + 2 * (Math.ceil(reachY) + spread));
+    const rx = taps >= 2 ? even(reachX + 1) : 0;
+    const ry = taps >= 2 ? even(reachY + 1) : 0;
+    filters.push(
+      `[${cur}]${toAlpha},pad=w=${cw + 2 * rx}:h=${ch + 2 * ry}:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0.0:eval=frame,` +
+        `premultiply=inplace=1:${on}[${tag}p]`
+    );
+    let out = `${tag}p`;
+
+    // The streak: copies at even steps along it, averaged. Outside the
+    // window the first copy is the unshifted picture, which mix passes.
+    if (taps >= 2) {
+      const ex = piecewiseExpr(sx, "t");
+      const ey = piecewiseExpr(sy, "t");
+      const ins = Array.from({ length: taps }, (_, i) => `[${tag}s${i}]`);
+      filters.push(`[${out}]split=${taps}${ins.join("")}`);
+      for (let i = 0; i < taps; i++) {
+        const f = num(i / (taps - 1) - 0.5);
+        filters.push(
+          `[${tag}s${i}]crop=${cw}:${ch}:x=${fexpr(`${rx}-(${f})*${ex}`)}:y=${fexpr(`${ry}-(${f})*${ey}`)}[${tag}c${i}]`
+        );
+      }
+      filters.push(`${Array.from({ length: taps }, (_, i) => `[${tag}c${i}]`).join("")}mix=inputs=${taps}:${on}[${tag}m]`);
+      out = `${tag}m`;
+    }
+
+    // The blur: sigma set on every frame it changes, half a frame early so
+    // the command lands on its own frame whatever the rounding.
+    let blur = "";
+    if (maxBlur > 0) {
+      const cmds: string[] = [];
+      let prev = -1;
+      for (let i = first; i <= last + 1 && i < n; i++) {
+        if (blurs[i].v === prev) {
+          continue;
+        }
+        prev = blurs[i].v;
+        cmds.push(`${num(Math.max(0, (i - 0.5) / fps))} gblur@${tag} sigma ${num(prev)}`);
+      }
+      blur = `sendcmd=c='${cmds.join(";")}',gblur@${tag}=sigma=${num(blurs[first].v)}:${on},`;
+    }
+    filters.push(`[${out}]${blur}unpremultiply=inplace=1:${on}[${tag}o]`);
+    return `${tag}o`;
   };
 
   /** One matte split, shaped for a consumer. Every counted consumer takes
@@ -1925,6 +2146,7 @@ export async function runExport(
     const secs = Math.min(a.seconds, max);
     if (a.style === "zoom") return { kind: "zoom", secs };
     if (a.style === "pop") return { kind: "pop", secs };
+    if (a.style === "blur") return { kind: "xfade", secs, xfade: "hblur" };
     if (/^slide(left|right|up|down)$/.test(a.style)) {
       return { kind: "xfade", secs, xfade: a.style };
     }
@@ -2015,9 +2237,10 @@ export async function runExport(
     const tf = isFadeAnim(animOutNow) ? Math.min(animOutNow!.seconds, dur - hf) : 0;
     // The sound of a fade animation follows the picture whether the fade
     // renders inline (over black) or in the backdrop pass.
-    const ahf = animIn?.style === "fade" ? Math.min(animIn.seconds, dur) : 0;
+    const soundFades = (s: string | undefined) => s === "fade" || s === "blur";
+    const ahf = soundFades(animIn?.style) ? Math.min(animIn!.seconds, dur) : 0;
     const atf =
-      animOut?.style === "fade" ? Math.min(animOut.seconds, Math.max(0, dur - ahf)) : 0;
+      soundFades(animOut?.style) ? Math.min(animOut!.seconds, Math.max(0, dur - ahf)) : 0;
     if (!headFx && hf <= 0.01 && czHead > 0.01) {
       headFx = { kind: "zoom", secs: Math.min(czHead, dur) };
     }
@@ -2039,7 +2262,7 @@ export async function runExport(
     } else {
       timebase = c.image
         ? `[${idx}:v]setpts=PTS-STARTPTS`
-        : `[${idx}:v]trim=${num(c.in)}:${num(c.out)},setpts=${retimedPts(rt)}`;
+        : sourceSpan(idx, c, rt);
     }
     if ((c.image || rmIn || videoPresence.get(c.file)) && !c.hidden) {
       const region = regionPx(c.frame, W, H);
@@ -2082,6 +2305,9 @@ export async function runExport(
       // a still just replays its looped input. The color runs on the framed
       // picture before the letterbox pad, so the bars stay the frame color.
       let core = framedTimebase(timebase, frame, `c${j}`, rmIn ? {} : c, rt, fps, filters);
+      // The picture holds the frames the clip owns before anything paints
+      // on it, so a held frame takes its own effects at its own time.
+      core += `,${gridHold(segFrames[j].count, fps)}`;
       if (plan) core = plan.run(core, `c${j}`);
       core += `,format=${segFmt}`;
       // The look bakes in after grade + framing, before the edge effects, so
@@ -2099,7 +2325,7 @@ export async function runExport(
         return `[lko${j}]null`;
       };
       const wears = !!c.effects?.length;
-      if (wears) core = wearEffects(lookAt(core), c, dur, W, H, segFmt, `cw${j}`);
+      if (wears) core = wearEffects(lookAt(core), c, dur, W, H, segFmt, `cw${j}`, segLead(j));
       core += padding;
       if (!wears) core = lookAt(core);
       // The border ring lands after the look (true stroke color) and before
@@ -2149,12 +2375,13 @@ export async function runExport(
           cur = `cmc${j}`;
         }
         if (keyed) {
-          const tf = poseTransformFilters(c.kf!, W, H);
+          const tf = poseTransformFilters(c.kf!, W, H, segLead(j));
           if (tf) {
             filters.push(`[${cur}]null${tf}[ckt${j}]`);
             cur = `ckt${j}`;
           }
-          const pos = posePositionExprs(c.kf!, 0);
+          cur = softenPose(cur, c, dur, W, H, videoToAlpha, `cso${j}`, segLead(j));
+          const pos = posePositionExprs(c.kf!, -segLead(j));
           placeOnClear(cur, pos.x, pos.y, dur, `ckb${j}`, `ckp${j}`);
           cur = `ckp${j}`;
         }
@@ -2242,7 +2469,8 @@ export async function runExport(
   // clone from the copies split off above, so a slide-in covers the previous
   // clip's last frame and a slide-out reveals the next clip's first frame.
   // Slides become cover/reveal (the backdrop stays put); pop alpha-blends
-  // over the frozen frame; fade — and any unknown stored style — crossfades.
+  // over the frozen frame; blur defocuses across it; fade — and any unknown
+  // stored style — crossfades.
   const segLabel = spec.clips.map((_, j) => `v${j}`);
   const backdropFx = (
     a: { style: string; seconds: number },
@@ -2251,6 +2479,7 @@ export async function runExport(
     bg: string
   ): EdgeFx => {
     if (a.style === "pop") return { kind: "pop", secs, bg };
+    if (a.style === "blur") return { kind: "xfade", secs, xfade: "hblur", bg };
     if (/^slide(left|right|up|down)$/.test(a.style)) {
       const dir = a.style.slice(5);
       return { kind: "xfade", secs, xfade: `${side === "head" ? "cover" : "reveal"}${dir}`, bg };
@@ -2373,9 +2602,19 @@ export async function runExport(
   // cross dissolve cuts the picture and crosses the sound instead — a tail
   // fade against the incoming clip's head fade. The rest hard-cut (concat).
   // Fold left so mixed sequences chain correctly.
+  // Each segment is held to the frames it owns, so every cut lands on the
+  // frame the preview cuts on and a short clip never shifts the rest.
+  spec.clips.forEach((_, j) => {
+    filters.push(
+      `[${segLabel[j]}]${gridHold(segFrames[j].count, fps)}[vg${j}]`
+    );
+    segLabel[j] = `vg${j}`;
+  });
   let vAcc = segLabel[0];
   let aAcc = "a0";
-  let acc = clipDur(spec.clips[0]); // running timeline length of the accumulator
+  // Running timeline length of the accumulator, on the frame grid.
+  const gridEnd = (j: number) => (segFrames[j].first + segFrames[j].count) / fps;
+  let acc = gridEnd(0);
   for (let j = 1; j < spec.clips.length; j++) {
     const prev = spec.clips[j - 1];
     const durJ = clipDur(spec.clips[j]);
@@ -2394,10 +2633,11 @@ export async function runExport(
     } else if (d > 0.01) {
       const offset = Math.max(0, acc - d);
       // The style id resolves through the allowlist map; anything unknown
-      // (or an old spec without a style) renders as a plain fade.
-      const kind = TRANSITION_XFADE[prev.transitionStyle as TransitionStyle] ?? "fade";
+      // (or an old spec without a style) renders as a plain fade. The shaped
+      // and softened styles come back as xfade expressions.
+      const kind = xfadeTransition(prev.transitionStyle, prev.transitionFeather, d, W, H);
       filters.push(`[${segLabel[j]}]tpad=start_duration=${num(d)}:start_mode=clone[vh${j}]`);
-      filters.push(`[${vAcc}][vh${j}]xfade=transition=${kind}:duration=${num(d)}:offset=${num(offset)}[${vOut}]`);
+      filters.push(`[${vAcc}][vh${j}]xfade=${kind}:duration=${num(d)}:offset=${num(offset)}[${vOut}]`);
       filters.push(`[${aAcc}]afade=t=out:st=${num(offset)}:d=${num(d)}[ah${j}]`);
       filters.push(`[ah${j}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
     } else {
@@ -2407,7 +2647,7 @@ export async function runExport(
       filters.push(`[${vAcc}][${segLabel[j]}]concat=n=2:v=1:a=0,fps=${fps}[${vOut}]`);
       filters.push(`[${aAcc}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
     }
-    acc = acc + durJ;
+    acc = gridEnd(j);
     vAcc = vOut;
     aAcc = aOut;
   }
@@ -2499,7 +2739,7 @@ export async function runExport(
     } else {
       timebase = oc.image
         ? `[${idx}:v]setpts=PTS-STARTPTS`
-        : `[${idx}:v]trim=${num(oc.in)}:${num(oc.out)},setpts=${retimedPts(ort)}`;
+        : sourceSpan(idx, oc, ort);
     }
     let core = framedTimebase(timebase, framing, `o${k}`, orIn ? {} : oc, ort, fps, filters);
     if (plan) core = plan.run(core, `o${k}`);
@@ -2515,7 +2755,9 @@ export async function runExport(
         core = `[olko${k}]null`;
       }
     }
-    core = wearEffects(core, oc, olen, boxW, boxH, lookFmt, `ow${k}`);
+    // Seconds from the element's start to its first frame on the grid.
+    const ovLead = gridFrame(oc.start, fps) / fps - oc.start;
+    core = wearEffects(core, oc, olen, boxW, boxH, lookFmt, `ow${k}`, ovLead);
     if (boxPad) core += boxPad;
     // The border ring lands after the look and box pad, before the edge
     // ramps, so it fades and masks with the clip like the preview.
@@ -2549,18 +2791,19 @@ export async function runExport(
       masked = `omc${k}`;
     }
     if (keyed) {
-      const tf = poseTransformFilters(oc.kf!, boxW, boxH);
+      const tf = poseTransformFilters(oc.kf!, boxW, boxH, ovLead);
       if (tf) {
         filters.push(`[${masked}]${videoToAlpha}${tf},format=${alphaFmt}[okt${k}]`);
         masked = `okt${k}`;
       }
+      masked = softenPose(masked, oc, olen, boxW, boxH, `format=${alphaFmt}`, `oso${k}`, ovLead);
     }
-    // The zoom slices' concat drops the stream's frame-rate metadata, and
-    // tpad converts start_duration to a frame count through it — without the
-    // fps re-stamp it pads zero frames and the overlay lands early.
-    filters.push(`[${masked}]fps=${fps},tpad=start_duration=${num(oc.start)}[${seg}]`);
+    // The clip's first frame is the first one at or after its start, as on
+    // track 0. The zoom slices' concat drops the stream's frame-rate
+    // metadata, so the fps re-stamp keeps tpad's frames on the grid.
+    filters.push(`[${masked}]fps=${fps},tpad=start=${gridFrame(oc.start, fps)}[${seg}]`);
     const next = `vovv${k}`;
-    const enable = `enable='between(t,${num(oc.start)},${num(end)})'`;
+    const enable = `enable='between(t,${edge(oc.start)},${edge(end)})'`;
     // The shadow falls on whatever is already there, then the clip goes down
     // over it. Its silhouette is punched out, so the two never fight.
     const oshIdx = overlayShadowInput.get(oc);
@@ -2693,7 +2936,7 @@ export async function runExport(
     } else if (o.file) {
       const idx = inputIndex.get(o.file)!;
       filters.push(
-        `[${onto}][${gfx(`${idx}:v`)}]overlay=0:0:enable='gte(t,${num(o.start)})*lt(t,${num(o.end)})'${ovl}[${next}]`
+        `[${onto}][${gfx(`${idx}:v`)}]overlay=0:0:enable='gte(t,${edge(o.start)})*lt(t,${edge(o.end)})'${ovl}[${next}]`
       );
     } else {
       return onto;
@@ -2727,7 +2970,7 @@ export async function runExport(
     const lines = effectFilterLines(
       vLabel,
       `vfx${i}`,
-      e.effect,
+      effectRecipe(e),
       e.amount,
       Math.max(0, e.start),
       Math.min(e.end, spec.duration),
@@ -2736,7 +2979,8 @@ export async function runExport(
       `fx${i}`,
       e.focus,
       e.ramp,
-      chroma
+      chroma,
+      e
     );
     if (!lines) continue;
     filters.push(...lines);

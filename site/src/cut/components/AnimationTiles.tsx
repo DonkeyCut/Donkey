@@ -1,7 +1,9 @@
 "use client";
 
+import { erodeMask } from "./textureCss";
 import { useEffect, useRef, useState } from "react";
 import {
+  countText,
   evalOverlayAnim,
   glyphStateAt,
   hasGlyphMotion,
@@ -28,6 +30,7 @@ import {
   type OverlayAnimStyle,
   type OverlayLoopStyle,
   type OverlayWords,
+  zapSeed,
 } from "@donkeycut/effects-kit";
 import { Tile } from "@/cut/components/PanelTile";
 import { SectionTitle } from "@/cut/components/SectionTitle";
@@ -180,6 +183,14 @@ const wordStyle = () => ({ fontFamily: fontStack("montserrat"), fontWeight: 700,
 const typesItsName = (slot: Slot, style: string) =>
   slot === "in" || slot === "out" ? !!MOTION.edges[style]?.animate.typed : false;
 
+/** Whether the demo counts a number up (count). Its element comes from React
+ * empty, for the reason a typed demo's does. */
+const countsItsName = (slot: Slot, style: string) =>
+  slot === "in" || slot === "out" ? !!MOTION.edges[style]?.animate.counted : false;
+
+/** The number a count demo counts to, after the style's name: "Count 100". */
+const COUNT_DEMO_TO = 100;
+
 /** Whether the demo rolls each letter up a reel (slot). The reel's three
  * windows come from React empty, for the reason a typed demo's do. */
 const rollsItsName = (slot: Slot, style: string) =>
@@ -235,6 +246,7 @@ function LiveName({
   const ref = useRef<HTMLSpanElement>(null);
   const label = labelOf(slot, style);
   const typed = typesItsName(slot, style);
+  const counts = countsItsName(slot, style);
   const rolls = isText && rollsItsName(slot, style);
   const dives = divesIntoName(slot, style);
   // Golden-ratio steps around the cycle: neighbouring tiles land far apart in
@@ -265,6 +277,10 @@ function LiveName({
       el.style.opacity = "";
       el.style.clipPath = "";
       el.style.filter = "";
+      el.style.textShadow = "";
+      for (const prop of ["mask-image", "-webkit-mask-image"]) {
+        el.style.removeProperty(prop);
+      }
       letters().forEach((kid, i) => {
         kid.style.transform = "";
         kid.style.opacity = "";
@@ -316,10 +332,38 @@ function LiveName({
       }
       el.style.clipPath =
         st.reveal !== undefined ? `inset(0 ${(1 - st.reveal) * 100}% 0 0)` : "";
+      // A disintegration eats the name through the kit's erosion tile.
+      const eroded = st.erode !== undefined && st.erode > 0 ? erodeMask(st.erode, null) : null;
+      for (const prop of ["mask-image", "-webkit-mask-image"]) {
+        el.style.setProperty(prop, eroded ? String(eroded.maskImage) : "");
+      }
+      for (const prop of ["mask-size", "-webkit-mask-size"]) {
+        el.style.setProperty(prop, eroded ? "100% 100%" : "");
+      }
+      for (const prop of ["mask-repeat", "-webkit-mask-repeat"]) {
+        el.style.setProperty(prop, eroded ? "no-repeat" : "");
+      }
+      // A zap's arcs read on a tile this small as the name crackling blue,
+      // its glow re-dealt at the arcs' own rate.
+      if (st.zap) {
+        const flick = 0.6 + 0.4 * ((zapSeed((now - start) / 1000) * 7919) % 5) / 4;
+        el.style.textShadow = `0 0 ${(3 * st.zap * flick).toFixed(1)}px #dbe6ff, 0 0 ${(9 * st.zap * flick).toFixed(1)}px #4f7bff`;
+      } else {
+        el.style.textShadow = "";
+      }
       el.style.filter = st.brightness !== undefined ? `brightness(${st.brightness})` : "";
       if (st.textProgress !== undefined) {
         const word = el.dataset.word ?? "";
         el.textContent = word.slice(0, Math.ceil(st.textProgress * word.length));
+      }
+      // A count demo shows its number where the count stands, and the whole
+      // number once the ramp is over.
+      if (counts) {
+        const word = el.dataset.word ?? "";
+        const shown = st.countProgress !== undefined ? countText(word, st.countProgress) : word;
+        if (el.textContent !== shown) {
+          el.textContent = shown;
+        }
       }
       raf = requestAnimationFrame(tick);
     };
@@ -329,16 +373,16 @@ function LiveName({
       cancelAnimationFrame(raf);
       rest();
     };
-  }, [slot, style, isText, seconds, speed, phase, label, rolls, dives]);
+  }, [slot, style, isText, seconds, speed, phase, label, rolls, dives, counts]);
 
   return (
     <span
       ref={ref}
-      data-word={typed ? label : undefined}
+      data-word={typed ? label : counts ? `${label} ${COUNT_DEMO_TO}` : undefined}
       className={`${WORD} text-foreground`}
       style={{ willChange: "transform", ...wordStyle() }}
     >
-      {typed
+      {typed || counts
         ? null
         : rolls
           ? [...label].map((ch, i) => (

@@ -23,6 +23,7 @@ import {
   WORD_POP_SCALE,
   WORD_SWELL_MAX,
   WORD_SWELL_MIN,
+  TEXT_WEIGHTS,
 } from "@donkeycut/effects-kit";
 
 export const SUBTITLES_TOOLS = [
@@ -127,8 +128,8 @@ export const SUBTITLES_TOOLS = [
       emphasis_italic: bool(`Emphasized words in italic (default ${CAPTION_EMPHASIS_DEFAULT.italic})`),
       emphasis_weight: {
         type: "number",
-        enum: [400, 700],
-        description: `Emphasized word weight, 400 regular or 700 bold (default ${CAPTION_EMPHASIS_DEFAULT.weight})`,
+        enum: [...TEXT_WEIGHTS],
+        description: `Emphasized word weight, 400 regular, 700 bold, 800 extra bold or 900 black (default ${CAPTION_EMPHASIS_DEFAULT.weight})`,
       },
       emphasis_scale: num(
         `Emphasized word size over the caption's own, ${EMPHASIS_SCALE_MIN}..${EMPHASIS_SCALE_MAX} (default ${CAPTION_EMPHASIS_DEFAULT.scale})`

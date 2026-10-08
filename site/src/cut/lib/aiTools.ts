@@ -62,7 +62,8 @@ import {
   type WheelTuple,
   type Mask,
   OVERLAY_ANIM_DEFAULT_SECONDS,
-  OVERLAY_ANIM_MAX_SECONDS,
+  EDGE_STAGGER_MAX,
+  edgeMaxSeconds,
   OVERLAY_ANIM_MIN_SECONDS,
   OVERLAY_ANIM_STYLE_IDS,
   TEXT_ONLY_ANIM_STYLE_IDS,
@@ -95,6 +96,25 @@ import {
   penClosed,
   type RemovalStroke,
   type StrokeStyleId,
+  CYCLE_SCALE_MAX,
+  CYCLE_SCALE_MIN,
+  FONT_CYCLE_FACES_MAX,
+  FONT_CYCLE_RATE,
+  FONT_CYCLE_RATE_MAX,
+  FONT_CYCLE_RATE_MIN,
+  TEXT_WEIGHTS,
+  LEAK_COURSES,
+  type LeakCourse,
+  GLITCH_KINDS,
+  type GlitchKind,
+  FLASH_RATE_MAX,
+  FLASH_RATE_MIN,
+  FLASH_RHYTHMS,
+  FLASH_TONES,
+  TEXT_TEXTURES,
+  type CycleFace,
+  type FlashRhythm,
+  type TextWeight,
 } from "@donkeycut/effects-kit";
 import type { AiPanelToolName } from "@/cut/components/AiPanel.tools";
 import type { OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
@@ -107,7 +127,8 @@ import type { VideoGenToolName } from "@/cut/components/GeneratePanel.tools";
 import type { ImageGenToolName } from "@/cut/components/ImageGenPanel.tools";
 import type { InspectorToolName } from "@/cut/components/Inspector.tools";
 import type { GroupPanelToolName } from "@/cut/components/GroupPanel.tools";
-import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, ELEMENT_BLUR_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
+import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, ELEMENT_BLUR_MAX, TILT_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
+import { cleanInks, LETTER_SPACING_MAX, LETTER_SPACING_MIN, PATTERN_KINDS, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN, STRIPES_DEFAULT, type PatternSpec, type ShadowSpec } from "@donkeycut/effects-kit";
 import { groupCameraOf, groupCameraPoseAt } from "@/cut/lib/groupCamera";
 import { cutMotion } from "@/cut/lib/motionSettings";
 import type { LibraryToolName } from "@/cut/components/LibraryView.tools";
@@ -309,6 +330,7 @@ import {
   WATCH_DETAILS,
   type WatchDetail,
 } from "./types";
+import { clampFeather } from "./transitionShape";
 
 import { soundSourceOf, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { bindRecording, unbindRecording } from "./soundBind";
@@ -485,6 +507,15 @@ const MAX_COMPARE = 4;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isTextWeight = (v: unknown): v is TextWeight => (TEXT_WEIGHTS as readonly unknown[]).includes(v);
+
+/** A flash rhythm from a tool call: strobe, the default, stores as absence. */
+const flashRhythm = (v: unknown): FlashRhythm | undefined => {
+  if (!(FLASH_RHYTHMS as readonly unknown[]).includes(v)) {
+    throw new ToolError(`rhythm is one of ${FLASH_RHYTHMS.join(", ")}.`);
+  }
+  return v === "flicker" ? "flicker" : undefined;
+};
 
 /** A camera card places its clip's footage itself, so a framing write on
  * one of `fields` would change nothing anyone sees: refused, naming the
@@ -598,6 +629,32 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         },
       });
     }
+    // A light leak's course: drift is the default and stores as absence.
+    if (effect === "lightleak" && input.leak !== undefined) {
+      if (!(LEAK_COURSES as readonly unknown[]).includes(input.leak))
+        throw new ToolError(`leak is one of ${LEAK_COURSES.join(", ")}.`);
+      useEditor.getState().updateOverlay(sel.id, { leak: input.leak === "drift" ? undefined : (input.leak as LeakCourse) });
+    }
+    // A glitch pinned to one kind; the random mix stores as absence.
+    if (effect === "glitch" && input.glitch !== undefined) {
+      if (!(GLITCH_KINDS as readonly unknown[]).includes(input.glitch)) {
+        throw new ToolError(`glitch is one of ${GLITCH_KINDS.join(", ")}.`);
+      }
+      useEditor.getState().updateOverlay(sel.id, { glitch: input.glitch as GlitchKind });
+    }
+    // A flash's tone and strobe: white and a single pop store as absence.
+    if (effect === "flash" && input.tone !== undefined) {
+      if (!(FLASH_TONES as readonly unknown[]).includes(input.tone)) {
+        throw new ToolError(`tone is one of ${FLASH_TONES.join(", ")}.`);
+      }
+      useEditor.getState().updateOverlay(sel.id, { tone: input.tone === "black" ? "black" : undefined });
+    }
+    if (effect === "flash" && isNum(input.rate)) {
+      useEditor.getState().updateOverlay(sel.id, { rate: input.rate > 0 ? clamp(input.rate, FLASH_RATE_MIN, FLASH_RATE_MAX) : undefined });
+    }
+    if (effect === "flash" && input.rhythm !== undefined) {
+      useEditor.getState().updateOverlay(sel.id, { rhythm: flashRhythm(input.rhythm) });
+    }
     const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
     return { id: o.id, effect, start: round2(o.start), end: round2(o.end) };
   },
@@ -607,8 +664,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const anim: OverlayAnim = { ...(o.anim ?? {}) };
     const edge = (slot: "in" | "out", styleKey: string, secondsKey: string) => {
       const raw = input[styleKey];
+      // The cap is the style's the slot ends up with (a count runs longer).
+      const styled = typeof raw === "string" && raw !== "none" ? raw : anim[slot]?.style;
       const secs = isNum(input[secondsKey])
-        ? clamp(input[secondsKey], OVERLAY_ANIM_MIN_SECONDS, OVERLAY_ANIM_MAX_SECONDS)
+        ? clamp(input[secondsKey], OVERLAY_ANIM_MIN_SECONDS, edgeMaxSeconds(styled))
         : undefined;
       if (typeof raw === "string") {
         if (raw === "none") {
@@ -622,11 +681,20 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const caret = keepCaret(anim[slot], raw);
         anim[slot] = {
           style: raw as OverlayAnimStyle,
-          seconds: secs ?? anim[slot]?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
+          // A long count's length shrinks to the new style's cap.
+          seconds: Math.min(edgeMaxSeconds(raw), secs ?? anim[slot]?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS),
           ...(caret ? { caret } : {}),
         };
       } else if (secs !== undefined && anim[slot]) {
         anim[slot] = { ...anim[slot]!, seconds: secs };
+      }
+      // The letter hand-off rides the slot; a negative hands it back to
+      // the style's own.
+      const stagger = input[`${slot}_stagger`];
+      if (isNum(stagger) && anim[slot]) {
+        const rest = { ...anim[slot]! };
+        delete rest.stagger;
+        anim[slot] = stagger < 0 ? rest : { ...rest, stagger: clamp(stagger, 0, EDGE_STAGGER_MAX) };
       }
     };
     edge("in", "in_style", "in_seconds");
@@ -695,6 +763,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     }
     applyCaretInput(o, anim, input);
     applyHitInput(o, anim, input);
+    applyFontCycleInput(o, anim, input);
     s.updateOverlay(o.id, { anim: hasOverlayAnim(anim) ? anim : undefined });
     const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
     return { id: next.id, anim: next.anim ?? null };
@@ -722,7 +791,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             ...(isNum(k.x) ? { x: clampOverlayPos(k.x, o) } : {}),
             ...(isNum(k.y) ? { y: clampOverlayPos(k.y, o) } : {}),
             ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
+            ...(isNum(k.scale_x) ? { scaleX: clamp(k.scale_x, 0, 4) } : {}),
+            ...(isNum(k.scale_y) ? { scaleY: clamp(k.scale_y, 0, 4) } : {}),
             ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
+            ...(isNum(k.tilt_x) ? { tiltX: clamp(Math.round(k.tilt_x), -TILT_MAX, TILT_MAX) } : {}),
+            ...(isNum(k.tilt_y) ? { tiltY: clamp(Math.round(k.tilt_y), -TILT_MAX, TILT_MAX) } : {}),
             ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
             ...(isNum(k.blur) ? { blur: clamp(k.blur, 0, ELEMENT_BLUR_MAX) } : {}),
             ...(k.ease !== undefined ? { ease: easeInput(k.ease) } : {}),
@@ -779,9 +852,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   set_clip_keyframes: (s, input) => {
     const clip = requireItem(s.clips, input.clipId, "video clip");
     const raw = input.keys;
-    if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
     const dur = clipLen(clip);
     let kf = clip.kf;
+
+    // The shutter rides beside the track: on, off, or kept. With no keys
+    // in the call it is the whole edit and its own undo step; with keys it
+    // joins theirs.
+    const motionBlur = shutterInput(input, clip.motionBlur);
+    if (raw === undefined) {
+      if (motionBlur !== clip.motionBlur) {
+        s.pushHistory();
+        s.updateClipTransient(clip.id, { motionBlur });
+      }
+      return { id: clip.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })), motionBlur: motionBlur ?? null };
+    }
+    if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
     if (raw.length === 0) {
       s.clearClipKeys(clip.id);
       kf = undefined;
@@ -800,13 +885,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
             ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
             ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
+            ...(isNum(k.blur) ? { blur: clamp(k.blur, 0, ELEMENT_BLUR_MAX) } : {}),
           },
           { transient: true }
         );
       }
       kf = useEditor.getState().clips.find((c) => c.id === clip.id)?.kf;
     }
-    return { id: clip.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })) };
+    if (motionBlur !== clip.motionBlur) {
+      useEditor.getState().updateClipTransient(clip.id, { motionBlur });
+    }
+    return { id: clip.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })), motionBlur: motionBlur ?? null };
   },
 
   set_mask: (s, input) => {
@@ -944,18 +1033,25 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (!style) throw new ToolError(`Unknown style. Use one of: ${TRANSITION_STYLE_IDS.join(", ")}.`);
     }
     s.setClipTransition(clip.id, input.seconds, style);
-    const after = useEditor.getState();
-    const next = after.clips.find((c) => c.id === clip.id)!;
+    let after = useEditor.getState();
     // The bar's own id rides the result so remove_transition can round-trip it.
     const roles = resolveTransitions(after.clips, after.transitions);
     const bar = after.transitions.find((t) =>
       (roles.get(t.id) ?? []).some((r) => r.kind !== "in" && r.clipId === clip.id)
     );
+    // The softness lands on the bar inside the same undo step.
+    if (bar && isNum(input.feather)) {
+      const feather = clampFeather(input.feather);
+      after.updateTransitionTransient(bar.id, { feather: feather > 0 ? feather : undefined });
+      after = useEditor.getState();
+    }
+    const next = after.clips.find((c) => c.id === clip.id)!;
     return {
       id: next.id,
       transitionId: bar?.id ?? null,
       transition: next.transition ?? 0,
       style: next.transitionStyle ?? "crossfade",
+      ...(next.transitionFeather ? { feather: next.transitionFeather } : {}),
     };
   },
 
@@ -2465,6 +2561,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   add_title: (s, input) => {
       if (typeof input.text !== "string" || !input.text.trim())
         throw new ToolError("text is required.");
+      // Refused before the title exists, so a bad font leaves nothing behind.
+      if (input.font !== undefined) {
+        knownFont(input.font);
+      }
       if (isNum(input.start)) s.seek(input.start);
       s.addOverlay(aimedLane(input));
       const sel = useEditor.getState().selection;
@@ -2590,8 +2690,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         patch.style = input.style as CaptionStyleId;
       }
       if (isNum(input.size)) patch.size = clamp(Math.round(input.size), 16, 200);
-      if (typeof input.font === "string" && allFonts().some((f) => f.id === input.font))
-        patch.font = input.font;
+      if (input.font !== undefined) {
+        patch.font = knownFont(input.font);
+      }
       if (typeof input.word_highlight === "boolean") patch.wordHighlight = input.word_highlight;
       if (typeof input.accent_color === "string") patch.accentColor = input.accent_color;
       if (isNum(input.accent_scale))
@@ -2614,8 +2715,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (typeof input.emphasis_color === "string") patch.emphasisColor = input.emphasis_color;
       if (typeof input.emphasis_italic === "boolean") patch.emphasisItalic = input.emphasis_italic;
       if (input.emphasis_weight !== undefined) {
-        if (input.emphasis_weight !== 400 && input.emphasis_weight !== 700)
-          throw new ToolError("emphasis_weight is 400 or 700.");
+        if (!isTextWeight(input.emphasis_weight))
+          throw new ToolError(`emphasis_weight is one of ${TEXT_WEIGHTS.join(", ")}.`);
         patch.emphasisWeight = input.emphasis_weight;
       }
       if (isNum(input.emphasis_scale))
@@ -2968,13 +3069,30 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       if (!Array.isArray(input.effects)) throw new ToolError("effects must be a list; [] removes them all.");
 
-      // Each entry names a clip effect once, with an optional amount in range.
+      // Each entry names a clip effect once, with an optional amount in range;
+      // a flash also takes its tone, strobe rate and rhythm.
       const effects: ClipEffect[] = [];
-      for (const e of input.effects as { effect?: unknown; amount?: unknown }[]) {
+      for (const e of input.effects as { effect?: unknown; amount?: unknown; tone?: unknown; rate?: unknown; rhythm?: unknown }[]) {
         const effect = CLIP_EFFECT_IDS.find((id) => id === e?.effect);
         if (!effect) throw new ToolError(`effect must be one of ${CLIP_EFFECT_IDS.join(", ")}.`);
         if (effects.some((x) => x.effect === effect)) throw new ToolError(`${effect} is listed twice; a clip wears an effect once.`);
-        effects.push(isNum(e.amount) ? { effect, amount: Math.max(0.05, Math.min(1, e.amount)) } : { effect });
+        const entry: ClipEffect = isNum(e.amount) ? { effect, amount: Math.max(0.05, Math.min(1, e.amount)) } : { effect };
+        if (effect === "flash") {
+          if (e.tone !== undefined && !(FLASH_TONES as readonly unknown[]).includes(e.tone)) {
+            throw new ToolError(`tone is one of ${FLASH_TONES.join(", ")}.`);
+          }
+          if (e.tone === "black") {
+            entry.tone = "black";
+          }
+          if (isNum(e.rate) && e.rate > 0) {
+            entry.rate = clamp(e.rate, FLASH_RATE_MIN, FLASH_RATE_MAX);
+          }
+          const rhythm = e.rhythm === undefined ? undefined : flashRhythm(e.rhythm);
+          if (rhythm) {
+            entry.rhythm = rhythm;
+          }
+        }
+        effects.push(entry);
       }
       s.updateClip(clip.id, { effects: effects.length ? effects : undefined });
       return { id: clip.id, effects };
@@ -6239,6 +6357,71 @@ function applyHitInput(
   };
 }
 
+/** set_overlay_animation's font-cycle fields, written onto `anim`. A new
+ * cycle runs from the element's start to its end at the default rate; an
+ * empty face list removes it. Only font ids the registry knows are kept, so
+ * the cycle never shows a face the user could not pick. */
+function applyFontCycleInput(
+  o: { kind?: string; start: number; end: number },
+  anim: OverlayAnim,
+  input: Record<string, unknown>
+): void {
+  const raw = input.font_cycle;
+  const named =
+    raw !== undefined ||
+    isNum(input.font_cycle_at) ||
+    isNum(input.font_cycle_seconds) ||
+    isNum(input.font_cycle_rate);
+  if (!named) return;
+
+  // An empty list clears the cycle.
+  if (Array.isArray(raw) && raw.length === 0) {
+    delete anim.fonts;
+    return;
+  }
+  if ((o.kind ?? "text") !== "text") throw new ToolError("A font cycle changes a title's face; it needs a title.");
+  if (raw !== undefined && !Array.isArray(raw)) throw new ToolError("font_cycle must be a list of faces.");
+  const faces = Array.isArray(raw) ? raw.slice(0, FONT_CYCLE_FACES_MAX).map(cycleFaceOf) : anim.fonts?.faces;
+  if (!faces) throw new ToolError("Name font_cycle to add a font cycle.");
+
+  // Timing: held inside the element, with the rate in its supported range.
+  const dur = Math.max(0.1, o.end - o.start);
+  const at = clamp(isNum(input.font_cycle_at) ? input.font_cycle_at : (anim.fonts?.at ?? 0), 0, dur - 0.05);
+  const seconds = clamp(
+    isNum(input.font_cycle_seconds) ? input.font_cycle_seconds : (anim.fonts?.seconds ?? dur - at),
+    0.05,
+    dur - at
+  );
+  const rate = isNum(input.font_cycle_rate)
+    ? clamp(input.font_cycle_rate, FONT_CYCLE_RATE_MIN, FONT_CYCLE_RATE_MAX)
+    : (anim.fonts?.rate ?? FONT_CYCLE_RATE);
+  const round = (v: number) => Math.round(v * 1000) / 1000;
+  anim.fonts = { faces, at: round(at), seconds: round(seconds), rate };
+}
+
+/** A font id the registry knows, or a refusal naming the one it does not. */
+function knownFont(v: unknown): FontId {
+  if (typeof v !== "string" || !allFonts().some((f) => f.id === v)) {
+    throw new ToolError(`Unknown font id "${String(v)}".`);
+  }
+  return v as FontId;
+}
+
+/** One font_cycle entry as a stored face, checked against the registry. */
+function cycleFaceOf(raw: unknown): CycleFace {
+  const f = (raw ?? {}) as Record<string, unknown>;
+  if (typeof f.font !== "string" || !allFonts().some((x) => x.id === f.font))
+    throw new ToolError(`Unknown font id "${String(f.font)}".`);
+  if (f.weight !== undefined && !isTextWeight(f.weight))
+    throw new ToolError(`A face's weight is one of ${TEXT_WEIGHTS.join(", ")}.`);
+  return {
+    font: f.font,
+    ...(isTextWeight(f.weight) ? { weight: f.weight } : {}),
+    ...(isNum(f.scale) && f.scale !== 1 ? { scale: clamp(f.scale, CYCLE_SCALE_MIN, CYCLE_SCALE_MAX) } : {}),
+    ...(isNum(f.tracking) ? { tracking: clamp(f.tracking, -0.05, 0.5) } : {}),
+  };
+}
+
 function requireItem<T extends { id: string }>(pool: T[], id: unknown, label: string): T {
   const item = pool.find((x) => x.id === String(id ?? ""));
   if (!item) throw new ToolError(`No ${label} with id ${String(id)}. Call get_state for current ids.`);
@@ -6586,10 +6769,82 @@ function easeInput(v: unknown) {
   return v === "linear" ? undefined : v;
 }
 
+/** A shadow from a call, or null when the call leaves it alone: `shadow`
+ * false turns it off (as `off`), true turns it on, and any shadow_* field
+ * lands on top of the current one. Example: shadow_color "#00E5FF" with
+ * shadow_y 0 is a cyan glow. */
+function shadowInput(
+  input: Record<string, unknown>,
+  current: boolean | ShadowSpec | undefined,
+  off: false | undefined
+): { value: boolean | ShadowSpec | undefined } | null {
+  if (input.shadow === false) {
+    return { value: off };
+  }
+  const tuned =
+    typeof input.shadow_color === "string" || isNum(input.shadow_blur) || isNum(input.shadow_opacity) || isNum(input.shadow_y);
+  if (!tuned) {
+    return input.shadow === true ? { value: current || true } : null;
+  }
+
+  // Tuning starts from the current spec, or the default look when it is off.
+  const spec: ShadowSpec = typeof current === "object" ? { ...current } : {};
+  if (typeof input.shadow_color === "string") {
+    if (!HEX_COLOR.test(input.shadow_color)) {
+      throw new ToolError("shadow_color is a hex color like #00E5FF.");
+    }
+    spec.color = input.shadow_color;
+  }
+  if (isNum(input.shadow_blur)) {
+    spec.blur = clamp(input.shadow_blur, 0, SHADOW_BLUR_MAX);
+  }
+  if (isNum(input.shadow_opacity)) {
+    spec.opacity = clamp(input.shadow_opacity, 0, 1);
+  }
+  if (isNum(input.shadow_y)) {
+    spec.offsetY = clamp(input.shadow_y, -SHADOW_OFFSET_MAX, SHADOW_OFFSET_MAX);
+  }
+  return { value: spec };
+}
+
+/** Six-digit hex, the form a shadow color is stored in. */
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/** A shape's pattern from a call, or null when the call leaves it alone:
+ * "none" clears it, a kind or any pattern_* field lands on the current one. */
+function patternInput(
+  input: Record<string, unknown>,
+  current: PatternSpec | undefined
+): { value: PatternSpec | undefined } | null {
+  if (input.pattern === "none") {
+    return { value: undefined };
+  }
+  if (input.pattern !== undefined && !(PATTERN_KINDS as readonly unknown[]).includes(input.pattern)) {
+    throw new ToolError(`pattern is one of ${[...PATTERN_KINDS, "none"].join(", ")}.`);
+  }
+  const tuned = isNum(input.pattern_width) || isNum(input.pattern_gap) || isNum(input.pattern_angle);
+  if (input.pattern === undefined && !tuned) {
+    return null;
+  }
+
+  // Stripes are the one kind today; fields land on the current pattern.
+  const spec: PatternSpec = { ...(current ?? STRIPES_DEFAULT) };
+  if (isNum(input.pattern_width)) {
+    spec.width = clamp(input.pattern_width, STRIPE_LINE_MIN, STRIPE_LINE_MAX);
+  }
+  if (isNum(input.pattern_gap)) {
+    spec.gap = clamp(input.pattern_gap, 0, STRIPE_GAP_MAX);
+  }
+  if (isNum(input.pattern_angle)) {
+    spec.angle = Math.round(clamp(input.pattern_angle, -90, 90)) || undefined;
+  }
+  return { value: spec };
+}
+
 function overlayPatch(
   input: Record<string, unknown>,
   kind: "text" | "shape" | "sticker" | "effect",
-  place?: { groupId?: string }
+  place?: { groupId?: string; shadow?: boolean | ShadowSpec; pattern?: PatternSpec }
 ) {
   const patch: Record<string, unknown> = {};
   if (isNum(input.start)) patch.start = Math.max(0, input.start);
@@ -6615,23 +6870,34 @@ function overlayPatch(
       patch.text = input.text.replace(/\\n/g, "\n");
     if (isNum(input.size)) patch.size = clamp(Math.round(input.size), 16, 320);
     if (typeof input.color === "string") patch.color = input.color;
-    // Only ids the registry knows: an unknown one resolves to the default
-    // face, so storing it would silently render a font the user never chose
-    // and leave the Inspector's font menu blank.
-    if (typeof input.font === "string" && allFonts().some((f) => f.id === input.font))
-      patch.font = input.font as FontId;
-    if (input.weight === 400 || input.weight === 700) patch.weight = input.weight;
+    // Only ids the registry knows: an unknown one is refused, since it would
+    // render the default face and leave the Inspector's font menu blank.
+    if (input.font !== undefined) {
+      patch.font = knownFont(input.font);
+    }
+    if (isTextWeight(input.weight)) patch.weight = input.weight;
     if (typeof input.italic === "boolean") patch.italic = input.italic || undefined;
     if (["left", "center", "right"].includes(String(input.align)))
       patch.align = input.align === "center" ? undefined : input.align;
     if (isNum(input.letter_spacing))
-      patch.letterSpacing = Math.abs(input.letter_spacing) < 0.0025 ? undefined : clamp(input.letter_spacing, -0.05, 0.5);
+      patch.letterSpacing = Math.abs(input.letter_spacing) < 0.0025 ? undefined : clamp(input.letter_spacing, LETTER_SPACING_MIN, LETTER_SPACING_MAX);
     if (isNum(input.line_height))
       patch.lineHeight = Math.abs(input.line_height - 1.25) < 0.01 ? undefined : clamp(input.line_height, 0.7, 2.5);
     if (isNum(input.wrap_width))
       patch.wrapWidth = input.wrap_width <= 0 ? undefined : clamp(input.wrap_width, 0.01, 2);
-    if (typeof input.shadow === "boolean") patch.shadow = input.shadow;
+    const shadow = shadowInput(input, place?.shadow, false);
+    if (shadow) {
+      patch.shadow = shadow.value;
+    }
     if (typeof input.plate === "boolean") patch.plate = input.plate;
+    // A texture names one of the kit's grains; "none" stores as absence.
+    if (input.texture === "none") {
+      patch.texture = undefined;
+    } else if ((TEXT_TEXTURES as readonly unknown[]).includes(input.texture)) {
+      patch.texture = input.texture;
+    } else if (input.texture !== undefined) {
+      throw new ToolError(`texture is one of ${[...TEXT_TEXTURES, "none"].join(", ")}.`);
+    }
     if (isNum(input.plateRadius)) patch.plateRadius = clamp(input.plateRadius, 0, 1);
     if (typeof input.stroke_color === "string" || isNum(input.stroke_width)) {
       const width = isNum(input.stroke_width) ? clamp(input.stroke_width, 0, 0.3) : 0.04;
@@ -6656,6 +6922,21 @@ function overlayPatch(
         width > 0
           ? { color: typeof input.stroke_color === "string" ? input.stroke_color : "#111114", width }
           : undefined;
+    }
+    const pattern = patternInput(input, place?.pattern);
+    if (pattern) {
+      patch.pattern = pattern.value;
+    }
+
+    // A doodle's inks replace the list whole; an empty list leaves the fill
+    // as its one paint.
+    if (input.inks !== undefined) {
+      const inks = cleanInks(input.inks);
+      patch.inks = inks.length > 0 ? inks : undefined;
+    }
+    const shadow = shadowInput(input, place?.shadow, undefined);
+    if (shadow) {
+      patch.shadow = shadow.value;
     }
     return patch;
   }

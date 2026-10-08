@@ -11,6 +11,7 @@ import { decodeRasterImageUrl } from "@/cut/lib/raster";
 import { useEditor } from "@/cut/lib/store";
 import {
   clipCovers,
+  CLIP_MIN_SECONDS,
   clipKeyed,
   clipPoseAt,
   clipZoom,
@@ -58,7 +59,7 @@ export function RemovalBrush({ stage }: { stage: { w: number; h: number } }) {
   // pointer rides the timeline and the overlay tracks the frame on screen.
   const tLocal = usePreviewSelector((t) => (armed && clip ? t - clip.start : -1));
   if (!armed || !clip) return null;
-  const len = Math.max(0.1, retimeOf(clip).len);
+  const len = Math.max(CLIP_MIN_SECONDS, retimeOf(clip).len);
   if (tLocal < 0 || tLocal >= len) return null;
   const asset = assets.find((a) => a.id === clip.assetId);
   if (!asset?.width || !asset?.height) return null;

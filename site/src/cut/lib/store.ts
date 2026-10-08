@@ -8,6 +8,9 @@ import {
   isAudioEffect,
   KEY_EPSILON,
   keyAt,
+  dealsMarks,
+  DOODLE_FILL,
+  DOODLE_INKS,
   lineLikeShape,
   maskKeyAt,
   removeKeyAt,
@@ -93,7 +96,8 @@ import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { cueEmphasis, mergeEmphasis, remapEmphasis, splitEmphasis, toggleEmphasis, withEmphasis } from "./captionEmphasis";
 import { clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
-import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, CLIP_MIN_SECONDS, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
+import { clampFeather, takesFeather } from "./transitionShape";
 import { liftMoveTracks } from "./textMotion";
 import { OWN_SOUND, soundRoom, soundSourceOf, soundWindow, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { cutSound } from "./soundSettings";
@@ -193,7 +197,7 @@ const templateTreatment = (l: TemplateLayer) => ({
   ...(l.card ? { card: { ...l.card, matte: undefined } } : {}),
 });
 
-const MIN_LEN = 0.1;
+const MIN_LEN = CLIP_MIN_SECONDS;
 
 /** Where a video clip lands when dropped: an existing track or a brand-new
  * track inserted at z-level `level`. Tracks number 0..N bottom-up: track 0 is
@@ -3050,14 +3054,18 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     addShape: (shape, aim) => {
       const frame = frameOf(get().aspect);
       // A square-reading default box whatever the aspect; lines/arrows are a
-      // wider box whose height is the stroke thickness.
-      const w = lineLikeShape(shape) ? 0.42 : 0.3;
+      // wider box whose height is the stroke thickness. A doodle paints
+      // across the whole frame in the graffiti set.
+      const marks = dealsMarks(shape);
+      const w = lineLikeShape(shape) ? 0.42 : marks ? 1 : 0.3;
       const h =
         shape === "line"
           ? 6 / frame.h
           : shape === "arrow"
             ? 10 / frame.h
-            : (w * frame.w) / frame.h;
+            : marks
+              ? 1
+              : (w * frame.w) / frame.h;
       addElement(
         "shape",
         (start, end, lane) => ({
@@ -3070,7 +3078,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           y: 0.5,
           w,
           h,
-          fill: "#FFFFFF",
+          fill: marks ? DOODLE_FILL : "#FFFFFF",
+          ...(marks ? { inks: [...DOODLE_INKS] } : {}),
           lane,
         }),
         aim
@@ -5732,6 +5741,9 @@ export function deriveTransitionFields(
     const cut = byBoundary.get(`cut:${c.id}`);
     const transition = cut ? clampBarSeconds(cut.seconds) : undefined;
     const transitionStyle = cut && cut.style !== "crossfade" ? cut.style : undefined;
+    // Only a style with a reveal edge has anything to soften.
+    const transitionFeather =
+      cut && takesFeather(cut.style) && clampFeather(cut.feather) > 0 ? clampFeather(cut.feather) : undefined;
     const animOf = (t: TimelineTransition | undefined): ClipAnim | undefined => {
       if (!t) return undefined;
       // Only a style with an edge ramp reaches an open edge — a sound
@@ -5749,12 +5761,13 @@ export function deriveTransitionFields(
     if (
       c.transition === transition &&
       c.transitionStyle === transitionStyle &&
+      c.transitionFeather === transitionFeather &&
       sameAnim(c.animIn, animIn) &&
       sameAnim(c.animOut, animOut)
     )
       return c;
     changed = true;
-    return { ...c, transition, transitionStyle, animIn, animOut };
+    return { ...c, transition, transitionStyle, transitionFeather, animIn, animOut };
   });
   return changed ? next : clips;
 }
@@ -5772,6 +5785,7 @@ function sanitizeTransitions(raw: TimelineTransition[] | undefined): TimelineTra
       start: t.start,
       seconds: clampBarSeconds(t.seconds),
       style: TRANSITION_STYLE_IDS.includes(t.style) ? t.style : "crossfade",
+      ...(clampFeather(t.feather) > 0 ? { feather: clampFeather(t.feather) } : {}),
       ...(t.hidden ? { hidden: true as const } : {}),
     }));
   return bars.filter(

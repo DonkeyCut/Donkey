@@ -9,7 +9,7 @@ import {
   soundCrossGain,
   trackZeroPlan,
 } from "./framePlan";
-import { TRANSITION_ZOOM } from "./types";
+import { TRANSITION_BLUR, TRANSITION_ZOOM } from "./types";
 import type { AudioClip, ClipSpan, MediaAsset, VideoClip } from "./types";
 
 const asset: MediaAsset = {
@@ -252,6 +252,16 @@ describe("clipAnimFx", () => {
     expect(clipAnimFx(clip, 1, 4).dxFrac).toBeCloseTo(0, 5);
     expect(clipAnimFx(clip, 3.5, 4).dxFrac).toBeCloseTo(-0.5, 5);
     expect(clipAnimFx(clip, 4, 4).dxFrac).toBeCloseTo(-1, 5);
+  });
+
+  test("defocuses an open-edge blur through the middle of its ramp as it fades", () => {
+    const clip = videoClip({ animIn: { style: "blur", seconds: 1 } });
+    const mid = clipAnimFx(clip, 0.5, 4);
+    expect(mid.blur).toBeCloseTo(TRANSITION_BLUR, 5);
+    expect(mid.veil).toBeCloseTo(0.5, 5);
+    expect(mid.gain).toBeCloseTo(0.5, 5);
+    expect(clipAnimFx(clip, 0.25, 4).blur).toBeCloseTo(TRANSITION_BLUR / 2, 5);
+    expect(clipAnimFx(clip, 2, 4).blur).toBeUndefined();
   });
 
   test("treats a style it does not know as a fade", () => {

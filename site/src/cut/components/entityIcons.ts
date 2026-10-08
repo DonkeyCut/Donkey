@@ -12,14 +12,18 @@ import {
   Blend,
   Captions,
   Circle,
+  Clock,
   Diamond,
   Droplets,
   Expand,
   FoldHorizontal,
+  SplitSquareHorizontal,
+  SplitSquareVertical,
   Folder,
   StickyNote,
   Heart,
   Hexagon,
+  Brush,
   Layers,
   Minus,
   Moon,
@@ -50,6 +54,7 @@ export const SHAPE_CHIP_ICONS: Record<ShapeKind, LucideIcon> = {
   hexagon: Hexagon,
   line: Minus,
   arrow: MoveRight,
+  doodle: Brush,
 };
 
 /** The glyph a transition wears on its bar and on its mention pill. */
@@ -72,6 +77,9 @@ export const TRANSITION_ICONS: Record<TransitionStyle, LucideIcon> = {
   circleclose: Target,
   splitopen: UnfoldHorizontal,
   splitclose: FoldHorizontal,
+  clockwipe: Clock,
+  sliceleft: SplitSquareHorizontal,
+  sliceup: SplitSquareVertical,
 };
 
 /** The glyph an effect wears on its bar and on its mention pill: a waveform

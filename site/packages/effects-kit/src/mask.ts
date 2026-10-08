@@ -56,7 +56,20 @@ export const MASK_KINDS: MaskKind[] = MASK_SHAPES.map((s) => s.id);
 export const MASK_SHAPE_KINDS: MaskKind[] = MASK_KINDS.filter((k) => k !== "subject");
 
 /** Feather ceiling, design px at the 1080 short side. */
-export const MASK_FEATHER_MAX = 200;
+export const MASK_FEATHER_MAX = 600;
+/** A straight edge's feather, from coverage `a` to `b` along the gradient.
+ * The ramp eases at both ends (a smoothstep), the falloff a blurred edge has,
+ * so a wide feather reads as soft light. A linear ramp shows its two corners
+ * as bands. */
+function featherStops(g: CanvasGradient, a: number, b: number) {
+  for (let i = 0; i <= FEATHER_STEPS; i++) {
+    const u = i / FEATHER_STEPS;
+    const v = a + (b - a) * u * u * (3 - 2 * u);
+    g.addColorStop(u, `rgba(255,255,255,${v.toFixed(3)})`);
+  }
+}
+const FEATHER_STEPS = 8;
+
 /** Corner radius ceiling for rect and square masks, design px. */
 export const MASK_RADIUS_MAX = 400;
 
@@ -406,8 +419,7 @@ export function paintMaskCoverage(
     // the feather, centered on the edge line.
     if (feather > 0) {
       const g = ctx.createLinearGradient(0, -feather / 2, 0, feather / 2);
-      g.addColorStop(0, "rgba(255,255,255,1)");
-      g.addColorStop(1, "rgba(255,255,255,0)");
+      featherStops(g, 1, 0);
       ctx.fillStyle = g;
       ctx.fillRect(-big, -feather / 2, big * 2, feather);
       ctx.fillStyle = "#ffffff";
@@ -421,13 +433,11 @@ export function paintMaskCoverage(
     const fe = Math.min(feather, h);
     if (fe > 0) {
       const top = ctx.createLinearGradient(0, -h / 2 - fe / 2, 0, -h / 2 + fe / 2);
-      top.addColorStop(0, "rgba(255,255,255,0)");
-      top.addColorStop(1, "rgba(255,255,255,1)");
+      featherStops(top, 0, 1);
       ctx.fillStyle = top;
       ctx.fillRect(-big, -h / 2 - fe / 2, big * 2, fe);
       const bottom = ctx.createLinearGradient(0, h / 2 - fe / 2, 0, h / 2 + fe / 2);
-      bottom.addColorStop(0, "rgba(255,255,255,1)");
-      bottom.addColorStop(1, "rgba(255,255,255,0)");
+      featherStops(bottom, 1, 0);
       ctx.fillStyle = bottom;
       ctx.fillRect(-big, h / 2 - fe / 2, big * 2, fe);
       ctx.fillStyle = "#ffffff";

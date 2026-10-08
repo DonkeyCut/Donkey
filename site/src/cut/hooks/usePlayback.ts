@@ -12,7 +12,7 @@ import {
 import { headSrc, retimeOf, smoothsAt } from "@donkeycut/effects-kit";
 import { blendInto, SYNTH_EDGE, synthWeight } from "@/cut/lib/frameSynth";
 import { playheadAt, previewAt, setPlayhead, subscribePlayhead } from "@/cut/lib/playhead";
-import { assetIsSilent, clipCovers, rectOf } from "@/cut/lib/types";
+import { assetIsSilent, CLIP_MIN_SECONDS, clipCovers, rectOf } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { OWN_SOUND, soundSourceOf, soundWindow } from "@/cut/lib/soundSource";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
@@ -754,7 +754,7 @@ class Engine {
       const asset = s.assets.find((x) => x.id === a.assetId);
       if (!asset || a.hidden) continue;
       const rt = retimeOf(a);
-      const len = Math.max(0.1, rt.len);
+      const len = Math.max(CLIP_MIN_SECONDS, rt.len);
       if (t < a.start || t >= a.start + len) continue;
       const v = audioVoice(a, asset, s.assets);
       if (!v || (v.url === asset.url && assetIsSilent(asset))) continue;
@@ -849,6 +849,7 @@ class Engine {
         masterFx: {
           dx: plan.masterFxFrac.dx * this.canvas.width,
           dy: plan.masterFxFrac.dy * this.canvas.height,
+          blur: plan.masterFxFrac.blur * Math.min(this.canvas.width, this.canvas.height),
         },
         incFrame,
         incClip: plan.incoming?.clip,

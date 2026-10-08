@@ -16,7 +16,7 @@ import {
   TEXT_VARIATION_IDS,
 } from "@/cut/lib/textCompose";
 import { TEXT_MOVE_IDS, TEXT_MOVE_NOTES } from "@/cut/lib/textMotion";
-import { OVERLAY_ANIM_STYLE_IDS } from "@donkeycut/effects-kit";
+import { LETTER_SPACING_MAX, LETTER_SPACING_MIN, OVERLAY_ANIM_STYLE_IDS, TEXT_TEXTURES, TEXT_WEIGHTS } from "@donkeycut/effects-kit";
 import { TIMELINE_IDS, TIMELINE_LABELS } from "@/cut/lib/types";
 
 export const TIMELINE_TOOLS = [
@@ -254,15 +254,20 @@ export const TIMELINE_TOOLS = [
       size: num("Font size px at 1080w (default 88)"),
       color: str("CSS color (default #FFFFFF)"),
       font: str("Font id (see the graphics skill; default sf)"),
-      weight: { type: "number", enum: [400, 700], description: "Font weight" },
+      weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Font weight: 400 regular, 700 bold, 800 extra bold, 900 black" },
       italic: bool("Italic"),
       align: { type: "string", enum: ["left", "center", "right"], description: "Multi-line alignment (default center)" },
-      letter_spacing: num("Tracking in em (0 = normal, 0.1 = airy)"),
+      letter_spacing: num(`Tracking in em, ${LETTER_SPACING_MIN}..${LETTER_SPACING_MAX} (0 = normal, 0.1 = airy, negative = tight)`),
       line_height: num("Line height multiplier (default 1.25)"),
       stroke_color: str("Text outline color"),
       stroke_width: num("Text outline width in em (0..0.15; 0 removes it)"),
       shadow: bool("Drop shadow (default true)"),
       plate: bool("Translucent plate behind text (default false)"),
+      texture: {
+        type: "string",
+        enum: [...TEXT_TEXTURES, "none"],
+        description: 'Grain inside the letters: "stipple" breaks each letter into spray-paint specks along its left edge, solid by its middle (the gritty teaser title); "none" makes the type solid again',
+      },
       rotation: num("Degrees clockwise, -180..180"),
       opacity: num("Whole-element opacity 0..1"),
       lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),

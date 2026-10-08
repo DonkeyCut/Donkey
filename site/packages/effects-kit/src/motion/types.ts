@@ -57,8 +57,15 @@ export interface MotionProperties {
   tracking?: PropertyKey<number>[];
   /** Share of the box uncovered from its leading edge, 0..1 (wipes). */
   reveal?: PropertyKey<number>[];
+  /** Share of the ink eaten away by grain, 0..1 (disintegrate). */
+  erode?: PropertyKey<number>[];
+  /** Strength of the electric arcs crawling over the element, 0..1 (zap). */
+  zap?: PropertyKey<number>[];
   /** Share of the characters drawn, 0..1 (typewriter). */
   typed?: PropertyKey<number>[];
+  /** Share of its written value every number in the text shows, 0..1
+   * (count). */
+  counted?: PropertyKey<number>[];
   /** Characters a unit's reel still has to roll past before it lands, 0 at
    * rest (slot). */
   roll?: PropertyKey<number>[];
@@ -68,6 +75,14 @@ export interface MotionProperties {
   /** Multiplies the element's colors, 1 = as drawn; below 1 it darkens
    * (a pressed button). */
   brightness?: PropertyKey<number>[];
+  /** Defocus, design px: the unit sharpens out of a blur as it falls to 0. */
+  blur?: PropertyKey<number>[];
+  /** How far a red and a cyan copy of the unit pull apart either side of it,
+   * design px (a glitch's channel split). */
+  split?: PropertyKey<number>[];
+  /** The chance, 0..1, that the unit is dark at a given moment. Each unit
+   * blinks on its own seeded pattern, so a line flickers letter by letter. */
+  flicker?: PropertyKey<number>[];
 }
 
 /** What the selector counts as one unit. */
@@ -120,6 +135,9 @@ export interface MotionPreset {
   slots: MotionSlot[];
   /** Loops only: one cycle in seconds at speed 1. */
   period?: number;
+  /** Edges only: the longest the ramp may run, seconds, over the shared cap
+   * (a count can run for as long as a loading bar does). */
+  maxSeconds?: number;
   selector?: RangeSelector;
   wiggly?: WigglySelector;
   animate: MotionProperties;
@@ -151,10 +169,16 @@ export interface MotionPose {
   alpha: number;
   tracking: number;
   reveal?: number;
+  erode?: number;
+  zap?: number;
   typed?: number;
+  counted?: number;
   roll?: number;
   dive?: number;
   brightness?: number;
+  blur?: number;
+  split?: number;
+  flicker?: number;
 }
 
 export const REST_POSE: MotionPose = {

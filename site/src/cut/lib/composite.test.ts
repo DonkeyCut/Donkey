@@ -284,3 +284,59 @@ describe("the compositor's color path", () => {
     expect(peekClipLut(first.key)).toBeUndefined();
   });
 });
+
+describe("a keyed clip's softening", () => {
+  /** Every filter and blend mode the compositor sets while `draw` runs, on
+   * the frame and on each scratch it makes. */
+  const settingsDuring = (draw: (c: FrameCompositor) => void): string[] => {
+    const seen: string[] = [];
+    const spy = (c: PixelCanvas): PixelCanvas => {
+      const inner = c.ctx;
+      (c as unknown as { ctx: unknown }).ctx = new Proxy(inner, {
+        set: (target, prop, value) => {
+          if (prop === "filter" || prop === "globalCompositeOperation") seen.push(String(value));
+          (target as Record<string, unknown>)[prop as string] = value;
+          return true;
+        },
+      });
+      return c;
+    };
+    setRasterFactory({
+      createCanvas: (w, h) => spy(new PixelCanvas(w, h)) as unknown as RasterSurface,
+      decodeImage: async () => null,
+      canvasToBlob: async () => new Blob(),
+      snapshot: async (canvas) => canvas as unknown as ImageBitmap,
+    });
+    try {
+      draw(new FrameCompositor(spy(new PixelCanvas(W, H)) as unknown as RasterSurface));
+    } finally {
+      setRasterFactory({
+        createCanvas: (w, h) => new PixelCanvas(w, h) as unknown as RasterSurface,
+        decodeImage: async () => null,
+        canvasToBlob: async () => new Blob(),
+        snapshot: async (canvas) => canvas as unknown as ImageBitmap,
+      });
+    }
+    return seen;
+  };
+  const key = (t: number, x: number, blur?: number) => ({ t, x, y: 0.5, scale: 1, rotation: 0, opacity: 1, ...(blur !== undefined ? { blur } : {}) });
+  const rect = { x: 0.25, y: 0, w: 0.5, h: 1 };
+
+  test("pose keys carrying blur blur the clip as it lands", () => {
+    // 540 design px at the 1080 short side is 4 px on this 8 px frame; half
+    // way down the ramp it is 2.
+    const clip = clipOf({ frame: rect, kf: [key(0, 0.5, 540), key(1, 0.5, 0)] });
+    const seen = settingsDuring((c) => c.drawIntoRect(frameOf(picture()), rect, true, 1, 0.5, 1, clip));
+    expect(seen).toContain("blur(2.00px)");
+  });
+
+  test("motion blur streaks a moving clip and only when it is on", () => {
+    const kf = [key(0, 0.2), key(1, 0.8)];
+    const still = settingsDuring((c) => c.drawIntoRect(frameOf(picture()), rect, true, 1, 0.5, 1, clipOf({ frame: rect, kf })));
+    expect(still).not.toContain("lighter");
+    const moving = settingsDuring((c) =>
+      c.drawIntoRect(frameOf(picture()), rect, true, 1, 0.5, 1, clipOf({ frame: rect, kf, motionBlur: 1 }))
+    );
+    expect(moving).toContain("lighter");
+  });
+});

@@ -19,13 +19,14 @@
  * it was reached by playing there or by rendering the 135th frame.
  */
 
-import { applyClipEffects, applyDetail, applyLutToImageData, applyMaskToCanvas, detailActive, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
+import { applyClipEffects, applyDetail, applyLutToImageData, applyMaskToCanvas, detailActive, drawStreak, elementLook, grainTile, hexToHlgHex, lookCssFilter, lookPost, maskComposite, paintStrokeInk, removalActive, type ClipColorRecipe, type OutputSpace } from "@donkeycut/effects-kit";
 import { cameraCardLayout, traceCardPath, type CardLayout } from "./cameraCard";
 import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
 import { clipRecipe, peekClipLut, requestClipLut, type ClipLut, type RecipeSource } from "./lutBuild";
 import { createRasterCanvas } from "./raster";
-import { clipCovers, clipPosed, clipPoseAt, clipZoom, contentRect, DEFAULT_BACKGROUND, isFullRect, rectOf, shadowInk } from "./types";
+import { CLOCK_SWEEP, clampFeather, featherAlpha, shapeEase, SLICE_TAPS, sliceStreak, takesFeather } from "./transitionShape";
+import { clipCovers, clipFrameAt, clipPosed, clipZoom, contentRect, DEFAULT_BACKGROUND, isFullRect, rectOf, shadowInk, TRANSITION_BLUR } from "./types";
 import type { ClipShadow, FrameRect, TransitionStyle, VideoClip } from "./types";
 
 /** A clip's picture at some instant, or the reasons there isn't one.
@@ -56,6 +57,8 @@ export const PENDING_FRAME: Frame = { kind: "pending" };
 export interface LayerFx {
   dx?: number;
   dy?: number;
+  /** Defocus as the layer lands, output px (an edge blur). */
+  blur?: number;
 }
 
 /** The two clips a transition joins, each with its ramps already resolved. */
@@ -64,7 +67,7 @@ export interface CrossJoin {
   masterClip: VideoClip;
   masterAlpha: number;
   masterZoom: number;
-  masterFx: { dx: number; dy: number };
+  masterFx: { dx: number; dy: number; blur?: number };
   incFrame: Frame;
   incClip: VideoClip | undefined;
   incAlpha: number;
@@ -131,6 +134,9 @@ export class FrameCompositor {
   private cardPop: Surface | null = null;
   private cardLayer: Surface | null = null;
   private cardPost: Surface | null = null;
+  /** A soft-edged transition draws its incoming shot here, then fades it
+   * out along the edge before laying it over the outgoing one. */
+  private featherScratch: Surface | null = null;
   /** The fade under the card edge, rebuilt only when the band moves. */
   private cardFade: { ctx: Ctx; edge: number; bottom: number; fill: CanvasGradient } | null = null;
   /** The card shadow's ink, rebuilt only when its opacity changes. */
@@ -244,7 +250,8 @@ export class FrameCompositor {
       | "detailScratch"
       | "cardPop"
       | "cardLayer"
-      | "cardPost",
+      | "cardPost"
+      | "featherScratch",
     w: number,
     h: number
   ): { surface: Surface; resized: boolean } {
@@ -743,8 +750,10 @@ export class FrameCompositor {
     const W = this.canvas.width;
     const H = this.canvas.height;
     const tLocal = Math.max(0, at - clip.start);
-    const pose = clipPosed(clip) ? clipPoseAt(clip, tLocal) : null;
+    const pose = clipPosed(clip) ? clipFrameAt(clip, tLocal, W / H) : null;
     if (pose && pose.opacity <= 0.001) return;
+    // The keyed blur and the motion streak, in output px, as an element's.
+    const look = pose ? elementLook(pose, Math.min(W, H) / 1080) : null;
     const mask = clip.mask;
     const { surface: layer } = this.scratch("layerScratch", W, H);
     const lctx = layer.getContext("2d") as Ctx | null;
@@ -814,6 +823,18 @@ export class FrameCompositor {
       pctx.restore();
       out = posed;
       octx = pctx;
+
+      // Motion blur smears the posed picture along its streak; the layer
+      // scratch is free again by now, so it takes the smear.
+      if (look && look.taps >= 2) {
+        lctx.setTransform(1, 0, 0, 1, 0, 0);
+        lctx.globalAlpha = 1;
+        lctx.globalCompositeOperation = "source-over";
+        lctx.clearRect(0, 0, W, H);
+        drawStreak(lctx, posed as CanvasImageSource, 0, 0, look);
+        out = layer;
+        octx = lctx;
+      }
     }
     if (mask?.kind === "subject") {
       // The person matte is the coverage: blur its edge by the feather and
@@ -844,8 +865,20 @@ export class FrameCompositor {
       ctx.translate(Math.round(fx.dx ?? 0), Math.round(fx.dy ?? 0));
     }
     const shade = clip.card ? null : this.shadowOf(out, clip.boxStyle?.shadow);
+
+    // The keyed blur softens the picture and its shadow as they land, on
+    // top of any filter the caller set (a blur transition's own).
+    const soft = !!look && look.blur > 0 && "filter" in ctx;
+    const before = soft ? ctx.filter : "none";
+    if (soft) {
+      const own = `blur(${look.blur.toFixed(2)}px)`;
+      ctx.filter = before && before !== "none" ? `${before} ${own}` : own;
+    }
     if (shade) ctx.drawImage(shade, 0, 0);
     ctx.drawImage(out, 0, 0);
+    if (soft) {
+      ctx.filter = before;
+    }
     if (hasFx) ctx.restore();
   }
 
@@ -1210,6 +1243,20 @@ export class FrameCompositor {
     // instead of strobing black (matters while skimming).
     if (frame.kind === "pending") return;
     blank();
+
+    // An edge blur softens the whole layer as it lands, over any filter the
+    // caller set; the layer draws with the filter in place.
+    if (fx?.blur && fx.blur > 0.1 && "filter" in ctx) {
+      const before = ctx.filter;
+      const own = `blur(${fx.blur.toFixed(2)}px)`;
+      ctx.filter = before && before !== "none" ? `${before} ${own}` : own;
+      try {
+        this.drawLayer(frame, clip, false, alpha, at, zoom, { dx: fx.dx, dy: fx.dy });
+      } finally {
+        ctx.filter = before;
+      }
+      return;
+    }
     if (this.needsFx(clip)) {
       // The blank above already settled who owns the black; the layer itself
       // draws through the mask/pose pass, and any transition motion lands on
@@ -1302,9 +1349,19 @@ export class FrameCompositor {
       style.startsWith("push") ||
       style.startsWith("wipe") ||
       style.startsWith("circle") ||
-      style.startsWith("split");
+      style.startsWith("split") ||
+      style.startsWith("slice") ||
+      style === "clockwipe";
     if (carves && d.incFrame.kind === "pending") {
       drawMaster();
+      return;
+    }
+    // A softened edge: the incoming shot fades in across a ramp along the
+    // edge, the same profile the ffmpeg expression computes per pixel.
+    const feather = clampFeather(d.masterClip.transitionFeather);
+    if (feather > 0 && takesFeather(style)) {
+      drawMaster();
+      this.drawFeathered(style, p, feather, () => drawInc(1));
       return;
     }
     switch (style) {
@@ -1323,7 +1380,7 @@ export class FrameCompositor {
         // here vs ffmpeg's horizontal hblur — reads the same). Without
         // ctx.filter this degrades to the plain crossfade below.
         const supports = "filter" in ctx;
-        const r = Math.max(0.5, (Math.min(W, H) / 24) * (1 - Math.abs(2 * p - 1)));
+        const r = Math.max(0.5, Math.min(W, H) * TRANSITION_BLUR * (1 - Math.abs(2 * p - 1)));
         if (supports) ctx.filter = `blur(${r.toFixed(2)}px)`;
         drawMaster();
         drawInc();
@@ -1407,6 +1464,62 @@ export class FrameCompositor {
         );
         break;
       }
+      case "clockwipe": {
+        // A hand pinned at the top-left corner sweeps from the top edge down
+        // to the left one, uncovering the incoming shot behind it.
+        const angle = shapeEase(style, p) * CLOCK_SWEEP;
+        drawMaster();
+        clipped(
+          () => {
+            ctx.moveTo(0, 0);
+            ctx.arc(0, 0, Math.hypot(W, H), 0, angle);
+            ctx.closePath();
+          },
+          () => drawInc(1)
+        );
+        break;
+      }
+      case "sliceleft":
+      case "sliceup": {
+        // The frame cut in two: across, the top half slides left and the
+        // bottom right; up, the left column slides up and the right down. In
+        // each half the incoming shot follows the outgoing one in. The halves
+        // streak along their slide: copies across the shutter's travel,
+        // folded into a running average (copy k at 1/(k+1)), each copy an
+        // opaque outgoing+incoming pair so the average needs no scratch.
+        const across = style === "sliceleft";
+        const e = shapeEase(style, p);
+        const len = across ? W : H;
+        const streak = sliceStreak(p, d.masterClip.transition ?? 0) * len;
+        const taps = streak >= 1 ? SLICE_TAPS : 1;
+        const halves: { rect: [number, number, number, number]; dir: number }[] = across
+          ? [
+              { rect: [0, 0, W, H / 2], dir: -1 },
+              { rect: [0, H / 2, W, H - H / 2], dir: 1 },
+            ]
+          : [
+              { rect: [0, 0, W / 2, H], dir: -1 },
+              { rect: [W / 2, 0, W - W / 2, H], dir: 1 },
+            ];
+        for (const half of halves) {
+          clipped(
+            () => ctx.rect(...half.rect),
+            () => {
+              for (let k = 0; k < taps; k++) {
+                const off = taps > 1 ? streak * (k / (taps - 1) - 0.5) : 0;
+                const shift = half.dir * e * len + off;
+                const at = (v: number) => (across ? { dx: v, dy: 0 } : { dx: 0, dy: v });
+                const a = 1 / (k + 1);
+                const m = at(shift);
+                const i = at(shift - half.dir * len);
+                drawMaster({ ...d.masterFx, dx: d.masterFx.dx + m.dx, dy: d.masterFx.dy + m.dy }, a);
+                drawInc(a, i);
+              }
+            }
+          );
+        }
+        break;
+      }
       default: {
         // crossfade / crosszoom: the classic A·(1−α)+B·α blend (zooms already
         // folded into the layer zoom factors).
@@ -1414,5 +1527,56 @@ export class FrameCompositor {
         drawInc();
       }
     }
+  }
+
+  /**
+   * Lay the incoming shot over the frame through a soft edge: drawn into the
+   * scratch, faded by the style's profile (`featherAlpha`, sampled into a
+   * gradient along the edge's axis or out from the center), then composited.
+   */
+  private drawFeathered(style: TransitionStyle, p: number, feather: number, drawInc: () => void) {
+    const ctx = this.ctx();
+    if (!ctx) return;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    const { surface } = this.scratch("featherScratch", W, H);
+    const sctx = surface.getContext("2d") as Ctx | null;
+    if (!sctx) return;
+    sctx.clearRect(0, 0, W, H);
+    const main = this.canvas;
+    this.canvas = surface;
+    try {
+      drawInc();
+    } finally {
+      this.canvas = main;
+    }
+
+    // The profile, sampled along the axis it varies on: x for the sideways
+    // styles, y for the vertical wipes, the distance from the center for the
+    // circles.
+    const STOPS = 48;
+    const radial = style.startsWith("circle");
+    const vertical = style === "wipeup" || style === "wipedown";
+    const R = Math.hypot(W, H) / 2;
+    const grad = radial
+      ? sctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, R)
+      : vertical
+        ? sctx.createLinearGradient(0, 0, 0, H)
+        : sctx.createLinearGradient(0, 0, W, 0);
+    for (let i = 0; i <= STOPS; i++) {
+      const u = i / STOPS;
+      const a = radial
+        ? featherAlpha(style, p, W / 2 + u * R, H / 2, W, H, feather)
+        : vertical
+          ? featherAlpha(style, p, 0, u * H, W, H, feather)
+          : featherAlpha(style, p, u * W, 0, W, H, feather);
+      grad.addColorStop(u, `rgba(0,0,0,${a.toFixed(4)})`);
+    }
+    sctx.save();
+    sctx.globalCompositeOperation = "destination-in";
+    sctx.fillStyle = grad;
+    sctx.fillRect(0, 0, W, H);
+    sctx.restore();
+    ctx.drawImage(surface as CanvasImageSource, 0, 0);
   }
 }

@@ -13,7 +13,7 @@
 // compile until it has an entry, and `itemKinds.test.ts` walks the table so
 // every entry proves it copies and pastes.
 
-import { KEY_EPSILON, maskKeyAt, poseAt, retimeOf, shiftCamera, sortedKeys, type EaseId, type Mask, type OverlayAnim, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
+import { KEY_EPSILON, maskKeyAt, OVERLAY_HIT_DEFAULT_SECONDS, poseAt, retimeOf, shiftCamera, sortedKeys, type EaseId, type Mask, type OverlayAnim, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
 import { splitEmphasis, withEmphasis } from "./captionEmphasis";
 import {
   clipPoseAt,
@@ -144,7 +144,7 @@ function splitHit(anim: OverlayAnim | undefined, cut: number): [OverlayAnim | un
   void _drop;
   return [
     hit.at < cut ? anim : rest,
-    hit.at + hit.seconds > cut ? { ...rest, hit: { ...hit, at: hit.at - cut } } : rest,
+    hit.at + (hit.seconds > 0 ? hit.seconds : OVERLAY_HIT_DEFAULT_SECONDS) > cut ? { ...rest, hit: { ...hit, at: hit.at - cut } } : rest,
   ];
 }
 

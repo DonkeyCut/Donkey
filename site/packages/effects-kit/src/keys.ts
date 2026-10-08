@@ -34,6 +34,8 @@ import {
   type GroupCamera,
 } from "./camera";
 import { easeAt, type EaseId } from "./ease";
+import { splitScale } from "./stretch";
+import { dealsMarks, type ShapeKind } from "./types";
 
 /** A pose captured at `t` seconds into the element. Values are absolute, in
  * the same units as the element's own fields — `scale` multiplies the
@@ -43,7 +45,16 @@ export interface OverlayKey {
   x: number; // center, fraction of frame width
   y: number; // center, fraction of frame height
   scale: number;
+  /** Width and height over `scale`; absent = 1. A screen switching off
+   * squashes scaleY toward 0. */
+  scaleX?: number;
+  scaleY?: number;
   rotation: number; // degrees clockwise
+  /** 3D tilt in degrees, seen in perspective (TILT_PERSPECTIVE): tiltX turns
+   * the element about its horizontal axis, top edge away from the viewer;
+   * tiltY about its vertical axis, right edge away. Absent = flat. */
+  tiltX?: number;
+  tiltY?: number;
   opacity: number; // 0..1
   /** Gaussian blur, px at the 1080 short side; absent = the element's own. */
   blur?: number;
@@ -51,12 +62,31 @@ export interface OverlayKey {
   ease?: EaseId;
 }
 
+/** How far the viewer sits from a tilted element, px at the 1080 design
+ * short side: the CSS perspective() the DOM draws with and the depth the
+ * canvas painters project through. */
+export const TILT_PERSPECTIVE = 1600;
+
+/** The steepest tilt a key holds, degrees either way: at 90 the element is
+ * edge-on and gone. */
+export const TILT_MAX = 85;
+
+/** The most a tilt can grow an element's nearer edge, for the frame sampler's
+ * crop: an edge 540 design px off center tipped fully toward the viewer. */
+export const TILT_GROW = TILT_PERSPECTIVE / (TILT_PERSPECTIVE - 540);
+
 /** What an element looks like at one moment, before presets compose over it. */
 export interface OverlayPose {
   x: number;
   y: number;
+  /** The larger axis; `sx`/`sy` stretch each axis over it (see stretch.ts). */
   scale: number;
+  sx?: number;
+  sy?: number;
   rotation: number;
+  /** Absent = flat (see OverlayKey). */
+  tiltX?: number;
+  tiltY?: number;
   opacity: number;
   /** Absent = sharp. */
   blur?: number;
@@ -73,6 +103,8 @@ interface Posable {
   /** Absent means text — the union's own default. Only the per-glyph styles
    * read it, to decide whether there are glyphs to move. */
   kind?: string;
+  /** A shape's kind; a doodle paints anew on every beat. */
+  shape?: ShapeKind;
   rotation?: number;
   opacity?: number;
   anim?: OverlayAnim;
@@ -105,10 +137,12 @@ export function hasOverlayKeys(o: Posable): boolean {
 }
 
 /** Whether the element is drawn through the per-frame evaluator: something
- * moves it (a preset, pose keys, its group's camera, a keyframed mask). Any
- * other element renders as one still picture, its own blur baked in. */
+ * moves it (a preset, pose keys, its group's camera, a keyframed mask) or it
+ * paints anew on every beat (a doodle). Any other element renders as one
+ * still picture, its own blur baked in. */
 export function isOverlayAnimated(o: Posable): boolean {
   return (
+    (o.kind === "shape" && !!o.shape && dealsMarks(o.shape)) ||
     hasOverlayAnim(o.anim) ||
     hasOverlayKeys(o) ||
     hasCameraKeys(o.camera) ||
@@ -164,26 +198,48 @@ export function lerpKeys<K extends { t: number; ease?: EaseId }>(
 /** The pose at `tLocal` seconds into the element: interpolated between the
  * surrounding keys, held flat outside them, resting when there are no keys. */
 export function poseAt(o: Posable, tLocal: number): OverlayPose {
-  const keys = o.kf;
-  if (!keys || keys.length === 0) return restingPose(o);
+  if (!hasOverlayKeys(o)) return restingPose(o);
+  return poseOf(trackAt(o.kf!, tLocal, o.blur ?? 0), o.blur ?? 0);
+}
+
+/** The pose at `tLocal` in the keys' own terms (a uniform scale with its
+ * per-axis stretch apart), the way an editor shows and writes it. */
+export function keyPoseAt(o: Posable, tLocal: number): Omit<OverlayKey, "t" | "ease"> {
+  if (!hasOverlayKeys(o)) return restingPose(o);
+  const k: Partial<OverlayKey> = { ...trackAt(o.kf!, tLocal, o.blur ?? 0) };
+  delete k.t;
+  delete k.ease;
+  return k as Omit<OverlayKey, "t" | "ease">;
+}
+
+/** The key track interpolated at `tLocal`. */
+function trackAt(keys: OverlayKey[], tLocal: number, rest: number): OverlayKey {
   // A key with no blur of its own takes the element's.
-  const rest = o.blur ?? 0;
-  const k = lerpKeys(keys, tLocal, (a, b, p) => {
+  return lerpKeys(keys, tLocal, (a, b, p) => {
     const mix = (u: number, v: number) => u + (v - u) * p;
     const blur = mix(a.blur ?? rest, b.blur ?? rest);
+    // Axes and tilts a key leaves out sit at rest, so a squash or a tilt on
+    // one key eases in from the key before it.
+    const scaleX = mix(a.scaleX ?? 1, b.scaleX ?? 1);
+    const scaleY = mix(a.scaleY ?? 1, b.scaleY ?? 1);
+    const tiltX = mix(a.tiltX ?? 0, b.tiltX ?? 0);
+    const tiltY = mix(a.tiltY ?? 0, b.tiltY ?? 0);
     return {
       t: mix(a.t, b.t),
       x: mix(a.x, b.x),
       y: mix(a.y, b.y),
       scale: mix(a.scale, b.scale),
+      ...(scaleX !== 1 ? { scaleX } : {}),
+      ...(scaleY !== 1 ? { scaleY } : {}),
       // Rotation takes the short way around, so a key at 350° into one at 10°
       // turns 20° forward instead of 340° back.
       rotation: a.rotation + shortestTurn(a.rotation, b.rotation) * p,
+      ...(tiltX !== 0 ? { tiltX } : {}),
+      ...(tiltY !== 0 ? { tiltY } : {}),
       opacity: mix(a.opacity, b.opacity),
       ...(blur > 0 ? { blur } : {}),
     };
   });
-  return poseOf(k, rest);
 }
 
 /** The signed short-way-around turn from one angle to another, degrees. */
@@ -199,8 +255,10 @@ function poseOf(k: OverlayKey, restBlur = 0): OverlayPose {
   return {
     x: k.x,
     y: k.y,
-    scale: k.scale,
+    ...splitScale(k.scale * (k.scaleX ?? 1), k.scale * (k.scaleY ?? 1)),
     rotation: k.rotation,
+    ...(k.tiltX ? { tiltX: k.tiltX } : {}),
+    ...(k.tiltY ? { tiltY: k.tiltY } : {}),
     opacity: k.opacity,
     ...(blur > 0 ? { blur } : {}),
   };
@@ -210,7 +268,7 @@ function poseOf(k: OverlayKey, restBlur = 0): OverlayPose {
  * live pose is what makes the first two keys a no-op: the element sits where
  * it already sat until one of them is moved. */
 export function keyAt(o: Posable, t: number): OverlayKey {
-  return { t, ...poseAt(o, t) };
+  return { t, ...keyPoseAt(o, t) };
 }
 
 /** The camera's pose at `tLocal` seconds into the element: eased between the
@@ -260,8 +318,15 @@ export interface OverlayFrameState extends OverlayPose {
   dy: number;
   /** 0..1 share of the text shown (typewriter); absent when not typing. */
   textProgress?: number;
+  /** 0..1 share of its value each number shows (count); absent when not
+   * counting. */
+  countProgress?: number;
   /** 0..1 share of the box uncovered from its left edge (wipe). */
   reveal?: number;
+  /** 0..1 share of the ink eaten away (disintegrate). */
+  erode?: number;
+  /** 0..1 strength of the electric arcs over the element (zap hit). */
+  zap?: number;
   /** Where a per-glyph ramp stands; the element's own transform stays neutral
    * and each character carries the motion. */
   glyphs?: GlyphPhase;
@@ -325,20 +390,31 @@ function ownFrame(o: Posable, tLocal: number): OverlayFrameState {
   const dur = Math.max(0.1, o.end - o.start);
   const pose = poseAt(o, tLocal);
   const ev = evalOverlayAnim(o.anim, tLocal, dur, (o.kind ?? "text") === "text");
+  // The pose's axes and the preset's multiply axis by axis, so a key squash
+  // and a preset flip compose.
+  const size = splitScale(
+    pose.scale * (pose.sx ?? 1) * ev.scale * (ev.sx ?? 1),
+    pose.scale * (pose.sy ?? 1) * ev.scale * (ev.sy ?? 1)
+  );
   return {
     x: pose.x,
     y: pose.y,
     dx: ev.dx,
     dy: ev.dy,
-    scale: pose.scale * ev.scale,
+    ...size,
     rotation: pose.rotation + ev.rotate,
+    ...(pose.tiltX ? { tiltX: pose.tiltX } : {}),
+    ...(pose.tiltY ? { tiltY: pose.tiltY } : {}),
     opacity: pose.opacity * ev.alpha,
     ...(ev.textProgress !== undefined ? { textProgress: ev.textProgress } : {}),
+    ...(ev.countProgress !== undefined ? { countProgress: ev.countProgress } : {}),
     ...(ev.reveal !== undefined ? { reveal: ev.reveal } : {}),
+    ...(ev.erode !== undefined ? { erode: ev.erode } : {}),
+    ...(ev.zap ? { zap: ev.zap } : {}),
     ...(ev.glyphs ? { glyphs: ev.glyphs } : {}),
     ...(ev.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
     ...(ev.dive !== undefined ? { dive: ev.dive } : {}),
-    ...(pose.blur ? { blur: pose.blur } : {}),
+    ...(pose.blur || ev.blur ? { blur: (pose.blur ?? 0) + (ev.blur ?? 0) } : {}),
     ...(ev.caret !== undefined ? { caret: ev.caret } : {}),
     ...(ev.brightness !== undefined ? { brightness: ev.brightness } : {}),
   };
@@ -355,11 +431,13 @@ export function poseExtent(o: Posable): {
   scale: number;
 } {
   const poses = hasOverlayKeys(o) ? sortedKeys(o.kf!).map((k) => poseOf(k)) : [restingPose(o)];
+  // A tilted edge swings toward the viewer and draws larger than its scale.
+  const tilted = poses.some((p) => p.tiltX || p.tiltY);
   return {
     x0: Math.min(...poses.map((p) => p.x)),
     y0: Math.min(...poses.map((p) => p.y)),
     x1: Math.max(...poses.map((p) => p.x)),
     y1: Math.max(...poses.map((p) => p.y)),
-    scale: Math.max(...poses.map((p) => p.scale), 1),
+    scale: Math.max(...poses.map((p) => p.scale), 1) * (tilted ? TILT_GROW : 1),
   };
 }

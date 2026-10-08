@@ -68,5 +68,44 @@
         }
       ]
     }
+  },
+  "zap": {
+    "label": "Zap",
+    "note": "electric arcs crackle over the element: blue-white bolts with a flare where each lands, re-dealt a dozen times a second, sparking up fast and dying out at the end \u2014 the charged beat of a teaser title",
+    "slots": [
+      "hit"
+    ],
+    "animate": {
+      "zap": [
+        {
+          "t": 0,
+          "v": 0,
+          "ease": [
+            0.2,
+            0,
+            0.4,
+            1
+          ]
+        },
+        {
+          "t": 0.1,
+          "v": 1
+        },
+        {
+          "t": 0.75,
+          "v": 1,
+          "ease": [
+            0.4,
+            0,
+            0.6,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": 0
+        }
+      ]
+    }
   }
 }

@@ -32,6 +32,7 @@ import {
 import { drawBlock } from "./blockSource";
 import { audioFxSpans } from "./audioEffects";
 import { duckWindows, renderMix, type MixClip, type MixItem, type MixSpec } from "./audioMix";
+import { encoderLead } from "./encoderLead";
 import { masterInPlace } from "./loudness";
 import { STEM_CHANNELS, STEM_RATE, wavBytes, wavChunks, writeStoredZip, type StemDef } from "./stems";
 import { spanSoundSpec, specSound } from "./soundSource";
@@ -45,14 +46,14 @@ import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { getClipSpans, overlayLayers, projectDuration, spanSequence } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { ElementFx, elementLook } from "@donkeycut/effects-kit";
-import { applyEffectToCanvas, diveView, divesAt, evalOverlayFrame, measureDiveFocus, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type DiveFocus, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
+import { ElementFx, elementLook, paintElementCrop } from "@donkeycut/effects-kit";
+import { applyEffectToCanvas, effectRecipe, diveView, divesAt, evalOverlayFrame, measureDiveFocus, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type DiveFocus, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { MatteAlpha, matteStamp } from "./matteAlpha";
-import { createRasterCanvas, type RasterSurface } from "./raster";
+import { createRasterCanvas, snapshotRaster, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
-import { cutRenderEnv, renderElementCanvas, renderElementPng, renderStillPng } from "./textRender";
+import { cutRenderEnv, renderElementCanvas, renderStillPng } from "./textRender";
 import { cardMatteKey } from "./cameraCard";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
@@ -730,9 +731,19 @@ async function stampText(doc: ExportDoc): Promise<StampedLayer[]> {
  * the rest keeps the memory a subtitled export uses flat in the length of the
  * cut instead of growing with every word in it.
  */
+/** A layer's picture and where its top-left sits in the frame: (0, 0) for a
+ * frame-sized picture, the ink box's corner for a cropped one. */
+interface Stamp {
+  image: ImageBitmap;
+  x: number;
+  y: number;
+}
+
 class StampCache {
-  private drawn = new Map<StampedLayer, ImageBitmap>();
-  private maskFrames = new Map<StampedLayer, { t: number; bitmap: ImageBitmap }>();
+  private drawn = new Map<StampedLayer, Stamp>();
+  private maskFrames = new Map<StampedLayer, { t: number; stamp: Stamp }>();
+  /** The mask pass's scratch for cropped pictures, made on first use. */
+  private maskScratch: HTMLCanvasElement | null = null;
   /** Scratch for blurred, motion-blurred and darkening stamps, made on first
    * use. */
   readonly fx = new ElementFx(createRasterCanvas);
@@ -743,38 +754,56 @@ class StampCache {
     private assets: MediaAsset[]
   ) {}
 
-  async bitmapFor(layer: StampedLayer): Promise<ImageBitmap> {
-    let bitmap = this.drawn.get(layer);
-    if (!bitmap) {
+  async bitmapFor(layer: StampedLayer): Promise<Stamp> {
+    let stamp = this.drawn.get(layer);
+    if (!stamp) {
       // A layer with no animation holds still, its blur baked into the
-      // picture; an animated one is neutral and softens as it is drawn.
-      const png = layer.anim
-        ? await renderElementPng(layer.overlay, this.width, this.height, this.assets, layer.phase)
-        : await renderStillPng(layer.overlay, this.width, this.height, this.assets);
-      bitmap = await createImageBitmap(png);
-      this.drawn.set(layer, bitmap);
+      // picture; an animated one is neutral, cropped to its own ink so a
+      // pose that shrinks an oversize element keeps what hung past the
+      // frame, and softens as it is drawn.
+      stamp = layer.anim
+        ? await this.cropped(layer.overlay, 0, layer.phase)
+        : { image: await createImageBitmap(await renderStillPng(layer.overlay, this.width, this.height, this.assets)), x: 0, y: 0 };
+      this.drawn.set(layer, stamp);
     }
-    return bitmap;
+    return stamp;
+  }
+
+  /** The neutral element painted into a canvas cropped to its ink box,
+   * however far past the frame that reaches. */
+  private async cropped(el: Overlay, t: number, phase?: PaintPhase): Promise<Stamp> {
+    const canvas = createRasterCanvas(1, 1) as unknown as HTMLCanvasElement;
+    this.maskScratch ??= createRasterCanvas(1, 1) as unknown as HTMLCanvasElement;
+    const origin = await paintElementCrop(canvas, el, this.width, this.height, cutRenderEnv(this.assets), {
+      t,
+      phase,
+      maskScratch: this.maskScratch,
+    });
+    const image = await snapshotRaster(canvas);
+    canvas.width = canvas.height = 1;
+    return { image, ...origin };
   }
 
   /** The layer's picture drawn for this one moment, for the animations that
    * change the pixels as time moves — a keyframed mask, a per-glyph loop.
    * There is one live bitmap per layer, replaced as the render walks forward:
    * the cached-stamp twin of the Lottie per-frame path. */
-  async bitmapAt(layer: StampedLayer, tLocal: number, phase?: PaintPhase): Promise<ImageBitmap> {
+  async bitmapAt(layer: StampedLayer, tLocal: number, phase?: PaintPhase): Promise<Stamp> {
     const hit = this.maskFrames.get(layer);
-    if (hit && Math.abs(hit.t - tLocal) < 1e-6) return hit.bitmap;
+    if (hit && Math.abs(hit.t - tLocal) < 1e-6) return hit.stamp;
     const m = layer.overlay.mask;
     const el = isMaskAnimated(m)
       ? { ...layer.overlay, mask: { ...m!, ...maskFrameAt(m!, tLocal), kf: undefined } }
       : layer.overlay;
-    // Drawn once and shown once, so it goes straight from the canvas.
-    const bitmap = await createImageBitmap(
-      await renderElementCanvas(el, this.width, this.height, this.assets, phase)
-    );
-    hit?.bitmap.close();
-    this.maskFrames.set(layer, { t: tLocal, bitmap });
-    return bitmap;
+    // Drawn once and shown once, so it goes straight from the canvas. A
+    // dive's pose lives inside its frame-sized picture; everything else is
+    // cropped to its ink like the cached stamps.
+    const stamp = phase?.dive
+      ? { image: await snapshotRaster(await renderElementCanvas(el, this.width, this.height, this.assets, phase)), x: 0, y: 0 }
+      : await this.cropped(el, tLocal, phase);
+    hit?.stamp.image.close();
+    this.maskFrames.set(layer, { t: tLocal, stamp });
+    return stamp;
   }
 
   /** Where a diving element flies into, measured once per look. */
@@ -784,25 +813,29 @@ class StampCache {
 
   /** Release the pictures of layers that have finished by `t`. */
   retire(t: number) {
-    for (const [layer, bitmap] of this.drawn) {
+    for (const [layer, stamp] of this.drawn) {
       if (layer.end <= t) {
-        bitmap.close();
+        stamp.image.close();
         this.drawn.delete(layer);
       }
     }
     for (const [layer, hit] of this.maskFrames) {
       if (layer.end <= t) {
-        hit.bitmap.close();
+        hit.stamp.image.close();
         this.maskFrames.delete(layer);
       }
     }
   }
 
   dispose() {
-    for (const bitmap of this.drawn.values()) bitmap.close();
+    for (const stamp of this.drawn.values()) stamp.image.close();
     this.drawn.clear();
-    for (const hit of this.maskFrames.values()) hit.bitmap.close();
+    for (const hit of this.maskFrames.values()) hit.stamp.image.close();
     this.maskFrames.clear();
+    if (this.maskScratch) {
+      this.maskScratch.width = this.maskScratch.height = 1;
+      this.maskScratch = null;
+    }
     this.fx.dispose();
   }
 }
@@ -980,6 +1013,23 @@ export function mixHasSound(spec: MixSpec): boolean {
   return spec.clips.some((c) => c.file && !c.muted) || spec.items.some((i) => !i.muted);
 }
 
+/** Slack, in frames, within which a render's start counts as on the grid. */
+const GRID_SLACK = 1e-6;
+
+/** The timeline time of output frame `i` of a render starting at `from`.
+ * A frame on the timeline grid is exactly k / fps, the time the kit cuts its
+ * windows at: `i * (1 / fps)` lands a hair early (111 * (1 / 30) is
+ * 3.6999…97) and would show the window before its own. */
+export function exportFrameAt(from: number, i: number, fps: number): number {
+  const k = Math.round(from * fps);
+
+  // A range start off the grid keeps its own frame times.
+  if (Math.abs(from * fps - k) > GRID_SLACK) {
+    return from + i / fps;
+  }
+  return (k + i) / fps;
+}
+
 /**
  * Render `doc` to an MP4 in scratch storage.
  *
@@ -1124,10 +1174,16 @@ export async function renderProjectToMp4(
         sampleRate: settings.audioSampleRate ?? AUDIO_RATE,
       });
       if (!audioCodec) throw new Error("This browser can't encode AAC audio.");
-      audio = new AudioBufferSource({
-        codec: audioCodec,
-        ...(audioCodec === "aac" ? { quality: new Quality({ bitrate: settings.audioBitrate ?? 192_000 }) } : {}),
-      });
+      // The mix starts its encoder's priming early, so the edit list trims
+      // the priming and the sound stays on its picture.
+      const lead = await encoderLead(audioCodec, mix.sampleRate, mix.numberOfChannels);
+      audio = new AudioBufferSource(
+        {
+          codec: audioCodec,
+          ...(audioCodec === "aac" ? { quality: new Quality({ bitrate: settings.audioBitrate ?? 192_000 }) } : {}),
+        },
+        { startTimestamp: -lead }
+      );
       output.addAudioTrack(audio, { maximumPacketCount: Math.ceil(mix.length / 960) + 32 });
     }
     await output.start();
@@ -1142,7 +1198,7 @@ export async function renderProjectToMp4(
     for (let i = 0; i < frames; i++) {
       stop();
       const t = i * frameDur;
-      await painter.drawAt(from + t);
+      await painter.drawAt(exportFrameAt(from, i, settings.fps));
 
       await video.add(t, frameDur);
       if (i % 15 === 0) {
@@ -1282,12 +1338,13 @@ async function drawStamps(
       const h = w / aspect;
       // A blurred, streaking or darkening sticker poses into the scratch
       // alone and lands softened or dimmed.
-      const lc = stamps.fx.begin(ctx, canvas.width, canvas.height, elementLook(ev, scale));
+      const at = { x: ev.x * canvas.width + ev.dx * scale, y: ev.y * canvas.height + ev.dy * scale };
+      const lc = stamps.fx.begin(ctx, canvas.width, canvas.height, elementLook(ev, scale, at));
       lc.save();
       lc.globalAlpha = ev.opacity;
-      lc.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
+      lc.translate(at.x, at.y);
       lc.rotate((ev.rotation * Math.PI) / 180);
-      lc.scale(ev.scale, ev.scale);
+      lc.scale(ev.scale * (ev.sx ?? 1), ev.scale * (ev.sy ?? 1));
       lc.drawImage(layer.lottie.seek(t - (layer.animStart ?? layer.start)), -w / 2, -h / 2, w, h);
       lc.restore();
       stamps.fx.end(ctx);
@@ -1325,7 +1382,7 @@ async function drawStamps(
             ...(dive && ev ? { dive, pose: ev } : {}),
           }
         : undefined;
-    const bitmap =
+    const stamp =
       livePhase || isMaskAnimated(layer.overlay.mask)
         ? await stamps.bitmapAt(layer, tLocal, livePhase ?? layer.phase)
         : await stamps.bitmapFor(layer);
@@ -1336,10 +1393,14 @@ async function drawStamps(
     if (!ev) {
       const picture = subjectFront
         ? subject!.mattedStamp(layer.overlay, canvas.width, canvas.height, (c) =>
-            c.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+            c.drawImage(stamp.image, stamp.x, stamp.y)
           )
-        : bitmap;
-      ctx.drawImage(picture, 0, 0, canvas.width, canvas.height);
+        : null;
+      if (picture) {
+        ctx.drawImage(picture, 0, 0, canvas.width, canvas.height);
+      } else {
+        ctx.drawImage(stamp.image, stamp.x, stamp.y);
+      }
       continue;
     }
     if (ev.opacity <= 0.001) continue;
@@ -1349,19 +1410,23 @@ async function drawStamps(
     const posed = (c: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => {
       // A dive's pose is already inside its frame-sized picture.
       if (dive) {
-        c.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        c.drawImage(stamp.image, 0, 0, canvas.width, canvas.height);
         return;
       }
 
       c.translate(ev.x * canvas.width + ev.dx * scale, ev.y * canvas.height + ev.dy * scale);
       c.rotate((ev.rotation * Math.PI) / 180);
-      c.scale(ev.scale, ev.scale);
+      c.scale(ev.scale * (ev.sx ?? 1), ev.scale * (ev.sy ?? 1));
       c.translate(-cx, -cy);
-      c.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      c.drawImage(stamp.image, stamp.x, stamp.y);
     };
-    // A blurred, streaking or darkening element poses into the scratch alone
-    // and lands softened or dimmed; a sharp one draws straight onto the frame.
-    const look = elementLook(ev, scale);
+    // A blurred, streaking, darkening or tilted element poses into the
+    // scratch alone and lands softened, dimmed or turned; a sharp one draws
+    // straight onto the frame.
+    const look = elementLook(ev, scale, {
+      x: ev.x * canvas.width + ev.dx * scale,
+      y: ev.y * canvas.height + ev.dy * scale,
+    });
     const lay = (into: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D) => {
       const target = stamps.fx.begin(into, canvas.width, canvas.height, look);
       target.save();
@@ -1644,6 +1709,7 @@ export class FramePainter {
           masterFx: {
             dx: plan.masterFxFrac.dx * W,
             dy: plan.masterFxFrac.dy * H,
+            blur: plan.masterFxFrac.blur * Math.min(W, H),
           },
           incFrame,
           incClip: plan.incoming?.clip,
@@ -1692,13 +1758,15 @@ export class FramePainter {
       applyEffectToCanvas(
         canvas,
         this.fxScratch,
-        o.effect,
+        effectRecipe(o),
         o.amount,
         t - o.start,
         grainTile,
         o.focus,
         o.ramp,
-        o.end - o.start
+        o.end - o.start,
+        "opaque",
+        o
       );
     }
     await drawStamps(canvas, this.stacked.slice(drawn), stamps, t, this.behind);

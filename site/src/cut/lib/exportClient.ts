@@ -28,11 +28,11 @@ import { renderRemovalPieces } from "./removalVideo";
 import { renderCardPieces } from "./cameraCardVideo";
 import { drawBlock } from "./blockSource";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
-import { clipLen, clipSpeed, getClipSpans, openedTimeline, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
+import { clipLen, clipSpeed, getClipSpans, MICRO_GAP_S, openedTimeline, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type Mask, type SpeedNode } from "@donkeycut/effects-kit";
+import { drawStreak, elementLook, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, type Mask, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng, renderStillPng } from "./textRender";
-import { clipCovers, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
+import { CLIP_MIN_SECONDS, clipCovers, clipFrameAt, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
 import { soundSourceOf, spanSoundSpec, spanUsesSoundFeature, specSound } from "./soundSource";
 import type {
@@ -699,13 +699,17 @@ async function renderClipShadowPictures(
   const shape = createRasterCanvas(W, H);
   const cover = createRasterCanvas(W, H);
   const canvas = createRasterCanvas(W, H);
+  // The smear and the blur the preview lays on the shadow, made on first use.
+  let smear: ReturnType<typeof createRasterCanvas> | null = null;
+  let soft: ReturnType<typeof createRasterCanvas> | null = null;
   const anchor = { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 };
   const blobAt = async (tLocal: number) => {
     const sil = silhouette ? await silhouette.at(tLocal) : null;
     const shapeCtx = shape.getContext("2d") as CanvasRenderingContext2D;
     shapeCtx.setTransform(1, 0, 0, 1, 0, 0);
     shapeCtx.clearRect(0, 0, W, H);
-    const pose = clipPosed(clip) ? clipPoseAt(clip, tLocal) : null;
+    const pose = clipPosed(clip) ? clipFrameAt(clip, tLocal, W / H) : null;
+    const look = pose ? elementLook(pose, scale) : null;
     if (pose) {
       shapeCtx.translate(pose.x * W, pose.y * H);
       shapeCtx.rotate((pose.rotation * Math.PI) / 180);
@@ -741,6 +745,17 @@ async function renderClipShadowPictures(
       shapeCtx.drawImage(cover as CanvasImageSource, 0, 0);
       shapeCtx.globalCompositeOperation = "source-over";
     }
+
+    // A moving clip with motion blur casts from its streaked shape.
+    let lit = shape;
+    if (look && look.taps >= 2) {
+      smear ??= createRasterCanvas(W, H);
+      const smearCtx = smear.getContext("2d") as CanvasRenderingContext2D;
+      smearCtx.setTransform(1, 0, 0, 1, 0, 0);
+      smearCtx.clearRect(0, 0, W, H);
+      drawStreak(smearCtx, shape as CanvasImageSource, 0, 0, look);
+      lit = smear;
+    }
     const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = "source-over";
@@ -750,12 +765,22 @@ async function renderClipShadowPictures(
     ctx.shadowBlur = Math.max(0, sh.blur) * scale;
     ctx.shadowOffsetX = (sh.x ?? 0) * scale;
     ctx.shadowOffsetY = (sh.y ?? 0) * scale;
-    ctx.drawImage(shape as CanvasImageSource, 0, 0);
+    ctx.drawImage(lit as CanvasImageSource, 0, 0);
     ctx.restore();
     ctx.globalCompositeOperation = "destination-out";
-    ctx.drawImage(shape as CanvasImageSource, 0, 0);
+    ctx.drawImage(lit as CanvasImageSource, 0, 0);
     ctx.globalCompositeOperation = "source-over";
-    return rasterCanvasToPng(canvas);
+
+    // The keyed blur softens the shadow as it softens the picture.
+    if (!look || !(look.blur > 0) || !("filter" in ctx)) return rasterCanvasToPng(canvas);
+    soft ??= createRasterCanvas(W, H);
+    const softCtx = soft.getContext("2d") as CanvasRenderingContext2D;
+    softCtx.setTransform(1, 0, 0, 1, 0, 0);
+    softCtx.clearRect(0, 0, W, H);
+    softCtx.filter = `blur(${look.blur.toFixed(2)}px)`;
+    softCtx.drawImage(canvas as CanvasImageSource, 0, 0);
+    softCtx.filter = "none";
+    return rasterCanvasToPng(soft);
   };
   try {
     // A keyed subject moves every frame, so its shadow samples like an
@@ -956,6 +981,7 @@ export async function buildExportPayload(
     // xfade name (and the cross-zoom ramps) itself, so the spec carries only
     // the id.
     transitionStyle: sp.clip.transitionStyle,
+    transitionFeather: sp.clip.transitionFeather,
     animIn: sp.clip.animIn,
     animOut: sp.clip.animOut,
     look: sp.clip.look,
@@ -971,6 +997,7 @@ export async function buildExportPayload(
     mask: undefined as SpecMask | undefined,
     shadow: undefined as SpecMask | undefined,
     kf: posed(sp.clip).kf,
+    motionBlur: sp.clip.motionBlur,
     border: undefined as string | undefined,
     removal: undefined as { rgb: string; alpha: string } | undefined,
     staged: undefined as boolean | undefined,
@@ -993,7 +1020,7 @@ export async function buildExportPayload(
   // opacity, since opacity ships as coverage luma.
   for (let i = 0; i < spans.length; i++) {
     const c = posed(cardBoxless(spans[i].clip));
-    const dur = Math.max(0.1, retimeOf(c).len);
+    const dur = Math.max(CLIP_MIN_SECONDS, retimeOf(c).len);
     const pictures = await renderClipMaskPictures(
       c,
       { x: 0, y: 0, w: settings.width, h: settings.height },
@@ -1098,13 +1125,19 @@ export async function buildExportPayload(
     image: false,
   });
   // An overlay-only cut has no track-0 spans: the whole base is one black bed.
+  // Titles or sound that outlast the last shot run over black to the end.
+  const last = spans[spans.length - 1];
+  const tail = last ? duration - (last.start + last.len) : 0;
   const clips =
     spans.length === 0
       ? [spacer(duration)]
-      : spanSequence(spans).flatMap(({ gapBefore }, i) => [
-          ...(gapBefore > 0 ? [spacer(gapBefore)] : []),
-          clipEntries[i],
-        ]);
+      : [
+          ...spanSequence(spans).flatMap(({ gapBefore }, i) => [
+            ...(gapBefore > 0 ? [spacer(gapBefore)] : []),
+            clipEntries[i],
+          ]),
+          ...(tail > MICRO_GAP_S ? [spacer(tail)] : []),
+        ];
 
   // Video tracks composited over track 0; hidden ones are dropped. Each
   // track's transitions and animations translate into per-clip head/tail
@@ -1199,6 +1232,7 @@ export async function buildExportPayload(
           mask: undefined as SpecMask | undefined,
           shadow: undefined as SpecMask | undefined,
           kf: posed(c).kf,
+          motionBlur: c.motionBlur,
           border: undefined as string | undefined,
           removal: undefined as { rgb: string; alpha: string } | undefined,
           ...ramp,
@@ -1218,7 +1252,7 @@ export async function buildExportPayload(
     const box = region
       ? { x: region.rx, y: region.ry, w: region.rw, h: region.rh }
       : { x: 0, y: 0, w: settings.width, h: settings.height };
-    const olen = Math.max(0.1, retimeOf(c).len);
+    const olen = Math.max(CLIP_MIN_SECONDS, retimeOf(c).len);
     const pictures = await renderClipMaskPictures(
       c,
       box,
@@ -1354,6 +1388,11 @@ export async function buildExportPayload(
       amount: (o as { amount?: number }).amount,
       focus: (o as { focus?: { x: number; y: number } }).focus,
       ramp: (o as { ramp?: number }).ramp,
+      leak: (o as { leak?: LeakCourse }).leak,
+      glitch: (o as { glitch?: GlitchKind }).glitch,
+      tone: (o as { tone?: FlashTone }).tone,
+      rate: (o as { rate?: number }).rate,
+      rhythm: (o as { rhythm?: FlashRhythm }).rhythm,
       lane: laneOf(o),
       start: o.start,
       end: Math.min(o.end, duration),

@@ -18,7 +18,7 @@ import { ensureClipLuts } from "./lutBuild";
 import { matteStage } from "./matteAlpha";
 import { createRasterCanvas, decodeRasterImageUrl } from "./raster";
 import { splitFrame, type RemovalPieces } from "./removalVideo";
-import type { MediaAsset, VideoClip } from "./types";
+import { CLIP_MIN_SECONDS, type MediaAsset, type VideoClip } from "./types";
 import { liveReader } from "./liveReader";
 
 /**
@@ -35,7 +35,7 @@ export async function renderCardPieces(
   if (!clip.card) return null;
   const rt = retimeOf(clip);
   const still = asset.type === "image";
-  const dur = Math.max(0.1, rt.len);
+  const dur = Math.max(CLIP_MIN_SECONDS, rt.len);
   const frames = Math.max(1, Math.ceil(dur * opts.fps));
   const w = opts.box.w;
   const h = opts.box.h;

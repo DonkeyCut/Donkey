@@ -12,6 +12,7 @@
  * this file. Adding an effect means adding an entry; no code lists them.
  */
 
+import type { TextWeight } from "../types";
 import type { Easing } from "../motion/types";
 
 /** One word's look at one moment. Offsets are em of the word's own type size,
@@ -109,7 +110,7 @@ export interface WordDraw {
    * word in another family, slant or weight. Absent = the line's. */
   font?: string;
   italic?: boolean;
-  weight?: 400 | 700;
+  weight?: TextWeight;
 }
 
 /** How one word is set apart from the rest of its line: its own fill, face
@@ -120,7 +121,7 @@ export interface WordFace {
   color?: string;
   font?: string;
   italic?: boolean;
-  weight?: 400 | 700;
+  weight?: TextWeight;
   /** Type-size multiplier, on top of whatever the effect does to the word. */
   scale?: number;
 }

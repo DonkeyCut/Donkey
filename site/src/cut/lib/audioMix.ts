@@ -27,6 +27,7 @@ import {
   type SpeedNode,
 } from "@donkeycut/effects-kit";
 import { decodeAudioSpan } from "./mediaRead";
+import { CLIP_MIN_SECONDS } from "./types";
 import { fitSpan, retimeFits } from "./retimeFit";
 import { OWN_SOUND, shiftSpan, soundWindow, type SoundWindow, type SpecSound } from "./soundSource";
 
@@ -138,7 +139,7 @@ export interface MixOptions {
  * spacer keeps its exact length — flooring it would land everything after it
  * late. */
 const clipDur = (c: MixClip) =>
-  c.file ? Math.max(0.1, retimeOf(c).len) : Math.max(0, c.out - c.in);
+  c.file ? Math.max(CLIP_MIN_SECONDS, retimeOf(c).len) : Math.max(0, c.out - c.in);
 
 /** Timeline footprint of a placed item. */
 const itemDur = (a: MixItem) => Math.max(0, retimeOf(a).len);

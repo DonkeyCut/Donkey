@@ -1,5 +1,5 @@
 import { textRoom, wrapTextToRoom } from "@donkeycut/effects-kit";
-import type { OverlayAnim, OverlayAnimStyle } from "@donkeycut/effects-kit";
+import type { OverlayAnim, OverlayAnimStyle, TextWeight } from "@donkeycut/effects-kit";
 import { measureLine, textFontOf } from "./textFit";
 import type { TextLook } from "./textLooks";
 import type { TextMoveId } from "./textMotion";
@@ -131,7 +131,7 @@ const EMPHASIS_SCALE: Record<TextEmphasis, number> = {
 /** One face in a look's ensemble. */
 export interface TextFace {
   font: FontId;
-  weight: 400 | 700;
+  weight: TextWeight;
   /** Size multiplier against the look's own size — a condensed face carries a
    * bigger number than a wide one at the same optical weight. */
   scale?: number;
@@ -183,7 +183,7 @@ export interface ComposedLine {
   y: number;
   rotation: number;
   font: FontId;
-  weight: 400 | 700;
+  weight: TextWeight;
   italic: boolean;
   size: number;
   color: string;
@@ -221,7 +221,7 @@ export function fitLineToFrame(
   size: number,
   opts: {
     font: FontId;
-    weight: 400 | 700;
+    weight: TextWeight;
     italic?: boolean;
     lineHeight?: number;
     x?: number;

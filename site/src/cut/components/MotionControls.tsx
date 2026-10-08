@@ -28,7 +28,7 @@ import { sharedNumber, sharedValue } from "@/cut/lib/groupEdit";
 import { cutMotion } from "@/cut/lib/motionSettings";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
-import { isEffectOverlay, type Overlay } from "@/cut/lib/types";
+import { clipPoseAt, isEffectOverlay, type Overlay, type VideoClip } from "@/cut/lib/types";
 
 /**
  * The motion rows an element, a selection of elements, and a group's camera
@@ -198,6 +198,38 @@ export function GroupMotionRows({ overlays }: { overlays: readonly Overlay[] }) 
         onChange={(motionBlur, phase) => {
           if (phase === "once") st().pushHistory();
           st().updateOverlaysTransient(posed.map((o) => ({ id: o.id, patch: { motionBlur } })));
+        }}
+      />
+    </>
+  );
+}
+
+/** A video clip's blur rows: the blur of its key at the playhead, once it
+ * has keys (a clip has no resting blur), and its motion blur. `tLocal` is
+ * the playhead in the clip's own seconds. */
+export function ClipMotionRows({ clip, tLocal }: { clip: VideoClip; tLocal: number }) {
+  const blurCk = useSliderCheckpoint();
+  const shutterCk = useSliderCheckpoint();
+  const keyed = !!clip.kf?.length;
+  return (
+    <>
+      {keyed && (
+        <BlurRow
+          blur={{ value: clipPoseAt(clip, tLocal).blur ?? 0, mixed: false }}
+          ck={blurCk}
+          onSet={(v) =>
+            st().setClipKey(clip.id, tLocal, { blur: Math.max(0, Math.min(ELEMENT_BLUR_MAX, v)) }, { transient: true })
+          }
+        />
+      )}
+      <MotionBlurRows
+        shutter={clip.motionBlur ? { value: clip.motionBlur, mixed: false } : null}
+        ck={shutterCk}
+        onChange={(motionBlur, phase) => {
+          if (phase === "once") {
+            st().pushHistory();
+          }
+          st().updateClipTransient(clip.id, { motionBlur });
         }}
       />
     </>

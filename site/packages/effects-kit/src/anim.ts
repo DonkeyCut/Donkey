@@ -25,8 +25,10 @@ import {
   PER_UNIT_LOOP_IDS,
 } from "./motion/catalog";
 import { evalPreset, evalWhole, presetExtent, sampleProperties } from "./motion/evaluate";
+import type { OverlayFontCycle } from "./fontCycle";
 import type { MotionPose, MotionPreset } from "./motion/types";
 import type { OverlayWords } from "./words";
+import { splitScale } from "./stretch";
 
 export type OverlayAnimStyle =
   | "fade"
@@ -37,8 +39,10 @@ export type OverlayAnimStyle =
   | "slideup"
   | "slidedown"
   | "typewriter" // text only; other kinds render it as a fade
+  | "count" // text only, like typewriter
   | "wipe"
   | "dive"
+  | "disintegrate"
   // Per-glyph styles: on text each character runs the ramp on its own delay
   // (the preset carries a range selector); on every other kind the whole
   // element runs it once.
@@ -53,7 +57,10 @@ export type OverlayAnimStyle =
   | "streak"
   | "tumble"
   | "scatter"
-  | "slot";
+  | "slot"
+  | "blur"
+  | "glitch"
+  | "flicker";
 
 export type OverlayLoopStyle =
   | "pulse"
@@ -88,7 +95,10 @@ export type GlyphAnimStyle =
   | "streak"
   | "tumble"
   | "scatter"
-  | "slot";
+  | "slot"
+  | "blur"
+  | "glitch"
+  | "flicker";
 
 /**
  * A ramp at one end of the element.
@@ -106,6 +116,10 @@ export interface OverlayEdge {
   /** The typing bar, on an entrance that types (typewriter). Every other
    * entrance ignores it. */
   caret?: OverlayCaret;
+  /** A per-letter style's hand-off, 0..1: the share of the ramp spent
+   * passing the motion from the first letter to the last (0 = every letter
+   * together, near 1 = one at a time). Absent = the style's own. */
+  stagger?: number;
 }
 
 /**
@@ -177,6 +191,9 @@ export interface OverlayAnim {
    * ignores it, the way typewriter is offered on titles alone. */
   words?: OverlayWords;
   hit?: OverlayHit;
+  /** A stretch of typefaces the title cycles through (see fontCycle.ts).
+   * Text only, like the word effects. */
+  fonts?: OverlayFontCycle;
 }
 
 /** The motion a slot plays: the one it carries, or the catalog entry it
@@ -216,9 +233,12 @@ export const OVERLAY_HIT_MAX_SECONDS = 1;
 export const OVERLAY_HIT_DEFAULT_SECONDS = 0.3;
 
 /** The edges that only play on characters — typing them out, rolling each up
- * a reel. Every other kind is offered the rest. */
+ * a reel, counting the numbers up. Every other kind is offered the rest. */
 export const TEXT_ONLY_ANIM_STYLE_IDS = EDGE_IDS.filter(
-  (id) => !!MOTION.edges[id].animate.typed || !!MOTION.edges[id].animate.roll
+  (id) =>
+    !!MOTION.edges[id].animate.typed ||
+    !!MOTION.edges[id].animate.roll ||
+    !!MOTION.edges[id].animate.counted
 ) as OverlayAnimStyle[];
 /** The edges that fly the view into the element's ink until it fills the
  * frame. */
@@ -260,6 +280,24 @@ export const OVERLAY_ANIM_MIN_SECONDS = 0.1;
 export const OVERLAY_ANIM_MAX_SECONDS = 2;
 export const OVERLAY_ANIM_DEFAULT_SECONDS = 0.5;
 
+/** The longest ramp a style may run: its own cap, else the shared one. */
+export const edgeMaxSeconds = (style: string | undefined): number =>
+  (style ? edgePreset(style)?.maxSeconds : undefined) ?? OVERLAY_ANIM_MAX_SECONDS;
+
+/** The most of a ramp the letter hand-off may take: at 1 each letter would
+ * get no time of its own to move. */
+export const EDGE_STAGGER_MAX = 0.95;
+
+/** The hand-off a per-letter edge plays with — its own, else its style's;
+ * undefined for a style that moves the element as one piece. */
+export const edgeStagger = (slot: OverlayEdge | undefined): number | undefined => {
+  const sel = edgeMotion(slot)?.selector;
+  if (!sel) {
+    return undefined;
+  }
+  return slot?.stagger ?? sel.spread;
+};
+
 /**
  * Whether a style changes the element's pixels rather than moving them as one
  * picture. A cached bitmap under a transform can't express these, so both
@@ -269,9 +307,11 @@ export function bakesPixels(slot: OverlayEdge | undefined, isText: boolean): boo
   const preset = edgeMotion(slot);
   if (!preset) return false;
   if (preset.animate.reveal) return true; // a wipe clips whatever it is over
+  if (preset.animate.erode) return true; // and a disintegration eats it
   if (!isText) return false;
-  // A typewriter types characters; a selector moves them one at a time.
-  return !!preset.animate.typed || !!preset.selector;
+  // A typewriter types characters, a count rewrites its numbers; a selector
+  // moves them one at a time.
+  return !!preset.animate.typed || !!preset.animate.counted || !!preset.selector;
 }
 
 /**
@@ -314,6 +354,8 @@ export interface GlyphPhase {
   /** 0 at the far end of the ramp, 1 at rest. */
   p: number;
   exiting: boolean;
+  /** The slot's own hand-off, over the style's (see `OverlayEdge.stagger`). */
+  stagger?: number;
 }
 
 /** Where a per-glyph loop stands: one number, 0 to 1 around the cycle. Each
@@ -327,6 +369,7 @@ export interface GlyphLoopPhase {
 /** The transform an animation contributes at one moment. dx/dy are design px
  * (1080 short side); rotate is degrees; alpha multiplies the element opacity;
  * textProgress (0..1, typewriter only) is the share of characters shown;
+ * countProgress (0..1, count only) is the share of its value each number shows;
  * reveal (0..1, wipe) is the share of the box uncovered from its left edge;
  * glyphs and glyphLoop replace the whole-element transform with a
  * per-character one, and both apply at once (a title can fly its letters in
@@ -334,11 +377,20 @@ export interface GlyphLoopPhase {
 export interface OverlayAnimState {
   dx: number;
   dy: number;
+  /** The larger axis; `sx`/`sy` stretch each axis over it (see stretch.ts),
+   * so a whole-element flip turns one axis through zero. */
   scale: number;
+  sx?: number;
+  sy?: number;
   rotate: number;
   alpha: number;
   textProgress?: number;
+  countProgress?: number;
   reveal?: number;
+  /** 0..1 share of the ink eaten away (disintegrate). */
+  erode?: number;
+  /** 0..1 strength of the electric arcs over the element (zap hit). */
+  zap?: number;
   glyphs?: GlyphPhase;
   glyphLoop?: GlyphLoopPhase;
   /** How far the view has flown into the element's deepest ink, 0..1 (dive).
@@ -350,6 +402,8 @@ export interface OverlayAnimState {
   caret?: boolean;
   /** Multiplies the element's colors (a hit that darkens); absent = 1. */
   brightness?: number;
+  /** Defocus the ramp adds over the element's own, design px (blur). */
+  blur?: number;
 }
 
 /** How one character sits at a moment: offsets in design px, a scale per axis
@@ -364,6 +418,11 @@ export interface GlyphAnimState {
   /** Characters its reel still rolls past before it lands (slot); absent or
    * 0 = the character alone. `slotReel` says what to draw. */
   roll?: number;
+  /** Defocus, design px; absent = sharp. */
+  blur?: number;
+  /** How far a red and a cyan copy pull apart either side, design px; absent
+   * = one copy. */
+  split?: number;
 }
 
 const IDLE: OverlayAnimState = { dx: 0, dy: 0, scale: 1, rotate: 0, alpha: 1 };
@@ -386,6 +445,8 @@ function asGlyph(pose: MotionPose, index: number, count: number): GlyphAnimState
     rotate: pose.rotate,
     alpha: pose.alpha,
     ...(pose.roll ? { roll: pose.roll } : {}),
+    ...(pose.blur ? { blur: pose.blur } : {}),
+    ...(pose.split ? { split: pose.split } : {}),
   };
 }
 
@@ -401,7 +462,7 @@ export function glyphAnimAt(phase: GlyphPhase, index: number, count: number): Gl
   // whole-element style leaves its glyphs where they are.
   if (!preset?.selector) return GLYPH_IDLE;
   const n = Math.max(1, count);
-  return asGlyph(evalPreset(preset, p, index, n, exiting), index, n);
+  return asGlyph(evalPreset(preset, p, index, n, exiting, 0, phase.stagger), index, n);
 }
 
 /** Where character `index` of `count` sits with everything applied — the edge
@@ -419,6 +480,8 @@ export function glyphStateAt(
   const n = Math.max(1, count);
   const loop = asGlyph(evalPreset(preset, state.glyphLoop.phase, index, n, false), index, n);
   const roll = (ramp.roll ?? 0) + (loop.roll ?? 0);
+  const blur = (ramp.blur ?? 0) + (loop.blur ?? 0);
+  const split = (ramp.split ?? 0) + (loop.split ?? 0);
   return {
     dx: ramp.dx + loop.dx,
     dy: ramp.dy + loop.dy,
@@ -427,6 +490,8 @@ export function glyphStateAt(
     rotate: ramp.rotate + loop.rotate,
     alpha: ramp.alpha * loop.alpha,
     ...(roll ? { roll } : {}),
+    ...(blur ? { blur } : {}),
+    ...(split ? { split } : {}),
   };
 }
 
@@ -454,7 +519,7 @@ function edgeState(
   if (preset.selector && isText)
     return {
       ...IDLE,
-      glyphs: { style: slot.style, preset: slot.preset, p: clamped, exiting },
+      glyphs: { style: slot.style, preset: slot.preset, p: clamped, exiting, ...(slot.stagger !== undefined ? { stagger: slot.stagger } : {}) },
     };
   // Anything with no characters to hand the motion to plays it once over the
   // whole box.
@@ -462,15 +527,18 @@ function edgeState(
   const state: OverlayAnimState = {
     dx: pose.dx,
     dy: pose.dy,
-    scale: (pose.sx + pose.sy) / 2,
+    ...splitScale(pose.sx, pose.sy),
     rotate: pose.rotate,
     alpha: pose.alpha,
   };
   // A typewriter on anything but text has no characters to reveal, so the
   // element just holds — the same as it always did.
   if (pose.typed !== undefined) state.textProgress = pose.typed;
+  if (pose.counted !== undefined) state.countProgress = pose.counted;
   if (pose.reveal !== undefined) state.reveal = pose.reveal;
+  if (pose.erode !== undefined) state.erode = pose.erode;
   if (pose.dive !== undefined) state.dive = pose.dive;
+  if (pose.blur) state.blur = pose.blur;
   return state;
 }
 
@@ -493,7 +561,7 @@ function applyLoop(
   state.dx += pose.dx;
   state.dy += pose.dy;
   state.rotate += pose.rotate;
-  state.scale *= (pose.sx + pose.sy) / 2;
+  foldAxes(state, pose.sx, pose.sy);
   state.alpha *= pose.alpha;
 }
 
@@ -533,20 +601,27 @@ export function evalOverlayAnim(
   return state;
 }
 
+/** How long the hit plays: a stored hit without seconds plays the default,
+ * the length the inspector shows for it. */
+const hitSeconds = (slot: OverlayHit): number => (slot.seconds > 0 ? slot.seconds : OVERLAY_HIT_DEFAULT_SECONDS);
+
 /** The hit's contribution at `tLocal`: nothing outside its window; inside,
  * the preset's pose folded onto what the other slots left, as one piece. */
 function applyHit(state: OverlayAnimState, slot: OverlayHit, tLocal: number): void {
   const preset = hitMotion(slot);
-  const q = (tLocal - slot.at) / slot.seconds;
+  const q = (tLocal - slot.at) / hitSeconds(slot);
   if (!preset || !(q > 0 && q < 1)) return;
   const pose = evalWhole(preset, q, false);
   state.dx += pose.dx;
   state.dy += pose.dy;
   state.rotate += pose.rotate;
-  state.scale *= (pose.sx + pose.sy) / 2;
+  foldAxes(state, pose.sx, pose.sy);
   state.alpha *= pose.alpha;
   if (slot.darken && pose.brightness !== undefined && pose.brightness !== 1)
     state.brightness = (state.brightness ?? 1) * pose.brightness;
+  if (pose.zap !== undefined) {
+    state.zap = pose.zap;
+  }
 }
 
 /** Where the hit plays inside [0, dur], or null when there is none. The frame
@@ -558,9 +633,13 @@ export function hitWindow(
   const slot = anim?.hit;
   if (!slot || !hitMotion(slot)) return null;
   const start = Math.max(0, Math.min(dur, slot.at));
-  const end = Math.max(start, Math.min(dur, slot.at + slot.seconds));
+  const end = Math.max(start, Math.min(dur, slot.at + hitSeconds(slot)));
   return end - start > 1e-3 ? { start, end } : null;
 }
+
+/** Whether the hit paints arcs (zap): pixels the stamped export bakes frame
+ * by frame across the hit's window. */
+export const hitZaps = (anim: OverlayAnim | undefined): boolean => !!hitMotion(anim?.hit)?.animate.zap;
 
 /** The largest scale a hit reaches, so the frame sampler can pad its crop. */
 export function hitScale(anim: OverlayAnim | undefined): number {
@@ -640,8 +719,21 @@ function applyMove(state: OverlayAnimState, slot: OverlayMove, tLocal: number, d
   state.dx += pose.dx * k;
   state.dy += pose.dy * k;
   state.rotate += pose.rotate * k;
-  state.scale *= 1 + ((pose.sx + pose.sy) / 2 - 1) * k;
+  foldAxes(state, 1 + (pose.sx - 1) * k, 1 + (pose.sy - 1) * k);
   state.alpha *= 1 + (pose.alpha - 1) * k;
+}
+
+/** Multiply a per-axis scale into the state, axis by axis, and split the
+ * result back into its uniform scale and stretch. */
+function foldAxes(state: OverlayAnimState, ax: number, ay: number): void {
+  const next = splitScale(state.scale * (state.sx ?? 1) * ax, state.scale * (state.sy ?? 1) * ay);
+  state.scale = next.scale;
+  delete state.sx;
+  delete state.sy;
+  if (next.sx !== undefined) {
+    state.sx = next.sx;
+    state.sy = next.sy;
+  }
 }
 
 /** The loop's exact cycle length in seconds (frame sequences render one cycle
@@ -656,7 +748,8 @@ export function loopPeriod(anim: OverlayAnim | undefined): number | null {
 /** Whether any slot is set (an element with an empty anim object is static). */
 export function hasOverlayAnim(anim: OverlayAnim | undefined): boolean {
   return (
-    !!anim && (!!anim.in || !!anim.out || !!anim.loop || !!anim.move || !!anim.words || !!anim.hit)
+    !!anim &&
+    (!!anim.in || !!anim.out || !!anim.loop || !!anim.move || !!anim.words || !!anim.hit || !!anim.fonts)
   );
 }
 
@@ -702,11 +795,15 @@ export function holdMoveKeys(
   const keys = track
     .map((t) => {
       const p = pose(t);
+      // Baked axes keep a hold's squash: the key's scale is the larger axis
+      // and scaleX/scaleY stretch each one over it.
+      const size = splitScale(1 + (p.sx - 1) * k, 1 + (p.sy - 1) * k);
       return {
         t: Math.round(t * dur * 1000) / 1000,
         x: rest.x + p.dx * px * k,
         y: rest.y + p.dy * px * k,
-        scale: 1 + ((p.sx + p.sy) / 2 - 1) * k,
+        scale: size.scale,
+        ...(size.sx !== undefined ? { scaleX: size.sx, scaleY: size.sy } : {}),
         rotation: rest.rotation + p.rotate * k,
         opacity: 1 + (p.alpha - 1) * k,
       };

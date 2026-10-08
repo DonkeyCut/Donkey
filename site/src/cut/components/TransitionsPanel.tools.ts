@@ -9,6 +9,7 @@
 
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { ANIM_STYLE_IDS, TRANSITION_STYLE_IDS } from "@/cut/lib/types";
+import { FEATHER_STYLES, TRANSITION_FEATHER_MAX } from "@/cut/lib/transitionShape";
 
 export const TRANSITIONS_TOOLS = [
   {
@@ -24,6 +25,9 @@ export const TRANSITIONS_TOOLS = [
         enum: [...TRANSITION_STYLE_IDS],
         description: "Transition look (default crossfade)",
       },
+      feather: num(
+        `Softness of the reveal edge for ${FEATHER_STYLES.join(", ")}: a share of the frame the edge crosses, 0..${TRANSITION_FEATHER_MAX} (0 = hard edge, 0.15 = a soft blurred band); other styles ignore it`
+      ),
     }, ["seconds"]),
   },
   {
@@ -46,7 +50,7 @@ export const TRANSITIONS_TOOLS = [
   {
     name: "set_animation",
     description:
-      "Animate one clip's own entrance (which:'in') or exit (which:'out'): fade, zoom, pop, or a slide named by its motion direction. style 'none' clears. Track-0 clips take every style; upper-track clips only fade and zoom. Each edge holds one effect, last pick wins: animating an edge a transition owns replaces that transition, and setting a transition clears the animations adjacent to its joint. At an abutting cut the animation plays over the neighbor's held frame; at the timeline's ends and across gaps it plays against black.",
+      "Animate one clip's own entrance (which:'in') or exit (which:'out'): fade, blur (defocuses as it fades), zoom, pop, or a slide named by its motion direction. style 'none' clears. Track-0 clips take every style; upper-track clips only fade and zoom. Each edge holds one effect, last pick wins: animating an edge a transition owns replaces that transition, and setting a transition clears the animations adjacent to its joint. At an abutting cut the animation plays over the neighbor's held frame; at the timeline's ends and across gaps it plays against black.",
     inputSchema: obj({
       clipId: str("Video clip id"),
       which: { type: "string", enum: ["in", "out"], description: "Entrance or exit" },

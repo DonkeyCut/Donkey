@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PanelTopClose, PenTool, Scissors, Smile, Sparkles, StretchHorizontal, Trash2, Type, User, Volume2 } from "lucide-react";
+import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, ChevronLeft, ChevronRight, Diamond, FlipHorizontal2, FlipVertical2, Frame, House, Italic, Link2, Link2Off, Loader2, type LucideIcon, Palette, PanelRightClose, PanelRightOpen, PanelTopClose, PenTool, Plus, Scissors, Smile, Sparkles, StretchHorizontal, Trash2, Type, User, Volume2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmojiPicker } from "@/cut/components/EmojiPicker";
 import { FontPicker } from "@/cut/components/FontPicker";
@@ -33,18 +33,26 @@ import {
   hasOverlayKeys,
   KEY_EPSILON,
   keyIndexAt,
+  dealsMarks,
+  DOODLE_INKS,
+  DOODLE_INKS_MAX,
+  LETTER_SPACING_MIN,
   lineLikeShape,
   maskFrameAt,
   poseAt,
+  keyPoseAt,
+  TILT_MAX,
   type Mask,
   type MaskKey,
   type MaskKind,
   type OverlayKey,
   OVERLAY_ANIM_DEFAULT_SECONDS,
-  OVERLAY_ANIM_MAX_SECONDS,
+  edgeMaxSeconds,
   OVERLAY_ANIM_MIN_SECONDS,
   CARET_BLINKS_MAX,
   edgeMotion,
+  edgeStagger,
+  EDGE_STAGGER_MAX,
   keepCaret,
   OVERLAY_HIT_DEFAULT_SECONDS,
   OVERLAY_HIT_MAX_SECONDS,
@@ -89,15 +97,33 @@ import {
   restingMaskFrame,
   AMOUNTLESS_EFFECTS,
   displayWords,
+  CYCLE_SCALE_MAX,
+  CYCLE_SCALE_MIN,
+  FONT_CYCLE_FACES_MAX,
+  FONT_CYCLE_RATE,
+  FONT_CYCLE_RATE_MAX,
+  FONT_CYCLE_RATE_MIN,
+  TEXT_WEIGHTS,
+  LEAK_COURSES,
+  type LeakCourse,
+  GLITCH_KINDS,
+  type GlitchKind,
+  TEXT_TEXTURES,
+  type TextTexture,
+  type CycleFace,
+  type OverlayFontCycle,
+  type TextWeight,
 } from "@donkeycut/effects-kit";
+import { SHADOW, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN, STRIPES_DEFAULT, type ShadowSpec, type StripesPattern } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
 import { bindRecording, unbindRecording } from "@/cut/lib/soundBind";
 import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
 import { clipLen, clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
 import { PANEL_GLOBAL, usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import { playheadAt, usePreviewTime } from "@/cut/lib/playhead";
-import { CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
+import { allFonts, CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
 import { AnimationTiles } from "@/cut/components/AnimationTiles";
+import { FlashPulseRows } from "@/cut/components/FlashPulseRows";
 import { ColorField } from "@/cut/components/ColorField";
 import { wordTimesFor } from "@/cut/lib/textWords";
 import { NumberField } from "@/cut/components/NumberField";
@@ -178,7 +204,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Field, ResetButton, Row, Section, SegGroup, SegToggle, Tip, useSliderCheckpoint, Value } from "@/cut/components/panelBits";
 import { ColorPanel } from "@/cut/components/ColorPanel";
 import { GroupPanel } from "@/cut/components/GroupPanel";
-import { ElementMotionRows } from "@/cut/components/MotionControls";
+import { ClipMotionRows, ElementMotionRows } from "@/cut/components/MotionControls";
 import { RemovalPanel } from "@/cut/components/RemovalPanel";
 import { CameraCardSection } from "@/cut/components/CameraCardSection";
 import { useMatteBakes } from "@/cut/lib/removal/bakeJobs";
@@ -2084,7 +2110,6 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
   const lineHeightCk = useSliderCheckpoint();
   const widthCk = useSliderCheckpoint();
   const strokeCk = useSliderCheckpoint();
-  const shadowCk = useSliderCheckpoint();
   const taRef = useRef<HTMLTextAreaElement>(null);
   // The saved-style previews below are set in whatever font each style names,
   // so they re-render when a family finishes registering.
@@ -2157,19 +2182,16 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
           />
         </div>
         <StylePresetsRow overlay={o} />
-        <FontPicker
-          value={o.font}
-          onChange={(v) => update(o.id, { font: v as TextOverlay["font"] })}
-        />
+        <div className="flex items-center gap-2">
+          <FontPicker
+            className="min-w-0 flex-1"
+            value={o.font}
+            onChange={(v) => update(o.id, { font: v as TextOverlay["font"] })}
+          />
+          <WeightSelect value={o.weight} onChange={(weight) => update(o.id, { weight })} />
+        </div>
         <div className="mt-1 flex items-center gap-2">
           <SegGroup>
-            <SegToggle
-              label="Bold"
-              active={o.weight === 700}
-              onClick={() => update(o.id, { weight: o.weight === 700 ? 400 : 700 })}
-            >
-              <Bold />
-            </SegToggle>
             <SegToggle
               label="Italic"
               active={!!o.italic}
@@ -2251,7 +2273,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
               label="Letter spacing"
               icon={<AlignHorizontalSpaceAround />}
               value={(o.letterSpacing ?? 0) * 100}
-              min={-5}
+              min={LETTER_SPACING_MIN * 100}
               max={30}
               step={1}
               snap={[0]}
@@ -2283,6 +2305,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             onCommit={(v) => { widthCk.begin(); useEditor.getState().updateOverlayTransient(o.id, { wrapWidth: v > 0 ? v / 100 : undefined }); widthCk.end(); }}
           />
         </Field>
+        <TextTextureRow overlay={o} />
         <Row label="Color">
           <ColorField
             value={o.color}
@@ -2345,75 +2368,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             </>
           )}
         </Section>
-        <Section
-          title="Shadow"
-          enabled={!!o.shadow}
-          onEnabledChange={(v) => update(o.id, { shadow: v })}
-        >
-          <>
-            <Row label="Color">
-              <ColorField
-                value={(typeof o.shadow === "object" ? o.shadow.color : undefined) ?? "#000000"}
-                label="Shadow color"
-                onBegin={() => useEditor.getState().pushHistory()}
-                onLive={(c) =>
-                  useEditor.getState().updateOverlayTransient(o.id, {
-                    shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), color: c },
-                  })
-                }
-                onCommit={(c) =>
-                  update(o.id, {
-                    shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), color: c },
-                  })
-                }
-                opacity={{
-                  label: "Shadow opacity",
-                  value: (typeof o.shadow === "object" ? o.shadow.opacity : undefined) ?? 0.65,
-                  onDraft: (v) => {
-                    shadowCk.begin();
-                    useEditor.getState().updateOverlayTransient(o.id, {
-                      shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), opacity: v },
-                    });
-                  },
-                  onCommit: (v) => {
-                    shadowCk.begin();
-                    useEditor.getState().updateOverlayTransient(o.id, {
-                      shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), opacity: v },
-                    });
-                    shadowCk.end();
-                  },
-                }}
-              />
-            </Row>
-            <Row label="Blur">
-              <ValueSlider
-                label="Shadow blur"
-                sliderClassName="data-horizontal:w-24"
-                valueClassName="w-9 text-muted-foreground"
-                value={(typeof o.shadow === "object" ? o.shadow.blur : undefined) ?? 14}
-                min={0}
-                max={60}
-                step={1}
-                snap={[14]}
-                format={(v) => String(Math.round(v))}
-                parse={parseNumberInput}
-                onDraft={(v) => {
-                  shadowCk.begin();
-                  useEditor.getState().updateOverlayTransient(o.id, {
-                    shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), blur: v },
-                  });
-                }}
-                onCommit={(v) => {
-                  shadowCk.begin();
-                  useEditor.getState().updateOverlayTransient(o.id, {
-                    shadow: { ...(typeof o.shadow === "object" ? o.shadow : {}), blur: v },
-                  });
-                  shadowCk.end();
-                }}
-              />
-            </Row>
-          </>
-        </Section>
+        <ShadowSection id={o.id} shadow={o.shadow} onToggle={(v) => update(o.id, { shadow: v })} />
         <Section
           title="Backdrop"
           enabled={o.plate}
@@ -2603,6 +2558,7 @@ function writeOverlayAnim(o: Overlay, anim: OverlayAnim, patch: Partial<OverlayA
   if (!next.move) delete next.move;
   if (!next.words) delete next.words;
   if (!next.hit) delete next.hit;
+  if (!next.fonts) delete next.fonts;
   const value = hasOverlayAnim(next) ? next : undefined;
   const st = useEditor.getState();
   // A multi-selection names its targets; a lone grouped element stamps its group.
@@ -2920,8 +2876,204 @@ function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly
   );
 }
 
+/** What each text weight is called in the weight menu. */
+const WEIGHT_LABELS: Record<TextWeight, string> = {
+  400: "Regular",
+  700: "Bold",
+  800: "Extra bold",
+  900: "Black",
+};
+
+/** A title's weight, from regular to black. */
+function WeightSelect({ value, onChange }: { value: TextWeight; onChange: (w: TextWeight) => void }) {
+  return (
+    <Select
+      value={String(value)}
+      items={Object.fromEntries(TEXT_WEIGHTS.map((w) => [String(w), WEIGHT_LABELS[w]]))}
+      onValueChange={(v) => onChange(Number(v) as TextWeight)}
+    >
+      <SelectTrigger aria-label="Weight" size="sm" className="w-24 text-[12px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {TEXT_WEIGHTS.map((w) => (
+          <SelectItem key={w} value={String(w)} className="text-[12px]">
+            {WEIGHT_LABELS[w]}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** A face the cycle does not show yet, for the Add face button: the next
+ * font in the menu after the last face, so each add brings a new look. */
+function nextCycleFont(o: TextOverlay, faces: CycleFace[]): string {
+  const ids = allFonts().map((f) => f.id);
+  const used = new Set([o.font, ...faces.map((f) => f.font)]);
+  const from = ids.indexOf(faces.at(-1)?.font ?? o.font);
+  for (let i = 1; i <= ids.length; i++) {
+    const id = ids[(from + i) % ids.length];
+    if (!used.has(id)) return id;
+  }
+  return o.font;
+}
+
+/** The font cycle's faces, in the order the title walks them: each one's
+ * font, weight, size and tracking, and a button to add another. The first
+ * face added starts a cycle across the title's whole length. */
+function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: readonly Overlay[] }) {
+  const ck = useSliderCheckpoint();
+  const anim = o.anim ?? {};
+  const fontCycle = anim.fonts;
+  const faces = fontCycle?.faces ?? [];
+  const dur = Math.max(0.2, Math.min(...(peers ?? [o]).map((el) => el.end - el.start)));
+
+  // Every edit writes the whole face list; none left clears the cycle.
+  const write = (next: CycleFace[]) => {
+    const fonts: OverlayFontCycle | undefined = next.length
+      ? (fontCycle ? { ...fontCycle, faces: next } : { faces: next, at: 0, seconds: dur, rate: FONT_CYCLE_RATE })
+      : undefined;
+    writeOverlayAnim(o, anim, { fonts }, peers);
+  };
+  const commit = (next: CycleFace[]) => {
+    useEditor.getState().pushHistory();
+    write(next);
+  };
+  const setFace = (i: number, patch: Partial<CycleFace>) => faces.map((f, j) => (j === i ? { ...f, ...patch } : f));
+
+  return (
+    <div className="flex flex-col gap-2">
+      {faces.map((face, i) => (
+        <div key={i} className={cn("flex flex-col gap-1.5", i > 0 && "border-t border-border pt-2")}>
+          <div className="flex items-center gap-1.5">
+            <FontPicker className="min-w-0 flex-1" value={face.font} onChange={(font) => commit(setFace(i, { font }))} />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Remove face"
+              onClick={() => commit(faces.filter((_, j) => j !== i))}
+            >
+              <X />
+            </Button>
+          </div>
+          <Row label="Weight">
+            <WeightSelect value={face.weight ?? o.weight} onChange={(weight) => commit(setFace(i, { weight }))} />
+          </Row>
+          <Row label="Size">
+            <ValueSlider
+              label="Size"
+              sliderClassName="data-horizontal:w-24"
+              valueClassName="w-9 text-muted-foreground"
+              value={face.scale ?? 1}
+              min={CYCLE_SCALE_MIN}
+              max={CYCLE_SCALE_MAX}
+              step={0.05}
+              snap={[1]}
+              format={(v) => `${v.toFixed(2)}×`}
+              parse={parseNumberInput}
+              onDraft={(scale) => {
+                ck.begin();
+                write(setFace(i, { scale }));
+              }}
+              onCommit={(scale) => {
+                write(setFace(i, { scale }));
+                ck.end();
+              }}
+            />
+          </Row>
+          <Row label="Tracking">
+            <ValueSlider
+              label="Tracking"
+              sliderClassName="data-horizontal:w-24"
+              valueClassName="w-9 text-muted-foreground"
+              value={(face.tracking ?? o.letterSpacing ?? 0) * 100}
+              min={-5}
+              max={50}
+              step={1}
+              format={(v) => `${Math.round(v)}%`}
+              parse={(raw) => parseNumberInput(raw.replace(/%$/, ""))}
+              onDraft={(v) => {
+                ck.begin();
+                write(setFace(i, { tracking: v / 100 }));
+              }}
+              onCommit={(v) => {
+                write(setFace(i, { tracking: v / 100 }));
+                ck.end();
+              }}
+            />
+          </Row>
+        </div>
+      ))}
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={faces.length >= FONT_CYCLE_FACES_MAX}
+        onClick={() => commit([...faces, { font: nextCycleFont(o, faces) }])}
+      >
+        <Plus />
+        Add face
+      </Button>
+    </div>
+  );
+}
+
+/** Where the font cycle starts inside the title, how long it runs, and how
+ * many times a second the face changes. */
+function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
+  const ck = useSliderCheckpoint();
+  const anim = o.anim ?? {};
+  const cycle = anim.fonts;
+  const dur = Math.max(0.2, Math.min(...(peers ?? [o]).map((el) => el.end - el.start)));
+  const fontCycleAt = cycle?.at ?? 0;
+  const fontCycleSeconds = cycle?.seconds ?? dur;
+  const fontCycleRate = cycle?.rate ?? FONT_CYCLE_RATE;
+  const write = (patch: Partial<OverlayFontCycle>) => {
+    if (!cycle) return;
+    ck.begin();
+    writeOverlayAnim(o, anim, { fonts: { ...cycle, ...patch } }, peers);
+  };
+  const slider = (
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    format: (v: number) => string,
+    key: keyof OverlayFontCycle
+  ) => (
+    <Row label={label}>
+      <ValueSlider
+        label={label}
+        sliderClassName="data-horizontal:w-24"
+        valueClassName="w-9 text-muted-foreground"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        format={format}
+        parse={parseNumberInput}
+        disabled={!cycle}
+        onDraft={(v) => write({ [key]: v })}
+        onCommit={(v) => {
+          write({ [key]: v });
+          ck.end();
+        }}
+      />
+    </Row>
+  );
+  const secs = (v: number) => `${v.toFixed(2)}s`;
+  return (
+    <>
+      {slider("At", fontCycleAt, 0, Math.max(0, dur - 0.05), 0.05, secs, "at")}
+      {slider("Duration", fontCycleSeconds, 0.05, Math.max(0.05, dur - fontCycleAt), 0.05, secs, "seconds")}
+      {slider("Rate", fontCycleRate, FONT_CYCLE_RATE_MIN, FONT_CYCLE_RATE_MAX, 1, (v) => `${Math.round(v)}/s`, "rate")}
+    </>
+  );
+}
+
 /** The slots the picker fills, in tab order. */
-type AnimSlot = "in" | "out" | "loop" | "move" | "words" | "hit";
+type AnimSlot = "in" | "out" | "loop" | "move" | "words" | "fonts" | "hit";
 
 /** The pill of slot tabs over an animation grid. A slot that is already set
  * reads darker, so switching tabs is not the only way to see what an item is
@@ -2944,7 +3096,7 @@ function SlotTabs<T extends string>({
           key={id}
           type="button"
           className={cn(
-            "flex-1 rounded-md px-1.5 py-1 capitalize transition-colors",
+            "flex-1 rounded-md px-1 py-1 capitalize transition-colors",
             slot === id ? "bg-neutral-900 text-white" : "text-muted-foreground hover:text-foreground",
             isSet(id) && slot !== id && "text-foreground"
           )}
@@ -3055,11 +3207,12 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
   // selecting one hands the picker back to the entrance.
   // Word emphasis needs words on every target.
   const tabs: AnimSlot[] = (peers ?? [o]).every(isTextOverlay)
-    ? ["in", "out", "loop", "move", "words", "hit"]
+    ? ["in", "out", "loop", "move", "words", "fonts", "hit"]
     : ["in", "out", "loop", "move", "hit"];
   const slot = tabs.includes(picked) ? picked : "in";
   const tilesScroll = useRememberedScroll(o.id, `anim:${slot}`);
-  const active = slot === "move" || slot === "words" || slot === "hit" ? undefined : anim[slot];
+  const active =
+    slot === "move" || slot === "words" || slot === "fonts" || slot === "hit" ? undefined : anim[slot];
   const seconds =
     slot === "in" || slot === "out"
       ? anim[slot]?.seconds
@@ -3069,6 +3222,8 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
   const activeMove = anim.move;
   const hitStyle = anim.hit?.style;
   const pick = (style: string | null) => {
+    // The fonts tab edits its faces in place; it has no tiles to pick.
+    if (slot === "fonts") return;
     if (slot === "hit") {
       if (!style && !anim.hit) return;
       useEditor.getState().pushHistory();
@@ -3131,7 +3286,8 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
         : {
             [slot]: {
               style: style as OverlayAnimStyle,
-              seconds: seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS,
+              // A long count's length shrinks to the new style's cap.
+              seconds: Math.min(edgeMaxSeconds(style), seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS),
               ...(caret ? { caret } : {}),
             },
           };
@@ -3169,6 +3325,9 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
         viewportClassName="overscroll-contain"
         contentClassName="flex flex-col gap-1 px-3.5 pt-1 pb-2"
       >
+        {slot === "fonts" && isTextOverlay(o) ? (
+          <FontCycleFaces overlay={o} peers={peers} />
+        ) : slot === "fonts" ? null : (
         <AnimationTiles
           slot={slot}
           // A slot carrying its own preset is playing something no tile here
@@ -3195,6 +3354,7 @@ export function AnimationPanel({ overlay: o, peers }: { overlay: Overlay; peers?
           accentDim={anim.words?.dim}
           onPick={pick}
         />
+        )}
       </ScrollArea>
       <AnimationToolbar overlay={o} slot={slot} peers={peers} />
     </div>
@@ -3223,6 +3383,8 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
   if (slot === "words") return bar(<WordSettings overlay={o} peers={peers} />);
 
   if (slot === "hit") return bar(<HitSettings overlay={o} peers={peers} />);
+
+  if (slot === "fonts") return bar(<FontCycleSettings overlay={o} peers={peers} />);
 
   if (slot === "loop") {
     const write = (speed: number) => {
@@ -3261,6 +3423,15 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
   };
   // A typing entrance on a title carries its typing bar's settings too.
   const types = slot === "in" && isTextOverlay(o) && !!edgeMotion(edge)?.animate.typed;
+  // A per-letter style on a title carries its letter hand-off.
+  const stagger = isTextOverlay(o) ? edgeStagger(edge) : undefined;
+  const writeStagger = (v: number) => {
+    if (!edge) {
+      return;
+    }
+    ck.begin();
+    writeOverlayAnim(o, anim, { [slot]: { ...edge, stagger: v } }, peers);
+  };
   return bar(
     <>
       <Row label="Duration">
@@ -3270,7 +3441,7 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
           valueClassName="w-9 text-muted-foreground"
           value={edge?.seconds ?? OVERLAY_ANIM_DEFAULT_SECONDS}
           min={OVERLAY_ANIM_MIN_SECONDS}
-          max={Math.min(OVERLAY_ANIM_MAX_SECONDS, dur)}
+          max={Math.min(edgeMaxSeconds(edge?.style), dur)}
           step={0.05}
           snap={[OVERLAY_ANIM_DEFAULT_SECONDS]}
           format={(v) => `${v.toFixed(2)}s`}
@@ -3283,6 +3454,27 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
           }}
         />
       </Row>
+      {stagger !== undefined && (
+        <Row label="Stagger">
+          <ValueSlider
+            label="Stagger"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={stagger}
+            min={0}
+            max={EDGE_STAGGER_MAX}
+            step={0.01}
+            snap={[edgeMotion(edge)?.selector?.spread ?? 0]}
+            format={(v) => String(Math.round(v * 100))}
+            parse={parsePercentInput}
+            onDraft={writeStagger}
+            onCommit={(v) => {
+              writeStagger(v);
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
       {types && <CaretSettings overlay={o} peers={peers} />}
     </>
   );
@@ -3345,6 +3537,59 @@ function PositionRow({
             onCommit={(v) => {
               ck.begin();
               onSet(axis, v);
+              ck.end();
+            }}
+          />
+        </span>
+      ))}
+    </Row>
+  );
+}
+
+/** Two numbers a key holds per axis — the stretch of each side, the tilt
+ * about each axis — scrubbed side by side like Position. */
+function KeyAxisRow({
+  label,
+  axes,
+  min,
+  max,
+  snap,
+  format,
+  parse,
+  ck,
+}: {
+  label: string;
+  axes: { name: string; value: number; set: (v: number) => void }[];
+  min: number;
+  max: number;
+  snap: number[];
+  format: (v: number) => string;
+  parse: (s: string) => number | null;
+  ck: { begin: () => void; end: () => void };
+}) {
+  return (
+    <Row label={label}>
+      {axes.map((axis) => (
+        <span key={axis.name} className="flex items-center gap-1">
+          <span className="text-[11px] text-muted-foreground/70 uppercase">{axis.name}</span>
+          <ScrubValue
+            label={`${label} ${axis.name}`}
+            className="w-10 text-muted-foreground"
+            value={axis.value}
+            min={min}
+            max={max}
+            step={(max - min) / 400}
+            keyStep={(max - min) / 80}
+            snap={snap}
+            format={format}
+            parse={parse}
+            onScrub={(v) => {
+              ck.begin();
+              axis.set(v);
+            }}
+            onCommit={(v) => {
+              ck.begin();
+              axis.set(v);
               ck.end();
             }}
           />
@@ -3418,6 +3663,9 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
   const keyed = hasOverlayKeys(o);
   const tLocal = localTimeOf(o, now);
   const pose = poseAt(o, tLocal);
+  const keyPose = keyPoseAt(o, tLocal);
+  const stretchCk = useSliderCheckpoint();
+  const tiltCk = useSliderCheckpoint();
   const setKey = (patch: Partial<Omit<OverlayKey, "t">>) =>
     useEditor.getState().setOverlayKey(o.id, tLocal, patch, { transient: true });
   const setRotation = (v: number) => {
@@ -3448,7 +3696,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
             label="Scale"
             sliderClassName="data-horizontal:w-20"
             valueClassName="w-12 text-muted-foreground"
-            value={pose.scale}
+            value={keyPose.scale}
             min={0.1}
             max={4}
             // The slider stays fine-grained where most work happens; the
@@ -3472,6 +3720,36 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
             }}
           />
         </Row>
+      )}
+      {keyed && (
+        <KeyAxisRow
+          label="Stretch"
+          axes={[
+            { name: "W", value: keyPose.scaleX ?? 1, set: (v) => setKey({ scaleX: v }) },
+            { name: "H", value: keyPose.scaleY ?? 1, set: (v) => setKey({ scaleY: v }) },
+          ]}
+          min={0}
+          max={4}
+          snap={[1]}
+          format={(v) => `${Math.round(v * 100)}%`}
+          parse={parsePercentInput}
+          ck={stretchCk}
+        />
+      )}
+      {keyed && (
+        <KeyAxisRow
+          label="Tilt"
+          axes={[
+            { name: "X", value: keyPose.tiltX ?? 0, set: (v) => setKey({ tiltX: Math.round(v) }) },
+            { name: "Y", value: keyPose.tiltY ?? 0, set: (v) => setKey({ tiltY: Math.round(v) }) },
+          ]}
+          min={-TILT_MAX}
+          max={TILT_MAX}
+          snap={[0]}
+          format={(v) => `${Math.round(v)}°`}
+          parse={parseNumberInput}
+          ck={tiltCk}
+        />
       )}
       <Row label="Rotation">
         <ValueSlider
@@ -3805,6 +4083,7 @@ function ClipTransformSection({ clip }: { clip: VideoClip }) {
           </Row>
         </>
       )}
+      <ClipMotionRows clip={clip} tLocal={tLocal} />
     </Section>
   );
 }
@@ -4359,7 +4638,8 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
   const fillCk = useSliderCheckpoint();
   const radiusCk = useSliderCheckpoint();
   const strokeCk = useSliderCheckpoint();
-  const boxShape = !lineLikeShape(o.shape);
+  const marks = dealsMarks(o.shape);
+  const boxShape = !lineLikeShape(o.shape) && !marks;
   return (
     <>
       <ElementTitle overlay={o} />
@@ -4478,10 +4758,177 @@ function ShapePanel({ overlay: o }: { overlay: ShapeOverlay }) {
             )}
           </Section>
         )}
+        {boxShape && <PatternSection overlay={o} />}
+        {marks && <InksRow overlay={o} />}
+        <ShadowSection id={o.id} shadow={o.shadow} onToggle={(v) => update(o.id, { shadow: v || undefined })} />
         <OverlayMaskSection overlay={o} />
         <TransformRows overlay={o} />
       </div>
     </>
+  );
+}
+
+/** A doodle's other paints: one swatch per ink, each with a remove button,
+ * and an add button while there is room. Each mark takes the fill or one of
+ * these. */
+function InksRow({ overlay: o }: { overlay: ShapeOverlay }) {
+  const update = useEditor((s) => s.updateOverlay);
+  const inks = o.inks ?? [];
+
+  // Every change writes the whole list back with one entry changed.
+  const swap = (i: number, c: string) => inks.map((x, j) => (j === i ? c : x));
+  const write = (next: string[]) => update(o.id, { inks: next.length > 0 ? next : undefined });
+  return (
+    <Row label="Inks">
+      <div className="flex flex-col items-end gap-1">
+        {inks.map((ink, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <ColorField
+              value={ink}
+              label={`Ink ${i + 1}`}
+              onBegin={() => useEditor.getState().pushHistory()}
+              onLive={(c) => useEditor.getState().updateOverlayTransient(o.id, { inks: swap(i, c) })}
+              onCommit={(c) => update(o.id, { inks: swap(i, c) })}
+            />
+            <Button variant="ghost" size="icon-xs" aria-label={`Remove ink ${i + 1}`} onClick={() => write(inks.filter((_, j) => j !== i))}>
+              <X />
+            </Button>
+          </div>
+        ))}
+        {inks.length < DOODLE_INKS_MAX && (
+          <Button variant="ghost" size="icon-xs" aria-label="Add ink" onClick={() => write([...inks, DOODLE_INKS[inks.length % DOODLE_INKS.length]])}>
+            <Plus />
+          </Button>
+        )}
+      </div>
+    </Row>
+  );
+}
+
+/** The drop shadow controls text and shapes share. A colored shadow at
+ * offset 0 reads as a glow. */
+function ShadowSection({
+  id,
+  shadow,
+  onToggle,
+}: {
+  id: string;
+  shadow: boolean | ShadowSpec | undefined;
+  onToggle: (on: boolean) => void;
+}) {
+  const update = useEditor((s) => s.updateOverlay);
+  const shadowCk = useSliderCheckpoint();
+  const spec: ShadowSpec = typeof shadow === "object" ? shadow : {};
+
+  // A slider drag lands live and checkpoints once, the way every row does.
+  const draft = (patch: ShadowSpec) => {
+    shadowCk.begin();
+    useEditor.getState().updateOverlayTransient(id, { shadow: { ...spec, ...patch } });
+  };
+  const commit = (patch: ShadowSpec) => {
+    draft(patch);
+    shadowCk.end();
+  };
+  return (
+    <Section title="Shadow" enabled={!!shadow} onEnabledChange={onToggle}>
+      <>
+        <Row label="Color">
+          <ColorField
+            value={spec.color ?? "#000000"}
+            label="Shadow color"
+            onBegin={() => useEditor.getState().pushHistory()}
+            onLive={(c) => useEditor.getState().updateOverlayTransient(id, { shadow: { ...spec, color: c } })}
+            onCommit={(c) => update(id, { shadow: { ...spec, color: c } })}
+            opacity={{
+              label: "Shadow opacity",
+              value: spec.opacity ?? 0.65,
+              onDraft: (v) => draft({ opacity: v }),
+              onCommit: (v) => commit({ opacity: v }),
+            }}
+          />
+        </Row>
+        <Row label="Blur">
+          <ValueSlider
+            label="Shadow blur"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={spec.blur ?? SHADOW.blur}
+            min={0}
+            max={SHADOW_BLUR_MAX}
+            step={1}
+            snap={[SHADOW.blur]}
+            format={(v) => String(Math.round(v))}
+            parse={parseNumberInput}
+            onDraft={(v) => draft({ blur: v })}
+            onCommit={(v) => commit({ blur: v })}
+          />
+        </Row>
+        <Row label="Offset">
+          <ValueSlider
+            label="Shadow offset"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={spec.offsetY ?? SHADOW.offsetY}
+            min={-SHADOW_OFFSET_MAX}
+            max={SHADOW_OFFSET_MAX}
+            step={1}
+            snap={[0, SHADOW.offsetY]}
+            format={(v) => String(Math.round(v))}
+            parse={parseNumberInput}
+            onDraft={(v) => draft({ offsetY: Math.round(v) })}
+            onCommit={(v) => commit({ offsetY: Math.round(v) })}
+          />
+        </Row>
+      </>
+    </Section>
+  );
+}
+
+/** A shape's pattern fill: stripes in the fill color, with line, gap and
+ * angle sliders. Off is a solid fill. */
+function PatternSection({ overlay: o }: { overlay: ShapeOverlay }) {
+  const update = useEditor((s) => s.updateOverlay);
+  const patternCk = useSliderCheckpoint();
+  const pattern = o.pattern ?? STRIPES_DEFAULT;
+
+  // Each slider writes the whole pattern back with its one field changed.
+  const draft = (patch: Partial<StripesPattern>) => {
+    patternCk.begin();
+    useEditor.getState().updateOverlayTransient(o.id, { pattern: { ...pattern, ...patch } });
+  };
+  const commit = (patch: Partial<StripesPattern>) => {
+    draft(patch);
+    patternCk.end();
+  };
+  const slider = (label: string, value: number, min: number, max: number, step: number, write: (v: number) => Partial<StripesPattern>) => (
+    <ValueSlider
+      label={label}
+      sliderClassName="data-horizontal:w-24"
+      valueClassName="w-9 text-muted-foreground"
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      format={(v) => String(Math.round(v * 10) / 10)}
+      parse={parseNumberInput}
+      onDraft={(v) => draft(write(v))}
+      onCommit={(v) => commit(write(v))}
+    />
+  );
+  return (
+    <Section
+      title="Pattern"
+      enabled={!!o.pattern}
+      onEnabledChange={(v) => update(o.id, { pattern: v ? STRIPES_DEFAULT : undefined })}
+    >
+      {o.pattern && (
+        <>
+          <Row label="Line">{slider("Stripe line width", pattern.width, STRIPE_LINE_MIN, STRIPE_LINE_MAX, 0.5, (v) => ({ width: v }))}</Row>
+          <Row label="Gap">{slider("Stripe gap", pattern.gap, 0, STRIPE_GAP_MAX, 0.5, (v) => ({ gap: v }))}</Row>
+          <Row label="Angle">{slider("Stripe angle", pattern.angle ?? 0, -90, 90, 1, (v) => ({ angle: Math.round(v) || undefined }))}</Row>
+        </>
+      )}
+    </Section>
   );
 }
 
@@ -4496,6 +4943,17 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
         {o.effect === "zoom" ? (
           <ZoomTarget overlay={o} />
         ) : AMOUNTLESS_EFFECTS.includes(o.effect) ? null : (
+          <>
+          {o.effect === "lightleak" && <LeakCourseRow overlay={o} />}
+          {o.effect === "glitch" && <GlitchKindRow overlay={o} />}
+          {o.effect === "flash" && (
+            <FlashPulseRows
+              pulse={o}
+              write={(patch, how) =>
+                how === "draft" ? useEditor.getState().updateOverlayTransient(o.id, patch) : useEditor.getState().updateOverlay(o.id, patch)
+              }
+            />
+          )}
           <Row label="Amount">
             <ValueSlider
               label="Effect amount"
@@ -4519,6 +4977,7 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
               }}
             />
           </Row>
+          </>
         )}
         <HiddenRow overlay={o} />
       </div>
@@ -4526,6 +4985,100 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
   );
 }
 
+/** What a glitch's kinds are called in the panel; "mix" is the random
+ * schedule, stored as absence. */
+const GLITCH_LABELS: Record<GlitchKind | "mix", string> = {
+  mix: "Mix",
+  smear: "Smear",
+  split: "Split",
+  tint: "Tint",
+  blowout: "Blowout",
+  rgb: "RGB split",
+};
+
+/** A glitch's kind: the random mix, or one kind pinned to every frame. */
+function GlitchKindRow({ overlay: o }: { overlay: EffectOverlay }) {
+  const kinds = ["mix", ...GLITCH_KINDS] as const;
+  return (
+    <Row label="Kind">
+      <Select
+        value={o.glitch ?? "mix"}
+        items={Object.fromEntries(kinds.map((k) => [k, GLITCH_LABELS[k]]))}
+        onValueChange={(v) => useEditor.getState().updateOverlay(o.id, { glitch: v === "mix" ? undefined : (v as GlitchKind) })}
+      >
+        <SelectTrigger className="h-8 w-36 text-[12px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {kinds.map((k) => (
+            <SelectItem key={k} value={k} className="text-[12px]">
+              {GLITCH_LABELS[k]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Row>
+  );
+}
+
+/** What each light leak course is called in the panel. */
+const LEAK_LABELS: Record<LeakCourse, string> = { drift: "Drift", burn: "Burn", scorch: "Scorch" };
+
+/** A light leak's course: a drifting glow for the whole element, the film
+ * burn played once across it, or the scorch flashing hot tones through it. */
+function LeakCourseRow({ overlay: o }: { overlay: EffectOverlay }) {
+  const leak = o.leak ?? "drift";
+  return (
+    <Row label="Course">
+      <div className="flex w-44 rounded-lg border border-input p-0.5 text-[11.5px] font-medium">
+        {LEAK_COURSES.map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-pressed={leak === c}
+            className={cn(
+              "flex-1 rounded-md px-1 py-1 whitespace-nowrap transition-colors",
+              leak === c ? "bg-neutral-900 text-white" : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => useEditor.getState().updateOverlay(o.id, { leak: c === "drift" ? undefined : c })}
+          >
+            {LEAK_LABELS[c]}
+          </button>
+        ))}
+      </div>
+    </Row>
+  );
+}
+
+/** What each text texture is called in the panel. */
+const TEXT_TEXTURE_LABELS: Record<TextTexture | "none", string> = { none: "None", stipple: "Stipple" };
+
+/** The grain a title wears inside its letters, or none. */
+function TextTextureRow({ overlay: o }: { overlay: TextOverlay }) {
+  const texture = o.texture ?? "none";
+  return (
+    <Row label="Texture">
+      <div className="flex w-36 rounded-lg border border-input p-0.5 text-[11.5px] font-medium">
+        {(["none", ...TEXT_TEXTURES] as const).map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-pressed={texture === c}
+            className={cn(
+              "flex-1 rounded-md px-1 py-1 whitespace-nowrap transition-colors",
+              texture === c ? "bg-neutral-900 text-white" : "text-muted-foreground hover:text-foreground"
+            )}
+            onClick={() => useEditor.getState().updateOverlay(o.id, { texture: c === "none" ? undefined : c })}
+          >
+            {TEXT_TEXTURE_LABELS[c]}
+          </button>
+        ))}
+      </div>
+    </Row>
+  );
+}
+
+/** What each flash tone is called in the panel. */
 /** The focus puck's diameter, in px — `size-5` on the element below. */
 const PUCK = 20;
 

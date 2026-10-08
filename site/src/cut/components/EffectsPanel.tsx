@@ -923,25 +923,16 @@ export function EffectSwatch({
   const shake =
     st.dx || st.dy || st.zoom
       ? `translate(${pct(st.dx ?? 0).toFixed(2)}%, ${pct(st.dy ?? 0).toFixed(2)}%) scale(${st.zoom ?? 1})`
+      : st.stretch
+        ? `scaleY(${st.stretch.scale})`
+        : undefined;
+  // A zoom scales about the point it holds, a stretch about its row;
+  // everything else about the middle.
+  const origin = st.origin
+    ? `${st.origin.x * 100}% ${st.origin.y * 100}%`
+    : st.stretch
+      ? `50% ${st.stretch.row * 100}%`
       : undefined;
-  // A zoom scales about the point it holds; everything else about the middle.
-  const origin = st.origin ? `${st.origin.x * 100}% ${st.origin.y * 100}%` : undefined;
-  // The glitch's chroma ghost is a few pixels of screen blend, and bright
-  // footage swallows it at tile size. The swatch tears the picture the way
-  // the full-size channel shift reads: strips of the frame knocked sideways,
-  // jumping on the preview state's quantized clock.
-  const tears =
-    id === "glitch"
-      ? [0, 1].map((i) => {
-          const step = Math.floor(t * 9) + 3 * i;
-          const j = ((step * 7919) % 5) - 2; // -2..2, deterministic
-          return {
-            top: i ? 58 : 22,
-            h: i ? 8 : 12,
-            dx: (j || 1) * (i ? -2.6 : 3.2),
-          };
-        })
-      : [];
   return (
     <span
       data-drag-object
@@ -961,18 +952,12 @@ export function EffectSwatch({
       >
         <SwatchScene frame={frame} />
       </span>
-      {tears.map((tear) => (
-        <span
-          key={tear.top}
-          className="absolute inset-0"
-          style={{
-            clipPath: `inset(${tear.top}% 0 ${100 - tear.top - tear.h}% 0)`,
-            transform: `translateX(${tear.dx.toFixed(2)}%)`,
-          }}
-        >
+      {!!st.ghost && (
+        // A split's unmoved frame, lightened back over the moved one.
+        <span className="absolute inset-0 mix-blend-lighten" style={{ opacity: st.ghost }}>
           <SwatchScene frame={frame} />
         </span>
-      ))}
+      )}
       {!!st.grain && grainUrl && (
         <span
           className="cut-grain absolute inset-0"

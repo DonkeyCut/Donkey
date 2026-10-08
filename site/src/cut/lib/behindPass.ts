@@ -11,25 +11,34 @@
 
 import {
   applyWordDraw,
+  countStep,
+  countText,
+  cutAtFaces,
   diveView,
   divesAt,
+  erodeLevel,
   evalOverlayFrame,
+  fontCycleCuts,
   measureDiveFocus,
   peekDiveFocus,
   glyphStateAt,
   hasGlyphMotion,
   maskComposite,
   overlayWords,
-  paintElementInto,
+  paintElementCrop,
+  typedChars,
+  withFontCycle,
   wordSampleWindows,
+  zapSeed,
   type OverlayFrameState,
   type PaintPhase,
+  type ZapPhase,
 } from "@donkeycut/effects-kit";
 import { ElementFx, elementLook } from "@donkeycut/effects-kit";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { allowance, holdMemory } from "./memoryBudget";
-import { createRasterCanvas } from "./raster";
-import { cutRenderEnv, renderElementPng } from "./textRender";
+import { createRasterCanvas, snapshotRaster } from "./raster";
+import { cutRenderEnv } from "./textRender";
 import {
   behindSubjectOverlay,
   frontSubjectOverlay,
@@ -53,9 +62,14 @@ const BEHIND_WORD_FPS = 8;
 /** The spans an element's word effect holds still for — one picture each.
  * Nothing here means the element draws as one piece. */
 function rasterSpans(o: Overlay): { start: number; end: number }[] | null {
+  if (!isTextOverlay(o)) return null;
+  // A font cycle changes the type at every step: each face gets its own
+  // picture, cut inside the word spans when both run.
   const words = overlayWords(o);
-  if (!words || !isTextOverlay(o)) return null;
-  const spans = wordSampleWindows(o.text, words, spanOf(o), BEHIND_WORD_FPS);
+  const faces = fontCycleCuts(o, spanOf(o));
+  if (!words && faces.length === 0) return null;
+  const base = words ? wordSampleWindows(o.text, words, spanOf(o), BEHIND_WORD_FPS) : [{ start: 0, end: spanOf(o) }];
+  const spans = cutAtFaces(base, faces);
   return spans.length > 0 ? spans : null;
 }
 
@@ -80,27 +94,54 @@ function rasterSliceAt(o: Overlay, tLocal: number): number {
  * typing bar is lit — the same reading the front path's painters take from
  * the evaluator. A whole-text picture keys at zero or above (two per word
  * slice, bar dark and lit); a typing picture keys below zero, one per typed
- * count.
+ * count, and a counting picture likewise, one per step its numbers take.
+ * A disintegrating or crackling moment keys below zero too, one picture per
+ * erosion step and arc deal.
  */
 interface Look {
   key: number;
   word: number;
   chars: number;
   caret: boolean;
+  /** Where a counting picture's numbers stand, 0..1 (count). */
+  count?: number;
+  /** The share of the ink a disintegration has eaten, at its erosion step. */
+  erode?: number;
+  /** The arcs a zap hit paints over the picture. */
+  zap?: ZapPhase;
 }
 
 /** The picture `o` needs at `tLocal`. */
 function lookAt(o: Overlay, tLocal: number, ev: OverlayFrameState): Look {
   const word = rasterSliceAt(o, tLocal);
   const caret = ev.caret === true;
-  const n = isTextOverlay(o) ? o.text.length : 0;
-  const chars =
-    isTextOverlay(o) && ev.textProgress !== undefined
-      ? Math.max(0, Math.min(n, Math.ceil(ev.textProgress * n)))
-      : -1;
+  const n = isTextOverlay(o) ? [...o.text].length : 0;
+  const chars = isTextOverlay(o) && ev.textProgress !== undefined ? typedChars(o.text, ev.textProgress) : -1;
   const bar = caret ? 1 : 0;
-  const key = chars < 0 ? (word + 1) * 2 + bar : -1 - (((word + 1) * (n + 1) + chars) * 2 + bar);
-  return { key, word, chars, caret };
+  // A count keys its pictures by how far its numbers have counted, out of
+  // every step they take ("100 %" takes 100).
+  const count = isTextOverlay(o) ? ev.countProgress : undefined;
+  const text = isTextOverlay(o) ? o.text : "";
+  const step = count !== undefined ? countStep(text, count) : chars;
+  const steps = count !== undefined ? countStep(text, 1) : n;
+  // An erosion step and an arc deal fold into a phase slot: 0 is neither,
+  // e.g. step 3 under deal 5 is 3 + 25 × 6 with 24 erosion steps.
+  const level = ev.erode !== undefined ? erodeLevel(ev.erode) : 0;
+  const zap = ev.zap ? { amount: ev.zap, seed: zapSeed(tLocal) } : undefined;
+  const levels = erodeLevel(1) + 1;
+  const phase = level + levels * (zap ? zap.seed + 1 : 0);
+  const phases = levels * (zapSeed(spanOf(o)) + 2);
+  const picture = ((word + 1) * (steps + 2) + step + 1) * 2 + bar;
+  const key = step < 0 && phase === 0 ? (word + 1) * 2 + bar : -1 - (picture * phases + phase);
+  return {
+    key,
+    word,
+    chars,
+    caret,
+    ...(count !== undefined ? { count } : {}),
+    ...(level > 0 ? { erode: level / (levels - 1) } : {}),
+    ...(zap ? { zap } : {}),
+  };
 }
 
 /** The phase a picture with its typing bar lit is painted at. */
@@ -228,6 +269,12 @@ export class SubjectMaskCompositor {
   private person: HTMLCanvasElement | null = null;
   /** Scratch for blurred and motion-blurred behind elements. */
   private fx = new ElementFx(createRasterCanvas);
+  /** Where each picture's top-left sits in the frame: pictures are cropped to
+   * the element's ink, however far past the frame it reaches, so a pose that
+   * shrinks an oversize element keeps its edges. */
+  private origins = new WeakMap<ImageBitmap, { x: number; y: number }>();
+  /** The crop's mask scratch, made on first use. */
+  private cropMask: HTMLCanvasElement | null = null;
   private small: HTMLCanvasElement | null = null;
   private mask: { at: number; alpha: HTMLCanvasElement | null } = { at: -1e9, alpha: null };
   /** A second matte slot for mid-stack clip masks: it snapshots the canvas as
@@ -328,13 +375,17 @@ export class SubjectMaskCompositor {
   }
 
   /** The element as one picture shows it: its words as they stand across
-   * the span the picture covers, `chars` of its text typed (-1 = all). */
-  private pictureOf(o: Overlay, word: number, chars: number): Overlay {
+   * the span the picture covers, `chars` of its text typed (-1 = all), its
+   * numbers counted to `count`. */
+  private pictureOf(o: Overlay, word: number, count?: number): Overlay {
     const spans = rasterSpans(o);
     const span = word >= 0 ? spans?.[word] : undefined;
     const at = span ? (span.start + span.end) / 2 : 0;
-    const el = applyWordDraw({ ...o, rotation: undefined, opacity: undefined }, at, spanOf(o));
-    return chars >= 0 && isTextOverlay(el) ? { ...el, text: el.text.slice(0, chars) } : el;
+    const el = withFontCycle(applyWordDraw({ ...o, rotation: undefined, opacity: undefined }, at, spanOf(o)), at);
+    if (count !== undefined && isTextOverlay(el)) {
+      return { ...el, text: countText(el.text, count) };
+    }
+    return el;
   }
 
   /** One whole-text picture, kept under the element it came from. */
@@ -347,22 +398,38 @@ export class SubjectMaskCompositor {
     word: number,
     caret: boolean
   ): Promise<void> {
-    const png = await renderElementPng(this.pictureOf(o, word, -1), w, h, assets, caret ? CARET_LIT : undefined);
-    this.land(o, key, await createImageBitmap(png));
+    const surface = scratchCanvas();
+    const origin = await paintElementCrop(surface, this.pictureOf(o, word), w, h, cutRenderEnv(assets), {
+      t: 0,
+      phase: caret ? CARET_LIT : undefined,
+      maskScratch: (this.cropMask ??= scratchCanvas()),
+    });
+    const bmp = await snapshotRaster(surface);
+    surface.width = surface.height = 1;
+    this.origins.set(bmp, origin);
+    this.land(o, key, bmp);
   }
 
   /** One typing picture, painted on the shared surface. */
   private async drawTyped(o: Overlay, w: number, h: number, assets: MediaAsset[], look: Look): Promise<void> {
     const surface = (this.typeSurface ??= scratchCanvas());
-    if (surface.width !== w) surface.width = w;
-    if (surface.height !== h) surface.height = h;
-    await paintElementInto(
-      surface,
-      this.pictureOf(o, look.word, look.chars),
-      cutRenderEnv(assets),
-      look.caret ? CARET_LIT : undefined
-    );
-    this.land(o, look.key, await createImageBitmap(surface));
+    // A typing picture keeps the whole text's layout and shows its typed head.
+    // A disintegrating or crackling picture carries its erosion and arcs.
+    const typing: PaintPhase | undefined = look.chars >= 0 ? { typed: look.chars } : undefined;
+    const lived: PaintPhase = {
+      ...(look.caret ? CARET_LIT : {}),
+      ...typing,
+      ...(look.erode !== undefined ? { erode: look.erode } : {}),
+      ...(look.zap ? { zap: look.zap } : {}),
+    };
+    const origin = await paintElementCrop(surface, this.pictureOf(o, look.word, look.count), w, h, cutRenderEnv(assets), {
+      t: 0,
+      phase: Object.keys(lived).length > 0 ? lived : undefined,
+      maskScratch: (this.cropMask ??= scratchCanvas()),
+    });
+    const bmp = await snapshotRaster(surface);
+    this.origins.set(bmp, origin);
+    this.land(o, look.key, bmp);
   }
 
   /** Paint the typing pictures elements are waiting on, one after another,
@@ -447,6 +514,10 @@ export class SubjectMaskCompositor {
       this.typeSurface.width = 1;
       this.typeSurface.height = 1;
       this.typeSurface = null;
+    }
+    if (this.cropMask) {
+      this.cropMask.width = this.cropMask.height = 1;
+      this.cropMask = null;
     }
     this.releaseMemory();
   }
@@ -669,17 +740,18 @@ export class SubjectMaskCompositor {
       if (alphaOf <= 0.001) continue;
       const cx = o.x * W;
       const cy = o.y * H;
-      // A blurred, streaking or darkening element poses into the scratch
-      // alone and lands softened or dimmed.
-      const target = this.fx.begin(ctx, W, H, elementLook(ev, scale)) as CanvasRenderingContext2D;
+      // A blurred, streaking, darkening or tilted element poses into the
+      // scratch alone and lands softened, dimmed or turned.
+      const at = {
+        x: ev.x * W + (ev.dx + (g?.dx ?? 0)) * scale,
+        y: ev.y * H + (ev.dy + (g?.dy ?? 0)) * scale,
+      };
+      const target = this.fx.begin(ctx, W, H, elementLook(ev, scale, at)) as CanvasRenderingContext2D;
       target.save();
       target.globalAlpha = alphaOf;
-      target.translate(
-        ev.x * W + (ev.dx + (g?.dx ?? 0)) * scale,
-        ev.y * H + (ev.dy + (g?.dy ?? 0)) * scale
-      );
+      target.translate(at.x, at.y);
       target.rotate(((ev.rotation + (g?.rotate ?? 0)) * Math.PI) / 180);
-      target.scale(ev.scale * (g?.sx ?? 1), ev.scale * (g?.sy ?? 1));
+      target.scale(ev.scale * (ev.sx ?? 1) * (g?.sx ?? 1), ev.scale * (ev.sy ?? 1) * (g?.sy ?? 1));
       target.translate(-cx, -cy);
       // A dive flies the same one picture in, under the view the other
       // renderers draw their type under.
@@ -690,7 +762,8 @@ export class SubjectMaskCompositor {
         target.scale(v.s, v.s);
         target.translate(-v.fx, -v.fy);
       }
-      target.drawImage(bmp, 0, 0, W, H);
+      const origin = this.origins.get(bmp);
+      target.drawImage(bmp, origin?.x ?? 0, origin?.y ?? 0);
       target.restore();
       this.fx.end(ctx);
     }

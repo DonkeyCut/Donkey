@@ -16,7 +16,7 @@ import { FrameCompositor } from "./composite";
 import { ensureClipLuts } from "./lutBuild";
 import { matteStage } from "./matteAlpha";
 import { createRasterCanvas, decodeRasterImageUrl, type RasterSurface } from "./raster";
-import type { MediaAsset, VideoClip } from "./types";
+import { CLIP_MIN_SECONDS, type MediaAsset, type VideoClip } from "./types";
 import { liveReader } from "./liveReader";
 
 export interface RemovalPieces {
@@ -75,7 +75,7 @@ export async function renderRemovalPieces(
 
   const rt = retimeOf(clip);
   const still = asset.type === "image";
-  const dur = Math.max(0.1, rt.len);
+  const dur = Math.max(CLIP_MIN_SECONDS, rt.len);
   const frames = Math.max(1, Math.ceil(dur * opts.fps));
 
   const reader = liveReader(asset);

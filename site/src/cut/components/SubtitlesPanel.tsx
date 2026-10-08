@@ -436,7 +436,7 @@ function EmphasisRows() {
         Bold
         <Switch
           className="sub-emphasis-weight"
-          checked={em.weight === 700}
+          checked={em.weight >= 700}
           onCheckedChange={(v) => {
             useEditor.getState().pushHistory();
             set({ emphasisWeight: v ? 700 : 400 });

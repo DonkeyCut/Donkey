@@ -11,7 +11,7 @@
  * The math is here, apart from React, because both exports walk the same stack.
  */
 
-import { effectPreviewState, isAudioEffect, type EffectPreviewState } from "@donkeycut/effects-kit";
+import { effectPreviewState, effectRecipe, isAudioEffect, type EffectPreviewState } from "@donkeycut/effects-kit";
 import { isEffectOverlay, laneOf, type Overlay } from "./types";
 
 /** One effect live at a moment, with the lane that places it in the stack. */
@@ -28,7 +28,7 @@ export function liveEffectsAt(overlays: Overlay[], t: number): LiveEffect[] {
     if (o.hidden || t < o.start || t > o.end) continue;
     live.push({
       lane: laneOf(o),
-      state: effectPreviewState(o.effect, o.amount, t - o.start, o.focus, o.ramp, o.end - o.start),
+      state: effectPreviewState(effectRecipe(o), o.amount, t - o.start, o.focus, o.ramp, o.end - o.start, o),
     });
   }
   return live.sort((a, b) => a.lane - b.lane);
@@ -48,6 +48,7 @@ export function stageEffectTransform(states: EffectPreviewState[]): string | und
   let dy = 0;
   let zoom = 1;
   let origin = { x: 0.5, y: 0.5 };
+  let stretch: EffectPreviewState["stretch"];
   for (const st of states) {
     dx += st.dx ?? 0;
     dy += st.dy ?? 0;
@@ -56,8 +57,9 @@ export function stageEffectTransform(states: EffectPreviewState[]): string | und
     if (st.ghostFrac) dx += st.ghostFrac * 1080 * 3;
     zoom *= st.zoom ?? 1;
     if (st.origin) origin = st.origin;
+    if (st.stretch) stretch = st.stretch;
   }
-  if (!dx && !dy && zoom === 1) return undefined;
+  if (!dx && !dy && zoom === 1 && !stretch) return undefined;
   // The offsets are design pixels against a 1080 short side.
   const pct = (px: number) => ((px / 1080) * 100).toFixed(3);
   // Percentage translates are of the stage's own box, so the scale can be sat
@@ -67,10 +69,17 @@ export function stageEffectTransform(states: EffectPreviewState[]): string | und
   // half a frame off and the push in walks the picture out of frame.
   const ox = (origin.x - 0.5) * 100;
   const oy = (origin.y - 0.5) * 100;
+  // A pixel stretch scales the picture tall about its row the same way, so
+  // the thin band at the row fills the stage.
+  const sy = stretch ? (stretch.row - 0.5) * 100 : 0;
+  const smear = stretch
+    ? ` translate(0%, ${sy.toFixed(3)}%) scaleY(${stretch.scale}) translate(0%, ${(-sy).toFixed(3)}%)`
+    : "";
   return (
     `translate(${pct(dx)}%, ${pct(dy)}%) ` +
     `translate(${ox.toFixed(3)}%, ${oy.toFixed(3)}%) scale(${zoom}) ` +
-    `translate(${(-ox).toFixed(3)}%, ${(-oy).toFixed(3)}%)`
+    `translate(${(-ox).toFixed(3)}%, ${(-oy).toFixed(3)}%)` +
+    smear
   );
 }
 

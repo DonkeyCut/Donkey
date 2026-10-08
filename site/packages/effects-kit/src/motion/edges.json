@@ -1837,5 +1837,244 @@
         }
       ]
     }
+  },
+  "count": {
+    "label": "Count",
+    "note": "Every number in a title counts up from zero to its written value, one step at a time: a loading percentage, a stat, a price. Decimals and leading zeros keep their written form; on Out the numbers count back down to zero.",
+    "maxSeconds": 10,
+    "slots": [
+      "in",
+      "out"
+    ],
+    "animate": {
+      "counted": [
+        {
+          "t": 0,
+          "v": 0,
+          "ease": [
+            0.335,
+            0.335,
+            0.665,
+            0.665
+          ]
+        },
+        {
+          "t": 1,
+          "v": 1
+        }
+      ]
+    }
+  },
+  "disintegrate": {
+    "label": "Disintegrate",
+    "note": "The element crumbles away in grain: blotches of its ink are eaten until nothing is left, the gritty exit of a teaser title; on In it assembles out of the grain.",
+    "slots": [
+      "in",
+      "out"
+    ],
+    "animate": {
+      "erode": [
+        {
+          "t": 0,
+          "v": 1,
+          "ease": [
+            0.42,
+            0,
+            0.58,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": 0
+        }
+      ]
+    }
+  },
+  "blur": {
+    "label": "Blur",
+    "note": "Letters sharpen out of a soft blur one at a time, in a shuffled order, each drifting into its line: the dreamy title reveal. On Out they melt back into the blur.",
+    "slots": [
+      "in",
+      "out"
+    ],
+    "selector": {
+      "basedOn": "characters",
+      "shape": "rampUp",
+      "spread": 0.55,
+      "randomize": true,
+      "seed": 3
+    },
+    "wiggly": {
+      "position": [
+        0,
+        70
+      ],
+      "seed": 5
+    },
+    "animate": {
+      "opacity": [
+        {
+          "t": 0,
+          "v": 0,
+          "ease": [
+            0.25,
+            0.6,
+            0.4,
+            1
+          ]
+        },
+        {
+          "t": 0.6,
+          "v": 1
+        },
+        {
+          "t": 1,
+          "v": 1
+        }
+      ],
+      "blur": [
+        {
+          "t": 0,
+          "v": 22,
+          "ease": [
+            0.2,
+            0.7,
+            0.35,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": 0
+        }
+      ]
+    }
+  },
+  "glitch": {
+    "label": "Glitch",
+    "note": "Letters snap in one after another, torn into red and cyan copies that jitter sideways and lock together: the digital glitch title. On Out they tear apart and drop out.",
+    "slots": [
+      "in",
+      "out"
+    ],
+    "selector": {
+      "basedOn": "characters",
+      "shape": "rampUp",
+      "spread": 0.7
+    },
+    "animate": {
+      "opacity": [
+        {
+          "t": 0,
+          "v": 0,
+          "hold": true
+        },
+        {
+          "t": 0.04,
+          "v": 1
+        }
+      ],
+      "split": [
+        {
+          "t": 0,
+          "v": 30,
+          "ease": [
+            0.25,
+            0.6,
+            0.45,
+            1
+          ]
+        },
+        {
+          "t": 1,
+          "v": 0
+        }
+      ],
+      "position": [
+        {
+          "t": 0,
+          "v": [
+            -26,
+            0
+          ],
+          "hold": true
+        },
+        {
+          "t": 0.18,
+          "v": [
+            18,
+            0
+          ],
+          "hold": true
+        },
+        {
+          "t": 0.36,
+          "v": [
+            -10,
+            0
+          ],
+          "hold": true
+        },
+        {
+          "t": 0.54,
+          "v": [
+            6,
+            0
+          ],
+          "hold": true
+        },
+        {
+          "t": 0.72,
+          "v": [
+            0,
+            0
+          ]
+        }
+      ],
+      "flicker": [
+        {
+          "t": 0,
+          "v": 0.5
+        },
+        {
+          "t": 0.6,
+          "v": 0
+        }
+      ]
+    }
+  },
+  "flicker": {
+    "label": "Flicker",
+    "note": "Letters blink on and off at random, each on its own beat, a few out at any moment, until the line locks on: the failing-neon title. On Out the line breaks into the same flicker within a few frames and keeps failing to the end.",
+    "slots": [
+      "in",
+      "out"
+    ],
+    "selector": {
+      "basedOn": "characters",
+      "shape": "rampUp",
+      "spread": 0
+    },
+    "animate": {
+      "flicker": [
+        {
+          "t": 0,
+          "v": 1
+        },
+        {
+          "t": 0.12,
+          "v": 0.4
+        },
+        {
+          "t": 0.88,
+          "v": 0.4
+        },
+        {
+          "t": 1,
+          "v": 0
+        }
+      ]
+    }
   }
 }

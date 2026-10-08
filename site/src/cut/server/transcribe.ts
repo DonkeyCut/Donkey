@@ -8,6 +8,7 @@ import { assertLocalRuntime } from "./local-only";
 import { createJobRegistry } from "./jobRegistry";
 import { mediaPath, readProject } from "./projects";
 import { retimeOf, type SpeedNode } from "@donkeycut/effects-kit";
+import { CLIP_MIN_SECONDS } from "../lib/types";
 import { bakeRetimedAudio, type BakedAudio } from "./retimeAudio";
 import { atempoChain, findOnPath, hasStream, num, round, errorMessage } from "./util";
 
@@ -352,10 +353,10 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
     const filters: string[] = [];
     // Per-clip timeline length: a sped-up clip is shorter and time-stretched,
     // so the transcript's cue times line up with what the user sees. A gap
-    // spacer (no file) keeps its exact length — flooring it at 0.1s would
+    // spacer (no file) keeps its exact length — flooring it would
     // land every cue after the gap late.
     const clipDur = (c: TranscribeSpec["clips"][number]) =>
-      c.file ? Math.max(0.1, retimeOf(c).len) : Math.max(0, c.out - c.in);
+      c.file ? Math.max(CLIP_MIN_SECONDS, retimeOf(c).len) : Math.max(0, c.out - c.in);
     // A clip whose rate changes through its footage is baked to a WAV in
     // timeline seconds first (the same stretch the export and the preview
     // use), so its words land where they play.
@@ -435,7 +436,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
     spec.audio.forEach((a, k) => {
       if (!audible.get(a.file)) return;
       filters.push(
-        audioRead(a, Math.max(0.1, retimeOf(a).len)) +
+        audioRead(a, Math.max(CLIP_MIN_SECONDS, retimeOf(a).len)) +
           `aresample=16000,aformat=sample_fmts=s16:channel_layouts=mono,` +
           `volume=${num(a.volume)},adelay=${Math.max(0, Math.round(a.start * 1000))}:all=1[snd${k}]`
       );

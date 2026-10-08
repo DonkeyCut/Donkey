@@ -1,6 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
+import { Fragment } from "react";
 import {
   AMOUNTLESS_EFFECTS,
   CLIP_EFFECT_IDS,
@@ -10,6 +11,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { FlashPulseRows, type PulseWrite } from "@/cut/components/FlashPulseRows";
 import { Row, Section, useSliderCheckpoint } from "@/cut/components/panelBits";
 import { parsePercentInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
@@ -35,6 +37,17 @@ export function ClipEffectsSection({ clip }: { clip: VideoClip }) {
   const setAmount = (i: number, amount: number) => {
     ck.begin();
     st().updateClipTransient(clip.id, { effects: list.map((e, j) => (j === i ? { ...e, amount } : e)) });
+  };
+
+  // A flash's pulse rows write into its entry: drafts ride the transient
+  // path under the rows' own checkpoint, clicks land as one step.
+  const setPulse = (i: number, patch: Partial<ClipEffect>, how: PulseWrite) => {
+    const effects = list.map((e, j) => (j === i ? { ...e, ...patch } : e));
+    if (how === "draft") {
+      st().updateClipTransient(clip.id, { effects });
+      return;
+    }
+    write(effects);
   };
 
   return (
@@ -65,37 +78,40 @@ export function ClipEffectsSection({ clip }: { clip: VideoClip }) {
       }
     >
       {list.map((e, i) => (
-        <Row key={e.effect} label={EFFECT_LABELS[e.effect]}>
-          {!AMOUNTLESS_EFFECTS.includes(e.effect) && (
-            <ValueSlider
-              label={`${EFFECT_LABELS[e.effect]} amount`}
-              sliderClassName="data-horizontal:w-24"
-              valueClassName="w-9 text-muted-foreground"
-              value={e.amount ?? 0.5}
-              min={0.05}
-              max={1}
-              step={0.01}
-              snap={[0.5]}
-              format={(v) => String(Math.round(v * 100))}
-              parse={parsePercentInput}
-              onDraft={(v) => setAmount(i, v)}
-              onCommit={(v) => {
-                setAmount(i, v);
-                ck.end();
-              }}
-            />
-          )}
-          <Tooltip>
-            <TooltipTrigger
-              aria-label={`Remove ${EFFECT_LABELS[e.effect]}`}
-              className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => write(list.filter((_, j) => j !== i))}
-            >
-              <X className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>Remove</TooltipContent>
-          </Tooltip>
-        </Row>
+        <Fragment key={e.effect}>
+          <Row label={EFFECT_LABELS[e.effect]}>
+            {!AMOUNTLESS_EFFECTS.includes(e.effect) && (
+              <ValueSlider
+                label={`${EFFECT_LABELS[e.effect]} amount`}
+                sliderClassName="data-horizontal:w-24"
+                valueClassName="w-9 text-muted-foreground"
+                value={e.amount ?? 0.5}
+                min={0.05}
+                max={1}
+                step={0.01}
+                snap={[0.5]}
+                format={(v) => String(Math.round(v * 100))}
+                parse={parsePercentInput}
+                onDraft={(v) => setAmount(i, v)}
+                onCommit={(v) => {
+                  setAmount(i, v);
+                  ck.end();
+                }}
+              />
+            )}
+            <Tooltip>
+              <TooltipTrigger
+                aria-label={`Remove ${EFFECT_LABELS[e.effect]}`}
+                className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => write(list.filter((_, j) => j !== i))}
+              >
+                <X className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipContent>Remove</TooltipContent>
+            </Tooltip>
+          </Row>
+          {e.effect === "flash" && <FlashPulseRows pulse={e} write={(patch, how) => setPulse(i, patch, how)} />}
+        </Fragment>
       ))}
     </Section>
   );

@@ -18,7 +18,7 @@ import { headSrc, retimeOf } from "@donkeycut/effects-kit";
  * watched the download.
  */
 
-import { overlayAnimStyle, TRANSITION_ZOOM } from "./types";
+import { CLIP_MIN_SECONDS, overlayAnimStyle, TRANSITION_BLUR, TRANSITION_ZOOM } from "./types";
 import type { AudioClip, ClipAnim, ClipSpan, MediaAsset, TransitionStyle, VideoClip } from "./types";
 
 /** The ramps a transition or clip animation puts on one upper-track clip. */
@@ -117,6 +117,8 @@ export interface ClipAnimFx {
   /** Frame translation, as a fraction of canvas width/height. */
   dxFrac: number;
   dyFrac: number;
+  /** Defocus, as a share of the frame's short side; absent = sharp. */
+  blur?: number;
 }
 
 /**
@@ -172,6 +174,12 @@ export function clipAnimFx(
       case "slidedown":
         fx.dyFrac += side === "in" ? -(1 - p) : 1 - p;
         break;
+      case "blur":
+        // The blur transition on an open edge: the picture defocuses through
+        // the middle of the ramp while it fades, as xfade's hblur does
+        // against the frame.
+        fx.blur = Math.max(fx.blur ?? 0, TRANSITION_BLUR * (1 - Math.abs(2 * p - 1)));
+      // falls through
       case "fade":
       default:
         // Fade — and the graceful fallback for a stored style this build no
@@ -196,7 +204,7 @@ export function duckGainAt(audioClips: AudioClip[], t: number): number {
   let g = 1;
   for (const a of audioClips) {
     if (a.hidden || a.duck === undefined || a.duck >= 1) continue;
-    const len = Math.max(0.1, retimeOf(a).len);
+    const len = Math.max(CLIP_MIN_SECONDS, retimeOf(a).len);
     if (t >= a.start && t < a.start + len) g = Math.min(g, Math.max(0, a.duck));
   }
   return g;
@@ -311,7 +319,7 @@ export interface TrackZeroPlan {
   masterAlpha: number;
   masterZoom: number;
   /** Frame motion on the master, as a fraction of canvas width/height. */
-  masterFxFrac: { dx: number; dy: number };
+  masterFxFrac: { dx: number; dy: number; blur: number };
   incAlpha: number;
   incZoom: number;
   /** Fade-to-black over the master clip's own footprint, 0..1. */
@@ -418,7 +426,7 @@ export function trackZeroPlan(master: ClipSpan, spans: ClipSpan[], t: number): T
     p,
     masterAlpha: anim.alpha,
     masterZoom: masterZoom * anim.zoom,
-    masterFxFrac: { dx: anim.dxFrac, dy: anim.dyFrac },
+    masterFxFrac: { dx: anim.dxFrac, dy: anim.dyFrac, blur: anim.blur ?? 0 },
     incAlpha,
     incZoom,
     veil: anim.veil,

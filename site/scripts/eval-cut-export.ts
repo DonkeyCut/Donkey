@@ -59,6 +59,11 @@ const HERMETIC_PROJECT = "cut-export-eval";
 const CLIP_S = 3;
 /** How far the probed file may drift from the doc's own duration. */
 const DURATION_TOLERANCE_S = 0.5;
+/** Where the click sits in its file, and where the doc puts it on the timeline. */
+const CLICK_IN_FILE_S = 0.25;
+const CLICK_AT_S = 4.85;
+/** Sound against picture: under a fifth of a frame at 24 fps. */
+const SYNC_TOLERANCE_S = 0.008;
 
 function run(cmd: string, cmdArgs: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -108,6 +113,17 @@ async function buildFixtures(): Promise<void> {
       "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=44100:duration=8",
       "-c:a", "aac",
       music,
+    ]);
+  }
+  // A one-sample-wide click 0.25 s into an MP3. The encoder's tag says how
+  // much priming opens the file; the click is where the sync check looks.
+  const click = path.join(OUT, "click.mp3");
+  if (!existsSync(click)) {
+    await run("ffmpeg", [
+      "-y", "-loglevel", "error",
+      "-f", "lavfi", "-i", `aevalsrc='if(between(t,${CLICK_IN_FILE_S},${CLICK_IN_FILE_S}+0.0005),0.9,0)':s=44100:d=0.6`,
+      "-c:a", "libmp3lame", "-b:a", "128k",
+      click,
     ]);
   }
 }
@@ -293,6 +309,7 @@ function fixtureDoc(url: (file: string) => string, clipS = CLIP_S) {
       asset("v0", "clip-0.mp4", "video", clipS),
       asset("v1", "clip-1.mp4", "video", clipS),
       asset("m0", "music.m4a", "audio", 8),
+      asset("k0", "click.mp3", "audio", 0.6),
     ],
     clips: [
       {
@@ -323,6 +340,10 @@ function fixtureDoc(url: (file: string) => string, clipS = CLIP_S) {
       {
         id: "a0", assetId: "m0", start: 0, in: 0, out: 5,
         volume: 0.5, fadeIn: 0.3, fadeOut: 0.5, lane: 0,
+      },
+      {
+        id: "k0", assetId: "k0", start: CLICK_AT_S - CLICK_IN_FILE_S, in: 0, out: 0.5,
+        volume: 1, lane: 1,
       },
     ],
     overlays: [
@@ -564,6 +585,21 @@ async function main(): Promise<void> {
   const dB = 20 * Math.log10(level / expected);
   if (!(Math.abs(dB) <= 0.5)) failures.push(`level at 3.5–4.5s is ${dB.toFixed(2)} dB off the sources`);
   console.log(`[level] ${dB >= 0 ? "+" : ""}${dB.toFixed(2)} dB against the sources; ${frames.length} frames, ${flashes.length} bare`);
+
+  // Sync: the click lands where the doc puts it. Encoder priming written
+  // without an edit list, or an MP3's own priming read as sound, plays every
+  // cut's audio late against its picture. The tones under it sit below the
+  // high-pass, so the loudest sample left is the click.
+  const near = CLICK_AT_S - 0.2;
+  const hp = await run("ffmpeg", ["-loglevel", "error", "-ss", String(near), "-t", "0.4", "-i", outPath, "-vn", "-af", "highpass=f=4000,pan=mono|c0=c0", "-f", "f32le", "-ar", "48000", "-"]);
+  const hx = new Float32Array(Buffer.from(hp, "binary").buffer);
+  let peak = 0;
+  for (let i = 1; i < hx.length; i++) if (Math.abs(hx[i]) > Math.abs(hx[peak])) peak = i;
+  const clickAt = near + peak / 48000;
+  if (!(Math.abs(clickAt - CLICK_AT_S) <= SYNC_TOLERANCE_S)) {
+    failures.push(`the click plays at ${clickAt.toFixed(4)}s, the doc puts it at ${CLICK_AT_S}s`);
+  }
+  console.log(`[sync] click ${((clickAt - CLICK_AT_S) * 1000).toFixed(1)} ms from where the doc puts it`);
 
   if (failures.length) {
     console.error(`[FAIL] ${failures.join("; ")}`);

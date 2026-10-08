@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AlignCenter, AlignHorizontalSpaceAround, AlignLeft, AlignRight, AlignVerticalSpaceAround, Bold, FlipHorizontal2, FlipVertical2, Italic, StretchHorizontal, Type } from "lucide-react";
-import { hasOverlayKeys, hasSpeedCurve, lineLikeShape, poseAt, retimeOf, ZOOM_LEVELS, ZOOM_RAMP_MAX, zoomRampOf } from "@donkeycut/effects-kit";
+import { hasOverlayKeys, hasSpeedCurve, LETTER_SPACING_MIN, lineLikeShape, poseAt, retimeOf, ZOOM_LEVELS, ZOOM_RAMP_MAX, zoomRampOf } from "@donkeycut/effects-kit";
 import { ColorField } from "@/cut/components/ColorField";
 import { FontPicker } from "@/cut/components/FontPicker";
 import { LETTER_SPACINGS, LINE_HEIGHTS, SoundQualityPanel, SoundQualityRow, TEXT_WIDTHS, StylePresetsRow } from "@/cut/components/Inspector";
@@ -353,7 +353,7 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
   const write = useGroupWrite();
   const font = sharedValue(texts.map((t) => t.font));
   const size = sharedNumber(texts.map((t) => t.size));
-  const bold = sharedValue(texts.map((t) => t.weight === 700));
+  const bold = sharedValue(texts.map((t) => t.weight >= 700));
   const italic = sharedValue(texts.map((t) => !!t.italic));
   const align = sharedValue(texts.map((t) => t.align ?? "center"));
   const lineHeight = sharedNumber(texts.map((t) => t.lineHeight ?? 1.25));
@@ -465,7 +465,7 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
             icon={<AlignHorizontalSpaceAround />}
             value={letterSpacing.value}
             mixed={letterSpacing.mixed}
-            min={-5}
+            min={LETTER_SPACING_MIN * 100}
             max={30}
             step={1}
             snap={[0]}

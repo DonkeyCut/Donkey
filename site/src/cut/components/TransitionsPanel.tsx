@@ -23,6 +23,10 @@ import {
   type TransitionStyle,
   type VideoClip,
 } from "@/cut/lib/types";
+import { CLOCK_SWEEP, shapeEase, takesFeather, TRANSITION_FEATHER_MAX } from "@/cut/lib/transitionShape";
+import { Row, useSliderCheckpoint } from "@/cut/components/panelBits";
+import { parseNumberInput } from "@/cut/components/ScrubValue";
+import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -64,6 +68,7 @@ export function TransitionsPanel() {
       <ScrollArea className="min-h-0 flex-1" contentClassName="px-3.5 pt-5 pb-4">
         {/* One key handler over every group, so arrows walk the whole list
             across section boundaries. */}
+        {live && takesFeather(live.style) && <SoftnessRow bar={live} />}
         <div onKeyDown={pickGridNav}>
           {TRANSITION_STYLE_GROUPS.map((g) => (
             <section key={g.label} className="mb-3 flex flex-col gap-1.5">
@@ -78,6 +83,44 @@ export function TransitionsPanel() {
         </div>
       </ScrollArea>
     </>
+  );
+}
+
+/** How soft the selected bar's reveal edge is: 0 is the hard edge, the top
+ * of the range a ramp half the frame wide. A drag is one undo step. */
+function SoftnessRow({ bar }: { bar: TimelineTransition }) {
+  const ck = useSliderCheckpoint();
+  const write = (v: number) => {
+    ck.begin();
+    useEditor.getState().updateTransitionTransient(bar.id, { feather: v > 0 ? v : undefined });
+  };
+  return (
+    <div className="mb-3">
+      <Row label="Softness">
+        <ValueSlider
+          label="Edge softness"
+          sliderClassName="data-horizontal:w-24"
+          valueClassName="w-9 text-muted-foreground"
+          value={bar.feather ?? 0}
+          min={0}
+          max={TRANSITION_FEATHER_MAX}
+          step={0.01}
+          format={(v) => (v ? `${Math.round(v * 100)}%` : "Hard")}
+          parse={(raw) => {
+            if (raw.trim().toLowerCase() === "hard") {
+              return 0;
+            }
+            const n = parseNumberInput(raw.replace(/%$/, ""));
+            return n === null ? null : n / 100;
+          }}
+          onDraft={write}
+          onCommit={(v) => {
+            write(v);
+            ck.end();
+          }}
+        />
+      </Row>
+    </div>
   );
 }
 
@@ -512,6 +555,41 @@ function TransitionSwatch({
         </>
       );
       break;
+    case "clockwipe": {
+      // A wedge pinned at the top-left corner sweeps from the top edge down
+      // to the left one. Past the diagonal the wedge takes the far corner.
+      const angle = shapeEase(style, p) * CLOCK_SWEEP;
+      const wedge =
+        angle <= Math.PI / 4
+          ? `polygon(0 0, 100% 0, 100% ${pc(Math.tan(angle))})`
+          : `polygon(0 0, 100% 0, 100% 100%, ${pc(1 / Math.tan(Math.max(angle, 1e-3)))} 100%)`;
+      layers = (
+        <>
+          {A()}
+          {B({ clipPath: wedge })}
+        </>
+      );
+      break;
+    }
+    case "sliceleft":
+    case "sliceup": {
+      // Two halves slide opposite ways: the top half left and the bottom
+      // right, or the left column up and the right one down.
+      const e = shapeEase(style, p);
+      const across = style === "sliceleft";
+      const head = across ? "inset(0 0 50% 0)" : "inset(0 50% 0 0)";
+      const tail = across ? "inset(50% 0 0 0)" : "inset(0 0 0 50%)";
+      const move = (n: number) => (across ? `translateX(${pc(n)})` : `translateY(${pc(n)})`);
+      layers = (
+        <>
+          {A({ clipPath: head, transform: move(-e) })}
+          {B({ clipPath: head, transform: move(1 - e) })}
+          {A({ clipPath: tail, transform: move(e) })}
+          {B({ clipPath: tail, transform: move(e - 1) })}
+        </>
+      );
+      break;
+    }
   }
   return (
     <span

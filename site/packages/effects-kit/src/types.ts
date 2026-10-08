@@ -10,6 +10,8 @@ import type { GroupCamera } from "./camera";
 import type { EffectOverlay } from "./effects";
 import type { OverlayKey } from "./keys";
 import type { Mask } from "./mask";
+import type { PatternSpec } from "./pattern";
+import type { TextTexture } from "./texture";
 import type { WordDraw } from "./words/types";
 
 /** Fields every overlay element carries, whatever its kind. */
@@ -54,16 +56,31 @@ export interface OverlayBase {
   camera?: GroupCamera;
 }
 
-/** A custom drop shadow. Every field is optional — absent ones take the
- * legacy defaults, so `shadow: true` and `shadow: {}` render identically. */
-export interface TextShadowSpec {
+/** A custom drop shadow, for text and shapes alike. Every field is optional —
+ * absent ones take the legacy defaults, so `shadow: true` and `shadow: {}`
+ * render identically. A colored shadow with offsetY 0 reads as a glow. */
+export interface ShadowSpec {
   color?: string; // hex; opacity folds in separately
   blur?: number; // px at the 1080 design short side
   offsetY?: number; // px at the 1080 design short side
   opacity?: number; // 0..1
 }
 
+/** Shadow blur and offset bounds, px at the 1080 design short side. */
+export const SHADOW_BLUR_MAX = 60;
+export const SHADOW_OFFSET_MAX = 40;
+
 export type TextAlign = "left" | "center" | "right";
+
+/** The weights a title can be set in: regular, bold, extra bold and black. A
+ * face without a weight draws in its nearest one. */
+export const TEXT_WEIGHTS = [400, 700, 800, 900] as const;
+
+/** Tracking bounds, em: display type set tight down to the floor, spaced caps
+ * up to the ceiling. */
+export const LETTER_SPACING_MIN = -0.15;
+export const LETTER_SPACING_MAX = 0.5;
+export type TextWeight = (typeof TEXT_WEIGHTS)[number];
 
 /** A text element. `kind` may be absent — documents written before the union
  * existed stored bare title objects, and absence still means text. `font` is a
@@ -73,7 +90,7 @@ export interface TextOverlay extends OverlayBase {
   text: string;
   size: number; // px at a 1080-wide design frame
   font: string;
-  weight: 400 | 700;
+  weight: TextWeight;
   italic?: boolean;
   color: string;
   /** Outline drawn behind the fill (stroke-before-fill; the DOM pair is
@@ -91,11 +108,13 @@ export interface TextOverlay extends OverlayBase {
    * Width changes wrap lines; height follows the content. */
   wrapWidth?: number;
   /** Drop shadow: `true` = the legacy default look, an object customizes it. */
-  shadow: boolean | TextShadowSpec;
+  shadow: boolean | ShadowSpec;
   plate: boolean; // rounded plate behind the text
   plateRadius?: number; // plate corner radius in em
   plateColor?: string; // plate fill color
   plateOpacity?: number; // plate fill opacity 0..1
+  /** Grain laid into the letters themselves; absent = solid type. */
+  texture?: TextTexture;
   /** Word burn-in: one entry per display word (whitespace-split across all
    * lines), each resolved to the color, opacity and pose it draws at. Stamped
    * by the word engine at paint time; absent = the line draws as one piece. */
@@ -111,7 +130,8 @@ export type ShapeKind =
   | "heart"
   | "hexagon"
   | "line"
-  | "arrow";
+  | "arrow"
+  | "doodle";
 
 /** Shapes drawn as a stroke across the element box: `h` is the stroke
  * thickness and rotation gives them their direction. Every other kind is a
@@ -129,6 +149,19 @@ export interface ShapeOverlay extends OverlayBase {
   fillOpacity?: number; // 0..1, absent = 1 (composes with `opacity`)
   radius?: number; // rect corner radius, px at 1080 short side
   stroke?: { color: string; width: number }; // outline, width px at 1080 short side
+  /** The fill color laid down as a pattern clipped to the outline; absent =
+   * a solid fill. Line and arrow shapes always draw solid. */
+  pattern?: PatternSpec;
+  /** Drop shadow cast by the shape's silhouette; absent or false = none. */
+  shadow?: boolean | ShadowSpec;
+  /** A doodle's other paints: each mark it deals takes the fill or one of
+   * these. Other kinds ignore it. */
+  inks?: string[];
+}
+
+/** Shapes that paint a new hand-drawn mark on every beat (see `doodle.ts`). */
+export function dealsMarks(k: ShapeKind): boolean {
+  return k === "doodle";
 }
 
 /** An image sticker. Height follows the source's own aspect until a side
@@ -239,6 +272,7 @@ export const TEXT_STYLE_FIELDS = [
   "plateColor",
   "plateOpacity",
   "plateRadius",
+  "texture",
 ] as const;
 
 /** A saved look, and what one title copies from another. */

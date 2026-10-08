@@ -8,6 +8,7 @@ import {
   wordEffect,
   wordSampleWindows,
   type OverlayWords,
+  type TextWeight,
   type WordDraw,
   type WordFace,
 } from "@donkeycut/effects-kit";
@@ -69,7 +70,7 @@ export interface CaptionEmphasisOverrides {
   emphasisFont?: FontId;
   emphasisColor?: string;
   emphasisItalic?: boolean;
-  emphasisWeight?: 400 | 700;
+  emphasisWeight?: TextWeight;
   emphasisScale?: number;
 }
 
@@ -174,7 +175,7 @@ export interface CaptionStyle {
   y: number;
   size: number;
   font: FontId;
-  weight: 400 | 700;
+  weight: TextWeight;
   color: string;
   shadow: boolean;
   plate: boolean;
@@ -379,7 +380,7 @@ export function wrapCaptionForSize(
   size: number,
   frameW: number,
   font: FontId = "sf",
-  weight: 400 | 700 = 700,
+  weight: TextWeight = 700,
   x = 0.5
 ): string {
   const flat = text.trim().replace(/\s+/g, " ");

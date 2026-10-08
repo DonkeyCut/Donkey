@@ -48,7 +48,7 @@ function transitionToNext(sp: ClipSpan, index: number, spans: ClipSpan[]) {
   const seconds = sp.clip.transition ?? 0;
   if (seconds <= 0 || index >= spans.length - 1) return null;
   const style = sp.clip.transitionStyle ?? "crossfade";
-  return { style, seconds: r(sp.transitionOut) };
+  return { style, seconds: r(sp.transitionOut), ...(sp.clip.transitionFeather ? { feather: sp.clip.transitionFeather } : {}) };
 }
 
 /** The clip's own effects — entrance/exit animations, box styling, and its
@@ -634,6 +634,7 @@ function describeState(
       ...(sp.clip.kf?.length
         ? { keyframes: sp.clip.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
         : {}),
+      ...(sp.clip.motionBlur ? { motionBlur: r(sp.clip.motionBlur) } : {}),
       ...clipEffects(sp.clip, live, { aspect: s.aspect, assetById }),
     })),
     // Video layers composited over track 0 in track order (the topmost
@@ -670,6 +671,7 @@ function describeState(
             start: r(t.start),
             seconds: r(t.seconds),
             style: t.style,
+            ...(t.feather ? { feather: t.feather } : {}),
             ...(t.hidden ? { hidden: true } : {}),
             ...(plays.length > 0
               ? { plays: plays.map((p) => ({ at: p.kind, clipId: p.clipId })) }
@@ -842,6 +844,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     ...(c.kf?.length
       ? { keyframes: c.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
       : {}),
+    ...(c.motionBlur ? { motionBlur: r(c.motionBlur) } : {}),
   };
 }
 
@@ -876,6 +879,8 @@ function describeOverlay(o: Overlay) {
       ...(o.fillOpacity !== undefined ? { fillOpacity: r(o.fillOpacity) } : {}),
       ...(o.radius ? { radius: o.radius } : {}),
       ...(o.stroke ? { stroke: o.stroke } : {}),
+      ...(o.pattern ? { pattern: o.pattern } : {}),
+      ...(o.shadow ? { shadow: o.shadow } : {}),
     };
   }
   if (o.kind === "sticker") {
@@ -889,6 +894,9 @@ function describeOverlay(o: Overlay) {
       ...(o.effect === "zoom"
         ? { focus: { x: r(o.focus?.x ?? 0.5), y: r(o.focus?.y ?? 0.5) } }
         : {}),
+      ...(o.effect === "glitch" && o.glitch ? { glitch: o.glitch } : {}),
+      ...(o.effect === "flash" && o.tone ? { tone: o.tone } : {}),
+      ...(o.effect === "flash" && o.rate ? { rate: r(o.rate), rhythm: o.rhythm ?? "strobe" } : {}),
     };
   }
   return {
@@ -902,5 +910,6 @@ function describeOverlay(o: Overlay) {
     plate: o.plate,
     ...(o.plateRadius !== undefined && { plateRadius: r(o.plateRadius) }),
     ...(o.wrapWidth !== undefined ? { wrapWidth: r(o.wrapWidth) } : {}),
+    ...(o.texture ? { texture: o.texture } : {}),
   };
 }

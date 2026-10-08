@@ -7,7 +7,8 @@
  * side catches up.
  */
 
-import { num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { DOODLE_FPS, DOODLE_INKS_MAX, PATTERN_KINDS, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN } from "@donkeycut/effects-kit";
+import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { SHAPE_LABELS, type ShapeKind } from "@/cut/lib/types";
 
 /** Every shape the panel's grid shows, in `SHAPE_LABELS` order. */
@@ -17,7 +18,7 @@ export const ELEMENTS_TOOLS = [
   {
     name: "add_shape",
     description:
-      `Add a vector shape overlay (${SHAPE_KINDS.join(", ")}). Position is the shape center as frame fractions; w/h are frame fractions too (a line/arrow's h is its stroke thickness). Rotation gives lines and arrows their direction.`,
+      `Add a vector shape overlay (${SHAPE_KINDS.join(", ")}). Position is the shape center as frame fractions; w/h are frame fractions too (a line/arrow's h is its stroke thickness). Rotation gives lines and arrows their direction. A doodle is animated graffiti in translucent paint: inside its box (default: the whole frame) it paints one hand-drawn mark — a dry-brush smear, a painted X, a burst, a tall painted bar, a brushed ring, a pair of fat loops — often with a thin hand line beside it (a tall oval, standing strands, a scribble), and deals new ones ${DOODLE_FPS} times a second, each in the fill or one of its inks (default: the teal, cream, red, orange and white graffiti set). Put it on a row under the titles to paint behind them, or between titles to sit over one line and under another.`,
     inputSchema: obj({
       shape: { type: "string", enum: [...SHAPE_KINDS], description: "Shape kind" },
       start: num("Start time s (default: playhead)"),
@@ -26,11 +27,26 @@ export const ELEMENTS_TOOLS = [
       y: num("Center y 0..1 (default 0.5)"),
       w: num("Width, fraction of frame width"),
       h: num("Height, fraction of frame height (line/arrow: thickness)"),
-      fill: str("CSS color (default #FFFFFF)"),
+      fill: str("CSS color (default #FFFFFF; a doodle's default is the graffiti set's teal)"),
+      inks: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: DOODLE_INKS_MAX,
+        description: `Doodle: up to ${DOODLE_INKS_MAX} more paints beside the fill; each mark takes one of them or the fill`,
+      },
       fill_opacity: num("Fill opacity 0..1 (rect/ellipse)"),
       radius: num("Rect corner radius, px at 1080 short side"),
       stroke_color: str("Outline color (rect/ellipse)"),
       stroke_width: num("Outline width px at 1080 short side (0 removes it)"),
+      pattern: { type: "string", enum: [...PATTERN_KINDS, "none"], description: 'Not line/arrow: the fill color laid as a pattern clipped to the outline — "stripes" are parallel lines with clear gaps (a loading bar); absent or "none" = solid' },
+      pattern_width: num(`Stripe line thickness, px at 1080, ${STRIPE_LINE_MIN}..${STRIPE_LINE_MAX} (default 2)`),
+      pattern_gap: num(`Clear space between stripes, px at 1080, 0..${STRIPE_GAP_MAX} (default 1)`),
+      pattern_angle: num("Stripe direction in degrees clockwise, -90..90; 0 = vertical lines"),
+      shadow: bool("Drop shadow on or off (default off); the shadow_* fields switch it on"),
+      shadow_color: str("Shadow hex color, e.g. #00E5FF"),
+      shadow_blur: num(`Shadow blur, px at 1080, 0..${SHADOW_BLUR_MAX}`),
+      shadow_opacity: num("Shadow opacity 0..1"),
+      shadow_y: num(`Shadow drop, px at 1080, -${SHADOW_OFFSET_MAX}..${SHADOW_OFFSET_MAX}; 0 with a bright color makes a glow`),
       rotation: num("Degrees clockwise, -180..180"),
       opacity: num("Whole-element opacity 0..1"),
       lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),

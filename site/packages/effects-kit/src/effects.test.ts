@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CLIP_EFFECT_IDS, codeScale, EFFECT_IDS, effectFilterLines, effectPreviewState } from "./effects";
+import { CLIP_EFFECT_IDS, codeScale, EFFECT_IDS, effectFilterLines, effectPreviewState, glitchHitAt } from "./effects";
 
 // The bundled engine ffmpeg is LGPL: a recipe reaching for a GPL-only filter
 // renders on a dev machine (Homebrew ffmpeg) and fails in the shipped app.
@@ -80,7 +80,7 @@ describe("effect recipes", () => {
     for (const id of EFFECT_IDS) {
       const lines = effectFilterLines("in", "out", id, 0.5, 2.5, 6, 1080, 1920, "t")!;
       const joined = lines.join("\n");
-      expect(joined.includes("gte(t,2.5)") || joined.includes("sin(t*")).toBe(true);
+      expect(joined.includes("gte(t,2.500000)") || joined.includes("sin(t*")).toBe(true);
     }
   });
 
@@ -182,6 +182,50 @@ describe("effect recipes", () => {
       const b = effectPreviewState(id, 0.6, 1.234);
       expect(a).toEqual(b);
     }
+  });
+
+  test("a glitch breaks clean footage with runs of every kind, more at a higher amount", () => {
+    const hits = (k: number) => Array.from({ length: 300 }, (_, i) => glitchHitAt(i, k));
+    const count = (k: number) => hits(k).filter(Boolean).length;
+    // 300 steps is 20 seconds: plenty of hits, with clean footage between.
+    expect(count(0.1)).toBeGreaterThan(30);
+    expect(count(1)).toBeGreaterThan(count(0.1));
+    expect(count(1)).toBeLessThan(220);
+    const kinds = new Set(hits(1).map((h) => h?.kind).filter(Boolean));
+    expect([...kinds].sort()).toEqual(["blowout", "smear", "split", "tint"]);
+  });
+
+  test("a glitch's split holds its offset for the run while a smear moves its row", () => {
+    const all = Array.from({ length: 600 }, (_, i) => glitchHitAt(i, 1));
+    const held = all.findIndex((h, i) => h?.kind === "split" && all[i + 1]?.kind === "split");
+    expect(held).toBeGreaterThanOrEqual(0);
+    expect(all[held + 1]!.shift).toBe(all[held]!.shift);
+    const smear = all.findIndex((h, i) => h?.kind === "smear" && all[i + 1]?.kind === "smear");
+    expect(smear).toBeGreaterThanOrEqual(0);
+    expect(all[smear + 1]!.row).not.toBe(all[smear]!.row);
+  });
+
+  test("a glitch's export hits the frames its preview does", () => {
+    // Every frame of a 30fps window: the preview's state and the export's
+    // gates must agree on which kind of hit plays, frame-edge times included.
+    const start = 2.5;
+    const lines = effectFilterLines("in", "out", "glitch", 0.6, start, 6.5, 1080, 1920, "t")!.join("\n");
+    const kinds = new Set<string>();
+    for (let n = 0; n < 120; n++) {
+      const t = start + n / 30;
+      const st = effectPreviewState("glitch", 0.6, t - start);
+      const kind = st.stretch ? "smear" : st.ghost ? "split" : st.zoom ? "tint" : st.cssFilter ? "blowout" : null;
+      const gate = (label: string) => {
+        const m = new RegExp(`\\[${label}\\][^\\n]*?enable='([^']*)'`).exec(lines)!;
+        return [...m[1].matchAll(/gte\(t,([\d.]+)\)\*lt\(t,([\d.]+)\)/g)]
+          .slice(1)
+          .some((w) => t >= Number(w[1]) && t < Number(w[2]));
+      };
+      const gated = gate("gsbt") ? "smear" : gate("gtbt") ? "tint" : gate("gpbt") ? "split" : gate("gpo2t") ? "blowout" : null;
+      expect(gated).toBe(kind);
+      if (kind) kinds.add(kind);
+    }
+    expect(kinds.size).toBeGreaterThanOrEqual(3);
   });
 
   test("flash decays from its start and shake stays bounded", () => {

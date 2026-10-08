@@ -89,10 +89,16 @@ export function sampleProperties(props: MotionProperties, q: number, dur = 0): M
       opacity: capped(props.opacity, dur),
       tracking: capped(props.tracking, dur),
       reveal: capped(props.reveal, dur),
+      erode: capped(props.erode, dur),
+      zap: capped(props.zap, dur),
       typed: capped(props.typed, dur),
+      counted: capped(props.counted, dur),
       roll: capped(props.roll, dur),
       dive: capped(props.dive, dur),
       brightness: capped(props.brightness, dur),
+      blur: capped(props.blur, dur),
+      split: capped(props.split, dur),
+      flicker: capped(props.flicker, dur),
     };
   return samplePropertiesRaw(props, q);
 }
@@ -109,10 +115,16 @@ function samplePropertiesRaw(props: MotionProperties, q: number): MotionPose {
     alpha: sampleTrack(props.opacity, q, 1),
     tracking: sampleTrack(props.tracking, q, 0),
     ...(props.reveal ? { reveal: sampleTrack(props.reveal, q, 1) } : {}),
+    ...(props.erode ? { erode: sampleTrack(props.erode, q, 0) } : {}),
+    ...(props.zap ? { zap: sampleTrack(props.zap, q, 0) } : {}),
     ...(props.typed ? { typed: sampleTrack(props.typed, q, 1) } : {}),
+    ...(props.counted ? { counted: sampleTrack(props.counted, q, 1) } : {}),
     ...(props.roll ? { roll: sampleTrack(props.roll, q, 0) } : {}),
     ...(props.dive ? { dive: sampleTrack(props.dive, q, 0) } : {}),
     ...(props.brightness ? { brightness: sampleTrack(props.brightness, q, 1) } : {}),
+    ...(props.blur ? { blur: sampleTrack(props.blur, q, 0) } : {}),
+    ...(props.split ? { split: sampleTrack(props.split, q, 0) } : {}),
+    ...(props.flicker ? { flicker: sampleTrack(props.flicker, q, 0) } : {}),
   };
 }
 
@@ -122,6 +134,28 @@ function draw(seed: number, i: number, salt = 0): number {
   h = (h ^ (h >>> 13)) >>> 0;
   h = Math.imul(h, 1274126177) >>> 0;
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/** How many times a flickering unit may change state across its window. A
+ * 0.75s exit changes about every frame and a half, the pace of a failing
+ * tube. */
+const FLICKER_STEPS = 16;
+/** How bright a flickering unit shows when it dips without going out. */
+const FLICKER_DIM = 0.35;
+/** Seeds every flicker pattern, so the same line always blinks the same way. */
+const FLICKER_SEED = 29;
+
+/** The pose with its flicker spent on its opacity. Each unit draws its own
+ * pattern from its index, so the letters of a line blink independently: at
+ * flicker 0.5 a letter is dark for about half the steps, and at 1 for all of
+ * them. A dark step is out half the time and dim the rest. */
+function flickered(pose: MotionPose, q: number, index: number): MotionPose {
+  const chance = pose.flicker ?? 0;
+  if (chance <= 0) return pose;
+  const step = Math.min(FLICKER_STEPS - 1, Math.floor(clamp01(q) * FLICKER_STEPS));
+  if (chance < 1 && draw(FLICKER_SEED, index, 100 + step) >= chance) return pose;
+  const level = draw(FLICKER_SEED, index, 500 + step) < 0.5 ? 0 : FLICKER_DIM;
+  return { ...pose, alpha: pose.alpha * level };
 }
 
 /** Where unit `i` sits in the hand-off order, 0 at the front. */
@@ -149,10 +183,10 @@ function orderOf(sel: RangeSelector, i: number, n: number): number {
 
 /** The share of the window unit `i` starts at. `square` gives every unit its
  * own slot with no overlap; the ramps and curves overlap by `spread`. */
-function startShare(sel: RangeSelector, i: number, n: number): number {
+function startShare(sel: RangeSelector, i: number, n: number, share = sel.spread): number {
   if (n <= 1) return 0;
   const o = orderOf(sel, i, n);
-  const spread = clamp01(sel.spread);
+  const spread = clamp01(share);
   if (sel.shape === "square") return o / n;
   const u = o / (n - 1);
   switch (sel.shape) {
@@ -176,13 +210,15 @@ export function selectorProgress(
   p: number,
   index: number,
   count: number,
-  exiting = false
+  exiting = false,
+  /** The hand-off share over the selector's own `spread`. */
+  spread = sel.spread
 ): number {
   const n = Math.max(1, count);
   // An exit sweeps out the way it came in, so the order reverses.
   const i = exiting ? n - 1 - index : index;
-  const from = startShare(sel, i, n);
-  const window = sel.shape === "square" ? 1 / n : Math.max(1e-6, 1 - clamp01(sel.spread));
+  const from = startShare(sel, i, n, spread);
+  const window = sel.shape === "square" ? 1 / n : Math.max(1e-6, 1 - clamp01(spread));
   let q = clamp01((clamp01(p) - from) / window);
   if (sel.easeHigh) q = lerp(q, bezierEase([0.42, 0, 1, 1], q), clamp01(sel.easeHigh));
   if (sel.easeLow) q = lerp(q, bezierEase([0, 0, 0.58, 1], q), clamp01(sel.easeLow));
@@ -240,15 +276,17 @@ export function evalPreset(
   index = 0,
   count = 1,
   exiting = false,
-  dur = 0
+  dur = 0,
+  /** An edge's own hand-off over its selector's (`OverlayEdge.stagger`). */
+  spread?: number
 ): MotionPose {
   const props = exiting && preset.animateOut ? preset.animateOut : preset.animate;
   const q = !preset.selector
     ? clamp01(p)
     : preset.period !== undefined
       ? loopProgress(preset.selector, p, index, count)
-      : selectorProgress(preset.selector, p, index, count, exiting);
-  const pose = sampleProperties(props, q, dur);
+      : selectorProgress(preset.selector, p, index, count, exiting, spread);
+  const pose = flickered(sampleProperties(props, q, dur), q, index);
   return preset.wiggly ? applyWiggly(pose, preset.wiggly, index, 1 - q) : pose;
 }
 
@@ -266,7 +304,7 @@ export function evalWhole(
 ): MotionPose {
   const props = exiting && preset.animateOut ? preset.animateOut : preset.animate;
   const q = clamp01(p);
-  const pose = sampleProperties(props, q, dur);
+  const pose = flickered(sampleProperties(props, q, dur), q, 0);
   // A wiggly preset keeps its stray here too — it is the whole motion of a
   // scatter, and dropping it would leave the element with only its fade.
   return preset.wiggly ? applyWiggly(pose, preset.wiggly, 0, 1 - q) : pose;
@@ -287,7 +325,12 @@ export function presetExtent(preset: MotionPreset): { travel: number; rotates: b
     for (const k of props.position ?? [])
       offset = Math.max(offset, Math.abs(k.v[0]), Math.abs(k.v[1]));
     for (const k of props.tracking ?? []) spread = Math.max(spread, Math.abs(k.v));
-    travel = Math.max(travel, offset + spread);
+    // A split letter's copies and a blurred letter's halo reach past it too:
+    // a defocus spreads about twice its radius.
+    let halo = 0;
+    for (const k of props.split ?? []) halo = Math.max(halo, Math.abs(k.v));
+    for (const k of props.blur ?? []) halo = Math.max(halo, Math.abs(k.v) * 2);
+    travel = Math.max(travel, offset + spread + halo);
     if ((props.rotation ?? []).some((k) => k.v !== 0)) rotates = true;
   }
   if (preset.wiggly?.position)

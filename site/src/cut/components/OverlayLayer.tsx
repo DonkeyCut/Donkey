@@ -1,7 +1,7 @@
 "use client";
 
 import { guideSnapLines } from "@/cut/lib/guides";
-import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
@@ -18,10 +18,14 @@ import {
   subtitleLaneCount,
   trackPos,
 } from "@/cut/lib/subtitles";
-import { drawStreak, elementAtMoment, paintElementCrop, streakTaps } from "@donkeycut/effects-kit";
+import { dealsMarks, doodleBeat, doodleSeed, isInkless, paintDoodle, paintZapInto, SPLIT_CYAN, SPLIT_RED, zapSeed, type TextTexture } from "@donkeycut/effects-kit";
+import { erodeMask, textureMask } from "./textureCss";
+import { countText, drawStreak, elementAtMoment, fontCycleVariants, paintElementCrop, streakTaps, textCssFont, typedChars, withFontCycle } from "@donkeycut/effects-kit";
 import { holdMemory } from "@/cut/lib/memoryBudget";
+import { stripeGeometry, stripesSolid } from "@donkeycut/effects-kit";
 import { elementCameraAt } from "@/cut/lib/groupCamera";
 import { cameraPoint, worldPoint } from "@donkeycut/effects-kit";
+import { TILT_PERSPECTIVE } from "@donkeycut/effects-kit";
 import { CARET_GAP_EM, CARET_HEIGHT_EM, CARET_WIDTH_EM, typeCaret } from "@donkeycut/effects-kit";
 import { diveView, evalOverlayFrame, glyphStateAt, measureDiveFocus, paintElementInto, slotReel, slotSeed, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type DiveFocus, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
@@ -57,6 +61,7 @@ import {
   type ResizeHandle,
 } from "./TransformHandles";
 import { stageEffectFilter, stageEffectTransform } from "@/cut/lib/effectStack";
+import { rgbSplitFilter } from "./rgbSplit";
 import { useLiveEffects } from "./StageEffects";
 import { cn } from "@/lib/utils";
 
@@ -185,8 +190,20 @@ export function OverlayLayer({
         .sort((a, b) => laneOf(b) - laneOf(a)),
     [allOverlays, from, to]
   );
+  // A font cycle shows each face for a frame or two, too short for the
+  // page to fetch one on sight, so every face in play is loaded ahead.
+  useEffect(() => {
+    if (typeof document === "undefined" || !document.fonts?.load) return;
+    const env = cutRenderEnv([]);
+    for (const o of overlays) {
+      for (const face of fontCycleVariants(o)) {
+        if (isTextOverlay(face)) void document.fonts.load(textCssFont(face, 32, env), face.text).catch(() => {});
+      }
+    }
+  }, [overlays]);
   const selection = useEditor((s) => s.selection);
   const multiSelection = useEditor((s) => s.multiSelection);
+  const playing = useEditor((s) => s.playing);
   const aspect = useEditor((s) => s.aspect);
   const shownGuides = useEditor((s) => s.guides);
   const guideLines = useEditor((s) => s.guideLines);
@@ -200,7 +217,6 @@ export function OverlayLayer({
     () => (gradeAbove === null ? [] : live.filter((e) => e.lane < gradeAbove).map((e) => e.state)),
     [live, gradeAbove]
   );
-  const filter = stageEffectFilter(graded);
   const transform = stageEffectTransform(graded);
 
   const rootRef = useRef<HTMLDivElement>(null);
@@ -215,6 +231,8 @@ export function OverlayLayer({
 
   const frame = frameOf(aspect);
   const stageHeight = (stageWidth * frame.h) / frame.w;
+  const split = rgbSplitFilter(graded, stageWidth, stageHeight);
+  const filter = [stageEffectFilter(graded), split].filter(Boolean).join(" ") || undefined;
 
   // Smart snapping: while dragging an item, pull its left/center/
   // right edges to the frame edges, safe margins, center line, and the edges
@@ -313,8 +331,12 @@ export function OverlayLayer({
   const grouped = pictureGroupSelected(multiSelection);
   const selectedIds = useMemo(() => new Set(multiSelection.flatMap((item) => item?.kind === "overlay" ? [item.id] : [])), [multiSelection]);
   const isolate = !multiple && !!sel && !scrubbing && !(t >= sel.start && t <= sel.end);
+  // A glitch's split doubles the slice too: the unmoved elements, lightened in
+  // over the moved ones at the ghost's share, the way the export draws them.
+  const ghostAlpha = Math.max(0, ...graded.map((s) => s.ghost ?? 0));
 
   return (
+    <>
     <div
       ref={rootRef}
       className="pointer-events-none absolute inset-0"
@@ -336,7 +358,10 @@ export function OverlayLayer({
         return (
           <OverlayItem
             key={o.id}
-            overlay={o}
+            // A font cycle sets the title in another face at this moment.
+            // A selected title holds its own face while paused, since that is
+            // the face its grips and the inspector edit.
+            overlay={inRange && (playing || !selected) ? withFontCycle(o, t - o.start) : o}
             // The skimmer paints the bare frame: the item still renders, its
             // selection chrome (outline, resize handle) does not.
             selected={selected && !scrubbing}
@@ -377,8 +402,40 @@ export function OverlayLayer({
         />
       ))}
     </div>
+    {ghostAlpha > 0 && (
+      <div
+        aria-hidden
+        inert
+        className="pointer-events-none absolute inset-0 mix-blend-lighten"
+        style={{ filter, opacity: ghostAlpha }}
+      >
+        {overlays.map((o) => {
+          if (o.hidden || o.kind === "effect" || t < o.start || t > o.end) return null;
+          return (
+            <OverlayItem
+              key={o.id}
+              overlay={withFontCycle(o, t - o.start)}
+              selected={false}
+              armed={false}
+              grouped={false}
+              ghost={false}
+              t={t}
+              stageWidth={stageWidth}
+              registerBox={ignoreBox}
+              snap={snap}
+              onSnapEnd={clearGuides}
+              rotationGuide={rotationGuide}
+            />
+          );
+        })}
+      </div>
+    )}
+    </>
   );
 }
+
+/** The ghost copy's boxes stay out of the snap registry. */
+const ignoreBox = () => {};
 
 /** Text drawn word by word, each word wearing what the word engine resolved
  * for it. The words are walked exactly the way the canvas painter walks them
@@ -389,36 +446,92 @@ function WordText({
   draws,
   lineHeight,
   tail,
+  texture,
+  typed,
 }: {
   text: string;
   draws: WordDraw[];
   lineHeight?: number;
-  /** Drawn at the end of the last line (the typing bar). */
+  /** Drawn just past the last typed character (the typing bar). */
   tail?: React.ReactNode;
+  /** Grain each word wears over its own box, as the canvas cuts it. */
+  texture?: TextTexture;
+  /** Characters a typewriter has typed; the rest hold their room unseen. */
+  typed?: number;
 }) {
   let k = 0;
   const lines = text.split("\n");
+  const at = typingAt(lines, typed);
+  // Where each line starts in the text; a line break takes a turn.
+  const starts = lines.map((_, li) => lines.slice(0, li).reduce((n, l) => n + [...l].length + 1, 0));
   return (
     <>
-      {lines.map((line, li) => (
-        <span key={li} className="block">
-          {line
-            .split(" ")
-            .filter(Boolean)
-            .map((w, wi) => {
+      {lines.map((line, li) => {
+        const start = starts[li];
+        const words = line.split(" ").filter(Boolean);
+
+        // Where each word starts in the line, and the word the bar follows on
+        // the line the typing has reached: the last one it has started.
+        let from = 0;
+        const wordAt = words.map((w) => {
+          const s = line.indexOf(w, from);
+          from = s + w.length;
+          return [...line.slice(0, s)].length;
+        });
+        const barWord = li === at.line ? wordAt.filter((s) => s < at.chars).length - 1 : -2;
+        return (
+          <span key={li} className="block">
+            {barWord === -1 && tail}
+            {words.map((w, wi) => {
               const d = draws[k++];
+              const letters = [...w];
+              const typedIn = typed === undefined ? letters.length : typed - start - wordAt[wi];
+              const head = letters.slice(0, Math.max(0, typedIn)).join("");
+              const rest = letters.slice(Math.max(0, typedIn)).join("");
               return (
                 <span key={wi}>
                   {wi > 0 && " "}
-                  <span style={d ? wordDrawCss(d, lineHeight) : undefined}>{w}</span>
+                  <span
+                    style={
+                      texture
+                        ? { ...(d ? wordDrawCss(d, lineHeight) : {}), display: "inline-block", ...textureMask(texture) }
+                        : d
+                          ? wordDrawCss(d, lineHeight)
+                          : undefined
+                    }
+                  >
+                    {head}
+                    {wi === barWord && tail}
+                    {rest && <span style={{ visibility: "hidden" }}>{rest}</span>}
+                  </span>
                 </span>
               );
             })}
-          {li === lines.length - 1 && tail}
-        </span>
-      ))}
+          </span>
+        );
+      })}
     </>
   );
+}
+
+/** Where the typing bar stands: the line the typing has reached and how many
+ * of that line's characters are typed. A line break takes a turn, the way
+ * the painters count. Untyped text stands at the end of the last line. */
+function typingAt(lines: string[], typed: number | undefined): { line: number; chars: number } {
+  const last = lines.length - 1;
+  if (typed === undefined) {
+    return { line: last, chars: [...lines[last]].length };
+  }
+  let start = 0;
+  let at = { line: 0, chars: 0 };
+  lines.forEach((l, i) => {
+    const n = [...l].length;
+    if (start <= typed) {
+      at = { line: i, chars: Math.min(n, typed - start) };
+    }
+    start += n + 1;
+  });
+  return at;
 }
 
 /** Every subtitle track's active cue, one caption per language. */
@@ -650,17 +763,35 @@ function OverlayItem({
   // wears it as a transform, the chrome twin folds it into its size instead,
   // so a grip and a hairline stay the size they were drawn at.
   const poseZoom = live && live.scale !== 1 ? live.scale : 1;
+  // A squash stretches one axis over the zoom; the chrome stays uniform.
+  const stretchX = live?.sx ?? 1;
+  const stretchY = live?.sy ?? 1;
+  // A tilt turns the box in perspective about its posed center, the same
+  // depth the painters project through.
+  const tilt =
+    live && (live.tiltX || live.tiltY)
+      ? ` perspective(${(TILT_PERSPECTIVE * scale).toFixed(1)}px) rotateX(${live.tiltX ?? 0}deg) rotateY(${live.tiltY ?? 0}deg)`
+      : "";
   const animMove = live
     ? ` translate(${live.dx * scale}px, ${live.dy * scale}px)` +
+      tilt +
       (live.rotation ? ` rotate(${live.rotation}deg)` : "")
     : o.rotation
       ? ` rotate(${o.rotation}deg)`
       : "";
-  const animTransform = poseZoom !== 1 ? `${animMove} scale(${poseZoom})` : animMove;
+  const animTransform =
+    poseZoom !== 1 || stretchX !== 1 || stretchY !== 1
+      ? `${animMove} scale(${poseZoom * stretchX}, ${poseZoom * stretchY})`
+      : animMove;
   // Per-glyph ramps and loops draw character by character; a wipe uncovers the
   // box from its left edge. Neither runs while the box is being edited.
   const glyphs = isText && !editing && live && hasGlyphMotion(live) ? live : null;
+  // A textured title wears its grain letter by letter, so it lays out by
+  // glyph too.
+  const texture = isTextOverlay(o) && !editing ? o.texture : undefined;
   const reveal = !editing ? live?.reveal : undefined;
+  // A disintegration eats the box's ink through the kit's erosion tile.
+  const erode = !editing ? live?.erode : undefined;
   // Word effects: the line plays word by word on its own clock. Off while
   // editing — the box is plain text then — and a per-glyph ramp takes the
   // frame for itself while it runs.
@@ -678,11 +809,14 @@ function OverlayItem({
           wordLocal
         )
       : null;
-  // Typewriter: the visible slice of the text (display only, never while
-  // the box is being edited).
+  // Typewriter: how many characters are typed, the rest holding their room
+  // unseen; count: the text with its numbers where the count stands (display
+  // only, never while the box is being edited).
+  const typed =
+    isText && live?.textProgress !== undefined && !editing ? typedChars(drawnText, live.textProgress) : undefined;
   const shownText =
-    isText && live?.textProgress !== undefined && !editing
-      ? drawnText.slice(0, Math.ceil(live.textProgress * drawnText.length))
+    isText && typed === undefined && live?.countProgress !== undefined && !editing
+      ? countText(drawnText, live.countProgress)
       : isText
         ? drawnText
         : "";
@@ -715,6 +849,8 @@ function OverlayItem({
   // sits become the width of the frame, so while it dives the element is
   // drawn by the kit's own painter — the picture the export draws.
   const diving = !!live?.dive && !editing && !behindHidden;
+  // A zap's arcs are kit pixels, laid on their own canvas over the box.
+  const zapping = !!live?.zap && !editing && !behindHidden && !diving;
   // Blur is a CSS filter inside the box, so the box's zoom would grow it:
   // it is divided back out to land the radius every renderer draws.
   const blurPx = (((live ? live.blur : o.blur) ?? 0) * scale) / poseZoom;
@@ -810,7 +946,7 @@ function OverlayItem({
           };
         })()
       : {}),
-    ...(maskCss ?? {}),
+    ...(erode !== undefined && erode > 0 ? erodeMask(erode, maskCss) : (maskCss ?? {})),
     ...(diving || streaking ? { visibility: "hidden" as const } : {}),
     ...(reveal !== undefined
       ? { clipPath: `inset(0 ${(1 - Math.min(1, Math.max(0, reveal))) * 100}% 0 0)` }
@@ -1240,21 +1376,40 @@ function OverlayItem({
             >
               {o.text}
             </div>
-          ) : glyphs ? (
-            <GlyphText text={shownText} phase={glyphs} scale={scale} tail={caretBar} />
+          ) : glyphs || (texture && !wordDraw) ? (
+            <GlyphText
+              text={shownText}
+              phase={glyphs ?? {}}
+              scale={scale}
+              zoom={poseZoom}
+              ink={isTextOverlay(o) ? o.color : undefined}
+              tail={caretBar}
+              texture={texture}
+              typed={typed}
+            />
           ) : wordDraw ? (
             <WordText
               text={shownText}
               draws={wordDraw}
               lineHeight={(isTextOverlay(o) ? o.lineHeight : undefined) ?? LINE_HEIGHT}
               tail={caretBar}
+              texture={texture}
+              typed={typed}
             />
+          ) : typed !== undefined ? (
+            <span>
+              {[...shownText].slice(0, typed).join("")}
+              {caretBar}
+              <span style={{ visibility: "hidden" }}>{[...shownText].slice(typed).join("")}</span>
+            </span>
           ) : (
             <span>
               {shownText}
               {caretBar}
             </span>
           )
+        ) : o.kind === "shape" && dealsMarks(o.shape) ? (
+          <DoodleView shape={o} stageWidth={stageWidth} stageHeight={stageHeight} scale={scale} t={t} />
         ) : o.kind === "shape" ? (
           <ShapeView shape={o} stageWidth={stageWidth} stageHeight={stageHeight} scale={scale} />
         ) : o.kind === "sticker" ? (
@@ -1279,6 +1434,9 @@ function OverlayItem({
           holds through that first frame — a select never blinks. */}
       {!chromeLifted && chrome}
     </div>
+    {zapping && live && (
+      <ZapCanvas o={o} live={live} tLocal={tLocal} stageWidth={stageWidth} stageHeight={stageHeight} />
+    )}
     {chromeLifted && chromeHost && chromeSize &&
       createPortal(
         (() => {
@@ -1377,27 +1535,61 @@ function GlyphText({
   text,
   phase,
   scale,
+  zoom,
+  ink,
   tail,
+  texture,
+  typed,
 }: {
   text: string;
-  phase: OverlayFrameState;
+  phase: Parameters<typeof glyphStateAt>[0];
   scale: number;
-  /** Drawn at the end of the last line (the typing bar). */
+  /** The box's own zoom: a letter's blur is divided back out of it, so the
+   * radius lands where the painters draw it. */
+  zoom: number;
+  /** The title's fill; an inkless one keeps a split letter's copies hollow. */
+  ink?: string;
+  /** Drawn just past the last typed character (the typing bar). */
   tail?: React.ReactNode;
+  /** Grain each letter wears over its own box, as the canvas cuts it. */
+  texture?: TextTexture;
+  /** Characters a typewriter has typed; the rest hold their room unseen. */
+  typed?: number;
 }) {
   const total = Math.max(1, [...text].length);
-  const lineCount = text.split("\n").length;
+  const lines = text.split("\n");
+  const at = typingAt(lines, typed);
   const seed = slotSeed(text);
   let gi = 0;
   return (
     <>
-      {text.split("\n").map((line, li) => {
+      {lines.map((line, li) => {
         const chars = [...line].map((ch) => {
           const i = gi++;
           const g = glyphStateAt(phase, i, total);
+          const unseen = typed !== undefined && i >= typed;
           // A slot character shows its reel through its own line band; the
           // band clips top and bottom only, so a wide filler is not cut.
           const reel = g.roll ? slotReel(ch, i, g.roll, seed) : null;
+          // A letter sharpening out of a blur wears its own defocus.
+          const blur = g.blur ? (g.blur * scale) / zoom : 0;
+          // A splitting letter shows a red and a cyan copy either side.
+          const split = g.split && ch !== " " ? g.split * scale : 0;
+          const copy = (tint: string, dx: number) => (
+            <span
+              aria-hidden
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                transform: `translateX(${dx}px)`,
+                color: ink && isInkless(ink) ? "transparent" : tint,
+                WebkitTextStrokeColor: tint,
+              }}
+            >
+              {ch}
+            </span>
+          );
           return (
             <span
               key={i}
@@ -1405,12 +1597,16 @@ function GlyphText({
                 display: "inline-block",
                 whiteSpace: "pre",
                 opacity: Math.min(1, Math.max(0, g.alpha)),
+                ...(blur >= 0.1 ? { filter: `blur(${blur.toFixed(2)}px)` } : {}),
+                ...(split ? { position: "relative" } : {}),
+                ...(unseen ? { visibility: "hidden" } : {}),
                 transform:
                   `translate(${g.dx * scale}px, ${g.dy * scale}px)` +
                   ` rotate(${g.rotate}deg) scale(${g.sx}, ${g.sy})`,
                 ...(reel
                   ? { position: "relative", overflowX: "visible", overflowY: "clip", verticalAlign: "top" }
                   : {}),
+                ...(texture && ch !== " " ? textureMask(texture) : {}),
               }}
             >
               {reel ? (
@@ -1431,6 +1627,12 @@ function GlyphText({
                     </span>
                   ))}
                 </>
+              ) : split ? (
+                <>
+                  {copy(SPLIT_RED, -split)}
+                  {copy(SPLIT_CYAN, split)}
+                  <span style={{ position: "relative" }}>{ch}</span>
+                </>
               ) : (
                 ch
               )}
@@ -1438,14 +1640,78 @@ function GlyphText({
           );
         });
         gi++;
+        // The bar follows the last typed character on the line typing reached.
+        const withBar =
+          li === at.line ? [...chars.slice(0, at.chars), <Fragment key="bar">{tail}</Fragment>, ...chars.slice(at.chars)] : chars;
         return (
           <span key={li} style={{ display: "block", minHeight: "1em" }}>
-            {chars}
-            {li === lineCount - 1 && tail}
+            {withBar}
           </span>
         );
       })}
     </>
+  );
+}
+
+/**
+ * A zap's arcs, painted by the kit over a stage-sized canvas under the
+ * element's pose: the same painter the export bakes them with, laid over the
+ * element the DOM box draws. One paint is in flight at a time; the newest
+ * moment waits behind it.
+ */
+function ZapCanvas({
+  o,
+  live,
+  tLocal,
+  stageWidth,
+  stageHeight,
+}: {
+  o: Overlay;
+  live: OverlayFrameState;
+  tLocal: number;
+  stageWidth: number;
+  stageHeight: number;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const assets = useEditor((s) => (o.kind === "sticker" ? s.assets : null));
+  const dpr = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(stageWidth * dpr));
+  const h = Math.max(1, Math.round(stageHeight * dpr));
+  const seed = zapSeed(tLocal);
+  const pending = useRef<{ live: OverlayFrameState; seed: number } | null>(null);
+  const busy = useRef(false);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) {
+      return;
+    }
+    pending.current = { live, seed };
+    if (busy.current) {
+      return;
+    }
+    busy.current = true;
+    const env = cutRenderEnv(assets ?? []);
+    const el = { ...o, rotation: undefined, opacity: undefined } as Overlay;
+    void (async () => {
+      try {
+        while (pending.current) {
+          const next = pending.current;
+          pending.current = null;
+          await paintZapInto(canvas, el, env, { pose: next.live, zap: { amount: next.live.zap ?? 0, seed: next.seed } });
+        }
+      } finally {
+        busy.current = false;
+      }
+    })();
+  }, [o, live, seed, w, h, assets]);
+  return (
+    <canvas
+      ref={ref}
+      width={w}
+      height={h}
+      className="pointer-events-none absolute inset-0"
+      style={{ width: stageWidth, height: stageHeight, opacity: live.opacity }}
+    />
   );
 }
 
@@ -1567,7 +1833,9 @@ function StreakCanvas({
     !!live.glyphs ||
     !!live.glyphLoop ||
     live.reveal !== undefined ||
+    live.erode !== undefined ||
     live.textProgress !== undefined ||
+    live.countProgress !== undefined ||
     !!overlayWords(o) ||
     (o.kind === "sticker" && !!o.lottie);
   const moving = !!live.streak;
@@ -1642,8 +1910,8 @@ function StreakCanvas({
     const sx = streak.x * px;
     const sy = streak.y * px;
     const r = (-live.rotation * Math.PI) / 180;
-    const lx = (Math.cos(r) * sx - Math.sin(r) * sy) / poseZoom;
-    const ly = (Math.sin(r) * sx + Math.cos(r) * sy) / poseZoom;
+    const lx = (Math.cos(r) * sx - Math.sin(r) * sy) / (poseZoom * (live.sx ?? 1));
+    const ly = (Math.sin(r) * sx + Math.cos(r) * sy) / (poseZoom * (live.sy ?? 1));
     // Grows in steps and never shrinks while mounted, so a changing streak
     // does not reallocate the canvas every frame.
     const cw = Math.max(canvas.width, Math.ceil((pic.canvas.width + Math.abs(lx) + 4) / 64) * 64);
@@ -1667,7 +1935,7 @@ function StreakCanvas({
     canvas.style.width = `${cw / dpr}px`;
     canvas.style.height = `${ch / dpr}px`;
     onReady(true);
-  }, [streak, live.rotation, poseZoom, painted, w, h, dpr, onReady, selfMoving, tLocal]);
+  }, [streak, live.rotation, live.sx, live.sy, poseZoom, painted, w, h, dpr, onReady, selfMoving, tLocal]);
   return (
     <div
       className="pointer-events-none absolute"
@@ -2485,7 +2753,10 @@ function MaskGizmo({
 }
 
 /** A shape drawn as inline SVG with the painter's own pixel geometry
- * (`shapeMetrics` in stage space), so preview and export burn-in match. */
+ * (`shapeMetrics` in stage space), so preview and export burn-in match. A
+ * pattern fill is an SVG <pattern> on the kit's stripe geometry, and a shadow
+ * is the silhouette's blurred, flooded alpha drawn under the body — the same
+ * order the canvas painter casts it in. */
 function ShapeView({
   shape: o,
   stageWidth,
@@ -2497,71 +2768,177 @@ function ShapeView({
   stageHeight: number;
   scale: number;
 }) {
+  const uid = useId().replace(/[^\w-]/g, "");
   const m = shapeMetrics(o, { width: stageWidth, height: stageHeight, scale });
-  if (lineLikeShape(o.shape)) {
-    const h = Math.max(m.thickness, m.headHalf * 2);
-    const mid = h / 2;
-    return (
-      <svg
-        width={m.w}
-        height={h}
-        className="block overflow-visible"
-        style={{ pointerEvents: "none" }}
-      >
-        <line
-          x1={m.thickness / 2}
-          y1={mid}
-          x2={o.shape === "arrow" ? m.w - m.headLen : m.w - m.thickness / 2}
-          y2={mid}
-          stroke={o.fill}
-          strokeWidth={m.thickness}
-          strokeLinecap="round"
-        />
-        {o.shape === "arrow" && (
-          <polygon
-            points={`${m.w},${mid} ${m.w - m.headLen},${mid - m.headHalf} ${m.w - m.headLen},${mid + m.headHalf}`}
-            fill={o.fill}
+  const lineLike = lineLikeShape(o.shape);
+  const boxH = lineLike ? Math.max(m.thickness, m.headHalf * 2) : m.h;
+  const shadow = resolveShadow(o.shadow ?? false);
+  const stripes = o.pattern && !lineLike ? stripeGeometry(o.pattern, scale) : null;
+  const patterned = stripes && !stripesSolid(stripes) ? stripes : null;
+
+  // The body, painted in `fill`: once as the shadow's silhouette in the
+  // plain fill color, once on top in the pattern (or the same color).
+  const body = (fill: string) => {
+    if (lineLike) {
+      const mid = boxH / 2;
+      return (
+        <>
+          <line
+            x1={m.thickness / 2}
+            y1={mid}
+            x2={o.shape === "arrow" ? m.w - m.headLen : m.w - m.thickness / 2}
+            y2={mid}
+            stroke={o.fill}
+            strokeWidth={m.thickness}
+            strokeLinecap="round"
           />
-        )}
-      </svg>
+          {o.shape === "arrow" && (
+            <polygon
+              points={`${m.w},${mid} ${m.w - m.headLen},${mid - m.headHalf} ${m.w - m.headLen},${mid + m.headHalf}`}
+              fill={o.fill}
+            />
+          )}
+        </>
+      );
+    }
+    return o.shape === "rect" ? (
+      <rect
+        x={0}
+        y={0}
+        width={m.w}
+        height={m.h}
+        rx={m.radius}
+        fill={fill}
+        fillOpacity={o.fillOpacity ?? 1}
+        stroke={o.stroke?.color}
+        strokeWidth={m.strokeWidth || undefined}
+      />
+    ) : o.shape === "ellipse" ? (
+      <ellipse
+        cx={m.w / 2}
+        cy={m.h / 2}
+        rx={m.w / 2}
+        ry={m.h / 2}
+        fill={fill}
+        fillOpacity={o.fillOpacity ?? 1}
+        stroke={o.stroke?.color}
+        strokeWidth={m.strokeWidth || undefined}
+      />
+    ) : (
+      <path
+        d={shapePathD(o.shape, m.w, m.h)}
+        fill={fill}
+        fillOpacity={o.fillOpacity ?? 1}
+        stroke={o.stroke?.color}
+        strokeWidth={m.strokeWidth || undefined}
+        strokeLinejoin="round"
+      />
     );
-  }
+  };
+
+  // The filter region reaches past the blur's visible tail (3 sigma) and the
+  // offset, so a thin bar's glow is never cut at the default 10% margin.
+  const spill = shadow ? (1.5 * shadow.blur + Math.abs(shadow.offsetY)) * scale + m.strokeWidth + (lineLike ? m.thickness : 0) : 0;
   return (
-    <svg width={m.w} height={m.h} className="block overflow-visible" style={{ pointerEvents: "none" }}>
-      {o.shape === "rect" ? (
-        <rect
-          x={0}
-          y={0}
-          width={m.w}
-          height={m.h}
-          rx={m.radius}
-          fill={o.fill}
-          fillOpacity={o.fillOpacity ?? 1}
-          stroke={o.stroke?.color}
-          strokeWidth={m.strokeWidth || undefined}
-        />
-      ) : o.shape === "ellipse" ? (
-        <ellipse
-          cx={m.w / 2}
-          cy={m.h / 2}
-          rx={m.w / 2}
-          ry={m.h / 2}
-          fill={o.fill}
-          fillOpacity={o.fillOpacity ?? 1}
-          stroke={o.stroke?.color}
-          strokeWidth={m.strokeWidth || undefined}
-        />
-      ) : (
-        <path
-          d={shapePathD(o.shape, m.w, m.h)}
-          fill={o.fill}
-          fillOpacity={o.fillOpacity ?? 1}
-          stroke={o.stroke?.color}
-          strokeWidth={m.strokeWidth || undefined}
-          strokeLinejoin="round"
-        />
+    <svg width={m.w} height={boxH} className="block overflow-visible" style={{ pointerEvents: "none" }}>
+      {(patterned || shadow) && (
+        <defs>
+          {patterned && (
+            <pattern
+              id={`${uid}-fill`}
+              patternUnits="userSpaceOnUse"
+              width={patterned.period}
+              height={boxH}
+              patternTransform={patterned.angle ? `rotate(${patterned.angle} ${m.w / 2} ${boxH / 2})` : undefined}
+            >
+              <rect x={0} y={0} width={patterned.line} height={boxH} fill={o.fill} />
+            </pattern>
+          )}
+          {shadow && (
+            <filter
+              id={`${uid}-shadow`}
+              filterUnits="userSpaceOnUse"
+              x={-spill}
+              y={-spill}
+              width={m.w + spill * 2}
+              height={boxH + spill * 2}
+              colorInterpolationFilters="sRGB"
+            >
+              <feGaussianBlur in="SourceAlpha" stdDeviation={(shadow.blur * scale) / 2} />
+              <feOffset dy={shadow.offsetY * scale} result="spill" />
+              <feFlood floodColor={shadow.color} />
+              <feComposite in2="spill" operator="in" />
+            </filter>
+          )}
+        </defs>
       )}
+      {shadow && <g filter={`url(#${uid}-shadow)`}>{body(o.fill)}</g>}
+      {body(patterned ? `url(#${uid}-fill)` : o.fill)}
     </svg>
+  );
+}
+
+/** A doodle: the kit's painter draws the mark dealt on the current beat into
+ * a canvas the size of the shape's box, so preview and export deal the same
+ * marks. It repaints only when the beat, the box or the paints change. */
+function DoodleView({
+  shape: o,
+  stageWidth,
+  stageHeight,
+  scale,
+  t,
+}: {
+  shape: ShapeOverlay;
+  stageWidth: number;
+  stageHeight: number;
+  scale: number;
+  t: number;
+}) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const m = shapeMetrics(o, { width: stageWidth, height: stageHeight, scale });
+  const beat = doodleBeat(t - o.start);
+  const inks = [o.fill, ...(o.inks ?? [])].join("|");
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) {
+      return;
+    }
+
+    // Drawn at device pixels so the bristles stay crisp on a dense screen.
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.max(1, Math.round(m.w * dpr));
+    const h = Math.max(1, Math.round(m.h * dpr));
+    if (canvas.width !== w) {
+      canvas.width = w;
+    }
+    if (canvas.height !== h) {
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      return;
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.globalAlpha = o.fillOpacity ?? 1;
+    ctx.scale(dpr, dpr);
+    paintDoodle(ctx, { cx: m.w / 2, cy: m.h / 2, w: m.w, h: m.h, scale }, inks.split("|"), beat, doodleSeed(o.id));
+  }, [m.w, m.h, scale, inks, beat, o.id, o.fillOpacity]);
+
+  // A shadow is the marks' own silhouette, blurred and dropped, the way the
+  // painter casts it.
+  const shadow = resolveShadow(o.shadow ?? false);
+  return (
+    <canvas
+      ref={ref}
+      className="block"
+      style={{
+        width: m.w,
+        height: m.h,
+        pointerEvents: "none",
+        filter: shadow ? `drop-shadow(0 ${shadow.offsetY * scale}px ${shadow.blur * scale}px ${shadow.color})` : undefined,
+      }}
+    />
   );
 }
 

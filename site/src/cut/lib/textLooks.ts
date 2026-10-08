@@ -1,4 +1,4 @@
-import type { OverlayAnimStyle, OverlayLoopStyle, WordEffectId } from "@donkeycut/effects-kit";
+import type { OverlayAnimStyle, OverlayLoopStyle, TextWeight, WordEffectId } from "@donkeycut/effects-kit";
 import type { TextEnsemble, TextVariation } from "./textCompose";
 import type { CaptionStyleId, FontId } from "./types";
 
@@ -36,7 +36,7 @@ export interface TextLook {
   text: {
     font: FontId;
     size: number;
-    weight: 400 | 700;
+    weight: TextWeight;
     color: string;
     onCards?: string[];
     italic?: boolean;

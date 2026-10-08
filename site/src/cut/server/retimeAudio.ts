@@ -121,10 +121,11 @@ export function wavFloat32(channels: Float32Array[], sampleRate: number): Uint8A
 /**
  * The `setpts` expression that lays a clip's frames along its map: the
  * reduced polyline of the retime as a sum of clipped ramps, so nothing nests
- * however many knots the curve has. `T - STARTT` is the frame's seconds past
- * the trim's first frame; the sum is its timeline second, over the timebase.
+ * however many knots the curve has. `T - from` is the frame's seconds past
+ * the clip's in point; the sum is its timeline second, over the timebase. A
+ * frame from before the in point lands at 0.
  */
-export function setptsExpr(retime: Retime): string {
+export function setptsExpr(retime: Retime, from: number): string {
   // Slopes carry six places: a rounded slope drifts by its error times the
   // knot's width, and three places would put a long ramp a frame off.
   const fnum = (n: number) => String(Math.round(n * 1e6) / 1e6);
@@ -136,9 +137,9 @@ export function setptsExpr(retime: Retime): string {
     const w = s1 - s0;
     if (w <= 0) continue;
     const slope = (t1 - t0) / w;
-    const x = i === 0 ? "T-STARTT" : `T-STARTT-${fnum(s0)}`;
+    const x = `T-${fnum(from + s0)}`;
     terms.push(`clip(${x},0,${fnum(w)})*${fnum(slope)}`);
   }
-  if (terms.length === 0) return "PTS-STARTPTS";
+  if (terms.length === 0) return `PTS-${fnum(from)}/TB`;
   return `(${terms.join("+")})/TB`;
 }

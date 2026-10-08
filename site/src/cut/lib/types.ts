@@ -5,6 +5,7 @@ import {
   CAMERA_WORLD_MIN,
   EFFECT_LABELS,
   behindSubjectMask,
+  evalOverlayFrame,
   overlayKind,
   poseAt,
   retimeOf,
@@ -17,6 +18,7 @@ import {
   type LookStyle,
   type Mask,
   type OverlayBase,
+  type OverlayFrameState,
   type OverlayKey,
   type OverlayKind,
   type OverlayPose,
@@ -27,7 +29,7 @@ import {
   type TextOverlay as KitTextOverlay,
   type WordEffectId,
 } from "@donkeycut/effects-kit";
-import type { ClipEffect, CodeFormat, SourceProfile } from "@donkeycut/effects-kit";
+import type { ClipEffect, CodeFormat, SourceProfile, TextWeight } from "@donkeycut/effects-kit";
 import type { CameraCard } from "./cameraCard";
 import { getBackend, type CutBackend } from "./backend";
 import type { VideoProject } from "./genvideo/types";
@@ -44,6 +46,11 @@ export const isLinkedAssetType = (type: string): type is LinkedAssetType =>
 /** Default on-timeline length (seconds) a still image occupies when placed —
  * an image has no intrinsic duration, so the clip carries this as its `out`. */
 export const IMAGE_CLIP_SECONDS = 8;
+
+/** The shortest clip, seconds: one frame at 30 fps, a flash frame. Every
+ * renderer floors a clip's footprint here, so a one-frame clip plays one
+ * frame in the preview and in every export. */
+export const CLIP_MIN_SECONDS = 1 / 30;
 
 /** Project output frame ratio as "W:H". Presets cover common platforms;
  * any ratio that passes `parseRatio` (e.g. "9:5") is valid. */
@@ -528,39 +535,53 @@ export const clipPosed = (c: {
 }): boolean =>
   clipKeyed(c) || Math.abs(c.rotation ?? 0) > 0.001 || (c.opacity ?? 1) < 0.999;
 
+/** The fields a clip's pose reads. */
+type PosedClip = {
+  frame?: FrameRect;
+  in: number;
+  out: number;
+  speed?: number;
+  speedCurve?: SpeedNode[];
+  reverse?: boolean;
+  rotation?: number;
+  opacity?: number;
+  kf?: OverlayKey[];
+  motionBlur?: number;
+};
+
+/** The clip as the element evaluator sees it: an element over the clip's
+ * window, anchored on its region center. */
+function clipPosable(clip: PosedClip) {
+  const rect = rectOf(clip);
+  return {
+    start: 0,
+    end: Math.max(CLIP_MIN_SECONDS, retimeOf(clip).len),
+    x: rect.x + rect.w / 2,
+    y: rect.y + rect.h / 2,
+    rotation: clip.rotation,
+    opacity: clip.opacity,
+    kf: clip.kf,
+    motionBlur: clip.motionBlur,
+  };
+}
+
 /**
  * The clip's pose at `tLocal` seconds into its window: resting at its region
  * center, or moving along its key track — the overlay evaluator over the
  * clip's own anchor, so clips and elements share one interpolation.
  */
-export function clipPoseAt(
-  clip: {
-    frame?: FrameRect;
-    in: number;
-    out: number;
-    speed?: number;
-    speedCurve?: SpeedNode[];
-    reverse?: boolean;
-    rotation?: number;
-    opacity?: number;
-    kf?: OverlayKey[];
-  },
-  tLocal: number
-): OverlayPose {
-  const rect = rectOf(clip);
-  const len = Math.max(0.1, retimeOf(clip).len);
-  return poseAt(
-    {
-      start: 0,
-      end: len,
-      x: rect.x + rect.w / 2,
-      y: rect.y + rect.h / 2,
-      rotation: clip.rotation,
-      opacity: clip.opacity,
-      kf: clip.kf,
-    },
-    tLocal
-  );
+export function clipPoseAt(clip: PosedClip, tLocal: number): OverlayPose {
+  return poseAt(clipPosable(clip), tLocal);
+}
+
+/**
+ * The clip's frame state at `tLocal`: its pose, its keyed blur, and the
+ * motion blur streak its keyed movement draws (design px), from the element
+ * evaluator, so a clip softens exactly as an element does. `aspect` is the
+ * frame's width / height.
+ */
+export function clipFrameAt(clip: PosedClip, tLocal: number, aspect: number): OverlayFrameState {
+  return evalOverlayFrame(clipPosable(clip), tLocal, aspect);
 }
 
 /** One-click layouts for arranging a video layer in the frame. `fit` is the
@@ -670,6 +691,9 @@ export interface VideoClip {
   transition?: number;
   /** Look of that transition; absent = "crossfade". */
   transitionStyle?: TransitionStyle;
+  /** Softness of that transition's reveal edge (the bar's `feather`);
+   * absent = a hard edge. */
+  transitionFeather?: number;
   /** Entrance animation on this clip's own head (absent = none). Unlike a
    * transition it belongs to one clip and never moves its neighbors. */
   animIn?: ClipAnim;
@@ -701,6 +725,10 @@ export interface VideoClip {
    * multiplies its fitted size, rotation turns it about its center, opacity
    * fades it. Absent = the clip sits in its region untransformed. */
   kf?: OverlayKey[];
+  /** Motion blur: the shutter, 0..1 of a 30fps frame, streaking the
+   * picture's keyed movement the way an element's `motionBlur` does.
+   * Absent = off. */
+  motionBlur?: number;
   /** Rounded corners and a border stroke on the clip's box; absent = plain. */
   boxStyle?: BoxStyle;
   /** Background removal: keys the clip's picture to an AI matte baked to a
@@ -793,6 +821,10 @@ export interface TimelineTransition {
   /** Blend length, 0.1..TRANSITION_MAX. */
   seconds: number;
   style: TransitionStyle;
+  /** How soft the reveal edge is, as a share of the frame the edge crosses
+   * (0..TRANSITION_FEATHER_MAX); absent = a hard edge. Wipes, circles and
+   * splits take it. */
+  feather?: number;
   /** Hidden bars stay on the row (grayed) and keep the boundary they line up
    * with, so nothing else claims it, but play nothing — the cut renders hard
    * in the preview and in every export. */
@@ -838,6 +870,9 @@ export type TransitionStyle =
   | "circleclose"
   | "splitopen"
   | "splitclose"
+  | "clockwipe"
+  | "sliceleft"
+  | "sliceup"
   | "audiocross";
 
 /** The ffmpeg xfade transition each style renders with on export. Doubles as
@@ -862,6 +897,11 @@ export const TRANSITION_XFADE: Record<TransitionStyle, string> = {
   circleclose: "circleclose",
   splitopen: "vertopen",
   splitclose: "vertclose",
+  // The shaped styles ffmpeg has no built-in for run as xfade expressions
+  // (server/transitionExpr.ts), as does any edge with a feather.
+  clockwipe: "custom",
+  sliceleft: "custom",
+  sliceup: "custom",
   // The cross dissolve never reaches xfade — the picture cuts and the renders
   // branch before this map. The entry keeps the record total.
   audiocross: "fade",
@@ -915,8 +955,8 @@ export const transitionBarAt = (
 export const TRANSITION_STYLE_GROUPS: { label: string; ids: TransitionStyle[] }[] = [
   { label: "Fade", ids: ["crossfade", "dipblack", "dipwhite", "blur"] },
   { label: "Zoom", ids: ["crosszoom"] },
-  { label: "Push", ids: ["pushleft", "pushright", "pushup", "pushdown"] },
-  { label: "Wipe", ids: ["wipeleft", "wiperight", "wipeup", "wipedown"] },
+  { label: "Push", ids: ["pushleft", "pushright", "pushup", "pushdown", "sliceleft", "sliceup"] },
+  { label: "Wipe", ids: ["wipeleft", "wiperight", "wipeup", "wipedown", "clockwipe"] },
   { label: "Shape", ids: ["circleopen", "circleclose", "splitopen", "splitclose"] },
 ];
 
@@ -944,11 +984,17 @@ export const TRANSITION_STYLE_LABELS: Record<TransitionStyle, string> = {
   circleclose: "Circle close",
   splitopen: "Split open",
   splitclose: "Split close",
+  clockwipe: "Clock wipe",
+  sliceleft: "Slice left",
+  sliceup: "Slice up",
   audiocross: "Cross dissolve",
 };
 
 /** Peak scale the zoom transitions push into (preview and export). */
 export const TRANSITION_ZOOM = 1.18;
+/** Peak defocus of the blur transition and the blur entrance/exit, as a share
+ * of the frame's short side. */
+export const TRANSITION_BLUR = 1 / 24;
 
 /** A clip's own entrance/exit animation. The same style id serves both sides:
  * directional names describe the motion (slideleft moves the picture
@@ -957,6 +1003,7 @@ export const TRANSITION_ZOOM = 1.18;
  * animation they'd duplicate the same visual. */
 export type AnimStyle =
   | "fade"
+  | "blur"
   | "zoom"
   | "pop"
   | "slideleft"
@@ -972,6 +1019,7 @@ export interface ClipAnim {
 
 export const ANIM_STYLE_IDS: AnimStyle[] = [
   "fade",
+  "blur",
   "zoom",
   "pop",
   "slideleft",
@@ -982,6 +1030,7 @@ export const ANIM_STYLE_IDS: AnimStyle[] = [
 
 export const ANIM_STYLE_LABELS: Record<AnimStyle, string> = {
   fade: "Fade",
+  blur: "Blur",
   zoom: "Zoom",
   pop: "Pop",
   slideleft: "Slide left",
@@ -1014,12 +1063,15 @@ const EDGE_ANIM: Record<TransitionStyle, AnimStyle | null> = {
   crossfade: "fade",
   dipblack: "fade",
   dipwhite: "fade",
-  blur: "fade",
+  blur: "blur",
   crosszoom: "zoom",
   circleopen: "pop",
   circleclose: "pop",
   splitopen: "pop",
   splitclose: "pop",
+  clockwipe: "pop",
+  sliceleft: "slideleft",
+  sliceup: "slideup",
   pushleft: "slideleft",
   pushright: "slideright",
   pushup: "slideup",
@@ -1033,6 +1085,7 @@ const EDGE_ANIM: Record<TransitionStyle, AnimStyle | null> = {
 
 const ANIM_TRANSITION: Record<AnimStyle, TransitionStyle> = {
   fade: "crossfade",
+  blur: "blur",
   zoom: "crosszoom",
   pop: "circleopen",
   slideleft: "pushleft",
@@ -1443,6 +1496,7 @@ export const SHAPE_LABELS: Record<ShapeKind, string> = {
   hexagon: "Hexagon",
   line: "Line",
   arrow: "Arrow",
+  doodle: "Doodle",
 };
 
 /** A patch that may touch any kind's fields (never the discriminant). The
@@ -1568,7 +1622,7 @@ export interface SubtitlesBlock {
   emphasisFont?: FontId;
   emphasisColor?: string;
   emphasisItalic?: boolean;
-  emphasisWeight?: 400 | 700;
+  emphasisWeight?: TextWeight;
   /** Size multiplier over the caption's own size. */
   emphasisScale?: number;
 }

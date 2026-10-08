@@ -394,7 +394,7 @@ describe("a speed curve in the filtergraph", () => {
     const curved = clip("a.mp4", { speedCurve: [[0, 1], [4, 4]] });
     const g = await graphFor({ clips: [curved, clip("b.mp4")] });
     const video = g.find((f) => f.startsWith("[0:v]trim="))!;
-    expect(video).toContain("setpts='(clip(T-STARTT");
+    expect(video).toContain("setpts='(clip(T-0,0,");
     expect(video).not.toContain("(PTS-STARTPTS)/");
     // The baked WAV joins the inputs after the two media files, and the
     // clip's sound is read from it in timeline seconds with no tempo.
@@ -432,11 +432,25 @@ describe("smooth slow motion in the filtergraph", () => {
     expect(head).toContain("split=3[smic0_0][smic0_1][smic0_2]");
     const pieces = g.filter((f) => f.startsWith("[smic0_"));
     expect(pieces.length).toBe(3);
-    expect(pieces[0]).toContain("fps=30[smo");
+    expect(pieces[0]).toContain("fps=30:round=up:start_time=0[smo");
     expect(pieces[0]).not.toContain("minterpolate");
     expect(pieces[1]).toContain("minterpolate=fps=30");
     expect(pieces[2]).not.toContain("minterpolate");
     expect(g.some((f) => f.includes("concat=n=3:v=1:a=0,fps=30[smoc0]"))).toBe(true);
+  });
+
+  test("a curve stamps the preroll before 0, so interpolation never sees it", async () => {
+    // The 1 s preroll ahead of the in point must land before 0 for the
+    // interpolation's trim=start=0 to drop it: 4.5 s is preroll, 5 s the in point.
+    const curved = clip("a.mp4", { in: 5, out: 9, smoothSlow: true, speedCurve: [[0, 0.5], [4, 0.5]] });
+    const head = (await graphFor({ clips: [curved] })).find((f) => f.startsWith("[0:v]trim="))!;
+    expect(head).toContain("trim=start=0,");
+    const expr = /setpts='([^']+)'/.exec(head)![1];
+    const at = (T: number) =>
+      new Function("T", "TB", "clip", "min", `return ${expr};`)(T, 1, (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x)), Math.min) as number;
+    expect(at(4.5)).toBeLessThan(0);
+    expect(at(5)).toBeCloseTo(0, 6);
+    expect(at(5.5)).toBeGreaterThan(0);
   });
 
   test("a clip at 1× or faster keeps its plain chain with the flag on", async () => {
@@ -588,7 +602,7 @@ describe("clip masks in the filtergraph", () => {
     const joined = g.join(";");
     // Both effects gate on the segment's own clock, 0 to its 2s length, in
     // the order the clip lists them.
-    const negAt = g.findIndex((c) => c.includes("lutyuv=y='minval+maxval-val'") && c.includes("gte(t,0)*lt(t,2)"));
+    const negAt = g.findIndex((c) => c.includes("lutyuv=y='minval+maxval-val'") && c.includes("gte(t,0.000000)*lt(t,2.000000)"));
     const hueAt = g.findIndex((c) => c.includes("hue=H='2*PI*0.8*(t-0)'"));
     const padAt = g.findIndex((c) => c.includes("pad=540:960") && c.includes("black@0.0"));
     expect(negAt).toBeGreaterThanOrEqual(0);
@@ -722,6 +736,18 @@ describe("clip keyframes in the filtergraph", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 
+  test("a keyed clip off the frame grid poses on its own clock", async () => {
+    // b starts at 3.71 s; its first frame is 3.7333 s (frame 112 at 30 fps),
+    // so its keys read 0.023 s into the clip on the segment's first frame,
+    // as the clip's effects and the preview do.
+    const g = await graphFor({ clips: [clip("a.mp4", { out: 3.71 }), clip("b.mp4", { kf: KF })] });
+    const posed = g.filter((f) => f.includes("rotate=a=") || f.includes("-w/2"));
+    expect(posed.length).toBeGreaterThan(0);
+    for (const f of posed) {
+      expect(f).toContain("(t+0.023)");
+    }
+  });
+
   test("a keyed overlay clip positions by expression with its start folded in", async () => {
     const g = await graphFor({
       clips: [clip("a.mp4", { out: 8 })],
@@ -768,6 +794,56 @@ describe("clip keyframes in the filtergraph", () => {
   });
 });
 
+describe("keyed clip blur in the filtergraph", () => {
+  const key = (t: number, x: number, blur?: number) => ({ t, x, y: 0.5, scale: 1, rotation: 0, opacity: 1, ...(blur !== undefined ? { blur } : {}) });
+
+  test("pose-key blur ramps a Gaussian blur frame by frame on a track-0 clip", async () => {
+    const g = await graphFor({ clips: [clip("a.mp4", { out: 2, kf: [key(0, 0.5, 30), key(0.3, 0.5, 0)] })] });
+    const joined = g.join(";");
+    expect(joined).toContain("premultiply=inplace=1");
+    expect(joined).toMatch(/sendcmd=c='0\.000 gblur@\w+ sigma /);
+    expect(joined).toContain("unpremultiply=inplace=1");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("pose-key blur samples a clip off the frame grid on its own clock", async () => {
+    // The blur falls from 30 over 0.3 s. b's first frame is 0.023 s into the
+    // clip, so its first sigma sits below the one an on-grid clip opens on.
+    const firstSigma = (g: string[]) => Number(/sendcmd=c='0\.000 gblur@\w+ sigma ([\d.]+)/.exec(g.join(";"))![1]);
+    const keyed = { kf: [key(0, 0.5, 30), key(0.3, 0.5, 0)] };
+    const onGrid = firstSigma(await graphFor({ clips: [clip("a.mp4", { out: 3.7 }), clip("b.mp4", keyed)] }));
+    const offGrid = firstSigma(await graphFor({ clips: [clip("a.mp4", { out: 3.71 }), clip("b.mp4", keyed)] }));
+    expect(offGrid).toBeLessThan(onGrid);
+  });
+
+  test("motion blur averages shifted copies of a moving overlay clip", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { out: 4 })],
+      overlayVideos: [
+        { file: "ov.mp4", in: 0, out: 2, start: 1, track: 1, muted: true, frame: { x: 0, y: 0, w: 0.5, h: 0.5 }, kf: [key(0, 0.1), key(0.3, 0.25)], motionBlur: 1 },
+      ],
+    });
+    const joined = g.join(";");
+    expect(joined).toMatch(/mix=inputs=\d+/);
+    expect(joined).toContain("crop=");
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+
+  test("a blur entrance on an open edge blurs in from the frame, its sound with it", async () => {
+    const g = await graphFor({ clips: [clip("a.mp4", { out: 2, animIn: { style: "blur", seconds: 0.5 } })] });
+    const joined = g.join(";");
+    expect(joined).toContain("xfade=transition=hblur:duration=0.500");
+    expect(joined).toContain("afade=t=in:st=0:d=0.500");
+  });
+
+  test("a keyed clip with no blur and no shutter takes no softening pass", async () => {
+    const g = await graphFor({ clips: [clip("a.mp4", { out: 2, kf: [key(0, 0.4), key(1, 0.6)] })] });
+    const joined = g.join(";");
+    expect(joined).not.toContain("premultiply");
+    expect(joined).not.toContain("sendcmd");
+  });
+});
+
 describe("the project background in the filtergraph", () => {
   test("a cut of nothing but elements renders the background for its whole length", async () => {
     const g = await graphFor({
@@ -797,7 +873,7 @@ describe("the project background in the filtergraph", () => {
     const g = await graphFor({ clips: [clip("a.mp4", { fit: "fill", flipH: true })] });
     expect(g.join(";")).toContain(":(ih-oh)*0.500,hflip,setsar=1");
     const v = await graphFor({ clips: [clip("a.mp4", { flipV: true })] });
-    expect(v.join(";")).toContain(",vflip,setsar=1,format=yuv420p,pad=");
+    expect(v.join(";")).toMatch(/,vflip,setsar=1,[^;]*format=yuv420p,pad=/);
   });
 
   test("no background named keeps the black frame every cut had before", async () => {
@@ -902,15 +978,16 @@ describe("a reversed clip in the filtergraph", () => {
     const join = runs.find((a) => a.includes("concat"))!;
     expect(join).toContain("-c");
     expect(join[join.indexOf("-c") + 1]).toBe("copy");
-    // The graph reads the copy, never the source, and trims the mirrored
-    // span: source [2, 8] under a pivot of 9 is [1, 7] in the copy.
+    // The graph reads the copy, never the source, and times the mirrored
+    // span from its in point: source [2, 8] under a pivot of 9 is [1, 7] in
+    // the copy.
     const inputs = graph.slice(0, graph.indexOf("-filter_complex"));
     expect(inputs).not.toContain("/media/a.mp4");
     expect(inputs.some((p) => p.endsWith("turned_clip_0.mov"))).toBe(true);
     const idx = inputs.filter((p, i) => inputs[i - 1] === "-i").findIndex((p) => p.endsWith("turned_clip_0.mov"));
     const g = graph[graph.indexOf("-filter_complex") + 1].split(";");
     const video = g.find((f) => f.startsWith(`[${idx}:v]trim=`))!;
-    expect(video).toContain("trim=1.000:7.000,setpts=(PTS-STARTPTS)/2");
+    expect(video).toContain("trim=0.000:7.000,setpts=(PTS-1.000/TB)/2.000");
     expect(video).not.toContain("reverse");
     const audio = g.find((f) => f.startsWith(`[${idx}:a]atrim=`))!;
     expect(audio).toContain("atrim=1.000:7.000");
@@ -930,7 +1007,7 @@ describe("a reversed clip in the filtergraph", () => {
     });
     const g = await graphFor({ clips: [curved, clip("b.mp4")] });
     const video = g.find((f) => f.startsWith("[1:v]trim="))!;
-    expect(video).toContain("trim=0.000:4.000,setpts='(clip(T-STARTT");
+    expect(video).toContain("trim=0.000:4.000,setpts='(clip(T-0,0,");
     const first = g.find((f) => f.includes("apad=whole_dur="))!;
     expect(first).toContain(`apad=whole_dur=${retimeOf(curved).len.toFixed(3)}`);
   });
@@ -1684,5 +1761,58 @@ describe("stems", () => {
   test("a spec that asks for stems renders even when its source could copy", async () => {
     const runs = await runsFor({ ...stemSpec, sourceSegments: [{ file: "a.mp4", from: 0, to: 4 }], target: "export" });
     expect(runs.some((a) => a.includes("-filter_complex"))).toBe(true);
+  });
+});
+
+describe("an animated element's slideshow", () => {
+  test("a long run of one-frame pictures stays on the timeline's frames", async () => {
+    // 102 frames at 30 fps from 8.5333s, the doodle that drew a frame early
+    // every few beats when each duration was rounded to the millisecond.
+    const START = 8.5333;
+    const N = 102;
+    await graphFor({
+      clips: [clip("a.mp4", { out: 12 })],
+      overlays: [
+        {
+          start: START,
+          end: START + N / 30,
+          x: 0,
+          y: 0,
+          blank: "b.png",
+          frames: [...Array(N).keys()].map((k) => ({ file: `d_f${k}.png`, duration: 1 / 30 })),
+        },
+      ],
+    });
+    const list = written.find((w) => w.file.endsWith("overlay_anim_0.ffconcat"))!.data;
+    const durations = [...list.matchAll(/^duration (\S+)$/gm)].map((m) => Number(m[1]));
+    // Each picture starts where the timeline puts it, to the microsecond.
+    let at = durations[0];
+    expect(at).toBeCloseTo(START, 6);
+    for (let k = 1; k <= N; k++) {
+      at += durations[k];
+      expect(Math.abs(at - (START + k / 30))).toBeLessThan(2e-6);
+    }
+  });
+});
+
+describe("windows on floored times", () => {
+  test("an element, an overlay clip and an effect starting a hair before a frame show on that frame", async () => {
+    // 4.2666s sits just under frame 128 (4.266667s at 30 fps): every window
+    // has to open by that frame's time.
+    const AT = 4.2666;
+    const g = (
+      await graphFor({
+        clips: [clip("a.mp4", { out: 8 })],
+        overlays: [{ file: "el.png", x: 0, y: 0, start: AT, end: 6 }],
+        overlayVideos: [{ file: "o.mp4", in: 0, out: 1, start: AT, track: 1, muted: true }],
+        effects: [{ effect: "negative", start: AT, end: 6 }],
+      })
+    ).join(";");
+    const opens = [...g.matchAll(/gte\(t,([0-9.]+)\)|between\(t,([0-9.]+),/g)].map((m) => Number(m[1] ?? m[2]));
+    const near = opens.filter((t) => Math.abs(t - AT) < 0.01);
+    expect(near.length).toBeGreaterThanOrEqual(3);
+    for (const t of near) {
+      expect(t).toBeLessThanOrEqual(128 / 30);
+    }
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { lineLikeShape, shapePathD } from "@donkeycut/effects-kit";
+import { dealsMarks, lineLikeShape, shapePathD } from "@donkeycut/effects-kit";
 import { SubTabs } from "@/cut/components/SubTabs";
 import { clearElementDrag, setElementDragData, setObjectDragImage } from "@/cut/lib/assetDrag";
 import { PICKED_RING, pickGridNav, useAssetPick } from "@/cut/lib/assetPick";
@@ -138,7 +138,14 @@ function ShapeSwatch({ shape, className }: { shape: ShapeKind; className?: strin
           <polygon points="22,12 14,7.5 14,16.5" />
         </g>
       )}
-      {!lineLikeShape(shape) && shape !== "rect" && shape !== "ellipse" && (
+      {shape === "doodle" && (
+        <g fill="none" stroke="currentColor" strokeLinecap="round">
+          <path d="M5 16 C8 6, 12 18, 15 9 S20 8, 19 14" strokeWidth="3" />
+          <path d="M6 5 L10 10 M10 5 L6 10" strokeWidth="1.5" />
+          <circle cx="17" cy="18" r="2.5" strokeWidth="1.5" />
+        </g>
+      )}
+      {!lineLikeShape(shape) && !dealsMarks(shape) && shape !== "rect" && shape !== "ellipse" && (
         <path d={shapePathD(shape, 18, 18)} transform="translate(3 3)" />
       )}
     </svg>

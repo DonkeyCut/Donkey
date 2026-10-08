@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import {
+  burnGradient,
+  burnStreakGradient,
   grainTileUrl,
   isAudioEffect,
   LEAK_TINT,
   leakGradient,
   streakGradient,
+  washBackground,
 } from "@donkeycut/effects-kit";
 import { previewAt, subscribePlayhead, usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
@@ -19,6 +22,7 @@ import {
   type LiveEffect,
 } from "@/cut/lib/effectStack";
 import "./grain.css";
+import { rgbSplitFilter } from "./rgbSplit";
 
 /**
  * Effect elements in the preview's stack.
@@ -59,7 +63,33 @@ export function useLiveEffects(): LiveEffect[] {
 export function StagePictureFx({ children }: { children: React.ReactNode }) {
   const overlays = useEditor((s) => s.overlays);
   const ref = useRef<HTMLDivElement>(null);
+  const ghostRef = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
+    // A glitch's split doubles the picture: the unmoved frame is copied off
+    // the picture canvas onto one laid over the moved box, lightened in. The
+    // copy only runs on the frames a split is live.
+    const paintGhost = (alpha: number) => {
+      const ghost = ghostRef.current;
+      if (!ghost) return;
+      if (alpha <= 0) {
+        if (ghost.style.display !== "none") ghost.style.display = "none";
+        return;
+      }
+      // The picture shows on the SDR canvas, or on the present canvas over
+      // it in HDR; the hidden one is skipped.
+      let source: HTMLCanvasElement | null = null;
+      for (const c of ref.current?.querySelectorAll("canvas") ?? []) {
+        if (!c.classList.contains("hidden")) source = c;
+      }
+      const ctx = ghost.getContext("2d");
+      if (!source || !ctx || source.width === 0) return;
+      if (ghost.width !== source.width) ghost.width = source.width;
+      if (ghost.height !== source.height) ghost.height = source.height;
+      ctx.clearRect(0, 0, ghost.width, ghost.height);
+      ctx.drawImage(source, 0, 0);
+      ghost.style.opacity = String(alpha);
+      ghost.style.display = "block";
+    };
     const write = (filter: string, transform: string) => {
       const style = ref.current?.style;
       if (!style) return;
@@ -68,23 +98,31 @@ export function StagePictureFx({ children }: { children: React.ReactNode }) {
     };
     if (!hasEffects(overlays)) {
       write("", "");
+      paintGhost(0);
       return;
     }
     const apply = () => {
       const states = liveEffectsAt(overlays, previewAt()).map((e) => e.state);
-      write(stageEffectFilter(states) ?? "", stageEffectTransform(states) ?? "");
+      const box = ref.current;
+      const split = box ? rgbSplitFilter(states, box.clientWidth, box.clientHeight) : "";
+      write([stageEffectFilter(states), split].filter(Boolean).join(" "), stageEffectTransform(states) ?? "");
+      paintGhost(Math.max(0, ...states.map((s) => s.ghost ?? 0)));
     };
     apply();
     const stop = subscribePlayhead(apply);
     return () => {
       stop();
       write("", "");
+      paintGhost(0);
     };
   }, [overlays]);
   return (
-    <div ref={ref} className="absolute inset-0">
-      {children}
-    </div>
+    <>
+      <div ref={ref} className="absolute inset-0">
+        {children}
+      </div>
+      <canvas ref={ghostRef} className="pointer-events-none absolute inset-0 size-full mix-blend-lighten" style={{ display: "none" }} />
+    </>
   );
 }
 
@@ -116,10 +154,12 @@ export function StageEffectPaint({ lane }: { lane: number }) {
   const grainUrl = grainTileUrl();
   const grain = Math.max(0, ...states.map((s) => s.grain ?? 0));
   const vignette = Math.max(0, ...states.map((s) => s.vignette ?? 0));
-  const flash = Math.max(0, ...states.map((s) => s.flash ?? 0));
+  const flash = Math.max(0, ...states.map((s) => (s.flashTone ? 0 : (s.flash ?? 0))));
+  const dark = Math.max(0, ...states.map((s) => (s.flashTone === "black" ? (s.flash ?? 0) : 0)));
   const washes = states.flatMap((s) => s.washes ?? []);
   const leaks = states.flatMap((s) => (s.leak ? [s.leak] : []));
-  if (!grain && !vignette && !flash && washes.length === 0 && leaks.length === 0) return null;
+  const burns = states.flatMap((s) => (s.burn ? [s.burn] : []));
+  if (!grain && !vignette && !flash && !dark && washes.length === 0 && leaks.length === 0 && burns.length === 0) return null;
   return (
     <div className="pointer-events-none absolute inset-0">
       {grain > 0 && grainUrl && (
@@ -163,7 +203,7 @@ export function StageEffectPaint({ lane }: { lane: number }) {
           key={i}
           className="absolute inset-0"
           style={{
-            background: w.color,
+            background: washBackground(w.color, w.area),
             opacity: w.alpha,
             // The recipe names its wash with a canvas composite op; the ones
             // effects use are CSS blend modes by the same name.
@@ -172,6 +212,20 @@ export function StageEffectPaint({ lane }: { lane: number }) {
         />
       ))}
       {flash > 0 && <div className="absolute inset-0 bg-white" style={{ opacity: flash }} />}
+      {dark > 0 && <div className="absolute inset-0 bg-black" style={{ opacity: dark }} />}
+      {burns.map((b, i) => (
+        // The burned body, then the flame band over it — the canvas pass's
+        // two gradients at the same alphas.
+        <div key={`burn-${i}`} className="absolute inset-0">
+          <div className="absolute inset-0" style={{ opacity: b.alpha, background: burnGradient(b) }} />
+          {b.streak && (
+            <div
+              className="absolute inset-0"
+              style={{ opacity: b.streak.alpha * b.alpha, background: burnStreakGradient(b.streak) }}
+            />
+          )}
+        </div>
+      ))}
     </div>
   );
 }
