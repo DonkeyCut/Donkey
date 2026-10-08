@@ -17,6 +17,7 @@ setRasterFactory({
     return { source: {} as CanvasImageSource, width: SIDE, height: SIDE };
   },
   canvasToBlob: async () => new Blob(),
+  snapshot: async (canvas) => canvas as unknown as ImageBitmap,
 });
 
 globalThis.fetch = (async () => new Response(new Blob())) as typeof fetch;

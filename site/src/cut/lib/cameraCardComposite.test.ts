@@ -45,6 +45,7 @@ beforeAll(() => {
     createCanvas: (w, h) => new RecordingCanvas(w, h, `scratch${made++}`) as unknown as RasterSurface,
     decodeImage: async () => null,
     canvasToBlob: async () => new Blob(),
+    snapshot: async (canvas) => canvas as unknown as ImageBitmap,
   });
 });
 

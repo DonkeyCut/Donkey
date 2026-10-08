@@ -95,6 +95,7 @@ setRasterFactory({
   createCanvas: (w, h) => new PixelCanvas(w, h) as unknown as RasterSurface,
   decodeImage: async () => null,
   canvasToBlob: async () => new Blob(),
+  snapshot: async (canvas) => canvas as unknown as ImageBitmap,
 });
 afterAll(() => clearClipLuts());
 

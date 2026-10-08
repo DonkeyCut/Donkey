@@ -73,6 +73,10 @@ export async function installSkiaRaster(): Promise<boolean> {
         );
         return new Blob([new Uint8Array(buf)], { type });
       },
+      snapshot: async (canvas) => {
+        const img = await skia.loadImage(await (canvas as unknown as InstanceType<typeof skia.Canvas>).toBuffer("png"));
+        return Object.assign(img, { close: () => {} }) as unknown as ImageBitmap;
+      },
     });
     return true;
   } catch {

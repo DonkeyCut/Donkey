@@ -31,6 +31,7 @@ setRasterFactory({
   createCanvas: stubCanvas,
   decodeImage: async () => ({ source: {} as CanvasImageSource, width: 90, height: 160 }),
   canvasToBlob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" }),
+  snapshot: async (canvas) => canvas as unknown as ImageBitmap,
 });
 
 // Checking a replica against its source reads two pictures per moment, so what

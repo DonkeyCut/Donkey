@@ -18,6 +18,8 @@ export interface RasterFactory {
   /** Encode a canvas. `type` is a MIME type ("image/png", "image/jpeg");
    * `quality` applies to the lossy ones. */
   canvasToBlob(canvas: RasterSurface, type: string, quality?: number): Promise<Blob>;
+  /** A bitmap of what a canvas holds now, for drawing it again later. */
+  snapshot(canvas: RasterSurface): Promise<ImageBitmap>;
 }
 
 const domFactory: RasterFactory = {
@@ -54,14 +56,18 @@ const domFactory: RasterFactory = {
       )
     );
   },
+  snapshot: (canvas) => createImageBitmap(canvas),
 };
 
 let factory: RasterFactory = domFactory;
 
 /** Install a replacement surface, e.g. the skia factory in a headless
- * process. Affects every later createRasterCanvas/decodeRasterImage call. */
-export function setRasterFactory(f: RasterFactory): void {
+ * process. Affects every later createRasterCanvas/decodeRasterImage call.
+ * Returns the factory it replaced. */
+export function setRasterFactory(f: RasterFactory): RasterFactory {
+  const replaced = factory;
   factory = f;
+  return replaced;
 }
 
 export const createRasterCanvas = (w: number, h: number): RasterSurface => factory.createCanvas(w, h);
@@ -73,6 +79,7 @@ export const rasterCanvasToBlob = (
   type: string,
   quality?: number
 ): Promise<Blob> => factory.canvasToBlob(canvas, type, quality);
+export const snapshotRaster = (canvas: RasterSurface): Promise<ImageBitmap> => factory.snapshot(canvas);
 
 /** Decode an image that lives at a URL. Goes through `fetch` so the same call
  * works on a page and in a process with no `Image` constructor; anonymous CORS
