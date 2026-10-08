@@ -175,7 +175,7 @@ describe("the in-page proxy's muxer", () => {
   // reserved up front makes the finished file read from its start.
   test("streams the file out a bounded chunk at a time and reads back", async () => {
     const { EncodedPacket, EncodedVideoPacketSource, Input, BufferSource, MP4 } = await import("mediabunny");
-    const { PROXY_WRITE_CHUNK, proxyOutput, proxyPacketBudget } = await import("./mediaProxy");
+    const { PROXY_WRITE_CHUNK, proxyOutput, proxyPacketBudget } = await import("./proxyEncode");
     const file = new Uint8Array(64 * 1024 * 1024);
     let size = 0;
     let written = 0;
