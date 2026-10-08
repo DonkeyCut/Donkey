@@ -22,7 +22,9 @@ const H = 160;
 const FPS = 30;
 const SECONDS = 0.5;
 const FRAMES = Math.round(SECONDS * FPS);
-const FFMPEG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../vendor/donkey-tools/ffmpeg");
+// The app's bundled ffmpeg on a Mac checkout; CI installs ffmpeg on PATH.
+const BUNDLED_FFMPEG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../vendor/donkey-tools/ffmpeg");
+const FFMPEG = existsSync(BUNDLED_FFMPEG) ? BUNDLED_FFMPEG : "ffmpeg";
 
 beforeAll(() => {
   setRasterFactory({
@@ -104,8 +106,8 @@ const meanDiff = (a: Uint8Array, b: Uint8Array) => a.reduce((s, v, i) => s + Mat
 const at = (f: Uint8Array, x: number, y: number) => f[Math.round(y) * W + Math.round(x)];
 
 describe("the shaped transitions", () => {
-  test("the bundled ffmpeg is there", () => {
-    expect(existsSync(FFMPEG)).toBe(true);
+  test("an ffmpeg is there", () => {
+    expect(spawnSync(FFMPEG, ["-version"]).status).toBe(0);
   });
 
   test("the clock wipe sweeps a wedge from the top edge down to the left one", () => {

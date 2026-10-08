@@ -11,7 +11,7 @@ describe("openLocalImport", () => {
     const item = useLightbox.getState().item;
     expect(item?.ratio).toBe(1080 / 1920);
     expect(item?.duration).toBe(21.8);
-    expect(item?.poster).toStartWith("blob:");
+    expect(item?.poster?.startsWith("blob:")).toBe(true);
     useLightbox.getState().close();
   });
 

@@ -1,9 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Canvas } from "skia-canvas";
+import { TEST_FFMPEG } from "./testing/ffmpeg";
 import { applyEffectToCanvas, effectFilterLines, effectPreviewState, effectRecipe, glitchHitAt } from "./effects";
 
 /**
@@ -94,9 +92,8 @@ describe("a pinned glitch", () => {
     }
   });
 
-  test("the ffmpeg recipe splits the same way in the bundled LGPL build", () => {
-    const bin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../vendor/donkey-tools/ffmpeg");
-    expect(existsSync(bin)).toBe(true);
+  test("the ffmpeg recipe splits the same way in ffmpeg", () => {
+    const bin = TEST_FFMPEG;
     const { up, down } = sides();
     const lines = effectFilterLines("in", "out", "glitch:rgb", 1, 0, 0.2, S, S, "t")!;
     const graph =

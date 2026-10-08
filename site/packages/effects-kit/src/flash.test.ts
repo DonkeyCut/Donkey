@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Canvas } from "skia-canvas";
+import { TEST_FFMPEG } from "./testing/ffmpeg";
 import { applyClipEffects, applyEffectToCanvas, effectFilterLines, effectPreviewState } from "./effects";
 
 // The black strobe: a flash held dark for the first half of every pulse.
@@ -46,9 +44,8 @@ describe("the flash strobe", () => {
     expect(lum(lit)).toBe(128);
   });
 
-  test("the ffmpeg recipe strobes the same frames in the bundled LGPL build", () => {
-    const bin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../vendor/donkey-tools/ffmpeg");
-    expect(existsSync(bin)).toBe(true);
+  test("the ffmpeg recipe strobes the same frames in ffmpeg", () => {
+    const bin = TEST_FFMPEG;
     const lines = effectFilterLines("in", "out", "flash", 1, 0, 1, 64, 64, "t", undefined, undefined, undefined, STROBE)!;
     const graph = `color=c=0x808080:s=64x64:r=30:d=0.4,format=yuv420p[in];${lines.join(";")}`;
     const run = spawnSync(bin, [
@@ -78,8 +75,8 @@ describe("the fastest strobe", () => {
     expect(dark).toEqual([...Array(N).keys()].map((n) => n % 2 === 0));
   });
 
-  test("alternates on the same frames in the bundled LGPL build", () => {
-    const bin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../vendor/donkey-tools/ffmpeg");
+  test("alternates on the same frames in ffmpeg", () => {
+    const bin = TEST_FFMPEG;
     const lines = effectFilterLines("in", "out", "flash", 1, START, START + 1, 64, 64, "t", undefined, undefined, undefined, FAST)!;
     const graph = `color=c=0x808080:s=64x64:r=30:d=4.2,format=yuv420p[in];${lines.join(";")}`;
     const run = spawnSync(bin, ["-v", "error", "-filter_complex", graph, "-map", "[out]", "-f", "rawvideo", "-pix_fmt", "gray", "-"]);
@@ -121,8 +118,8 @@ describe("the flash flicker", () => {
     expect(px(0, 0)[3]).toBe(0);
   });
 
-  test("the ffmpeg recipe lights the same frames in the bundled LGPL build", () => {
-    const bin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../vendor/donkey-tools/ffmpeg");
+  test("the ffmpeg recipe lights the same frames in ffmpeg", () => {
+    const bin = TEST_FFMPEG;
     const lines = effectFilterLines("in", "out", "flash", 1, 0, 2, 64, 64, "t", undefined, undefined, undefined, FLICKER)!;
     const graph = `color=c=0x202020:s=64x64:r=30:d=${FRAMES / 30},format=yuv420p[in];${lines.join(";")}`;
     const run = spawnSync(bin, ["-v", "error", "-filter_complex", graph, "-map", "[out]", "-f", "rawvideo", "-pix_fmt", "gray", "-"]);

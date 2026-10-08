@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Canvas } from "skia-canvas";
+import { TEST_FFMPEG } from "./testing/ffmpeg";
 import { applyEffectToCanvas, effectFilterLines, effectPreviewState, effectRecipe, type WashArea } from "./effects";
 
 /**
@@ -141,9 +139,8 @@ describe("the scorch", () => {
     expect(Math.abs(graph(10).length - graph(1).length)).toBeLessThan(40);
   });
 
-  test("the ffmpeg recipe deals the same tones and patches in the bundled LGPL build", () => {
-    const bin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../vendor/donkey-tools/ffmpeg");
-    expect(existsSync(bin)).toBe(true);
+  test("the ffmpeg recipe deals the same tones and patches in ffmpeg", () => {
+    const bin = TEST_FFMPEG;
     // A 4:4:4 chain, so the rims keep their color per pixel.
     const chroma = { pixFmt: "yuv444p", overlay: ":format=yuv444" };
     const lines = effectFilterLines("in", "out", "scorch", 1, 0, FRAMES / 30, S, S, "t", undefined, undefined, chroma)!;
