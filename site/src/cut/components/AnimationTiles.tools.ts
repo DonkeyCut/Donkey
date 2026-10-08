@@ -157,7 +157,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
               scale: num("Size multiplier, 1 = the element's own size (0.1..4)"),
               scale_x: num("Width over scale, 0..4 (default 1)"),
               scale_y: num("Height over scale, 0..4 (default 1)"),
-              rotation: num("Degrees clockwise, -180..180"),
+              rotation: num("Degrees clockwise, -180..180, to a tenth (0.4 matches a slight lean)"),
               tilt_x: num(`3D tilt about the horizontal axis, degrees, -${TILT_MAX}..${TILT_MAX}; positive tips the top edge away (default 0)`),
               tilt_y: num(`3D tilt about the vertical axis, degrees, -${TILT_MAX}..${TILT_MAX}; positive tips the right edge away (default 0)`),
               opacity: num("0..1"),

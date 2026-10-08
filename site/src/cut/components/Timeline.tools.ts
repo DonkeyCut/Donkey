@@ -17,7 +17,7 @@ import {
 } from "@/cut/lib/textCompose";
 import { TEXT_MOVE_IDS, TEXT_MOVE_NOTES } from "@/cut/lib/textMotion";
 import { LETTER_SPACING_MAX, LETTER_SPACING_MIN, OVERLAY_ANIM_STYLE_IDS, TEXT_TEXTURES, TEXT_WEIGHTS } from "@donkeycut/effects-kit";
-import { TIMELINE_IDS, TIMELINE_LABELS } from "@/cut/lib/types";
+import { REGION_MAX_SCALE, TIMELINE_IDS, TIMELINE_LABELS } from "@/cut/lib/types";
 
 export const TIMELINE_TOOLS = [
   {
@@ -212,7 +212,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "update_overlay_video",
     description:
-      "Update an overlay video clip: move it (start, track), trim (in/out), mute, hide, change its frame region (layout preset, or a custom region rect in frame fractions), fit, zoom, mirror (flipH/flipV), rotation, opacity, or speed.",
+      "Update an overlay video clip: move it (start, track), trim (in/out), mute, hide, change its frame region (layout preset, or a custom region rect in frame fractions that may run past the frame's edges, e.g. to cover a screen in the shot that spills off the frame), fit, zoom, mirror (flipH/flipV), rotation, opacity, or speed.",
     inputSchema: obj({
       id: str("Overlay video clip id"),
       start: num("Timeline start s"),
@@ -227,16 +227,16 @@ export const TIMELINE_TOOLS = [
         description: "Frame region preset",
       },
       region: obj({
-        x: num("Left edge 0..1"),
-        y: num("Top edge 0..1"),
-        w: num("Width 0..1"),
-        h: num("Height 0..1"),
+        x: num("Left edge in frame fractions; may sit past the frame (negative = off the left side), the frame crops the overhang"),
+        y: num("Top edge in frame fractions; may sit past the frame (negative = above the top)"),
+        w: num(`Width in frame fractions, 0.05..${REGION_MAX_SCALE}; past 1 the box runs off the frame`),
+        h: num(`Height in frame fractions, 0.05..${REGION_MAX_SCALE}`),
       }, ["x", "y", "w", "h"]),
       fit: { type: "string", enum: ["fit", "fill"], description: "How the video meets its region" },
       zoom: num("Zoom the picture past its fitted size, 1 (none) .. 4; the overflow crops"),
       flipH: bool("Mirror the picture horizontally (left for right)"),
       flipV: bool("Mirror the picture vertically (top for bottom)"),
-      rotation: num("Resting turn in degrees clockwise, -180..180 (0 clears)"),
+      rotation: num("Resting turn in degrees clockwise, -180..180, to a tenth: match a screen in the shot that leans 0.4° (0 clears)"),
       opacity: num("Resting opacity 0..1 (1 clears)"),
       speed: num("Playback rate (1 = normal, no upper limit)"),
     }, ["id"]),
@@ -254,7 +254,7 @@ export const TIMELINE_TOOLS = [
       size: num("Font size px at 1080w (default 88)"),
       color: str("CSS color (default #FFFFFF)"),
       font: str("Font id (see the graphics skill; default sf)"),
-      weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Font weight: 400 regular, 700 bold, 800 extra bold, 900 black" },
+      weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Font weight: 400 regular, 500 medium, 600 semibold, 700 bold, 800 extra bold, 900 black" },
       italic: bool("Italic"),
       align: { type: "string", enum: ["left", "center", "right"], description: "Multi-line alignment (default center)" },
       letter_spacing: num(`Tracking in em, ${LETTER_SPACING_MIN}..${LETTER_SPACING_MAX} (0 = normal, 0.1 = airy, negative = tight)`),
@@ -268,7 +268,7 @@ export const TIMELINE_TOOLS = [
         enum: [...TEXT_TEXTURES, "none"],
         description: 'Grain inside the letters: "stipple" breaks each letter into spray-paint specks along its left edge, solid by its middle (the gritty teaser title); "none" makes the type solid again',
       },
-      rotation: num("Degrees clockwise, -180..180"),
+      rotation: num("Degrees clockwise, -180..180, to a tenth (0.4 matches a slight lean)"),
       opacity: num("Whole-element opacity 0..1"),
       lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }, ["text"]),

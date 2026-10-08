@@ -5,6 +5,7 @@ import { Check, Copy, Loader2, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlayback } from "@/cut/hooks/usePlayback";
 import { startDrag } from "@/cut/lib/drag";
 import { isPreviewSelectionModifier, startSelectionDrag, togglePreviewSelection } from "@/cut/components/previewSelectionDrag";
+import { paneResize } from "@/cut/lib/previewPane";
 import { pictureGroupSelected } from "@/cut/lib/previewSelection";
 import { useBrushUi } from "@/cut/lib/removal/brushUi";
 import {
@@ -432,19 +433,21 @@ export function Preview() {
       setZoom(1);
     };
     refitRef.current = fit;
-    // A horizontally centered camera follows the pane's center as panels
-    // resize. A panned camera holds its screen position. The observer applies
-    // the compensation after layout and before paint.
+    // A camera still at its fit refits as panels resize, so the picture grows
+    // when the timeline panel shrinks. Otherwise a horizontally centered
+    // camera follows the pane's center and a panned one holds its screen
+    // position. The observer applies this after layout and before paint.
     let prev: DOMRect | null = null;
     const measure = () => {
       const r = wrap.getBoundingClientRect();
-      if (!prev) {
+      const cam = camRef.current;
+      const move = prev
+        ? paneResize(prev, r, { atFit: cam.zoom === 1 && cam.x === 0 && cam.y === 0, centeredX: cam.x === 0 })
+        : null;
+      if (!move || move.refit) {
         fit();
       } else {
-        const dx = camRef.current.x === 0
-          ? 0
-          : prev.left + prev.width / 2 - (r.left + r.width / 2);
-        const dy = prev.top + prev.height / 2 - (r.top + r.height / 2);
+        const { dx, dy } = move;
         if (dx || dy) {
           camRef.current.x += dx;
           camRef.current.y += dy;

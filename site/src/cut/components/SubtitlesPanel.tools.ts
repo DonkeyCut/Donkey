@@ -129,7 +129,7 @@ export const SUBTITLES_TOOLS = [
       emphasis_weight: {
         type: "number",
         enum: [...TEXT_WEIGHTS],
-        description: `Emphasized word weight, 400 regular, 700 bold, 800 extra bold or 900 black (default ${CAPTION_EMPHASIS_DEFAULT.weight})`,
+        description: `Emphasized word weight, 400 regular, 500 medium, 600 semibold, 700 bold, 800 extra bold or 900 black (default ${CAPTION_EMPHASIS_DEFAULT.weight})`,
       },
       emphasis_scale: num(
         `Emphasized word size over the caption's own, ${EMPHASIS_SCALE_MIN}..${EMPHASIS_SCALE_MAX} (default ${CAPTION_EMPHASIS_DEFAULT.scale})`

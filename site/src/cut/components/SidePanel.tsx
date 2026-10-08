@@ -1025,8 +1025,9 @@ function ProjectFilesPanel({
             multiple
             hidden
             onChange={(e) => {
+              // Upload stocks Project Files only; dropping on the canvas places.
               if (e.target.files?.length)
-                onImport(e.target.files, { folderId: openFolder ?? undefined });
+                onImport(e.target.files, { mediaOnly: true, folderId: openFolder ?? undefined });
               e.target.value = "";
             }}
           />

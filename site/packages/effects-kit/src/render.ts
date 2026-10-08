@@ -696,11 +696,17 @@ async function paintText(
     ctx.textBaseline = baseline;
     return ctx.measureText("Hg").actualBoundingBoxAscent;
   };
-  const drawCaret = (right: number, line = lines.length - 1) => {
+  // A bar after a typed letter hugs its ink: the tracking a browser counts
+  // after a run's last letter (skia leaves it out) comes back off `right`.
+  const drawCaret = (right: number, line = lines.length - 1, hug = false) => {
     if (!caretColor) return;
     const y = cy - totalH / 2 + lineH * (line + 0.5);
     ctx.save();
     ctx.font = cssFont;
+    if (hug && "letterSpacing" in ctx) {
+      const track = (overlay.letterSpacing ?? 0) * fpx;
+      right -= track - (ctx.measureText("II").width - 2 * ctx.measureText("I").width);
+    }
     const base = ascentAt("alphabetic");
     const xh = ctx.measureText("x").actualBoundingBoxAscent;
     const mid = ascentAt("middle");
@@ -722,6 +728,7 @@ async function paintText(
     const alpha0 = ctx.globalAlpha;
     let gi = 0;
     let caretRight = cx;
+    let hug = false;
     lines.forEach((line, i) => {
       const y = cy - totalH / 2 + lineH * (i + 0.5);
       // Characters drawn one by one lose the kerning between them, so the run
@@ -741,6 +748,7 @@ async function paintText(
         gi++;
         if (shown && i === typingLine) {
           caretRight = x + w;
+          hug = true;
         }
         if (shown && ch !== " " && g.alpha > 0.001) {
           ctx.save();
@@ -782,7 +790,7 @@ async function paintText(
       gi++; // the line break takes a turn too
     });
     paintPlate();
-    drawCaret(caretRight, typingLine);
+    drawCaret(caretRight, typingLine, hug);
     return;
   }
 
@@ -815,7 +823,7 @@ async function paintText(
       drawText(head, left, y);
       ctx.textAlign = "center";
     });
-    drawCaret(caretRight, typingLine);
+    drawCaret(caretRight, typingLine, shownIn(typingLine) > 0);
     return;
   }
   // A word drawn at another size shares the baseline with the words beside it,
@@ -852,6 +860,7 @@ async function paintText(
   const alpha0 = ctx.globalAlpha;
   let k = 0;
   let caretRight = cx - (runs[typingLine]?.lineW ?? 0) / 2;
+  let hug = false;
   ctx.textAlign = "left";
   runs.forEach((run, i) => {
     const y = cy - totalH / 2 + lineH * (i + 0.5);
@@ -878,6 +887,7 @@ async function paintText(
       if (i === typingLine && shown) {
         setSize(mult, d);
         caretRight = drawX + (shown === w ? run.drawn[wi] : ctx.measureText(shown).width);
+        hug = true;
         setSize(1);
       }
       // A word its effect has not brought in yet has no pixels; it still holds
@@ -943,7 +953,7 @@ async function paintText(
   ctx.globalAlpha = alpha0;
   ctx.textAlign = "center";
   paintPlate();
-  drawCaret(caretRight, typingLine);
+  drawCaret(caretRight, typingLine, hug);
 }
 
 /** Paint one element in frame coordinates with no element-level transform —
@@ -1564,10 +1574,11 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
     for (let i = 0; i + 1 < cuts.length; i++)
       push(o, cuts[i], cuts[i + 1], animPart, lit(undefined, cuts[i], cuts[i + 1]));
   };
-  /** One window per slice. A typing or counting slice is one step, drawn at
-   * its middle; every other slice is one frame, drawn at its start, the
-   * moment the preview shows on that frame. The slot leaves the window's
-   * anim: its motion is in the picture already. */
+  /** One window per slice. A typing slice is a run of frames that show one
+   * count, a counting slice is one step drawn at its middle; every other
+   * slice is one frame, drawn at its start, the moment the preview shows on
+   * that frame. The slot leaves the window's anim: its motion is in the
+   * picture already. */
   const slices = (from: number, secs: number, slot: "in" | "out") => {
     const edge = anim[slot]!;
     // Which of the three bakes this is comes from the preset's own channels,
@@ -1578,22 +1589,43 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
     const perGlyph = !!preset?.selector;
     const text = isText ? (o as TextOverlay).text : "";
     // A count never needs more slices than it has steps ("100 %" has 100).
-    const cap = types ? Math.max(1, text.length) : counts ? Math.max(1, countStep(text, 1)) : Infinity;
+    const cap = counts ? Math.max(1, countStep(text, 1)) : Infinity;
     const n = Math.max(1, Math.min(cap, Math.ceil(secs * TYPE_SLICE_FPS)));
     const rest: OverlayAnim = { ...anim, [slot]: undefined };
-    // A typing or counting ramp is cut into its steps, each drawn at its
-    // middle; any other ramp is cut where the output frames fall, each piece
-    // drawn at its own start, so a frame shows what the preview shows then.
-    const stepped = types || counts;
+
+    // Typing reads the preset's own typed curve per output frame, drawn at
+    // the frame's middle, and frames that show the same count share one
+    // window: a composed typewriter's holds and jumps (the bar alone for a
+    // beat, three letters at once) land on the frames the preview shows them.
+    if (types) {
+      const frames = frameCuts(from, from + secs);
+      let runFrom = from;
+      let runCount = -1;
+      for (let i = 0; i + 1 < frames.length; i++) {
+        const q = ((frames[i] + frames[i + 1]) / 2 - from) / secs;
+        const p = slot === "out" ? 1 - q : q;
+        const count = typedChars(text, evalWhole(preset!, p, slot === "out").typed ?? p);
+        if (i > 0 && count !== runCount) {
+          push(o, runFrom, frames[i], rest, { ...lit(undefined, runFrom, frames[i]), typed: runCount });
+          runFrom = frames[i];
+        }
+        runCount = count;
+      }
+      push(o, runFrom, from + secs, rest, { ...lit(undefined, runFrom, from + secs), typed: runCount });
+      return;
+    }
+
+    // A counting ramp is cut into its steps, each drawn at its middle; any
+    // other ramp is cut where the output frames fall, each piece drawn at its
+    // own start, so a frame shows what the preview shows then.
+    const stepped = counts;
     const cuts = stepped ? [...Array(n + 1).keys()].map((i) => from + (i / n) * secs) : frameCuts(from, from + secs);
     for (let i = 0; i + 1 < cuts.length; i++) {
       const at = cuts[i];
       const to = cuts[i + 1];
       const q = stepped ? (i + 0.5) / n : (at - from) / secs;
       const p = slot === "out" ? 1 - q : q;
-      if (types) {
-        push(o, at, to, rest, { ...lit(undefined, at, to), typed: Math.max(1, typedChars(text, p)) });
-      } else if (counts) {
+      if (counts) {
         // The count follows the preset's own curve, the way the evaluator
         // reads it for the live preview.
         const shown = evalWhole(preset!, p, slot === "out").counted ?? p;

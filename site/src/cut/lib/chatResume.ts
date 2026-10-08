@@ -32,6 +32,24 @@ export function isResumeMessage(message: UIMessage): boolean {
   return message.role === "user" && (message.metadata as { resume?: boolean } | undefined)?.resume === true;
 }
 
+/** What a new engine turn asks: every user message since the last reply,
+ * oldest first, so one the engine refused (a turn this page lost was still
+ * running) reaches the model with the next. A continuation stands alone; it
+ * already quotes its ask. */
+export function pendingAsk(messages: UIMessage[]): { text: string; attachments: unknown[] } {
+  const since = messages.findLastIndex((message) => message.role === "assistant") + 1;
+  const asks = messages.slice(since).filter((message) => message.role === "user");
+  const newest = asks.at(-1);
+  const sent = newest && isResumeMessage(newest) ? [newest] : asks;
+  return {
+    text: sent.map(messageText).filter(Boolean).join("\n\n"),
+    attachments: sent.flatMap((message) => {
+      const attachments = (message.metadata as { attachments?: unknown } | undefined)?.attachments;
+      return Array.isArray(attachments) ? attachments : [];
+    }),
+  };
+}
+
 type ToolPart = { type: string; state?: string; errorText?: string; output?: unknown };
 
 const isToolPart = (part: { type: string }): part is ToolPart =>

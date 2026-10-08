@@ -221,6 +221,7 @@ import { clampLayersToAssets, mediaTypeFits, templateFromDoc } from "./projectTe
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
 import { isGradePresetTemplate, listSavedGrades, saveGradePreset } from "./gradePresets";
 import { isStylePresetTemplate } from "./stylePresets";
+import { findLibraryAsset, listLibrary } from "./libraryList";
 import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
 import { sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
 import { applyOverlayPatchSettled, assetClipUses, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
@@ -303,6 +304,7 @@ import {
   overlayAnimStyle,
   projectBackground,
   rectOf,
+  REGION_MAX_SCALE,
   regionLabel,
   SHAPE_LABELS,
   SIDE_PANEL_TABS,
@@ -336,6 +338,9 @@ import { soundSourceOf, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { bindRecording, unbindRecording } from "./soundBind";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+/** A rotation input in degrees, kept to tenths: a screen in the shot can lean
+ *  a fraction of a degree, and whatever is fitted onto it has to match. */
+const degInput = (n: number) => Math.round(clamp(n, -180, 180) * 10) / 10;
 
 /** The timeline rows a mutation touched, small enough to ride every result:
  * ids, starts, and lengths for track 0 and the soundtrack, read fresh after
@@ -793,7 +798,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
             ...(isNum(k.scale_x) ? { scaleX: clamp(k.scale_x, 0, 4) } : {}),
             ...(isNum(k.scale_y) ? { scaleY: clamp(k.scale_y, 0, 4) } : {}),
-            ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
+            ...(isNum(k.rotation) ? { rotation: degInput(k.rotation) } : {}),
             ...(isNum(k.tilt_x) ? { tiltX: clamp(Math.round(k.tilt_x), -TILT_MAX, TILT_MAX) } : {}),
             ...(isNum(k.tilt_y) ? { tiltY: clamp(Math.round(k.tilt_y), -TILT_MAX, TILT_MAX) } : {}),
             ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
@@ -883,7 +888,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             ...(isNum(k.x) ? { x: clamp(k.x, -0.5, 1.5) } : {}),
             ...(isNum(k.y) ? { y: clamp(k.y, -0.5, 1.5) } : {}),
             ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
-            ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
+            ...(isNum(k.rotation) ? { rotation: degInput(k.rotation) } : {}),
             ...(isNum(k.opacity) ? { opacity: clamp(k.opacity, 0, 1) } : {}),
             ...(isNum(k.blur) ? { blur: clamp(k.blur, 0, ELEMENT_BLUR_MAX) } : {}),
           },
@@ -923,7 +928,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       ...(isNum(k.y) ? { y: clamp(k.y, -1, 1) } : {}),
       ...(isNum(k.w) ? { w: clamp(k.w, 0.01, 2) } : {}),
       ...(isNum(k.h) ? { h: clamp(k.h, 0.01, 2) } : {}),
-      ...(isNum(k.rotation) ? { rotation: clamp(Math.round(k.rotation), -180, 180) } : {}),
+      ...(isNum(k.rotation) ? { rotation: degInput(k.rotation) } : {}),
       ...(isNum(k.feather) ? { feather: clamp(k.feather, 0, MASK_FEATHER_MAX) } : {}),
       ...(isNum(k.radius) ? { radius: clamp(k.radius, 0, MASK_RADIUS_MAX) } : {}),
     });
@@ -2020,9 +2025,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const rg = input.region as Record<string, unknown>;
         if (!isNum(rg.x) || !isNum(rg.y) || !isNum(rg.w) || !isNum(rg.h))
           throw new ToolError("region needs numeric x, y, w, h (frame fractions).");
-        const w = clamp(rg.w, 0.05, 1);
-        const h = clamp(rg.h, 0.05, 1);
-        patch.frame = { x: clamp(rg.x, 0, 1 - w), y: clamp(rg.y, 0, 1 - h), w, h };
+        // The box may hang past the frame's edges, as the preview's handles
+        // let it (a screen in the shot that runs off the frame); the frame
+        // crops it. A sliver always stays on the frame so it can't vanish.
+        const w = clamp(rg.w, 0.05, REGION_MAX_SCALE);
+        const h = clamp(rg.h, 0.05, REGION_MAX_SCALE);
+        const keep = 0.05;
+        patch.frame = { x: clamp(rg.x, keep - w, 1 - keep), y: clamp(rg.y, keep - h, 1 - keep), w, h };
       }
       refuseCardFraming(c, input, ["fit", "zoom"]);
       if (input.fit === "fit" || input.fit === "fill") patch.fit = input.fit;
@@ -2033,7 +2042,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (typeof input.flipH === "boolean") patch.flipH = input.flipH || undefined;
       if (typeof input.flipV === "boolean") patch.flipV = input.flipV || undefined;
       if (isNum(input.rotation)) {
-        const deg = Math.round(clamp(input.rotation, -180, 180));
+        const deg = degInput(input.rotation);
         patch.rotation = deg === 0 ? undefined : deg;
       }
       if (isNum(input.opacity)) {
@@ -4190,37 +4199,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   read_folder: async (_s, input) => readFolder(input),
 
-  library_list: async () => {
+  library_list: async (_s, input) => {
       const lib = await fetchLibrary();
-      return {
-        folders: lib.folders.map((f) => ({
-          id: f.id,
-          name: f.name,
-          ...(f.parentId ? { parentId: f.parentId } : {}),
-        })),
-        assets: lib.assets.map((a) => ({
-          id: a.id,
-          name: a.name,
-          // Read off the clip itself — what is said in it and what is on
-          // screen. A phone recording's own name is the clock it was shot on,
-          // so this is what says which clip it is.
-          ...(a.title ? { title: a.title } : {}),
-          kind: a.type,
-          duration: round2(a.duration),
-          ...(a.folderId ? { folderId: a.folderId } : {}),
-          // "camera" = recorded on the user's phone (their Camera Roll);
-          // "inspiration" = saved from the phone's Ideas tab.
-          ...(a.origin ? { origin: a.origin } : {}),
-        })),
+      return listLibrary({
+        folders: lib.folders,
+        assets: lib.assets,
         templates: lib.templates
           .filter((t) => !isSoundPresetTemplate(t) && !isStylePresetTemplate(t) && !isGradePresetTemplate(t))
           .map((t) => ({
-          id: t.id,
-          name: t.name,
-          duration: round2(t.duration),
-          parts: t.layers.length + t.audio.length + t.texts.length + t.cues.length,
-        })),
-      };
+            id: t.id,
+            name: t.name,
+            duration: t.duration,
+            parts: t.layers.length + t.audio.length + t.texts.length + t.cues.length,
+            folderId: t.folderId,
+          })),
+      }, input);
   },
 
   note_save: async (_s, input) => (await import("@/cut/lib/notes")).writeNoteFromTool(input),
@@ -4295,9 +4288,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         return { assetId: asset.id, name: asset.name, kind: asset.type, duration: round2(asset.duration),
           ...(place ? { addedToTimeline: true, clip: placeAssetOnTimeline(asset, input) } : { addedToTimeline: false }) };
       }
-      const lib = (await fetchLibrary()).assets.find((a) => a.id === String(input.id ?? ""));
-      if (!lib)
-        throw new ToolError(`No library asset with id ${String(input.id)}. Call library_list for ids.`);
+      const found = findLibraryAsset((await fetchLibrary()).assets, String(input.id ?? ""));
+      if (!found)
+        throw new ToolError(`No library asset with id or name "${String(input.id)}". Call library_list with a query for ids; stock sound effects come from stock_search and stock_add.`);
+      if ("candidates" in found)
+        throw new ToolError(`Several Library assets are named "${String(input.id)}": ${JSON.stringify(found.candidates)}. Pass one id.`);
+      const lib = found.asset;
       if (isLinkedType(lib.type)) {
         await syncLinkedLibrary();
         const linkedId = linkIdForAsset(lib.id);
@@ -6857,7 +6853,7 @@ function overlayPatch(
   if (isNum(input.x)) patch.x = clampOverlayPos(input.x, place);
   if (isNum(input.y)) patch.y = clampOverlayPos(input.y, place);
   if (isNum(input.rotation))
-    patch.rotation = Math.round(clamp(input.rotation, -180, 180)) || undefined;
+    patch.rotation = degInput(input.rotation) || undefined;
   if (isNum(input.opacity))
     patch.opacity = input.opacity >= 0.995 ? undefined : clamp(input.opacity, 0, 1);
   if (kind !== "effect") {

@@ -23,19 +23,19 @@ const require = createRequire(import.meta.url);
 /** Keep in step with googleFonts.ts, which declares the same families for
  * the page. An id here is a Cut font id; a family with no id is a stand-in. */
 const FAMILIES = [
-  { id: "inter", label: "Inter", family: "Inter", weights: [400, 700] },
-  { id: "montserrat", label: "Montserrat", family: "Montserrat", weights: [400, 700, 800, 900] },
-  { id: "poppins", label: "Poppins", family: "Poppins", weights: [400, 700, 800, 900] },
-  { id: "oswald", label: "Oswald", family: "Oswald", weights: [400, 700] },
-  { id: "space-grotesk", label: "Space Grotesk", family: "Space Grotesk", weights: [400, 700] },
+  { id: "inter", label: "Inter", family: "Inter", weights: [400, 500, 600, 700] },
+  { id: "montserrat", label: "Montserrat", family: "Montserrat", weights: [400, 500, 600, 700, 800, 900] },
+  { id: "poppins", label: "Poppins", family: "Poppins", weights: [400, 500, 600, 700, 800, 900] },
+  { id: "oswald", label: "Oswald", family: "Oswald", weights: [400, 500, 600, 700] },
+  { id: "space-grotesk", label: "Space Grotesk", family: "Space Grotesk", weights: [400, 500, 600, 700] },
   {
     id: "playfair",
     label: "Playfair Display",
     family: "Playfair Display",
-    weights: [400, 700],
+    weights: [400, 500, 600, 700],
     italics: [400, 700],
   },
-  { id: "caveat", label: "Caveat", family: "Caveat", weights: [400, 700] },
+  { id: "caveat", label: "Caveat", family: "Caveat", weights: [400, 500, 600, 700] },
   { id: "bebas", label: "Bebas Neue", family: "Bebas Neue", weights: [400] },
   {
     id: "anton",
@@ -62,7 +62,7 @@ const FAMILIES = [
   },
   {
     family: "Roboto",
-    weights: [400, 700],
+    weights: [400, 500, 600, 700],
     aliases: [
       "-apple-system",
       "system-ui",
@@ -76,17 +76,17 @@ const FAMILIES = [
   },
   {
     family: "Noto Serif",
-    weights: [400, 700],
+    weights: [400, 500, 600, 700],
     aliases: ["New York", "ui-serif", "Georgia", "Times New Roman", "serif"],
   },
   {
     family: "Nunito",
-    weights: [400, 700],
+    weights: [400, 500, 600, 700],
     aliases: ["ui-rounded", "SF Pro Rounded", "Arial Rounded MT Bold"],
   },
   {
     family: "Roboto Mono",
-    weights: [400, 700],
+    weights: [400, 500, 600, 700],
     aliases: ["ui-monospace", "SF Mono", "Menlo", "Courier New", "monospace"],
   },
 ];

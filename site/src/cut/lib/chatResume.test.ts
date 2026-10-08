@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { UIMessage } from "ai";
-import { DETACHED_MEDIA_ERROR, DETACHED_UI_NOTE, INTERRUPTED_ERROR, isResumeMessage, resumePrompt, scrubLostTurn, unfinishedAsk } from "./chatResume";
+import { DETACHED_MEDIA_ERROR, DETACHED_UI_NOTE, INTERRUPTED_ERROR, isResumeMessage, pendingAsk, resumePrompt, scrubLostTurn, unfinishedAsk } from "./chatResume";
 
 const user = (id: string, text: string, metadata?: Record<string, unknown>): UIMessage =>
   ({ id, role: "user", parts: [{ type: "text", text }], ...(metadata ? { metadata } : {}) }) as UIMessage;
@@ -64,4 +64,18 @@ test("scrubbing a lost turn keeps only the tool calls that landed", () => {
 
 test("the continuation asks for a reply that says nothing about the interruption", () => {
   expect(resumePrompt(user("ask", "cut the pauses"))).toContain("say nothing about the page going away");
+});
+
+test("a message the engine refused goes out with the next one", () => {
+  const messages = [user("a", "first"), reply("r"), user("b", "tilt it to the laptop"), user("c", "go ahead", { attachments: [{ id: "x" }] })];
+  expect(pendingAsk(messages)).toEqual({ text: "tilt it to the laptop\n\ngo ahead", attachments: [{ id: "x" }] });
+});
+
+test("an answered thread sends only the newest message", () => {
+  expect(pendingAsk([user("a", "first", { attachments: [{ id: "y" }] }), reply("r"), user("b", "next")])).toEqual({ text: "next", attachments: [] });
+});
+
+test("a continuation stands alone, since it quotes its ask", () => {
+  const messages = [user("a", "cut the pauses"), user("b", resumePrompt(user("a", "cut the pauses")), { resume: true })];
+  expect(pendingAsk(messages).text).toBe(resumePrompt(user("a", "cut the pauses")));
 });

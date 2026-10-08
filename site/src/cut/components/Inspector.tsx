@@ -36,6 +36,7 @@ import {
   dealsMarks,
   DOODLE_INKS,
   DOODLE_INKS_MAX,
+  LETTER_SPACING_MAX,
   LETTER_SPACING_MIN,
   lineLikeShape,
   maskFrameAt,
@@ -285,6 +286,11 @@ export function Inspector() {
  * and button shape and hangs at the bottom of the rail's column, so its icon
  * sits under the rail's own buttons.
  */
+/** Rotation in the inspector keeps tenths of a degree: a screen in the shot can
+ *  lean 0.4°, and a picture fitted onto it has to lean the same. */
+const tenthDeg = (v: number) => Math.round(v * 10) / 10;
+const formatDeg = (v: number) => `${tenthDeg(v)}°`;
+
 function ShowTimelineButton() {
   const open = useEditor((s) => s.timelineOpen);
   if (open) return null;
@@ -1658,19 +1664,20 @@ function ClipPanel({ clip }: { clip: VideoClip }) {
             value={clip.rotation ?? 0}
             min={-180}
             max={180}
-            step={1}
+            step={0.1}
+            keyStep={1}
             snap={[-90, 0, 90]}
-            format={(v) => `${Math.round(v)}°`}
+            format={formatDeg}
             parse={parseNumberInput}
             onDraft={(v) => {
               turnCk.begin();
               useEditor.getState().updateClipTransient(clip.id, {
-                rotation: Math.round(v) || undefined,
+                rotation: tenthDeg(v) || undefined,
               });
             }}
             onCommit={(v) => {
               turnCk.begin();
-              updateClip(clip.id, { rotation: Math.round(v) || undefined });
+              updateClip(clip.id, { rotation: tenthDeg(v) || undefined });
               turnCk.end();
             }}
           />
@@ -2274,7 +2281,7 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
               icon={<AlignHorizontalSpaceAround />}
               value={(o.letterSpacing ?? 0) * 100}
               min={LETTER_SPACING_MIN * 100}
-              max={30}
+              max={LETTER_SPACING_MAX * 100}
               step={1}
               snap={[0]}
               presets={LETTER_SPACINGS}
@@ -2879,6 +2886,8 @@ function HitSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly
 /** What each text weight is called in the weight menu. */
 const WEIGHT_LABELS: Record<TextWeight, string> = {
   400: "Regular",
+  500: "Medium",
+  600: "Semibold",
   700: "Bold",
   800: "Extra bold",
   900: "Black",
@@ -3669,7 +3678,7 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
   const setKey = (patch: Partial<Omit<OverlayKey, "t">>) =>
     useEditor.getState().setOverlayKey(o.id, tLocal, patch, { transient: true });
   const setRotation = (v: number) => {
-    const deg = Math.round(v);
+    const deg = tenthDeg(v);
     if (keyed) return setKey({ rotation: deg });
     useEditor.getState().updateOverlayTransient(o.id, { rotation: deg === 0 ? undefined : deg });
   };
@@ -3759,9 +3768,10 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
           value={keyed ? pose.rotation : (o.rotation ?? 0)}
           min={-180}
           max={180}
-          step={1}
+          step={0.1}
+          keyStep={1}
           snap={[-90, 0, 90]}
-          format={(v) => `${Math.round(v)}°`}
+          format={formatDeg}
           parse={parseNumberInput}
           onDraft={(v) => {
             rotationCk.begin();
@@ -4044,17 +4054,18 @@ function ClipTransformSection({ clip }: { clip: VideoClip }) {
               value={pose.rotation}
               min={-180}
               max={180}
-              step={1}
+              step={0.1}
+              keyStep={1}
               snap={[-90, 0, 90]}
-              format={(v) => `${Math.round(v)}°`}
+              format={formatDeg}
               parse={parseNumberInput}
               onDraft={(v) => {
                 rotationCk.begin();
-                setKey({ rotation: Math.round(v) });
+                setKey({ rotation: tenthDeg(v) });
               }}
               onCommit={(v) => {
                 rotationCk.begin();
-                setKey({ rotation: Math.round(v) });
+                setKey({ rotation: tenthDeg(v) });
                 rotationCk.end();
               }}
             />
@@ -4554,17 +4565,18 @@ function MaskSection({ target }: { target: MaskTarget }) {
                 value={geom.rotation}
                 min={-180}
                 max={180}
-                step={1}
+                step={0.1}
+                keyStep={1}
                 snap={[-90, 0, 90]}
-                format={(v) => `${Math.round(v)}°`}
+                format={formatDeg}
                 parse={parseNumberInput}
                 onDraft={(v) => {
                   rotationCk.begin();
-                  writeGeom({ rotation: Math.round(v) });
+                  writeGeom({ rotation: tenthDeg(v) });
                 }}
                 onCommit={(v) => {
                   rotationCk.begin();
-                  writeGeom({ rotation: Math.round(v) });
+                  writeGeom({ rotation: tenthDeg(v) });
                   rotationCk.end();
                 }}
               />

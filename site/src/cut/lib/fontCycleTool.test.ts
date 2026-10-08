@@ -75,7 +75,7 @@ describe("set_overlay_animation font cycle", () => {
   test("an unknown font or weight is refused", async () => {
     const o = await aTitle();
     expect(await failure({ id: o.id, font_cycle: [{ font: "no-such-face" }] })).toContain("Unknown font id");
-    expect(await failure({ id: o.id, font_cycle: [{ font: "serif", weight: 500 }] })).toContain("weight");
+    expect(await failure({ id: o.id, font_cycle: [{ font: "serif", weight: 450 }] })).toContain("weight");
   });
 
   test("a title takes the heavy weights", async () => {

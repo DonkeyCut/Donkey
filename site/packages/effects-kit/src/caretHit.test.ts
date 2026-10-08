@@ -70,6 +70,26 @@ describe("the typing caret", () => {
     expect(rest.length).toBe(caretToggles(o.anim, 3).length + 1);
     rest.forEach((l, i) => expect(!!l.phase?.caret).toBe(i % 2 === 0));
   });
+
+  test("the canvas export types along a composed typewriter's own keys", () => {
+    // The bar blinks alone for half a second, three letters land at once,
+    // and the rest at 1s: the preview reads these keys, so the export must.
+    const anim: OverlayAnim = {
+      in: {
+        style: "typewriter",
+        seconds: 2,
+        caret: { blink: false },
+        preset: { label: "Typewriter", slots: ["in", "out"], animate: { typed: [{ t: 0, v: 0, hold: true }, { t: 0.25, v: 0.5, hold: true }, { t: 0.5, v: 1 }] } },
+      },
+    };
+    const o: TextOverlay = { id: "t", text: "MOMENT", start: 0, end: 4, x: 0.5, y: 0.5, size: 60, font: "sf", weight: 500, color: "#fff", plate: false, shadow: false, anim };
+    const layers = planAnimatedLayers(o, 10);
+    const at = (t: number) => layers.find((l) => l.start <= t && t < l.end)!;
+    expect(at(0.1).phase?.typed).toBe(0);
+    expect(at(0.1).phase?.caret).toBe(true);
+    expect(at(0.6).phase?.typed).toBe(3);
+    expect(at(1.5).phase?.typed).toBe(6);
+  });
 });
 
 const env: RenderEnv = {
@@ -100,6 +120,38 @@ describe("the caret on canvas", () => {
     }
     expect(red).toBeGreaterThan(80 * 0.07 * 80 * 0.8);
     expect(redRight).toBe(red);
+  });
+
+  test("hugs the last letter however wide the tracking", async () => {
+    // The gap from the last typed letter's ink to the bar, in columns. A browser
+    // counts the tracking after a run's last letter in its width, where skia
+    // leaves it out; `browser` measures the browser's way.
+    const gapAt = async (letterSpacing: number, browser: boolean) => {
+      const o: TextOverlay = { id: "t", text: "LINK", start: 0, end: 4, x: 0.5, y: 0.5, size: 80, font: "sf", weight: 700, color: "#ffffff", letterSpacing, plate: false, shadow: false, anim: typed({ blink: true, color: "#ff0000" }) };
+      const c = new Canvas(1080, 1080);
+      const ctx = c.getContext("2d") as unknown as CanvasRenderingContext2D;
+      if (browser) {
+        const measure = ctx.measureText.bind(ctx);
+        ctx.measureText = (text: string) => {
+          const m = measure(text);
+          const trail = text ? parseFloat(ctx.letterSpacing) || 0 : 0;
+          return Object.create(m, { width: { value: m.width + trail } });
+        };
+      }
+      await paintElement(ctx, o, { width: 1080, height: 1080, scale: 1, phase: { caret: true, typed: 3 } }, env);
+      const px = ctx.getImageData(0, 0, 1080, 1080).data;
+      let white = 0;
+      let red = 1080;
+      for (let i = 0; i < px.length; i += 4) {
+        const col = (i / 4) % 1080;
+        if (px[i] > 200 && px[i + 1] > 200 && px[i + 3] > 200) white = Math.max(white, col);
+        if (px[i] > 200 && px[i + 1] < 60 && px[i + 2] < 60 && px[i + 3] > 200) red = Math.min(red, col);
+      }
+      return red - white;
+    };
+    for (const browser of [false, true]) {
+      expect(Math.abs((await gapAt(0.5, browser)) - (await gapAt(0, browser)))).toBeLessThanOrEqual(2);
+    }
   });
 });
 

@@ -37,7 +37,7 @@ import {
   type HandledAsk,
 } from "../ai/turnCatalog";
 import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
-import { messageText } from "../../lib/messageText";
+import { pendingAsk } from "../../lib/chatResume";
 import { codexCommand } from "../tool-path";
 import { errorMessage } from "../util";
 
@@ -76,26 +76,6 @@ function mcpCommand(base: string, sessionKey: string): { command: string; args: 
   return process.env.DONKEY_CUT_ENGINE
     ? { command: process.execPath, args: ["mcp-proxy", base, sessionKey] }
     : { command: process.execPath, args: [proxyPath(), base, sessionKey] };
-}
-
-function lastUserText(messages: UIMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "user") continue;
-    return messageText(m);
-  }
-  return "";
-}
-
-/** Asset refs the user dragged into the chat with the last message. */
-function lastUserAttachments(messages: UIMessage[]): unknown[] {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "user") continue;
-    const meta = (m as { metadata?: { attachments?: unknown } }).metadata;
-    return Array.isArray(meta?.attachments) ? meta.attachments : [];
-  }
-  return [];
 }
 
 /** Claude models through the Agent SDK — the user's Claude Code login. */
@@ -598,8 +578,7 @@ export const aiApi = {
     const { route, handled = [] } = identity.data;
     const base = new URL(req.url).origin;
     const sessionKey = crypto.randomUUID();
-    const userText = lastUserText(body.messages);
-    const attachments = lastUserAttachments(body.messages);
+    const { text: userText, attachments } = pendingAsk(body.messages);
     // A judged work turn carries the judge's skill pick, the same block the
     // hosted loop attaches.
     const skill = route && route.intent !== "chat" && route.skill !== undefined ? `\n\n${skillRelevanceBlock(route.skill)}` : "";

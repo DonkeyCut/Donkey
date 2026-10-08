@@ -108,7 +108,7 @@ import { holdEditorChat } from "@/cut/lib/editorWork";
 import { recoverSceneCall } from "@/cut/lib/chatRecovery";
 import { replayChatStream } from "@/cut/lib/chatReplay";
 import { INTERRUPTED_ERROR, isResumeMessage, RESUME_LIMIT, resumePrompt, scrubLostTurn, unfinishedAsk, type ResumeMetadata, type TurnSettled } from "@/cut/lib/chatResume";
-import { answerEngineGate, claimEngineTool, cancelEngineChat, foldIntoEngineChat } from "@/cut/lib/engineChat";
+import { answerEngineGate, claimEngineTool, cancelEngineChat, foldIntoEngineChat, joinRunningEngineChat } from "@/cut/lib/engineChat";
 import { messageText } from "@/cut/lib/messageText";
 import { EngineGate, engineInstant, handledSince, judgeEngineTurn } from "@/cut/lib/pi/engineTurn";
 import type { EngineRoute } from "@/cut/server/ai/turnCatalog";
@@ -1126,8 +1126,17 @@ function ChatSession({
       (engineTransport ??= new DefaultChatTransport<UIMessage>({
         // A refused turn reads as its message; the transport would show the raw body.
         fetch: async (input, init) => {
-          const res = await fetch(input, init);
+          let res = await fetch(input, init);
           if (res.ok) return res;
+          // A turn this page lost (a reload, another tab) still runs the
+          // thread on the Mac: the message joins it, or goes out once it ends.
+          if (res.status === 409 && typeof init?.body === "string") {
+            const sent = JSON.parse(init.body) as Parameters<typeof joinRunningEngineChat>[2];
+            const joined = await joinRunningEngineChat(projectId, threadId, sent, init.signal ?? undefined);
+            if (joined) return joined;
+            res = await fetch(input, init);
+            if (res.ok) return res;
+          }
           throw new Error((await apiJson(res)).error ?? `The engine replied ${res.status}.`);
         },
         // The engine origin is discovered asynchronously; await it per request

@@ -1,4 +1,6 @@
+import type { UIMessage } from "ai";
 import { localBackend } from "./backend/local";
+import { pendingAsk } from "./chatResume";
 
 export async function claimEngineTool(sessionKey: string | null, toolCallId: string): Promise<boolean> {
   const response = await localBackend.fetch("/api/cut/ai/tool-claim", {
@@ -29,6 +31,25 @@ export async function foldIntoEngineChat(
   });
   if (!response.ok) return false;
   return (await response.json() as { folded: boolean }).folded;
+}
+
+/** Join the thread's turn that a reload or another tab left running on this
+ * Mac, after the engine refused a new one for it: the message folds into that
+ * turn and the page follows its journal. Null when the turn ended first, so
+ * the message can go out as its own turn. */
+export async function joinRunningEngineChat(
+  projectId: string,
+  threadId: string,
+  body: { messages: UIMessage[]; context: unknown },
+  signal?: AbortSignal,
+): Promise<Response | null> {
+  const { text, attachments } = pendingAsk(body.messages);
+  if (!(await foldIntoEngineChat(projectId, threadId, { text, attachments, context: body.context }).catch(() => false))) return null;
+  const response = await localBackend.fetch(
+    `/api/cut/ai/chat/${encodeURIComponent(threadId)}/stream?projectId=${encodeURIComponent(projectId)}`,
+    { signal },
+  );
+  return response.ok && response.status !== 204 ? response : null;
 }
 
 /** Answer the engine's quality gate for a signing-off turn: the steer for its

@@ -10,6 +10,7 @@ import { CLOUD_LIBRARY_IMPORT_DESCRIPTION } from "@/cut/lib/libraryUpload";
 import { z } from "zod";
 import { NOTE_LIBRARY_LOCATION_DESCRIPTION, noteReadSchema, noteSaveSchema } from "@/cut/lib/noteReference";
 import { folderReadSchema } from "@/cut/lib/folderReference";
+import { LIBRARY_PAGE_DEFAULT, LIBRARY_PAGE_MAX } from "@/cut/lib/libraryList";
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
@@ -38,8 +39,14 @@ export const LIBRARY_TOOLS = [
   {
     name: "library_list",
     description:
-      CLOUD_LIBRARY_IMPORT_DESCRIPTION + " " + "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, the account's own font files, and its LUT files — .cube/.3dl, offered to every clip as \"lut:<key>\" via set_color_lut), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template.",
-    inputSchema: obj({}),
+      CLOUD_LIBRARY_IMPORT_DESCRIPTION + " " + "List the shared Library — reusable media saved across projects: folders (nested; a folder's parentId names the folder it sits in), assets (video/audio/image, the account's own font files, and its LUT files — .cube/.3dl, offered to every clip as \"lut:<key>\" via set_color_lut), and templates (saved arrangements of clips, overlays, titles, and captions). An asset's `origin` says it came from the user's iOS app: \"camera\" is a clip they recorded on their phone (their Camera Roll), \"inspiration\" a reference they saved to the Inspiration folder. Library items live outside the project: library_add imports an asset, template_add re-materializes a template. Answers a page of `items` (assets and templates, each with its kind) with `total` and, when more remain, `next` to pass back as offset. To find a named asset, pass words of its name as query (\"computer desk raw\" finds computer-desk-raw); folder narrows to a folder and the folders inside it. Stock sound effects are not in the Library: use stock_search.",
+    inputSchema: obj({
+      query: str("Words that must all appear in the name, file name or title; case, hyphens and spaces don't matter"),
+      folder: str("Folder id or name; lists that folder and the folders inside it"),
+      kind: { type: "string", enum: ["video", "audio", "image", "font", "lut", "template"], description: "Only items of this kind" },
+      offset: num("Where the page starts; pass the previous page's next"),
+      limit: num(`Items per page, 1..${LIBRARY_PAGE_MAX} (default ${LIBRARY_PAGE_DEFAULT})`),
+    }),
   },
   {
     name: "notes_list",
@@ -52,7 +59,7 @@ export const LIBRARY_TOOLS = [
     description:
       "Copy a Library asset into the project; pass share_link for an accessible shared Library asset (it appears in `media` and previews as a card in this chat). This is the import step \"library\"-scope attachments need before editor tools can touch them. For one file inside a shared template, pass its template id and template_file. Shared linked files copy into your Library and return their usable id (fontId for fonts). Your own linked files return their existing id from the registry. Pass add_to_timeline:true (or start/index) only when the user asked for it in the cut: video/image land on track 0, audio on the soundtrack.",
     inputSchema: obj({
-      id: str("Library asset id (from library_list, read_folder or an attachment)"),
+      id: str("Library asset id (from library_list, read_folder or an attachment), or its exact name — case, hyphens and spaces don't matter"),
       share_link: str("Shared Library URL returned or read by read_folder; imports an asset from that share"),
       template_file: str("One shared template fileName from read_folder; id is the template id when this is set"),
       folder_id: str("Shared folder containing the asset (from the read_folder page)"),

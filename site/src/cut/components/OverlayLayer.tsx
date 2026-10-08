@@ -828,6 +828,11 @@ function OverlayItem({
   // in the line — its negative margin gives back its width — so the text
   // sits exactly where the painter, which draws the bar over nothing, puts it.
   const caretWidth = `max(${2 * scale}px, ${CARET_WIDTH_EM}em)`;
+  // After a typed letter the bar hugs its ink, giving back the tracking the
+  // line lays after that letter.
+  const typedHead = [...shownText].slice(0, typed);
+  const hug = typedHead.length > 0 && typedHead[typedHead.length - 1] !== "\n";
+  const caretGap = `(${CARET_GAP_EM}em - ${hug && isTextOverlay(o) ? (o.letterSpacing ?? 0) : 0}em)`;
   const caretBar =
     isText && !editing && live?.caret ? (
       <span
@@ -836,8 +841,8 @@ function OverlayItem({
           display: "inline-block",
           width: caretWidth,
           height: `${CARET_HEIGHT_EM}em`,
-          marginLeft: `${CARET_GAP_EM}em`,
-          marginRight: `calc(-1 * (${CARET_GAP_EM}em + ${caretWidth}))`,
+          marginLeft: `calc${caretGap}`,
+          marginRight: `calc(-1 * (${caretGap} + ${caretWidth}))`,
           verticalAlign: "middle",
           background: typeCaret(o.anim)?.color ?? o.color,
         }}

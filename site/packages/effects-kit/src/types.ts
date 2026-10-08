@@ -72,14 +72,14 @@ export const SHADOW_OFFSET_MAX = 40;
 
 export type TextAlign = "left" | "center" | "right";
 
-/** The weights a title can be set in: regular, bold, extra bold and black. A
- * face without a weight draws in its nearest one. */
-export const TEXT_WEIGHTS = [400, 700, 800, 900] as const;
+/** The weights a title can be set in: regular, medium, semibold, bold, extra
+ * bold and black. A face without a weight draws in its nearest one. */
+export const TEXT_WEIGHTS = [400, 500, 600, 700, 800, 900] as const;
 
 /** Tracking bounds, em: display type set tight down to the floor, spaced caps
- * up to the ceiling. */
+ * up to the ceiling (a subtitle under a year title runs near 0.6). */
 export const LETTER_SPACING_MIN = -0.15;
-export const LETTER_SPACING_MAX = 0.5;
+export const LETTER_SPACING_MAX = 1;
 export type TextWeight = (typeof TEXT_WEIGHTS)[number];
 
 /** A text element. `kind` may be absent — documents written before the union
