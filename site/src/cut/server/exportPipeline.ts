@@ -627,7 +627,22 @@ const SOURCE_PREROLL = 1;
  * screen at the in point comes along (stamped before 0) and the re-stamp to
  * the output rate shows it on the clip's first frame. */
 const sourceSpan = (idx: number, c: { in: number; out: number }, rt: Retime) =>
-  `[${idx}:v]trim=${num(Math.max(0, c.in - SOURCE_PREROLL))}:${num(c.out)},setpts=${retimedPts(rt, c.in)}`;
+  `[${idx}:v]trim=${num(spanStart(c))}:${num(c.out)},setpts=${retimedPts(rt, c.in)}`;
+
+/** Where a footage clip's span starts in its source, preroll included. */
+const spanStart = (c: { in: number }) => Math.max(0, c.in - SOURCE_PREROLL);
+
+/**
+ * The same span read off an input already seeked to it, so the picture never
+ * trims inside the graph.
+ *
+ * `-ss` before `-i` restamps the seeked input to start at 0, so the in point
+ * sits at `c.in - spanStart(c)` — the preroll it kept — and the re-stamp
+ * measures from there. Everything downstream sees the frames and timestamps
+ * the trimmed chain produced.
+ */
+const seekedSpan = (idx: number, c: { in: number }, rt: Retime) =>
+  `[${idx}:v]setpts=${retimedPts(rt, c.in - spanStart(c))}`;
 
 /** A curve clamps everything before its first knot to 0; the preroll keeps
  * its own seconds before 0, as one rate does, so a trim at 0 drops it. */
@@ -1181,8 +1196,11 @@ export async function runExport(
   // Resolve paths in order first so ffmpeg input indices stay deterministic,
   // then probe every file's streams concurrently.
   const paths = await Promise.all(mediaFiles.map((f) => resolveMedia(io.stat, mediaPathFor, f)));
+  // file → the path ffmpeg opens, so a cut can open its own span below.
+  const pathOf = new Map<string, string>();
   mediaFiles.forEach((f, i) => {
     inputIndex.set(f, nInputs++);
+    pathOf.set(f, paths[i]);
     inputs.push("-i", paths[i]);
   });
   await Promise.all(
@@ -1217,6 +1235,7 @@ export async function runExport(
   // The turned copies: already probed at the bake.
   for (const [file, streams] of turned) {
     inputIndex.set(file, nInputs++);
+    pathOf.set(file, file);
     inputs.push("-i", file);
     audioPresence.set(file, streams.audio);
     videoPresence.set(file, streams.video);
@@ -1743,6 +1762,40 @@ export async function runExport(
     inputs.push("-i", file);
     baked.set(c, { ...bake, idx });
   }
+
+  /**
+   * One input per footage cut, seeked to that cut's span, instead of every cut
+   * trimming one shared decoder.
+   *
+   * `[0:v]trim=a:b` written N times makes ffmpeg split one decoder N ways, and
+   * `concat` reads those branches in order — so every branch past the one being
+   * read holds the frames already handed to it. What it holds grows with how
+   * long the encode runs, which is why a longer timeline dies where a short one
+   * survives, and why a slower preset dies earlier at the same length. Measured
+   * on one 30-cut 104s render, 1080x1920, veryfast, no subtitle lane:
+   *
+   *   one input, 30 trim branches   8,320MB
+   *   an input per cut              3,311MB
+   *
+   * Seeking at the input also skips decoding the head of each span, so a cut
+   * late in a long file no longer walks the file to reach its first frame.
+   *
+   * Left trimming in the graph: stills (no source span), removal clips (their
+   * picture is the keyed pair, not this file), and clips whose source is read
+   * twice over (a sound twin), where a second opening buys nothing.
+   */
+  const cutVideoInput = new Map<number, number>();
+  spec.clips.forEach((c, j) => {
+    if (c.image || clipRemovalInput.get(j) || c.hidden) return;
+    if (!c.file || !videoPresence.get(c.file)) return;
+    const src = pathOf.get(c.file);
+    if (!src) return;
+    const from = spanStart(c);
+    const span = Math.max(1 / fps, c.out - from);
+    cutVideoInput.set(j, nInputs++);
+    inputs.push("-ss", num(from), "-t", num(span), "-i", src);
+  });
+
   /**
    * The head of an audio chain reading a clip's sound over the timeline-local
    * window `[fromT, toT]` (seconds from the clip's head; negative reaches
@@ -2286,9 +2339,12 @@ export async function runExport(
       alphaSet(`rvc${j}`, `rva${j}`, `rvs${j}`, `rv${j}`, ",tpad=stop_mode=clone:stop_duration=1");
       timebase = `[rvs${j}]null`;
     } else {
+      const cutIdx = cutVideoInput.get(j);
       timebase = c.image
         ? `[${idx}:v]setpts=PTS-STARTPTS`
-        : sourceSpan(idx, c, rt);
+        : cutIdx === undefined
+          ? sourceSpan(idx, c, rt)
+          : seekedSpan(cutIdx, c, rt);
     }
     if ((c.image || rmIn || videoPresence.get(c.file)) && !c.hidden) {
       const region = regionPx(c.frame, W, H);
