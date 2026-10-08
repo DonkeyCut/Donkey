@@ -389,18 +389,41 @@ describe("export filtergraph timebases", () => {
   });
 });
 
-describe("cuts off one file", () => {
-  test("each stream of the file is fanned out by one split, so ffmpeg prepares each frame once", async () => {
-    const g = await graphFor({
-      clips: [clip("a.mp4", { in: 1, out: 3 }), clip("a.mp4", { in: 5, out: 8 }), clip("a.mp4", { in: 10, out: 12 })],
+describe("one input per cut", () => {
+  test("cuts off one file each open their own span, so no branch waits on another", async () => {
+    const runs = await runsFor({
+      clips: [
+        clip("a.mp4", { in: 1, out: 3 }),
+        clip("a.mp4", { in: 5, out: 8 }),
+        clip("a.mp4", { in: 10, out: 12 }),
+      ],
     });
-    expect(g.filter((f) => f.includes("[0:v]"))).toEqual(["[0:v]split=3[fan0_v_0][fan0_v_1][fan0_v_2]"]);
-    expect(g.filter((f) => f.includes("[0:a]"))).toEqual(["[0:a]asplit=3[fan0_a_0][fan0_a_1][fan0_a_2]"]);
-    expect(g.filter((f) => f.startsWith("[fan0_v_")).map((f) => f.slice(0, f.indexOf(",")))).toEqual([
-      "[fan0_v_0]trim=0.000:3.000",
-      "[fan0_v_1]trim=4.000:8.000",
-      "[fan0_v_2]trim=9.000:12.000",
+    const enc = runs.find((a) => a.includes("-filter_complex"))!;
+    const inputs = enc.slice(0, enc.indexOf("-filter_complex"));
+    const chain = enc[enc.indexOf("-filter_complex") + 1];
+    // The file is opened once for sound and once more per cut.
+    const opened = inputs.filter((p, i) => inputs[i - 1] === "-i");
+    expect(opened.filter((p) => p.endsWith("a.mp4"))).toHaveLength(4);
+    // Each span is cut at the input, preroll included: in 1 -> from 0,
+    // in 5 -> from 4, in 10 -> from 9.
+    expect(seeks(enc)).toEqual([
+      ["0.000", "3.000"],
+      ["4.000", "4.000"],
+      ["9.000", "3.000"],
     ]);
+    // So the picture never trims a shared decoder.
+    expect(chain).not.toContain(":v]trim=");
+    // Sound still trims in the graph, off one opening fanned out by one
+    // asplit: audio frames are small enough that holding them costs little.
+    expect(chain).toContain("[0:a]asplit=3[fan0_a_0][fan0_a_1][fan0_a_2]");
+    expect(chain).toContain("[fan0_a_0]atrim=");
+  });
+
+  test("a still has no source span, so it keeps reading its looped input", async () => {
+    const runs = await runsFor({ clips: [{ ...clip("a.png"), image: true }] });
+    const enc = runs.find((a) => a.includes("-filter_complex"))!;
+    expect(seeks(enc)).toHaveLength(0);
+    expect(enc[enc.indexOf("-filter_complex") + 1]).toContain(":v]setpts=PTS-STARTPTS");
   });
 });
 
@@ -408,7 +431,7 @@ describe("a speed curve in the filtergraph", () => {
   test("a curved clip lays its picture through the map and reads baked sound", async () => {
     const curved = clip("a.mp4", { speedCurve: [[0, 1], [4, 4]] });
     const g = await graphFor({ clips: [curved, clip("b.mp4")] });
-    const video = g.find((f) => f.startsWith("[0:v]trim="))!;
+    const video = pictureAt(g, 0);
     expect(video).toContain("setpts='(clip(T-0,0,");
     expect(video).not.toContain("(PTS-STARTPTS)/");
     // The baked WAV joins the inputs after the two media files, and the
@@ -425,11 +448,11 @@ describe("a speed curve in the filtergraph", () => {
 describe("smooth slow motion in the filtergraph", () => {
   test("a slowed clip runs motion interpolation over its whole span", async () => {
     const g = await graphFor({ clips: [clip("a.mp4", { speed: 0.5, smoothSlow: true }), clip("b.mp4")] });
-    const video = g.find((f) => f.startsWith("[0:v]trim="))!;
+    const video = pictureAt(g, 0);
     expect(video).toContain("minterpolate=fps=30:mi_mode=mci");
     expect(video).not.toContain("split=");
     // The plain clip beside it is untouched.
-    expect(g.find((f) => f.startsWith("[1:v]trim="))).not.toContain("minterpolate");
+    expect(pictureAt(g, 1)).not.toContain("minterpolate");
   });
 
   test("a curve that dips is interpolated in the dip alone", async () => {
@@ -443,7 +466,7 @@ describe("smooth slow motion in the filtergraph", () => {
       ],
     });
     const g = await graphFor({ clips: [curved, clip("b.mp4")] });
-    const head = g.find((f) => f.startsWith("[0:v]trim="))!;
+    const head = pictureAt(g, 0);
     expect(head).toContain("split=3[smic0_0][smic0_1][smic0_2]");
     const pieces = g.filter((f) => f.startsWith("[smic0_"));
     expect(pieces.length).toBe(3);
@@ -456,15 +479,17 @@ describe("smooth slow motion in the filtergraph", () => {
 
   test("a curve stamps the preroll before 0, so interpolation never sees it", async () => {
     // The 1 s preroll ahead of the in point must land before 0 for the
-    // interpolation's trim=start=0 to drop it: 4.5 s is preroll, 5 s the in point.
+    // interpolation's trim=start=0 to drop it. The input opens at the preroll
+    // (source 4 s) and `-ss` restamps it to 0, so the in point sits at T=1 and
+    // the preroll runs T=0..1 — the same picture, read on the seeked clock.
     const curved = clip("a.mp4", { in: 5, out: 9, smoothSlow: true, speedCurve: [[0, 0.5], [4, 0.5]] });
-    const head = (await graphFor({ clips: [curved] })).find((f) => f.startsWith("[0:v]trim="))!;
+    const head = pictureAt(await graphFor({ clips: [curved] }), 0);
     expect(head).toContain("trim=start=0,");
     const expr = /setpts='([^']+)'/.exec(head)![1];
     const at = (T: number) =>
       new Function("T", "TB", "clip", "min", `return ${expr};`)(T, 1, (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x)), Math.min) as number;
-    expect(at(4.5)).toBeLessThan(0);
-    expect(at(5)).toBeCloseTo(0, 6);
+    expect(at(0.5)).toBeLessThan(0);
+    expect(at(1)).toBeCloseTo(0, 6);
     expect(at(5.5)).toBeGreaterThan(0);
   });
 
@@ -1009,8 +1034,11 @@ describe("a reversed clip in the filtergraph", () => {
     expect(inputs.some((p) => p.endsWith("turned_clip_0.mov"))).toBe(true);
     const idx = inputs.filter((p, i) => inputs[i - 1] === "-i").findIndex((p) => p.endsWith("turned_clip_0.mov"));
     const g = graph[graph.indexOf("-filter_complex") + 1].split(";");
-    const video = g.find((f) => f.startsWith(`[${idx}:v]trim=`))!;
-    expect(video).toContain("trim=0.000:7.000,setpts=(PTS-1.000/TB)/2.000");
+    const video = pictureAt(g, 0);
+    // The mirrored span is cut at the input now; the re-stamp is unchanged.
+    expect(seeks(graph).some(([ss, t]) => ss === "0.000" && t === "7.000")).toBe(true);
+    expect(video).toContain("setpts=(PTS-1.000/TB)/2.000");
+    expect(video.startsWith("[2:v]setpts=")).toBe(true);
     expect(video).not.toContain("reverse");
     const audio = g.find((f) => f.startsWith(`[${idx}:a]atrim=`))!;
     expect(audio).toContain("atrim=1.000:7.000");
@@ -1029,8 +1057,8 @@ describe("a reversed clip in the filtergraph", () => {
       reverse: true,
     });
     const g = await graphFor({ clips: [curved, clip("b.mp4")] });
-    const video = g.find((f) => f.startsWith("[1:v]trim="))!;
-    expect(video).toContain("trim=0.000:4.000,setpts='(clip(T-0,0,");
+    const video = pictureAt(g, 0);
+    expect(video).toContain("setpts='(clip(T-0,0,");
     const first = g.find((f) => f.includes("apad=whole_dur="))!;
     expect(first).toContain(`apad=whole_dur=${retimeOf(curved).len.toFixed(3)}`);
   });
@@ -1046,6 +1074,16 @@ const encodeRun = async (over: Partial<ExportSpec>) => {
   return runs.find((a) => a.includes("-filter_complex"))!;
 };
 const arg = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
+
+/** A clip's picture chain, in clip order — footage now reads a seeked input
+ * (`setpts=`) where it used to trim a shared one (`trim=`), and a still has
+ * always read its looped input straight. */
+const pictureAt = (g: string[], nth: number) =>
+  g.filter((f) => /^\[\d+:v\](trim=|setpts=)/.test(f))[nth]!;
+
+/** The `-ss`/`-t` pairs ffmpeg is handed, in input order. */
+const seeks = (args: string[]) =>
+  args.flatMap((v, i) => (v === "-ss" ? [[args[i + 1], args[i + 3]] as const] : []));
 
 describe("delivery", () => {
   test("source bitrates reach the worker and Mac encoders", async () => {
@@ -1179,7 +1217,8 @@ describe("delivery", () => {
   test("no range delivers the whole cut", async () => {
     const args = await encodeRun({ duration: 20 });
     expect(arg(args, "-filter_complex")).not.toContain("[vrange]");
-    expect(arg(args, "-t")).toBe("20.000");
+    // Inputs carry their own `-t` now, so read the one on the output side.
+    expect(args[args.lastIndexOf("-t") + 1]).toBe("20.000");
   });
 });
 
@@ -1220,7 +1259,7 @@ describe("clip color in the filtergraph", () => {
     expect(cubes).toHaveLength(1);
     expect(cubes[0].file).toBe(path.join("/tmp/graph-test", "clip_0.cube"));
     expect(cubes[0].data).toContain("LUT_3D_SIZE 33");
-    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    const line = pictureAt(g, 0);
     // The framing scale spells the file's matrix and range; the picture goes
     // to 16-bit RGB, through the LUT, and comes back as BT.709 video before
     // the letterbox pad.
@@ -1246,7 +1285,7 @@ describe("clip color in the filtergraph", () => {
       lutSizeWide: 65,
       clips: [clip("log.mov", { color: { profile: "apple-log", matrix: "bt2020nc", fullRange: false } })],
     });
-    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    const line = pictureAt(g, 0);
     expect(line).toMatch(/scale=[^,]*in_color_matrix=bt2020:in_range=tv/);
     expect(line).toContain("format=gbrp16le,lut3d=file=");
     expect(written.find((w) => w.file.endsWith(".cube"))!.data).toContain("LUT_3D_SIZE 65");
@@ -1256,7 +1295,7 @@ describe("clip color in the filtergraph", () => {
     const g = await graphFor({
       clips: [clip("sd.mp4", { color: { profile: "rec709", matrix: "bt601", fullRange: true } })],
     });
-    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    const line = pictureAt(g, 0);
     expect(line).not.toContain("lut3d");
     expect(line).toContain("scale:in_color_matrix=bt601:in_range=pc:out_color_matrix=bt709:out_range=tv");
     expect(line.indexOf("out_range=tv")).toBeLessThan(line.indexOf("pad=1080:1920"));
@@ -1267,7 +1306,7 @@ describe("clip color in the filtergraph", () => {
       clips: [clip("a.mp4", { grade: { exposure: 5, sharpen: 25, clarity: 30 } })],
     });
     const joined = g.join(";");
-    const head = g.find((l) => l.startsWith("[0:v]"))!;
+    const head = pictureAt(g, 0);
     expect(head).toContain("lut3d=file=");
     expect(head).toMatch(/scale=out_color_matrix=bt709:out_range=pc,format=yuv444p16le\[dtic0\]$/);
     // The detail pass: bases from the input luma, gained detail merged back.
@@ -1345,7 +1384,7 @@ describe("clip color in the filtergraph", () => {
     const g = await graphFor({
       clips: [clip("a.mp4", { speed: 0.5, smoothSlow: true, grade: { exposure: 5 } })],
     });
-    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    const line = pictureAt(g, 0);
     expect(line).toContain("minterpolate=");
     expect(line.indexOf("minterpolate=")).toBeLessThan(line.indexOf("scale:in_color_matrix=bt709:in_range=tv,format=gbrp16le,lut3d"));
   });
@@ -1388,7 +1427,7 @@ describe("an HDR delivery", () => {
 
   test("composites at ten bits in HLG: every clip maps into Rec.2020 and comes back as 10-bit video", async () => {
     const g = await graphFor(hdrSpec());
-    const line = g.find((l) => l.startsWith("[0:v]"))!;
+    const line = pictureAt(g, 0);
     // An ungraded Rec.709 clip is a conversion here, so it takes the LUT.
     expect(line).toMatch(/scale=[^,]*in_color_matrix=bt709:in_range=tv/);
     expect(line).toContain("format=gbrp16le,lut3d=file=");
@@ -1405,9 +1444,9 @@ describe("an HDR delivery", () => {
   test("an HLG file ungraded runs no LUT, and a graded one grades in place", async () => {
     const hlg = { profile: "hlg" as const, matrix: "bt2020nc" as const, fullRange: false };
     const plain = await graphFor(hdrSpec({ clips: [clip("h.mp4", { color: hlg })] }));
-    expect(plain.find((l) => l.startsWith("[0:v]"))).not.toContain("lut3d");
+    expect(pictureAt(plain, 0)).not.toContain("lut3d");
     const graded = await graphFor(hdrSpec({ clips: [clip("h.mp4", { color: hlg, grade: { exposure: 10 } })] }));
-    const line = graded.find((l) => l.startsWith("[0:v]"))!;
+    const line = pictureAt(graded, 0);
     expect(line).toMatch(/scale=[^,]*in_color_matrix=bt2020:in_range=tv/);
     expect(line).toContain("lut3d=file=");
     expect(line).toContain("scale=out_color_matrix=bt2020:out_range=tv");
