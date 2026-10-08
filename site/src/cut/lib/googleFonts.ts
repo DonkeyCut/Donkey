@@ -14,8 +14,12 @@ import "@fontsource/inter/400.css";
 import "@fontsource/inter/700.css";
 import "@fontsource/montserrat/400.css";
 import "@fontsource/montserrat/700.css";
+import "@fontsource/montserrat/800.css";
+import "@fontsource/montserrat/900.css";
 import "@fontsource/poppins/400.css";
 import "@fontsource/poppins/700.css";
+import "@fontsource/poppins/800.css";
+import "@fontsource/poppins/900.css";
 import "@fontsource/oswald/400.css";
 import "@fontsource/oswald/700.css";
 import "@fontsource/space-grotesk/400.css";
@@ -35,6 +39,13 @@ import "@fontsource/lobster/400.css";
 import "@fontsource/pacifico/400.css";
 import "@fontsource/permanent-marker/400.css";
 import "@fontsource/dm-serif-display/400.css";
+import "@fontsource/amatic-sc/400.css";
+import "@fontsource/amatic-sc/700.css";
+// Light and Bold only, so a 400 title matches the thin Light LCD face.
+import "@fontsource/dseg14-classic/300.css";
+import "@fontsource/dseg14-classic/300-italic.css";
+import "@fontsource/dseg14-classic/700.css";
+import "@fontsource/dseg14-classic/700-italic.css";
 import { GOOGLE_FONTS } from "./fontCatalog";
 import { registerFonts } from "./types";
 

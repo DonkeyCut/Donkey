@@ -24,8 +24,8 @@ const require = createRequire(import.meta.url);
  * the page. An id here is a Cut font id; a family with no id is a stand-in. */
 const FAMILIES = [
   { id: "inter", label: "Inter", family: "Inter", weights: [400, 700] },
-  { id: "montserrat", label: "Montserrat", family: "Montserrat", weights: [400, 700] },
-  { id: "poppins", label: "Poppins", family: "Poppins", weights: [400, 700] },
+  { id: "montserrat", label: "Montserrat", family: "Montserrat", weights: [400, 700, 800, 900] },
+  { id: "poppins", label: "Poppins", family: "Poppins", weights: [400, 700, 800, 900] },
   { id: "oswald", label: "Oswald", family: "Oswald", weights: [400, 700] },
   { id: "space-grotesk", label: "Space Grotesk", family: "Space Grotesk", weights: [400, 700] },
   {
@@ -50,6 +50,16 @@ const FAMILIES = [
   { id: "pacifico", label: "Pacifico", family: "Pacifico", weights: [400] },
   { id: "permanent-marker", label: "Permanent Marker", family: "Permanent Marker", weights: [400] },
   { id: "dm-serif", label: "DM Serif Display", family: "DM Serif Display", weights: [400] },
+  { id: "amatic", label: "Amatic SC", family: "Amatic SC", weights: [400, 700] },
+  // Light and Bold only: font matching draws a 400 title in the Light face,
+  // the thin LCD look, and 700–900 in Bold.
+  {
+    id: "dseg14",
+    label: "DSEG14 Classic",
+    family: "DSEG14 Classic",
+    weights: [300, 700],
+    italics: [300, 700],
+  },
   {
     family: "Roboto",
     weights: [400, 700],

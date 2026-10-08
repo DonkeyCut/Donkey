@@ -29,6 +29,8 @@ export const GOOGLE_FONTS: BundledFont[] = [
   { id: "pacifico", label: "Pacifico" },
   { id: "permanent-marker", label: "Permanent Marker" },
   { id: "dm-serif", label: "DM Serif Display" },
+  { id: "amatic", label: "Amatic SC" },
+  { id: "dseg14", label: "DSEG14 Classic" },
 ];
 
 export const GOOGLE_FONT_IDS = GOOGLE_FONTS.map((f) => f.id);
