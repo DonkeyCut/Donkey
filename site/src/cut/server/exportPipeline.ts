@@ -8,7 +8,7 @@ import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions } from "./util";
 import { xfadeTransition } from "./transitionExpr";
-import { assertGraphSafe, fexpr } from "./filterGraph";
+import { assertGraphSafe, fanOutInputs, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
 import { bakeTurnedMedia } from "./turnMedia";
 import { withSpecColors } from "./fileColor";
@@ -3253,7 +3253,7 @@ export async function runExport(
     [
       "-y",
       ...inputs,
-      "-filter_complex", assertGraphSafe(filters.join(";")),
+      "-filter_complex", assertGraphSafe(fanOutInputs(filters).join(";")),
       "-map", `[${vLabel}]`,
       ...(master ? [] : ["-map", `[${aLabel}]`]),
       ...videoCodecArgs(enc, spec),

@@ -389,6 +389,21 @@ describe("export filtergraph timebases", () => {
   });
 });
 
+describe("cuts off one file", () => {
+  test("each stream of the file is fanned out by one split, so ffmpeg prepares each frame once", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4", { in: 1, out: 3 }), clip("a.mp4", { in: 5, out: 8 }), clip("a.mp4", { in: 10, out: 12 })],
+    });
+    expect(g.filter((f) => f.includes("[0:v]"))).toEqual(["[0:v]split=3[fan0_v_0][fan0_v_1][fan0_v_2]"]);
+    expect(g.filter((f) => f.includes("[0:a]"))).toEqual(["[0:a]asplit=3[fan0_a_0][fan0_a_1][fan0_a_2]"]);
+    expect(g.filter((f) => f.startsWith("[fan0_v_")).map((f) => f.slice(0, f.indexOf(",")))).toEqual([
+      "[fan0_v_0]trim=0.000:3.000",
+      "[fan0_v_1]trim=4.000:8.000",
+      "[fan0_v_2]trim=9.000:12.000",
+    ]);
+  });
+});
+
 describe("a speed curve in the filtergraph", () => {
   test("a curved clip lays its picture through the map and reads baked sound", async () => {
     const curved = clip("a.mp4", { speedCurve: [[0, 1], [4, 4]] });
