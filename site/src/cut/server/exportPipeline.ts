@@ -2692,8 +2692,24 @@ export async function runExport(
     );
     segLabel[j] = `vg${j}`;
   });
-  let vAcc = segLabel[0];
-  let aAcc = "a0";
+  // A run of joins that concat — hard cuts and cross dissolves, whose sound
+  // crosses on its own streams — is one concat over the whole run. A chain
+  // of two-way concats would hold every frame handed to a segment it has not
+  // reached at each link it waits behind, so its memory grew with the cut
+  // count; one concat reads its segments in turn. concat emits a microsecond
+  // timebase with no frame-rate stamp, and a later transitioned join hands
+  // the run to xfade, which demands both inputs carry the same 1/fps stamp —
+  // re-stamp it.
+  let runV = [segLabel[0]];
+  let runA = ["a0"];
+  const joinRun = (j: number): [string, string] => {
+    if (runV.length === 1) {
+      return [runV[0], runA[0]];
+    }
+    filters.push(`${runV.map((l) => `[${l}]`).join("")}concat=n=${runV.length}:v=1:a=0,fps=${fps}[vj${j}]`);
+    filters.push(`${runA.map((l) => `[${l}]`).join("")}concat=n=${runA.length}:v=0:a=1[aj${j}]`);
+    return [`vj${j}`, `aj${j}`];
+  };
   // Running timeline length of the accumulator, on the frame grid.
   const gridEnd = (j: number) => (segFrames[j].first + segFrames[j].count) / fps;
   let acc = gridEnd(0);
@@ -2703,36 +2719,29 @@ export async function runExport(
     // The blend can't exceed most of either clip, matching the editor clamp.
     const d = Math.min(prev.transition ?? 0, acc * 0.9, durJ * 0.9);
     const cross = Math.min(prev.soundCross ?? 0, acc * 0.9, durJ * 0.9);
-    const vOut = `vj${j}`;
-    const aOut = `aj${j}`;
-    if (cross > 0.01) {
-      // The picture cuts: concat, re-stamped for a later xfade the same way
-      // a plain join is. The sound crosses the cut — its ramps are already on
-      // the two segments, and the halves that reach past the cut ride their
-      // own streams into the mix, so the join here is a plain one.
-      filters.push(`[${vAcc}][${segLabel[j]}]concat=n=2:v=1:a=0,fps=${fps}[${vOut}]`);
-      filters.push(`[${aAcc}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
-    } else if (d > 0.01) {
+    if (cross > 0.01 || d <= 0.01) {
+      // The picture cuts: the segment joins the run. A cross dissolve's sound
+      // ramps are already on the two segments, and the halves that reach
+      // past the cut ride their own streams into the mix.
+      runV.push(segLabel[j]);
+      runA.push(`a${j}`);
+    } else {
+      const [vAcc, aAcc] = joinRun(j - 1);
       const offset = Math.max(0, acc - d);
       // The style id resolves through the allowlist map; anything unknown
       // (or an old spec without a style) renders as a plain fade. The shaped
       // and softened styles come back as xfade expressions.
       const kind = xfadeTransition(prev.transitionStyle, prev.transitionFeather, d, W, H);
       filters.push(`[${segLabel[j]}]tpad=start_duration=${num(d)}:start_mode=clone[vh${j}]`);
-      filters.push(`[${vAcc}][vh${j}]xfade=${kind}:duration=${num(d)}:offset=${num(offset)}[${vOut}]`);
+      filters.push(`[${vAcc}][vh${j}]xfade=${kind}:duration=${num(d)}:offset=${num(offset)}[vx${j}]`);
       filters.push(`[${aAcc}]afade=t=out:st=${num(offset)}:d=${num(d)}[ah${j}]`);
-      filters.push(`[ah${j}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
-    } else {
-      // concat emits a microsecond timebase with no frame-rate stamp, and a
-      // later transitioned join hands this accumulator to xfade, which
-      // demands both of its inputs carry the same 1/fps stamp — re-stamp it.
-      filters.push(`[${vAcc}][${segLabel[j]}]concat=n=2:v=1:a=0,fps=${fps}[${vOut}]`);
-      filters.push(`[${aAcc}][a${j}]concat=n=2:v=0:a=1[${aOut}]`);
+      filters.push(`[ah${j}][a${j}]concat=n=2:v=0:a=1[ax${j}]`);
+      runV = [`vx${j}`];
+      runA = [`ax${j}`];
     }
     acc = gridEnd(j);
-    vAcc = vOut;
-    aAcc = aOut;
   }
+  const [vAcc, aAcc] = joinRun(spec.clips.length - 1);
 
   // Composite the video stack bottom→top: the overlay tracks draw over the
   // track-0 base in track order. A full-frame layer covers; a regioned one
