@@ -627,22 +627,7 @@ const SOURCE_PREROLL = 1;
  * screen at the in point comes along (stamped before 0) and the re-stamp to
  * the output rate shows it on the clip's first frame. */
 const sourceSpan = (idx: number, c: { in: number; out: number }, rt: Retime) =>
-  `[${idx}:v]trim=${num(spanStart(c))}:${num(c.out)},setpts=${retimedPts(rt, c.in)}`;
-
-/** Where a footage clip's span starts in its source, preroll included. */
-const spanStart = (c: { in: number }) => Math.max(0, c.in - SOURCE_PREROLL);
-
-/**
- * The same span read off an input already seeked to it, so the picture never
- * trims inside the graph.
- *
- * `-ss` before `-i` restamps the seeked input to start at 0, so the in point
- * sits at `c.in - spanStart(c)` — the preroll it kept — and the re-stamp
- * measures from there. Everything downstream sees the frames and timestamps
- * the trimmed chain produced.
- */
-const seekedSpan = (idx: number, c: { in: number }, rt: Retime) =>
-  `[${idx}:v]setpts=${retimedPts(rt, c.in - spanStart(c))}`;
+  `[${idx}:v]trim=${num(Math.max(0, c.in - SOURCE_PREROLL))}:${num(c.out)},setpts=${retimedPts(rt, c.in)}`;
 
 /** A curve clamps everything before its first knot to 0; the preroll keeps
  * its own seconds before 0, as one rate does, so a trim at 0 drops it. */
@@ -762,6 +747,149 @@ const spanLen = (c: { in: number; out: number; speed?: number; speedCurve?: Spee
  * still shapes. */
 const RANGE_SLACK_S = 0.5;
 
+/** Source seconds a file's input opens ahead of the earliest read the graph
+ * makes of it, and the earliest it seeks to at all: a file read from near
+ * its start opens as it is. The seek lands on a whole second, a point on
+ * every sample and frame grid. */
+const READ_MARGIN_S = 1;
+const READ_SEEK_MIN_S = 10;
+
+/** How far past a range's edges a clip still shapes the frames inside it. */
+const rangeReach = (spec: ExportSpec) =>
+  Math.max(
+    0,
+    ...spec.clips.map((c) => Math.max(c.transition ?? 0, c.soundCross ?? 0, c.soundAhead ?? 0, c.soundBack ?? 0))
+  ) + RANGE_SLACK_S;
+
+/**
+ * What one encode pass may hold for its pieces — track-0 clips, layered clips
+ * and elements. Every piece's input is primed when the graph opens and its
+ * chain keeps frames through the encode, about PIECE_FRAMES of its source's
+ * size or the delivery's, whichever is larger; cuts played out of file order
+ * add the frames their decoder holds until their turn. One pass over a long
+ * timeline grows with it, and passes held to this budget stay flat; a larger
+ * budget means fewer passes, each decoding the stretch of file its cuts span.
+ * PASS_PIECES caps the count whatever the size: each piece brings a decoder
+ * and its threads.
+ */
+const PASS_HOLD_BYTES = 2 * 1024 * 1024 * 1024;
+const PIECE_FRAMES = 16;
+const PASS_PIECES = 48;
+
+/** A source's decoded picture: its size in pixels and its frame rate. */
+export type SourcePicture = { pixels: number; fps: number };
+
+/** A piece of one window: its timeline span and, for footage, the file and
+ * the source seconds its picture reads. */
+type PassSpan = { start: number; end: number; file: string; lo?: number; hi?: number };
+
+/**
+ * Seconds of source a file's one decoder holds at most for the window's cuts
+ * still to come. The decoder reads each file forward once and the join takes
+ * cuts in timeline order, so a cut that sits later in the timeline than in the
+ * file waits as frames until its turn. Cuts read in file order hold nothing:
+ * 0–2, 5–7, 9–11 hold 0 s; 9–11, 0–2, 5–7 hold the 4 s of 0–2 and 5–7 the
+ * decoder passes on its way to 11.
+ */
+function heldSeconds(cuts: PassSpan[]): number {
+  const order = [...cuts].sort((x, y) => x.start - y.start);
+  let reached = -Infinity;
+  let most = 0;
+  for (const [i, cut] of order.entries()) {
+    reached = Math.max(reached, cut.hi!);
+    const held = order.slice(i + 1).reduce((sum, c) => sum + Math.max(0, Math.min(c.hi!, reached) - c.lo!), 0);
+    most = Math.max(most, held);
+  }
+  return most;
+}
+
+/**
+ * The delivery cut into the windows it renders in, one pass each: every
+ * window touches at most `cap` pieces, and their primed frames plus the frames
+ * its decoders hold for cuts out of file order stay within PASS_HOLD_BYTES
+ * (with the reach a range keeps); each window ends on a frame at a piece's
+ * start. `sourceOf` is a file's decoded picture. A delivery under the budget
+ * is one window. Each pass is a range export, so its frames and samples are
+ * the ones the whole composite has there, and the windows laid end to end
+ * are the delivery.
+ */
+export function passWindows(
+  spec: ExportSpec,
+  sourceOf: (file: string) => SourcePicture,
+  cap: number = PASS_PIECES
+): ExportRange[] {
+  const from = Math.max(0, spec.range?.start ?? 0);
+  const to = Math.min(spec.duration, spec.range?.end ?? spec.duration);
+  const reach = rangeReach(spec);
+  const frameBytes = (file: string) => 1.5 * Math.max(sourceOf(file).pixels, spec.width * spec.height);
+
+  // Every piece the graph builds a chain for, as a timeline span, with the
+  // source a footage piece's picture reads.
+  const spans: PassSpan[] = [];
+  const footage = (c: Parameters<typeof retimeOf>[0] & { image?: boolean }): Pick<PassSpan, "lo" | "hi"> => {
+    if (c.image) {
+      return {};
+    }
+    const rt = retimeOf(c);
+    const { lo, hi } = srcSpan(rt, 0, rt.len);
+    return { lo: Math.max(0, lo - SOURCE_PREROLL), hi };
+  };
+  let cursor = 0;
+  for (const c of spec.clips) {
+    spans.push({ start: cursor, end: cursor + spanLen(c), file: c.file, ...footage(c) });
+    cursor += spanLen(c);
+  }
+  for (const o of spec.overlayVideos ?? []) {
+    spans.push({ start: o.start, end: o.start + spanLen(o), file: o.file, ...footage(o) });
+  }
+  for (const o of spec.overlays) {
+    spans.push({ start: o.start, end: o.end, file: "" });
+  }
+
+  // A window fits when its pieces' primed frames and its decoders' waiting
+  // ones come in under the budget.
+  const fits = (a: number, b: number) => {
+    const held = spans.filter((s) => s.end >= a - reach && s.start <= b + reach);
+    if (held.length > cap) {
+      return false;
+    }
+    let bytes = held.reduce((sum, s) => sum + PIECE_FRAMES * frameBytes(s.file), 0);
+    for (const file of new Set(held.filter((s) => s.lo !== undefined).map((s) => s.file))) {
+      const cuts = held.filter((s) => s.file === file && s.lo !== undefined);
+      bytes += heldSeconds(cuts) * sourceOf(file).fps * frameBytes(file);
+    }
+    return bytes <= PASS_HOLD_BYTES;
+  };
+
+  // Window edges sit on whole frames at piece starts, so each pass's trim
+  // takes exactly the frames between two edges.
+  const edges = [...new Set(spans.map((s) => gridFrame(s.start, spec.fps) / spec.fps))]
+    .filter((t) => t > from && t < to)
+    .sort((a, b) => a - b);
+
+  // Each window runs to the furthest edge that keeps it within the budget; a
+  // window whose first edge is already over still ends there.
+  const windows: ExportRange[] = [];
+  let start = from;
+  while (!fits(start, to)) {
+    const next = edges.filter((t) => t > start);
+    if (next.length === 0) {
+      break;
+    }
+    let end = next[0];
+    for (const t of next) {
+      if (!fits(start, t)) {
+        break;
+      }
+      end = t;
+    }
+    windows.push({ start, end });
+    start = end;
+  }
+  windows.push({ start, end: to });
+  return windows;
+}
+
 /**
  * The spec with everything that cannot reach the range taken out of the
  * graph's way: a track-0 clip whose slot ends before the range or starts
@@ -774,13 +902,7 @@ const RANGE_SLACK_S = 0.5;
  */
 export function narrowSpecToRange(spec: ExportSpec): ExportSpec {
   if (!spec.range) return spec;
-  const reach =
-    Math.max(
-      0,
-      ...spec.clips.map((c) =>
-        Math.max(c.transition ?? 0, c.soundCross ?? 0, c.soundAhead ?? 0, c.soundBack ?? 0)
-      )
-    ) + RANGE_SLACK_S;
+  const reach = rangeReach(spec);
   const from = Math.max(0, spec.range.start) - reach;
   const to = Math.min(spec.duration, spec.range.end) + reach;
   const inside = (start: number, end: number) => end >= from && start <= to;
@@ -912,12 +1034,14 @@ const realIO: ExportPipelineIO = {
 /** Render `spec` into `job.outPath`. `mediaPathFor` maps a spec media file
  * name to its staged path on disk (the engine reads the project folder; the
  * worker reads its download dir); overlay/caption PNGs are read from
- * `job.tmpDir` by base name in both. */
+ * `job.tmpDir` by base name in both. `passPieces` caps the pieces one encode
+ * pass opens (see passWindows). */
 export async function runExport(
   job: RenderHandle,
   given: ExportSpec,
   mediaPathFor: (file: string) => string,
-  io: ExportPipelineIO = realIO
+  io: ExportPipelineIO = realIO,
+  passPieces: number = PASS_PIECES
 ) {
   if (given.clips.length === 0) throw new Error("Nothing to export.");
   const codec = given.codec ?? "h264";
@@ -935,6 +1059,47 @@ export async function runExport(
     }
     if (await io.exportSourceFiles(job, mediaPathFor, given.sourceSegments, codec, given.audioBitrate)) return;
   }
+
+  // A long delivery renders in passes held to a memory budget, joined into
+  // the one file at the end. A piece's cost follows its source's size and
+  // frame rate.
+  const pictures = new Map<string, SourcePicture>();
+  const footage = [...given.clips, ...(given.overlayVideos ?? [])].filter((c) => c.file && !c.image && !c.removal);
+  await Promise.all(
+    [...new Set(footage.map((c) => c.file))].map(async (file) => {
+      const at = await resolveMedia(io.stat, mediaPathFor, file);
+      const [dims, perSecond] = await Promise.all([io.videoDimensions(at), io.videoDecodeCost(at)]);
+      const pixels = dims ? dims.width * dims.height : 0;
+      pictures.set(file, { pixels, fps: pixels > 0 && perSecond ? perSecond / (1.5 * pixels) : given.fps });
+    })
+  );
+  const windows = passWindows(given, (file) => pictures.get(file) ?? { pixels: 0, fps: given.fps }, passPieces);
+  if (windows.length === 1) {
+    await renderPass(job, given, mediaPathFor, io, { kind: "delivery" });
+    return;
+  }
+  await renderInPasses(job, given, windows, mediaPathFor, io);
+}
+
+/**
+ * Where one pass's render lands: the delivery itself, or a piece of a
+ * delivery rendered in passes — its picture encoded for the delivery, its mix
+ * and stems as sound to lay end to end — with the share of the job's
+ * progress the pass covers.
+ */
+type PassOutput =
+  | { kind: "delivery" }
+  | { kind: "piece"; video: string; mix: string; stems: string[]; progress: [number, number] };
+
+/** One encode pass over `given`, composited whole and cut to its range. */
+async function renderPass(
+  job: RenderHandle,
+  given: ExportSpec,
+  mediaPathFor: (file: string) => string,
+  io: ExportPipelineIO,
+  out: PassOutput
+) {
+  const codec = given.codec ?? "h264";
   let spec = await withSpecColors(narrowSpecToRange(given), mediaPathFor);
   const { width: W, height: H, fps } = spec;
 
@@ -1166,11 +1331,12 @@ export async function runExport(
   // plus one per uploaded overlay PNG.
   // Still images are excluded here: a plain `-i file` decodes one frame, so
   // each image clip/overlay gets its own looped input below instead. Gap
-  // spacers (empty file) reference no media at all — they render as black.
+  // spacers (empty file) reference no media at all — they render as black,
+  // and so do hidden clips outside a range, whose files stay closed.
   const mediaFiles = [
     ...new Set(
       [
-        ...spec.clips.filter((c) => !c.image),
+        ...spec.clips.filter((c) => !c.image && !c.hidden),
         ...spec.audio,
         ...overlayVideos.filter((o) => !o.image),
       ]
@@ -1196,12 +1362,21 @@ export async function runExport(
   // Resolve paths in order first so ffmpeg input indices stay deterministic,
   // then probe every file's streams concurrently.
   const paths = await Promise.all(mediaFiles.map((f) => resolveMedia(io.stat, mediaPathFor, f)));
-  // file → the path ffmpeg opens, so a cut can open its own span below.
-  const pathOf = new Map<string, string>();
+  // Each file opens at the earliest source second the graph reads of it, so
+  // a pass deep into a long recording never decodes the file from its start.
+  // Re-stamped by the same amount, the input carries the timestamps an
+  // unseeked one does, and every trim below reads it unchanged.
+  const readFrom = new Map<string, number>();
+  const readers = [...spec.clips.filter((c) => !c.hidden && !c.image), ...overlayVideos.filter((o) => !o.image), ...spec.audio];
+  for (const c of readers) {
+    const back = "soundBack" in c ? (c.soundBack ?? 0) : 0;
+    const lo = srcSpan(retimeOf(c), -back, 0).lo - SOURCE_PREROLL - READ_MARGIN_S;
+    readFrom.set(c.file, Math.min(readFrom.get(c.file) ?? Infinity, lo));
+  }
   mediaFiles.forEach((f, i) => {
     inputIndex.set(f, nInputs++);
-    pathOf.set(f, paths[i]);
-    inputs.push("-i", paths[i]);
+    const at = Math.floor(readFrom.get(f) ?? 0);
+    inputs.push(...(at >= READ_SEEK_MIN_S ? ["-ss", num(at), "-itsoffset", num(at)] : []), "-i", paths[i]);
   });
   await Promise.all(
     mediaFiles.map(async (f, i) => {
@@ -1235,7 +1410,6 @@ export async function runExport(
   // The turned copies: already probed at the bake.
   for (const [file, streams] of turned) {
     inputIndex.set(file, nInputs++);
-    pathOf.set(file, file);
     inputs.push("-i", file);
     audioPresence.set(file, streams.audio);
     videoPresence.set(file, streams.video);
@@ -1294,7 +1468,9 @@ export async function runExport(
   const imageClipInput = new Map<number, number>();
   for (let j = 0; j < spec.clips.length; j++) {
     const c = spec.clips[j];
-    if (!c.image || !c.file) continue;
+    if (!c.image || !c.file || c.hidden) {
+      continue;
+    }
     const dur = spanLen(c);
     imageClipInput.set(j, nInputs++);
     inputs.push(
@@ -1411,7 +1587,9 @@ export async function runExport(
   const clipRemovalInput = new Map<number, { rgb: number; a: number }>();
   for (let j = 0; j < spec.clips.length; j++) {
     const c = spec.clips[j];
-    if (c.removal) clipRemovalInput.set(j, removalInputs(c.removal));
+    if (c.removal && !c.hidden) {
+      clipRemovalInput.set(j, removalInputs(c.removal));
+    }
   }
   const overlayRemovalInput = new Map<(typeof overlayVideos)[number], { rgb: number; a: number }>();
   for (const oc of overlayVideos) {
@@ -1762,40 +1940,6 @@ export async function runExport(
     inputs.push("-i", file);
     baked.set(c, { ...bake, idx });
   }
-
-  /**
-   * One input per footage cut, seeked to that cut's span, instead of every cut
-   * trimming one shared decoder.
-   *
-   * `[0:v]trim=a:b` written N times makes ffmpeg split one decoder N ways, and
-   * `concat` reads those branches in order — so every branch past the one being
-   * read holds the frames already handed to it. What it holds grows with how
-   * long the encode runs, which is why a longer timeline dies where a short one
-   * survives, and why a slower preset dies earlier at the same length. Measured
-   * on one 30-cut 104s render, 1080x1920, veryfast, no subtitle lane:
-   *
-   *   one input, 30 trim branches   8,320MB
-   *   an input per cut              3,311MB
-   *
-   * Seeking at the input also skips decoding the head of each span, so a cut
-   * late in a long file no longer walks the file to reach its first frame.
-   *
-   * Left trimming in the graph: stills (no source span), removal clips (their
-   * picture is the keyed pair, not this file), and clips whose source is read
-   * twice over (a sound twin), where a second opening buys nothing.
-   */
-  const cutVideoInput = new Map<number, number>();
-  spec.clips.forEach((c, j) => {
-    if (c.image || clipRemovalInput.get(j) || c.hidden) return;
-    if (!c.file || !videoPresence.get(c.file)) return;
-    const src = pathOf.get(c.file);
-    if (!src) return;
-    const from = spanStart(c);
-    const span = Math.max(1 / fps, c.out - from);
-    cutVideoInput.set(j, nInputs++);
-    inputs.push("-ss", num(from), "-t", num(span), "-i", src);
-  });
-
   /**
    * The head of an audio chain reading a clip's sound over the timeline-local
    * window `[fromT, toT]` (seconds from the clip's head; negative reaches
@@ -2339,12 +2483,9 @@ export async function runExport(
       alphaSet(`rvc${j}`, `rva${j}`, `rvs${j}`, `rv${j}`, ",tpad=stop_mode=clone:stop_duration=1");
       timebase = `[rvs${j}]null`;
     } else {
-      const cutIdx = cutVideoInput.get(j);
       timebase = c.image
         ? `[${idx}:v]setpts=PTS-STARTPTS`
-        : cutIdx === undefined
-          ? sourceSpan(idx, c, rt)
-          : seekedSpan(cutIdx, c, rt);
+        : sourceSpan(idx, c, rt);
     }
     if ((c.image || rmIn || videoPresence.get(c.file)) && !c.hidden) {
       const region = regionPx(c.frame, W, H);
@@ -3262,7 +3403,12 @@ export async function runExport(
     const to = num(Math.min(spec.duration, spec.range.end));
     filters.push(`[${vLabel}]trim=start=${from}:end=${to},setpts=PTS-STARTPTS[vrange]`);
     vLabel = "vrange";
-    filters.push(`[${aLabel}]atrim=start=${from}:end=${to},asetpts=PTS-STARTPTS[arange]`);
+    // The sound takes the delivery's rate before the cut, so a range starts
+    // on the whole delivery's sample grid: ranges laid end to end are the
+    // samples one pass would write.
+    filters.push(
+      `[${aLabel}]aresample=${spec.audioSampleRate ?? MIX_RATE},atrim=start=${from}:end=${to},asetpts=PTS-STARTPTS[arange]`
+    );
     aLabel = "arange";
   }
 
@@ -3280,13 +3426,16 @@ export async function runExport(
     }
     label = treatAudio(label, `s${i}_`);
     const window = spec.range
-      ? `,atrim=start=${num(Math.max(0, spec.range.start))}:end=${num(Math.min(spec.duration, spec.range.end))},asetpts=PTS-STARTPTS`
+      ? `,aresample=${STEM_RATE},atrim=start=${num(Math.max(0, spec.range.start))}:end=${num(Math.min(spec.duration, spec.range.end))},asetpts=PTS-STARTPTS`
       : "";
     filters.push(`[${label}]apad=whole_dur=${num(spec.duration)},atrim=0:${num(spec.duration)}${window}[stem${i}]`);
     return `stem${i}`;
   });
   if (stemPlan.length > 0 && !job.stemsPath) throw new Error("This export has nowhere to put its stems.");
-  const stemFiles = stemPlan.map((s, i) => ({ path: path.join(job.tmpDir, `stem_${i}.wav`), name: s.file }));
+  const stemFiles = stemPlan.map((s, i) => ({
+    path: out.kind === "piece" ? out.stems[i] : path.join(job.tmpDir, `stem_${i}.wav`),
+    name: s.file,
+  }));
   const stemOutputs = stemLabels.flatMap((label, i) => [
     "-map", `[${label}]`,
     "-c:a", "pcm_s24le",
@@ -3301,9 +3450,12 @@ export async function runExport(
   // The raw mix comes out in the delivery's own rate and layout, so the
   // master weighs the same channels the tab's master does: a mono delivery
   // is measured as mono, a 5.1 one with its surround weights.
+  // A piece's mix always comes out raw: the pieces' samples laid end to end
+  // are the delivery's mix, mastered or encoded once at the join.
   const master = spec.loudness !== undefined;
   if (master && spec.truePeakCeiling === undefined) throw new Error("A mastered export needs its true-peak ceiling.");
-  const mixPath = path.join(job.tmpDir, "mix.f32");
+  const rawMix = master || out.kind === "piece";
+  const mixPath = out.kind === "piece" ? out.mix : path.join(job.tmpDir, "mix.f32");
   const mixRate = spec.audioSampleRate ?? MIX_RATE;
   const mixChannels = spec.audioChannels ?? 2;
 
@@ -3312,7 +3464,8 @@ export async function runExport(
   // Encode into the tmp dir, then re-emit the container to strip a stray output
   // rotation flag (see the strip pass below). Keeping the encode intermediate
   // lets the second pass own faststart.
-  const encodePath = path.join(job.tmpDir, `encode${containerExtension(spec)}`);
+  const encodePath = out.kind === "piece" ? out.video : path.join(job.tmpDir, `encode${containerExtension(spec)}`);
+  const [shareFrom, shareTo] = out.kind === "piece" ? out.progress : [0, 1];
   await io.runFfmpeg(
     job,
     [
@@ -3320,19 +3473,25 @@ export async function runExport(
       ...inputs,
       "-filter_complex", assertGraphSafe(fanOutInputs(filters).join(";")),
       "-map", `[${vLabel}]`,
-      ...(master ? [] : ["-map", `[${aLabel}]`]),
+      ...(rawMix ? [] : ["-map", `[${aLabel}]`]),
       ...videoCodecArgs(enc, spec),
       ...colorTagArgs(spec),
-      ...(master ? [] : audioCodecArgs(spec)),
+      ...(rawMix ? [] : audioCodecArgs(spec)),
       "-t", num(span),
       encodePath,
-      ...(master
+      ...(rawMix
         ? ["-map", `[${aLabel}]`, "-c:a", "pcm_f32le", "-ar", String(mixRate), "-ac", String(mixChannels), "-f", "f32le", "-t", num(span), mixPath]
         : []),
       ...stemOutputs,
     ],
-    (t) => (job.progress = Math.min(0.99, t / Math.max(0.1, span)))
+    (t) => (job.progress = Math.min(0.99, shareFrom + (shareTo - shareFrom) * (t / Math.max(0.1, span))))
   );
+
+  // A piece is done once its files are written; the join masters, packs and
+  // muxes the whole.
+  if (out.kind === "piece") {
+    return;
+  }
 
   // The master and the stems pack run in this process, out of a cancel's
   // reach, so the job is checked after each: a canceled render never goes on
@@ -3371,6 +3530,109 @@ export async function runExport(
           "-map", "0:v", "-map", "1:a", "-c:v", "copy", ...audioCodecArgs(spec), "-t", num(span),
         ]
       : ["-map", "0", "-c", "copy"]),
+    "-movflags", "+faststart",
+    job.outPath,
+  ]);
+
+  job.progress = 1;
+}
+
+/** An ffconcat list of pieces laid end to end, each held for its window's
+ * length so the next starts on the frame the last one stopped short of. */
+function pieceList(pieces: { file: string; seconds: number }[]): string {
+  const lines = ["ffconcat version 1.0"];
+  for (const p of pieces) {
+    lines.push(`file '${p.file}'`, `duration ${edge(p.seconds)}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+/**
+ * Render `given` window by window and join the pieces into the delivery.
+ *
+ * Each pass composites one window — a range export — so it holds what that
+ * window's pieces need and lets go of it when it ends. The pictures were
+ * encoded for the delivery and join without a re-encode; the raw mixes and
+ * stems lay end to end sample for sample, then are mastered, packed and
+ * encoded once over the whole, as a single pass would.
+ */
+async function renderInPasses(
+  job: RenderHandle,
+  given: ExportSpec,
+  windows: ExportRange[],
+  mediaPathFor: (file: string) => string,
+  io: ExportPipelineIO
+) {
+  const span = deliverySpan(given.range, given.duration);
+  const ext = containerExtension(given);
+  const stemPlan = given.stemPlan ?? [];
+  const pieces = windows.map((w, k) => ({
+    window: w,
+    video: path.join(job.tmpDir, `piece_${k}${ext}`),
+    mix: path.join(job.tmpDir, `piece_${k}.f32`),
+    stems: stemPlan.map((_, i) => path.join(job.tmpDir, `piece_${k}_stem_${i}.wav`)),
+  }));
+
+  // The passes, in order; each takes its window's share of the progress.
+  let done = 0;
+  for (const p of pieces) {
+    const seconds = p.window.end - p.window.start;
+    const progress: [number, number] = [done / span, (done + seconds) / span];
+    await renderPass(job, { ...given, range: p.window }, mediaPathFor, io, { kind: "piece", ...p, progress });
+    stopIfCanceled(job);
+    done += seconds;
+  }
+
+  // The mix: the pieces' raw samples read as one stream, mastered when the
+  // delivery asks for it.
+  const mixRate = given.audioSampleRate ?? MIX_RATE;
+  const mixChannels = given.audioChannels ?? 2;
+  const raw = ["-f", "f32le", "-ar", String(mixRate), "-ac", String(mixChannels)];
+  let mix = `concat:${pieces.map((p) => p.mix).join("|")}`;
+  if (given.loudness !== undefined) {
+    if (given.truePeakCeiling === undefined) {
+      throw new Error("A mastered export needs its true-peak ceiling.");
+    }
+    const mixPath = path.join(job.tmpDir, "mix.f32");
+    const masteredPath = path.join(job.tmpDir, "master.f32");
+    await io.runFfmpeg(job, ["-y", ...raw, "-i", mix, "-c", "copy", "-f", "f32le", mixPath]);
+    await io.masterRawMix(mixPath, masteredPath, {
+      sampleRate: mixRate,
+      channels: mixChannels,
+      targetLufs: given.loudness,
+      ceilingDbtp: given.truePeakCeiling,
+    });
+    stopIfCanceled(job);
+    mix = masteredPath;
+  }
+
+  // Each stem: its pieces joined into one file, then the pack.
+  if (stemPlan.length > 0) {
+    if (!job.stemsPath) {
+      throw new Error("This export has nowhere to put its stems.");
+    }
+    const stemFiles = stemPlan.map((s, i) => ({ path: path.join(job.tmpDir, `stem_${i}.wav`), name: s.file }));
+    for (const [i, stem] of stemFiles.entries()) {
+      const list = path.join(job.tmpDir, `stem_${i}.ffconcat`);
+      await io.writeFile(list, pieceList(pieces.map((p) => ({ file: p.stems[i], seconds: p.window.end - p.window.start }))));
+      await io.runFfmpeg(job, ["-y", "-f", "concat", "-safe", "0", "-i", list, "-c", "copy", stem.path]);
+    }
+    await io.packStems(stemFiles, job.stemsPath);
+    stopIfCanceled(job);
+  }
+
+  // The delivery: the pictures joined as encoded, the stray rotation flag
+  // stripped as a single pass strips it, and the mix encoded under them.
+  const list = path.join(job.tmpDir, "pieces.ffconcat");
+  await io.writeFile(list, pieceList(pieces.map((p) => ({ file: p.video, seconds: p.window.end - p.window.start }))));
+  await io.runFfmpeg(job, [
+    "-y",
+    "-display_rotation", "0",
+    "-f", "concat", "-safe", "0", "-i", list,
+    ...raw, "-i", mix,
+    "-map", "0:v", "-map", "1:a",
+    "-c:v", "copy", ...audioCodecArgs(given),
+    "-t", num(span),
     "-movflags", "+faststart",
     job.outPath,
   ]);
