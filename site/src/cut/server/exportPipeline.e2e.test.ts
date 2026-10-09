@@ -286,6 +286,11 @@ const sampleGap = (a: Int16Array, b: Int16Array) => {
   return a.reduce((gap, v, i) => Math.max(gap, Math.abs(v - b[i])), 0);
 };
 
+/** The spec rendered in passes of `pieces`, at the default memory budget. */
+const inPieces = (spec: ExportSpec, pieces: number): ExportSpec => ({ ...spec, passes: { holdMB: 2048, pieces } });
+/** More pieces than any fixture has: the whole delivery in one pass. */
+const ONE_PASS = 10_000;
+
 describe("a delivery rendered in passes", () => {
   // The same every-feature project rendered in one pass and in passes of two
   // pieces. ProRes is intra-only and the sound is PCM, so the same frames and
@@ -313,7 +318,7 @@ describe("a delivery rendered in passes", () => {
             { name: "Music", lane: 0, file: "2 Music.wav" },
           ],
         };
-        expect(passWindows(spec, () => ({ pixels: 0, fps: 30 }), 2).length).toBeGreaterThan(2);
+        expect(passWindows(inPieces(spec, 2), () => ({ pixels: 0, fps: 30 })).length).toBeGreaterThan(2);
 
         // Each render runs in its own copy of the job dir, so the stems it
         // packs stay on disk beside its file.
@@ -327,10 +332,10 @@ describe("a delivery rendered in passes", () => {
             progress: 0,
             log: [],
           };
-          await runExport(job, spec, (file) => path.join(mediaDir, file), undefined, passPieces);
+          await runExport(job, inPieces(spec, passPieces), (file) => path.join(mediaDir, file));
           return { file: job.outPath, stems: spec.stemPlan!.map((_, i) => path.join(dir, `stem_${i}.wav`)) };
         };
-        const whole = await render("whole", Infinity);
+        const whole = await render("whole", ONE_PASS);
         const passes = await render("passes", 2);
 
         expect(framesOf(passes.file)).toEqual(framesOf(whole.file));
@@ -369,7 +374,8 @@ describe("a long recording cut out of order", () => {
         const clips: ExportSpec["clips"] = at.map((from, k) => ({
           file: "talk.mp4",
           in: from,
-          out: from + 1.5,
+          // 37 frames: window edges fall between milliseconds.
+          out: from + 37 / 24,
           muted: false,
           soundBack: 0.4,
           soundAhead: 0.4,
@@ -399,16 +405,16 @@ describe("a long recording cut out of order", () => {
           container: "mov",
           audioCodec: "pcm",
         };
-        expect(passWindows(spec, () => ({ pixels: 0, fps: 30 }), 3).length).toBeGreaterThan(3);
+        expect(passWindows(inPieces(spec, 3), () => ({ pixels: 0, fps: 30 })).length).toBeGreaterThan(3);
 
         const render = async (name: string, passPieces: number) => {
           const dir = path.join(jobsDir, name);
           await mkdir(dir);
           const job: RenderHandle = { tmpDir: dir, outPath: path.join(dir, "out.mov"), progress: 0, log: [] };
-          await runExport(job, spec, (file) => path.join(mediaDir, file), undefined, passPieces);
+          await runExport(job, inPieces(spec, passPieces), (file) => path.join(mediaDir, file));
           return job.outPath;
         };
-        const whole = await render("whole", Infinity);
+        const whole = await render("whole", ONE_PASS);
         const passes = await render("passes", 3);
         // An AAC decoder fills noise-coded bands from a generator a seek
         // restarts, so a pass that reads from its window's first source

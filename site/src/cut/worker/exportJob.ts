@@ -12,6 +12,7 @@ import { STORAGE_FULL } from "../lib/operationFailure";
 import { specMediaFiles, STEMS_MIME, stemsArchiveName } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
 import { bindCutColor } from "../lib/colorSettings";
+import { bindCutExportPasses } from "../lib/exportPassSettings";
 import { bindCutSound } from "../lib/soundSettings";
 import { bindCutLoudness } from "../lib/loudnessSettings";
 import type { DocExportAudio } from "../lib/exportPresets";
@@ -147,6 +148,7 @@ export async function runExportJob(
       bindCutSound(await getGlobalSetting("cutSound"));
       // Its loudness target and ceiling come from the setting the tab binds.
       bindCutLoudness(await getGlobalSetting("cutLoudness"));
+      bindCutExportPasses(await getGlobalSetting("cutExportPasses"));
     }
     const body: ExportJobSpec = stored.fromDoc
       ? {

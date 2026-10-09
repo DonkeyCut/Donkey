@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { retimeOf } from "@donkeycut/effects-kit";
 import { runExport, type ExportSpec, type RenderHandle } from "../src/cut/server/exportPipeline";
+import { SETTINGS } from "../src/lib/config/registry";
 
 const SITE = path.resolve(import.meta.dir, "..");
 const REPORT = path.resolve(SITE, "..", "evals", "cut-export-memory.latest-report.json");
@@ -53,7 +54,7 @@ const CUT_COUNTS = [60, 180] as const;
 const GROWTH_MAX = 1.5;
 /** The most any export may peak at: the pass budget, which a reordered edit
  * spends on frames waiting for their turn, plus the process around it. */
-const PEAK_MAX_MB = 2560;
+const PEAK_MAX_MB = SETTINGS.cutExportPasses.default.holdMB + 512;
 
 type Order = "in order" | "reordered";
 

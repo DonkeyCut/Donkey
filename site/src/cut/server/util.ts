@@ -154,7 +154,14 @@ export function videoDimensions(
  * stretch of decoded frames at once sizes that stretch by this. Null when the
  * probe fails or the file carries no picture.
  */
-export function videoDecodeCost(file: string): Promise<number | null> {
+export async function videoDecodeCost(file: string): Promise<number | null> {
+  const picture = await videoPicture(file);
+  return picture ? picture.pixels * 1.5 * picture.fps : null;
+}
+
+/** The first video stream's size in pixels and its frame rate, or null when
+ * the probe fails or the file carries no picture. */
+export function videoPicture(file: string): Promise<{ pixels: number; fps: number } | null> {
   return new Promise((resolve) => {
     const p = spawn("ffprobe", [
       "-v", "error",
@@ -184,7 +191,7 @@ export function videoDecodeCost(file: string): Promise<number | null> {
           return Number.isFinite(fps) && fps > 0 && fps < 1000 ? fps : 0;
         };
         const fps = ratio(s?.avg_frame_rate) || ratio(s?.r_frame_rate) || 30;
-        resolve(width * height * 1.5 * fps);
+        resolve({ pixels: width * height, fps });
       } catch {
         resolve(null);
       }
