@@ -88,6 +88,11 @@ const REC709_SOURCE: RecipeSource = { profile: "rec709" };
 /** How many clips a compositor remembers the last drawn LUT for. */
 const LAST_LUT_MAX = 64;
 
+/** The posed picture's overhang grows in steps of this many px, so a streak
+ * that lengthens frame by frame keeps its padded scratches at one size. */
+const PAD_STEP = 32;
+const padStep = (px: number) => (px > 0 ? Math.ceil(px / PAD_STEP) * PAD_STEP : 0);
+
 /** Whether the clip wears its effects on its framed picture. A keyed clip
  * wears them on its source picture instead (see `gradedSource`). */
 const framedEffects = (clip: VideoClip) => !!clip.effects?.length && !removalActive(clip.removal);
@@ -107,10 +112,14 @@ export class FrameCompositor {
   private clipFxScratch: Surface | null = null;
   /** The masked/keyframed-layer pass: the layer draws into `layerScratch`,
    * its mask's coverage paints into `maskScratch`, a keyframed pose blits
-   * through `poseScratch`, and the result composites back onto the frame. */
+   * through `poseScratch`, and the result composites back onto the frame.
+   * A streak smears into `smearScratch` and a subject matte lands in
+   * `matteScratch`, both at the posed picture's padded size. */
   private layerScratch: Surface | null = null;
   private maskScratch: Surface | null = null;
   private poseScratch: Surface | null = null;
+  private smearScratch: Surface | null = null;
+  private matteScratch: Surface | null = null;
   /** Where a shadow is cast before the picture goes down over it. */
   private shadowScratch: Surface | null = null;
   /** The removal pass: the keyed picture builds in `removalScratch`, its
@@ -240,6 +249,8 @@ export class FrameCompositor {
       | "layerScratch"
       | "maskScratch"
       | "poseScratch"
+      | "smearScratch"
+      | "matteScratch"
       | "shadowScratch"
       | "removalScratch"
       | "removalMatte"
@@ -807,15 +818,27 @@ export class FrameCompositor {
     }
     let out: Surface = layer;
     let octx = lctx;
+    // The soft pass reads past the frame edge — half the streak and three
+    // blur radii — so the posed picture keeps that much overhang around the
+    // frame. Example: a clip zoomed 1.5x and streaking keeps its own picture
+    // at the border, where a frame-sized scratch would smear in a black rim.
+    let padX = 0;
+    let padY = 0;
+    if (pose && look) {
+      padX = padStep(Math.abs(look.streakX) / 2 + 3 * look.blur);
+      padY = padStep(Math.abs(look.streakY) / 2 + 3 * look.blur);
+    }
+    const PW = W + 2 * padX;
+    const PH = H + 2 * padY;
     if (pose) {
-      const { surface: posed } = this.scratch("poseScratch", W, H);
+      const { surface: posed } = this.scratch("poseScratch", PW, PH);
       const pctx = posed.getContext("2d") as Ctx | null;
       if (!pctx) return;
       pctx.setTransform(1, 0, 0, 1, 0, 0);
-      pctx.clearRect(0, 0, W, H);
+      pctx.clearRect(0, 0, PW, PH);
       pctx.save();
       pctx.globalAlpha = Math.max(0, Math.min(1, pose.opacity));
-      pctx.translate(pose.x * W, pose.y * H);
+      pctx.translate(padX + pose.x * W, padY + pose.y * H);
       pctx.rotate((pose.rotation * Math.PI) / 180);
       pctx.scale(pose.scale, pose.scale);
       pctx.translate(-(rect.x + rect.w / 2) * W, -(rect.y + rect.h / 2) * H);
@@ -827,13 +850,16 @@ export class FrameCompositor {
       // Motion blur smears the posed picture along its streak; the layer
       // scratch is free again by now, so it takes the smear.
       if (look && look.taps >= 2) {
-        lctx.setTransform(1, 0, 0, 1, 0, 0);
-        lctx.globalAlpha = 1;
-        lctx.globalCompositeOperation = "source-over";
-        lctx.clearRect(0, 0, W, H);
-        drawStreak(lctx, posed as CanvasImageSource, 0, 0, look);
-        out = layer;
-        octx = lctx;
+        const { surface: smear } = this.scratch("smearScratch", PW, PH);
+        const sctx = smear.getContext("2d") as Ctx | null;
+        if (!sctx) return;
+        sctx.setTransform(1, 0, 0, 1, 0, 0);
+        sctx.globalAlpha = 1;
+        sctx.globalCompositeOperation = "source-over";
+        sctx.clearRect(0, 0, PW, PH);
+        drawStreak(sctx, posed as CanvasImageSource, 0, 0, look);
+        out = smear;
+        octx = sctx;
       }
     }
     if (mask?.kind === "subject") {
@@ -847,14 +873,16 @@ export class FrameCompositor {
       if (res && !res.alpha) {
         if (!mask.invert) return;
       } else if (res?.alpha) {
-        const cctx = cover.getContext("2d") as Ctx;
-        cctx.clearRect(0, 0, W, H);
+        // The matte covers the frame; the overhang around it has no person.
+        const { surface: padded } = this.scratch("matteScratch", PW, PH);
+        const cctx = padded.getContext("2d") as Ctx;
+        cctx.clearRect(0, 0, PW, PH);
         const feather = (mask.feather ?? 0) * (Math.min(W, H) / 1080);
         if (feather > 0 && "filter" in cctx) cctx.filter = `blur(${feather / 2}px)`;
         cctx.imageSmoothingEnabled = true;
-        cctx.drawImage(res.alpha, 0, 0, W, H);
+        cctx.drawImage(res.alpha, padX, padY, W, H);
         cctx.filter = "none";
-        maskComposite(octx, cover as CanvasImageSource, mask.invert);
+        maskComposite(octx, padded as CanvasImageSource, mask.invert);
       }
     }
     // Transition motion lands on the finished result, so a push carries the
@@ -864,7 +892,7 @@ export class FrameCompositor {
       ctx.save();
       ctx.translate(Math.round(fx.dx ?? 0), Math.round(fx.dy ?? 0));
     }
-    const shade = clip.card ? null : this.shadowOf(out, clip.boxStyle?.shadow);
+    const shade = clip.card ? null : this.shadowOf(out, clip.boxStyle?.shadow, padX, padY);
 
     // The keyed blur softens the picture and its shadow as they land, on
     // top of any filter the caller set (a blur transition's own).
@@ -875,7 +903,7 @@ export class FrameCompositor {
       ctx.filter = before && before !== "none" ? `${before} ${own}` : own;
     }
     if (shade) ctx.drawImage(shade, 0, 0);
-    ctx.drawImage(out, 0, 0);
+    ctx.drawImage(out, -padX, -padY);
     if (soft) {
       ctx.filter = before;
     }
@@ -889,7 +917,7 @@ export class FrameCompositor {
    * frame beside it (the export's painted PNG) and look the same either way.
    * Null when the clip casts none.
    */
-  private shadowOf(layer: Surface, sh: ClipShadow | undefined): Surface | null {
+  private shadowOf(layer: Surface, sh: ClipShadow | undefined, padX = 0, padY = 0): Surface | null {
     const ctx = this.ctx();
     if (!ctx || !sh) return null;
     const W = this.canvas.width;
@@ -907,10 +935,10 @@ export class FrameCompositor {
     sctx.shadowBlur = Math.max(0, sh.blur) * ds;
     sctx.shadowOffsetX = (sh.x ?? 0) * ds;
     sctx.shadowOffsetY = (sh.y ?? 0) * ds;
-    sctx.drawImage(layer as CanvasImageSource, 0, 0);
+    sctx.drawImage(layer as CanvasImageSource, -padX, -padY);
     sctx.restore();
     sctx.globalCompositeOperation = "destination-out";
-    sctx.drawImage(layer as CanvasImageSource, 0, 0);
+    sctx.drawImage(layer as CanvasImageSource, -padX, -padY);
     sctx.globalCompositeOperation = "source-over";
     return surface;
   }

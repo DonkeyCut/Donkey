@@ -339,4 +339,24 @@ describe("a keyed clip's softening", () => {
     );
     expect(moving).toContain("lighter");
   });
+
+  test("a zoomed clip softens from the picture past the frame edge", () => {
+    // A full-frame clip zoomed 1.5x hangs past the frame. Its streak and
+    // blur have to read that overhang: a frame-sized scratch cut the picture
+    // at the edge, and the soft pass pulled transparent black into a rim.
+    const full = { x: 0, y: 0, w: 1, h: 1 };
+    const zoomed = (t: number, x: number) => ({ t, x, y: 0.5, scale: 1.5, rotation: 0, opacity: 1, blur: 270 });
+    const clip = clipOf({ frame: full, kf: [zoomed(0, 0.4), zoomed(1, 0.6)], motionBlur: 1 });
+    const frame = new PixelCanvas(W, H);
+    const lands: { width: number; dx: number }[] = [];
+    const draw = frame.ctx.drawImage as (src: PixelCanvas, ...args: number[]) => void;
+    frame.ctx.drawImage = (src: PixelCanvas, ...args: number[]) => {
+      lands.push({ width: src.width, dx: args[0] });
+      draw(src, ...args);
+    };
+    new FrameCompositor(frame as unknown as RasterSurface).drawIntoRect(frameOf(picture()), full, true, 1, 0.5, 1, clip);
+    const last = lands.at(-1)!;
+    expect(last.width).toBeGreaterThan(W);
+    expect(last.dx).toBeLessThan(0);
+  });
 });
