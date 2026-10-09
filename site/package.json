@@ -48,6 +48,7 @@
     "eval:cut-timeline-operations": "bun run scripts/eval-cut-timeline-operations.ts",
     "eval:cut-timeline-rows": "bun run scripts/eval-cut-timeline-rows.ts",
     "eval:cut-export": "bun run scripts/eval-cut-export.ts",
+    "eval:cut-export-memory": "bun run scripts/eval-cut-export-memory.ts",
     "chatgpt:build": "bun run scripts/build-chatgpt-widget.ts",
     "predev": "npm run chatgpt:build",
     "prebuild": "npm run chatgpt:build",
