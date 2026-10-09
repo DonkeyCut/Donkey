@@ -380,7 +380,8 @@ export function evalOverlayFrame(o: Posable, tLocal: number, aspect?: number): O
   const k = exposure / (t1 - t0);
   const streak = capStreak(
     ((b.x - a.x) * f.width + (b.dx - a.dx)) * k,
-    ((b.y - a.y) * f.height + (b.dy - a.dy)) * k
+    ((b.y - a.y) * f.height + (b.dy - a.dy)) * k,
+    shutter
   );
   return streak ? { ...placed, streak } : placed;
 }

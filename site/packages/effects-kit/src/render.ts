@@ -32,7 +32,7 @@ import { cutAtFaces, cycleFaceTag, fontCycleCuts, fontCycleVariants, withFontCyc
 import { evalWhole, presetExtent } from "./motion/evaluate";
 import { countStep, countText } from "./count";
 import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys, type OverlayFrameState } from "./keys";
-import { ELEMENT_BLUR_MAX, hasCameraKeys, STREAK_MAX } from "./camera";
+import { ELEMENT_BLUR_MAX, hasCameraKeys, streakCap } from "./camera";
 import { ElementFx, elementLook } from "./elementFx";
 import { applyMaskToCanvas, isMaskAnimated } from "./mask";
 import { tracePolyShape } from "./shapePath";
@@ -1903,7 +1903,7 @@ export async function renderOverlayFrames(
   const blurs = [overlay.blur ?? 0, ...(overlay.kf ?? []).map((k) => k.blur ?? 0)];
   const spill =
     Math.min(ELEMENT_BLUR_MAX, Math.max(...blurs)) * 3 * scale +
-    (overlay.motionBlur ? (STREAK_MAX / 2) * scale : 0);
+    (overlay.motionBlur ? (streakCap(overlay.motionBlur) / 2) * scale : 0);
   halfW += spill;
   halfH += spill;
   const x0 = whole ? 0 : Math.max(0, Math.floor(extent.x0 * width - halfW));

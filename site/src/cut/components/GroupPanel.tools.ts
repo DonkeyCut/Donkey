@@ -5,7 +5,7 @@
  * `GroupPanelToolName`.
  */
 
-import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, EASE_IDS } from "@donkeycut/effects-kit";
+import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, EASE_IDS, SHUTTER_MAX, SHUTTER_MIN } from "@donkeycut/effects-kit";
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 export const GROUP_PANEL_TOOLS = [
@@ -32,7 +32,7 @@ export const GROUP_PANEL_TOOLS = [
           ),
         },
         motion_blur: bool("Streak the camera's moves (true starts at the default shutter); false switches it off"),
-        shutter: num("Motion blur shutter, 0.05..1 of a 30fps frame (0.5 is the usual half-open shutter); setting it switches motion blur on"),
+        shutter: num(`Motion blur shutter in 30fps frames, ${SHUTTER_MIN}..${SHUTTER_MAX}: 0.5 is the usual half-open shutter, and past 1 is a stylized long exposure (2–3 smears a whip that settles in a few frames); setting it switches motion blur on`),
       },
       []
     ),

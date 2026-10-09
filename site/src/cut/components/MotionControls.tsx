@@ -13,6 +13,8 @@ import {
   keyIndexAt,
   poseAt,
   removeKeyAt,
+  SHUTTER_MAX,
+  SHUTTER_MIN,
   upsertKey,
   type CameraKey,
   type EaseId,
@@ -90,8 +92,8 @@ function MotionBlurRows({
             {...SLIDER}
             value={shutter.value}
             mixed={shutter.mixed}
-            min={0.05}
-            max={1}
+            min={SHUTTER_MIN}
+            max={SHUTTER_MAX}
             step={0.01}
             snap={[0.5]}
             format={(v) => `${Math.round(v * 100)}%`}

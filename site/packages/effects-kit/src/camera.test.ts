@@ -5,6 +5,7 @@ import {
   composeCamera,
   REST_CAMERA,
   shiftCamera,
+  SHUTTER_MAX,
   STREAK_MAX,
   STREAK_MIN,
   STREAK_TAPS_MAX,
@@ -219,6 +220,23 @@ describe("motion blur", () => {
     expect(Math.hypot(long.x, long.y)).toBeCloseTo(STREAK_MAX);
     expect(long.x).toBeCloseTo(long.y);
     expect(capStreak(10, 0)).toEqual({ x: 10, y: 0 });
+  });
+
+  test("a long exposure lengthens the cap with its shutter", () => {
+    // Up to one frame the cap holds; three frames of shutter allow three times
+    // the smear, so a whip settling in a few frames still streaks hard.
+    expect(Math.hypot(...Object.values(capStreak(1000, 0, 1)!))).toBeCloseTo(STREAK_MAX);
+    expect(capStreak(1000, 0, 3)!.x).toBeCloseTo(3 * STREAK_MAX);
+    expect(capStreak(1000, 0, SHUTTER_MAX)!.x).toBeCloseTo(SHUTTER_MAX * STREAK_MAX);
+  });
+
+  test("an element's long shutter streaks past one frame of travel", () => {
+    // A 7-frame whip settle: at three frames of shutter the first frame
+    // smears three times what a one-frame shutter shows.
+    const o = el({ kf: [key(0, { y: 0.6, ease: "power3.out" }), key(7 / 30, { y: 0.5 })] });
+    const one = evalOverlayFrame({ ...o, motionBlur: 1 }, 0.05, 16 / 9).streak!;
+    const three = evalOverlayFrame({ ...o, motionBlur: 3 }, 0.05, 16 / 9).streak!;
+    expect(Math.abs(three.y)).toBeGreaterThan(2.5 * Math.abs(one.y));
   });
 
   test("taps follow the streak length within their bounds", () => {

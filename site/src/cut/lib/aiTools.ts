@@ -127,7 +127,7 @@ import type { VideoGenToolName } from "@/cut/components/GeneratePanel.tools";
 import type { ImageGenToolName } from "@/cut/components/ImageGenPanel.tools";
 import type { InspectorToolName } from "@/cut/components/Inspector.tools";
 import type { GroupPanelToolName } from "@/cut/components/GroupPanel.tools";
-import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, ELEMENT_BLUR_MAX, TILT_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
+import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, ELEMENT_BLUR_MAX, SHUTTER_MAX, SHUTTER_MIN, TILT_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
 import { cleanInks, LETTER_SPACING_MAX, LETTER_SPACING_MIN, PATTERN_KINDS, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN, STRIPES_DEFAULT, type PatternSpec, type ShadowSpec } from "@donkeycut/effects-kit";
 import { groupCameraOf, groupCameraPoseAt } from "@/cut/lib/groupCamera";
 import { cutMotion } from "@/cut/lib/motionSettings";
@@ -6756,7 +6756,7 @@ async function launchVideoJob(
  * `motion_blur` true for the current one or the default, false for off;
  * neither keeps `current`. */
 function shutterInput(input: Record<string, unknown>, current: number | undefined): number | undefined {
-  if (isNum(input.shutter)) return input.shutter > 0 ? clamp(input.shutter, 0.05, 1) : undefined;
+  if (isNum(input.shutter)) return input.shutter > 0 ? clamp(input.shutter, SHUTTER_MIN, SHUTTER_MAX) : undefined;
   if (input.motion_blur === true) return current ?? cutMotion().motionBlur;
   if (input.motion_blur === false) return undefined;
   return current;

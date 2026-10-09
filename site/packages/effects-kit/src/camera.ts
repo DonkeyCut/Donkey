@@ -34,7 +34,8 @@ export interface CameraKey {
 }
 
 /** A group's camera, as each member carries it. `motionBlur` streaks what the
- * camera's movement does to the picture (shutter, 0..1; absent = off). */
+ * camera's movement does to the picture (shutter, SHUTTER_MIN..SHUTTER_MAX;
+ * absent = off). */
 export interface GroupCamera {
   kf: CameraKey[];
   motionBlur?: number;
@@ -143,26 +144,39 @@ export function shiftCamera(cam: GroupCamera, by: number): GroupCamera {
 // distance the element's center travels on screen while it is open. The
 // exposure is measured in seconds, so a 24fps export, a 60fps export and the
 // preview all draw the same streak for the same move. A still frame travels
-// nowhere and stays sharp.
+// nowhere and stays sharp. A shutter past one frame is a stylized long
+// exposure: the smear a whip cut wears while the shot settles.
 
 /** The frame the shutter amount is a share of, seconds. */
 export const MOTION_BLUR_FRAME = 1 / 30;
+/** The shutter's range, in frames: a sliver of one up to a long exposure. */
+export const SHUTTER_MIN = 0.05;
+export const SHUTTER_MAX = 4;
 /** A streak shorter than this, design px, draws nothing: the frame is sharp. */
 export const STREAK_MIN = 0.75;
-/** The longest streak, design px. A whip faster than this reads as a blur
- * either way, and the cap bounds what a frame costs to draw. */
+/** The longest streak a one-frame shutter draws, design px. A whip faster
+ * than this reads as a blur either way, and the cap bounds what a frame
+ * costs to draw. A longer shutter lengthens the cap in step (`streakCap`). */
 export const STREAK_MAX = 96;
 /** Design px between two taps along a streak. */
 const STREAK_TAP_SPACING = 4;
 /** The most copies one streak is drawn from. */
 export const STREAK_TAPS_MAX = 24;
 
+/** The longest streak `shutter` draws, design px: one frame's cap, or that
+ * cap times the frames a long exposure stays open. */
+export function streakCap(shutter = 1): number {
+  return STREAK_MAX * Math.max(1, shutter);
+}
+
 /** The streak for a screen displacement over the exposure (design px): the
- * displacement itself, capped in length, or null when it is too short to see. */
-export function capStreak(dx: number, dy: number): { x: number; y: number } | null {
+ * displacement itself, capped in length for the shutter, or null when it is
+ * too short to see. */
+export function capStreak(dx: number, dy: number, shutter = 1): { x: number; y: number } | null {
   const len = Math.hypot(dx, dy);
   if (!(len >= STREAK_MIN)) return null;
-  const k = len > STREAK_MAX ? STREAK_MAX / len : 1;
+  const cap = streakCap(shutter);
+  const k = len > cap ? cap / len : 1;
   return { x: dx * k, y: dy * k };
 }
 
