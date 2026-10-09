@@ -736,6 +736,14 @@ describe("clip keyframes in the filtergraph", () => {
     expect(xfadeMismatches(g)).toEqual([]);
   });
 
+  test("a keyed clip moves along its key's ease, as the kit evaluator does", async () => {
+    const eased = [{ ...KF[0], ease: "power3.out" as const }, KF[1]];
+    const g = await graphFor({ clips: [clip("a.mp4", { out: 4, kf: eased })] });
+    const joined = g.join(";");
+    expect(joined).toContain("1-pow(1-clip((t-0.000)/2.000,0,1),3)");
+    expect(joined).not.toMatch(/\*clip\(\(t-0\.000\)\/2\.000,0,1\)/);
+  });
+
   test("a keyed clip off the frame grid poses on its own clock", async () => {
     // b starts at 3.71 s; its first frame is 3.7333 s (frame 112 at 30 fps),
     // so its keys read 0.023 s into the clip on the segment's first frame,

@@ -17,7 +17,7 @@ import { shiftSpan, type SpecSound } from "../lib/soundSource";
 import { masterRawMix, packStems } from "./exportAudio";
 import { STEM_CHANNELS, STEM_RATE, type StemDef } from "../lib/stems";
 import { CLIP_MAX_ZOOM, CLIP_MIN_SECONDS, clipFrameAt, regionPx, TRANSITION_ZOOM, type ColorGrade } from "../lib/types";
-import { audioFxFilters, buildClipLut, elementLook, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, effectRecipe, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildClipLut, elementLook, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, effectRecipe, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type EaseId, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -1817,29 +1817,55 @@ export async function runExport(
     );
   }
   // ---- Keyframed clip poses as filter expressions -------------------------
-  // The pose track is piecewise-linear with the ends held flat, exactly the
-  // kit evaluator: v0 + Σ Δi·clip((V−ti)/(ti+1−ti),0,1) builds that shape as
-  // one monotone expression, safe inside overlay/scale/rotate.
-  const piecewiseExpr = (keys: { t: number; v: number }[], varExpr: string): string => {
+  // The pose track runs key to key along each key's ease with the ends held
+  // flat, exactly the kit evaluator: v0 + Σ Δi·ease(clip((V−ti)/(ti+1−ti),0,1))
+  // builds that shape as one expression, safe inside overlay/scale/rotate.
+  /** easeAt from the kit as an ffmpeg expression over progress `u`. */
+  const easeExpr = (ease: EaseId | undefined, u: string): string => {
+    switch (ease) {
+      case "sine.in":
+        return `(1-cos(${u}*PI/2))`;
+      case "sine.out":
+        return `sin(${u}*PI/2)`;
+      case "sine.inOut":
+        return `((1-cos(PI*${u}))/2)`;
+      case "power2.in":
+        return `pow(${u},2)`;
+      case "power2.out":
+        return `(1-pow(1-${u},2))`;
+      case "power2.inOut":
+        return `if(lt(${u},0.5),2*pow(${u},2),1-pow(2-2*${u},2)/2)`;
+      case "power3.in":
+        return `pow(${u},3)`;
+      case "power3.out":
+        return `(1-pow(1-${u},3))`;
+      case "power3.inOut":
+        return `if(lt(${u},0.5),4*pow(${u},3),1-pow(2-2*${u},3)/2)`;
+      default:
+        return u;
+    }
+  };
+  const piecewiseExpr = (keys: { t: number; v: number; ease?: EaseId }[], varExpr: string): string => {
     const ks = [...keys].sort((a, b) => a.t - b.t);
     let e = `${num(ks[0].v)}`;
     for (let i = 0; i < ks.length - 1; i++) {
       const dt = Math.max(1e-6, ks[i + 1].t - ks[i].t);
       const dv = ks[i + 1].v - ks[i].v;
       if (Math.abs(dv) < 1e-9) continue;
-      e += `+${num(dv)}*clip((${varExpr}-${num(ks[i].t)})/${num(dt)},0,1)`;
+      e += `+${num(dv)}*${easeExpr(ks[i].ease, `clip((${varExpr}-${num(ks[i].t)})/${num(dt)},0,1)`)}`;
     }
     return `(${e})`;
   };
   /** The pose track's rotation values unwrapped into cumulative degrees, so
    * the expression lerps the short way around like the kit evaluator. */
-  const unwrappedRotation = (kf: OverlayKey[]): { t: number; v: number }[] => {
+  const unwrappedRotation = (kf: OverlayKey[]): { t: number; v: number; ease?: EaseId }[] => {
     const ks = sortedKeys(kf);
-    const out: { t: number; v: number }[] = [{ t: ks[0].t, v: ks[0].rotation }];
+    const out: { t: number; v: number; ease?: EaseId }[] = [{ t: ks[0].t, v: ks[0].rotation, ease: ks[0].ease }];
     for (let i = 1; i < ks.length; i++) {
       out.push({
         t: ks[i].t,
         v: out[i - 1].v + shortestTurn(ks[i - 1].rotation, ks[i].rotation),
+        ease: ks[i].ease,
       });
     }
     return out;
@@ -1872,7 +1898,7 @@ export async function runExport(
       chain += `,rotate=a='${rot}*PI/180':ow=${diag}:oh=${diag}:c=black@0.0`;
     }
     if (varies(ks, "scale") || Math.abs(ks[0].scale - 1) > 1e-6) {
-      const sc = piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.scale })), v);
+      const sc = piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.scale, ease: k.ease })), v);
       chain += `,scale=w='trunc(iw*${sc}/2)*2':h=-2:eval=frame`;
     }
     return chain;
@@ -1884,8 +1910,8 @@ export async function runExport(
     const ks = sortedKeys(kf);
     const v = keyClock(startAt);
     return {
-      x: `'${piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.x })), v)}*${W}-w/2'`,
-      y: `'${piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.y })), v)}*${H}-h/2'`,
+      x: `'${piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.x, ease: k.ease })), v)}*${W}-w/2'`,
+      y: `'${piecewiseExpr(ks.map((k) => ({ t: k.t, v: k.y, ease: k.ease })), v)}*${H}-h/2'`,
     };
   };
   // ---- Keyed blur and motion blur on a posed segment ----------------------
