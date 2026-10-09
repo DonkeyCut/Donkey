@@ -427,6 +427,24 @@ describe("one input per cut", () => {
   });
 });
 
+describe("joins", () => {
+  test("a run of hard cuts is one concat, split by a transition", async () => {
+    const g = await graphFor({
+      clips: [clip("a.mp4"), clip("b.mp4"), clip("c.mp4", { transition: 0.5 }), clip("d.mp4"), clip("e.mp4")],
+    });
+    const joins = g.filter((f) => /concat=|xfade=/.test(f) && !f.includes("[fan"));
+    expect(joins.map((f) => f.replace(/xfade=.*\[/, "xfade=…["))).toEqual([
+      "[vg0][vg1][vg2]concat=n=3:v=1:a=0,fps=30[vj2]",
+      "[a0][a1][a2]concat=n=3:v=0:a=1[aj2]",
+      "[vj2][vh3]xfade=…[vx3]",
+      "[ah3][a3]concat=n=2:v=0:a=1[ax3]",
+      "[vx3][vg4]concat=n=2:v=1:a=0,fps=30[vj4]",
+      "[ax3][a4]concat=n=2:v=0:a=1[aj4]",
+    ]);
+    expect(xfadeMismatches(g)).toEqual([]);
+  });
+});
+
 describe("a speed curve in the filtergraph", () => {
   test("a curved clip lays its picture through the map and reads baked sound", async () => {
     const curved = clip("a.mp4", { speedCurve: [[0, 1], [4, 4]] });
