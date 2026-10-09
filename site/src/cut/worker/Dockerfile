@@ -2,15 +2,35 @@
 # then build this image from site/:
 #   docker build -f src/cut/worker/Dockerfile -t donkey-cut-worker .
 #
-# The Debian release picks the ffmpeg, so it is part of the contract: the
-# export's final pass passes -display_rotation, which ffmpeg gained in 6.0.
-# Bookworm's 5.1 encodes the entire file and then dies on that last command, at
-# 98% progress, with "Unrecognized option". Trixie carries 7.1.
+# ffmpeg is built from the ffmpeg.org tarball that ffmpeg-release names and
+# checksums, the file the Mac app's bundle reads too, so both render one
+# release. GPL here: x264 and x265 are the worker's only encoders.
+FROM node:24-trixie-slim AS ffmpeg
+COPY src/cut/worker/ffmpeg-release /tmp/ffmpeg-release
+RUN . /tmp/ffmpeg-release \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends build-essential pkg-config nasm curl ca-certificates xz-utils \
+       libx264-dev libx265-dev libvpx-dev libmp3lame-dev libopus-dev libdav1d-dev libass-dev libgnutls28-dev zlib1g-dev \
+  && curl -fsSL -o /tmp/ffmpeg.tar.xz "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz" \
+  && echo "${FFMPEG_SHA256}  /tmp/ffmpeg.tar.xz" | sha256sum -c - \
+  && mkdir /tmp/ffmpeg && tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1 \
+  && cd /tmp/ffmpeg \
+  && ./configure --prefix=/opt/ffmpeg --enable-gpl --disable-doc --disable-static --enable-shared \
+       --enable-libx264 --enable-libx265 --enable-libvpx --enable-libmp3lame --enable-libopus --enable-libdav1d \
+       --enable-libass --enable-gnutls --extra-ldflags="-Wl,-rpath,/opt/ffmpeg/lib" \
+  && make -j"$(nproc)" \
+  && make install
+
 FROM node:24-trixie-slim
 
-# ffmpeg/ffprobe for the render pipeline; python3 runs the yt-dlp zipapp.
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg python3 ca-certificates curl \
+# ffmpeg/ffprobe for the render pipeline, with the runtime halves of the
+# libraries it was built against; python3 runs the yt-dlp zipapp, and
+# libasound2t64 is the ALSA library node-web-audio-api links.
+COPY --from=ffmpeg /opt/ffmpeg /opt/ffmpeg
+RUN ln -s /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/ \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends python3 ca-certificates curl \
+       libx264-164 libx265-215 libvpx9 libmp3lame0 libopus0 libdav1d7 libass9 libgnutls30t64 zlib1g libasound2t64 \
   && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp \
   && chmod +x /usr/local/bin/yt-dlp \
@@ -18,8 +38,8 @@ RUN apt-get update \
   && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
 
-# Hold the image to what the pipeline actually calls. A base bump that walks
-# ffmpeg backwards fails here instead of at 98% of someone's export.
+# Hold the image to what the pipeline actually calls. A build that walks
+# ffmpeg backwards fails here, at image build, before it reaches an export.
 RUN ffmpeg -hide_banner -h full 2>&1 | grep -q -- '-display_rotation' \
   || { echo "ffmpeg is too old: the export re-mux needs -display_rotation (6.0+)." >&2; exit 1; }
 
@@ -60,6 +80,9 @@ RUN npm install --no-package-lock --omit=dev \
       mediabunny@^1.51.0 \
       @mediabunny/server@^1.54.0 \
       node-web-audio-api@^2.2.0
+# A headless job installs all three at once, so a native library missing from
+# the image fails the build here.
+RUN node -e "Promise.all([import('@mediabunny/server'), import('skia-canvas'), import('node-web-audio-api')]).catch((e) => { console.error(e.message); process.exit(1); })"
 COPY dist/cut-worker/main.js ./main.js
 # The faces the editor shows, staged as files the canvas loads at startup so a
 # title renders in its own font. npm install stages them from the @fontsource

@@ -62,15 +62,29 @@ jobs:
       - name: Bundle worker
         run: npm run worker:build
 
+      # The image's layers persist in the Actions cache, so the ffmpeg compile
+      # runs only when ffmpeg-release or the build stage changes. This builder
+      # is the default, so wrangler's build below reads the same layers.
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the worker image
+        uses: docker/build-push-action@v7
+        with:
+          context: site
+          file: site/src/cut/worker/Dockerfile
+          tags: cut-worker
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
       # Render the export test project through the same runExport the container
-      # runs (site/src/cut/server/exportPipeline.e2e.test.ts), against a Linux
-      # GPL ffmpeg like the image's Debian build. A graph the container's
-      # ffmpeg family rejects fails the deploy here.
+      # runs (site/src/cut/server/exportPipeline.e2e.test.ts), inside the image
+      # itself, so a graph the shipped ffmpeg rejects fails the deploy here.
       - name: Render the export test project
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg
-          bun test src/cut/server/exportPipeline.e2e.test.ts
+          docker run --rm --entrypoint bun -v "$PWD:/site" -w /site \
+            -v "$(readlink -f "$(command -v bun)"):/usr/local/bin/bun:ro" \
+            cut-worker test src/cut/server/exportPipeline.e2e.test.ts
 
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v4

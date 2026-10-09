@@ -1,0 +1,5 @@
+# The ffmpeg release the Mac app's bundle (scripts/fetch-bundled-tools.sh) and
+# the cloud worker's image (Dockerfile here) both build, and the sha256 of its
+# ffmpeg.org tarball. Both read this file, so they build one release.
+FFMPEG_VERSION=9.0.2
+FFMPEG_SHA256=8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
