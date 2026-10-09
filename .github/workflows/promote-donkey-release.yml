@@ -8,10 +8,10 @@ on:
   # the hosted page, so a path list either releases site-only edits or misses app ones.
   # Every push runs the gate; only a labelled one reaches the build.
   #
-  # The tools recipe (tools/**, fetch-bundled-tools.sh) goes the long way round. Those
-  # changes go to Publish Bundled Tools first, which builds the new bundle, commits the
-  # manifest pinning it, and then dispatches this workflow. Releasing on the recipe push
-  # too would ship a build that still stages the previous bundle.
+  # The tools recipe (tools/**, fetch-bundled-tools.sh, ffmpeg-release) goes the long
+  # way round. Those changes go to Publish Bundled Tools first, which builds the new
+  # bundle, commits the manifest pinning it, and then dispatches this workflow. Releasing
+  # on the recipe push too would ship a build that still stages the previous bundle.
   push:
     branches:
       - main

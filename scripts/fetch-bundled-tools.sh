@@ -93,10 +93,14 @@ build_libass() {
 # above). Built shared, then dylibbundled. ffmpeg is MANDATORY: any failure here aborts
 # the whole vendoring run, because a bundle without ffmpeg is not shippable.
 build_lgpl_ffmpeg() {
-  if [ -x "$VENDOR_DIR/ffmpeg" ] && [ -x "$VENDOR_DIR/ffprobe" ]; then
+  # The release and tarball checksum the cloud worker's image builds too.
+  . "$ROOT_DIR/site/src/cut/worker/ffmpeg-release"
+  local ver="$FFMPEG_VERSION"
+  # A vendored build of another version is rebuilt, so a bump here reaches the bundle.
+  if [ -x "$VENDOR_DIR/ffmpeg" ] && [ -x "$VENDOR_DIR/ffprobe" ] \
+    && "$VENDOR_DIR/ffmpeg" -version 2>/dev/null | head -1 | grep -q "^ffmpeg version $ver "; then
     ok "ffmpeg (cached)"; ok "ffprobe (cached)"; return 0
   fi
-  local ver="7.1.1"
   local work="/tmp/ffmpeg-lgpl-build"
   local brew_prefix; brew_prefix="$(brew --prefix)"
   command -v nasm >/dev/null 2>&1 || brew install nasm >/dev/null 2>&1
@@ -109,6 +113,8 @@ build_lgpl_ffmpeg() {
   rm -rf "$work"; mkdir -p "$work"
   curl -fsSL -o "$work/ffmpeg.tar.xz" "https://ffmpeg.org/releases/ffmpeg-${ver}.tar.xz" \
     || { echo "FATAL: ffmpeg source download failed" >&2; exit 1; }
+  echo "$FFMPEG_SHA256  $work/ffmpeg.tar.xz" | shasum -a 256 -c - >/dev/null \
+    || { echo "FATAL: ffmpeg source does not match the checksum in ffmpeg-release" >&2; exit 1; }
   tar -xJf "$work/ffmpeg.tar.xz" -C "$work" --strip-components=1
   ( cd "$work" \
     && PKG_CONFIG_PATH="$ASS_PREFIX/lib/pkgconfig:$brew_prefix/lib/pkgconfig:$brew_prefix/share/pkgconfig" \

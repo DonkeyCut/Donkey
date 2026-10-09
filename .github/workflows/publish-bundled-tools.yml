@@ -17,6 +17,7 @@ on:
     branches: [main]
     paths:
       - scripts/fetch-bundled-tools.sh
+      - site/src/cut/worker/ffmpeg-release
       - tools/**
 
 permissions:
@@ -56,7 +57,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: vendor/donkey-tools
-          key: donkey-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-bundled-tools.sh', 'tools/**') }}
+          key: donkey-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-bundled-tools.sh', 'site/src/cut/worker/ffmpeg-release', 'tools/**') }}
 
       # Import the Developer ID cert into a throwaway keychain and stage the notary API key, so the tools
       # are production-signed + notarized. Absent the secrets this no-ops to ad-hoc signing (still runnable,
