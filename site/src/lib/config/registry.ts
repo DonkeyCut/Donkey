@@ -391,6 +391,24 @@ export const SETTINGS = defineSettings({
     description:
       "The color LUT sizes a clip is rendered through (standard, wide-gamut and the draft drawn mid-drag), the preview proxy's size and quality, and the largest LUT file the library takes.",
   },
+  cutExportPasses: {
+    schema: z
+      .object({
+        // The frames one ffmpeg pass may hold, MB. A long timeline renders in
+        // passes held under it; a larger budget means fewer passes, each
+        // decoding the stretch of file its cuts span.
+        holdMB: z.number().int().min(256).max(65536),
+        // The most pieces one pass opens, whatever their size: each brings a
+        // decoder and its threads.
+        pieces: z.number().int().min(2).max(512),
+      })
+      .strict(),
+    default: { holdMB: 2048, pieces: 48 },
+    public: true,
+    title: "Export passes",
+    description:
+      "The memory one export pass may hold and the most pieces it opens; a longer timeline renders in more passes.",
+  },
   cutSound: {
     schema: z
       .object({

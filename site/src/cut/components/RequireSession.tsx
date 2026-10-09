@@ -1,6 +1,7 @@
 "use client";
 import { bindChatRuntime, bindChatgptPolling, bindCutClip, bindCutJudge, bindCutNotes, bindCutTracking } from "@/cut/lib/chatRuntime";
 import { bindCutColor } from "@/cut/lib/colorSettings";
+import { bindCutExportPasses } from "@/cut/lib/exportPassSettings";
 import { bindCutSound } from "@/cut/lib/soundSettings";
 import { bindCutMotion } from "@/cut/lib/motionSettings";
 import { bindCutLoudness } from "@/cut/lib/loudnessSettings";
@@ -55,6 +56,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
     bindCutSound(config.data.settings.cutSound);
     bindCutMotion(config.data.settings.cutMotion);
     bindCutLoudness(config.data.settings.cutLoudness);
+    bindCutExportPasses(config.data.settings.cutExportPasses);
     bindCutMediaCache(config.data.settings.cutMediaCache);
     reportExposures(config.data);
   }, [userId, config.data]);

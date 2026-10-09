@@ -8,47 +8,52 @@ import { writeStoredZip } from "../lib/stems";
 // Both stream through files a second at a time, so an hour of sound costs a
 // second of it in memory.
 
-/** Raw interleaved 32-bit float PCM, read a second at a time as planar
- * chunks. */
-async function* rawChunks(file: string, sampleRate: number, channels: number): AsyncGenerator<Float32Array[]> {
+/** Raw interleaved 32-bit float PCM in files laid end to end, read a second
+ * at a time as planar chunks. */
+async function* rawChunks(files: string[], sampleRate: number, channels: number): AsyncGenerator<Float32Array[]> {
   const frameBytes = channels * 4;
   const bytes = new Uint8Array(sampleRate * frameBytes);
-  const handle = await open(file, "r");
-  try {
-    let pos = 0;
-    let carry = 0;
-    for (;;) {
-      const { bytesRead } = await handle.read(bytes, carry, bytes.length - carry, pos);
-      pos += bytesRead;
-      const have = carry + bytesRead;
-      const frames = Math.floor(have / frameBytes);
-      if (frames > 0) {
-        const view = new DataView(bytes.buffer, 0, frames * frameBytes);
-        const planar = Array.from({ length: channels }, () => new Float32Array(frames));
-        for (let i = 0; i < frames; i++) {
-          for (let c = 0; c < channels; c++) planar[c][i] = view.getFloat32((i * channels + c) * 4, true);
+  let carry = 0;
+  for (const file of files) {
+    const handle = await open(file, "r");
+    try {
+      let pos = 0;
+      for (;;) {
+        const { bytesRead } = await handle.read(bytes, carry, bytes.length - carry, pos);
+        if (bytesRead === 0) {
+          break;
         }
-        yield planar;
+        pos += bytesRead;
+        const have = carry + bytesRead;
+        const frames = Math.floor(have / frameBytes);
+        if (frames > 0) {
+          const view = new DataView(bytes.buffer, 0, frames * frameBytes);
+          const planar = Array.from({ length: channels }, () => new Float32Array(frames));
+          for (let i = 0; i < frames; i++) {
+            for (let c = 0; c < channels; c++) planar[c][i] = view.getFloat32((i * channels + c) * 4, true);
+          }
+          yield planar;
+        }
+        carry = have - frames * frameBytes;
+        if (carry > 0) bytes.copyWithin(0, frames * frameBytes, have);
       }
-      carry = have - frames * frameBytes;
-      if (carry > 0) bytes.copyWithin(0, frames * frameBytes, have);
-      if (bytesRead === 0) return;
+    } finally {
+      await handle.close();
     }
-  } finally {
-    await handle.close();
   }
 }
 
-/** Master the raw float mix at `input` into `output`, same layout. */
+/** Master the raw float mix in `inputs`, read in order as one stream, into
+ * `output`, same layout. */
 export async function masterRawMix(
-  input: string,
+  inputs: string[],
   output: string,
   opts: { sampleRate: number; channels: number; targetLufs: number; ceilingDbtp: number }
 ): Promise<MasterReport> {
   const out = await open(output, "w");
   try {
     return await masterStream(
-      () => rawChunks(input, opts.sampleRate, opts.channels),
+      () => rawChunks(inputs, opts.sampleRate, opts.channels),
       async (chunk) => {
         const frames = chunk[0].length;
         const buf = new Uint8Array(frames * opts.channels * 4);

@@ -26,8 +26,10 @@ const stagedFiles = new Map<string, string>();
 const probedDims = new Map<string, { width: number; height: number }>();
 
 /** The masters and stem packs the last run asked for. */
-let mastered: { input: string; output: string; opts: Parameters<ExportPipelineIO["masterRawMix"]>[2] }[] = [];
+let mastered: { inputs: string[]; output: string; opts: Parameters<ExportPipelineIO["masterRawMix"]>[2] }[] = [];
 let packed: { files: { path: string; name: string }[]; output: string }[] = [];
+/** Each stream probe the last run made, as `kind:file`. */
+let streamProbes: string[] = [];
 /** A pass to cancel the job during, the way the dock's cancel lands mid-render. */
 let cancelDuring: "master" | "stems" | null = null;
 
@@ -39,6 +41,7 @@ const runsWithCap = async (over: Partial<ExportSpec>, cap: number | undefined): 
   written = [];
   mastered = [];
   packed = [];
+  streamProbes = [];
   // Seconds each turned file was asked to produce, summed off the `-t` of the
   // chunk runs that wrote its pieces, so the bake reads back a whole file.
   const produced = new Map<string, number>();
@@ -52,15 +55,19 @@ const runsWithCap = async (over: Partial<ExportSpec>, cap: number | undefined): 
       return new TextEncoder().encode(stagedFiles.get(path.basename(file)) ?? "");
     }) as unknown as ExportPipelineIO["readFile"],
     unlink: (async () => {}) as unknown as ExportPipelineIO["unlink"],
-    hasStream: async () => true,
+    hasStream: async (file, kind) => {
+      streamProbes.push(`${kind}:${file}`);
+      return true;
+    },
     audioChannels: async (file) => (file.includes("mono") ? 1 : 2),
     videoDecodeCost: async () => null,
+    videoPicture: async () => null,
     videoDimensions: async (file) => probedDims.get(file) ?? null,
     mediaDuration: async (file) => produced.get(file) ?? 0,
     videoEncoder: async (codec) =>
       codec === "hevc" ? "libx265" : codec.startsWith("prores") ? "prores_ks" : "libx264",
-    masterRawMix: async (input, output, opts) => {
-      mastered.push({ input, output, opts });
+    masterRawMix: async (inputs, output, opts) => {
+      mastered.push({ inputs, output, opts });
       if (cancelDuring === "master") job.error = "Export canceled.";
       return {} as Awaited<ReturnType<ExportPipelineIO["masterRawMix"]>>;
     },
@@ -96,7 +103,7 @@ const runsWithCap = async (over: Partial<ExportSpec>, cap: number | undefined): 
     progress: 0,
     log: [],
   };
-  await runExport(job, spec, (f) => `/media/${f}`, io, cap);
+  await runExport(job, cap === undefined ? spec : { ...spec, passes: { holdMB: 2048, pieces: cap } }, (f) => `/media/${f}`, io);
   return ffmpegCalls;
 };
 
@@ -483,6 +490,12 @@ describe("passes", () => {
     expect(fast.length).toBeGreaterThan(backward.length);
   });
 
+  test("gaps decode nothing, so they hold no frames", () => {
+    // Ten three-second cuts in file order with a three-second gap after each.
+    const clips = Array.from({ length: 10 }, (_, i) => [clip("a.mp4", { in: i * 3, out: i * 3 + 3 }), clip("", { in: 0, out: 3 })]).flat();
+    expect(passWindows(long(20, { clips, duration: 60 }), () => ({ pixels: 1080 * 1920, fps: 30 }))).toEqual([{ start: 0, end: 60 }]);
+  });
+
   test("a range is split inside itself", () => {
     const windows = passWindows(long(120, { range: { start: 31, end: 200 } }), () => ({ pixels: 1080 * 1920, fps: 30 }));
     expect(windows[0].start).toBe(31);
@@ -505,6 +518,8 @@ describe("passes", () => {
       expect(a.slice(a.indexOf("-filter_complex") + 2, video)).not.toContain("-c:a");
       expect(a.slice(video, mix)).toContain("pcm_f32le");
     }
+    // The passes share one look at each file.
+    expect(streamProbes.length).toBe(new Set(streamProbes).size);
     const join = passes.at(-1)!;
     expect(arg(join, "-display_rotation")).toBe("0");
     expect(arg(join, "-f")).toBe("concat");
@@ -1276,15 +1291,51 @@ describe("delivery", () => {
     const spec = {
       projectId: "p", width: 1080, height: 1920, fps: 30, crf: 24, preset: "veryfast",
       duration: 15,
-      range: { start: 6, end: 8 },
+      range: { start: 2, end: 3.8 },
       clips: [clip("a.mp4", { out: 5, transition: 1 }), clip("b.mp4", { out: 5 }), clip("c.mp4", { out: 5 })],
       audio: [],
       overlays: [],
     } as unknown as ExportSpec;
-    // Slots [0,5) [5,10) [10,15): a one-second join reaches 1.5 s past each
-    // edge, so the first slot (ending at 5, within 1.5 of 6) stays and the
-    // last (starting at 10, beyond 1.5 of 8) is hidden.
+    // Slots [0,5) [5,10) [10,15): the one-second join holds b's first frame
+    // from 4, so b, within the half-second slack of that, stays; c is hidden.
     expect(narrowSpecToRange(spec).clips.map((c) => !!c.hidden)).toEqual([false, false, true]);
+  });
+
+  test("a clip animating in over its neighbor's held frame keeps the neighbor", () => {
+    const spec = {
+      projectId: "p", width: 1080, height: 1920, fps: 30, crf: 24, preset: "veryfast",
+      duration: 15,
+      range: { start: 6, end: 8 },
+      clips: [
+        clip("a.mp4", { out: 5 }),
+        clip("b.mp4", { out: 5, animIn: { style: "slideleft", seconds: 1.3 } }),
+        clip("c.mp4", { out: 5 }),
+      ],
+      audio: [],
+      overlays: [],
+    } as unknown as ExportSpec;
+    // b slides in over a's last frame until 6.3, inside the range, so a stays.
+    expect(narrowSpecToRange(spec).clips.map((c) => !!c.hidden)).toEqual([false, false, true]);
+  });
+
+  test("a long join reaches only the clips beside it", () => {
+    const spec = {
+      projectId: "p", width: 1080, height: 1920, fps: 30, crf: 24, preset: "veryfast",
+      duration: 25,
+      range: { start: 6, end: 8 },
+      clips: [
+        clip("a.mp4", { out: 5 }),
+        clip("b.mp4", { out: 5 }),
+        clip("c.mp4", { out: 5 }),
+        clip("d.mp4", { out: 5, transition: 3 }),
+        clip("e.mp4", { out: 5 }),
+      ],
+      audio: [],
+      overlays: [],
+    } as unknown as ExportSpec;
+    // The 3 s join between d and e is far from the range: a, ending 1 s
+    // before it, and c, starting 2 s after, are beyond the half-second slack.
+    expect(narrowSpecToRange(spec).clips.map((c) => !!c.hidden)).toEqual([true, false, true, true, true]);
   });
 
   test("a slot the range hides opens none of its inputs", async () => {
@@ -1793,7 +1844,7 @@ describe("a mastered delivery", () => {
     expect(enc.slice(videoOut, mixAt)).toContain("pcm_f32le");
     expect(mastered).toEqual([
       {
-        input: "/tmp/graph-test/mix.f32",
+        inputs: ["/tmp/graph-test/mix.f32"],
         output: "/tmp/graph-test/master.f32",
         opts: { sampleRate: 44100, channels: 2, targetLufs: -14, ceilingDbtp: -1 },
       },
