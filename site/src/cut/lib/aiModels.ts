@@ -17,7 +17,7 @@ export const AI_MODELS: AiModel[] = [
   { id: "claude-fable-5-1", label: "Fable 5.1", provider: "claude" },
   { id: "claude-opus-5-5", label: "Opus 5.5", provider: "claude" },
   { id: "claude-sonnet-5-5", label: "Sonnet 5.5", provider: "claude" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", provider: "claude" },
+  { id: "claude-haiku-5-5", label: "Haiku 5.5", provider: "claude" },
   { id: "gpt-6-astra", label: "GPT-6 Astra", provider: "codex" },
   { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", provider: "codex" },
   { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "codex" },
@@ -33,6 +33,7 @@ export const AI_MODELS: AiModel[] = [
 export const RETIRED_CHAT_MODELS: Record<string, string> = {
   "claude-opus-5": "claude-opus-5-5",
   "claude-sonnet-5": "claude-sonnet-5-5",
+  "claude-haiku-4-5-20251001": "claude-haiku-5-5",
   "gpt-5.6-sol": "gpt-6.1-sol",
   "gpt-6-sol": "gpt-6.1-sol",
   "gpt-5.6-luna": "gpt-6-luna",
