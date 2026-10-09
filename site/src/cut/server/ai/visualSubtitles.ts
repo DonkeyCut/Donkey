@@ -18,7 +18,7 @@ export interface VisualCue {
   text: string;
 }
 
-const MODEL = "claude-haiku-4-5-20251001";
+const MODEL = "claude-haiku-5-5";
 const MAX_FRAMES = 24;
 
 type ImageBlock = {
