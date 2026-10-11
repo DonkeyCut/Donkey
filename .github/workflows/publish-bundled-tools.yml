@@ -112,7 +112,19 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$manifest"
           git commit -m "chore(tools): publish bundled tools ${{ steps.ver.outputs.version }} [skip ci]"
-          git push origin "HEAD:${{ github.event.repository.default_branch }}"
+
+          # main keeps moving during the long build, so rebase onto it before each push.
+          branch="${{ github.event.repository.default_branch }}"
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin "$branch"
+            if git push origin "HEAD:$branch"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
           echo "committed=true" >> "$GITHUB_OUTPUT"
 
       # New tools are new bytes inside the app, so they need a release. The push above
