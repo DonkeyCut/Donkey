@@ -15,6 +15,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENDOR_DIR="${DONKEY_TOOLS_DIR:-$ROOT_DIR/vendor/donkey-tools}"
 MANIFEST="$ROOT_DIR/apps/Donkey/Sources/DonkeyRuntime/Resources/bundled-tools.json"
+FFMPEG_RELEASE="$ROOT_DIR/site/src/cut/worker/ffmpeg-release"
 
 # Every tool the app ships. All of them are required: they travel inside the app, so a
 # build that can't stage one would ship a capability that silently doesn't work on a
@@ -39,6 +40,17 @@ missing_of() {
   printf '%s\n' "${out[@]:-}"
 }
 
+# The app ships the ffmpeg release the export code is written against, so a vendored
+# ffmpeg off that pin counts as stale. Example: ffmpeg-release says 9.0.2 while the
+# manifest still names a 7.1.1 bundle, which renders passes with a dropped frame.
+ffmpeg_on_pin() {
+  local pinned have
+  pinned="$(. "$FFMPEG_RELEASE" && printf '%s' "$FFMPEG_VERSION")"
+  have="$("$VENDOR_DIR/ffmpeg" -version 2>/dev/null | head -n 1 | awk '{print $3}')"
+  [ "$have" = "$pinned" ] && return 0
+  echo "ffmpeg in $VENDOR_DIR is ${have:-missing}; ffmpeg-release pins $pinned." >&2
+  return 1
+}
 
 manifest_value() {
   [ -f "$MANIFEST" ] || return 1
@@ -88,12 +100,13 @@ if [ -n "${DONKEY_TOOLS_DIR:-}" ]; then
     echo "ERROR: DONKEY_TOOLS_DIR=$VENDOR_DIR is missing required tools: $missing" >&2
     exit 1
   fi
+  ffmpeg_on_pin || exit 1
   echo "Bundled tools present in $VENDOR_DIR (DONKEY_TOOLS_DIR)"
   exit 0
 fi
 
 required_missing=$(missing_of "${REQUIRED_TOOLS[@]}" | grep -c .)
-if [ "$required_missing" -eq 0 ]; then
+if [ "$required_missing" -eq 0 ] && ffmpeg_on_pin; then
   echo "Bundled tools present in $VENDOR_DIR"
   exit 0
 fi
@@ -118,6 +131,13 @@ fi
 if [ -n "$still_missing" ]; then
   echo "ERROR: bundled tools still missing after install: $(echo "$still_missing" | tr '\n' ' ')" >&2
   echo "       Source build needs Homebrew + network; fix that and re-run." >&2
+  exit 1
+fi
+
+# A manifest that still names a bundle built before the ffmpeg bump is a release blocker:
+# run Publish Bundled Tools so bundled-tools.json names a bundle on the pin.
+if ! ffmpeg_on_pin; then
+  echo "ERROR: bundled-tools.json names a tools bundle off the ffmpeg pin; publish a new one." >&2
   exit 1
 fi
 echo "Bundled tools ready in $VENDOR_DIR"
