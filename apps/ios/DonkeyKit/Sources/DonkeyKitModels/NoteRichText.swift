@@ -306,12 +306,70 @@ nonisolated public enum NoteRichText {
     // MARK: Changing blocks
 
     /// Turn lines into another kind of block. Lists keep their nesting when
-    /// they stay lists.
+    /// they stay lists. A list made from several lines takes only the
+    /// written ones, so it numbers 1, 2, 3 and never around empty items; a
+    /// blank line alone still turns.
     public static func setting(_ kind: NoteBlockKind, lines: ClosedRange<Int>, of blocks: [NoteBlock]) -> [NoteBlock] {
         var out = blocks
         for i in lines where out.indices.contains(i) {
             out[i].indent = kind.isList && out[i].kind.isList ? out[i].indent : 0
             out[i].kind = kind
+        }
+        let blank = lines.filter { out.indices.contains($0) && out[$0].text.isEmpty }
+        guard kind.isList, blank.count < lines.count else { return out }
+        for i in blank.reversed() { out.remove(at: i) }
+        return out
+    }
+
+    /// Cut the words between two offsets out of their plain lines onto lines
+    /// of their own, so a list made from a piece of a line takes that piece:
+    /// "eggs" selected in "milk eggs bread" leaves "milk", "eggs", "bread".
+    /// Spaces at a cut go with it; a heading, quote or list line stays whole.
+    /// Returns the blocks and where the words now sit.
+    public static func cuttingOut(from start: Int, to end: Int, in blocks: [NoteBlock]) -> (blocks: [NoteBlock], range: Range<Int>) {
+        guard start < end else { return (blocks, start..<end) }
+        var out = blocks
+        let a = position(of: start, in: blocks), b = position(of: end, in: blocks)
+
+        // The end first, so the start's line still holds.
+        var endLine = b.line, endContent = b.content
+        if let cut = cut(&out, line: b.line, at: b.content) { endContent = cut.before }
+        var startLine = a.line, startContent = a.content
+        if let cut = cut(&out, line: a.line, at: a.content) {
+            startLine += 1
+            startContent = 0
+            endLine += 1
+            if b.line == a.line { endContent -= cut.after }
+        }
+        return (out, offset(line: startLine, content: startContent, in: out)..<offset(line: endLine, content: endContent, in: out))
+    }
+
+    /// Split a plain line at a point in its words, dropping the spaces
+    /// around the cut: `before` is where the first half's words end, `after`
+    /// where the second half's began. Nil when the point sits at the line's
+    /// edge, and the line stays whole.
+    private static func cut(_ blocks: inout [NoteBlock], line: Int, at content: Int) -> (before: Int, after: Int)? {
+        guard blocks.indices.contains(line), blocks[line].kind == .paragraph else { return nil }
+        let chars = Array(blocks[line].text)
+        var before = content, after = content
+        while before > 0, chars[before - 1].isWhitespace { before -= 1 }
+        while after < chars.count, chars[after].isWhitespace { after += 1 }
+        guard before > 0, after < chars.count else { return nil }
+        let runs = blocks[line].runs
+        blocks[line].runs = slice(runs, 0..<before)
+        blocks.insert(NoteBlock(.paragraph, runs: slice(runs, after..<chars.count)), at: line + 1)
+        return (before, after)
+    }
+
+    /// The runs covering a range of a line's characters.
+    private static func slice(_ runs: [NoteRun], _ range: Range<Int>) -> [NoteRun] {
+        var out: [NoteRun] = []
+        var index = 0
+        for run in runs {
+            let chars = Array(run.text)
+            let from = max(range.lowerBound - index, 0), to = min(range.upperBound - index, chars.count)
+            if from < to { out.append(NoteRun(String(chars[from..<to]), run.marks)) }
+            index += chars.count
         }
         return out
     }

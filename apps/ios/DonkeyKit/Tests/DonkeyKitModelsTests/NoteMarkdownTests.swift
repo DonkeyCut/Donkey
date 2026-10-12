@@ -289,5 +289,27 @@ import Testing
         #expect(NoteMarkdown.serialize(nested) == "1. hello world\n  1. next")
         let heading = NoteRichText.setting(.heading(2), lines: 1...1, of: nested)
         #expect(NoteMarkdown.serialize(heading) == "1. hello world\n## next")
+        // A list made from several lines takes the written ones; a blank
+        // line alone still turns.
+        let spaced = NoteMarkdown.parse("one\n\ntwo\n\nafter")
+        #expect(NoteMarkdown.serialize(NoteRichText.setting(.number, lines: 0...2, of: spaced)) == "1. one\n2. two\n\nafter")
+        #expect(NoteMarkdown.serialize(NoteRichText.setting(.bullet, lines: 1...1, of: spaced)) == "one\n- \ntwo\n\nafter")
+    }
+
+    @Test func selectedWordsCutOntoTheirOwnLines() {
+        func cut(_ body: String, _ words: String) -> (String, String) {
+            let blocks = NoteMarkdown.parse(body)
+            let text = String(NoteRichText.attributedText(blocks).characters)
+            let start = text.distance(from: text.startIndex, to: text.range(of: words)!.lowerBound)
+            let result = NoteRichText.cuttingOut(from: start, to: start + words.count, in: blocks)
+            let drawn = Array(NoteRichText.attributedText(result.blocks).characters)
+            return (NoteMarkdown.serialize(result.blocks), String(drawn[result.range]))
+        }
+        #expect(cut("milk **eggs** bread", "eggs") == ("milk\n**eggs**\nbread", "eggs"))
+        #expect(cut("I quit. I'll find one.", " I'll") == ("I quit.\nI'll\nfind one.", "I'll"))
+        #expect(cut("one two\nthree four", "two\nthree") == ("one\ntwo\nthree\nfour", "two\nthree"))
+        // A whole line, or a piece of a heading, stays as it is.
+        #expect(cut("milk eggs", "milk eggs") == ("milk eggs", "milk eggs"))
+        #expect(cut("# milk eggs", "eggs") == ("# milk eggs", "eggs"))
     }
 }

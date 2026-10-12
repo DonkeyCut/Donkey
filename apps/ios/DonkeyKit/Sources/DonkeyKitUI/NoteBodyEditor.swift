@@ -95,6 +95,14 @@ final class NoteBodyEditing {
     // MARK: Formatting
 
     func setKind(_ kind: NoteBlockKind) {
+        // Selected words become the list on lines of their own.
+        if kind.isList {
+            let range = selectedOffsets()
+            let cut = NoteRichText.cuttingOut(from: range.lowerBound, to: range.upperBound, in: blocks)
+            blocks = cut.blocks
+            redraw()
+            select(cut.range)
+        }
         changeLines { NoteRichText.setting(kind, lines: $1, of: $0) }
     }
 
@@ -150,11 +158,16 @@ final class NoteBodyEditing {
         let range = selectedOffsets()
         let start = NoteRichText.position(of: range.lowerBound, in: blocks)
         let end = NoteRichText.position(of: range.upperBound, in: blocks)
+        let before = blocks
         blocks = change(blocks, start.line...end.line)
         redraw()
+        // Lines the change dropped come out of the selection's end; a dropped
+        // last line leaves it at the end of the line above.
+        let dropped = before.count - blocks.count
+        let endGone = dropped > 0 && before[end.line].text.isEmpty
         select(
             NoteRichText.offset(line: start.line, content: start.content, in: blocks)
-                ..< NoteRichText.offset(line: end.line, content: end.content, in: blocks)
+                ..< NoteRichText.offset(line: end.line - dropped, content: endGone ? .max : end.content, in: blocks)
         )
         publish()
     }
