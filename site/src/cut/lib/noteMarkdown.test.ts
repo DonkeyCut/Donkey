@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { getSchema } from "@tiptap/core";
 import { Node } from "@tiptap/pm/model";
+import { EditorState, TextSelection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
-import { noteBodyText, parseInline, parseNoteBody, serializeNoteBody } from "@/cut/lib/noteMarkdown";
-import { blocksOf, docOf, TextColor } from "@/cut/lib/noteDoc";
+import { noteBodyText, parseInline, parseNoteBody, pastedNoteBlocks, serializeNoteBody } from "@/cut/lib/noteMarkdown";
+import { blocksOf, docOf, dropBlankLines, splitSelection, TextColor } from "@/cut/lib/noteDoc";
 
 const roundTrip = (body: string) => serializeNoteBody(parseNoteBody(body));
 
@@ -76,6 +77,16 @@ describe("note markdown", () => {
     ];
     expect(parseNoteBody(serializeNoteBody(blocks))).toEqual(blocks);
   });
+
+  test("pasted Markdown lists come in as lists, loose lists closed up", () => {
+    const pasted = (text: string) => {
+      const blocks = pastedNoteBlocks(text);
+      return blocks && serializeNoteBody(blocks);
+    };
+    expect(pasted("1. one\r\n\r\n2. two\n\n\n3. three\n")).toBe("1. one\n2. two\n3. three");
+    expect(pasted("Plan\n\n- a\n\n- b\n\nAfter")).toBe("Plan\n\n- a\n- b\n\nAfter");
+    expect(pasted("just words\n\nmore words")).toBeNull();
+  });
 });
 
 describe("note editor document", () => {
@@ -92,5 +103,38 @@ describe("note editor document", () => {
       expect(() => Node.fromJSON(schema, doc).check()).not.toThrow();
       expect(serializeNoteBody(blocksOf(doc))).toBe(body);
     }
+  });
+
+  test("blank lines inside a selection drop before it turns into a list", () => {
+    const body = "one\n\ntwo\n\nthree\n\nafter";
+    const doc = Node.fromJSON(schema, docOf(parseNoteBody(body)));
+    const lines = (from: number, to: number) => {
+      const state = EditorState.create({ doc, selection: TextSelection.create(doc, from, to) });
+      const tr = state.tr;
+      dropBlankLines({ tr } as Parameters<typeof dropBlankLines>[0]);
+      return serializeNoteBody(blocksOf(tr.doc.toJSON()));
+    };
+    // From inside "one" to inside "three": the blanks between go, the one after stays.
+    expect(lines(2, 16)).toBe("one\ntwo\nthree\n\nafter");
+    // A blank line on its own is left for the list to take.
+    expect(lines(6, 6)).toBe(body);
+  });
+
+  test("selected words cut out onto their own lines before a list takes them", () => {
+    const cut = (body: string, words: string) => {
+      const doc = Node.fromJSON(schema, docOf(parseNoteBody(body)));
+      // The words' positions: one past the line's opening.
+      const from = doc.textContent.indexOf(words) + 1;
+      const state = EditorState.create({ doc, selection: TextSelection.create(doc, from, from + words.length) });
+      const tr = state.tr;
+      splitSelection({ tr } as Parameters<typeof splitSelection>[0]);
+      return [serializeNoteBody(blocksOf(tr.doc.toJSON())), tr.doc.textBetween(tr.selection.from, tr.selection.to, "|")];
+    };
+    expect(cut("milk eggs bread", "eggs")).toEqual(["milk\neggs\nbread", "eggs"]);
+    expect(cut("I quit. I'll find one.", "I'll find one.")).toEqual(["I quit.\nI'll find one.", "I'll find one."]);
+    expect(cut("I quit. I'll find one.", " I'll")).toEqual(["I quit.\nI'll\nfind one.", "I'll"]);
+    // A whole line, or a piece of a heading, stays as it is.
+    expect(cut("milk eggs", "milk eggs")).toEqual(["milk eggs", "milk eggs"]);
+    expect(cut("# milk eggs", "eggs")).toEqual(["# milk eggs", "eggs"]);
   });
 });

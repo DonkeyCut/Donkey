@@ -6,9 +6,12 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import { Placeholder } from "@tiptap/extensions";
-import { Bold, Check, ChevronDown, Italic, Strikethrough, Underline } from "lucide-react";
-import { NOTE_TEXT_COLORS, parseNoteBody, serializeNoteBody, type NoteTextColor } from "@/cut/lib/noteMarkdown";
-import { blocksOf, docOf, TextColor } from "@/cut/lib/noteDoc";
+import { Slice } from "@tiptap/pm/model";
+import type { EditorView } from "@tiptap/pm/view";
+import { Bold, Check, ChevronDown, Italic, List, ListOrdered, ListTodo, Strikethrough, Underline } from "lucide-react";
+import { NOTE_TEXT_COLORS, parseNoteBody, pastedNoteBlocks, serializeNoteBody, type NoteTextColor } from "@/cut/lib/noteMarkdown";
+import { blocksOf, docOf, dropBlankLines, splitSelection, TextColor } from "@/cut/lib/noteDoc";
+import { useLocalPref } from "@/cut/lib/uiState";
 import { cn } from "@/lib/utils";
 
 /** What a selection can turn its lines into, the way the toolbar names it. */
@@ -20,20 +23,62 @@ const TURN_INTO: { id: string; label: string; active: (e: Editor) => boolean; ru
     active: (e: Editor) => e.isActive("heading", { level }),
     run: (e: Editor) => toText(e).setHeading({ level }).run(),
   })),
-  { id: "bullet", label: "Bulleted list", active: (e) => e.isActive("bulletList"), run: (e) => toText(e).toggleBulletList().run() },
-  { id: "number", label: "Numbered list", active: (e) => e.isActive("orderedList"), run: (e) => toText(e).toggleOrderedList().run() },
-  { id: "todo", label: "To-do list", active: (e) => e.isActive("taskList"), run: (e) => toText(e).toggleTaskList().run() },
+  { id: "bullet", label: "Bulleted list", active: (e) => e.isActive("bulletList"), run: (e) => toList(e).toggleBulletList().run() },
+  { id: "number", label: "Numbered list", active: (e) => e.isActive("orderedList"), run: (e) => toList(e).toggleOrderedList().run() },
+  { id: "todo", label: "To-do list", active: (e) => e.isActive("taskList"), run: (e) => toList(e).toggleTaskList().run() },
   { id: "quote", label: "Quote", active: (e) => e.isActive("blockquote"), run: (e) => toText(e).setParagraph().toggleBlockquote().run() },
 ];
 /** Lift the selected lines out of any list or quote first, so every turn
  * starts from plain lines. */
-function toText(e: Editor) {
-  let chain = e.chain().focus();
+function toText(e: Editor, chain = e.chain().focus()) {
   if (e.isActive("bulletList")) chain = chain.toggleBulletList();
   else if (e.isActive("orderedList")) chain = chain.toggleOrderedList();
   else if (e.isActive("taskList")) chain = chain.toggleTaskList();
   if (e.isActive("blockquote")) chain = chain.lift("blockquote");
   return chain;
+}
+
+/** Lines turning into a list: selected words cut out onto lines of their
+ * own, then the blank lines between the written ones drop. */
+function toList(e: Editor) {
+  return toText(e, e.chain().focus().command(splitSelection)).command(dropBlankLines);
+}
+
+/** The list styles the toolbar's list button makes, by their turn-into ids. */
+const LIST_STYLES = [
+  { id: "bullet", icon: List },
+  { id: "number", icon: ListOrdered },
+  { id: "todo", icon: ListTodo },
+] as const;
+type ListStyle = (typeof LIST_STYLES)[number]["id"];
+
+/** Paste plain text as the note's Markdown when its lines carry block
+ * markers, so "- a" or "1. a" copied from a chat or a text file lands as the
+ * list it was written as. A copy from a note, or rich text that brings its
+ * own blocks, pastes as the editor reads it. */
+function pasteMarkdown(view: EditorView, event: ClipboardEvent, slice: Slice): boolean {
+  const html = event.clipboardData?.getData("text/html") ?? "";
+  if (html.includes("data-pm-slice")) {
+    return false;
+  }
+  let blocks = false;
+  slice.content.forEach((node) => {
+    blocks ||= node.type.name !== "paragraph";
+  });
+  if (blocks) {
+    return false;
+  }
+  const pasted = pastedNoteBlocks(event.clipboardData?.getData("text/plain") ?? "");
+  if (!pasted) {
+    return false;
+  }
+
+  // Leading and trailing text joins the line the caret is on, the way a
+  // plain paste does.
+  const doc = view.state.schema.nodeFromJSON(docOf(pasted));
+  const open = (node: typeof doc.firstChild) => (node?.type.name === "paragraph" ? 1 : 0);
+  view.dispatch(view.state.tr.replaceSelection(new Slice(doc.content, open(doc.firstChild), open(doc.lastChild))).scrollIntoView());
+  return true;
 }
 
 /** The note's body: rich text on the paper, written out as the note's
@@ -78,7 +123,7 @@ export default function NoteBodyEditor({
       Placeholder.configure({ placeholder: "Write your note…" }),
     ],
     content: initial,
-    editorProps: { attributes: { class: "outline-none min-h-[50vh]" } },
+    editorProps: { attributes: { class: "outline-none min-h-[50vh]" }, handlePaste: pasteMarkdown },
     onCreate: ({ editor }) => handlers.current.onEditor?.(editor),
     onDestroy: () => handlers.current.onEditor?.(null),
     onUpdate: ({ editor }) => handlers.current.onChange(serializeNoteBody(blocksOf(editor.getJSON()))),
@@ -110,11 +155,16 @@ export default function NoteBodyEditor({
 /** The selection's toolbar. Every press keeps the editor's focus, so the
  * selection it acts on stays put. */
 function Toolbar({ editor }: { editor: Editor }) {
-  const [panel, setPanel] = useState<"turn" | "color" | null>(null);
+  const [panel, setPanel] = useState<"turn" | "list" | "color" | null>(null);
+  // The style the list button makes: the last one picked from its menu, kept
+  // across notes and reloads.
+  const [listStyle, setListStyle] = useLocalPref<ListStyle>("cut-note-list-style", "bullet", (v) =>
+    LIST_STYLES.some((l) => l.id === v),
+  );
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
-      turn: TURN_INTO.find((t) => t.active(e))?.label ?? "Text",
+      turn: TURN_INTO.find((t) => t.active(e))?.id ?? "text",
       bold: e.isActive("bold"),
       italic: e.isActive("italic"),
       underline: e.isActive("underline"),
@@ -124,6 +174,10 @@ function Toolbar({ editor }: { editor: Editor }) {
   });
   const keep = (e: React.MouseEvent) => e.preventDefault();
   const color = NOTE_TEXT_COLORS.find((c) => c.id === state.color);
+  const turn = (id: string) => TURN_INTO.find((t) => t.id === id)!.run(editor);
+  const label = (id: string) => TURN_INTO.find((t) => t.id === id)!.label;
+  const activeList = LIST_STYLES.find((l) => l.id === state.turn);
+  const list = LIST_STYLES.find((l) => l.id === listStyle)!;
 
   return (
     <BubbleMenu
@@ -135,10 +189,10 @@ function Toolbar({ editor }: { editor: Editor }) {
       <Menu
         open={panel === "turn"}
         onToggle={() => setPanel(panel === "turn" ? null : "turn")}
-        trigger={<>{state.turn}<ChevronDown className="size-3.5 opacity-50" /></>}
+        trigger={<>{label(state.turn)}<ChevronDown className="size-3.5 opacity-50" /></>}
       >
         {TURN_INTO.map((t) => (
-          <MenuItem key={t.id} checked={t.label === state.turn} onPick={() => { t.run(editor); setPanel(null); }}>
+          <MenuItem key={t.id} checked={t.id === state.turn} onPick={() => { t.run(editor); setPanel(null); }}>
             {t.label}
           </MenuItem>
         ))}
@@ -148,6 +202,21 @@ function Toolbar({ editor }: { editor: Editor }) {
       <Toggle label="Italic" on={state.italic} onPress={() => editor.chain().focus().toggleItalic().run()}><Italic className="size-4" /></Toggle>
       <Toggle label="Underline" on={state.underline} onPress={() => editor.chain().focus().toggleUnderline().run()}><Underline className="size-4" /></Toggle>
       <Toggle label="Strikethrough" on={state.strike} onPress={() => editor.chain().focus().toggleStrike().run()}><Strikethrough className="size-4" /></Toggle>
+      <Divider />
+      <Toggle label={label(list.id)} on={state.turn === list.id} onPress={() => turn(state.turn === list.id ? "text" : list.id)}><list.icon className="size-4" /></Toggle>
+      <Menu
+        open={panel === "list"}
+        onToggle={() => setPanel(panel === "list" ? null : "list")}
+        label="List style"
+        trigger={<ChevronDown className="size-3.5 opacity-50" />}
+        fit="icon"
+      >
+        {LIST_STYLES.map((l) => (
+          <MenuItem key={l.id} checked={l.id === activeList?.id} onPick={() => { setListStyle(l.id); turn(l.id); setPanel(null); }}>
+            <l.icon className="size-4" /> {label(l.id)}
+          </MenuItem>
+        ))}
+      </Menu>
       <Divider />
       <Menu
         open={panel === "color"}
@@ -184,14 +253,17 @@ function Toggle({ label, on, onPress, children }: { label: string; on: boolean; 
   );
 }
 
-function Menu({ open, onToggle, label, trigger, children }: { open: boolean; onToggle: () => void; label?: string; trigger: ReactNode; children: ReactNode }) {
+/** How a menu's trigger sits: around a label, or close around a lone icon. */
+type MenuFit = "label" | "icon";
+
+function Menu({ open, onToggle, label, trigger, fit = "label", children }: { open: boolean; onToggle: () => void; label?: string; trigger: ReactNode; fit?: MenuFit; children: ReactNode }) {
   return (
     <div className="relative">
       <button
         type="button"
         aria-label={label}
         aria-expanded={open}
-        className={cn("flex h-7 cursor-pointer items-center gap-1 rounded-md px-2 hover:bg-black/5", open && "bg-black/5")}
+        className={cn("flex h-7 cursor-pointer items-center gap-1 rounded-md hover:bg-black/5", fit === "icon" ? "px-1" : "px-2", open && "bg-black/5")}
         onClick={onToggle}
       >
         {trigger}

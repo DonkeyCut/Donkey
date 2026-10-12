@@ -1,4 +1,5 @@
-import { Mark, mergeAttributes, type JSONContent } from "@tiptap/core";
+import { Mark, mergeAttributes, type Command, type JSONContent } from "@tiptap/core";
+import { TextSelection, type Transaction } from "@tiptap/pm/state";
 import {
   NOTE_LIST_KINDS,
   NOTE_TEXT_COLORS,
@@ -119,6 +120,82 @@ export function docOf(blocks: NoteBlock[]): JSONContent {
     }
   }
   return { type: "doc", content };
+}
+
+/** Take the blank lines out of a selection of several written lines, so the
+ * list it turns into numbers only what was written: 1, 2, 3, never 1, 3, 5
+ * around empty items. A blank line alone stays to take the list. */
+export const dropBlankLines: Command = ({ tr }) => {
+  const blanks: { from: number; to: number }[] = [];
+  let written = 0;
+  tr.doc.nodesBetween(tr.selection.from, tr.selection.to, (node, pos) => {
+    if (!node.isTextblock) {
+      return true;
+    }
+    if (node.content.size === 0) {
+      blanks.push({ from: pos, to: pos + node.nodeSize });
+    } else {
+      written++;
+    }
+    return false;
+  });
+  if (written === 0) {
+    return true;
+  }
+
+  // Last first, so the earlier positions still hold.
+  for (const b of blanks.reverse()) {
+    tr.delete(b.from, b.to);
+  }
+  return true;
+};
+
+/** Cut the selected words out of their lines onto lines of their own, so a
+ * list made from a piece of a line takes that piece: "eggs" selected in "milk
+ * eggs bread" leaves "milk", "eggs", "bread". Spaces at a cut go with it. Only
+ * plain lines cut; a heading, quote or list line turns whole. */
+export const splitSelection: Command = ({ tr }) => {
+  const { from, to, empty } = tr.selection;
+  if (empty) {
+    return true;
+  }
+
+  // The end first, so the start's position still holds; then the end maps
+  // through the start's cut.
+  const end = cutLine(tr, to) ?? to;
+  const steps = tr.steps.length;
+  const start = cutLine(tr, from);
+  // A cut start's words open the next line, past the split's two tokens.
+  const head = start === null ? from : start + 2;
+  tr.setSelection(TextSelection.create(tr.doc, head, tr.mapping.slice(steps).map(end, -1)));
+  return true;
+};
+
+/** Split a plain line at `pos`, dropping the spaces around the cut. Returns
+ * where the words before the cut now end, or null when the line is left
+ * whole because the cut sits at its edge. */
+function cutLine(tr: Transaction, pos: number): number | null {
+  const $pos = tr.doc.resolve(pos);
+  if ($pos.depth !== 1 || $pos.parent.type.name !== "paragraph") {
+    return null;
+  }
+  const text = $pos.parent.textContent;
+  let before = $pos.parentOffset;
+  let after = before;
+  while (before > 0 && /\s/.test(text[before - 1])) {
+    before--;
+  }
+  while (after < text.length && /\s/.test(text[after])) {
+    after++;
+  }
+  if (before === 0 || after === text.length) {
+    return null;
+  }
+
+  const base = $pos.start();
+  tr.delete(base + before, base + after);
+  tr.split(base + before);
+  return base + before;
 }
 
 /** A named text color. The name is what the body stores; the ink is the

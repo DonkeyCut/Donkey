@@ -261,6 +261,38 @@ export function serializeInline(runs: NoteRun[]): string {
   return out;
 }
 
+/** Plain text pasted into a note, read as the note's Markdown when a line
+ * opens with a block marker, so a list, heading or quote copied from a chat
+ * or a text file comes in as that block. Blank lines between list lines close
+ * up, keeping a loose list one list: "1. a\n\n2. b" is items 1 and 2. Text
+ * with no marker returns null and pastes as it is. */
+export function pastedNoteBlocks(text: string): NoteBlock[] | null {
+  const blocks = parseNoteBody(text.replace(/\r\n?/g, "\n").replace(/\n+$/, ""));
+  if (blocks.every((b) => b.kind === "paragraph")) {
+    return null;
+  }
+
+  // Drop each run of blank lines that sits between two list lines.
+  const blank = (b: NoteBlock) => b.kind === "paragraph" && b.runs.every((r) => !r.text);
+  const out: NoteBlock[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    if (!blank(blocks[i])) {
+      out.push(blocks[i]);
+      continue;
+    }
+    let next = i;
+    while (next < blocks.length && blank(blocks[next])) {
+      next++;
+    }
+    const between = NOTE_LIST_KINDS.has(out.at(-1)?.kind ?? "paragraph") && NOTE_LIST_KINDS.has(blocks[next]?.kind ?? "paragraph");
+    if (!between) {
+      out.push(...blocks.slice(i, next));
+    }
+    i = next - 1;
+  }
+  return out;
+}
+
 /** The words of a body with its markup taken out. */
 export function noteBodyText(body: string): string {
   return parseNoteBody(body)
