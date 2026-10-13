@@ -31,6 +31,19 @@ export const GOOGLE_FONTS: BundledFont[] = [
   { id: "dm-serif", label: "DM Serif Display" },
   { id: "amatic", label: "Amatic SC" },
   { id: "dseg14", label: "DSEG14 Classic" },
+  { id: "outfit", label: "Outfit" },
+  { id: "cinzel", label: "Cinzel" },
+  { id: "freckle-face", label: "Freckle Face" },
+  { id: "orbitron", label: "Orbitron" },
+  { id: "chewy", label: "Chewy" },
+  { id: "great-vibes", label: "Great Vibes" },
+  { id: "rubik-dirt", label: "Rubik Dirt" },
+  { id: "fredoka", label: "Fredoka" },
+  { id: "oranienbaum", label: "Oranienbaum" },
+  { id: "kaushan", label: "Kaushan Script" },
+  { id: "rubik", label: "Rubik" },
+  { id: "jost", label: "Jost" },
+  { id: "gloria-hallelujah", label: "Gloria Hallelujah" },
 ];
 
 export const GOOGLE_FONT_IDS = GOOGLE_FONTS.map((f) => f.id);
