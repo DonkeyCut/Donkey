@@ -20,14 +20,16 @@ export interface BuiltinLut {
   file: string;
   /** Content key of the file's bytes. */
   key: string;
+  /** Keys of earlier builds of this look; a grade naming one draws this file. */
+  replaces?: string[];
 }
 
 export const BUILTIN_LUTS: readonly BuiltinLut[] = BUILTIN_LUT_MANIFEST;
 
-const byKey = new Map(BUILTIN_LUTS.map((l) => [l.key, l]));
+const byKey = new Map(BUILTIN_LUTS.flatMap((l) => [l.key, ...(l.replaces ?? [])].map((k) => [k, l] as const)));
 
 /** One line per built-in LUT, for the chat's tool and prompt text. */
 export const builtinLutCatalogText = (): string => BUILTIN_LUTS.map((l) => `${l.label} (${l.look})`).join("; ");
 
-/** The built-in LUT with this content key. */
+/** The built-in LUT with this content key, or the one that replaced it. */
 export const builtinLutByKey = (key: string): BuiltinLut | undefined => byKey.get(key);

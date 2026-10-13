@@ -42,7 +42,10 @@ export const LUT_MARK_ICON = "/cut/lut-file-mark.svg";
 /** The LUT a grade names, when it names one off the shelf. */
 export function lutIdOf(grade: ColorGrade | undefined | null): string | null {
   const id = (grade as { lut?: { id?: unknown } } | null | undefined)?.lut?.id;
-  return typeof id === "string" && id.startsWith(`${PREFIX}:`) ? id : null;
+  if (typeof id !== "string" || !id.startsWith(`${PREFIX}:`)) return null;
+  // A grade saved with an earlier build of a built-in names that build's key.
+  const builtin = builtinLutOf(id);
+  return builtin ? libraryLutId(builtin.key) : id;
 }
 
 /** Bytes of parsed tables kept, before the budget has its say. */
@@ -162,6 +165,8 @@ export function listLutChoices(): LutChoice[] {
 
 /** What a LUT id is called, or undefined when nothing in reach answers to it. */
 export function lutLabel(id: string): string | undefined {
+  const builtin = builtinLutOf(id);
+  if (builtin) return builtin.label;
   return listLutChoices().find((c) => c.id === id)?.label;
 }
 

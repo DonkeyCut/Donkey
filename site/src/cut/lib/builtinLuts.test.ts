@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseLutFile } from "@donkeycut/effects-kit";
-import { BUILTIN_LUTS } from "./builtinLuts";
+import { BUILTIN_LUTS, builtinLutByKey } from "./builtinLuts";
 import { contentKey } from "./contentKey";
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../public");
@@ -20,6 +20,12 @@ describe("built-in LUTs", () => {
 
   test("every look says what it does to a picture", () => {
     for (const l of BUILTIN_LUTS) expect(l.look.trim().length).toBeGreaterThan(10);
+  });
+
+  test("a grade naming a replaced build draws the current file", () => {
+    for (const l of BUILTIN_LUTS) {
+      for (const old of l.replaces ?? []) expect(builtinLutByKey(old)?.key).toBe(l.key);
+    }
   });
 
   test("ids and labels are unique", () => {

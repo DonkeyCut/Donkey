@@ -8,9 +8,15 @@
 //
 //   cd site && ./node_modules/.bin/bun scripts/build-builtin-luts.ts <path to the unzipped HaldCLUT folder>
 //
+// A look may not throw picture away: a pick whose response to grey reaches
+// black above the darkest visible code, or white below the brightest, takes
+// a shaper on its input — the identity through the middle, a smooth
+// quadratic at the end that starts the ramp where the look starts rising —
+// so every visible tone stays apart (gradeRange.test.ts holds it).
+//
 // A LUT's id is its content key, so a saved grade names the exact bytes it
-// was made with: changing a shipped file breaks every grade that wears it.
-// Add new looks; leave the shipped files as they are.
+// was made with. A pick whose bytes change lists the key it had in
+// `replaces`, and a grade naming the old key draws the new file.
 
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -43,6 +49,15 @@ const PICKS: { src: string; id: string; label: string; group: Group; look: strin
 ];
 
 const SIZE = 33;
+/** The visible ends of a code ramp, and the levels they must stay inside. */
+const DARKEST = 8 / 255;
+const BRIGHTEST = 250 / 255;
+const FLOOR = 3 / 255;
+const CEILING = 252 / 255;
+/** How far into the ramp a shaper reaches from each end, at least; a larger
+ * lift or drop reaches twice its own size, so the slope never turns. */
+const SHAPE_SPAN = 0.25;
+const spanFor = (amount: number) => Math.max(SHAPE_SPAN, 2 * amount);
 const OUT_DIR = path.join(import.meta.dir, "../public/cut/luts");
 const MANIFEST = path.join(import.meta.dir, "../src/cut/lib/builtinLutManifest.ts");
 const CREDIT =
@@ -81,26 +96,71 @@ function sample(n: number, px: Uint8Array, r: number, g: number, b: number): [nu
   return [out[0] / 255, out[1] / 255, out[2] / 255];
 }
 
+const lumaOf = (v: [number, number, number]) => 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+
+/** A quadratic that takes [0, span] onto [lift, span] with slope 1 where it
+ * meets the identity: s(x) = lift + (1 − 2·lift/span)·x + lift/span²·x². */
+function toe(x: number, lift: number): number {
+  const span = spanFor(lift);
+  return x >= span ? x : lift + (1 - (2 * lift) / span) * x + (lift / span ** 2) * x * x;
+}
+const shoulder = (x: number, drop: number) => 1 - toe(1 - x, drop);
+
+/** The smallest end shapers that keep the darkest and brightest visible grey
+ * inside the floor and ceiling, found by bisection; 0 when none is needed. */
+function shaperFor(n: number, px: Uint8Array): { lift: number; drop: number } {
+  const grey = (v: number) => lumaOf(sample(n, px, v, v, v));
+  const solve = (ok: (amount: number) => boolean) => {
+    if (ok(0)) return 0;
+    let lo = 0;
+    let hi = 0.5;
+    for (let i = 0; i < 40; i++) {
+      const mid = (lo + hi) / 2;
+      if (ok(mid)) hi = mid;
+      else lo = mid;
+    }
+    return hi;
+  };
+  return {
+    lift: solve((a) => grey(toe(DARKEST, a)) > FLOOR),
+    drop: solve((a) => grey(shoulder(BRIGHTEST, a)) < CEILING),
+  };
+}
+
 const fixed = (v: number) => (Math.round(Math.min(1, Math.max(0, v)) * 1e4) / 1e4).toString();
 
 async function build(root: string) {
   await mkdir(OUT_DIR, { recursive: true });
-  const entries: { id: string; label: string; group: Group; look: string; file: string; key: string }[] = [];
+  const entries: { id: string; label: string; group: Group; look: string; file: string; key: string; replaces?: string[] }[] = [];
   for (const pick of PICKS) {
     const { n, px } = await readHald(path.join(root, pick.src));
-    const lines = [`TITLE "${pick.label}"`, `# ${CREDIT}`, `LUT_3D_SIZE ${SIZE}`];
-    for (let b = 0; b < SIZE; b++)
-      for (let g = 0; g < SIZE; g++)
-        for (let r = 0; r < SIZE; r++) {
-          const [R, G, B] = sample(n, px, r / (SIZE - 1), g / (SIZE - 1), b / (SIZE - 1));
-          lines.push(`${fixed(R)} ${fixed(G)} ${fixed(B)}`);
-        }
-    const text = lines.join("\n") + "\n";
-    const bytes = new TextEncoder().encode(text);
+    const cube = (shape: (v: number) => number) => {
+      const lines = [`TITLE "${pick.label}"`, `# ${CREDIT}`, `LUT_3D_SIZE ${SIZE}`];
+      for (let b = 0; b < SIZE; b++)
+        for (let g = 0; g < SIZE; g++)
+          for (let r = 0; r < SIZE; r++) {
+            const [R, G, B] = sample(n, px, shape(r / (SIZE - 1)), shape(g / (SIZE - 1)), shape(b / (SIZE - 1)));
+            lines.push(`${fixed(R)} ${fixed(G)} ${fixed(B)}`);
+          }
+      return new TextEncoder().encode(lines.join("\n") + "\n");
+    };
+    const { lift, drop } = shaperFor(n, px);
+    const raw = cube((v) => v);
+    const bytes = lift || drop ? cube((v) => shoulder(toe(v, lift), drop)) : raw;
     const name = `${pick.id}.cube`;
     await writeFile(path.join(OUT_DIR, name), bytes);
-    entries.push({ id: pick.id, label: pick.label, group: pick.group, look: pick.look, file: `/cut/luts/${name}`, key: await contentKey(bytes.buffer) });
-    console.log(`${name}  ${(bytes.byteLength / 1024).toFixed(0)} KB`);
+    const key = await contentKey(bytes.buffer);
+    const rawKey = await contentKey(raw.buffer);
+    entries.push({
+      id: pick.id,
+      label: pick.label,
+      group: pick.group,
+      look: pick.look,
+      file: `/cut/luts/${name}`,
+      key,
+      ...(rawKey !== key ? { replaces: [rawKey] } : {}),
+    });
+    console.log(`${name}  ${(bytes.byteLength / 1024).toFixed(0)} KB${lift || drop ? `  shaped: lift ${lift.toFixed(4)} drop ${drop.toFixed(4)}` : ""}`);
   }
   await writeFile(path.join(OUT_DIR, "LICENSE.txt"), `${CREDIT}\n`);
   await writeFile(
