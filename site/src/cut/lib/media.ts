@@ -2968,6 +2968,12 @@ async function pumpEdgeFrames() {
         idle.cancel();
         edgeWake = null;
       }
+      // A clip-edge capture waits out a play too. The edges of the clips the
+      // scroll brings into view open each clip's file while the play is
+      // opening the same clips a moment later, and on a fast cut those reads
+      // took the link from the picture and stalled it. A paused timeline
+      // still gets its edges ahead of the strip tiles.
+      if (edgeQueue.size > 0) await idleWait().done;
       const queue = edgeQueue.size ? edgeQueue : edgeBackQueue;
       const next = queue.entries().next();
       if (next.done) break;

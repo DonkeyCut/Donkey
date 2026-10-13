@@ -68,7 +68,7 @@ import { laneHidden, subtitleLaneCount } from "@/cut/lib/subtitles";
 import { formatTime, formatTimecode } from "@/cut/lib/time";
 import { EFFECT_LABELS, hasSpeedCurve, headSrc, retimeOf, SPEED_CURVE_MAX, SPEED_CURVE_MIN, tailSrc, type EffectId, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
-import { isLinkedAssetType, assetIsSilent, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
+import { isLinkedAssetType, assetIsSilent, previewUrl, emptySubtitles, fontStack, IMAGE_CLIP_SECONDS, isAudioTransition, clipName, isTextOverlay, overlayName, SHAPE_LABELS, TRANSITION_STYLE_LABELS, transitionBarStart, transitionDefaultSeconds, XBAR_MAGNET_PX, type ShapeKind } from "@/cut/lib/types";
 import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, StickerOverlay, SubtitleCue, TimelineTransition, TransitionBoundaryKind, TransitionStyle, VideoClip } from "@/cut/lib/types";
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox, normalizeGrade } from "@donkeycut/effects-kit";
@@ -4457,7 +4457,7 @@ function GhostClip({
   useEffect(() => {
     if (!seedless) return;
     let live = true;
-    void requestEdgeFrame("drop-ghost:head", asset.url, 0, undefined, { background: true }).then(
+    void requestEdgeFrame("drop-ghost:head", previewUrl(asset), 0, undefined, { background: true }).then(
       (src) => {
         if (live && src) onTileFrame();
       }
@@ -4522,7 +4522,7 @@ function seedThumb(
   edges?: { start: string | null; end: string | null }
 ): string[] {
   if (asset.type !== "video") return [];
-  const seed = edges?.start ?? peekEdgeFrame(asset.url, filmIn);
+  const seed = edges?.start ?? peekEdgeFrame(previewUrl(asset), filmIn);
   return seed ? [seed] : [];
 }
 
@@ -4640,7 +4640,7 @@ function filmstripFrames(
     tileH,
     minTileW,
     cuts: asset.sceneCuts,
-    exactFrame: asset.type === "video" ? (t) => peekEdgeFrame(asset.url, t) : undefined,
+    exactFrame: asset.type === "video" ? (t) => peekEdgeFrame(previewUrl(asset), t) : undefined,
     view,
   });
   // The window may start past the clip's first tile or end before its last;
@@ -4687,7 +4687,7 @@ function useTileFrames(
   const wanted = tiles.length > 0;
   useEffect(() => {
     const box = boxRef.current;
-    const url = asset?.type === "video" ? asset.url : null;
+    const url = asset?.type === "video" ? previewUrl(asset) : null;
     if (!box || !url || !wanted) return;
     const scroller = box.closest("[data-tl-scroll]") as HTMLElement | null;
     let live = true;
@@ -4747,7 +4747,7 @@ function useTileFrames(
  * thumb shows instead) until the capture lands; a changed edge time falls back
  * immediately so a trim drag never shows a stale exact frame. */
 function useEdgeFrame(asset: MediaAsset | undefined, time: number, slot: string) {
-  const url = asset?.type === "video" ? asset.url : null;
+  const url = asset?.type === "video" ? previewUrl(asset) : null;
   const id = url ? `${url}#${time.toFixed(2)}` : "";
   const cached = url ? peekEdgeFrame(url, time) : null;
   const [frame, setFrame] = useState<{ id: string; src: string } | null>(null);

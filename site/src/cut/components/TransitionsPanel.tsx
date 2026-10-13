@@ -16,6 +16,7 @@ import {
   TRANSITION_STYLE_GROUPS,
   TRANSITION_STYLE_LABELS,
   overlayAnimStyle,
+  previewUrl,
   transitionStyleOfAnim,
   type AnimStyle,
   type MediaAsset,
@@ -192,7 +193,7 @@ function useCutFrame(
   slot: string,
   side: { asset: MediaAsset; srcT: number } | null
 ): string | null {
-  const url = side?.asset.type === "video" ? side.asset.url : null;
+  const url = side?.asset.type === "video" ? previewUrl(side.asset) : null;
   const time = side?.srcT ?? 0;
   const id = url ? `${url}#${time.toFixed(2)}` : "";
   const cached = url ? peekEdgeFrame(url, time, TILE_FRAME_H) : null;
