@@ -73,7 +73,7 @@ import { fetchSignedMediaUrls, pinDocBase } from "./backend/cloud";
 import { cancelRevoke, resolveRegisteredBlob, revokeRegistered } from "./backend/browser/registry";
 import { markSignedBatch } from "./mediaLinks";
 import { dropLocalMedia, localMediaUrl, prefetchCloudMedia } from "./mediaSync";
-import { clipWarmSettled, stopClipWarm, warmClipSpans, warmOrder } from "./spanWarm";
+import { clipWarmBusy, clipWarmSettled, stopClipWarm, warmClipSpans, warmOrder } from "./spanWarm";
 import {
   dropCachedDoc,
   readCachedDoc,
@@ -2217,9 +2217,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
                 Math.min(firstUse.get(asset.fileName) ?? Infinity, c.start)
               );
             }
+            // A video the preview plays through its proxy is walked as the
+            // proxy: the preview never reads that master, and a render reads
+            // it on the worker or on demand.
             const queue = missing
               .flatMap((a) => {
-                const url = signed.urls.get(a.fileName);
+                const url = (a.type === "video" ? a.proxyUrl : undefined) ?? signed.urls.get(a.fileName);
                 return url ? [{ fileName: a.fileName, url, type: a.type }] : [];
               })
               .sort(
@@ -2250,7 +2253,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
                 next.delete(fileName);
                 return { loadingMedia: next };
               });
-            }, clipWarmSettled);
+            }, videoWalkGate);
           }
         } else {
           markSignedBatch(id, null);
@@ -5371,6 +5374,27 @@ useEditor.subscribe((s, prev) => {
   )
     docSeq++;
 });
+
+/** Resolves once the cut is not playing. */
+function untilStopped(): Promise<void> {
+  if (!useEditor.getState().playing) return Promise.resolve();
+  return new Promise((resolve) => {
+    const off = useEditor.subscribe((s) => {
+      if (s.playing) return;
+      off();
+      resolve();
+    });
+  });
+}
+
+/** The whole-video walk's hold: it reads only while no clip spans are being
+ * read and the cut is not playing, so the link is the play's. */
+export async function videoWalkGate(): Promise<void> {
+  while (clipWarmBusy() || useEditor.getState().playing) {
+    await clipWarmSettled();
+    await untilStopped();
+  }
+}
 
 // A play from a new spot reads ahead from there: the walk the open started
 // may still be reading the far end of the cut, or have finished long before

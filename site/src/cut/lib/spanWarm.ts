@@ -101,6 +101,9 @@ export function warmClipSpans(spans: WarmSpan[]): Promise<void> {
   return done;
 }
 
+/** Whether a walk is reading now. */
+export const clipWarmBusy = (): boolean => walk !== null;
+
 /** Resolves once no walk is reading: the one running now, and any a play
  * started in its place. What waits on this — the whole-file prefetch — never
  * shares the link with a walk the playhead depends on. */

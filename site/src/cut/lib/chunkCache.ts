@@ -1091,8 +1091,14 @@ export async function adoptChunks(fromUrl: string, toUrl: string): Promise<void>
 
 /** Walk a file's chunks into the store front to back, skipping what is
  * already resident or in the air. Stops on abort, on a store that has run out
- * of room, and on a network failure — every chunk that landed stays. */
-export async function prefetchChunks(url: string, signal: AbortSignal): Promise<void> {
+ * of room, and on a network failure — every chunk that landed stays. `gate`
+ * holds the walk before each request, for as long as something with a better
+ * claim on the link needs it. */
+export async function prefetchChunks(
+  url: string,
+  signal: AbortSignal,
+  gate?: () => Promise<void>
+): Promise<void> {
   if (!supportsBrowserStore() || signal.aborted) return;
   const id = chunkIdentity(url);
   if (!id) return;
@@ -1104,6 +1110,11 @@ export async function prefetchChunks(url: string, signal: AbortSignal): Promise<
     for (let i = 0; i < total; i++) {
       if (signal.aborted || !canPersist(state)) return;
       if (state.resident.has(i) || state.inflight.has(i)) continue;
+      if (gate) {
+        await gate();
+        if (signal.aborted) return;
+        if (state.resident.has(i) || state.inflight.has(i)) continue;
+      }
       let last = i;
       while (
         last - i + 1 < PREFETCH_RUN &&

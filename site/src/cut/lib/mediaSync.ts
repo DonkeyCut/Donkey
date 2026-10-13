@@ -247,16 +247,17 @@ let prefetch: PrefetchRun | null = null;
  * and swap onto blob URLs, so an <img> paints local bytes offline. Every file
  * reports back through `onDone` exactly once — its blob URL when whole bytes
  * landed, null otherwise — so the caller can swap playing assets mid-session
- * and retire per-file loading state either way. Videos wait for `videosAfter`
- * (the clip spans the cut plays, read first) while the other files go ahead. Starting a prefetch cancels
- * any earlier one — the queue follows the open project — and records the open
+ * and retire per-file loading state either way. Videos hold at `videoGate`
+ * before each file and each ranged request — the caller's wait for the clip
+ * spans the cut plays and for a play to stop — while the other files go
+ * ahead. Starting a prefetch cancels any earlier one — the queue follows the open project — and records the open
  * for eviction recency. Fire-and-forget; a failed or refused write costs
  * nothing but the cache. */
 export function prefetchCloudMedia(
   projectId: string,
   files: { fileName: string; url: string; type?: AssetType }[],
   onDone?: (fileName: string, blobUrl: string | null) => void,
-  videosAfter?: () => Promise<void>
+  videoGate?: () => Promise<void>
 ): void {
   if (!supportsBrowserStore()) {
     for (const f of files) onDone?.(f.fileName, null);
@@ -274,18 +275,12 @@ export function prefetchCloudMedia(
     // The small files a still or a sticker paints go first; the videos follow
     // the spans the cut plays.
     files = [...files.filter((f) => f.type !== "video"), ...files.filter((f) => f.type === "video")];
-    let waited = false;
     for (let i = 0; i < files.length; i++) {
       if (run.ctrl.signal.aborted) return;
       const f = files[i];
-      if (f.type === "video" && !waited) {
-        waited = true;
-        await videosAfter?.().catch(() => {});
-        if (run.ctrl.signal.aborted) return;
-      }
       const r =
         f.type === "video"
-          ? await cacheVideoChunks(f.url, run.ctrl.signal)
+          ? await cacheVideoChunks(f.url, run.ctrl.signal, videoGate)
           : await cacheOne(projectId, f.fileName, f.url, run.ctrl.signal).catch(
               // Offline mid-stream: the abort discarded the partial write.
               () => ({ go: true, url: null as string | null })
@@ -306,9 +301,10 @@ export function prefetchCloudMedia(
  * on-demand reads finish it — and the queue always goes on. */
 async function cacheVideoChunks(
   url: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  gate?: () => Promise<void>
 ): Promise<{ go: boolean; url: string | null }> {
-  await prefetchChunks(url, signal).catch(() => {});
+  await prefetchChunks(url, signal, gate).catch(() => {});
   return { go: !signal.aborted, url: null };
 }
 
