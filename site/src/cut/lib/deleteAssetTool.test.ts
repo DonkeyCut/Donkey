@@ -41,6 +41,15 @@ describe("delete_asset", () => {
     expect(ids()).toEqual(["placed", "parked"]);
   });
 
+  test("the sweep leaves another chat's unused media and says how many it left", async () => {
+    useEditor.setState({ assets: [...useEditor.getState().assets, { ...asset("theirs"), origin: "chat", chatId: "other-thread" }] });
+    const out = (await runAiTool("delete_asset", { unused: true })) as { removed: number; heldByOtherChats?: number; note?: string };
+    expect(out.removed).toBe(3);
+    expect(ids()).toContain("theirs");
+    expect(out.heldByOtherChats).toBe(1);
+    expect(out.note).toMatch(/another chat/i);
+  });
+
   test("asset_ids removes several at once and counts the clips that went with them", async () => {
     const out = (await runAiTool("delete_asset", { asset_ids: ["spare1", "placed"] })) as { removed: number; clipsRemoved: number };
     expect(out).toMatchObject({ removed: 2, clipsRemoved: 1 });

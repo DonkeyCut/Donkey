@@ -15,7 +15,7 @@ import { captureRenderSnapshot, renderDoc } from "./renderSnapshot";
 import { submitPreviewSnapshot } from "./exportClient";
 
 import { ITEM_KIND_IDS, ITEM_KINDS, ROW_ITEM_KINDS, type ItemKind } from "./itemKinds";
-import { insertItemRow } from "./laneTracks";
+import { insertItemRow, packRows } from "./laneTracks";
 import { timelineItem } from "./timelineItems";
 import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previewSelection";
 
@@ -231,7 +231,7 @@ import { isStylePresetTemplate } from "./stylePresets";
 import { findLibraryAsset, listLibrary } from "./libraryList";
 import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
 import { baseFrameAt, sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
-import { applyOverlayPatchSettled, assetClipUses, assetIdsOnAnyTimeline, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, assetClipUses, assetIdsOnAnyTimeline, clipLen, footprints, nextFreeStart, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { mixSpecFor, renderProjectFrame, renderProjectFrames } from "./exportRender";
 import { renderMix } from "./audioMix";
@@ -239,7 +239,7 @@ import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./
 import { framesAt, readMediaFileSize } from "./mediaRead";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
-import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, placedAssetIds, roundT } from "./aiContext";
+import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, placedAssetIds, roundT } from "./aiContext";
 import { CARD_SIDES, newCard, normalizeCard, type CardSide } from "./cameraCard";
 import { CAPTION_STYLES, captionEmphasis, cueSpot, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount } from "./subtitles";
 import { cueEmphasis, emphasisIndicesOf, emphasizedWords } from "./captionEmphasis";
@@ -1153,10 +1153,20 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     return { id: next.id, which, style: anim?.style ?? "none", seconds: anim?.seconds ?? 0 };
   },
 
-  get_state: () => {
+  get_state: (_s, input) => {
       // The tool result carries the whole transcript; the per-message context
       // snapshot trims it, so this is how the model pulls every cue when needed.
-      return buildAiContext({ fullCues: true });
+      const full = buildAiContext({ fullCues: true }) as Record<string, unknown>;
+      const want: unknown[] = Array.isArray(input.sections) ? input.sections : [];
+      if (want.length === 0) return full;
+      // A big cut read whole runs past what a tool result can carry; a read
+      // that names its sections stays small enough to check an edit with.
+      const names = Object.keys(full);
+      const bad = want.filter((k) => typeof k !== "string" || !names.includes(k));
+      if (bad.length > 0) throw new ToolError(`Unknown section ${bad.join(", ")}; sections are ${names.join(", ")}.`);
+      return Object.fromEntries(
+        names.filter((k) => k === "playhead" || want.includes(k)).map((k) => [k, full[k]])
+      );
   },
 
   get_asset_info: async (s, input) => {
@@ -1175,12 +1185,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const chatId = chatOwner();
     const visible = s.assets.filter((a) => !isLinkedAssetType(a.type) && !hiddenFromChat(a, chatId, placed));
     const type = input.type === "video" || input.type === "image" || input.type === "audio" ? input.type : undefined;
+    const query = typeof input.query === "string" ? input.query : undefined;
     const found = findMedia(visible, {
-      query: typeof input.query === "string" ? input.query : undefined,
+      query,
       type,
       limit: isNum(input.limit) ? input.limit : undefined,
       offset: isNum(input.offset) ? input.offset : undefined,
     });
+    // Matches the chat can't see still exist: it says so rather than calling
+    // the file missing.
+    const held = findMedia(
+      s.assets.filter((a) => !isLinkedAssetType(a.type) && hiddenFromChat(a, chatId, placed)),
+      { query, type }
+    ).total;
     return {
       total: found.total,
       assets: found.page.map((a) => ({
@@ -1193,6 +1210,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...(a.folderId != null ? { folderId: a.folderId } : {}),
       })),
       ...(found.next !== undefined ? { next: found.next } : {}),
+      ...(held > 0 ? { heldByOtherChats: held, note: OTHER_CHATS_MEDIA_NOTE } : {}),
     };
   },
 
@@ -1787,6 +1805,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         kind: "video" | "soundtrack";
         sourceDb: number;
         loudestFrameDb: number;
+        loudestAt?: number;
+        loudestAtTimeline?: number;
+        samplePeakDb?: number;
         audibleSeconds: number;
         volume: number;
         levelDb: number;
@@ -1797,6 +1818,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const rows = new Map<string, Row | { id: string; name: string; kind: "video" | "soundtrack"; noAudio: string }>();
       await eachScanned(ids, async (id) => {
         const { asset, clip, from, to } = resolveWatchRange(s, { clip_id: id });
+        const c = clip!;
         const soundtrack = s.audioClips.some((a) => a.id === clip!.id);
         const kind = soundtrack ? "soundtrack" : "video";
         if (asset.type === "image") {
@@ -1820,6 +1842,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           kind,
           sourceDb: level.rmsDb,
           loudestFrameDb: level.loudestFrameDb,
+          // Where the loudest sample lands — a click's hit, a drum's attack —
+          // on the clip's source clock and on the timeline.
+          ...(level.peakAt !== undefined
+            ? {
+                loudestAt: Math.round(level.peakAt * 1000) / 1000,
+                loudestAtTimeline:
+                  Math.round((c.start + retimeOf(c).tAt(clamp(level.peakAt, c.in, c.out))) * 1000) / 1000,
+                samplePeakDb: level.samplePeakDb,
+              }
+            : {}),
           audibleSeconds: level.audibleSeconds,
           volume: round2(volume),
           // A muted clip plays nothing; its level is what it would play unmuted.
@@ -1992,6 +2024,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (!ROW_ITEM_KINDS.includes(input.kind as ItemKind) || typeof input.id !== "string" || !isNum(input.before_row)) throw new ToolError("kind, id and before_row are required.");
     insertItemRow(input.kind as ItemKind, input.id, input.before_row);
     return { ...tracksAfter() };
+  },
+
+  pack_lanes: (_s, input) => {
+    const band = input.band === "soundtrack" || input.band === "elements" ? input.band : "both";
+    const soundtrack = band === "elements" ? undefined : packRows("audio");
+    const elements = band === "soundtrack" ? undefined : packRows("overlay");
+    return {
+      ...(soundtrack ? { soundtrack: { before: soundtrack.before, after: soundtrack.after } } : {}),
+      ...(elements ? { elements: { before: elements.before, after: elements.after } } : {}),
+      moved: (soundtrack?.moved ?? 0) + (elements?.moved ?? 0),
+    };
   },
 
   split_at: (s, input) => {
@@ -3131,6 +3174,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         ...patch,
         lane: landed.lane ?? 0,
         ...("start" in patch ? { start: round2(landed.start) } : {}),
+        ...audioPackHint(a.id),
       };
   },
 
@@ -3427,7 +3471,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (asset.type !== "video" && asset.type !== "image")
         throw new ToolError(`"${asset.name}" is ${asset.type} — a video clip plays video or a still.`);
       const before = clipLen(clip);
-      s.replaceClipAsset(clip.id, asset.id);
+      s.replaceClipAsset(clip.id, asset.id, { keepMask: input.keep_mask === true });
       const next = useEditor.getState().clips.find((c) => c.id === clip.id);
       if (!next || next.assetId !== asset.id) throw new ToolError("That clip could not take this source.");
       return {
@@ -4264,7 +4308,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const docAssets = ref.doc.assets ?? [];
       const chatId = chatOwner();
       // Another chat's unplaced media is not the reference's to hand over.
-      const placed = placedAssetIds({ clips: ref.doc.clips ?? [], audioClips: ref.doc.audioClips ?? [] });
+      const placed = placedAssetIds({
+        clips: ref.doc.clips ?? [],
+        audioClips: ref.doc.audioClips ?? [],
+        overlays: ref.doc.overlays ?? [],
+        transitions: ref.doc.transitions ?? [],
+        subtitles: ref.doc.subtitles,
+        timelines: ref.doc.timelines ?? {},
+      });
       const assets = ids.map((id) => {
         const a = docAssets.find((x) => x.id === id);
         if (!a || hiddenFromChat(a, chatId, placed))
@@ -4730,12 +4781,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const listed = Array.isArray(input.asset_ids) && input.asset_ids.length > 0;
       if (input.unused === true || listed) {
         let gone: MediaAsset[];
+        let held = 0;
         if (input.unused === true) {
           const used = assetIdsOnAnyTimeline(s);
           const placed = placedAssetIds(s);
           const chatId = chatOwner();
           const spare = s.assets.filter((a) => !used.has(a.id) && !isLinkedAssetType(a.type));
           gone = spare.filter((a) => !hiddenFromChat(a, chatId, placed));
+          held = spare.length - gone.length;
         } else {
           const want = [...new Set((input.asset_ids as unknown[]).filter((v): v is string => typeof v === "string"))];
           gone = want.map((id) => requireItem(s.assets, id, "project asset"));
@@ -4747,6 +4800,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           names: gone.slice(0, 30).map((a) => a.name),
           ...(gone.length > 30 ? { namesTruncated: true } : {}),
           clipsRemoved: uses,
+          ...(held > 0 ? { heldByOtherChats: held, note: OTHER_CHATS_MEDIA_NOTE } : {}),
         };
       }
       const asset = requireItem(s.assets, input.asset_id, "project asset");
@@ -6203,7 +6257,10 @@ function soundSpan(asset: MediaAsset, from: number, to: number | undefined) {
 /** How loud a source range plays, read where its sound is. */
 async function sourceLevel(asset: MediaAsset, from: number, to: number | undefined) {
   const heard = soundSpan(asset, from, to);
-  return measureSourceLevel(heard.asset.url, { from: heard.from, ...(heard.to !== undefined ? { to: heard.to } : {}) });
+  const level = await measureSourceLevel(heard.asset.url, { from: heard.from, ...(heard.to !== undefined ? { to: heard.to } : {}) });
+  // A bound recording plays on its own clock; the peak is reported on the
+  // clip's.
+  return level.peakAt === undefined ? level : { ...level, peakAt: level.peakAt - (heard.from - from) };
 }
 
 /** Silent stretches of a source range, in source seconds — the engine's
@@ -6669,6 +6726,29 @@ const NOT_PLACED = { added: false, clipId: null, index: null };
 /** Place a project asset on the timeline like a drag: video/image onto track 0
  * (an `index` insert, a free-positioned `start`, or appended at the end),
  * audio onto the soundtrack. Returns the created clip's summary. */
+/** The lowest soundtrack lane with room for `len` seconds at `start` itself,
+ * leaving `skip` (the clip being moved) out of the count. */
+function lowestFreeAudioLane(clips: AudioClip[], start: number, len: number, skip?: string): number {
+  for (let lane = 0; ; lane++) {
+    const taken = footprints(clips.filter((c) => c.id !== skip && (c.lane ?? 0) === lane));
+    if (nextFreeStart(taken, start, len) < start + 1e-3) return lane;
+  }
+}
+
+/** When a soundtrack clip sits on a higher lane than its span needs, the lane
+ * it fits on, so a soundtrack built a sound at a time stays packed. */
+function audioPackHint(id: string): { freeLane?: number; note?: string } {
+  const all = useEditor.getState().audioClips;
+  const c = all.find((x) => x.id === id);
+  if (!c) return {};
+  const free = lowestFreeAudioLane(all, c.start, clipLen(c), c.id);
+  if (free >= (c.lane ?? 0)) return {};
+  return {
+    freeLane: free,
+    note: `Lane ${free} is free for this sound's whole span. Keep the soundtrack packed: move it there with update_audio lane ${free} unless it is stacked on purpose.`,
+  };
+}
+
 function audioLaneInput(value: unknown): number {
   if (!isNum(value) || !Number.isInteger(value) || value < 0)
     throw new ToolError("Audio lane must be a non-negative integer.");
@@ -6805,7 +6885,14 @@ function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>)
   const s = useEditor.getState();
   const start = isNum(input.start) ? Math.max(0, input.start) : undefined;
   if (asset.type === "audio") {
-    const lane = input.lane === undefined ? 0 : audioLaneInput(input.lane);
+    // With no lane, a sound placed at a moment lands at that moment on the
+    // lowest lane free there, rather than sliding down lane 0 off its mark.
+    const lane =
+      input.lane !== undefined
+        ? audioLaneInput(input.lane)
+        : start === undefined
+          ? 0
+          : lowestFreeAudioLane(s.audioClips, start, Math.max(0.1, asset.duration));
     s.addAudioFromAsset(asset.id, start, { lane });
     const sel = useEditor.getState().selection;
     const c =
@@ -6813,7 +6900,7 @@ function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>)
         ? useEditor.getState().audioClips.find((x) => x.id === sel.id)
         : undefined;
     if (!c) throw new ToolError("Could not create the soundtrack clip.");
-    return { id: c.id, kind: asset.type, lane: c.lane ?? 0, start: round2(c.start), len: round2(c.out - c.in) };
+    return { id: c.id, kind: asset.type, lane: c.lane ?? 0, start: round2(c.start), len: round2(c.out - c.in), ...audioPackHint(c.id) };
   }
   let clipId: string | null;
   if (isNum(input.index)) {

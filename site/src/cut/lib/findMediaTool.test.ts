@@ -65,6 +65,37 @@ describe("find_media", () => {
     expect(out.total).toBe(0);
   });
 
+  test("a search that matches only another chat's media says it exists and where it lives", async () => {
+    // Without this the chat told the user the files were not in the project.
+    const out = (await runAiTool("find_media", { query: "private" })) as Found & { heldByOtherChats?: number; note?: string };
+    expect(out.heldByOtherChats).toBe(1);
+    expect(out.note).toMatch(/another chat/i);
+    const none = (await runAiTool("find_media", { query: "gref_s6" })) as Found & { heldByOtherChats?: number };
+    expect(none.heldByOtherChats).toBeUndefined();
+  });
+
+  test("another chat's media placed as an overlay, or on a parked timeline, is project content", async () => {
+    // Pictures a chat set as overlays were hidden from every other thread.
+    const base = useEditor.getState().assets;
+    useEditor.setState({
+      assets: [
+        ...base,
+        { ...image(98), id: "ovl", name: "chat_overlay.jpg", origin: "chat", chatId: "someone-else" },
+        { ...image(97), id: "parked", name: "chat_parked.jpg", origin: "chat", chatId: "someone-else" },
+      ],
+      overlays: [{ id: "o1", kind: "sticker", assetId: "ovl", start: 0, end: 2 } as never],
+      timelines: { second: { clips: [], audioClips: [], overlays: [{ id: "o2", kind: "sticker", assetId: "parked", start: 0, end: 2 }] } as never },
+    });
+    const out = (await runAiTool("find_media", { query: "chat_" })) as Found;
+    expect(out.assets.map((a) => a.id).sort()).toEqual(["ovl", "parked"]);
+    expect(buildAiContext({ chatId: null }).mediaInOtherChats).toBe(1);
+  });
+
+  test("the snapshot counts the media other chats hold", () => {
+    expect(buildAiContext({ chatId: null }).mediaInOtherChats).toBe(1);
+    expect(buildAiContext({ chatId: "someone-else" }).mediaInOtherChats).toBeUndefined();
+  });
+
   test("the chat is offered the tool", () => {
     expect(AI_PANEL_TOOLS.some((t) => t.name === "find_media")).toBe(true);
   });

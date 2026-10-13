@@ -183,7 +183,7 @@ export const INSPECTOR_TOOLS = [
       hidden: bool("Hide the element without deleting it"),
       amount: num("Effects: strength 0.05..1 (see add_effect)"),
       ...EFFECT_SETTING_ARGS,
-      lane: num("Move the element to another row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
+      lane: num("Move the element to another row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape. Use as few rows as the stacking needs: an element shares a row with anything it never overlaps in time."),
     }, []),
   },
   {
@@ -278,11 +278,11 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_audio",
     description:
-      "Update a soundtrack clip: volume (0..3), fadeIn/fadeOut seconds, start position, lane, in/out trim, speed, reverse, hidden, or duck. Audio overlaps across lanes; clips on the same lane slide to its next free slot. To put music under narration, move music to lane 1 and start 0 in the same call, with narration on lane 0. `duck` is voiceover ducking — while this clip plays, ALL other audio drops to that gain (0..1); pass 1 to clear ducking.",
+      "Update a soundtrack clip: volume (0..3), fadeIn/fadeOut seconds, start position, lane, in/out trim, speed, reverse, hidden, or duck. Audio overlaps across lanes; clips on the same lane slide to its next free slot. To put music under narration, move music to lane 1 and start 0 in the same call, with narration on lane 0. Keep the soundtrack packed: a sound shares lane 0 with every sound it never overlaps, and a higher lane is only for one that plays over another; the result names `freeLane` when a lower lane has room for the clip. `duck` is voiceover ducking — while this clip plays, ALL other audio drops to that gain (0..1); pass 1 to clear ducking.",
     inputSchema: obj({
       id: str("Soundtrack clip id"),
       ids: ids("id"),
-      lane: { type: "integer", minimum: 0, description: "Audio lane, 0-based. Separate lanes play together." },
+      lane: { type: "integer", minimum: 0, description: "Audio lane, 0-based. Separate lanes play together; use the lowest lane free for the clip's span." },
       volume: num("0..3 (1 = unchanged, above 1 boosts)"),
       fadeIn: num("Fade-in seconds"),
       fadeOut: num("Fade-out seconds"),

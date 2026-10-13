@@ -68,7 +68,7 @@ export const SIDE_PANEL_TOOLS = [
   {
     name: "delete_asset",
     description:
-      "Remove project assets and every timeline clip that uses them — the Media panel's trash. Pass asset_id for one, asset_ids for several in one call, or unused:true to clear every asset no timeline uses, open or parked (leftover imports, replaced footage, reference images) without touching placed media. Removed media does not come back with undo, so call it only when the user explicitly asked to remove that media, and report how many assets and clips went.",
+      "Remove project assets and every timeline clip that uses them — the Media panel's trash. Pass asset_id for one, asset_ids for several in one call, or unused:true to clear every asset no timeline uses, open or parked (leftover imports, replaced footage, reference images) without touching placed media; another chat thread's unplaced media is out of this chat's reach, and the sweep counts it as heldByOtherChats. Removed media does not come back with undo, so call it only when the user explicitly asked to remove that media, and report how many assets and clips went.",
     inputSchema: obj({
       asset_id: str("Project asset id from `media`"),
       asset_ids: { type: "array", items: { type: "string" }, description: "Several project asset ids, removed in one call" },

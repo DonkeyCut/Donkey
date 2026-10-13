@@ -52,7 +52,7 @@ export const ELEMENTS_TOOLS = [
       shadow_y: num(`Shadow drop, px at 1080, -${SHADOW_OFFSET_MAX}..${SHADOW_OFFSET_MAX}; 0 with a bright color makes a glow`),
       rotation: num("Degrees clockwise, -180..180, to a tenth (0.4 matches a slight lean)"),
       opacity: num("Whole-element opacity 0..1"),
-      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape. Use as few rows as the stacking needs: an element shares a row with anything it never overlaps in time."),
     }, ["shape"]),
   },
   {
@@ -71,7 +71,7 @@ export const ELEMENTS_TOOLS = [
       h: num("Height, fraction of frame height; omit to keep the source's aspect"),
       rotation: num("Degrees clockwise, -180..180, to a tenth (0.4 matches a slight lean)"),
       opacity: num("Whole-element opacity 0..1"),
-      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape. Use as few rows as the stacking needs: an element shares a row with anything it never overlaps in time."),
     }),
   },
   {
@@ -86,7 +86,7 @@ export const ELEMENTS_TOOLS = [
       y: num("Center y 0..1 (default 0.5)"),
       w: num("Width, fraction of frame width (default 0.25)"),
       h: num("Height, fraction of frame height; omit to keep the source's aspect"),
-      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape. Use as few rows as the stacking needs: an element shares a row with anything it never overlaps in time."),
     }, ["idea"]),
   },
 ] as const satisfies readonly AiToolDef[];

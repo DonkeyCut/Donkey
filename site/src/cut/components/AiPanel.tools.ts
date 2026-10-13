@@ -17,8 +17,10 @@ export const AI_PANEL_TOOLS = [
   {
     name: "get_state",
     description:
-      "Read the full current editor state: clips, soundtrack, overlay elements (titles, shapes, stickers), subtitles, selection, playhead, view settings, publish metadata. Use this whenever the context snapshot is not enough or might be stale.",
-    inputSchema: obj({}),
+      "Read the full current editor state: clips, soundtrack, overlay elements (titles, shapes, stickers), subtitles, selection, playhead, view settings, publish metadata. Use this whenever the context snapshot is not enough or might be stale. A big cut read whole can run past what a result carries: name the sections you need (soundtrack, overlays, videoTrack, overlayVideo, transitions, subtitles, media, project, …) to check an edit.",
+    inputSchema: obj({
+      sections: { type: "array", items: { type: "string" }, description: "Top-level sections to return (the playhead always rides along); omit for everything" },
+    }),
   },
   {
     name: "get_asset_info",
@@ -29,7 +31,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "find_media",
     description:
-      `Find project media by name: every asset whose name or file name contains query (any case), optionally of one kind, with its id. The context snapshot lists at most ${FIND_MEDIA_SNAPSHOT_CAP} media items (mediaTruncated says when it cut the rest), so use this to reach the others — say the reference images a person just uploaded to a long project. Pages: pass the answer's next as offset for more.`,
+      `Find project media by name: every asset whose name or file name contains query (any case), optionally of one kind, with its id. The context snapshot lists at most ${FIND_MEDIA_SNAPSHOT_CAP} media items (mediaTruncated says when it cut the rest), so use this to reach the others — say the reference images a person just uploaded to a long project. Pages: pass the answer's next as offset for more. Matches another chat thread made and hasn't placed are hidden from this chat; heldByOtherChats counts them, so never call such a file missing.`,
     inputSchema: obj({
       query: str("Text the name or file name contains (omit for all)"),
       type: { type: "string", enum: ["video", "image", "audio"], description: "Only this kind of media" },
@@ -106,7 +108,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "measure_level",
     description:
-      "Measure how loud clips actually play — the level of each clip's audible sound over its trimmed range, in dBFS, with its current volume applied — so volumes are set from numbers, never by ear. Returns per clip: sourceDb (the media), volume, levelDb (what plays), loudestFrameDb (the loudest 20 ms frame as RMS — a sample peak sits higher, so it is no clipping margin), and for every clip except the target, volumeToMatch: the volume that lands it at the target's level; a clip whose source has no audio track comes back with noAudio instead of levels. \"Make the voiceover as loud as the clip\", \"match the levels\", \"balance the music under the speech\": call this with every clip involved and target_id = the one to match, then set_clip_volume / update_audio with volumeToMatch (for a bed under speech, a fraction of it). A shortfallDb means the volume ceiling (3) cannot reach the target; lower the target instead. A clip marked muted plays nothing until set_clip_muted / update_audio unmutes it; its level is what it would play unmuted. Each clip also reports integratedLufs (BS.1770 loudness over its range) and truePeakDbtp, both as it plays with its volume applied; a volume change of g dB moves both by g (volume × 10^(g/20)), so \"music 10 LU under the voice\" is a volume that puts the music's integratedLufs 10 below the voice's. mix: true measures the whole mix as an unmastered export hears it: integratedLufs, truePeakDbtp, loudnessRangeLu and maxShortTermLufs — check it against the export's loudness targets or a platform's spec. null means silence.",
+      "Measure how loud clips actually play — the level of each clip's audible sound over its trimmed range, in dBFS, with its current volume applied — so volumes are set from numbers, never by ear. Returns per clip: sourceDb (the media), volume, levelDb (what plays), loudestFrameDb (the loudest 20 ms frame as RMS — a sample peak sits higher, so it is no clipping margin), loudestAt / loudestAtTimeline (when the loudest single sample plays, in source and timeline seconds, to the millisecond — put a click, hit or drop on a beat with these, never by probing silence thresholds) and samplePeakDb, and for every clip except the target, volumeToMatch: the volume that lands it at the target's level; a clip whose source has no audio track comes back with noAudio instead of levels. \"Make the voiceover as loud as the clip\", \"match the levels\", \"balance the music under the speech\": call this with every clip involved and target_id = the one to match, then set_clip_volume / update_audio with volumeToMatch (for a bed under speech, a fraction of it). A shortfallDb means the volume ceiling (3) cannot reach the target; lower the target instead. A clip marked muted plays nothing until set_clip_muted / update_audio unmutes it; its level is what it would play unmuted. Each clip also reports integratedLufs (BS.1770 loudness over its range) and truePeakDbtp, both as it plays with its volume applied; a volume change of g dB moves both by g (volume × 10^(g/20)), so \"music 10 LU under the voice\" is a volume that puts the music's integratedLufs 10 below the voice's. mix: true measures the whole mix as an unmastered export hears it: integratedLufs, truePeakDbtp, loudnessRangeLu and maxShortTermLufs — check it against the export's loudness targets or a platform's spec. null means silence.",
     inputSchema: obj({
       ids: { type: "array", items: { type: "string" }, description: "Clip ids to measure — video clips (their own sound) and soundtrack clips alike; optional with mix" },
       target_id: str("The clip whose level the others should match (default: the first id)"),

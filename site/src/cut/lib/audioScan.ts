@@ -162,6 +162,11 @@ export interface LevelScan {
   loudestFrameDb: number;
   /** Seconds of the span that read as audible. */
   audibleSeconds: number;
+  /** When the loudest single sample plays, source seconds — where a click or
+   * hit actually lands, to the sample. Absent for digital silence. */
+  peakAt?: number;
+  /** That sample's level, dBFS. */
+  samplePeakDb?: number;
 }
 
 /**
@@ -193,12 +198,37 @@ export function levelFrom(env: Envelope): LevelScan {
   };
 }
 
-/** The level of `chunks`, by RMS over 20ms windows. */
+/** The level of `chunks`, by RMS over 20ms windows, and when its loudest
+ * sample plays. */
 export async function scanLevel(
   chunks: AsyncIterable<PcmChunk>,
   opts: { from: number; to?: number }
 ): Promise<LevelScan> {
-  return levelFrom(await scanEnvelope(chunks, opts));
+  const peak = { at: opts.from, abs: 0 };
+  async function* tapped(): AsyncGenerator<PcmChunk> {
+    for await (const chunk of chunks) {
+      const rate = chunk.sampleRate;
+      const n = chunk.channels[0]?.length ?? 0;
+      // A decode opens before `from` and may run past `to`; only the asked
+      // span counts.
+      const a = Math.max(0, Math.round((opts.from - chunk.timestamp) * rate));
+      const b = opts.to === undefined ? n : Math.min(n, Math.round((opts.to - chunk.timestamp) * rate));
+      for (const ch of chunk.channels) {
+        for (let i = a; i < b; i++) {
+          const v = Math.abs(ch[i]);
+          if (v > peak.abs) {
+            peak.abs = v;
+            peak.at = chunk.timestamp + i / rate;
+          }
+        }
+      }
+      yield chunk;
+    }
+  }
+  const level = levelFrom(await scanEnvelope(tapped(), opts));
+  return peak.abs > 0
+    ? { ...level, peakAt: Math.round(peak.at * 10000) / 10000, samplePeakDb: round2(20 * Math.log10(peak.abs)) }
+    : level;
 }
 
 /** Silent spans in `chunks`, by RMS over 20ms windows. */

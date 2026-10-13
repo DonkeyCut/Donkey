@@ -39,7 +39,7 @@ import { getClipSpans, moveOverlayGroup, nextFreeStart, overlayLaneOrder, projec
 import { ITEM_KINDS, type ItemKind, type ItemOf } from "./itemKinds";
 import { expandTimelineGroups } from "./timelineGroups";
 import { playheadAt } from "./playhead";
-import { TRANSITION_MAX } from "./types";
+import { isEffectOverlay, TRANSITION_MAX } from "./types";
 import type {
   AudioClip,
   MediaAsset,
@@ -1138,6 +1138,55 @@ export function insertItemRow(kind: ItemKind, id: string, beforeRow: number): vo
   if (!Number.isInteger(beforeRow) || beforeRow < 0 || beforeRow > rows.length) throw new Error("Row is outside this timeline band.");
   state.pushHistory();
   commitRow(band, id, beforeRow === 0 ? -1 : beforeRow === rows.length ? rows.length : beforeRow - 0.5);
+}
+
+/**
+ * Close a band up onto the fewest rows its timing allows, changing lanes only.
+ * Sounds play together whatever their lane, so the soundtrack packs by time
+ * alone. Elements stack by row, so every pair that overlaps keeps its
+ * front-to-back order, and an effect never shares a row with another kind.
+ * Rows are walked front first, each item landing on the frontmost row behind
+ * everything it overlaps that stood in front of it. One undo step.
+ */
+export function packRows(kind: "audio" | "overlay"): { before: number; after: number; moved: number } {
+  const s = useEditor.getState();
+  const ad = ADAPTERS[kind];
+  const raws = ad.raws(s);
+  const views = raws.map((r) => ad.view(r));
+  const isEffect = (i: number) => kind === "overlay" && isEffectOverlay(raws[i] as Overlay);
+  const meets = (i: number, j: number) =>
+    views[i].start < views[j].start + views[j].len - 1e-6 && views[j].start < views[i].start + views[i].len - 1e-6;
+  const order = views
+    .map((_, i) => i)
+    .sort((a, b) =>
+      kind === "audio"
+        ? views[a].start - views[b].start
+        : views[a].lane - views[b].lane || views[a].start - views[b].start
+    );
+  const row: number[] = [];
+  const rowIsEffect = new Map<number, boolean>();
+  const placed: number[] = [];
+  for (const i of order) {
+    let r = 0;
+    if (kind === "overlay")
+      for (const j of placed) if (views[j].lane < views[i].lane && meets(i, j)) r = Math.max(r, row[j] + 1);
+    while (
+      placed.some((j) => row[j] === r && meets(i, j)) ||
+      (rowIsEffect.has(r) && rowIsEffect.get(r) !== isEffect(i))
+    )
+      r++;
+    row[i] = r;
+    rowIsEffect.set(r, isEffect(i));
+    placed.push(i);
+  }
+  const before = new Set(views.map((v) => v.lane)).size;
+  const after = new Set(row).size;
+  const moved = views.filter((v, i) => v.lane !== row[i]).length;
+  if (moved > 0 && ad.lanePatch) {
+    s.pushHistory();
+    ad.apply(raws.map((r, i) => ad.lanePatch!(r, row[i])));
+  }
+  return { before, after, moved };
 }
 
 /**

@@ -635,7 +635,7 @@ export interface EditorState {
    * trimmed from the source's head to the block's length (a shorter source
    * makes the clip its own length). The block it replaced is dropped with it
    * when nothing else plays it. */
-  replaceClipAsset: (clipId: string, assetId: string) => void;
+  replaceClipAsset: (clipId: string, assetId: string, opts?: { keepMask?: boolean }) => void;
   /** Add a soundtrack clip from an audio asset at `start` (default: the
    * playhead). `opts.duck` marks it a voiceover that lowers everything else
    * to that gain while it plays; `opts.lane` picks the audio track it lands
@@ -2940,7 +2940,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       return clip.id;
     },
 
-    replaceClipAsset: (clipId, assetId) => {
+    replaceClipAsset: (clipId, assetId, opts) => {
       const clip = get().clips.find((c) => c.id === clipId);
       const asset = get().assets.find((a) => a.id === assetId);
       if (!clip || !asset || (asset.type !== "video" && asset.type !== "image")) return;
@@ -2964,10 +2964,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
                 speed: undefined,
                 speedCurve: undefined,
                 reverse: undefined,
-                // Coverage painted frame by frame for the old picture, and a
-                // key pulled off its pixels, mean nothing to the new one. A
-                // subject matte is computed from whatever plays, so it stays.
-                ...(clip.mask && clip.mask.kind !== "subject" ? { mask: undefined } : {}),
+                // Coverage drawn over the old picture means nothing to the
+                // new one. A subject matte is computed from whatever plays, so
+                // it stays, and so does a mask the caller names as the
+                // layer's own region (a screen a recording is cut to).
+                ...(clip.mask && clip.mask.kind !== "subject" && !opts?.keepMask ? { mask: undefined } : {}),
                 removal: undefined,
                 // The card's layout stays; its matte belongs to the old
                 // picture, and the new one bakes its own.

@@ -60,7 +60,7 @@ export const EFFECTS_TOOLS = [
       focus_x: num("Zoom only: the x of the point to zoom into, 0..1 (default 0.5)"),
       focus_y: num("Zoom only: the y of the point to zoom into, 0..1 (default 0.5)"),
       ...EFFECT_SETTING_ARGS,
-      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape. Use as few rows as the stacking needs: an element shares a row with anything it never overlaps in time."),
     }, ["effect"]),
   },
 ] as const satisfies readonly AiToolDef[];

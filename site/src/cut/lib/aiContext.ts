@@ -9,7 +9,7 @@ import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { matteBakesAvailable, useMatteBakes } from "./removal/bakeJobs";
 import { cardMatteKey, resolveCardShape } from "./cameraCard";
-import { deriveTransitionFields, getClipSpans, normalizeDocState, overlayLayers, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { assetIdsInUse, deriveTransitionFields, getClipSpans, normalizeDocState, overlayLayers, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import type { VideoProject } from "./genvideo/types";
 import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
@@ -306,6 +306,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
     ...(core.mediaFolders ? { mediaFolders: core.mediaFolders } : {}),
     media: core.media,
     mediaTruncated: core.mediaTruncated,
+    ...(core.mediaInOtherChats ? { mediaInOtherChats: core.mediaInOtherChats, mediaInOtherChatsNote: core.mediaInOtherChatsNote } : {}),
     // AI video renders for this project, live from the job store — what
     // "rendering" claims must be grounded in. A done render names the asset
     // it landed as (already in `media`); a failed one carries its error.
@@ -411,9 +412,21 @@ interface DescribedState {
   timelines: Partial<Record<TimelineId, TimelineBody>>;
 }
 
-/** The media a project's timeline plays: project content whichever chat made it. */
-export const placedAssetIds = (s: { clips: VideoClip[]; audioClips: AudioClip[] }): Set<string> =>
-  new Set([...s.clips, ...s.audioClips].map((c) => c.assetId));
+/** The media a project's timelines play, open or parked — clips, overlays,
+ * transitions and caption fonts: project content whichever chat made it. */
+export const placedAssetIds = (s: {
+  clips: VideoClip[];
+  audioClips: AudioClip[];
+  overlays?: Overlay[];
+  transitions?: TimelineTransition[];
+  subtitles?: SubtitlesBlock;
+  timelines?: Partial<Record<TimelineId, TimelineBody>>;
+  assets?: readonly MediaAsset[];
+}): Set<string> => {
+  const used = assetIdsInUse({ ...s, overlays: s.overlays ?? [] });
+  for (const body of Object.values(s.timelines ?? {})) for (const id of assetIdsInUse(body)) used.add(id);
+  return used;
+};
 
 /** An asset still owned by another chat: chat-made, tagged to a different
  * thread, and not yet moved onto the timeline. Placed media is project
@@ -425,6 +438,11 @@ export const hiddenFromChat = (
   chatId: string | null,
   placed: Set<string>
 ): boolean => a.origin === "chat" && !!a.chatId && a.chatId !== chatId && !placed.has(a.id);
+
+/** What a chat is told about media it can't see: that it exists, so it never
+ * says a file is missing from the project, and where it can be cleared. */
+export const OTHER_CHATS_MEDIA_NOTE =
+  "Some project media belongs to another chat thread, which made it and hasn't placed it, so this chat can't see or delete it. Tell the user it is there: they can clear it from that thread, or delete that thread from the chat history, which removes the unplaced media it owns.";
 
 /** `live` marks the open project: the sweep's progress, the matte bakes in
  * flight, and another chat's private media are facts about this page, and
@@ -441,6 +459,7 @@ function describeState(
   // A font asset is a typeface, not footage: it is listed under `fonts` with
   // the account's shelf fonts, where a font id is what the model needs.
   const visibleAssets = s.assets.filter((a) => !isLinkedAssetType(a.type) && !ownedByOtherChat(a));
+  const otherChatsMedia = s.assets.filter((a) => !isLinkedAssetType(a.type) && ownedByOtherChat(a)).length;
   // The cap trims the tail of a huge media list, and a source someone has
   // watched and written up stays regardless of where it sits: the record is
   // what later decisions are made from.
@@ -590,6 +609,7 @@ function describeState(
         : {}),
     })),
     mediaTruncated: shownAssets.length < visibleAssets.length,
+    ...(live && otherChatsMedia > 0 ? { mediaInOtherChats: otherChatsMedia, mediaInOtherChatsNote: OTHER_CHATS_MEDIA_NOTE } : {}),
     videoTrack: spans.map((sp, index) => ({
       index,
       id: sp.clip.id,

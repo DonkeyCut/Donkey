@@ -60,6 +60,14 @@ export const TIMELINE_TOOLS = [
     }, ["kind", "id", "before_row"]),
   },
   {
+    name: "pack_lanes",
+    description:
+      "Close the timeline up onto the fewest lanes, changing lanes only — no start, trim or look moves. Soundtrack clips that never overlap in time share a lane. Elements keep the front-to-back order of every pair that overlaps, and effects keep rows of their own. Run it after building or rearranging a cut a piece at a time; it reports each band's lane count before and after. One undo step.",
+    inputSchema: obj({
+      band: { type: "string", enum: ["both", "soundtrack", "elements"], description: "Which band to pack; default both" },
+    }),
+  },
+  {
     name: "split_at",
     description:
       `Split selected items and group members at a time, like pressing S. Supported kinds: ${ITEM_KIND_IDS.filter(canSplitItem).join(", ")}. Transitions remain whole. With no selection, split the video on track 0. Omit t for the playhead. Times stay fixed; the result includes the new selected ids.`,
@@ -101,7 +109,7 @@ export const TIMELINE_TOOLS = [
           "Stretches of this source, in SOURCE seconds — one clip each, in order. Gapped spans keep the moments and drop the rest; spans that meet cut the source at those boundaries.",
         items: obj({ from: num("Source start s"), to: num("Source end s") }, ["from", "to"]),
       },
-      lane: { type: "integer", minimum: 0, description: "Audio assets only: soundtrack lane, default 0. Put music on lane 1 to overlap narration on lane 0." },
+      lane: { type: "integer", minimum: 0, description: "Audio assets only: soundtrack lane. Omit it and a sound placed with `start` lands at that moment on the lowest lane free there — lane 0 unless it overlaps another sound. Pass one only to stack on purpose; never open a lane per sound." },
       start: num("Timeline start s"),
       index: num("Insert position on video track 0 (video/image only; 0 = first)"),
     }),
@@ -275,7 +283,7 @@ export const TIMELINE_TOOLS = [
       },
       rotation: num("Degrees clockwise, -180..180, to a tenth (0.4 matches a slight lean)"),
       opacity: num("Whole-element opacity 0..1"),
-      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
+      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape. Use as few rows as the stacking needs: an element shares a row with anything it never overlaps in time."),
     }, ["text"]),
   },
   {
@@ -339,11 +347,15 @@ export const TIMELINE_TOOLS = [
   {
     name: "replace_item",
     description:
-      "Replace what an item plays, keeping the item: a video clip (including a blocked-out shot) keeps its place and its length and plays the asset you name instead, trimmed from that source's head; a soundtrack clip keeps its slot; a sticker shows the new image. This is how a block becomes the person's own footage (\"put the kitchen clip in shot 3\"), and how any clip swaps its source without moving what comes after. A block left playing nothing goes with it.",
+      "Replace what an item plays, keeping the item: a video clip (including a blocked-out shot) keeps its place and its length and plays the asset you name instead, trimmed from that source's head; a soundtrack clip keeps its slot; a sticker shows the new image. This is how a block becomes the person's own footage (\"put the kitchen clip in shot 3\"), and how any clip swaps its source without moving what comes after. The clip keeps its framing and rotation; its mask goes with the old picture unless keep_mask names it the layer's own region. A block left playing nothing goes with it.",
     inputSchema: obj(
       {
         id: str("The item to refill — a video clip, a soundtrack clip, or a sticker"),
         asset_id: str("Project asset that plays there instead"),
+        keep_mask: {
+          type: "boolean",
+          description: "Video clips: keep the clip's mask because it cuts the layer to a region of the frame (a screen, a window) rather than covering something in the old footage",
+        },
       },
       ["id", "asset_id"]
     ),

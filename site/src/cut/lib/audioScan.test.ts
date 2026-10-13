@@ -158,6 +158,23 @@ function expectWords(
 }
 
 describe("scanLevel", () => {
+  test("says when the loudest sample plays, to the sample, across chunk joins", async () => {
+    // A click's place was only known to the 20 ms frame, and a sound trimmed
+    // to that frame's start cut the click's peak off.
+    async function* spike(): AsyncGenerator<PcmChunk> {
+      for (let c = 0; c < 4; c++) {
+        const data = new Float32Array(RATE / 4).fill(0.1);
+        if (c === 2) data[1234] = -0.9;
+        yield { channels: [data], timestamp: c / 4, sampleRate: RATE };
+      }
+    }
+    const level = await scanLevel(spike(), { from: 0 });
+    expect(level.peakAt).toBeCloseTo(0.5 + 1234 / RATE, 4);
+    expect(level.samplePeakDb).toBeCloseTo(20 * Math.log10(0.9), 1);
+    // Outside the asked span the spike does not count.
+    expect((await scanLevel(spike(), { from: 0.7 })).peakAt).toBeGreaterThanOrEqual(0.7);
+  });
+
   test("reads the level of what plays, leaving the pauses out", async () => {
     // Half-scale tone with a second of silence in the middle: the mean is
     // the tone's own level, and the silence does not drag it down.
