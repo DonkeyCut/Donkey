@@ -90,16 +90,16 @@ describe("buildGradeLut", () => {
     for (let ch = 0; ch < 3; ch++) expect(Math.abs(stop(grey, grey, grey)[ch] - bt1886Encode(0.36))).toBeLessThan(1e-6);
     const contrast = createGradeTransform({ contrast: 50 })!;
     for (let ch = 0; ch < 3; ch++) expect(Math.abs(contrast(grey, grey, grey)[ch] - grey)).toBeLessThan(1e-6);
-    // Full contrast is the 1.5 power about the pivot: a stop above grey lands
-    // 1.5 stops above.
-    const up = bt1886Encode(0.36);
+    // Full contrast is the 1.5 power about the pivot: half a stop above grey
+    // lands three quarters of a stop above, under the shoulder's knee.
+    const up = bt1886Encode(0.18 * Math.SQRT2);
     const out = contrast(up, up, up)[0];
-    expect(Math.abs(out - bt1886Encode(0.18 * Math.pow(2, 1 + CONTRAST_POWER_AT_MAX)))).toBeLessThan(1e-6);
+    expect(Math.abs(out - bt1886Encode(0.18 * Math.pow(2, 0.5 * (1 + CONTRAST_POWER_AT_MAX))))).toBeLessThan(1e-6);
   });
 
-  test("a brightness slider is a linear gain", () => {
+  test("a brightness slider is a linear gain below the shoulder", () => {
     const t = createGradeTransform({ brightness: 20 })!;
-    for (const v of [0.1, 0.4, 0.7]) expect(Math.abs(t(v, v, v)[0] - v * 1.2)).toBeLessThan(1e-6);
+    for (const v of [0.1, 0.4, 0.6]) expect(Math.abs(t(v, v, v)[0] - v * 1.2)).toBeLessThan(1e-6);
   });
 });
 

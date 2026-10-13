@@ -1,12 +1,14 @@
 /**
  * The grade's pixel math: one pure transform on display values that every
  * renderer consumes through the clip LUT (colorPipeline.ts). A grade
- * resolves to at most two layers — the preset (scaled by its amount,
- * optionally kept off skin tones) and the manual adjustments on top — and
- * each layer runs its stages in one order, on the container the project
- * delivers in (Rec.709/BT.1886 for SDR, Rec.2100 HLG or PQ for HDR):
+ * resolves to at most two layers — the manual adjustments, which balance the
+ * shot, and the preset on top, the look (scaled by its amount, optionally
+ * kept off skin tones) — and each layer runs its stages in one order, on the
+ * container the project delivers in (Rec.709/BT.1886 for SDR, Rec.2100 HLG or
+ * PQ for HDR):
  *
- *   light, in linear light (the container's transfer inverted):
+ *   light, in linear light with headroom (the container's transfer inverted,
+ *   then the shoulder below inverted):
  *     monochrome (a negative saturation slider, see below) → white balance
  *     (CAT02) → exposure (stops) → contrast (a power about 18% grey) →
  *     highlights / shadows / whites / blacks / brilliance (smooth luminance
@@ -23,6 +25,15 @@
  * Skin protection is one rule at the layer's end: the tone lands in full and
  * the chroma the layer moved blends back toward the pixel's own by the skin
  * weight.
+ *
+ * No control throws picture away. Linear light carries headroom above the
+ * container's white, and leaving it for display values passes through a
+ * shoulder that is the identity up to SHOULDER_KNEE and rolls everything up
+ * to HEADROOM times white smoothly into white; entering inverts it exactly,
+ * so an ungraded pixel round-trips unchanged and a brightened highlight
+ * compresses where it used to clip. Every darkening move is a gain, never a
+ * subtraction, so nothing crosses black: a shadow pushed down keeps its
+ * detail. gradeRange.test.ts holds both.
  */
 
 import {
@@ -55,6 +66,7 @@ import {
   oklabMatrices,
   pqDecode,
   pqEncode,
+  rgbToXyzMatrix,
   spow,
   whiteBalanceMatrix,
 } from "./colorSpace";
@@ -86,16 +98,28 @@ const HIGHLIGHTS_STOPS = 3.4;
 const SHADOWS_STOPS = 6.75;
 const WHITES_STOPS = 0.7;
 const BRILLIANCE_STOPS = 0.5;
-/** Blacks is an additive offset in linear light, so it reaches black. The
- * slider maps to it through its signed square: a linear offset shows on the
- * encoded ramp as its 1/2.4 power, so the first notches would otherwise jump. */
+/** Raised blacks are an additive lift in linear light, through the slider's
+ * signed square: a linear offset shows on the encoded ramp as its 1/2.4
+ * power, so the first notches would otherwise jump. */
 const BLACKS_OFFSET = 0.03;
+/** Lowered blacks are a gain on the darkest tones, this many stops at black
+ * at full travel: dense shadows that keep their detail. */
+const BLACKS_DARKEN_STOPS = 2;
 
-/** Wheel amplitudes at a full puck / luma trim. */
+/** Wheel amplitudes at a full puck / luma trim. A raised lift adds light
+ * toward black; a lowered one is a gain that reaches WHEEL_LIFT_DARKEN at
+ * black. Offset is a per-channel gain in stops, the printer light. */
 const WHEEL_LIFT = 0.03;
+const WHEEL_LIFT_DARKEN = 0.6;
 const WHEEL_GAMMA = 0.35;
 const WHEEL_GAIN = 0.5;
-const WHEEL_OFFSET = 0.05;
+const WHEEL_OFFSET_STOPS = 1;
+
+/** The shoulder between linear light and display values: identity up to
+ * this share of the container's white, then a smooth roll into white that
+ * reaches it at HEADROOM times white with zero slope. */
+export const SHOULDER_KNEE = 0.5;
+export const HEADROOM = 4;
 
 /* ------------------------------------------------------------------ */
 /* The container a grade works in                                      */
@@ -110,6 +134,9 @@ export interface GradeSpace {
   encode(l: number): number;
   /** Linear value of an 18% grey card (BT.2408 for the HDR containers). */
   pivot: number;
+  /** Linear value of the container's white, where the shoulder lands;
+   * Infinity for scene light, whose encoding is its own shoulder. */
+  white: number;
   /** Luminance weights of the container's primaries. */
   luma: [number, number, number];
   oklab: { toLms: Mat3; fromLms: Mat3 };
@@ -127,6 +154,7 @@ export function gradeSpaceFor(output: OutputSpace): GradeSpace {
       decode: bt1886Decode,
       encode: bt1886Encode,
       pivot: 0.18,
+      white: 1,
       luma: [0.2126, 0.7152, 0.0722],
       oklab: oklabMatrices(REC709_PRIMARIES),
     };
@@ -137,6 +165,7 @@ export function gradeSpaceFor(output: OutputSpace): GradeSpace {
       decode: (v) => (v < 0 ? -hlgOetfInverse(-v) : hlgOetfInverse(v)),
       encode: (l) => (l < 0 ? -hlgOetf(-l) : hlgOetf(l)),
       pivot: hlgOetfInverse(0.38),
+      white: 1,
       luma: [0.2627, 0.678, 0.0593],
       oklab: oklabMatrices(REC2020_PRIMARIES),
     };
@@ -147,12 +176,98 @@ export function gradeSpaceFor(output: OutputSpace): GradeSpace {
       decode: (v) => (v < 0 ? -pqDecode(-v) / 1000 : pqDecode(v) / 1000),
       encode: (l) => (l < 0 ? -pqEncode(-l * 1000) : pqEncode(l * 1000)),
       pivot: 26 / 1000,
+      white: 10,
       luma: [0.2627, 0.678, 0.0593],
       oklab: oklabMatrices(REC2020_PRIMARIES),
     };
   }
   spaces.set(output, s);
   return s;
+}
+
+/**
+ * The grade space of scene light rendered by a display transform: linear is
+ * scene-linear in `primaries` (18% grey at 0.18, no ceiling), and the
+ * encoding is the transform's own response to a neutral, so curves, masks
+ * and fade read a tone as the viewer will see it. `neutral` samples the
+ * transform on grey from 2^LO to 2^HI; the encoding is piecewise linear in
+ * log2 between the samples, and its inverse inverts that same function, so
+ * the round trip is exact.
+ */
+export function sceneGradeSpace(output: OutputSpace, primaries: Primaries, neutral: (y: number) => number): GradeSpace {
+  const LO = -16;
+  const HI = 12;
+  const N = 1024;
+  const xs = new Float64Array(N);
+  const vs = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    xs[i] = LO + ((HI - LO) * i) / (N - 1);
+    vs[i] = neutral(Math.pow(2, xs[i]));
+    // A plateau at the top would make the inverse ambiguous; keep it rising.
+    if (i && vs[i] <= vs[i - 1]) vs[i] = vs[i - 1] + 1e-9;
+  }
+  const y0 = Math.pow(2, LO);
+  const encode = (y: number): number => {
+    if (y <= y0) return (vs[0] * y) / y0;
+    const x = Math.log2(y);
+    if (x >= HI) return vs[N - 1];
+    const f = ((x - LO) / (HI - LO)) * (N - 1);
+    const i = Math.floor(f);
+    return vs[i] + (vs[i + 1] - vs[i]) * (f - i);
+  };
+  const decode = (v: number): number => {
+    if (v <= vs[0]) return (v / vs[0]) * y0;
+    if (v >= vs[N - 1]) return Math.pow(2, HI);
+    let lo = 0;
+    let hi = N - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (vs[mid] <= v) lo = mid;
+      else hi = mid;
+    }
+    const x = xs[lo] + ((xs[hi] - xs[lo]) * (v - vs[lo])) / (vs[hi] - vs[lo]);
+    return Math.pow(2, x);
+  };
+  const xyz = rgbToXyzMatrix(primaries);
+  return {
+    output,
+    primaries,
+    decode,
+    encode,
+    pivot: 0.18,
+    white: Infinity,
+    luma: [xyz[3], xyz[4], xyz[5]],
+    oklab: oklabMatrices(primaries),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* The shoulder                                                        */
+/* ------------------------------------------------------------------ */
+
+/** Linear light with headroom → the container's linear range: identity to
+ * the knee, then k + (w − k)·(1 − (1 − u)ⁿ) up to HEADROOM·w, where u runs
+ * 0..1 across the roll and n makes the slope 1 at the knee. */
+export function shoulder(x: number, white: number): number {
+  const k = SHOULDER_KNEE * white;
+  if (x <= k) return x;
+  const top = HEADROOM * white;
+  if (x >= top) return white;
+  const n = (top - k) / (white - k);
+  const u = (x - k) / (top - k);
+  return k + (white - k) * (1 - Math.pow(1 - u, n));
+}
+
+/** The shoulder's exact inverse: the container's linear range → linear light
+ * with headroom. White maps to HEADROOM·white. */
+export function unshoulder(y: number, white: number): number {
+  const k = SHOULDER_KNEE * white;
+  if (y <= k) return y;
+  const top = HEADROOM * white;
+  if (y >= white) return top;
+  const n = (top - k) / (white - k);
+  const t = (y - k) / (white - k);
+  return k + (top - k) * (1 - Math.pow(1 - t, 1 / n));
 }
 
 /* ------------------------------------------------------------------ */
@@ -488,17 +603,17 @@ let LIN = false;
 
 function toLinear(space: GradeSpace): void {
   if (LIN) return;
-  R = space.decode(R);
-  G = space.decode(G);
-  B = space.decode(B);
+  R = unshoulder(space.decode(clamp01(R)), space.white);
+  G = unshoulder(space.decode(clamp01(G)), space.white);
+  B = unshoulder(space.decode(clamp01(B)), space.white);
   LIN = true;
 }
 
 function toDisplay(space: GradeSpace): void {
   if (!LIN) return;
-  R = space.encode(R);
-  G = space.encode(G);
-  B = space.encode(B);
+  R = space.encode(shoulder(R, space.white));
+  G = space.encode(shoulder(G, space.white));
+  B = space.encode(shoulder(B, space.white));
   LIN = false;
 }
 
@@ -525,6 +640,15 @@ function fromOklab(F: Mat3, Lk: number, a: number, bb: number): void {
   R = F[0] * l3 + F[1] * m3 + F[2] * s3;
   G = F[3] * l3 + F[4] * m3 + F[5] * s3;
   B = F[6] * l3 + F[7] * m3 + F[8] * s3;
+}
+
+/** One channel through the lift wheel: a raise adds light toward black, a
+ * lowering scales toward black, so the channel never crosses zero. Both
+ * fade out at white and leave the headroom above it alone. */
+function lift(c: number, a: number): number {
+  const toBlack = 1 - Math.min(1, Math.max(0, c));
+  if (a >= 0) return c + WHEEL_LIFT * a * toBlack;
+  return c * (1 + WHEEL_LIFT_DARKEN * a * toBlack);
 }
 
 function applyLayer(v: [number, number, number], L: Layer, space: GradeSpace, skinW: number): void {
@@ -569,26 +693,29 @@ function applyLayer(v: [number, number, number], L: Layer, space: GradeSpace, sk
     }
     if (L.masks) {
       const y = space.luma[0] * R + space.luma[1] * G + space.luma[2] * B;
-      const yl = clamp01(y);
-      const V = clamp01(space.encode(yl));
+      // The masks read the tone as it will show: through the shoulder.
+      const ys = shoulder(Math.max(0, y), space.white);
+      const yl = clamp01(ys);
+      const V = clamp01(space.encode(ys));
       const iv = 1 - V;
       let stops = 0;
       if (L.highlights) stops += L.highlights * HIGHLIGHTS_STOPS * V * V * iv;
       if (L.shadows) stops += L.shadows * SHADOWS_STOPS * iv * iv * V;
       if (L.whites) stops += L.whites * WHITES_STOPS * V * V * V * V;
       if (L.brilliance) stops += L.brilliance * BRILLIANCE_STOPS * (1 - 2 * V) * 4 * V * iv;
+      if (L.blacks < 0) stops += L.blacks * BLACKS_DARKEN_STOPS * iv * iv * iv * iv;
       if (stops) {
         const k = Math.pow(2, stops);
         R *= k;
         G *= k;
         B *= k;
       }
-      if (L.blacks) {
+      if (L.blacks > 0) {
         // The mask is on linear luminance: an offset masked on the encoded
         // value would rise faster than the signal near black and fold the
         // ramp over.
         const iy = 1 - yl;
-        const off = L.blacks * Math.abs(L.blacks) * BLACKS_OFFSET * iy * iy * iy;
+        const off = L.blacks * L.blacks * BLACKS_OFFSET * iy * iy * iy;
         R += off;
         G += off;
         B += off;
@@ -597,9 +724,9 @@ function applyLayer(v: [number, number, number], L: Layer, space: GradeSpace, sk
     for (const w of L.wheels) {
       const a = w.amount;
       if (w.zone === "s") {
-        R += WHEEL_LIFT * a[0] * (1 - R);
-        G += WHEEL_LIFT * a[1] * (1 - G);
-        B += WHEEL_LIFT * a[2] * (1 - B);
+        R = lift(R, a[0]);
+        G = lift(G, a[1]);
+        B = lift(B, a[2]);
       } else if (w.zone === "m") {
         R = spow(R, 1 / (1 + WHEEL_GAMMA * a[0]));
         G = spow(G, 1 / (1 + WHEEL_GAMMA * a[1]));
@@ -609,9 +736,9 @@ function applyLayer(v: [number, number, number], L: Layer, space: GradeSpace, sk
         G *= 1 + WHEEL_GAIN * a[1];
         B *= 1 + WHEEL_GAIN * a[2];
       } else {
-        R += WHEEL_OFFSET * a[0];
-        G += WHEEL_OFFSET * a[1];
-        B += WHEEL_OFFSET * a[2];
+        R *= Math.pow(2, WHEEL_OFFSET_STOPS * a[0]);
+        G *= Math.pow(2, WHEEL_OFFSET_STOPS * a[1]);
+        B *= Math.pow(2, WHEEL_OFFSET_STOPS * a[2]);
       }
     }
   }
@@ -697,17 +824,14 @@ export type GradeTransform = (r: number, g: number, b: number) => [number, numbe
  */
 export function createGradeTransform(
   g: ColorGrade | undefined | null,
-  output: OutputSpace = "sdr"
+  output: OutputSpace | GradeSpace = "sdr"
 ): GradeTransform | null {
   const n = normalizeGrade(g);
   if (!n) return null;
-  const space = gradeSpaceFor(output);
+  const space = typeof output === "string" ? gradeSpaceFor(output) : output;
+  // The manual adjustments balance the shot first, so the look lands on a
+  // corrected picture the same way on every clip.
   const layers: Layer[] = [];
-  const presetGrade = resolvePreset(n.preset);
-  if (presetGrade) {
-    const layer = buildLayer(presetGrade, space, !!n.preset?.skin);
-    if (layer) layers.push(layer);
-  }
   const manual: ColorGrade = { ...n };
   delete manual.preset;
   delete manual.lut;
@@ -715,6 +839,11 @@ export function createGradeTransform(
   delete manual.clarity;
   const manualLayer = buildLayer(manual, space, false);
   if (manualLayer) layers.push(manualLayer);
+  const presetGrade = resolvePreset(n.preset);
+  if (presetGrade) {
+    const layer = buildLayer(presetGrade, space, !!n.preset?.skin);
+    if (layer) layers.push(layer);
+  }
   if (!layers.length) return null;
   const anySkin = layers.some((l) => l.skinDamp);
   return (r, g2, b) => {

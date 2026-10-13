@@ -13,16 +13,23 @@
  *     other through the transfer at 1000 nits, so an HDR source keeps its
  *     range)
  *   2 the clip's library LUT, mixed by its amount
- *   3 the grade (preset layer, then manual), gradeMath.ts
+ *   3 the grade (manual layer, then preset), gradeMath.ts
  *   4 output: SDR as is; an SDR source delivered as HDR takes the BT.2408
  *     mapping (Rec.709 white to 203 nits in the Rec.2020 container)
  *
  * Sharpen and clarity are spatial and run on the picture afterwards
  * (detail.ts); they never enter the LUT or its key.
  *
- * The source conversion is the expensive stage (the ACES transform), and it
- * never changes while sliders move, so it can be sampled once onto its own
- * lattice and the cheap stages composed on top per edit.
+ * A graded log clip takes stages 1 and 3 in the other order: the grade works
+ * on the scene light the camera recorded and the ACES output transform
+ * renders the result, so its shoulder carries a brightened sky into white
+ * the way it carries the ungraded one; the LUT then reads the rendered
+ * picture.
+ *
+ * The source conversion is the expensive stage (the ACES transform). An
+ * ungraded or display-referred clip samples it once onto its own lattice and
+ * composes the cheap stages on top per edit; a graded log clip runs the
+ * transform per node, on the draft cube while a slider moves.
  */
 
 import { type ColorGrade, gradeWithoutDetail } from "./colorGrade";
@@ -53,7 +60,7 @@ import {
   srgbEncode,
 } from "./colorSpace";
 import { type GradeLut, GRADE_LUT_SIZE, stableJson } from "./gradeLut";
-import { type GradeTransform, createGradeTransform } from "./gradeMath";
+import { type GradeSpace, type GradeTransform, createGradeTransform, sceneGradeSpace } from "./gradeMath";
 import { type ParsedLut, sampleLut } from "./lutFile";
 
 /** The file's Y'CbCr matrix and range beside the ones the decoder drew the
@@ -192,6 +199,7 @@ function matrixFixTransform(drawn: DrawnColor): GradeTransform {
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 const REC2020_TO_AP0 = rgbToRgbMatrix(REC2020_PRIMARIES, AP0_PRIMARIES, BRADFORD);
+const AP0_TO_REC2020 = mat3Inv(REC2020_TO_AP0);
 const AWG_TO_AP0 = rgbToRgbMatrix(APPLE_WIDE_GAMUT_PRIMARIES, AP0_PRIMARIES, BRADFORD);
 const REC2020_TO_REC709 = rgbToRgbMatrix(REC2020_PRIMARIES, REC709_PRIMARIES);
 const SDR_PEAK_NITS = 100;
@@ -215,6 +223,44 @@ function sceneDecoder(profile: SourceProfile): ((r: number, g: number, b: number
     default:
       return null;
   }
+}
+
+/** The grade space of a log clip: scene light in Rec.2020 primaries, encoded
+ * by the output transform's response to grey. One per output transform. */
+const sceneSpaces = new Map<AcesOutputPresetId, GradeSpace>();
+
+function sceneSpaceFor(output: OutputSpace): GradeSpace {
+  const id = acesPresetFor(output);
+  let space = sceneSpaces.get(id);
+  if (space) return space;
+  const ot = acesOutputTransform(id);
+  space = sceneGradeSpace(output, REC2020_PRIMARIES, (y) => {
+    const [r, g, b] = mat3Apply(REC2020_TO_AP0, y, y, y);
+    return ot.forward(r, g, b)[1];
+  });
+  sceneSpaces.set(id, space);
+  return space;
+}
+
+/** Code values → the graded scene → the output transform, for a log clip
+ * with a grade: the grade runs on scene light and the transform renders it.
+ * Null when the profile is not log or the grade is neutral. */
+function sceneGradedTransform(recipe: ClipColorRecipe): GradeTransform | null {
+  const scene = sceneDecoder(recipe.profile);
+  if (!scene) return null;
+  const space = sceneSpaceFor(recipe.output);
+  const gradeFn = createGradeTransform(gradeWithoutDetail(recipe.grade), space);
+  if (!gradeFn) return null;
+  const fix = needsMatrixFix(recipe) ? matrixFixTransform(recipe) : null;
+  const ot = acesOutputTransform(acesPresetFor(recipe.output));
+  return (r, g, b) => {
+    const [fr, fg, fb] = fix ? fix(r, g, b) : [r, g, b];
+    const [ar, ag, ab] = scene(clamp01(fr), clamp01(fg), clamp01(fb));
+    const [sr, sg, sb] = mat3Apply(AP0_TO_REC2020, ar, ag, ab);
+    const [gr, gg, gb] = gradeFn(space.encode(sr), space.encode(sg), space.encode(sb));
+    const [or, og, ob] = mat3Apply(REC2020_TO_AP0, space.decode(gr), space.decode(gg), space.decode(gb));
+    return ot.forward(or, og, ob);
+  };
 }
 
 /** HLG signal → PQ signal on a 1000-nit display: the BT.2100 OOTF gives the
@@ -296,28 +342,44 @@ function outputTransform(profile: SourceProfile, output: OutputSpace): GradeTran
 /* The composed mapping                                                */
 /* ------------------------------------------------------------------ */
 
+/** The library LUT mixed by its amount, on display values; null without one. */
+function lutStage(recipe: ClipColorRecipe, userLut: ParsedLut | undefined): GradeTransform | null {
+  const lutRef = recipe.grade?.lut;
+  const amount = lutRef && userLut ? (lutRef.amount ?? 1) : 0;
+  if (!amount || !userLut) return null;
+  return (r, g, b) => {
+    const l = sampleLut(userLut, clamp01(r), clamp01(g), clamp01(b));
+    return [r + (l[0] - r) * amount, g + (l[1] - g) * amount, b + (l[2] - b) * amount];
+  };
+}
+
 /** Stages 2–4: the LUT, the grade and the output mapping on display values. */
 function postSourceTransform(recipe: ClipColorRecipe, userLut: ParsedLut | undefined): GradeTransform | null {
   const grade = gradeWithoutDetail(recipe.grade);
   const gradeSpace: OutputSpace = isSdrSource(recipe.profile) ? "sdr" : recipe.output;
-  const lutRef = grade?.lut;
-  const lutAmount = lutRef && userLut ? (lutRef.amount ?? 1) : 0;
+  const lutFn = lutStage(recipe, userLut);
   const gradeFn = createGradeTransform(grade, gradeSpace);
   const outFn = outputTransform(recipe.profile, recipe.output);
-  if (!lutAmount && !gradeFn && !outFn) return null;
+  if (!lutFn && !gradeFn && !outFn) return null;
   return (r, g, b) => {
     let v: [number, number, number] = [r, g, b];
-    if (lutAmount && userLut) {
-      const l = sampleLut(userLut, clamp01(v[0]), clamp01(v[1]), clamp01(v[2]));
-      v = [
-        v[0] + (l[0] - v[0]) * lutAmount,
-        v[1] + (l[1] - v[1]) * lutAmount,
-        v[2] + (l[2] - v[2]) * lutAmount,
-      ];
-    }
+    if (lutFn) v = lutFn(v[0], v[1], v[2]);
     if (gradeFn) v = gradeFn(v[0], v[1], v[2]);
     if (outFn) v = outFn(clamp01(v[0]), clamp01(v[1]), clamp01(v[2]));
     return v;
+  };
+}
+
+/** The whole mapping of a graded log clip: the scene grade and its rendering,
+ * then the LUT on the rendered picture. Null for every other recipe. */
+function sceneClipTransform(recipe: ClipColorRecipe, userLut: ParsedLut | undefined): GradeTransform | null {
+  const graded = sceneGradedTransform(recipe);
+  if (!graded) return null;
+  const lutFn = lutStage(recipe, userLut);
+  if (!lutFn) return graded;
+  return (r, g, b) => {
+    const v = graded(r, g, b);
+    return lutFn(v[0], v[1], v[2]);
   };
 }
 
@@ -327,6 +389,13 @@ function postSourceTransform(recipe: ClipColorRecipe, userLut: ParsedLut | undef
  * SDR-in-SDR clip with no grade and no LUT.
  */
 export function createClipTransform(recipe: ClipColorRecipe, userLut?: ParsedLut): GradeTransform | null {
+  const scene = sceneClipTransform(recipe, userLut);
+  if (scene) {
+    return (r, g, b) => {
+      const v = scene(r, g, b);
+      return [clamp01(v[0]), clamp01(v[1]), clamp01(v[2])];
+    };
+  }
   const source = sourceTransform(recipe.profile, recipe.output, recipe);
   const post = postSourceTransform(recipe, userLut);
   if (!source && !post) return null;
@@ -455,6 +524,18 @@ export function clearSourceLatticeCache(): void {
  */
 export function buildClipLut(recipe: ClipColorRecipe, userLut?: ParsedLut, source?: SourceLattice): GradeLut | null {
   const size = recipe.size;
+  // A graded log clip runs the output transform after its grade, so no
+  // rendered lattice can stand in for it: every node takes the whole path.
+  const scene = sceneClipTransform(recipe, userLut);
+  if (scene) {
+    return {
+      size,
+      data: fillLattice(size, (r, g, b) => {
+        const v = scene(r, g, b);
+        return [clamp01(v[0]), clamp01(v[1]), clamp01(v[2])];
+      }),
+    };
+  }
   const post = postSourceTransform(recipe, userLut);
   const lattice =
     source &&

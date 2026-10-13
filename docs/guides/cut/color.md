@@ -8,13 +8,13 @@ A clip's color is one recipe: what its code values mean (the source profile), th
 
 Every video carries a source profile, read from its header at import: Apple Log and Log 2 by Apple's metadata identifier, HLG and PQ by the transfer tag beside a BT.2020 matrix, sRGB by its transfer, Rec.709 otherwise. The Color panel shows the detection and takes a per-asset override.
 
-Rec.709 and sRGB sources draw as they are. Log goes through the ACES 2.0 output transform, HLG and PQ through the BT.2100 OOTF on a 100-nit display, so the grade and any creative LUT see a Rec.709 picture. A technical Log→Rec.709 LUT is a conversion of its own: it goes on a clip whose source is set to "Rec.709 (no conversion)".
+Rec.709 and sRGB draw as they are; HLG and PQ convert through the BT.2100 OOTF on a 100-nit display, so the grade sees a Rec.709 picture. Log is graded in scene light, then rendered by the ACES 2.0 output transform. A technical Log→Rec.709 LUT is a conversion of its own: it goes on a clip whose source is set to "Rec.709 (no conversion)".
 
 That needs the code values untouched, and a browser converts a decoded frame by its bitstream tags, so the parameter set's tags are rewritten to neutral Rec.709 / sRGB before the decoder sees them. The matrix a decoder draws with differs by browser, so each route is measured once per session and the clip's LUT undoes it before applying the file's own. ffmpeg and headless renders read the file's matrix and need no fix. ProRes masters and their preview proxies are in [Local Compute](local-compute.md).
 
 ## LUTs
 
-A `.cube` or `.3dl` file is a Library file keyed by its content, so the same file dropped twice is one LUT and it travels with a project. The built-in film LUTs are `.cube` files the site serves, keyed the same way. A grade names either by `lut:<key>`; the recipe bakes it between the source conversion and the grade, and an export stages its bytes beside the job, so every renderer applies the same numbers.
+A `.cube` or `.3dl` file is a Library file keyed by its content, so the same file dropped twice is one LUT and it travels with a project. The built-in film LUTs are `.cube` files the site serves, keyed the same way. A grade names either by `lut:<key>`, and an export stages its bytes beside the job, so every renderer applies the same numbers.
 
 ## HDR delivery
 
