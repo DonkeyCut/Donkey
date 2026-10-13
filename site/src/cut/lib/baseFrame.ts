@@ -3,10 +3,11 @@
 /**
  * A clip's frame as the base rendering sees it: the decoder's code values put
  * through the source conversion alone — Apple Log, HLG or PQ into Rec.709
- * display values — and nothing of the grade. Analysis (Auto, the chat's
- * colour stats, a match), thumbnails, watch frames and freeze frames read
- * this, so a log clip's numbers and pictures describe what the grade works
- * on, never the flat log encoding. The frames are read the way the preview
+ * display values — and nothing of the grade. The chat's colour stats,
+ * thumbnails, watch frames and freeze frames read this, so a log clip's
+ * numbers and pictures describe what the display shows, never the flat log
+ * encoding; Auto and a match read the raw frame and render each grade they
+ * try through the clip's recipe. The frames are read the way the preview
  * reads them (sourceColor.ts): tags overridden so the decoder draws code
  * values, and the matrix it drew them through undone first.
  */
@@ -14,9 +15,12 @@
 import {
   applyLutToImageData,
   buildClipLut,
+  type ClipColorRecipe,
+  type ColorGrade,
   drawnColorKey,
   type DrawnColor,
   type GradeLut,
+  type ParsedLut,
   type SourceProfile,
 } from "@donkeycut/effects-kit";
 import { frameSink, openMedia, videoTrackOf, type FrameCanvasSink, type FrameSize, type FrameSinkOptions } from "./mediaRead";
@@ -53,19 +57,48 @@ export function toBaseRendering(
   return px;
 }
 
-/** A small RGBA readout of a clip's base rendering; null when the clip has no
- * decoded frame ready. */
-export function sampleClipBaseFrameData(clipId: string, w = 96, h = 54): Uint8ClampedArray | null {
+/** A grade to read a frame through: the clip's grade and the library LUT it
+ * names, loaded. */
+export type ReadGrade = { grade: ColorGrade; userLut?: ParsedLut };
+
+/** Thumb-size readouts sample a 33³ lattice: quantiles and means sit within
+ * a code of the full-size preview. */
+const GRADED_READ_LUT_SIZE = 33;
+
+/** Convert raw code values in place into the picture the grade renders on an
+ * SDR project: the clip's whole recipe in one lattice, so a log clip's grade
+ * runs in scene light exactly as the preview runs it. */
+export function toGradedRendering(
+  px: Uint8ClampedArray,
+  profile: SourceProfile,
+  drawn: Partial<DrawnColor> | undefined,
+  read: ReadGrade
+): Uint8ClampedArray {
+  const lut = buildClipLut({ ...drawn, profile, output: "sdr", size: GRADED_READ_LUT_SIZE, grade: read.grade }, read.userLut);
+  if (!lut) return toBaseRendering(px, profile, drawn);
+  applyLutToImageData(px, lut);
+  return px;
+}
+
+/** A frame's code values (RGBA) and the ungraded recipe that draws them on
+ * an SDR project: what a match renders each grade it tries through. */
+export interface RawFrame {
+  px: Uint8ClampedArray;
+  recipe: ClipColorRecipe;
+}
+
+/** A small readout of a clip's code values as the preview decoded them; null
+ * when the clip has no decoded frame ready. */
+export function sampleClipRawFrame(clipId: string, w = 96, h = 54): RawFrame | null {
   const px = sampleClipFrameData(clipId, w, h);
   if (!px) return null;
   const s = useEditor.getState();
   const clip = s.clips.find((c) => c.id === clipId);
   const asset = clip ? s.assets.find((a) => a.id === clip.assetId) : undefined;
-  if (!asset) return toBaseRendering(px, "rec709");
-  // The frame came through the engine's read of the clip; convert it the way
-  // the compositor does.
-  const input = (sampleClipColorRead(clipId) ?? colorRead(asset, previewFile(asset))).recipe();
-  return toBaseRendering(px, input.profile, input);
+  // The frame came through the engine's read of the clip; its recipe is the
+  // one the compositor draws it with.
+  const input = asset ? (sampleClipColorRead(clipId) ?? colorRead(asset, previewFile(asset))).recipe() : undefined;
+  return { px, recipe: { ...input, profile: input?.profile ?? "rec709", output: "sdr", size: 0 } };
 }
 
 /** How the frames at `url` are to be read: the project asset the URL belongs
@@ -120,6 +153,28 @@ export async function baseFrameAt(url: string, time: number, size?: FrameSize): 
     const track = await videoTrackOf(input);
     if (!track) throw new Error("This file has no readable video.");
     return await baseFrameSink(track, size, colorReadAt(url)).getCanvas(Math.max(0, time));
+  } finally {
+    input.dispose();
+  }
+}
+
+/** The code values of one frame of the file at `url`, read the way the
+ * preview reads them, with the recipe that draws them. */
+export async function rawFrameAt(url: string, time: number, size: FrameSize): Promise<RawFrame | null> {
+  const input = openMedia(url);
+  try {
+    const track = await videoTrackOf(input);
+    if (!track) throw new Error("This file has no readable video.");
+    const read = colorReadAt(url);
+    const colorSpace = read.colorSpace;
+    const frame = await frameSink(track, size, colorSpace ? { colorSpace } : {}).getCanvas(Math.max(0, time));
+    const ctx = frame?.canvas.getContext("2d") as CanvasRenderingContext2D | null | undefined;
+    if (!frame || !ctx) return null;
+    const drawn = await read.settled();
+    return {
+      px: ctx.getImageData(0, 0, frame.canvas.width, frame.canvas.height).data,
+      recipe: { ...drawn, output: "sdr", size: 0 },
+    };
   } finally {
     input.dispose();
   }

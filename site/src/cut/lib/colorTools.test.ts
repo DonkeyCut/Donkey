@@ -5,6 +5,7 @@ import type { LibraryAsset, LibraryData } from "./library";
 import type { SavedGrade } from "./gradePresets";
 import type { MediaAsset } from "./types";
 import { BUILTIN_LUTS } from "./builtinLuts";
+import { sourceProfileOf } from "./sourceColor";
 
 // The colour tools: every slider the panel renders, four wheels, the LUT
 // off the shelf, one grade copied across the timeline as one undo step, the
@@ -47,7 +48,12 @@ await stubModule<typeof import("./gradePresets")>("./gradePresets", import.meta.
 // A flat mid-grey frame stands in for a decoded clip frame, so the stats
 // tool reads known pixels.
 await stubModule<typeof import("./baseFrame")>("./baseFrame", import.meta.url, {
-  sampleClipBaseFrameData: (_clipId, w = 96, h = 54) => new Uint8ClampedArray(w * h * 4).fill(128),
+  sampleClipRawFrame: (clipId, w = 96, h = 54) => {
+    const s = useEditor.getState();
+    const asset = s.assets.find((a) => a.id === s.clips.find((c) => c.id === clipId)?.assetId);
+    const px = new Uint8ClampedArray(w * h * 4).fill(128);
+    return { px, recipe: { profile: asset ? sourceProfileOf(asset) : "rec709", output: "sdr", size: 0 } };
+  },
 });
 
 const { runAiTool } = await import("./aiTools");

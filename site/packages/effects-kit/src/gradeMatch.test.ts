@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import type { ColorGrade } from "./colorGrade";
 import { createGradeTransform } from "./gradeMath";
-import { autoGradeFromImageData, colorStatsFromImageData, matchGrade, type ColorStats } from "./gradeMatch";
+import { type Lab, deltaE2000, displayToLab } from "./colorDifference";
+import { type ClipColorRecipe, createClipTransform } from "./colorPipeline";
+import { type SourceProfile, appleLogEncode, bt1886Decode } from "./colorSpace";
+import { autoGrade, colorStatsFromImageData, matchGrade, recipeStatsRender } from "./gradeMatch";
 
 /** A synthetic frame with tonal and color variety. */
 function testFrame(): Uint8ClampedArray {
@@ -19,116 +23,72 @@ function testFrame(): Uint8ClampedArray {
   return data;
 }
 
-function graded(data: Uint8ClampedArray, f: (v: number, c: number) => number): Uint8ClampedArray {
-  const out = new Uint8ClampedArray(data.length);
-  for (let i = 0; i < data.length; i += 4) {
-    for (let c = 0; c < 3; c++) out[i + c] = Math.max(0, Math.min(255, Math.round(f(data[i + c], c))));
-    out[i + 3] = data[i + 3];
+/** A clip's code values rendered through its recipe with `grade`, as pixels. */
+function rendered(px: Uint8ClampedArray, recipe: ClipColorRecipe, grade?: ColorGrade): Lab[] {
+  const fn = createClipTransform({ ...recipe, grade });
+  const out: Lab[] = [];
+  for (let i = 0; i < px.length; i += 4) {
+    const v = fn ? fn(px[i] / 255, px[i + 1] / 255, px[i + 2] / 255) : [px[i] / 255, px[i + 1] / 255, px[i + 2] / 255];
+    out.push(displayToLab(Math.round(v[0] * 255), Math.round(v[1] * 255), Math.round(v[2] * 255)));
   }
   return out;
 }
 
+const meanDeltaE = (a: Lab[], b: Lab[]) => a.reduce((s, p, i) => s + deltaE2000(p, b[i]), 0) / a.length;
+
+const recipeFor = (profile: SourceProfile): ClipColorRecipe => ({ profile, output: "sdr", size: 0 });
+
 describe("matchGrade", () => {
   test("a frame matched to itself is neutral", () => {
-    const stats = colorStatsFromImageData(testFrame())!;
-    expect(matchGrade(stats, stats)).toBeUndefined();
+    const render = recipeStatsRender(testFrame(), recipeFor("rec709"));
+    expect(matchGrade(render, render(undefined)!)).toBeUndefined();
   });
 
-  test("recovers a known channel shift within tolerance", () => {
-    const src = testFrame();
-    // Warm the reference: red up, blue down — a temperature-like cast.
-    const ref = graded(src, (v, c) => (c === 0 ? v * 1.18 : c === 2 ? v * 0.85 : v));
-    const srcStats = colorStatsFromImageData(src)!;
-    const refStats = colorStatsFromImageData(ref)!;
-    const grade = matchGrade(srcStats, refStats);
-    expect(grade !== undefined).toBe(true);
-    const transform = createGradeTransform(grade)!;
-    // Apply the match and compare channel means against the reference.
-    let mr = 0;
-    let mg = 0;
-    let mb = 0;
-    let n = 0;
-    for (let i = 0; i < src.length; i += 4) {
-      const [r, g, b] = transform(src[i] / 255, src[i + 1] / 255, src[i + 2] / 255);
-      mr += r * 255;
-      mg += g * 255;
-      mb += b * 255;
-      n++;
+  // The eval: a reference made by grading the clip's own frame with a known
+  // grade, so a perfect match exists. The fitted grade has to land the frame
+  // on that reference pixel for pixel — mean CIEDE2000 under 1, below what
+  // an observer sees across a cut — on Rec.709 and on Apple Log graded in
+  // scene light.
+  const TARGETS: ColorGrade[] = [
+    { exposure: 12, temperature: 20 },
+    { contrast: 25, temperature: -18, saturation: 10 },
+    { exposure: -10, tint: 12, saturation: -25 },
+    { highlights: -20, shadows: 15, temperature: 10 },
+  ];
+  for (const profile of ["rec709", "apple-log-2"] as SourceProfile[]) {
+    for (const target of TARGETS) {
+      test(`${profile}: recovers ${JSON.stringify(target)}`, () => {
+        const px = testFrame();
+        const recipe = recipeFor(profile);
+        const render = recipeStatsRender(px, recipe);
+        const grade = matchGrade(render, render(target)!);
+        expect(grade).toBeDefined();
+        expect(meanDeltaE(rendered(px, recipe, grade), rendered(px, recipe, target))).toBeLessThan(1);
+      });
     }
-    mr /= n;
-    mg /= n;
-    mb /= n;
-    expect(Math.abs(mr - refStats.meanR)).toBeLessThan(10);
-    expect(Math.abs(mg - refStats.meanG)).toBeLessThan(10);
-    expect(Math.abs(mb - refStats.meanB)).toBeLessThan(10);
+  }
+
+  test("strength scales every fitted slider", () => {
+    const render = recipeStatsRender(testFrame(), recipeFor("rec709"));
+    const reference = render({ exposure: 16, temperature: 24 })!;
+    const full = matchGrade(render, reference)!;
+    const half = matchGrade(render, reference, 0.5)!;
+    for (const [k, v] of Object.entries(full)) {
+      expect(Math.abs((half as Record<string, number>)[k] ?? 0) - Math.abs((v as number) / 2)).toBeLessThanOrEqual(0.5);
+    }
+    expect(matchGrade(render, reference, 0)).toBeUndefined();
   });
 
-  test("matched curves reach both ends of the range", () => {
-    const src = testFrame();
-    const ref = graded(src, (v, c) => (c === 0 ? v * 1.18 : c === 2 ? v * 0.85 : v));
-    const grade = matchGrade(colorStatsFromImageData(src)!, colorStatsFromImageData(ref)!)!;
-    // The spline holds flat past its end points, so a curve stopping at the
-    // p2/p98 probes would flatten the darkest and brightest pixels.
-    for (const ch of ["r", "g", "b"] as const) {
-      const pts = grade.curves?.[ch];
-      if (!pts) continue;
-      expect(pts[0][0]).toBe(0);
-      expect(pts[pts.length - 1][0]).toBe(255);
-      for (let i = 1; i < pts.length; i++) {
-        expect(pts[i][0]).toBeGreaterThan(pts[i - 1][0]);
-        expect(pts[i][1]).toBeGreaterThanOrEqual(pts[i - 1][1]);
-      }
-    }
-  });
-
-  test("a reference of other content never posterizes: every curve segment keeps a bounded slope", () => {
-    // A shadow on a blue-and-orange wall matched to a shadow on beige
-    // pavement: the green quantiles jump 54 -> 164 across eight code values,
-    // which as a curve tears the wall into flat bands of false colour.
-    const stats = (r: number[], g: number[], b: number[]): ColorStats => ({
-      r,
-      g,
-      b,
-      luma: g,
-      meanR: r[3],
-      meanG: g[3],
-      meanB: b[3],
-      meanSat: 0.3,
-      warmth: 1,
-    });
-    const source = stats([50, 59, 126, 153, 227, 230, 232], [42, 52, 113, 147, 155, 160, 171], [23, 48, 60, 74, 132, 149, 161]);
-    const reference = stats([33, 37, 40, 48, 203, 209, 213], [39, 45, 47, 54, 164, 173, 178], [40, 45, 48, 55, 135, 144, 150]);
-    const grade = matchGrade(source, reference)!;
-    for (const ch of ["r", "g", "b"] as const) {
-      const pts = grade.curves?.[ch];
-      expect(pts).toBeDefined();
-      for (let i = 1; i < pts!.length; i++) {
-        const slope = (pts![i][1] - pts![i - 1][1]) / (pts![i][0] - pts![i - 1][0]);
-        // Rounding to whole code values moves a short segment's slope a little.
-        const slack = 1.5 / (pts![i][0] - pts![i - 1][0]);
-        expect(slope).toBeLessThanOrEqual(3 + slack);
-        if (pts![i][1] < 255 && pts![i - 1][1] > 0) expect(slope).toBeGreaterThanOrEqual(1 / 3 - slack);
-      }
-    }
-    // The middle of the range still lands where the reference puts it.
-    const mid = grade.curves!.g!.find(([x]) => x === 147)!;
-    expect(mid[1]).toBe(54);
-  });
-
-  test("strength scales the match: half strength moves every curve point half as far", () => {
-    const src = testFrame();
-    const ref = graded(src, (v, c) => (c === 0 ? v * 1.3 : c === 2 ? v * 0.7 : v));
-    const srcStats = colorStatsFromImageData(src)!;
-    const refStats = colorStatsFromImageData(ref)!;
-    const full = matchGrade(srcStats, refStats)!;
-    const half = matchGrade(srcStats, refStats, 0.5)!;
-    for (const ch of ["r", "b"] as const) {
-      const f = full.curves![ch]!;
-      const h = half.curves![ch]!;
-      expect(h.map(([x]) => x)).toEqual(f.map(([x]) => x));
-      for (let i = 0; i < f.length; i++) expect(Math.abs(h[i][1] - (f[i][0] + f[i][1]) / 2)).toBeLessThanOrEqual(0.5);
-    }
-    expect(matchGrade(srcStats, refStats, 0)).toBeUndefined();
+  test("stats read lightness and each band's cast in CIELAB", () => {
+    const grey = colorStatsFromImageData(frame([119, 119, 119]))!;
+    // BT.1886 code 119 is 16% luminance: L* 47.
+    expect(Math.abs(grey.lightness[3] - 47)).toBeLessThan(1);
+    const mid = grey.tones[1];
+    expect(mid.share).toBe(1);
+    expect(Math.abs(mid.a) + Math.abs(mid.b)).toBeLessThan(0.5);
+    const warm = colorStatsFromImageData(frame([160, 120, 90], [40, 60, 90]))!;
+    expect(warm.tones[1].b).toBeGreaterThan(10);
+    expect(warm.tones[0].b).toBeLessThan(-10);
   });
 
   test("stats expose warmth and saturation for the assistant", () => {
@@ -155,29 +115,31 @@ function frame(...pixels: [number, number, number][]): Uint8ClampedArray {
   return data;
 }
 
-describe("autoGradeFromImageData", () => {
+const autoGrade709 = (px: Uint8ClampedArray) => autoGrade(px, recipeFor("rec709"));
+
+describe("autoGrade", () => {
   test("a mid-gray frame needs nearly nothing", () => {
-    const g = autoGradeFromImageData(frame([125, 125, 125]));
+    const g = autoGrade709(frame([125, 125, 125]));
     expect(Math.abs(g?.exposure ?? 0) <= 1).toBe(true);
     expect(g?.contrast).toBeUndefined();
     expect(g?.temperature).toBeUndefined();
   });
 
   test("a dark frame gets pushed up toward middle gray, in stops", () => {
-    const g = autoGradeFromImageData(frame([30, 30, 30], [50, 50, 50]));
+    const g = autoGrade709(frame([30, 30, 30], [50, 50, 50]));
     expect((g?.exposure ?? 0) > 10).toBe(true);
     expect(g?.exposure ?? 0).toBeLessThanOrEqual(50);
   });
 
   test("a compressed tonal range gets a contrast stretch", () => {
-    const g = autoGradeFromImageData(frame([100, 100, 100], [150, 150, 150]));
+    const g = autoGrade709(frame([100, 100, 100], [150, 150, 150]));
     expect((g?.contrast ?? 0) > 0).toBe(true);
   });
 
   test("gray-world counters color casts both ways and leaves hue and saturation alone", () => {
-    const cool = autoGradeFromImageData(frame([90, 120, 170]));
+    const cool = autoGrade709(frame([90, 120, 170]));
     expect((cool?.temperature ?? 0) > 0).toBe(true);
-    const warm = autoGradeFromImageData(frame([170, 120, 90]));
+    const warm = autoGrade709(frame([170, 120, 90]));
     expect((warm?.temperature ?? 0) < 0).toBe(true);
     expect(cool?.saturation).toBeUndefined();
     expect(cool?.hue).toBeUndefined();
@@ -186,7 +148,7 @@ describe("autoGradeFromImageData", () => {
 
   test("the fitted white balance neutralizes the cast it measured", () => {
     const cast: [number, number, number] = [150, 120, 95];
-    const g = autoGradeFromImageData(frame(cast))!;
+    const g = autoGrade709(frame(cast))!;
     const t = createGradeTransform({ temperature: g.temperature })!;
     const out = t(cast[0] / 255, cast[1] / 255, cast[2] / 255);
     // Damped correction: the red/blue gap closes by at least half.
@@ -194,6 +156,32 @@ describe("autoGradeFromImageData", () => {
   });
 
   test("an empty sample yields no grade", () => {
-    expect(autoGradeFromImageData(new Uint8ClampedArray(0))).toBeUndefined();
+    expect(autoGrade709(new Uint8ClampedArray(0))).toBeUndefined();
+  });
+
+  test("on Apple Log the exposure lands the rendered frame on its target in true stops", () => {
+    // A flat log frame two stops under: grey card codes from a scene at 4.5%.
+    const recipe = recipeFor("apple-log-2");
+    const code = Math.round(appleLogEncode(0.045) * 255);
+    const px = frame([code, code, code], [code + 30, code + 30, code + 30]);
+    const g = autoGrade(px, recipe)!;
+    const before = Math.log2(renderedLogAverage(px, recipe));
+    const after = Math.log2(renderedLogAverage(px, recipe, { exposure: g.exposure }));
+    const want = before + 0.8 * (Math.log2(0.18) - before);
+    expect(Math.abs(after - want)).toBeLessThan(0.1);
   });
 });
+
+/** Geometric mean display luminance of a frame rendered through a recipe. */
+function renderedLogAverage(px: Uint8ClampedArray, recipe: ClipColorRecipe, grade?: ColorGrade): number {
+  const fn = createClipTransform({ ...recipe, grade });
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const v = fn ? fn(px[i] / 255, px[i + 1] / 255, px[i + 2] / 255) : [px[i] / 255, px[i + 1] / 255, px[i + 2] / 255];
+    const luma = 0.2126 * Math.round(v[0] * 255) + 0.7152 * Math.round(v[1] * 255) + 0.0722 * Math.round(v[2] * 255);
+    sum += Math.log(Math.max(1e-4, bt1886Decode(luma / 255)));
+    n++;
+  }
+  return Math.exp(sum / n);
+}

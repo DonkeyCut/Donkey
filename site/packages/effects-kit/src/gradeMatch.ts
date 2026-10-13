@@ -2,15 +2,18 @@
  * Measuring pictures and fitting grades to them: color statistics off a
  * frame, the auto grade, and reference matching. Every fit is expressed in
  * the grade's own parameters (exposure in stops, white balance as an
- * illuminant, contrast about grey, curves), so the result is an ordinary
- * ColorGrade the user or the assistant refines afterward. Callers hand these
- * the pixels of the base rendering — the picture after the source
- * conversion — so a log clip is measured as the display sees it.
+ * illuminant, contrast about grey), so the result is an ordinary ColorGrade
+ * the user or the assistant refines afterward. Stats and the auto grade read
+ * the base rendering — the picture after the source conversion — so a log
+ * clip is measured as the display sees it; a match renders the clip's code
+ * values through its real recipe for every grade it tries.
  */
 
-import { type ColorGrade, type CurvePoint, GRADE_MAX, normalizeGrade } from "./colorGrade";
-import { REC709_PRIMARIES, bt1886Decode, mat3Apply } from "./colorSpace";
-import { CONTRAST_POWER_AT_MAX, EXPOSURE_STOPS_AT_MAX, whiteBalanceFor } from "./gradeMath";
+import { type ColorGrade, GRADE_MAX, normalizeGrade } from "./colorGrade";
+import { displayToLab } from "./colorDifference";
+import { type ClipColorRecipe, createClipTransform } from "./colorPipeline";
+import { bt1886Decode } from "./colorSpace";
+import { CONTRAST_POWER_AT_MAX } from "./gradeMath";
 
 /** Quantile probes used by stats and matching. */
 export const STAT_QUANTILES = [0.02, 0.1, 0.25, 0.5, 0.75, 0.9, 0.98] as const;
@@ -29,10 +32,33 @@ export interface ColorStats {
   meanSat: number;
   /** Red/blue mean ratio in the midtones; >1 reads warm, <1 reads cool. */
   warmth: number;
+  /** CIELAB lightness L* (0..100) at each STAT_QUANTILES probe. */
+  lightness: number[];
+  /** The color of the shadows, midtones and highlights (TONE_BANDS): the
+   * share of pixels in the band, the mean a* and b* — its cast, green–magenta
+   * and blue–yellow — and their spread, which saturation scales. */
+  tones: ToneColor[];
 }
+
+export interface ToneColor {
+  share: number;
+  a: number;
+  b: number;
+  spreadA: number;
+  spreadB: number;
+}
+
+/** Upper L* edge of each tonal band, darkest first. */
+const TONE_BANDS = [35, 70, 100];
+
+/** Lightness bins per L* unit: a tenth of the smallest step anyone sees. */
+const L_BINS_PER_UNIT = 10;
 
 export function colorStatsFromImageData(data: Uint8ClampedArray): ColorStats | undefined {
   const hist = [new Float64Array(256), new Float64Array(256), new Float64Array(256), new Float64Array(256)];
+  const lightHist = new Float64Array(100 * L_BINS_PER_UNIT + 1);
+  // Per band: count, Σa, Σb, Σa², Σb².
+  const bands = TONE_BANDS.map(() => [0, 0, 0, 0, 0]);
   let count = 0;
   let sumR = 0;
   let sumG = 0;
@@ -62,17 +88,25 @@ export function colorStatsFromImageData(data: Uint8ClampedArray): ColorStats | u
       midB += b;
       mids++;
     }
+    const [L, a, lb] = displayToLab(r, g, b);
+    lightHist[Math.max(0, Math.min(lightHist.length - 1, Math.round(L * L_BINS_PER_UNIT)))]++;
+    const band = bands[Math.max(0, TONE_BANDS.findIndex((top) => L <= top))];
+    band[0]++;
+    band[1] += a;
+    band[2] += lb;
+    band[3] += a * a;
+    band[4] += lb * lb;
     count++;
   }
   if (!count) return undefined;
-  const quantiles = (h: Float64Array) =>
+  const quantiles = (h: Float64Array, scale = 1) =>
     STAT_QUANTILES.map((p) => {
       let acc = 0;
-      for (let v = 0; v < 256; v++) {
+      for (let v = 0; v < h.length; v++) {
         acc += h[v];
-        if (acc >= count * p) return v;
+        if (acc >= count * p) return v / scale;
       }
-      return 255;
+      return (h.length - 1) / scale;
     });
   return {
     r: quantiles(hist[0]),
@@ -84,6 +118,19 @@ export function colorStatsFromImageData(data: Uint8ClampedArray): ColorStats | u
     meanB: sumB / count,
     meanSat: sumSat / count,
     warmth: mids ? midR / Math.max(1, midB) : 1,
+    lightness: quantiles(lightHist, L_BINS_PER_UNIT),
+    tones: bands.map(([n, sa, sb, saa, sbb]) => {
+      if (!n) return { share: 0, a: 0, b: 0, spreadA: 0, spreadB: 0 };
+      const a = sa / n;
+      const b = sb / n;
+      return {
+        share: n / count,
+        a,
+        b,
+        spreadA: Math.sqrt(Math.max(0, saa / n - a * a)),
+        spreadB: Math.sqrt(Math.max(0, sbb / n - b * b)),
+      };
+    }),
   };
 }
 
@@ -91,47 +138,124 @@ export function colorStatsFromImageData(data: Uint8ClampedArray): ColorStats | u
 /* Auto grade                                                          */
 /* ------------------------------------------------------------------ */
 
-/**
- * Auto grade from a frame's RGBA pixels, the classic auto-tone pipeline:
- *
- * 1. Exposure — map the frame's log-average (geometric mean) luminance onto
- *    18% middle grey, in stops.
- * 2. Contrast — auto-levels: clip 0.5% off each end of the luma histogram
- *    and stretch what remains toward full range, expressed as the power
- *    about grey the contrast slider applies.
- * 3. White balance — grey-world: the illuminant whose CAT02 correction
- *    equalizes the red and blue means of the midtones, found on the
- *    temperature slider.
- *
- * Corrections are damped and capped inside the slider range so the result
- * is a starting point the user refines. Saturation and hue are left alone.
- */
-export function autoGradeFromImageData(data: Uint8ClampedArray): ColorGrade | undefined {
-  const hist = new Float64Array(256);
-  let count = 0;
-  let logSum = 0;
-  let sumR = 0;
-  let sumG = 0;
-  let sumB = 0;
+/** Pixels of a frame rendered through its recipe with a candidate grade. */
+type PixelRender = (grade: ColorGrade | undefined) => Uint8ClampedArray;
+
+/** The most pixels a fit renders per try: enough for quantiles a tenth of
+ * an L* apart, few enough that a few hundred tries take well under a second. */
+const FIT_SAMPLE = 4096;
+
+/** A PixelRender over a frame's code values (RGBA) and the recipe that draws
+ * them, with the candidate grade in the recipe's place: every try runs the
+ * real pipeline, so a log clip is fitted in scene light exactly as the
+ * preview renders it. At most FIT_SAMPLE pixels, evenly spaced. */
+function recipeRender(px: Uint8ClampedArray, recipe: ClipColorRecipe): PixelRender {
+  const total = px.length >> 2;
+  const stride = Math.max(1, Math.ceil(total / FIT_SAMPLE));
+  const sample = new Float32Array(Math.ceil(total / stride) * 3);
+  let n = 0;
+  for (let i = 0; i < total; i += stride) {
+    sample[n * 3] = px[i * 4] / 255;
+    sample[n * 3 + 1] = px[i * 4 + 1] / 255;
+    sample[n * 3 + 2] = px[i * 4 + 2] / 255;
+    n++;
+  }
+  return (grade) => {
+    const fn = createClipTransform({ ...recipe, grade });
+    const out = new Uint8ClampedArray(n * 4);
+    for (let i = 0; i < n; i++) {
+      const r = sample[i * 3];
+      const g = sample[i * 3 + 1];
+      const b = sample[i * 3 + 2];
+      const v = fn ? fn(r, g, b) : [r, g, b];
+      out[i * 4] = Math.round(v[0] * 255);
+      out[i * 4 + 1] = Math.round(v[1] * 255);
+      out[i * 4 + 2] = Math.round(v[2] * 255);
+      out[i * 4 + 3] = 255;
+    }
+    return out;
+  };
+}
+
+const lumaOf = (data: Uint8ClampedArray, i: number) => 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+
+/** Geometric mean of display luminance: where the frame's exposure sits. */
+function logAverage(data: Uint8ClampedArray): number {
+  let sum = 0;
+  for (let i = 0; i < data.length; i += 4) sum += Math.log(Math.max(1e-4, bt1886Decode(lumaOf(data, i) / 255)));
+  return Math.exp(sum / Math.max(1, data.length >> 2));
+}
+
+/** Mean red minus mean blue of the midtones in display light — the cast
+ * grey-world reads; darker and clipped pixels carry no reliable illuminant. */
+function midtoneCast(data: Uint8ClampedArray): number {
+  let gap = 0;
   let mids = 0;
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    hist[Math.min(255, Math.round(luma))]++;
-    logSum += Math.log(Math.max(1e-4, bt1886Decode(luma / 255)));
-    count++;
-    // Cast statistics from the midtones only — near-black and clipped pixels
-    // carry no reliable illuminant signal.
-    if (luma >= 16 && luma <= 240) {
-      sumR += bt1886Decode(r / 255);
-      sumG += bt1886Decode(g / 255);
-      sumB += bt1886Decode(b / 255);
-      mids++;
-    }
+    const luma = lumaOf(data, i);
+    if (luma < 16 || luma > 240) continue;
+    gap += bt1886Decode(data[i] / 255) - bt1886Decode(data[i + 2] / 255);
+    mids++;
   }
-  if (!count) return undefined;
+  return mids ? gap / mids : 0;
+}
+
+/** The slider value in [-GRADE_MAX, GRADE_MAX] where a monotone `f` crosses
+ * zero by bisection, or the end nearer zero when it never does. */
+function sliderRoot(f: (v: number) => number): number {
+  let lo = -GRADE_MAX;
+  let hi = GRADE_MAX;
+  let flo = f(lo);
+  const fhi = f(hi);
+  if (Math.sign(flo) === Math.sign(fhi)) return Math.abs(flo) < Math.abs(fhi) ? lo : hi;
+  for (let i = 0; i < 14; i++) {
+    const mid = (lo + hi) / 2;
+    const fm = f(mid);
+    if (Math.sign(fm) === Math.sign(flo)) {
+      lo = mid;
+      flo = fm;
+    } else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+/** How much of each measured correction Auto applies: a starting point the
+ * user refines, short of a full normalization. */
+const AUTO_EXPOSURE_SHARE = 0.8;
+const AUTO_CONTRAST_SHARE = 0.6;
+const AUTO_WB_SHARE = 0.6;
+const AUTO_CONTRAST_RANGE = [-10, 40] as const;
+const AUTO_WB_MAX = 40;
+
+/**
+ * Auto grade from a frame's code values (RGBA) and the recipe that draws
+ * them, the classic auto-tone pipeline measured through the real render:
+ *
+ * 1. Exposure — the slider that moves the rendered frame's log-average
+ *    luminance AUTO_EXPOSURE_SHARE of the way to 18% middle grey.
+ * 2. Contrast — auto-levels: clip 0.5% off each end of the rendered luma
+ *    histogram and stretch what remains toward full range, expressed as the
+ *    power about grey the contrast slider applies.
+ * 3. White balance — grey-world: the temperature whose render brings the
+ *    midtones' red and blue means together, applied in part.
+ *
+ * Saturation and hue are left alone.
+ */
+export function autoGrade(px: Uint8ClampedArray, recipe: ClipColorRecipe): ColorGrade | undefined {
+  if (px.length < 4) return undefined;
+  const render = recipeRender(px, recipe);
+  const grade: ColorGrade = {};
+
+  const start = Math.log(logAverage(render(undefined)));
+  const target = start + AUTO_EXPOSURE_SHARE * (Math.log(0.18) - start);
+  grade.exposure = Math.round(sliderRoot((e) => Math.log(logAverage(render({ exposure: e }))) - target));
+
+  // Auto-levels on the exposed render. A near-flat histogram (solid color,
+  // title card) carries no tonal-range signal: contrast stays.
+  const exposed = render(normalizeGrade(grade));
+  const hist = new Float64Array(256);
+  for (let i = 0; i < exposed.length; i += 4) hist[Math.min(255, Math.round(lumaOf(exposed, i)))]++;
+  const count = exposed.length >> 2;
   const percentile = (p: number) => {
     let acc = 0;
     for (let v = 0; v < 256; v++) {
@@ -140,43 +264,17 @@ export function autoGradeFromImageData(data: Uint8ClampedArray): ColorGrade | un
     }
     return 255;
   };
-
-  const grade: ColorGrade = {};
-  const ev = Math.log2(0.18 / Math.exp(logSum / count));
-  grade.exposure = Math.round((GRADE_MAX * ev * 0.8) / EXPOSURE_STOPS_AT_MAX);
-  // Auto-levels spread after the exposure shift moves it, on encoded values.
-  // A near-flat histogram (solid color, title card) carries no tonal-range
-  // signal — leave contrast alone rather than stretch noise.
-  const gain = Math.pow(2, ((grade.exposure / GRADE_MAX) * EXPOSURE_STOPS_AT_MAX) / 2.4);
-  const lo = Math.min(255, percentile(0.005) * gain);
-  const hi = Math.min(255, percentile(0.995) * gain);
+  const lo = percentile(0.005);
+  const hi = percentile(0.995);
   if (hi - lo >= 16) {
     const power = 255 / (hi - lo);
-    grade.contrast = Math.max(
-      -10,
-      Math.min(40, Math.round(((power - 1) * 0.6 * GRADE_MAX) / CONTRAST_POWER_AT_MAX))
-    );
+    const [min, max] = AUTO_CONTRAST_RANGE;
+    grade.contrast = Math.max(min, Math.min(max, Math.round(((power - 1) * AUTO_CONTRAST_SHARE * GRADE_MAX) / CONTRAST_POWER_AT_MAX)));
   }
-  if (mids) {
-    const mean: [number, number, number] = [sumR / mids, sumG / mids, sumB / mids];
-    // Grey-world on the temperature axis: the slider value whose white
-    // balance brings red and blue to the same level.
-    const imbalance = (t: number) => {
-      const wb = whiteBalanceFor(t, 0, REC709_PRIMARIES);
-      const c = wb ? mat3Apply(wb, mean[0], mean[1], mean[2]) : mean;
-      return c[0] - c[2];
-    };
-    let best = 0;
-    let bestErr = Math.abs(imbalance(0));
-    for (let t = -GRADE_MAX; t <= GRADE_MAX; t++) {
-      const err = Math.abs(imbalance(t));
-      if (err < bestErr) {
-        bestErr = err;
-        best = t;
-      }
-    }
-    grade.temperature = Math.max(-40, Math.min(40, Math.round(best * 0.6)));
-  }
+
+  const toned = normalizeGrade(grade);
+  const balanced = sliderRoot((t) => midtoneCast(render({ ...toned, temperature: t })));
+  grade.temperature = Math.max(-AUTO_WB_MAX, Math.min(AUTO_WB_MAX, Math.round(balanced * AUTO_WB_SHARE)));
   return normalizeGrade(grade);
 }
 
@@ -184,101 +282,134 @@ export function autoGradeFromImageData(data: Uint8ClampedArray): ColorGrade | un
 /* Reference matching                                                  */
 /* ------------------------------------------------------------------ */
 
-/** The steepest a matched curve may climb, and (inverted) the flattest, per
- * segment. Quantiles of a reference with other content — a beige pavement
- * for a painted wall — can jump a hundred code values across a few, and a
- * curve that steep tears smooth gradients into flat bands of false colour;
- * one that flat crushes a channel while its neighbours keep climbing, so the
- * channels cross and highlights change hue. */
-export const MATCH_SLOPE_MAX = 2.5;
+/** The fields a match moves: exposure and contrast about grey, the two ends
+ * of the range, white balance and saturation — the corrections that bring
+ * one shot to another. Each is a slider the user reads afterward. */
+const MATCH_FIELDS = ["exposure", "contrast", "highlights", "shadows", "temperature", "tint", "saturation"] as const;
 
-function quantileCurve(src: number[], ref: number[]): CurvePoint[] | undefined {
-  const pts: CurvePoint[] = [];
-  const median = STAT_QUANTILES.indexOf(0.5);
-  let anchor = 0;
-  let lastX = -1;
-  for (let i = 0; i < src.length; i++) {
-    const x = Math.round(src[i]);
-    const y = Math.round(ref[i]);
-    if (x <= lastX) continue;
-    if (i <= median) anchor = pts.length;
-    pts.push([x, y]);
-    lastX = x;
+/** Cost of a slider's distance from zero, in squared ΔL* units at full
+ * throw: when two settings fit equally, the smaller one wins, so a field the
+ * reference does not need stays at zero. */
+const MATCH_PULL = 4;
+
+/** Slider step of the finite differences the fit takes its slopes from. */
+const MATCH_PROBE = 2;
+
+/** The fit stops once no slider would move by more than this much. */
+const MATCH_SETTLED = 0.25;
+const MATCH_ITERATIONS = 40;
+
+/** The stats of a frame rendered with a candidate grade. */
+export type StatsRender = (grade: ColorGrade | undefined) => ColorStats | undefined;
+
+/** How far apart two frames read, as residuals in CIELAB units: the
+ * lightness distribution probe by probe, and each tonal band's cast and
+ * spread weighted by the share of the reference it holds — the moments a Lab
+ * color transfer matches, read per band so a split tone counts too. */
+function statsResiduals(a: ColorStats, b: ColorStats): number[] {
+  const out = a.lightness.map((l, i) => l - b.lightness[i]);
+  for (let i = 0; i < b.tones.length; i++) {
+    const p = a.tones[i];
+    const q = b.tones[i];
+    const w = Math.sqrt(TONE_BANDS.length * q.share);
+    out.push(w * (p.a - q.a), w * (p.b - q.b), w * (p.spreadA - q.spreadA), w * (p.spreadB - q.spreadB));
   }
-  // Monotone outputs keep the compiled spline monotone.
-  for (let i = 1; i < pts.length; i++) {
-    if (pts[i][1] < pts[i - 1][1]) pts[i][1] = pts[i - 1][1];
-  }
-  // The median lands where the reference puts it; outward from it each
-  // segment's slope stays inside [1/MATCH_SLOPE_MAX, MATCH_SLOPE_MAX].
-  const clampY = (y: number) => Math.max(0, Math.min(255, Math.round(y)));
-  for (let i = anchor + 1; i < pts.length; i++) {
-    const dx = pts[i][0] - pts[i - 1][0];
-    const y = pts[i - 1][1];
-    pts[i][1] = clampY(Math.min(y + dx * MATCH_SLOPE_MAX, Math.max(y + dx / MATCH_SLOPE_MAX, pts[i][1])));
-  }
-  for (let i = anchor - 1; i >= 0; i--) {
-    const dx = pts[i + 1][0] - pts[i][0];
-    const y = pts[i + 1][1];
-    pts[i][1] = clampY(Math.max(y - dx * MATCH_SLOPE_MAX, Math.min(y - dx / MATCH_SLOPE_MAX, pts[i][1])));
-  }
-  if (pts.length < 2 || pts.every(([x, y]) => Math.abs(x - y) <= 2)) return undefined;
-  // The spline holds flat outside its end points, so a curve that stops at the
-  // p2/p98 probes would crush everything darker and brighter into those two
-  // values. Carry the end segments' slopes out to 0 and 255 instead, keeping
-  // the shadow and specular separation the reference has.
-  const [x0, y0] = pts[0];
-  const [x1, y1] = pts[1];
-  const [xa, ya] = pts[pts.length - 2];
-  const [xb, yb] = pts[pts.length - 1];
-  if (xb < 255) {
-    const slope = (yb - ya) / Math.max(1, xb - xa);
-    pts.push([255, Math.round(Math.min(255, Math.max(yb, yb + slope * (255 - xb))))]);
-  }
-  if (x0 > 0) {
-    const slope = (y1 - y0) / Math.max(1, x1 - x0);
-    pts.unshift([0, Math.round(Math.max(0, Math.min(y0, y0 - slope * x0)))]);
-  }
-  return pts;
+  return out;
 }
 
-/** Move each curve point `strength` of the way from identity to where the
- * match put it. */
-function scaleCurve(pts: CurvePoint[] | undefined, strength: number): CurvePoint[] | undefined {
-  if (!pts || strength >= 1) return pts;
-  const out = pts.map(([x, y]) => [x, Math.round(x + (y - x) * strength)] as CurvePoint);
-  return out.every(([x, y]) => Math.abs(x - y) <= 2) ? undefined : out;
+/** Solve A x = y for a small dense system by Gaussian elimination with
+ * partial pivoting; null when A is singular. */
+function solve(A: number[][], y: number[]): number[] | null {
+  const n = y.length;
+  const m = A.map((row, i) => [...row, y[i]]);
+  for (let c = 0; c < n; c++) {
+    let pivot = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(m[r][c]) > Math.abs(m[pivot][c])) pivot = r;
+    if (Math.abs(m[pivot][c]) < 1e-12) return null;
+    [m[c], m[pivot]] = [m[pivot], m[c]];
+    for (let r = c + 1; r < n; r++) {
+      const f = m[r][c] / m[c][c];
+      for (let k = c; k <= n; k++) m[r][k] -= f * m[c][k];
+    }
+  }
+  const x = new Array<number>(n).fill(0);
+  for (let r = n - 1; r >= 0; r--) {
+    let v = m[r][n];
+    for (let k = r + 1; k < n; k++) v -= m[r][k] * x[k];
+    x[r] = v / m[r][r];
+  }
+  return x;
+}
+
+/** A StatsRender over a frame's code values (RGBA) and the recipe that
+ * draws them: recipeRender, measured. */
+export function recipeStatsRender(px: Uint8ClampedArray, recipe: ClipColorRecipe): StatsRender {
+  const render = recipeRender(px, recipe);
+  return (grade) => colorStatsFromImageData(render(grade));
 }
 
 /**
- * Compute the grade that moves `source` toward `reference`: per-channel
- * quantile curves, or a saturation delta when the tones already agree.
- * `strength` (0..1) takes the match part of the way — for a reference whose
- * content differs from the clip's (a bright window for a dark room), where
- * the full match lifts or crushes what the reference never had. Returns
- * undefined when the frames already agree.
+ * The grade that brings a frame to `reference`, fitted in the grade's own
+ * sliders: Levenberg–Marquardt least squares over MATCH_FIELDS, every try
+ * rendered through `render` and scored by statsResiduals in CIELAB, with a
+ * light pull toward zero on each slider. `strength` (0..1) scales the fitted
+ * sliders — for a reference whose content differs from the clip's (a bright
+ * window for a dark room), where the full match lifts or crushes what the
+ * reference never had. Returns undefined when the frames already agree.
  */
-export function matchGrade(source: ColorStats, reference: ColorStats, strength = 1): ColorGrade | undefined {
+export function matchGrade(render: StatsRender, reference: ColorStats, strength = 1): ColorGrade | undefined {
   const k = Math.max(0, Math.min(1, strength));
   if (k === 0) return undefined;
-  const grade: ColorGrade = {};
-  const r = scaleCurve(quantileCurve(source.r, reference.r), k);
-  const g = scaleCurve(quantileCurve(source.g, reference.g), k);
-  const b = scaleCurve(quantileCurve(source.b, reference.b), k);
-  if (r || g || b) {
-    grade.curves = {};
-    if (r) grade.curves.r = r;
-    if (g) grade.curves.g = g;
-    if (b) grade.curves.b = b;
-  }
-  // Per-channel curves already stretch or squeeze chroma along with the
-  // channels, so the saturation term is for frames that agree in tone and
-  // differ in chroma alone.
-  if (!grade.curves && source.meanSat > 0.01) {
-    const delta = Math.round((reference.meanSat / source.meanSat - 1) * GRADE_MAX * k);
-    if (Math.abs(delta) >= 2) {
-      grade.saturation = Math.max(-GRADE_MAX, Math.min(GRADE_MAX, delta));
+  const gradeOf = (p: number[]): ColorGrade => Object.fromEntries(MATCH_FIELDS.map((f, i) => [f, p[i]]));
+  const pull = Math.sqrt(MATCH_PULL) / GRADE_MAX;
+  const residuals = (p: number[]): number[] | null => {
+    const stats = render(normalizeGrade(gradeOf(p)));
+    return stats ? [...statsResiduals(stats, reference), ...p.map((v) => pull * v)] : null;
+  };
+  const sumSq = (r: number[]) => r.reduce((a, v) => a + v * v, 0);
+  const clampSlider = (v: number) => Math.max(-GRADE_MAX, Math.min(GRADE_MAX, v));
+
+  // Levenberg–Marquardt: slopes by finite differences, a damped
+  // Gauss–Newton step, damping eased after a step that helps and raised
+  // after one that does not.
+  let p = MATCH_FIELDS.map(() => 0);
+  let r = residuals(p);
+  if (!r) return undefined;
+  let damping = 1e-2;
+  for (let it = 0; it < MATCH_ITERATIONS; it++) {
+    const J = p.map((v, j) => {
+      const q = [...p];
+      q[j] = v + MATCH_PROBE <= GRADE_MAX ? v + MATCH_PROBE : v - MATCH_PROBE;
+      const rq = residuals(q) ?? r!;
+      return rq.map((x, i) => (x - r![i]) / (q[j] - v));
+    });
+    const A = J.map((ci) => J.map((cj) => ci.reduce((a, x, i) => a + x * cj[i], 0)));
+    const g = J.map((ci) => ci.reduce((a, x, i) => a + x * r![i], 0));
+    let stepped = false;
+    let largest = 0;
+    while (damping < 1e6) {
+      const damped = A.map((row, i) => row.map((v, j) => (i === j ? v * (1 + damping) + 1e-9 : v)));
+      const delta = solve(damped, g.map((v) => -v));
+      if (!delta) break;
+      const next = p.map((v, i) => clampSlider(v + delta[i]));
+      largest = Math.max(...next.map((v, i) => Math.abs(v - p[i])));
+      const rn = residuals(next);
+      if (rn && sumSq(rn) < sumSq(r)) {
+        p = next;
+        r = rn;
+        damping = Math.max(1e-6, damping / 3);
+        stepped = true;
+        break;
+      }
+      damping *= 4;
     }
+    if (!stepped || largest < MATCH_SETTLED) break;
   }
-  return normalizeGrade(grade);
+
+  const scaled: ColorGrade = {};
+  MATCH_FIELDS.forEach((f, i) => {
+    const v = Math.round(p[i] * k);
+    if (v) scaled[f] = v;
+  });
+  return normalizeGrade(scaled);
 }

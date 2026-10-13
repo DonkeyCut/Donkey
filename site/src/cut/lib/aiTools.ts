@@ -31,15 +31,14 @@ import {
   ALL_EFFECT_IDS,
   CLIP_EFFECT_IDS,
   type ClipEffect,
-  applyLutToImageData,
-  autoGradeFromImageData,
-  buildClipLut,
+  autoGrade,
   colorStatsFromImageData,
   GRADE_BASIC_FIELDS,
   GRADE_DETAIL_FIELDS,
   GRADE_PRESETS,
   HSL_BANDS,
   matchGrade,
+  recipeStatsRender,
   normalizeGrade,
   SOURCE_PROFILES,
   WHEEL_LABELS,
@@ -230,7 +229,7 @@ import { isGradePresetTemplate, listSavedGrades, saveGradePreset } from "./grade
 import { isStylePresetTemplate } from "./stylePresets";
 import { findLibraryAsset, listLibrary } from "./libraryList";
 import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
-import { baseFrameAt, sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
+import { type RawFrame, type ReadGrade, rawFrameAt, sampleClipRawFrame, sourceProfileOf, toBaseRendering, toGradedRendering } from "./baseFrame";
 import { applyOverlayPatchSettled, assetClipUses, assetIdsOnAnyTimeline, clipLen, footprints, nextFreeStart, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { mixSpecFor, renderProjectFrame, renderProjectFrames } from "./exportRender";
@@ -456,30 +455,52 @@ const GRADE_KEYS = [
  * rendering (through the source conversion, before any grade — what Auto
  * reads), or `graded` through the clip's LUT, preset and adjustments too, or
  * an image asset's pixels. */
-/** A clip's frame decoded from its file at the middle of its trim, for a clip
- * the preview has no frame of — off screen, or not decoded yet. The decode
- * reads the base rendering, as the on-screen sample does. */
-async function offscreenClipFrameData(
+/** A clip's code values and recipe: the preview's decoded frame when it has
+ * one, else a decode of the file at the middle of the trim — off screen, or
+ * not decoded yet. */
+async function clipRawFrame(
   s: ReturnType<typeof useEditor.getState>,
   clip: VideoClip,
   w: number,
   h: number
-): Promise<Uint8ClampedArray | null> {
+): Promise<RawFrame> {
+  const shown = sampleClipRawFrame(clip.id, w, h);
+  if (shown) return shown;
   const asset = s.assets.find((a) => a.id === clip.assetId);
-  if (!asset?.url) return null;
+  if (!asset?.url) throw new ToolError("Could not decode a frame of that clip's file.");
   // A still on the track has no frames to seek: draw the image itself.
   if (asset.type === "image") {
     const img = await decodeRasterImageUrl(asset.url);
-    if (!img || !img.width) return null;
+    if (!img || !img.width) throw new ToolError("Could not decode a frame of that clip's file.");
     const c = createRasterCanvas(w, h);
     const ctx = c.getContext("2d") as CanvasRenderingContext2D | null;
-    if (!ctx) return null;
+    if (!ctx) throw new ToolError("Could not decode a frame of that clip's file.");
     ctx.drawImage(img.source, 0, 0, w, h);
-    return toBaseRendering(ctx.getImageData(0, 0, w, h).data, sourceProfileOf(asset));
+    return { px: ctx.getImageData(0, 0, w, h).data, recipe: { profile: sourceProfileOf(asset), output: "sdr", size: 0 } };
   }
-  const frame = await baseFrameAt(asset.url, (clip.in + clip.out) / 2, { width: w, height: h, fit: "fill" });
-  const ctx = frame?.canvas.getContext("2d") as CanvasRenderingContext2D | null | undefined;
-  return ctx ? ctx.getImageData(0, 0, w, h).data : null;
+  const raw = await rawFrameAt(asset.url, (clip.in + clip.out) / 2, { width: w, height: h, fit: "fill" });
+  if (!raw) throw new ToolError("Could not decode a frame of that clip's file.");
+  return raw;
+}
+
+/** A clip's frame as the base rendering, or through its whole grade. */
+async function clipFrameData(
+  s: ReturnType<typeof useEditor.getState>,
+  clip: VideoClip,
+  w: number,
+  h: number,
+  graded?: ReadGrade
+): Promise<Uint8ClampedArray> {
+  const { px, recipe } = await clipRawFrame(s, clip, w, h);
+  return graded ? toGradedRendering(px, recipe.profile, recipe, graded) : toBaseRendering(px, recipe.profile, recipe);
+}
+
+/** The grade a clip's graded reads render through: its own, with the library
+ * LUT it names loaded. */
+async function readGradeOf(clip: VideoClip): Promise<ReadGrade | undefined> {
+  if (!clip.grade) return undefined;
+  const lutId = lutIdOf(clip.grade);
+  return { grade: clip.grade, userLut: lutId ? await loadLibraryLut(lutId) : undefined };
 }
 
 async function colorStatsForRef(
@@ -488,16 +509,9 @@ async function colorStatsForRef(
 ): Promise<ColorStats> {
   if (ref.clipId) {
     const clip = requireItem(s.clips, ref.clipId, "video clip");
-    const data = sampleClipBaseFrameData(clip.id, 192, 108) ?? (await offscreenClipFrameData(s, clip, 192, 108));
-    if (!data) throw new ToolError("Could not decode a frame of that clip's file.");
-    if (ref.graded && clip.grade) {
-      // The same recipe the Color panel's tiles draw with: the base rendering
-      // through the clip's LUT, preset and adjustments.
-      const lutId = lutIdOf(clip.grade);
-      const userLut = lutId ? await loadLibraryLut(lutId) : undefined;
-      const lut = buildClipLut({ profile: "rec709", grade: clip.grade, output: "sdr", size: 33 }, userLut);
-      if (lut) applyLutToImageData(data, lut);
-    }
+    // Graded reads run the clip's whole recipe on its code values, the way
+    // the preview draws it: a log clip's grade works in scene light.
+    const data = await clipFrameData(s, clip, 192, 108, ref.graded ? await readGradeOf(clip) : undefined);
     const stats = colorStatsFromImageData(data);
     if (!stats) throw new ToolError("Could not read pixels off that clip's frame.");
     return stats;
@@ -5310,9 +5324,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       let grade: ColorGrade =
         input.reset === true ? { preset: clip.grade?.preset, lut: clip.grade?.lut } : { ...clip.grade };
       if (input.auto === true) {
-        const data = sampleClipBaseFrameData(clip.id) ?? (await offscreenClipFrameData(s, clip, 96, 54));
-        if (!data) throw new ToolError("Could not decode a frame of that clip's file.");
-        grade = { ...autoGradeFromImageData(data), preset: clip.grade?.preset, lut: clip.grade?.lut };
+        const raw = await clipRawFrame(s, clip, 96, 54);
+        grade = { ...autoGrade(raw.px, raw.recipe), preset: clip.grade?.preset, lut: clip.grade?.lut };
       }
       for (const k of GRADE_KEYS) if (isNum(input[k])) grade[k] = input[k];
       s.updateClip(clip.id, { grade: normalizeGrade(grade) });
@@ -5510,13 +5523,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   match_color_grade: async (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
-      const source = await colorStatsForRef(s, { clipId: clip.id });
+      // The reference reads as it shows — a clip through its own grade — and
+      // the fit renders this clip's code values through its real recipe for
+      // every grade it tries.
       const reference = await colorStatsForRef(s, {
         clipId: typeof input.ref_clip_id === "string" ? input.ref_clip_id : undefined,
         assetId: typeof input.ref_asset_id === "string" ? input.ref_asset_id : undefined,
+        graded: true,
       });
+      const raw = await clipRawFrame(s, clip, 192, 108);
       const strength = isNum(input.strength) ? input.strength : 1;
-      const grade = matchGrade(source, reference, strength);
+      const grade = matchGrade(recipeStatsRender(raw.px, raw.recipe), reference, strength);
       // The frames already agree, or strength 0 asked for none of the match:
       // the clip's own grade stays as it is.
       if (!grade)

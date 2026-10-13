@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ChevronLeft, Loader2, RotateCcw, SlidersHorizontal, Trash2, Wand2, X } from "lucide-react";
 import {
   applyLutToImageData,
-  autoGradeFromImageData,
+  autoGrade as fitAutoGrade,
   buildClipLut,
   GRADE_BASIC_FIELDS,
   GRADE_DETAIL_FIELDS,
@@ -36,7 +36,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { getPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { beginLutDraft, endLutDraft } from "@/cut/lib/lutBuild";
-import { sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "@/cut/lib/baseFrame";
+import { sampleClipRawFrame, sourceProfileOf, toBaseRendering } from "@/cut/lib/baseFrame";
 import { useEditor } from "@/cut/lib/store";
 import { usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import type { MediaAsset, VideoClip } from "@/cut/lib/types";
@@ -381,7 +381,7 @@ function useLutTiles(): LutTile[] {
  * already wears. */
 function withLutToggled(grade: ColorGrade | undefined, lutId: string): ColorGrade {
   const next: ColorGrade = { ...grade };
-  if (grade?.lut?.id === lutId) delete next.lut;
+  if (lutIdOf(grade) === lutId) delete next.lut;
   else next.lut = { id: lutId, amount: grade?.lut?.amount };
   return next;
 }
@@ -514,7 +514,7 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
             frame={frame}
             profile={profile}
             selected={
-              "lutId" in p ? lut?.id === p.lutId : "saved" in p ? gradeKey(p.grade) === currentKey : active?.id === p.id
+              "lutId" in p ? lutIdOf(clip.grade) === p.lutId : "saved" in p ? gradeKey(p.grade) === currentKey : active?.id === p.id
             }
             onPick={() => pick(p)}
             onRemove={"saved" in p ? () => remove(p) : undefined}
@@ -575,11 +575,18 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
 const presetLutCache = new Map<string, GradeLut | null>();
 const presetThumbCache = new Map<string, string>();
 
-function presetLut(p: GradePreset, userLut: ParsedLut | undefined): GradeLut | null {
-  const key = `${p.id}|${userLut ? "lut" : ""}`;
+/** Thumbs are 128px wide: a 17³ lattice draws them without visible error and
+ * builds in a few milliseconds even through a log clip's scene grade. */
+const THUMB_LUT_SIZE = 17;
+
+/** The preset through the clip's own recipe, from raw code values to the
+ * display: the source conversion, the grade (in scene light for log) and its
+ * LUT in one lattice. */
+function presetLut(p: GradePreset, profile: SourceProfile, userLut: ParsedLut | undefined): GradeLut | null {
+  const key = `${p.id}|${profile}|${userLut ? "lut" : ""}`;
   let lut = presetLutCache.get(key);
   if (lut === undefined) {
-    lut = buildClipLut({ profile: "rec709", grade: p.grade, output: "sdr", size: 33 }, userLut);
+    lut = buildClipLut({ profile, grade: p.grade, output: "sdr", size: THUMB_LUT_SIZE }, userLut);
     presetLutCache.set(key, lut);
   }
   return lut;
@@ -632,7 +639,7 @@ function PresetTile({
     const img = new Image();
     img.onload = () => {
       if (gone) return;
-      const lut = presetLut(preset, userLut);
+      const lut = presetLut(preset, profile, userLut);
       const w = 128;
       const h = Math.max(1, Math.round((img.naturalHeight / (img.naturalWidth || 1)) * w));
       const c = document.createElement("canvas");
@@ -643,8 +650,8 @@ function PresetTile({
       ctx.drawImage(img, 0, 0, w, h);
       if (lut || converted) {
         const px = ctx.getImageData(0, 0, w, h);
-        if (converted) toBaseRendering(px.data, profile);
         if (lut) applyLutToImageData(px.data, lut);
+        else toBaseRendering(px.data, profile);
         ctx.putImageData(px, 0, 0);
       }
       const url = c.toDataURL("image/jpeg", 0.72);
@@ -747,13 +754,13 @@ function AdjustView({ clip, peers, onBack }: { clip: VideoClip; peers?: readonly
   const grade = clip.grade;
   // Manual adjustments only — reset-all keeps the preset layer.
   const manualDirty = TOOLS.some((t) => toolDirty(grade, t.id));
-  // Fit a starting grade from the clip's base rendering (the decoder frame
-  // through the source conversion alone, never the graded preview, which
-  // would fold the current grade back into the fit); the sliders show the
-  // result and stay fully adjustable after.
+  // Fit a starting grade from the clip's code values rendered through its
+  // own recipe (never the graded preview, which would fold the current grade
+  // back into the fit); the sliders show the result and stay fully
+  // adjustable after.
   const autoGrade = () => {
-    const data = sampleClipBaseFrameData(clip.id);
-    if (data) commit({ ...autoGradeFromImageData(data), preset: grade?.preset, lut: grade?.lut });
+    const raw = sampleClipRawFrame(clip.id);
+    if (raw) commit({ ...fitAutoGrade(raw.px, raw.recipe), preset: grade?.preset, lut: grade?.lut });
   };
   const resetAll = () => commit(grade?.preset ? { preset: grade.preset } : undefined);
   return (

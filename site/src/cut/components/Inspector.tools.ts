@@ -479,7 +479,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_color_preset",
     description:
-      `Apply a named color preset to a video clip, layered under its manual grade. Presets by category — ${gradePresetCatalogText()}. amount 0..1 scales the preset toward neutral (default 1); protect_skin keeps its color shifts off skin tones. Pass preset "none" to clear. Preview, tiles, and export all render the same result.`,
+      `Apply a named color preset to a video clip, layered over its manual grade. Presets by category — ${gradePresetCatalogText()}. amount 0..1 scales the preset toward neutral (default 1); protect_skin keeps its color shifts off skin tones. Pass preset "none" to clear. Preview, tiles, and export all render the same result.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
       ...manyClips,
@@ -600,14 +600,14 @@ export const INSPECTOR_TOOLS = [
   {
     name: "match_color_grade",
     description:
-      "Match a video clip's color to a reference, computed from the pixels: per-channel quantile mapping compiled into tone curves (each segment's slope bounded, so a reference of other content shifts the look without tearing gradients into bands) plus a saturation delta. The computed curves carry the whole look, so the match replaces the clip's entire grade, preset and LUT included. The reference is ref_asset_id (an attached or imported image) or ref_clip_id (another clip's frame). Use when the user shares a look to copy or asks to match two shots; refine afterward with the other grading tools, checking read_color_stats.",
+      "Match a video clip's color to a reference, computed from the pixels: the grade sliders for tone, the ends of the range, white balance and saturation are fitted so the clip's frame, rendered through its real color pipeline, lands on the reference's lightness distribution and per-band color in CIELAB. The fitted sliders carry the whole look, so the match replaces the clip's entire grade, preset and LUT included. The reference is ref_asset_id (an attached or imported image) or ref_clip_id (another clip's frame). Use when the user shares a look to copy or asks to match two shots; refine afterward with the other grading tools, checking read_color_stats.",
     inputSchema: obj({
       clipId: str("Video clip to grade"),
       ref_asset_id: str("Reference image asset id"),
       strength: num(
         "0..1, default 1: how far to take the match. Lower it when the reference shows other content than the clip (a bright window for a dark room, a black foreground the clip lacks) and the full match lifts or crushes tones the reference never had"
       ),
-      ref_clip_id: str("Reference video clip id (its base rendering: the frame on screen, or one decoded mid-trim when it is off screen)"),
+      ref_clip_id: str("Reference video clip id, read as it shows through its own grade: the frame on screen, or one decoded mid-trim when it is off screen"),
     }, ["clipId"]),
   },
 ] as const satisfies readonly AiToolDef[];

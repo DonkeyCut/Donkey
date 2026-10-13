@@ -9,22 +9,17 @@ const decoded: { url: string; time: number; width?: number; height?: number }[] 
 
 // Nothing is on screen; the file decode answers a flat dark frame.
 await stubModule<typeof import("./baseFrame")>("./baseFrame", import.meta.url, {
-  sampleClipBaseFrameData: () => null,
-  baseFrameAt: async (url, time, size) => {
-    decoded.push({ url, time, width: size?.width, height: size?.height });
-    const w = size?.width ?? 16;
-    const h = size?.height ?? 9;
+  sampleClipRawFrame: () => null,
+  rawFrameAt: async (url, time, size) => {
+    decoded.push({ url, time, width: size.width, height: size.height });
+    const w = size.width ?? 16;
+    const h = size.height ?? 9;
     // Each file is two greys 40 apart, pixel by pixel: "blob:one" dark
     // (20 and 60), any other mid (100 and 140).
     const base = url === "blob:one" ? 20 : 100;
     const data = new Uint8ClampedArray(w * h * 4);
     for (let j = 0; j < w * h; j++) data.fill(base + (j % 2) * 40, j * 4, j * 4 + 3), (data[j * 4 + 3] = 255);
-    const canvas = {
-      width: w,
-      height: h,
-      getContext: () => ({ getImageData: () => ({ data, width: w, height: h }) }),
-    };
-    return { canvas, timestamp: time, duration: 1 / 30 } as never;
+    return { px: data, recipe: { profile: "rec709", output: "sdr", size: 0 } };
   },
 });
 
@@ -75,14 +70,12 @@ test("match_color_grade strength takes the match part of the way", async () => {
   });
   await runAiTool("add_clip", { asset_id: "a2" });
   const [dark, mid] = useEditor.getState().clips;
-  const curveAt20 = () => {
-    const g = useEditor.getState().clips.find((c) => c.id === dark.id)!.grade;
-    return g?.curves?.g?.find(([x]) => x === 20)?.[1];
-  };
+  const exposure = () => useEditor.getState().clips.find((c) => c.id === dark.id)!.grade?.exposure ?? 0;
   await runAiTool("match_color_grade", { clipId: dark.id, ref_clip_id: mid.id });
-  expect(curveAt20()).toBe(100);
+  const full = exposure();
+  expect(full).toBeGreaterThan(10);
   await runAiTool("match_color_grade", { clipId: dark.id, ref_clip_id: mid.id, strength: 0.5 });
-  expect(curveAt20()).toBe(60);
+  expect(Math.abs(exposure() - full / 2)).toBeLessThanOrEqual(1);
 });
 
 test("strength 0 says it took none of the match, not that the footage already matches", async () => {
