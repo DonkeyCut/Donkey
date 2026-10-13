@@ -3,9 +3,9 @@
 import { useState, type FormEvent } from "react";
 import { authClient } from "@/lib/auth-client";
 
-type Props = { mode: "sign-in" | "sign-up" };
+type Props = { mode: "sign-in" | "sign-up"; callbackURL?: string };
 
-export function EmailAuthForm({ mode }: Props) {
+export function EmailAuthForm({ mode, callbackURL }: Props) {
   const signingUp = mode === "sign-up";
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +19,7 @@ export function EmailAuthForm({ mode }: Props) {
       const credentials = {
         email: String(data.get("email")),
         password: String(data.get("password")),
-        callbackURL: new URLSearchParams(window.location.search).get("callbackURL") ?? (signingUp ? "/app/onboarding" : "/app"),
+        callbackURL: callbackURL ?? (signingUp ? "/app/onboarding" : "/app"),
       };
       const result = signingUp
         ? await authClient.signUp.email({ ...credentials, name: String(data.get("name")) })

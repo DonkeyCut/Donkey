@@ -66,16 +66,20 @@ export function AuthScreen({ mode, method = "google", callbackURL, footer }: Pro
   if (callbackURL) alternateParams.set("callbackURL", callbackURL);
   const alternateHref = `${screenCopy.alternateHref}${alternateParams.size ? `?${alternateParams}` : ""}`;
 
-  const handleGoogleAuth = useCallback(async () => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const callbackURL = searchParams.get("callbackURL") ?? "/app";
+  // An app that sent someone here to sign in (ChatGPT's connection) offers
+  // email too, carrying the callback, e.g. for accounts without Google.
+  const emailParams = new URLSearchParams({ method: "email" });
+  if (callbackURL) emailParams.set("callbackURL", callbackURL);
+  const emailHref = `/${mode}?${emailParams}`;
 
+  const handleGoogleAuth = useCallback(async () => {
     setIsPending(true);
     setStatusMessage(null);
 
     try {
       await authClient.signIn.social({
-        callbackURL,
+        // The streamed shell has no prop yet; its URL still carries the callback.
+        callbackURL: callbackURL ?? new URLSearchParams(window.location.search).get("callbackURL") ?? "/app",
         // A brand-new account lands on the welcome sequence's own address, so
         // its first paint is the sequence rather than the app home.
         newUserCallbackURL: "/app/onboarding",
@@ -86,7 +90,7 @@ export function AuthScreen({ mode, method = "google", callbackURL, footer }: Pro
     } finally {
       setIsPending(false);
     }
-  }, []);
+  }, [callbackURL]);
 
   const googleButtonWidth = Math.round(
     (screenCopy.googleWidth * GOOGLE_BUTTON_HEIGHT) / 40,
@@ -94,7 +98,7 @@ export function AuthScreen({ mode, method = "google", callbackURL, footer }: Pro
 
   const formContent = (
     <>
-      {method === "email" ? <EmailAuthForm mode={mode} /> : <button
+      {method === "email" ? <EmailAuthForm mode={mode} callbackURL={callbackURL} /> : <button
         type="button"
         aria-label={screenCopy.googleAlt}
         disabled={isPending}
@@ -115,6 +119,14 @@ export function AuthScreen({ mode, method = "google", callbackURL, footer }: Pro
           style={{ width: googleButtonWidth }}
         />
       </button>}
+      {method === "google" && callbackURL ? (
+        <Link
+          href={emailHref}
+          className="mt-[18px] text-sm font-semibold text-ink underline underline-offset-[3px]"
+        >
+          Continue with email
+        </Link>
+      ) : null}
       <p className="mt-[18px] text-sm leading-normal text-[#555]">
         {screenCopy.alternateLead}{" "}
         <Link

@@ -33,6 +33,7 @@ import {
   OAuthRateLimitError,
 } from "@/clients/chatgpt/server/oauthRateLimit";
 import { identitySigner, openIdMetadata } from "@/clients/chatgpt/server/oidc";
+import { signInReturnCookie } from "@/lib/signInReturn";
 
 const NO_STORE_HEADERS = { "Cache-Control": "no-store", Pragma: "no-cache" };
 const CONSENT_COOKIE_NAME = "__Host-donkey-chatgpt-consent";
@@ -99,14 +100,21 @@ export async function authorize(request: Request) {
     return oauthError("invalid_request");
   }
 
+  // Sign-in also remembers this authorization, so a sign-in page opened
+  // without the callback (a new tab, a typed URL) still comes back here.
   const identity = await getDonkeyAuthContext(request.headers);
   if (!identity) {
+    const authorizePath = `${OAUTH_PATH}/authorize?${searchParams}`;
     const loginUrl = new URL("/sign-in", config.issuer);
-    loginUrl.searchParams.set(
-      "callbackURL",
-      `${OAUTH_PATH}/authorize?${searchParams}`,
-    );
-    return Response.redirect(loginUrl, 303);
+    loginUrl.searchParams.set("callbackURL", authorizePath);
+    return new Response(null, {
+      status: 303,
+      headers: {
+        ...NO_STORE_HEADERS,
+        Location: loginUrl.href,
+        "Set-Cookie": signInReturnCookie(authorizePath),
+      },
+    });
   }
 
   const rateLimit = checkInMemoryRateLimit({
@@ -137,7 +145,10 @@ export async function authorize(request: Request) {
     },
   });
 
-  return consentPage(nonce, authorization, browserToken);
+  // Signed in now, so the remembered sign-in return has done its job.
+  const page = consentPage(nonce, authorization, browserToken);
+  page.headers.append("Set-Cookie", signInReturnCookie(null));
+  return page;
 }
 
 /** POST /api/chatgpt/oauth/authorize: explicit, browser-bound consent. */
