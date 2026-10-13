@@ -58,8 +58,7 @@ host bridge; it holds no account cookie or OAuth token.
 
 Editable cards frame Donkey Cut through a one-use, one-minute link that creates
 a partitioned session cookie. Reconnect renews that link through the tool bridge
-and reloads the editor. Revoking the connection ends its sessions; the editor skeleton
-covers loading, and `frameDomains` permits the app's own domain.
+and reloads the editor. Revoking the connection ends its sessions, and `frameDomains` permits the app's own domain.
 
 ## Account linking
 
@@ -76,9 +75,9 @@ key is served at `/api/chatgpt/oauth/jwks`.
 
 Consent binds the browser, account, callback, scopes, resource, and S256 challenge.
 Codes are single use, refresh tokens rotate, and replay revokes the connection.
-Tokens are hashed in storage. MCP and UserInfo check expiration, revocation,
-resource, and scopes on every request. Source and account rate limits apply;
-daily cleanup removes expired grants, tokens, and challenges. Revocation leaves
+Tokens are hashed, MCP and UserInfo check expiry, revocation, resource and scope
+on every request, and rate limits and daily cleanup apply. A signed-out
+authorization is remembered, so signing in from any tab returns to consent. Revocation leaves
 already issued media links valid until their normal expiry.
 
 ## Deployment and verification
@@ -93,8 +92,7 @@ Set the same `CUT_RUNNER_SECRET` on the hosted site and the
 to the render container.
 
 Create a ChatGPT developer-mode app pointing at
-`https://donkeycut.com/api/chatgpt/mcp`. Upload `site/public/chatgpt-app-icon.png`
-as the app icon. Use the predefined public OAuth client
+`https://donkeycut.com/api/chatgpt/mcp`. Use the predefined public OAuth client
 ID `donkey-chatgpt`, no client secret, and scopes
 `projects:read previews:render projects:write openid email`. The listing
 discloses generation credits and storage limits.
