@@ -5,27 +5,18 @@
     "category": "film",
     "look": "slightly muted, lifted cool shadows; handheld film",
     "grade": {
-      "saturation": -2,
-      "vibrance": 6,
       "contrast": 3,
+      "saturation": -2,
       "highlights": -9,
       "shadows": 3,
+      "blacks": 2,
+      "vibrance": 6,
       "curves": {
         "r": [[0, 10], [24, 24], [64, 64], [128, 133], [192, 199], [224, 230], [255, 248]],
-        "g": [[0, 11], [24, 25], [64, 64], [128, 129], [192, 194], [224, 225], [255, 245]],
+        "g": [[0, 11], [24, 25], [64, 64], [128, 129], [192, 194], [224, 225], [255, 242]],
         "b": [[0, 17], [24, 31], [64, 68], [128, 125], [192, 187], [224, 217], [255, 239]]
       },
-      "hsl": {
-        "red": [5, 2, 0],
-        "orange": [-5, 1, 1],
-        "yellow": [5, -6, -2],
-        "green": [4, -7, 2],
-        "aqua": [17, 7, -10],
-        "blue": [5, -2, 3],
-        "purple": [-1, -5, 1],
-        "magenta": [3, 0, -1]
-      },
-      "blacks": 2
+      "hsl": { "red": [5, 2, 0], "orange": [-5, 1, 1], "yellow": [5, -6, -2], "green": [4, -7, 2], "aqua": [17, 7, -10], "blue": [5, -2, 3], "purple": [-1, -5, 1], "magenta": [3, 0, -1] }
     }
   },
   {
@@ -63,12 +54,12 @@
     "category": "film",
     "look": "very warm and saturated, deep blacks; slide film",
     "grade": {
-      "contrast": -2,
-      "saturation": 14,
-      "vibrance": 7,
+      "contrast": 11,
+      "saturation": 6,
+      "temperature": -4,
       "highlights": 14,
-      "temperature": 2,
-      "blacks": -23
+      "blacks": -23,
+      "vibrance": 7
     }
   },
   {
@@ -77,12 +68,12 @@
     "category": "film",
     "look": "high contrast, dark midtones, bright whites; pushed film",
     "grade": {
-      "exposure": 4,
       "contrast": 17,
       "saturation": -21,
+      "exposure": 8,
       "shadows": -5,
-      "curves": { "m": [[0, 0], [32, 14], [128, 132], [224, 238], [255, 255]] },
-      "blacks": -31
+      "blacks": -31,
+      "curves": { "m": [[0, 0], [32, 22], [128, 132], [224, 238], [255, 255]] }
     }
   },
   {
@@ -93,9 +84,9 @@
     "grade": {
       "contrast": 12,
       "saturation": -2,
-      "wheels": { "s": [-14, -10, -10], "m": [0, 1, 2] },
-      "curves": { "m": [[0, 6], [32, 20], [128, 130], [192, 204], [255, 250]] },
-      "blacks": -15
+      "blacks": -15,
+      "curves": { "m": [[0, 6], [32, 20], [128, 130], [192, 204], [255, 252]] },
+      "wheels": { "s": [-14, -10, -10], "m": [0, 1, 2] }
     }
   },
   {
@@ -104,16 +95,17 @@
     "category": "film",
     "look": "warm and saturated, softly lifted blacks",
     "grade": {
+      "contrast": 4,
       "temperature": 6,
       "tint": 3,
-      "contrast": 4,
+      "blacks": -8,
       "vibrance": 4,
       "curves": {
         "r": [[0, 14], [128, 134], [255, 250]],
         "g": [[0, 8], [128, 126], [255, 243]],
         "b": [[0, 2], [128, 114], [255, 230]]
       },
-      "blacks": -8
+      "hsl": { "orange": [0, -7, 0] }
     }
   },
   {
@@ -122,15 +114,15 @@
     "category": "film",
     "look": "bright, washed-out instant photo, lifted blacks",
     "grade": {
-      "exposure": 6,
       "contrast": -13,
       "saturation": -11,
+      "exposure": 6,
+      "blacks": 9,
       "curves": {
-        "r": [[0, 20], [64, 78], [128, 138], [255, 240]],
+        "r": [[0, 20], [64, 78], [128, 144], [255, 240]],
         "g": [[0, 30], [64, 84], [128, 136], [255, 234]],
         "b": [[0, 33], [64, 84], [128, 128], [255, 222]]
-      },
-      "blacks": 9
+      }
     }
   },
   {
@@ -139,15 +131,15 @@
     "category": "film",
     "look": "faded and color-shifted, lifted blacks, muted",
     "grade": {
-      "saturation": -16,
       "contrast": -1,
+      "saturation": -21,
+      "blacks": 11,
       "curves": {
-        "r": [[0, 28], [64, 74], [128, 132], [255, 236]],
+        "r": [[0, 27], [64, 74], [128, 132], [255, 236]],
         "g": [[0, 20], [64, 79], [128, 140], [255, 242]],
         "b": [[0, 32], [64, 71], [128, 118], [255, 212]]
       },
-      "hsl": { "yellow": [0, -34, -4], "green": [15, -12, 8] },
-      "blacks": 11
+      "hsl": { "yellow": [0, -34, -4], "green": [15, -12, 8] }
     }
   }
 ]

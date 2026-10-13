@@ -30,11 +30,11 @@
     "category": "bw",
     "look": "hard-contrast black and white, deep blacks",
     "grade": {
-      "saturation": -50,
       "contrast": 13,
+      "saturation": -50,
       "shadows": -3,
-      "curves": { "m": [[0, 0], [48, 32], [128, 134], [208, 244], [255, 255]] },
-      "blacks": -33
+      "blacks": -33,
+      "curves": { "m": [[0, 0], [48, 32], [128, 134], [208, 244], [255, 253]] }
     }
   },
   {
@@ -96,12 +96,12 @@
     "category": "bw",
     "look": "gritty, high-contrast black and white",
     "grade": {
-      "saturation": -50,
       "contrast": 13,
+      "saturation": -50,
       "exposure": -2,
       "highlights": 7,
-      "curves": { "m": [[0, 16], [48, 38], [128, 138], [200, 226], [255, 255]] },
-      "blacks": -16
+      "blacks": -16,
+      "curves": { "m": [[0, 16], [48, 33], [128, 138], [200, 233], [255, 255]] }
     }
   }
 ]

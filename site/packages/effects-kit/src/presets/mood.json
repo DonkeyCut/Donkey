@@ -20,12 +20,12 @@
     "category": "mood",
     "look": "olive green, muted, earthy",
     "grade": {
-      "tint": -10,
-      "temperature": 6,
-      "saturation": -5,
       "contrast": 3,
-      "hsl": { "green": [-2, 4, 5] },
-      "blacks": -7
+      "saturation": -5,
+      "temperature": -2,
+      "tint": -10,
+      "blacks": -7,
+      "hsl": { "orange": [-8, 0, 0], "green": [-2, 4, 5] }
     }
   },
   {
@@ -47,13 +47,13 @@
     "category": "mood",
     "look": "warm magenta-red, dimmed highlights",
     "grade": {
-      "temperature": -4,
-      "tint": 2,
-      "exposure": -3,
       "contrast": 3,
+      "exposure": -3,
+      "temperature": -4,
+      "tint": -4,
+      "blacks": -7,
       "vibrance": 6,
-      "wheels": { "h": [5, -10, -6] },
-      "blacks": -7
+      "wheels": { "h": [5, -10, -6] }
     }
   },
   {
@@ -62,12 +62,12 @@
     "category": "mood",
     "look": "saturated magenta-red, deep blacks; nightlife",
     "grade": {
-      "vibrance": 22,
       "contrast": -4,
-      "saturation": 10,
+      "saturation": 4,
       "temperature": -2,
       "tint": 6,
-      "blacks": -22
+      "blacks": -22,
+      "vibrance": 22
     }
   },
   {
@@ -106,13 +106,13 @@
     "look": "deep warm red, dark and rich",
     "grade": {
       "contrast": 6,
-      "exposure": -4,
       "saturation": 12,
-      "temperature": 3,
+      "exposure": -4,
+      "temperature": -4,
       "tint": 4,
       "shadows": -6,
-      "curves": { "m": [[0, 6], [64, 56], [255, 252]] },
-      "blacks": -19
+      "blacks": -19,
+      "curves": { "m": [[0, 6], [64, 56], [255, 252]] }
     }
   }
 ]

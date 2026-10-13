@@ -5,14 +5,14 @@
     "category": "warm",
     "look": "warm, saturated sunset glow",
     "grade": {
+      "contrast": -5,
       "exposure": 6,
       "temperature": 17,
       "tint": 3,
-      "contrast": 1,
       "highlights": 2,
+      "blacks": -8,
       "vibrance": 13,
-      "hsl": { "orange": [-14, 2, 0] },
-      "blacks": -8
+      "hsl": { "orange": [-14, -6, 0] }
     }
   },
   {
@@ -21,11 +21,11 @@
     "category": "warm",
     "look": "strong amber cast, lifted blacks",
     "grade": {
-      "temperature": 23,
+      "saturation": -16,
+      "temperature": 31,
       "tint": 6,
       "shadows": 7,
-      "saturation": 6,
-      "blacks": 5
+      "blacks": 12
     }
   },
   {
@@ -34,13 +34,13 @@
     "category": "warm",
     "look": "soft warm yellow, gentle",
     "grade": {
+      "contrast": -10,
+      "exposure": 4,
       "temperature": 15,
       "tint": 8,
-      "exposure": 4,
-      "contrast": -4,
-      "vibrance": 9,
       "highlights": -4,
-      "blacks": 1
+      "blacks": 1,
+      "vibrance": 9
     }
   },
   {
@@ -90,12 +90,12 @@
     "category": "warm",
     "look": "intense red-orange, deep blacks",
     "grade": {
+      "contrast": 20,
       "temperature": 19,
       "shadows": -1,
-      "contrast": 12,
+      "blacks": -21,
       "vibrance": 3,
-      "hsl": { "red": [0, 5, 6] },
-      "blacks": -21
+      "hsl": { "red": [0, 5, 6], "orange": [0, -16, 0] }
     }
   },
   {
@@ -104,12 +104,12 @@
     "category": "warm",
     "look": "warm and metallic, muted, bright whites",
     "grade": {
+      "contrast": 10,
+      "saturation": -13,
       "temperature": 21,
       "tint": 1,
-      "contrast": 10,
-      "saturation": -5,
-      "wheels": { "m": [6, 2, 5] },
-      "blacks": -6
+      "blacks": -6,
+      "wheels": { "m": [6, 2, 5] }
     }
   }
 ]

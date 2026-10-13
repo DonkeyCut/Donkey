@@ -5,11 +5,11 @@
     "category": "cinematic",
     "look": "warm skin over teal shadows, extra saturation; blockbuster",
     "grade": {
-      "contrast": 7,
-      "vibrance": -2,
+      "contrast": 14,
       "saturation": 6,
-      "wheels": { "s": [-39, -1, -16], "h": [6, 6, 3] },
-      "blacks": 13
+      "blacks": 13,
+      "vibrance": -2,
+      "wheels": { "s": [-47, -17, 0], "h": [13, 6, 3] }
     }
   },
   {
@@ -18,7 +18,7 @@
     "category": "cinematic",
     "look": "desaturated and silvery, crushed blacks; gritty",
     "grade": {
-      "contrast": 8,
+      "contrast": 27,
       "saturation": -27,
       "highlights": 10,
       "shadows": -14,
@@ -31,12 +31,13 @@
     "category": "cinematic",
     "look": "very warm, rich saturated color; classic Hollywood",
     "grade": {
-      "exposure": 9,
       "contrast": -7,
+      "saturation": 10,
+      "exposure": 9,
       "temperature": 4,
-      "saturation": 18,
+      "blacks": -25,
       "vibrance": 6,
-      "blacks": -25
+      "hsl": { "orange": [0, -4, 0] }
     }
   },
   {
@@ -45,12 +46,12 @@
     "category": "cinematic",
     "look": "cool and muted, darker, crushed blacks; tense",
     "grade": {
+      "contrast": 23,
+      "saturation": -12,
       "temperature": -17,
-      "contrast": 10,
       "shadows": -9,
-      "saturation": -6,
-      "wheels": { "s": [-6, -12, 0] },
-      "blacks": -28
+      "blacks": -28,
+      "wheels": { "s": [-6, -12, 0] }
     }
   },
   {
@@ -59,13 +60,13 @@
     "category": "cinematic",
     "look": "warm and saturated, slightly dim; night streets",
     "grade": {
+      "contrast": -1,
       "temperature": -6,
       "tint": 4,
-      "contrast": 1,
       "shadows": -1,
+      "blacks": -7,
       "vibrance": 20,
-      "hsl": { "aqua": [-4, 2, 5], "magenta": [4, 8, 7] },
-      "blacks": -7
+      "hsl": { "aqua": [-4, 2, 5], "magenta": [4, 8, 7] }
     }
   },
   {
@@ -88,13 +89,13 @@
     "category": "cinematic",
     "look": "warm golden and dusty, lifted blacks",
     "grade": {
+      "contrast": -1,
+      "saturation": -2,
       "temperature": 18,
       "tint": 7,
-      "contrast": 3,
       "shadows": 3,
-      "saturation": -2,
-      "hsl": { "green": [-6, -32, -16] },
-      "blacks": 3
+      "blacks": 3,
+      "hsl": { "green": [-6, -32, -16] }
     }
   },
   {
