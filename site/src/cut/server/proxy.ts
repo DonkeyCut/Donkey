@@ -47,6 +47,9 @@ export interface ProxyArgs {
   maxHeight: number;
   /** x265 crf; VideoToolbox's constant quality maps from it. */
   crf: number;
+  /** A light proxy's bitrate ceiling, kbit/s (lib/proxyNames.ts): x265 holds
+   * it under its crf, VideoToolbox encodes at it. Absent = quality alone. */
+  maxKbps?: number;
 }
 
 /** swscale's name for a matrix. */
@@ -76,10 +79,21 @@ export function proxyFfmpegArgs(src: string, out: string, opts: ProxyArgs): stri
     // the stream options below cover the container.
     "setparams=color_primaries=bt709:color_trc=iec61966-2-1:colorspace=bt709:range=tv",
   ].join(",");
+  const kbps = opts.maxKbps && opts.maxKbps > 0 ? Math.round(opts.maxKbps) : 0;
   const video =
     encoder === "libx265"
-      ? ["-c:v", "libx265", "-preset", "medium", "-crf", String(opts.crf), "-profile:v", "main10", "-x265-params", "log-level=error"]
-      : ["-c:v", "hevc_videotoolbox", "-profile:v", "main10", "-q:v", String(vtQuality(opts.crf)), "-allow_sw", "1"];
+      ? [
+          "-c:v", "libx265", "-preset", "medium", "-crf", String(opts.crf),
+          // A one-second buffer: the ceiling holds over every stretch the
+          // preview fetches between keyframes.
+          ...(kbps ? ["-maxrate", `${kbps}k`, "-bufsize", `${kbps}k`] : []),
+          "-profile:v", "main10", "-x265-params", "log-level=error",
+        ]
+      : [
+          "-c:v", "hevc_videotoolbox", "-profile:v", "main10",
+          ...(kbps ? ["-b:v", `${kbps}k`] : ["-q:v", String(vtQuality(opts.crf))]),
+          "-allow_sw", "1",
+        ];
   return [
     "-y",
     // The master's timestamps, unshifted: the preview maps clip time to
@@ -96,7 +110,9 @@ export function proxyFfmpegArgs(src: string, out: string, opts: ProxyArgs): stri
     ...video,
     // A keyframe every second of the master's time: the preview seeks into
     // the proxy at every cut, and a seek decodes from the keyframe before it.
-    "-force_key_frames", "expr:gte(t,n_forced*1)",
+    // Counted from the last forced one, since -copyts keeps a master's own
+    // start time (a transport stream can start at 1000 s).
+    "-force_key_frames", "expr:if(isnan(prev_forced_t),1,gte(t,prev_forced_t+1))",
     "-tag:v", "hvc1",
     ...(source.hasAudio ? ["-c:a", "aac", "-b:a", "192k"] : []),
     "-movflags", "+faststart",
@@ -168,13 +184,13 @@ export async function makeProxy(
   handle: RenderHandle,
   src: string,
   out: string,
-  opts: { maxHeight: number; crf: number; onProgress?: (seconds: number) => void }
+  opts: { maxHeight: number; crf: number; maxKbps?: number; onProgress?: (seconds: number) => void }
 ): Promise<ProxyOutcome> {
   const [source, dims, encoder] = await Promise.all([probeProxySource(src), videoDimensions(src), proxyEncoder()]);
   // The display height decides the scale — a phone's sideways file is
   // measured upright everywhere else in Cut.
   if (dims) source.height = dims.height;
-  await runFfmpeg(handle, proxyFfmpegArgs(src, out, { encoder, source, maxHeight: opts.maxHeight, crf: opts.crf }), opts.onProgress);
+  await runFfmpeg(handle, proxyFfmpegArgs(src, out, { encoder, source, maxHeight: opts.maxHeight, crf: opts.crf, maxKbps: opts.maxKbps }), opts.onProgress);
   const [info, outDims] = await Promise.all([stat(out), videoDimensions(out)]);
   return { sizeBytes: info.size, ...(outDims ? { width: outDims.width, height: outDims.height } : {}) };
 }

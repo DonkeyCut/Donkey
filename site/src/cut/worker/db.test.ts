@@ -187,3 +187,11 @@ test("a running project preview prevents a second preview claim while other work
   expect(await claimNextJob()).toBeNull();
   expect(rows[1].state).toBe("queued");
 });
+
+test("an export waits behind no proxy: proxies take the tier after the watched work", async () => {
+  // Opening a cloud project queues a proxy for every heavy clip; an export
+  // asked for a moment later used to wait behind all of them.
+  queueHarness([...Array<string>(12).fill("proxy"), "export", "preview"]);
+  expect((await claimNextJob())?.kind).toBe("export");
+  expect((await claimNextJob())?.kind).toBe("proxy");
+});

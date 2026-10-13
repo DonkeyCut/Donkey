@@ -26,10 +26,12 @@ const GIF_RECIPES = [
 const MAX_GIF_BYTES = 3 * 1024 * 1024;
 
 /** ffmpeg for the derivations: short, bounded, and its own runner so the
- * engine's export pipeline keeps a single entry point. */
-function ffmpeg(args: string[]): Promise<void> {
+ * engine's export pipeline keeps a single entry point. The process rides the
+ * job's handle, so a cancel kills it and a shutdown can tell it stopped it. */
+function ffmpeg(handle: RenderHandle, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn("ffmpeg", ["-hide_banner", "-y", ...args]);
+    handle.proc = proc;
     let tail = "";
     proc.stderr.on("data", (chunk: Buffer) => {
       tail = (tail + chunk.toString()).slice(-2000);
@@ -54,18 +56,18 @@ async function bytesOf(file: string): Promise<number> {
 
 /** Still frame at t=0 — the video's actual first frame, not a poster picked
  * from the middle. */
-async function renderStill(source: string, dest: string): Promise<number> {
-  await ffmpeg(["-i", source, "-frames:v", "1", "-q:v", "3", dest]);
+async function renderStill(handle: RenderHandle, source: string, dest: string): Promise<number> {
+  await ffmpeg(handle, ["-i", source, "-frames:v", "1", "-q:v", "3", dest]);
   return bytesOf(dest);
 }
 
 /** Animated card, stepping down through the recipes until it fits. The last
  * recipe's output ships whatever its size — a card slightly over budget beats
  * no card. */
-async function renderAnimation(source: string, dest: string): Promise<number> {
+async function renderAnimation(handle: RenderHandle, source: string, dest: string): Promise<number> {
   let bytes = 0;
   for (const [i, recipe] of GIF_RECIPES.entries()) {
-    await ffmpeg([
+    await ffmpeg(handle, [
       "-i",
       source,
       "-vf",
@@ -98,8 +100,8 @@ export async function storeCardArtifacts(
   const dir = path.dirname(handle.outPath);
   const stillPath = path.join(dir, "card.jpg");
   const animPath = path.join(dir, "card.gif");
-  const stillBytes = await renderStill(handle.outPath, stillPath);
-  const animBytes = await renderAnimation(handle.outPath, animPath);
+  const stillBytes = await renderStill(handle, handle.outPath, stillPath);
+  const animBytes = await renderAnimation(handle, handle.outPath, animPath);
 
   // Same guard the export path uses: a project deleted mid-render must not
   // leave storage charged for bytes nothing can free.

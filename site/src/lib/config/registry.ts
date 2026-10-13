@@ -435,6 +435,23 @@ export const SETTINGS = defineSettings({
     description:
       "The ramp on the sound a split edit carries past its picture, and how lining up a separately recorded sound listens, how sure it must be, and how long a recording it searches.",
   },
+  cutProxy: {
+    schema: z
+      .object({
+        // A heavy video's light proxy: its bitrate ceiling at the 1080p cap,
+        // kbit/s, so a fast cut streams it from the cloud in time.
+        lightKbps: z.number().int().min(500).max(50_000),
+        // How long a master ffmpeg could not make a proxy from keeps the
+        // cloud from trying again, hours.
+        retryAfterHours: z.number().min(0).max(24 * 30),
+      })
+      .strict(),
+    default: { lightKbps: 6000, retryAfterHours: 24 },
+    public: false,
+    title: "Preview proxies",
+    description:
+      "The light proxy's bitrate ceiling for heavy cloud videos, and how long a master that could not be proxied waits before the cloud tries it again.",
+  },
   cutMotion: {
     schema: z.object({ motionBlur: z.number().min(0.05).max(1) }).strict(),
     default: { motionBlur: 0.5 },

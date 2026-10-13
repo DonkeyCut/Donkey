@@ -63,7 +63,7 @@ describe("proxy", () => {
     expect(args[args.indexOf("-movflags") + 1]).toBe("+faststart");
     // A keyframe every second: the preview seeks into the proxy at every
     // cut, and a seek decodes from the keyframe before it.
-    expect(args[args.indexOf("-force_key_frames") + 1]).toBe("expr:gte(t,n_forced*1)");
+    expect(args[args.indexOf("-force_key_frames") + 1]).toBe("expr:if(isnan(prev_forced_t),1,gte(t,prev_forced_t+1))");
 
     const vt = proxyFfmpegArgs("in.mov", "out.mp4", {
       encoder: "hevc_videotoolbox",
@@ -77,6 +77,25 @@ describe("proxy", () => {
     expect(vt).not.toContain("-c:a");
     expect(vt).not.toContain("0:a:0");
     expect(vt[vt.indexOf("-c:v") + 1]).toBe("hevc_videotoolbox");
+  });
+
+  test("keyframes fall a second apart from the first frame, whatever time the master starts at", () => {
+    const source = { matrix: "bt709" as const, fullRange: false, height: 1080, hasAudio: false };
+    const args = proxyFfmpegArgs("in.ts", "out.mp4", { encoder: "libx265", source, maxHeight: 1080, crf: 20 });
+    // With -copyts, t is the master's own timestamp: counting forced frames
+    // against it made every frame a keyframe on a file starting at 1000 s.
+    expect(args[args.indexOf("-force_key_frames") + 1]).toBe("expr:if(isnan(prev_forced_t),1,gte(t,prev_forced_t+1))");
+  });
+
+  test("a light proxy holds a bitrate ceiling in either encoder", () => {
+    const source = { matrix: "bt709" as const, fullRange: false, height: 2160, hasAudio: false };
+    const x265 = proxyFfmpegArgs("in.mp4", "out.mp4", { encoder: "libx265", source, maxHeight: 1080, crf: 20, maxKbps: 6000 });
+    expect(x265.join(" ")).toContain("-maxrate 6000k -bufsize 6000k");
+    const vt = proxyFfmpegArgs("in.mp4", "out.mp4", { encoder: "hevc_videotoolbox", source, maxHeight: 1080, crf: 20, maxKbps: 6000 });
+    expect(vt.join(" ")).toContain("-b:v 6000k");
+    expect(vt).not.toContain("-q:v");
+    // A ProRes proxy keeps its quality target and no ceiling.
+    expect(proxyFfmpegArgs("in.mp4", "out.mp4", { encoder: "libx265", source, maxHeight: 1080, crf: 20 })).not.toContain("-maxrate");
   });
 
   test("reads the fixture as a 10-bit BT.2020 ProRes master with sound", async () => {

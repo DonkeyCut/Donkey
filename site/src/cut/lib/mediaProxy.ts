@@ -33,9 +33,10 @@ import { resolveRegisteredBlob } from "./backend/browser/registry";
 import { pollCloudJob } from "./cloudJob";
 import { cutColor } from "./colorSettings";
 import { uploadProjectMediaTo } from "./media";
-import { frameSinkIsCustom, probeMediaFile } from "./mediaRead";
+import { frameSinkIsCustom, hasUndecodableVideo, probeMediaFile, withMedia } from "./mediaRead";
 import { forgetLocalMediaUrl, storedMediaUrl } from "./mediaSync";
 import { encodeProxyInPage, proxyNameFor, proxyOnTheMac, type Landed } from "./proxyEncode";
+import { isLightProxyName } from "./proxyNames";
 import { releaseProxyHold, useEditor } from "./store";
 import type { MediaAsset, StoredAsset } from "./types";
 
@@ -63,8 +64,12 @@ export function isHeavyVideo(asset: ProxyFacts): boolean {
  * heavy video when the project streams its media (`streamed`, a cloud
  * project). */
 export function needsProxy(asset: ProxyFacts, streamed = false): boolean {
-  if (asset.type !== "video" || asset.proxy || asset.block) return false;
-  return isProres(asset) || (streamed && isHeavyVideo(asset));
+  if (asset.type !== "video" || asset.block) return false;
+  if (isProres(asset)) return !asset.proxy;
+  if (!streamed || !isHeavyVideo(asset)) return false;
+  // A heavy video's proxy is the light one; an older full-quality proxy
+  // streams no lighter than its master, so it is asked for again.
+  return !asset.proxy || !isLightProxyName(asset.proxy.fileName);
 }
 
 /** The codec string of the worker's proxy: HEVC Main10. */
@@ -165,9 +170,9 @@ export async function proxyUnreadable(asset: MediaAsset, backend: CutBackend = g
   // The master plays from this moment; whether the proxy leaves the doc
   // waits on why it failed.
   s.holdProxyOff(asset.id);
-  // A page with no HEVC decoder cannot play the worker's proxy, however
+  // A page with no decoder for the proxy's codec cannot play it, however
   // sound the file: the proxy stays on the doc for the viewers who can.
-  if (!(await proxyDecodes())) return;
+  if (await proxyCodecMissing(live, backend)) return;
   const broken = live.proxy;
   releaseProxyHold(asset.id);
   s.dropAssetProxy(asset.id);
@@ -189,6 +194,22 @@ export async function proxyUnreadable(asset: MediaAsset, backend: CutBackend = g
   }
   const now = stillOpen() ? useEditor.getState().assets.find((a) => a.id === asset.id) : undefined;
   if (now) await ensureProxy(projectId, now, backend);
+}
+
+/** True when the proxy's file reads but this page has no decoder for its
+ * video, e.g. the worker's or the Mac's HEVC in Firefox. A file that does not
+ * read at all is broken, and false. */
+async function proxyCodecMissing(asset: MediaAsset, backend: CutBackend): Promise<boolean> {
+  const projectId = useEditor.getState().projectId;
+  if (!projectId || !asset.proxy) {
+    return false;
+  }
+  try {
+    const url = await storedMediaUrl(projectId, asset.proxy.fileName, backend);
+    return await withMedia(url, async (input) => (await input.canRead()) && (await hasUndecodableVideo(input)));
+  } catch {
+    return false;
+  }
 }
 
 /** Every asset in the open project that still needs a proxy. */

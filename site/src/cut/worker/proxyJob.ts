@@ -4,11 +4,13 @@ import path from "node:path";
 import { getGlobalSetting } from "@/lib/config/effective";
 import type { RenderHandle } from "../server/exportPipeline";
 import { makeProxy, proxyNameFor } from "../server/proxy";
+import { lightProxyNameFor, PROXY_SOURCE_FAULT } from "../lib/proxyNames";
 import { probeDuration } from "../server/frames";
 import { dedupeName } from "../server/cloud/util";
 import { prisma, registerObject, unregisterObjects, type ClaimedJob } from "./db";
 import { deleteObjects, downloadToFile, mediaKey, uploadFile } from "./r2";
 import { runLibraryProxyJob } from "./libraryProxyJob";
+import { InputFault, refusedInput } from "./settle";
 import type { LibraryAsset } from "../server/library";
 
 /** What a proxy job records in CutRenderJob.result — the same shape the
@@ -30,7 +32,7 @@ export interface ProxyJobIO {
   unregister: typeof unregisterObjects;
   make: typeof makeProxy;
   duration: typeof probeDuration;
-  settings: () => Promise<{ proxyMaxHeight: number; proxyCrf: number }>;
+  settings: () => Promise<{ proxyMaxHeight: number; proxyCrf: number; lightKbps: number }>;
 }
 
 const defaultIO: ProxyJobIO = {
@@ -42,7 +44,10 @@ const defaultIO: ProxyJobIO = {
   unregister: unregisterObjects,
   make: makeProxy,
   duration: probeDuration,
-  settings: () => getGlobalSetting("cutColor"),
+  settings: async () => {
+    const [color, proxy] = await Promise.all([getGlobalSetting("cutColor"), getGlobalSetting("cutProxy")]);
+    return { ...color, lightKbps: proxy.lightKbps };
+  },
 };
 
 /**
@@ -78,7 +83,10 @@ export async function runProxyJob(
       where: { projectId, kind: { in: ["media", "proxy"] } },
       select: { fileName: true },
     });
-    const fileName = dedupeName(proxyNameFor(file), new Set(rows.map((r) => r.fileName)));
+    // A job that names a height is a heavy video's: its proxy is the light
+    // copy, capped in bitrate and named apart from a full-quality one.
+    const light = !!(maxHeight && maxHeight > 0);
+    const fileName = dedupeName(light ? lightProxyNameFor(file) : proxyNameFor(file), new Set(rows.map((r) => r.fileName)));
     const out = path.join(tmp, fileName);
     handle.outPath = out;
 
@@ -88,9 +96,14 @@ export async function runProxyJob(
       // the account allows.
       maxHeight: maxHeight && maxHeight > 0 ? Math.min(settings.proxyMaxHeight, maxHeight) : settings.proxyMaxHeight,
       crf: settings.proxyCrf,
+      ...(light ? { maxKbps: settings.lightKbps } : {}),
       onProgress: (seconds) => {
         if (total > 0) handle.progress = Math.min(0.99, seconds / total);
       },
+    }).catch((e: unknown) => {
+      // ffmpeg ran to its own end and refused the master: the row says the
+      // file is at fault, so the route waits before trying it again.
+      throw !isCanceled() && refusedInput(handle.proc) ? new InputFault(PROXY_SOURCE_FAULT, e) : e;
     });
     if (isCanceled()) throw new Error("Proxy canceled.");
 

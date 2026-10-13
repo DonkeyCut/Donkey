@@ -11,11 +11,17 @@ await stubModule("./mediaSync", import.meta.url, {
   storedMediaUrl: async (projectId: string, fileName: string) => `stored:${projectId}/${fileName}`,
 });
 let storedReads = true;
+/** The codec the stored proxy file carries: the worker's and the Mac's are
+ * HEVC; a page without HEVC builds AV1 or VP9. */
+let proxyCodec: "hevc" | "av1" = "hevc";
 await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
   probeMediaFile: (async () => {
     if (!storedReads) throw new Error("gone");
     return { hasVideo: true };
   }) as never,
+  withMedia: (async (_src: unknown, fn: (input: unknown) => Promise<unknown>) =>
+    fn({ canRead: async () => storedReads })) as never,
+  hasUndecodableVideo: async () => proxyCodec === "hevc" && !hevc,
 });
 const { ensureProxy, HEAVY_PROXY_MAX_HEIGHT, needsProxy, proxyUnreadable, useProxyJobs } = await import("./mediaProxy");
 const { useEditor } = await import("./store");
@@ -90,7 +96,18 @@ describe("needsProxy", () => {
     expect(needsProxy(h264("hd", { width: 1920, height: 1080, sizeBytes: 7_000_000 }), true)).toBe(false);
     expect(needsProxy(h264("wide", { width: 2048, height: 1080, sizeBytes: 6_000_000 }), true)).toBe(false);
     expect(needsProxy(h264("uhd"))).toBe(false);
-    expect(needsProxy(h264("uhd", { proxy: { fileName: "uhd.proxy.mp4", sizeBytes: 1 } }), true)).toBe(false);
+    expect(needsProxy(h264("uhd", { proxy: { fileName: "uhd.mp4.light.mp4", sizeBytes: 1 } }), true)).toBe(false);
+  });
+
+  // The first heavy proxies were built at the account's quality with no
+  // ceiling, and a dense 1080p master came back heavier than itself (20 Mbps
+  // over 14). A heavy video's proxy is the capped light copy; one carrying
+  // the old full-quality proxy asks again, and gets the light one.
+  test("a heavy streamed video on the old full-quality proxy needs the light one", () => {
+    expect(needsProxy(h264("uhd", { proxy: { fileName: "uhd.proxy.mp4", sizeBytes: 1 } }), true)).toBe(true);
+    expect(needsProxy(h264("uhd", { proxy: { fileName: "uhd.mp4.light-1.mp4", sizeBytes: 1 } }), true)).toBe(false);
+    // ProRes keeps its own proxy, wherever it plays.
+    expect(needsProxy(prores("a", { proxy: { fileName: "a.proxy.mp4", sizeBytes: 1 } }), true)).toBe(false);
   });
 });
 
@@ -240,6 +257,36 @@ describe("proxyUnreadable", () => {
     useEditor.getState().applyMediaUrls(new Map([["nohevc.MOV", "https://x/m"], ["nohevc.proxy.mp4", "https://x/p"]]));
     expect(useEditor.getState().assets[0].url).toBe("https://x/m");
     expect(useEditor.getState().assets[0].proxyUrl).toBeUndefined();
+    hevc = true;
+  });
+
+  test("a browser project's own proxy still heals on a browser with no HEVC", async () => {
+    // The page built it (AV1 or VP9 where HEVC is missing), so it decodes
+    // here; a failure means the file, and the usual drop and heal apply.
+    hevc = false;
+    proxyCodec = "av1";
+    storedReads = true;
+    const asset = broken("pagebuilt");
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("browser", () => Response.json({}));
+    await proxyUnreadable(asset, b.api);
+    expect(useEditor.getState().assets[0].proxyUrl).toBe("stored:p/pagebuilt.proxy.mp4");
+    hevc = true;
+    proxyCodec = "hevc";
+  });
+
+  test("a Mac project's HEVC proxy stays on the doc in a browser with no HEVC", async () => {
+    // The engine encodes HEVC, and a Mac project opens in any browser on
+    // that Mac: Firefox cannot play the proxy, Safari still can.
+    features = new Set(["media.proxy"]);
+    hevc = false;
+    const asset = broken("machevc");
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("local", () => Response.json({ fileName: "machevc.proxy.mp4", sizeBytes: 9 }));
+    await proxyUnreadable(asset, b.api);
+    expect(useEditor.getState().assets[0].proxy).toEqual(asset.proxy!);
+    expect(useEditor.getState().assets[0].proxyUrl).toBeUndefined();
+    expect(b.calls).toHaveLength(0);
     hevc = true;
   });
 

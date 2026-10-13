@@ -1,7 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import type { prisma } from "@/lib/prisma";
+import type { RenderHandle } from "../server/exportPipeline";
 import { runProxyJob, type ProxyJobIO } from "./proxyJob";
+import { PROXY_SOURCE_FAULT } from "../lib/proxyNames";
+import { InputFault } from "./settle";
 
 function harness(taken: string[] = [], spec: Record<string, unknown> = { file: "clip.mov" }) {
   const findMany = mock(async (_args: unknown) => { void _args; return taken.map((fileName) => ({ fileName })); });
@@ -18,15 +21,25 @@ function harness(taken: string[] = [], spec: Record<string, unknown> = { file: "
       return { sizeBytes: 5, width: 64, height: 64 };
     }),
     duration: mock(async () => 2),
-    settings: mock(async () => ({ proxyMaxHeight: 1080, proxyCrf: 20 })),
+    settings: mock(async () => ({ proxyMaxHeight: 1080, proxyCrf: 20, lightKbps: 6000 })),
   } satisfies ProxyJobIO;
   const job = { id: "proxy-1", userId: "owner", projectId: "project", kind: "proxy", outName: null, spec };
-  const handle = { tmpDir: "", outPath: "", progress: 0, log: [] as string[] };
+  const handle: RenderHandle = { tmpDir: "", outPath: "", progress: 0, log: [] as string[] };
   const run = (canceled = () => false) => runProxyJob(job, handle, canceled, io);
   return { run, io, handle, findMany };
 }
 
 describe("proxy worker", () => {
+  test("a heavy video's job builds the capped light copy under its own name", async () => {
+    const h = harness([], { file: "clip.mov", maxHeight: 1080 });
+    expect((await h.run()).fileName).toBe("clip.mov.light.mp4");
+    expect(h.io.make.mock.calls[0][3]).toMatchObject({ maxHeight: 1080, maxKbps: 6000 });
+    // A ProRes job keeps the full-quality proxy, uncapped.
+    const pro = harness();
+    expect((await pro.run()).fileName).toBe("clip.proxy.mp4");
+    expect((pro.io.make.mock.calls[0][3] as { maxKbps?: number }).maxKbps).toBeUndefined();
+  });
+
   test("a job that asks for a smaller copy gets it, never one past the account's size", async () => {
     const small = harness([], { file: "clip.mov", maxHeight: 720 });
     await small.run();
@@ -72,5 +85,25 @@ describe("proxy worker", () => {
     const h = harness();
     await expect(h.run(() => true)).rejects.toThrow("canceled");
     expect(h.io.make).not.toHaveBeenCalled();
+  });
+
+  // A master ffmpeg refuses fails the same way on every try; a build killed
+  // by a signal or lost to storage does not, and the row tells them apart.
+  test("an encode that refuses the master records the file's fault; a killed one does not", async () => {
+    const refused = harness();
+    refused.io.make.mockImplementation(async (handle: unknown) => {
+      (handle as RenderHandle).proc = { signalCode: null, exitCode: 1 } as never;
+      throw new Error("ffmpeg exited with code 1.");
+    });
+    const err = await refused.run().catch((e: unknown) => e);
+    expect(err instanceof InputFault).toBe(true);
+    expect((err as InputFault).fault).toBe(PROXY_SOURCE_FAULT);
+
+    const killed = harness();
+    killed.io.make.mockImplementation(async (handle: unknown) => {
+      (handle as RenderHandle).proc = { signalCode: "SIGKILL", exitCode: null } as never;
+      throw new Error("Export stalled — no ffmpeg output for 120s.");
+    });
+    expect((await killed.run().catch((e: unknown) => e)) instanceof InputFault).toBe(false);
   });
 });

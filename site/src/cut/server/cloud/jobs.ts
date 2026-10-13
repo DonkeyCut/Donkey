@@ -2,6 +2,7 @@
 // manage CutRenderJob rows — the worker claims and executes them. Response
 // shapes byte-match the engine's export routes (http/export.ts + server/jobs.ts).
 import type { Prisma } from "@/generated/prisma/client";
+import { getGlobalSetting } from "@/lib/config/effective";
 import { prisma } from "@/lib/prisma";
 import { EXPORT_QUOTA_MARGIN, renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
@@ -13,8 +14,11 @@ import { contentTypeFor } from "../serveFile";
 import { containerOfName, deliveryContainer, exportBaseName, jobWantsStems, specMediaFiles, STEMS_MIME, stemsArchiveName, type ExportContainer, type ExportFiles } from "../../lib/exportDelivery";
 import { LOUDNESS_IDS, type LoudnessId } from "../../lib/loudnessSettings";
 import type { DocExportAudio } from "../../lib/exportPresets";
+import { PROXY_SOURCE_FAULT } from "../../lib/proxyNames";
 import { addUsage, outputByteCeiling, quotaCheck } from "./usage";
 import { caught, err, redirect } from "./util";
+
+const HOUR_MS = 60 * 60 * 1000;
 
 /** A master's file name without its extension: what its proxy's name starts
  * with (server/proxy.ts `proxyNameFor`). */
@@ -943,19 +947,42 @@ export const jobsCloud = {
         select: { id: true },
       });
       if (!source) return err("Media file missing from project.", 404);
+      // A heavy video's request (it names a height) wants the light proxy
+      // (lib/proxyNames.ts); a full-quality one built earlier doesn't answer it.
+      const light = maxHeight !== undefined;
       const built = await prisma.cutMediaObject.findFirst({
-        where: { userId, projectId, kind: "proxy", uploadState: "complete", fileName: { startsWith: `${proxyStem(file)}.proxy` } },
+        where: { userId, projectId, kind: "proxy", uploadState: "complete", fileName: { startsWith: light ? `${file}.light` : `${proxyStem(file)}.proxy` } },
         select: { fileName: true, bytes: true },
         orderBy: { createdAt: "desc" },
       });
       if (built) return Response.json({ fileName: built.fileName, sizeBytes: Number(built.bytes) });
-      const running = await prisma.cutRenderJob.findFirst({
+      const runningRows = await prisma.cutRenderJob.findMany({
         where: { userId, projectId, kind: "proxy", state: { in: ["queued", "running"] }, spec: { path: ["file"], equals: file } },
-        select: { id: true },
+        select: { id: true, spec: true },
       });
+      const running = runningRows.find((r) => ((r.spec as { maxHeight?: number } | null)?.maxHeight !== undefined) === light);
       if (running) {
         wakeRenderWorker();
         return Response.json({ jobId: running.id });
+      }
+      // A master ffmpeg refused lately would be refused the same way: the
+      // preview stays on the master instead of costing a worker run on every
+      // open. A build that failed for a passing reason retries at once.
+      const { retryAfterHours } = await getGlobalSetting("cutProxy");
+      const failedRows = await prisma.cutRenderJob.findMany({
+        where: {
+          userId,
+          projectId,
+          kind: "proxy",
+          state: "error",
+          createdAt: { gt: new Date(Date.now() - retryAfterHours * HOUR_MS) },
+          spec: { path: ["file"], equals: file },
+          result: { path: ["fault"], equals: PROXY_SOURCE_FAULT },
+        },
+        select: { spec: true },
+      });
+      if (failedRows.some((r) => ((r.spec as { maxHeight?: number } | null)?.maxHeight !== undefined) === light)) {
+        return err("The preview proxy could not be made from this file lately; the original plays instead.", 409);
       }
       const capped = await renderJobCheck(userId);
       if (capped) return capped;

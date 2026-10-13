@@ -9,6 +9,7 @@ import { runImportUrlJob } from "./importUrlJob";
 import { runTurnJob } from "./turnJob";
 import { describeRuntime, installHeadlessRuntime } from "../lib/headless/runtime";
 import { deleteObjects } from "./r2";
+import { failedJobFate, InputFault } from "./settle";
 
 // The cloud render worker: a headless loop that claims CutRenderJob rows the
 // hosted API queues (export, preview, import_url, convert, proxy, agent_turn),
@@ -41,6 +42,9 @@ const SWEEP_EVERY_MS = 15_000;
 // inside that window, keeping enough of it back to requeue whatever is still
 // going when it closes.
 const DRAIN_MS = 13 * 60_000;
+/** Set when the platform sends SIGTERM: a run whose process stops from here
+ * on is the shutdown's doing (`failedJobFate`). */
+let signaled = false;
 
 /** The longest a job of each kind may run. Everything else about a job's cost
  * is bounded when it is queued; this bounds the one thing that isn't — a
@@ -200,15 +204,27 @@ async function runJob(job: ClaimedJob): Promise<void> {
       : raw;
     // A canceled job's row already says so; the running-state guard also
     // keeps this from resurrecting a row canceled between watcher ticks.
-    if (!entry.canceled) {
+    const fate = failedJobFate({ canceled: entry.canceled, signaled, proc: entry.handle.proc });
+    if (fate === "requeue") {
+      // Its overlays stay for the replica that claims it next.
+      entry.retry = true;
       await prisma.cutRenderJob
         .updateMany({
           where: { id: job.id, state: "running" },
-          data: { state: "error", error: message },
+          data: { state: "queued", claimedAt: null, progress: 0 },
+        })
+        .catch(() => {});
+    } else if (fate === "error") {
+      // A failure on the job's input records which, for the route to read.
+      const fault = err instanceof InputFault ? { result: { fault: err.fault } } : {};
+      await prisma.cutRenderJob
+        .updateMany({
+          where: { id: job.id, state: "running" },
+          data: { state: "error", error: message, ...fault },
         })
         .catch(() => {});
     }
-    console.error(`[cut-worker] ${job.kind} ${job.id} ${entry.canceled ? "canceled" : "failed"}: ${raw}`);
+    console.error(`[cut-worker] ${job.kind} ${job.id} ${entry.canceled ? "canceled" : fate === "requeue" ? "requeued on shutdown" : "failed"}: ${raw}`);
     // A canceled turn retires this process once its cleanup settles: the
     // abort tears the agent loop down, and a fresh process guarantees the
     // next claim starts with clean per-user transport bindings even if some
@@ -258,7 +274,10 @@ async function stop(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  process.on("SIGTERM", () => void stop());
+  process.on("SIGTERM", () => {
+    signaled = true;
+    void stop();
+  });
   process.on("SIGINT", () => void stop());
   // Canvas, decoders, Web Audio, and fonts, standing in for the page a turn
   // would otherwise run in. A worker missing a native module loses that

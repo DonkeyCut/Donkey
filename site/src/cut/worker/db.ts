@@ -39,18 +39,20 @@ export interface ClaimedJob {
 /** The kinds someone is watching happen: an export, a URL import, or a chat
  * turn has a progress surface on screen, while a hover proxy and a share card
  * are background polish nobody is waiting on. */
-const WATCHED_KINDS = ["export", "import_url", "convert", "proxy", "agent_turn"];
+const WATCHED_KINDS = ["export", "import_url", "convert", "agent_turn"];
 
 /** Atomically claim the next queued job: the updateMany's state guard makes
  * exactly one worker win each row, so replicas never double-run a job.
  *
- * Watched kinds go first, FIFO within a tier. Strict FIFO across all kinds let
+ * Watched kinds go first, then proxies, FIFO within a tier. Strict FIFO across all kinds let
  * a proxy render queued moments earlier hold up an export the user is staring
  * at — the wait was invisible in the UI, because the export's elapsed clock
  * only starts once it is claimed. */
 export async function claimNextJob(): Promise<ClaimedJob | null> {
   // Editor command batches stay queued for the card that owns their document.
-  for (const kind of [{ in: WATCHED_KINDS }, { in: ["preview", "card", "hls"] }]) {
+  // Proxies come next: opening a cloud project queues one for every heavy
+  // clip, and an export asked for a moment later must not wait behind them.
+  for (const kind of [{ in: WATCHED_KINDS }, { in: ["proxy"] }, { in: ["preview", "card", "hls"] }]) {
     const candidates = await prisma.cutRenderJob.findMany({
       where: { state: "queued", kind },
       orderBy: { createdAt: "asc" },
