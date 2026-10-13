@@ -73,6 +73,7 @@ import { fetchSignedMediaUrls, pinDocBase } from "./backend/cloud";
 import { cancelRevoke, resolveRegisteredBlob, revokeRegistered } from "./backend/browser/registry";
 import { markSignedBatch } from "./mediaLinks";
 import { dropLocalMedia, localMediaUrl, prefetchCloudMedia } from "./mediaSync";
+import { clipWarmSettled, stopClipWarm, warmClipSpans, warmOrder } from "./spanWarm";
 import {
   dropCachedDoc,
   readCachedDoc,
@@ -2225,6 +2226,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
                 (x, y) =>
                   (firstUse.get(x.fileName) ?? Infinity) - (firstUse.get(y.fileName) ?? Infinity)
               );
+            // What the cut plays is read first — each clip's span, from the
+            // file the preview decodes, in timeline order (spanWarm.ts) — and
+            // the whole videos wait for it, so their walk never competes with
+            // the first play.
+            void warmClipSpans(warmOrder(doc.clips, assets, playheadAt()));
             // Video reads through the chunk cache and plays from its first
             // chunk, so only whole-file fetches show as loading.
             set({
@@ -2244,7 +2250,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
                 next.delete(fileName);
                 return { loadingMedia: next };
               });
-            });
+            }, clipWarmSettled);
           }
         } else {
           markSignedBatch(id, null);
@@ -2360,7 +2366,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     closeProject: (id) => {
       if (loadTarget === id) { loadGeneration++; loadTarget = null; }
-      if (get().projectId === id) set({ projectId: null, loaded: false, playing: false });
+      if (get().projectId === id) {
+        stopClipWarm();
+        set({ projectId: null, loaded: false, playing: false });
+      }
     },
 
     openProjectDoc: async (id, doc, assets) => {
@@ -5361,6 +5370,14 @@ useEditor.subscribe((s, prev) => {
     (s.assets !== prev.assets && beatsEdited(prev.assets, s.assets))
   )
     docSeq++;
+});
+
+// A play from a new spot reads ahead from there: the walk the open started
+// may still be reading the far end of the cut, or have finished long before
+// an edit put new clips under the playhead.
+useEditor.subscribe((s, prev) => {
+  if (s.playing && !prev.playing && s.loaded && getBackend().kind === "cloud")
+    void warmClipSpans(warmOrder(s.clips, s.assets, playheadAt()));
 });
 
 // Every subtitles pass — transcription, translation, AI captions — rides

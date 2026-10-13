@@ -247,14 +247,16 @@ let prefetch: PrefetchRun | null = null;
  * and swap onto blob URLs, so an <img> paints local bytes offline. Every file
  * reports back through `onDone` exactly once — its blob URL when whole bytes
  * landed, null otherwise — so the caller can swap playing assets mid-session
- * and retire per-file loading state either way. Starting a prefetch cancels
+ * and retire per-file loading state either way. Videos wait for `videosAfter`
+ * (the clip spans the cut plays, read first) while the other files go ahead. Starting a prefetch cancels
  * any earlier one — the queue follows the open project — and records the open
  * for eviction recency. Fire-and-forget; a failed or refused write costs
  * nothing but the cache. */
 export function prefetchCloudMedia(
   projectId: string,
   files: { fileName: string; url: string; type?: AssetType }[],
-  onDone?: (fileName: string, blobUrl: string | null) => void
+  onDone?: (fileName: string, blobUrl: string | null) => void,
+  videosAfter?: () => Promise<void>
 ): void {
   if (!supportsBrowserStore()) {
     for (const f of files) onDone?.(f.fileName, null);
@@ -269,9 +271,18 @@ export function prefetchCloudMedia(
     }).catch(() => {});
     // Opening a project brings a cache that outgrew its ceiling back under it.
     await makeRoom(projectId, 0).catch(() => {});
+    // The small files a still or a sticker paints go first; the videos follow
+    // the spans the cut plays.
+    files = [...files.filter((f) => f.type !== "video"), ...files.filter((f) => f.type === "video")];
+    let waited = false;
     for (let i = 0; i < files.length; i++) {
       if (run.ctrl.signal.aborted) return;
       const f = files[i];
+      if (f.type === "video" && !waited) {
+        waited = true;
+        await videosAfter?.().catch(() => {});
+        if (run.ctrl.signal.aborted) return;
+      }
       const r =
         f.type === "video"
           ? await cacheVideoChunks(f.url, run.ctrl.signal)
