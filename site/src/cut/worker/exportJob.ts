@@ -9,7 +9,7 @@ import { prisma, registerObjectIn, storageTransaction, type ClaimedJob } from ".
 import { deleteObjects, downloadToFile, exportKey, mediaKey, mimeFor, uploadFile } from "./r2";
 import { overlayKey } from "../server/cloud/r2";
 import { STORAGE_FULL } from "../lib/operationFailure";
-import { specMediaFiles, STEMS_MIME, stemsArchiveName } from "../lib/exportDelivery";
+import { isTabExport, specMediaFiles, STEMS_MIME, stemsArchiveName } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
 import { bindCutColor } from "../lib/colorSettings";
 import { bindCutExportPasses } from "../lib/exportPassSettings";
@@ -133,6 +133,8 @@ export async function runExportJob(
   if (!projectId) throw new Error("Export job has no project.");
   if (stored.fromDoc && !stored.fromDoc.snapshot?.doc)
     throw new Error("This render has no captured document. Queue the export again.");
+  // A tab render's claim carries no spec: the tab that made it draws it.
+  if (isTabExport(stored)) throw new Error("This export renders in the browser tab that started it.");
   if (!stored.fromDoc && (!stored.spec || !Array.isArray(stored.spec.clips))) {
     throw new Error("Malformed export spec.");
   }

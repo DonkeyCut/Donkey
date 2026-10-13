@@ -702,12 +702,34 @@ export const jobsCloud = {
         await addUsage(tx, userId, bytes);
         await tx.cutRenderJob.update({
           where: { id: row.id },
-          data: { state: "done", progress: 1, outputKey: key },
+          // A row the worker once mistook for its own may carry its error.
+          data: { state: "done", progress: 1, outputKey: key, error: null },
         });
       });
       return Response.json({ id: row.id, outName });
     } catch (e) {
       return caught(e, "Could not save the export.");
+    }
+  },
+
+  /**
+   * A tab render's heartbeat: its progress so far, and a fresh updatedAt that
+   * tells the worker's stale sweep the tab is still drawing. A claim whose tab
+   * goes quiet for minutes is dismissed there.
+   */
+  async exportClientProgress(userId: string, jobId: string, req: Request) {
+    try {
+      const body = (await req.json().catch(() => ({}))) as { ratio?: unknown };
+      const ratio = typeof body.ratio === "number" && Number.isFinite(body.ratio)
+        ? Math.min(1, Math.max(0, body.ratio))
+        : undefined;
+      await prisma.cutRenderJob.updateMany({
+        where: { id: jobId, userId, kind: "export", state: "running", spec: { path: ["client"], equals: true } },
+        data: { updatedAt: new Date(), ...(ratio === undefined ? {} : { progress: ratio }) },
+      });
+      return Response.json({ ok: true });
+    } catch (e) {
+      return caught(e, "Could not record the export's progress.");
     }
   },
 

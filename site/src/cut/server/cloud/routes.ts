@@ -108,6 +108,7 @@ const CUT_CLOUD_ROUTES: CloudRoute[] = [
   // register the finished file. No queue in between — the tab is the worker.
   { method: "POST", path: "/api/cut-cloud/export/client/presign", handler: (r, u) => jobsCloud.exportClientPresign(u, r) },
   { method: "POST", path: "/api/cut-cloud/export/client/complete", handler: (r, u) => jobsCloud.exportClientComplete(u, r) },
+  { method: "POST", path: "/api/cut-cloud/export/client/:jobId/progress", handler: (r, u, p) => jobsCloud.exportClientProgress(u, p.jobId, r) },
   { method: "POST", path: "/api/cut-cloud/export/client/:jobId/release", handler: (_r, u, p) => jobsCloud.exportClientRelease(u, p.jobId) },
   { method: "GET", path: "/api/cut-cloud/export/:jobId", handler: (_r, u, p) => jobsCloud.exportStatus(u, p.jobId) },
   { method: "DELETE", path: "/api/cut-cloud/export/:jobId", handler: (_r, u, p) => jobsCloud.exportCancel(u, p.jobId) },

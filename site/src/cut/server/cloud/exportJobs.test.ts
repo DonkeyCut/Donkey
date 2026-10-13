@@ -89,3 +89,27 @@ test("a released render with stems takes its own unregistered stems", async () =
   await jobsCloud.exportClientRelease("u", "j");
   expect(deleted).toEqual(["cut/u/p/exports/Trip.mp4", "cut/u/p/exports/Trip stems.zip"]);
 });
+
+// A row the worker once failed while the tab drew it lands clean, and the
+// tab's heartbeat touches only its own running claim.
+test("a finished tab render clears an error left on its row", async () => {
+  job = { id: "j", kind: "export", projectId: "p", outName: "Trip.mp4", state: "error", spec: { client: true } };
+  sizes.set("cut/u/p/exports/Trip.mp4", 50 * MB);
+  const res = await jobsCloud.exportClientComplete("u", post({ jobId: "j" }));
+  expect(res.status).toBe(200);
+  expect(tx.cutRenderJob.update.mock.calls.at(-1)).toEqual([
+    { where: { id: "j" }, data: { state: "done", progress: 1, outputKey: "cut/u/p/exports/Trip.mp4", error: null } },
+  ] as never);
+});
+
+test("the tab's heartbeat bumps its own running claim, clamping the ratio", async () => {
+  const res = await jobsCloud.exportClientProgress("u", "j", post({ ratio: 1.4 }));
+  expect(res.status).toBe(200);
+  const [args] = prisma.cutRenderJob.updateMany.mock.calls.at(-1) as unknown as [{ where: unknown; data: { progress?: number; updatedAt: Date } }];
+  expect(args.where).toEqual({ id: "j", userId: "u", kind: "export", state: "running", spec: { path: ["client"], equals: true } });
+  expect(args.data.progress).toBe(1);
+  expect(args.data.updatedAt instanceof Date).toBe(true);
+  await jobsCloud.exportClientProgress("u", "j", post({}));
+  const [bare] = prisma.cutRenderJob.updateMany.mock.calls.at(-1) as unknown as [{ data: Record<string, unknown> }];
+  expect("progress" in bare.data).toBe(false);
+});

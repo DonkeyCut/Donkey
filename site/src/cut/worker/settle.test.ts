@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { failedJobFate } from "./settle";
+import { failedJobFate, staleRunningFate, TAB_EXPORT_SILENCE_MS } from "./settle";
 
 /** A deploy rolls the worker's replicas with SIGTERM, and the signal reaches
  * the job's ffmpeg too: it stops mid-encode and the run fails a minute in. A
@@ -28,4 +28,20 @@ test("a run that fails on its own during the drain is an error", () => {
 test("a canceled run's row already says so", () => {
   expect(failedJobFate({ canceled: true, signaled: true, proc: killed })).toBe("leave");
   expect(failedJobFate({ canceled: true, signaled: false })).toBe("leave");
+});
+
+// A cloud project's export renders in the tab, which holds a "running" row as
+// its claim. The sweep used to requeue that row a minute in, and a worker then
+// failed it with "Malformed export spec." while the tab was still drawing.
+test("a quiet worker job goes back on the queue", () => {
+  const now = Date.now();
+  expect(staleRunningFate({ spec: { fromDoc: {} }, updatedAt: new Date(now - 90_000) }, now)).toBe("requeue");
+  expect(staleRunningFate({ spec: null, updatedAt: new Date(now - 90_000) }, now)).toBe("requeue");
+});
+
+test("a tab render's claim is never queued, and is let go once its tab is silent", () => {
+  const now = Date.now();
+  const claim = { client: true };
+  expect(staleRunningFate({ spec: claim, updatedAt: new Date(now - 90_000) }, now)).toBe("wait");
+  expect(staleRunningFate({ spec: { ...claim, stems: true }, updatedAt: new Date(now - TAB_EXPORT_SILENCE_MS - 1) }, now)).toBe("dismiss");
 });

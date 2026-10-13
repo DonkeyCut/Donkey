@@ -147,6 +147,12 @@ export function isStemsName(name: string): boolean {
  * beside it, whose name it claims too. */
 export type ExportFiles = "file" | "fileAndStems";
 
+/** Whether a stored export job is a tab render's claim: the browser draws
+ * and encodes it, so no worker can run it. */
+export function isTabExport(stored: unknown): boolean {
+  return (stored as { client?: boolean } | null)?.client === true;
+}
+
 /** Whether a stored export job asked for stems, however it was queued: a
  * tab render's claim, a document export, or a built spec with a stem plan. */
 export function jobWantsStems(stored: unknown): boolean {

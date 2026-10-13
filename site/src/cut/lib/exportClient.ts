@@ -1826,6 +1826,20 @@ export async function runBrowserExport(
   // The render keeps reading the project's store-served blob URLs after the
   // user opens another project; the hold keeps them alive until it finishes.
   holdRegistered(`/api/cut/projects/${projectId}/`);
+  // The claim's row hears from the tab on a timer, so the worker's stale sweep
+  // tells a render still drawing from a tab that closed mid-render.
+  let reported = 0;
+  const heartbeat = setInterval(
+    () =>
+      void backend
+        .fetch(`/api/cut/export/client/${jobId}/progress`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ratio: reported }),
+        })
+        .catch(() => {}),
+    CLIENT_HEARTBEAT_MS
+  );
   try {
     const rendered = await renderProjectToMp4(doc, settings, {
       // Read the asset's URL at the moment it is needed rather than off the
@@ -1835,7 +1849,10 @@ export async function runBrowserExport(
         renderAssetUrl(projectId, asset),
       signal: opts.signal,
       // The render is nearly all of the work; the upload is the tail of the bar.
-      onProgress: ({ ratio }) => opts.onProgress?.(ratio * 0.9),
+      onProgress: ({ ratio }) => {
+        reported = ratio * 0.9;
+        opts.onProgress?.(reported);
+      },
     });
 
     try {
@@ -1876,6 +1893,7 @@ export async function runBrowserExport(
       .catch(() => {});
     throw err;
   } finally {
+    clearInterval(heartbeat);
     releaseRegistered(`/api/cut/projects/${projectId}/`);
   }
 }

@@ -9,7 +9,7 @@ import { runImportUrlJob } from "./importUrlJob";
 import { runTurnJob } from "./turnJob";
 import { describeRuntime, installHeadlessRuntime } from "../lib/headless/runtime";
 import { deleteObjects } from "./r2";
-import { failedJobFate, InputFault } from "./settle";
+import { failedJobFate, InputFault, staleRunningFate, TAB_EXPORT_SILENCE_MS } from "./settle";
 
 // The cloud render worker: a headless loop that claims CutRenderJob rows the
 // hosted API queues (export, preview, import_url, convert, proxy, agent_turn),
@@ -80,20 +80,42 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Requeue "running" rows whose heartbeat (updatedAt) has gone quiet: their
  * worker died without SIGTERM (OOM, host kill), so nothing else will ever
- * settle them. Own in-flight jobs are excluded by id. */
+ * settle them. Own in-flight jobs are excluded by id. A tab render's claim is
+ * the tab's, never queued: one whose tab went silent is dismissed instead
+ * (`staleRunningFate`). */
 async function sweepStaleRunning(): Promise<void> {
-  const { count } = await prisma.cutRenderJob.updateMany({
+  const now = Date.now();
+  const stale = await prisma.cutRenderJob.findMany({
     where: {
       state: "running",
-      updatedAt: { lt: new Date(Date.now() - STALE_RUNNING_MS) },
+      updatedAt: { lt: new Date(now - STALE_RUNNING_MS) },
       id: { notIn: [...active.keys()] },
       // A command batch belongs to the editor in the ChatGPT card; the hosted
       // API expires one whose editor went quiet.
       kind: { not: "commands" },
     },
-    data: { state: "queued", claimedAt: null, progress: 0 },
+    select: { id: true, spec: true, updatedAt: true },
   });
-  if (count > 0) console.log(`[cut-worker] requeued ${count} stale running job(s)`);
+  const ids = (fate: ReturnType<typeof staleRunningFate>) =>
+    stale.filter((row) => staleRunningFate(row, now) === fate).map((row) => row.id);
+  const requeue = ids("requeue");
+  const dismiss = ids("dismiss");
+  // The state and heartbeat guards again, so a row that moved or beat since
+  // the read is left alone.
+  if (requeue.length > 0) {
+    const { count } = await prisma.cutRenderJob.updateMany({
+      where: { id: { in: requeue }, state: "running", updatedAt: { lt: new Date(now - STALE_RUNNING_MS) } },
+      data: { state: "queued", claimedAt: null, progress: 0 },
+    });
+    if (count > 0) console.log(`[cut-worker] requeued ${count} stale running job(s)`);
+  }
+  if (dismiss.length > 0) {
+    const { count } = await prisma.cutRenderJob.updateMany({
+      where: { id: { in: dismiss }, state: "running", updatedAt: { lt: new Date(now - TAB_EXPORT_SILENCE_MS) } },
+      data: { state: "dismissed" },
+    });
+    if (count > 0) console.log(`[cut-worker] dismissed ${count} tab export(s) whose tab went quiet`);
+  }
 }
 
 /** Mirror one running job to its row every WATCH_MS: push the pipeline's

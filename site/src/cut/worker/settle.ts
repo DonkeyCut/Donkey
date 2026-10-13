@@ -1,3 +1,5 @@
+import { isTabExport } from "../lib/exportDelivery";
+
 /** The exit code ffmpeg gives when it traps a termination signal and stops
  * ("Exiting normally, received signal 15"). */
 const FFMPEG_SIGNAL_EXIT = 255;
@@ -41,4 +43,23 @@ export class InputFault extends Error {
   ) {
     super(cause instanceof Error ? cause.message : String(cause));
   }
+}
+
+/** How long a tab render's claim may go without the tab's heartbeat before
+ * the tab counts as closed. A hidden tab's timers can be held to one a
+ * minute, so this is several of those. */
+export const TAB_EXPORT_SILENCE_MS = 5 * 60_000;
+
+/**
+ * What the stale sweep does with a quiet "running" row. A worker's job lost
+ * its worker and goes back on the queue. A tab render's claim never belonged
+ * to a worker, which has nothing to draw it from, so it is never queued: once
+ * its tab has been silent past TAB_EXPORT_SILENCE_MS the claim is dismissed,
+ * which frees its slot.
+ */
+export function staleRunningFate(row: { spec: unknown; updatedAt: Date }, now: number): "requeue" | "dismiss" | "wait" {
+  if (!isTabExport(row.spec)) {
+    return "requeue";
+  }
+  return now - row.updatedAt.getTime() > TAB_EXPORT_SILENCE_MS ? "dismiss" : "wait";
 }
