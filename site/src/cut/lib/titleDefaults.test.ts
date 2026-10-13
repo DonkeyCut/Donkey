@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from "bun:test";
+import { afterAll, beforeEach, expect, test } from "bun:test";
 import { useEditor } from "./store";
 import { emptySubtitles, isTextOverlay } from "./types";
 
@@ -6,15 +6,23 @@ import { emptySubtitles, isTextOverlay } from "./types";
 // The assistant's add_title states its own defaults, so a remembered look from
 // another title must not ride along on what it leaves out.
 const remembered = { font: "bangers", size: 140, letterSpacing: 0.55, color: "#FF0000", shadow: false };
-globalThis.localStorage ??= {
+// Its own storage on every test, whatever an earlier file left installed, and
+// that file's put back after.
+const previous = globalThis.localStorage;
+const storage = {
   getItem: () => JSON.stringify(remembered),
   setItem: () => {},
   removeItem: () => {},
 } as unknown as Storage;
+globalThis.localStorage = storage;
+afterAll(() => {
+  globalThis.localStorage = previous;
+});
 
 const { runAiTool } = await import("./aiTools");
 
-beforeEach(() =>
+beforeEach(() => {
+  globalThis.localStorage = storage;
   useEditor.setState({
     projectId: "p1",
     aspect: "16:9",
@@ -24,8 +32,8 @@ beforeEach(() =>
     overlays: [],
     subtitles: emptySubtitles(),
     background: "#000000",
-  })
-);
+  });
+});
 
 test("add_title starts from the defaults its schema states", async () => {
   await runAiTool("add_title", { text: "CLIP 1", font: "impact", start: 0, end: 1 });
