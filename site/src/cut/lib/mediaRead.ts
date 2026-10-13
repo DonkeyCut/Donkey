@@ -704,12 +704,21 @@ export async function* audioChunks(
 export async function decodeAudioSpan(
   src: string | Blob,
   from = 0,
-  to?: number
+  to?: number,
+  read: typeof audioChunks = audioChunks
 ): Promise<AudioBuffer | null> {
   const chunks: WrappedAudioBuffer[] = [];
-  for await (const chunk of audioChunks(src, from, to)) chunks.push(chunk);
+  // A compressed frame leans on the one before it — an MP3's bit reservoir,
+  // AAC's overlap, Opus's pre-skip — so the first frame a decode opens on
+  // comes out near-silent. Opening a little early puts that frame before the
+  // span, and assembleAudio trims it away.
+  for await (const chunk of read(src, Math.max(0, from - AUDIO_PREROLL), to)) chunks.push(chunk);
   return assembleAudio(chunks, from, to);
 }
+
+/** How far before a span its decode opens: past Opus's recommended 80 ms
+ * pre-roll, and several MP3 or AAC frames. */
+const AUDIO_PREROLL = 0.12;
 
 /**
  * Lay decoded chunks into one buffer covering `[from, to)`, or null when there
