@@ -2,7 +2,7 @@
 
 
 import { useEffect, type RefObject } from "react";
-import { noteStagePicture } from "@/cut/lib/posterCache";
+import { noteStageDraw, noteStagePicture } from "@/cut/lib/posterCache";
 import {
   getClipSpans,
   overlayLayers,
@@ -981,6 +981,7 @@ class Engine {
       this.stalledAt = 0;
       if (s.buffering) useEditor.setState({ buffering: false });
       this.comp.drawLayer(MISSING_FRAME, undefined, true, 1, 0);
+      noteStageDraw();
       if (s.playing) {
         useEditor.setState({ playing: false });
         this.writeHead(0);
@@ -1050,6 +1051,7 @@ class Engine {
       // readback of it costs nothing anyone is watching; a play's first
       // frame is read back once the play stops and the frame is redrawn.
       if (!playing && masterFrame.kind === "ready") noteStagePicture();
+      noteStageDraw();
     }
     this.phase("draw");
 

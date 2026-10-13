@@ -97,6 +97,23 @@ export function capturePoster(
   }
 }
 
+// Every frame the stage draws, picture or not. The opening poster stands in
+// only until the first one: a cut that opens on a gap draws an all-black
+// frame, which no pixel test can tell from a stage that has drawn nothing.
+let stageDraws = 0;
+
+/** The stage drew a frame of the cut. */
+export function noteStageDraw(): void {
+  stageDraws++;
+}
+
+/** Where the stage's draws stand now; `posterStillWanted` compares against it. */
+export const stageDrawMark = (): number => stageDraws;
+
+/** Whether a poster read since `mark` may still be painted: only while the
+ * stage has drawn nothing of its own. */
+export const posterStillWanted = (mark: number): boolean => stageDraws === mark;
+
 // The stage says when it has drawn a real picture, so the preview's poster
 // is taken from a frame known to be there. Asking on a timer instead meant a
 // pixel readback of the stage every few hundred milliseconds for the first
@@ -168,13 +185,14 @@ export function capturePosterWhenReady(
 }
 
 /** Draw a stored poster over a canvas, contained and centred so a project whose
- * aspect has changed since is letterboxed rather than stretched. */
-export function paintPoster(canvas: HTMLCanvasElement, data: string): Promise<void> {
+ * aspect has changed since is letterboxed rather than stretched. `wanted` is
+ * asked again once the image decodes: the stage may have drawn meanwhile. */
+export function paintPoster(canvas: HTMLCanvasElement, data: string, wanted?: () => boolean): Promise<void> {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
       const ctx = canvas.getContext("2d");
-      if (ctx) {
+      if (ctx && (!wanted || wanted())) {
         const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
         const w = img.width * scale;
         const h = img.height * scale;

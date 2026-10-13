@@ -17,10 +17,11 @@ import {
 import { clipLen, projectDuration, useEditor } from "@/cut/lib/store";
 import { copyStageFrame, primeStageFrame, stageHasFrame } from "@/cut/lib/stageFrame";
 import {
-  capturePoster,
   capturePosterOnPicture,
   paintPoster,
+  posterStillWanted,
   readPoster,
+  stageDrawMark,
 } from "@/cut/lib/posterCache";
 import { resizePreviewSurface, setPreviewCanvas } from "@/cut/lib/previewCanvas";
 import { hdrPreviewState, subscribeHdrPreviewState } from "@/cut/lib/hdrPresent";
@@ -76,12 +77,13 @@ function useCachedFirstFrame(
     const canvas = canvasRef.current;
     if (!canvas || !epoch || !projectId) return;
     let alive = true;
+    const mark = stageDrawMark();
     void readPoster("frame", projectId).then((data) => {
       // Only if the engine has not beaten us to it — a warm decoder paints
-      // within the same frame, and the real picture outranks a stored one.
-      if (alive && data && !capturePoster("frame", projectId, canvas)) {
-        void paintPoster(canvas, data);
-      }
+      // within the same frame, and the real picture outranks a stored one,
+      // even an all-black one at a gap the cut opens on.
+      const wanted = () => alive && posterStillWanted(mark);
+      if (data && wanted()) void paintPoster(canvas, data, wanted);
     });
     // An HDR preview's poster reads off the presented picture: the composite
     // canvas beneath holds an HLG signal, which is not a picture to keep.
