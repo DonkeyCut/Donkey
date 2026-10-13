@@ -66,12 +66,6 @@ export function AuthScreen({ mode, method = "google", callbackURL, footer }: Pro
   if (callbackURL) alternateParams.set("callbackURL", callbackURL);
   const alternateHref = `${screenCopy.alternateHref}${alternateParams.size ? `?${alternateParams}` : ""}`;
 
-  // An app that sent someone here to sign in (ChatGPT's connection) offers
-  // email too, carrying the callback, e.g. for accounts without Google.
-  const emailParams = new URLSearchParams({ method: "email" });
-  if (callbackURL) emailParams.set("callbackURL", callbackURL);
-  const emailHref = `/${mode}?${emailParams}`;
-
   const handleGoogleAuth = useCallback(async () => {
     setIsPending(true);
     setStatusMessage(null);
@@ -119,14 +113,6 @@ export function AuthScreen({ mode, method = "google", callbackURL, footer }: Pro
           style={{ width: googleButtonWidth }}
         />
       </button>}
-      {method === "google" && callbackURL ? (
-        <Link
-          href={emailHref}
-          className="mt-[18px] text-sm font-semibold text-ink underline underline-offset-[3px]"
-        >
-          Continue with email
-        </Link>
-      ) : null}
       <p className="mt-[18px] text-sm leading-normal text-[#555]">
         {screenCopy.alternateLead}{" "}
         <Link
