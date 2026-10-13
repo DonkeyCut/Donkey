@@ -183,6 +183,9 @@ export interface ExportSpec {
     /** Softness of that transition's reveal edge (lib/transitionShape.ts);
      * absent = hard. */
     transitionFeather?: number;
+    /** Width of the white band ahead of that wipe's edge
+     * (lib/transitionShape.ts); absent = none. */
+    transitionBand?: number;
     /** This clip's own entrance/exit animation, baked into the segment's
      * head/tail window: fade (audio follows), zoom, pop, or a slide
      * against black. Unknown styles render as a fade. */
@@ -2908,7 +2911,7 @@ async function renderPass(
       // The style id resolves through the allowlist map; anything unknown
       // (or an old spec without a style) renders as a plain fade. The shaped
       // and softened styles come back as xfade expressions.
-      const kind = xfadeTransition(prev.transitionStyle, prev.transitionFeather, d, W, H);
+      const kind = xfadeTransition(prev.transitionStyle, prev.transitionFeather, d, W, H, prev.transitionBand, depth);
       filters.push(`[${segLabel[j]}]tpad=start_duration=${num(d)}:start_mode=clone[vh${j}]`);
       filters.push(`[${vAcc}][vh${j}]xfade=${kind}:duration=${num(d)}:offset=${num(offset)}[vx${j}]`);
       filters.push(`[${aAcc}]afade=t=out:st=${num(offset)}:d=${num(d)}[ah${j}]`);

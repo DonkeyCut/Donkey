@@ -983,6 +983,7 @@ export async function buildExportPayload(
     // the id.
     transitionStyle: sp.clip.transitionStyle,
     transitionFeather: sp.clip.transitionFeather,
+    transitionBand: sp.clip.transitionBand,
     animIn: sp.clip.animIn,
     animOut: sp.clip.animOut,
     look: sp.clip.look,

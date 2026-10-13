@@ -1,0 +1,63 @@
+import { beforeEach, describe, expect, test } from "bun:test";
+import { runAiTool } from "./aiTools";
+import { useEditor } from "./store";
+import { emptySubtitles } from "./types";
+import { INSPECTOR_TOOLS } from "../components/Inspector.tools";
+
+/** An effect element's own settings changed in place through update_overlay,
+ * so its id, lane and timing survive the edit. */
+
+const reset = () =>
+  useEditor.setState({
+    projectId: "p1",
+    aspect: "16:9",
+    assets: [],
+    clips: [],
+    overlays: [],
+    subtitles: emptySubtitles(),
+    background: "#000000",
+  });
+
+const overlay = (id: string) => useEditor.getState().overlays.find((o) => o.id === id);
+
+async function errorOf(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+  return "";
+}
+
+describe("update_overlay on an effect", () => {
+  beforeEach(reset);
+
+  test("a light leak's amount and course change in place", async () => {
+    const { id } = (await runAiTool("add_effect", { effect: "lightleak", start: 1, end: 1.5, leak: "burn", amount: 0.8 })) as { id: string };
+    await runAiTool("update_overlay", { id, amount: 1, leak: "char" });
+    expect(overlay(id)).toMatchObject({ effect: "lightleak", leak: "char", amount: 1, start: 1, end: 1.5 });
+    await runAiTool("update_overlay", { id, leak: "drift" });
+    expect((overlay(id) as { leak?: string }).leak).toBeUndefined();
+    expect(await errorOf(() => runAiTool("update_overlay", { id, leak: "flare" }))).toContain("leak is one of");
+  });
+
+  test("a flash's tone, strobe and rhythm, and a glitch's kind, change in place", async () => {
+    const { id: flash } = (await runAiTool("add_effect", { effect: "flash", start: 2, end: 3 })) as { id: string };
+    await runAiTool("update_overlay", { id: flash, tone: "black", rate: 6, rhythm: "flicker" });
+    expect(overlay(flash)).toMatchObject({ tone: "black", rate: 6, rhythm: "flicker" });
+    const { id: glitch } = (await runAiTool("add_effect", { effect: "glitch", start: 0, end: 1 })) as { id: string };
+    await runAiTool("update_overlay", { id: glitch, glitch: "rgb" });
+    expect(overlay(glitch)).toMatchObject({ glitch: "rgb" });
+  });
+
+  test("a setting the effect doesn't take is skipped, like any field a kind lacks", async () => {
+    const { id } = (await runAiTool("add_effect", { effect: "flash", start: 2, end: 3 })) as { id: string };
+    await runAiTool("update_overlay", { id, leak: "burn" });
+    expect((overlay(id) as { leak?: string }).leak).toBeUndefined();
+  });
+
+  test("the tool's schema offers the effect settings", () => {
+    const props = INSPECTOR_TOOLS.find((t) => t.name === "update_overlay")!.inputSchema.properties as Record<string, unknown>;
+    for (const k of ["amount", "leak", "glitch", "tone", "rate", "rhythm"]) expect(Object.keys(props)).toContain(k);
+  });
+});

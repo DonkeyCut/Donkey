@@ -184,19 +184,43 @@ export function autoGradeFromImageData(data: Uint8ClampedArray): ColorGrade | un
 /* Reference matching                                                  */
 /* ------------------------------------------------------------------ */
 
+/** The steepest a matched curve may climb, and (inverted) the flattest, per
+ * segment. Quantiles of a reference with other content — a beige pavement
+ * for a painted wall — can jump a hundred code values across a few, and a
+ * curve that steep tears smooth gradients into flat bands of false colour;
+ * one that flat crushes a channel while its neighbours keep climbing, so the
+ * channels cross and highlights change hue. */
+export const MATCH_SLOPE_MAX = 2.5;
+
 function quantileCurve(src: number[], ref: number[]): CurvePoint[] | undefined {
   const pts: CurvePoint[] = [];
+  const median = STAT_QUANTILES.indexOf(0.5);
+  let anchor = 0;
   let lastX = -1;
   for (let i = 0; i < src.length; i++) {
     const x = Math.round(src[i]);
     const y = Math.round(ref[i]);
     if (x <= lastX) continue;
+    if (i <= median) anchor = pts.length;
     pts.push([x, y]);
     lastX = x;
   }
   // Monotone outputs keep the compiled spline monotone.
   for (let i = 1; i < pts.length; i++) {
     if (pts[i][1] < pts[i - 1][1]) pts[i][1] = pts[i - 1][1];
+  }
+  // The median lands where the reference puts it; outward from it each
+  // segment's slope stays inside [1/MATCH_SLOPE_MAX, MATCH_SLOPE_MAX].
+  const clampY = (y: number) => Math.max(0, Math.min(255, Math.round(y)));
+  for (let i = anchor + 1; i < pts.length; i++) {
+    const dx = pts[i][0] - pts[i - 1][0];
+    const y = pts[i - 1][1];
+    pts[i][1] = clampY(Math.min(y + dx * MATCH_SLOPE_MAX, Math.max(y + dx / MATCH_SLOPE_MAX, pts[i][1])));
+  }
+  for (let i = anchor - 1; i >= 0; i--) {
+    const dx = pts[i + 1][0] - pts[i][0];
+    const y = pts[i + 1][1];
+    pts[i][1] = clampY(Math.max(y - dx * MATCH_SLOPE_MAX, Math.min(y - dx / MATCH_SLOPE_MAX, pts[i][1])));
   }
   if (pts.length < 2 || pts.every(([x, y]) => Math.abs(x - y) <= 2)) return undefined;
   // The spline holds flat outside its end points, so a curve that stops at the
@@ -218,16 +242,29 @@ function quantileCurve(src: number[], ref: number[]): CurvePoint[] | undefined {
   return pts;
 }
 
+/** Move each curve point `strength` of the way from identity to where the
+ * match put it. */
+function scaleCurve(pts: CurvePoint[] | undefined, strength: number): CurvePoint[] | undefined {
+  if (!pts || strength >= 1) return pts;
+  const out = pts.map(([x, y]) => [x, Math.round(x + (y - x) * strength)] as CurvePoint);
+  return out.every(([x, y]) => Math.abs(x - y) <= 2) ? undefined : out;
+}
+
 /**
  * Compute the grade that moves `source` toward `reference`: per-channel
  * quantile curves, or a saturation delta when the tones already agree.
- * Returns undefined when the frames already agree.
+ * `strength` (0..1) takes the match part of the way — for a reference whose
+ * content differs from the clip's (a bright window for a dark room), where
+ * the full match lifts or crushes what the reference never had. Returns
+ * undefined when the frames already agree.
  */
-export function matchGrade(source: ColorStats, reference: ColorStats): ColorGrade | undefined {
+export function matchGrade(source: ColorStats, reference: ColorStats, strength = 1): ColorGrade | undefined {
+  const k = Math.max(0, Math.min(1, strength));
+  if (k === 0) return undefined;
   const grade: ColorGrade = {};
-  const r = quantileCurve(source.r, reference.r);
-  const g = quantileCurve(source.g, reference.g);
-  const b = quantileCurve(source.b, reference.b);
+  const r = scaleCurve(quantileCurve(source.r, reference.r), k);
+  const g = scaleCurve(quantileCurve(source.g, reference.g), k);
+  const b = scaleCurve(quantileCurve(source.b, reference.b), k);
   if (r || g || b) {
     grade.curves = {};
     if (r) grade.curves.r = r;
@@ -238,7 +275,7 @@ export function matchGrade(source: ColorStats, reference: ColorStats): ColorGrad
   // channels, so the saturation term is for frames that agree in tone and
   // differ in chroma alone.
   if (!grade.curves && source.meanSat > 0.01) {
-    const delta = Math.round((reference.meanSat / source.meanSat - 1) * GRADE_MAX);
+    const delta = Math.round((reference.meanSat / source.meanSat - 1) * GRADE_MAX * k);
     if (Math.abs(delta) >= 2) {
       grade.saturation = Math.max(-GRADE_MAX, Math.min(GRADE_MAX, delta));
     }

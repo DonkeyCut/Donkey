@@ -46,7 +46,7 @@ const defaultIO: ProxyJobIO = {
 };
 
 /**
- * Run one proxy job: pull the ProRes master out of R2, build its preview
+ * Run one proxy job: pull the master (ProRes, or a heavy video) out of R2, build its preview
  * proxy with the same code the engine runs on a Mac, and land it in the
  * project's media prefix as a quota-exempt object (kind "proxy") under a
  * name deduped against the project's files. The master is left alone; the
@@ -62,7 +62,7 @@ export async function runProxyJob(
   if ((job.spec as { target?: string } | null)?.target === "library") {
     return runLibraryProxyJob(job, handle, isCanceled);
   }
-  const { file } = (job.spec ?? {}) as { file?: string };
+  const { file, maxHeight } = (job.spec ?? {}) as { file?: string; maxHeight?: number };
   if (!file) throw new Error("Proxy job has no file.");
   const projectId = job.projectId;
   if (!projectId) throw new Error("Proxy job has no project.");
@@ -84,7 +84,9 @@ export async function runProxyJob(
 
     const [total, settings] = await Promise.all([io.duration(src), io.settings()]);
     const outcome = await io.make(handle, src, out, {
-      maxHeight: settings.proxyMaxHeight,
+      // A heavy video's proxy asks for a smaller copy; none is larger than
+      // the account allows.
+      maxHeight: maxHeight && maxHeight > 0 ? Math.min(settings.proxyMaxHeight, maxHeight) : settings.proxyMaxHeight,
       crf: settings.proxyCrf,
       onProgress: (seconds) => {
         if (total > 0) handle.progress = Math.min(0.99, seconds / total);

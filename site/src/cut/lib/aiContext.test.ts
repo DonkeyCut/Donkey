@@ -33,6 +33,18 @@ describe("describeDoc", () => {
     expect(read.project).toMatchObject({ id: "rich", name: "Rich edit", aspect: "16:9", background: "#102030" });
   });
 
+  test("an effect element reads with its own settings, a light leak's course among them", () => {
+    const doc = richDoc();
+    const base = { start: 1, end: 1.2, x: 0.5, y: 0.5 };
+    doc.overlays.push(
+      { ...base, id: "fx-leak", kind: "effect", effect: "lightleak", amount: 1, leak: "char" },
+      { ...base, id: "fx-drift", kind: "effect", effect: "lightleak" },
+    );
+    const read = describeDoc(doc).overlays as Record<string, unknown>[];
+    expect(read.find((o) => o.id === "fx-leak")).toMatchObject({ effect: "lightleak", leak: "char" });
+    expect("leak" in read.find((o) => o.id === "fx-drift")!).toBe(false);
+  });
+
   test("carries no live-only fields", () => {
     const read = describeDoc(richDoc()) as Record<string, unknown>;
     for (const key of ["playhead", "selection", "renders", "view", "fonts", "playing"]) {

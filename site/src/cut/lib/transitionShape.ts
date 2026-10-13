@@ -38,6 +38,28 @@ export const SLICE_TAPS = 5;
 /** The clock wipe's sweep from the top edge down to the left one. */
 export const CLOCK_SWEEP = Math.PI / 2;
 
+/** The wipes that can run a solid white band just ahead of their edge. */
+export const BAND_STYLES: TransitionStyle[] = ["wipeleft", "wiperight", "wipeup", "wipedown"];
+
+/** The widest band offered: half the distance the edge crosses. */
+export const TRANSITION_BAND_MAX = 0.5;
+
+/** Whether `style` takes a white band. */
+export const takesBand = (style: TransitionStyle | undefined): boolean => !!style && BAND_STYLES.includes(style);
+
+/** A clip's stored band brought into range; 0 = no band. */
+export const clampBand = (v: number | undefined): number =>
+  Math.min(TRANSITION_BAND_MAX, Math.max(0, Number.isFinite(v) ? (v as number) : 0));
+
+/**
+ * Where a banded wipe's reveal edge stands at progress `p`, as a share of
+ * the distance it crosses. The edge travels the frame plus the band, so the
+ * band enters from off-frame and leaves past the far edge: e.g. a 0.25 band
+ * stands at -0.25 at the start, 0.375 halfway and 1 at the end. With no
+ * band it is plain progress.
+ */
+export const bandEdge = (p: number, band: number): number => Math.min(1, Math.max(0, p)) * (1 + band) - band;
+
 /** Whether `style` takes a soft edge. */
 export const takesFeather = (style: TransitionStyle | undefined): boolean =>
   !!style && FEATHER_STYLES.includes(style);

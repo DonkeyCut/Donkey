@@ -17,7 +17,7 @@ await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
     return { hasVideo: true };
   }) as never,
 });
-const { ensureProxy, needsProxy, proxyUnreadable, useProxyJobs } = await import("./mediaProxy");
+const { ensureProxy, HEAVY_PROXY_MAX_HEIGHT, needsProxy, proxyUnreadable, useProxyJobs } = await import("./mediaProxy");
 const { useEditor } = await import("./store");
 
 const prores = (id: string, extra: Partial<MediaAsset> = {}): MediaAsset => ({
@@ -30,6 +30,27 @@ const prores = (id: string, extra: Partial<MediaAsset> = {}): MediaAsset => ({
   color: { matrix: "bt2020nc", fullRange: false, bitDepth: 10, detected: "apple-log", codec: "apch" },
   ...extra,
 });
+
+/** A Pexels-style H.264 master: 4K at about 20 Mbps unless told otherwise. */
+const h264 = (id: string, extra: Partial<MediaAsset> = {}): MediaAsset => ({
+  id,
+  fileName: `${id}.mp4`,
+  name: `${id}.mp4`,
+  type: "video",
+  duration: 10,
+  width: 3840,
+  height: 2160,
+  sizeBytes: 25_000_000,
+  url: `https://example.test/${id}.mp4`,
+  color: { matrix: "bt709", fullRange: false, bitDepth: 8, detected: "rec709", codec: "avc1" },
+  ...extra,
+});
+
+/** What the browser answers when asked whether it decodes the proxy's HEVC. */
+let hevc = true;
+(globalThis as { VideoDecoder?: unknown }).VideoDecoder = {
+  isConfigSupported: async () => ({ supported: hevc }),
+};
 
 function backend(kind: CutBackend["kind"], answer: (path: string, body: unknown) => Response) {
   const calls: { path: string; body: unknown }[] = [];
@@ -53,6 +74,23 @@ describe("needsProxy", () => {
     expect(needsProxy(prores("a", { color: { matrix: "bt709", fullRange: false, bitDepth: 8, detected: "rec709", codec: "avc1" } }))).toBe(false);
     expect(needsProxy(prores("a", { color: undefined }))).toBe(false);
     expect(needsProxy(prores("a", { type: "audio" }))).toBe(false);
+  });
+
+  // A fast cut streamed from the cloud opens a new file at every cut, and a
+  // 4K or high-bitrate master takes longer to reach its frame than the shot
+  // lasts. Its preview reads a lighter copy; a file on this machine, read
+  // off its own disk, does not need one.
+  test("a heavy streamed video needs one: over 1080p, or over the bitrate line", () => {
+    expect(needsProxy(h264("uhd"), true)).toBe(true);
+    expect(needsProxy(h264("qhd", { width: 2560, height: 1440, sizeBytes: 5_000_000 }), true)).toBe(true);
+    expect(needsProxy(h264("dense", { width: 1920, height: 1080, sizeBytes: 22_000_000 }), true)).toBe(true);
+  });
+
+  test("a light streamed video, or any video read off this machine, does not", () => {
+    expect(needsProxy(h264("hd", { width: 1920, height: 1080, sizeBytes: 7_000_000 }), true)).toBe(false);
+    expect(needsProxy(h264("wide", { width: 2048, height: 1080, sizeBytes: 6_000_000 }), true)).toBe(false);
+    expect(needsProxy(h264("uhd"))).toBe(false);
+    expect(needsProxy(h264("uhd", { proxy: { fileName: "uhd.proxy.mp4", sizeBytes: 1 } }), true)).toBe(false);
   });
 });
 
@@ -94,6 +132,35 @@ describe("ensureProxy", () => {
     expect(useEditor.getState().assets[0].proxy).toEqual({ fileName: "a.proxy.mp4", sizeBytes: 9 });
   });
 
+  test("a heavy cloud video asks the worker for a copy no taller than 1080p", async () => {
+    hevc = true;
+    const asset = h264("a");
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("cloud", () => Response.json({ fileName: "a.proxy.mp4", sizeBytes: 9 }));
+    await ensureProxy("p", asset, b.api);
+    expect(b.calls[0]).toEqual({ path: "/api/cut/projects/p/proxy", body: { file: "a.mp4", maxHeight: HEAVY_PROXY_MAX_HEIGHT } });
+    expect(HEAVY_PROXY_MAX_HEIGHT).toBeLessThanOrEqual(1080);
+    expect(useEditor.getState().assets[0].proxy).toEqual({ fileName: "a.proxy.mp4", sizeBytes: 9 });
+  });
+
+  test("a browser that cannot play the proxy's HEVC keeps the master and builds nothing", async () => {
+    hevc = false;
+    const asset = h264("a");
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("cloud", () => Response.json({ fileName: "a.proxy.mp4", sizeBytes: 9 }));
+    await ensureProxy("p", asset, b.api);
+    hevc = true;
+    expect(b.calls).toHaveLength(0);
+    expect(useEditor.getState().assets[0].proxy).toBeUndefined();
+  });
+
+  test("a heavy video in a Mac project is left alone", async () => {
+    features = new Set(["media.proxy"]);
+    const b = backend("local", () => Response.json({}));
+    await ensureProxy("p", h264("a"), b.api);
+    expect(b.calls).toHaveLength(0);
+  });
+
   test("a failure leaves the asset on the master and says why", async () => {
     features = new Set(["media.proxy"]);
     const asset = prores("a");
@@ -129,7 +196,6 @@ describe("proxyUnreadable", () => {
     const b = backend("local", () => Response.json({ fileName: "gone.proxy.mp4", sizeBytes: 44 }));
     const healed = proxyUnreadable(asset, b.api);
     // The master plays from the moment the reader gives up.
-    expect(useEditor.getState().assets[0].proxy).toBeUndefined();
     expect(useEditor.getState().assets[0].proxyUrl).toBeUndefined();
     await healed;
     expect(b.calls[0].path).toBe("/api/cut/projects/p/proxy");
@@ -157,6 +223,24 @@ describe("proxyUnreadable", () => {
     const back = useEditor.getState().assets[0];
     await proxyUnreadable(back, b.api);
     expect(useEditor.getState().assets[0].proxy).toBeUndefined();
+  });
+
+  test("a browser that cannot decode the proxy plays the master and leaves the doc's proxy alone", async () => {
+    // Firefox has no HEVC: the proxy is fine, only this page cannot play it.
+    // Dropping it from the doc would take it from every other viewer too.
+    hevc = false;
+    const asset = broken("nohevc");
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("cloud", () => Response.json({}));
+    await proxyUnreadable(asset, b.api);
+    expect(useEditor.getState().assets[0].proxy).toEqual(asset.proxy!);
+    expect(useEditor.getState().assets[0].proxyUrl).toBeUndefined();
+    expect(b.calls).toHaveLength(0);
+    // A link refresh re-mints the master's address but keeps the proxy off.
+    useEditor.getState().applyMediaUrls(new Map([["nohevc.MOV", "https://x/m"], ["nohevc.proxy.mp4", "https://x/p"]]));
+    expect(useEditor.getState().assets[0].url).toBe("https://x/m");
+    expect(useEditor.getState().assets[0].proxyUrl).toBeUndefined();
+    hevc = true;
   });
 
   test("a shared view drops the proxy for itself and builds nothing", async () => {

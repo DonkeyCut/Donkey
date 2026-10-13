@@ -68,8 +68,12 @@ export const SIDE_PANEL_TOOLS = [
   {
     name: "delete_asset",
     description:
-      "Remove a project asset and every timeline clip that uses it — the Media panel's trash. Removed media does not come back with undo, so call it only when the user explicitly asked to remove that media, and report how many clips went with it.",
-    inputSchema: obj({ asset_id: str("Project asset id from `media`") }, ["asset_id"]),
+      "Remove project assets and every timeline clip that uses them — the Media panel's trash. Pass asset_id for one, asset_ids for several in one call, or unused:true to clear every asset no timeline uses, open or parked (leftover imports, replaced footage, reference images) without touching placed media. Removed media does not come back with undo, so call it only when the user explicitly asked to remove that media, and report how many assets and clips went.",
+    inputSchema: obj({
+      asset_id: str("Project asset id from `media`"),
+      asset_ids: { type: "array", items: { type: "string" }, description: "Several project asset ids, removed in one call" },
+      unused: { type: "boolean", description: "true removes every asset that no timeline (open or parked) uses" },
+    }),
   },
   {
     name: "set_publish",
@@ -80,6 +84,17 @@ export const SIDE_PANEL_TOOLS = [
       tags: str("Space or comma separated tags"),
       soundTitle: str("Sound title"),
       handle: str("Creator handle without @"),
+    }),
+  },
+  {
+    name: "set_project_notes",
+    description:
+      "Write this project's own notes — the Details tab's date, links and text, saved with the project for anyone who opens it. Put a cut's sources here: the original video a template copies, the post it was published as, a reference. note_save writes the account's Notes instead, which travel with no project. add_links appends (skipping links already there); links replaces the whole list.",
+    inputSchema: obj({
+      add_links: { type: "array", items: { type: "string" }, description: "Links to append, kept in order, duplicates skipped" },
+      links: { type: "array", items: { type: "string" }, description: "The whole link list, replacing what is there ([] clears it)" },
+      text: str("Free text, replacing what is there"),
+      published_at: str("Published date, yyyy-mm-dd ('' clears it)"),
     }),
   },
   {

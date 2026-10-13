@@ -927,14 +927,16 @@ export const jobsCloud = {
     }
   },
 
-  /** Queue a preview proxy of a ProRes master: the worker builds it and
+  /** Queue a preview proxy of a ProRes master, or of a heavy video at the
+   * smaller `maxHeight` it asks for: the worker builds it and
    * registers it beside the master as a quota-exempt object. A proxy already
    * built answers at once, and a job already on its way answers with that
    * job, so a project copied to the cloud and then opened queues one. */
   async proxy(userId: string, projectId: string, req: Request) {
     try {
-      const { file } = (await req.json()) as { file?: string };
+      const { file, maxHeight: asked } = (await req.json()) as { file?: string; maxHeight?: unknown };
       if (!file) return err("file is required.", 400);
+      const maxHeight = typeof asked === "number" && Number.isFinite(asked) ? Math.round(Math.min(4320, Math.max(360, asked))) : undefined;
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
       const source = await prisma.cutMediaObject.findFirst({
         where: { userId, projectId, fileName: file, kind: "media", uploadState: "complete" },
@@ -958,7 +960,7 @@ export const jobsCloud = {
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
       const row = await prisma.cutRenderJob.create({
-        data: { userId, projectId, kind: "proxy", spec: { file } as unknown as Prisma.InputJsonValue },
+        data: { userId, projectId, kind: "proxy", spec: { file, ...(maxHeight ? { maxHeight } : {}) } as unknown as Prisma.InputJsonValue },
       });
       wakeRenderWorker();
       return Response.json({ jobId: row.id });

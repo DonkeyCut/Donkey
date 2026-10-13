@@ -5,9 +5,10 @@ import { assertGraphSafe } from "./filterGraph";
 import { videoDimensions } from "./util";
 
 /**
- * The preview proxy of a ProRes master: a 10-bit HEVC file the browser's
- * hardware decoder plays at speed, kept beside the master in the project's
- * media. The master stays what an export reads.
+ * The preview proxy of a ProRes master, or of a heavy video a cloud project
+ * streams: a 10-bit HEVC file the browser's hardware decoder plays at speed,
+ * kept beside the master in the project's media. The master stays what an
+ * export reads.
  *
  * The proxy carries the master's code values through the Rec.709 matrix: the
  * picture is taken out of the master's own matrix (BT.2020 non-constant on an
@@ -93,6 +94,9 @@ export function proxyFfmpegArgs(src: string, out: string, opts: ProxyArgs): stri
     "-colorspace", "bt709",
     "-color_range", "tv",
     ...video,
+    // A keyframe every second of the master's time: the preview seeks into
+    // the proxy at every cut, and a seek decodes from the keyframe before it.
+    "-force_key_frames", "expr:gte(t,n_forced*1)",
     "-tag:v", "hvc1",
     ...(source.hasAudio ? ["-c:a", "aac", "-b:a", "192k"] : []),
     "-movflags", "+faststart",

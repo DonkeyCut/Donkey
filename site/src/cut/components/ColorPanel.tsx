@@ -203,17 +203,19 @@ function SourceColorRow({ clip }: { clip: VideoClip }) {
   );
 }
 
-/** Where a ProRes master's preview is coming from: the proxy being made, or
+/** Where a proxied video's preview is coming from: the proxy being made, or
  * the master itself when no proxy could be made here. Silent once the proxy
- * is in place, and for every other kind of file. */
+ * is in place, and for every file no proxy was asked for. */
 function ProxyLine({ asset }: { asset: MediaAsset }) {
   const job = useProxyJobs((s) => s.jobs[asset.id]);
-  if (!job || !needsProxy(asset)) return null;
+  // A job only exists for a file that needed a proxy where it was asked.
+  if (!job || !needsProxy(asset, true)) return null;
+  const master = asset.color?.codec?.startsWith("ap") ? "the ProRes master" : "the original file";
   const text =
     job.kind === "making"
       ? `Preview proxy: ${Math.round(job.progress * 100)}%`
       : job.kind === "none"
-        ? "No preview proxy on this browser. The preview plays the ProRes master."
+        ? `No preview proxy on this browser. The preview plays ${master}.`
         : `Preview proxy failed: ${job.error}`;
   return <p className="pb-2 text-[11px] leading-snug text-muted-foreground">{text}</p>;
 }

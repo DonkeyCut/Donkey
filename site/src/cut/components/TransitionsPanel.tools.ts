@@ -9,7 +9,7 @@
 
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { ANIM_STYLE_IDS, TRANSITION_STYLE_IDS } from "@/cut/lib/types";
-import { FEATHER_STYLES, TRANSITION_FEATHER_MAX } from "@/cut/lib/transitionShape";
+import { BAND_STYLES, FEATHER_STYLES, TRANSITION_BAND_MAX, TRANSITION_FEATHER_MAX } from "@/cut/lib/transitionShape";
 
 export const TRANSITIONS_TOOLS = [
   {
@@ -27,6 +27,9 @@ export const TRANSITIONS_TOOLS = [
       },
       feather: num(
         `Softness of the reveal edge for ${FEATHER_STYLES.join(", ")}: a share of the frame the edge crosses, 0..${TRANSITION_FEATHER_MAX} (0 = hard edge, 0.15 = a soft blurred band); other styles ignore it`
+      ),
+      band: num(
+        `A solid white panel running just ahead of the reveal edge of ${BAND_STYLES.join(", ")}, as a share of the frame the edge crosses, 0..${TRANSITION_BAND_MAX} (0 = none): the outgoing shot is wiped first by white, then by the incoming one, and the panel leaves past the far edge. A 0.1s wiperight with band 0.5 is the white-panel slide of a recap montage. Draws a hard edge (overrides feather)`
       ),
     }, ["seconds"]),
   },

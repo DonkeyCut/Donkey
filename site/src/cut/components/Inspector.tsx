@@ -5034,10 +5034,11 @@ function GlitchKindRow({ overlay: o }: { overlay: EffectOverlay }) {
 }
 
 /** What each light leak course is called in the panel. */
-const LEAK_LABELS: Record<LeakCourse, string> = { drift: "Drift", burn: "Burn", scorch: "Scorch" };
+const LEAK_LABELS: Record<LeakCourse, string> = { drift: "Drift", burn: "Burn", scorch: "Scorch", film: "Film", char: "Char" };
 
 /** A light leak's course: a drifting glow for the whole element, the film
- * burn played once across it, or the scorch flashing hot tones through it. */
+ * burn played once across it, the scorch flashing hot tones through it, the
+ * film-strip flash over a cut, or the burn's dark climb. */
 function LeakCourseRow({ overlay: o }: { overlay: EffectOverlay }) {
   const leak = o.leak ?? "drift";
   return (

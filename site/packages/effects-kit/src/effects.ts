@@ -125,8 +125,11 @@ const flashOn = (tLocal: number, rate: number, rhythm?: FlashRhythm) => {
 /** How a light leak plays: `drift` glows and wanders for as long as it is
  * up; `burn` is the film burn, played once across the element's length;
  * `scorch` flashes the picture through hot yellow, orange and red tones,
- * a new one each frame. */
-export const LEAK_COURSES = ["drift", "burn", "scorch"] as const;
+ * a new one each frame; `film` is the film flash over a cut, a warm wash
+ * with the strip's sprocket holes blazing along the top, played once across
+ * the element; `char` is the burn's climb in dark stock — a hot orange front
+ * cooling through ember to black — played once across the element. */
+export const LEAK_COURSES = ["drift", "burn", "scorch", "film", "char"] as const;
 export type LeakCourse = (typeof LEAK_COURSES)[number];
 
 /** The kinds a glitch breaks the picture with. The random schedule deals the
@@ -137,14 +140,14 @@ export type GlitchKind = (typeof GLITCH_KINDS)[number];
 
 /** The recipes the renderers draw: every picture effect, the burn a light
  * leak plays on its burn course, and a glitch pinned to one kind. */
-type RecipeId = VisualEffectId | "burn" | "scorch" | `glitch:${GlitchKind}`;
+type RecipeId = VisualEffectId | "burn" | "scorch" | "film" | "char" | `glitch:${GlitchKind}`;
 
 /** The recipe an effect element renders with. Every renderer resolves the
  * element through here, so a light leak on its burn course draws the burn
  * recipe, and a pinned glitch its kind, in the preview, the in-tab export and
  * the ffmpeg graph alike. */
 export const effectRecipe = (e: { effect: string; leak?: LeakCourse; glitch?: GlitchKind }): string =>
-  e.effect === "lightleak" && (e.leak === "burn" || e.leak === "scorch")
+  e.effect === "lightleak" && (e.leak === "burn" || e.leak === "scorch" || e.leak === "film" || e.leak === "char")
     ? e.leak
     : e.effect === "glitch" && e.glitch && (GLITCH_KINDS as readonly string[]).includes(e.glitch)
       ? `glitch:${e.glitch}`
@@ -350,6 +353,9 @@ export interface BurnStreak {
   p: number;
   w: number;
   alpha: number;
+  /** The band's color when the burn's stock has its own (the char's light
+   * line); the burn's flame color otherwise. */
+  rgb?: [number, number, number];
 }
 
 /** The burn at one moment: its vertical profile, laid over the picture at
@@ -367,6 +373,30 @@ const BURN_YELLOW: [number, number, number] = [255, 216, 102];
 const BURN_ORANGE: [number, number, number] = [247, 168, 58];
 const BURN_EDGE: [number, number, number] = [255, 106, 26];
 export const BURN_FLAME: [number, number, number] = [232, 120, 42];
+
+/** A burn's stock: the body's three phases (`flare` while it climbs, `yellow`
+ * as it cools, `orange` where it settles), the front's hot edge and the
+ * flame band's color. */
+export interface BurnPalette {
+  flare: [number, number, number];
+  yellow: [number, number, number];
+  orange: [number, number, number];
+  edge: [number, number, number];
+  flame: [number, number, number];
+}
+
+const BURN_PALETTE: BurnPalette = { flare: BURN_FLARE, yellow: BURN_YELLOW, orange: BURN_ORANGE, edge: BURN_EDGE, flame: BURN_FLAME };
+
+/** The char's dark stock: the body climbs hot orange, cools through ember to
+ * char black, and a thin bright light line crosses it — film burning out on
+ * black rather than flaring white. */
+export const CHAR_PALETTE: BurnPalette = {
+  flare: [240, 118, 30],
+  yellow: [120, 38, 12],
+  orange: [10, 7, 6],
+  edge: [255, 112, 28],
+  flame: [255, 176, 88],
+};
 
 /** How far the burned body runs under the front, how wide the hot edge is,
  * and how far its glow reaches above it — frame fractions. */
@@ -393,10 +423,10 @@ const mixRgb = (a: [number, number, number], b: [number, number, number], p: num
 
 /** The burn's body color `u` of the way through: flare, then yellow, then
  * orange. */
-function burnCore(u: number): [number, number, number] {
-  if (u < 0.4) return BURN_FLARE;
-  if (u < 0.6) return mixRgb(BURN_FLARE, BURN_YELLOW, smooth((u - 0.4) / 0.2));
-  return mixRgb(BURN_YELLOW, BURN_ORANGE, smooth((u - 0.6) / 0.25));
+function burnCore(u: number, pal: BurnPalette): [number, number, number] {
+  if (u < 0.4) return pal.flare;
+  if (u < 0.6) return mixRgb(pal.flare, pal.yellow, smooth((u - 0.4) / 0.2));
+  return mixRgb(pal.yellow, pal.orange, smooth((u - 0.6) / 0.25));
 }
 
 /**
@@ -421,16 +451,16 @@ function clipStops(stops: BurnStop[]): BurnStop[] {
 }
 
 /** The burn `tLocal` seconds into an element `dur` long, at amount `k`. */
-export function burnAt(tLocal: number, dur: number, k: number): BurnPaint {
+export function burnAt(tLocal: number, dur: number, k: number, pal: BurnPalette = BURN_PALETTE): BurnPaint {
   const u = Math.max(0, Math.min(1, tLocal / Math.max(dur, 1e-3)));
 
   // The front climbs from the bottom edge until its glow has left the top.
   const h = (1 + BURN_GLOW + BURN_EDGE_W) * smooth(u / BURN_RISE);
-  const core = burnCore(u);
+  const core = burnCore(u, pal);
   const stops = clipStops([
     { at: h - BURN_BODY, rgb: core, a: 1 },
-    { at: h - BURN_EDGE_W, rgb: BURN_EDGE, a: 1 },
-    { at: h + BURN_GLOW, rgb: BURN_EDGE, a: 0 },
+    { at: h - BURN_EDGE_W, rgb: pal.edge, a: 1 },
+    { at: h + BURN_GLOW, rgb: pal.edge, a: 0 },
   ]);
 
   // Opaque at full amount; the release hands the picture back.
@@ -440,7 +470,8 @@ export function burnAt(tLocal: number, dur: number, k: number): BurnPaint {
   // The flame band crosses the frame while the burn flares.
   const B = BURN_STREAK;
   const f = (u - B.from) / B.span;
-  const streak = f > 0 && f < 1 ? { angle: B.angle, p: B.p0 - B.travel * f, w: B.w, alpha: B.alpha * Math.sin(Math.PI * f) } : undefined;
+  const flame = pal === BURN_PALETTE ? {} : { rgb: pal.flame };
+  const streak = f > 0 && f < 1 ? { angle: B.angle, p: B.p0 - B.travel * f, w: B.w, alpha: B.alpha * Math.sin(Math.PI * f), ...flame } : undefined;
   return streak ? { stops, alpha, streak } : { stops, alpha };
 }
 
@@ -454,9 +485,9 @@ export const burnGradient = (b: BurnPaint) =>
 
 /** The CSS background of the flame band, at the band's own alpha. */
 export const burnStreakGradient = (s: BurnStreak) =>
-  `linear-gradient(${s.angle}deg, ${rgba(BURN_FLAME, 0)} ${((s.p - 2 * s.w) * 100).toFixed(1)}%, ` +
-  `${rgba(BURN_FLAME, 1)} ${(s.p * 100).toFixed(1)}%, ` +
-  `${rgba(BURN_FLAME, 0)} ${((s.p + 2 * s.w) * 100).toFixed(1)}%)`;
+  `linear-gradient(${s.angle}deg, ${rgba(s.rgb ?? BURN_FLAME, 0)} ${((s.p - 2 * s.w) * 100).toFixed(1)}%, ` +
+  `${rgba(s.rgb ?? BURN_FLAME, 1)} ${(s.p * 100).toFixed(1)}%, ` +
+  `${rgba(s.rgb ?? BURN_FLAME, 0)} ${((s.p + 2 * s.w) * 100).toFixed(1)}%)`;
 
 /** The ellipse a wash covers, in frame fractions: center (x, y), radii (rx,
  * ry). The wash holds its full strength out to `inner` of the way to the rim
@@ -682,16 +713,21 @@ function glitchRunAt(step: number, k: number): { kind: GlitchKind; len: number }
   return { kind: run.kind, len: run.min + Math.floor(stepHash(step, 6) * (run.max - run.min + 1)) };
 }
 
+/** The amount a pinned glitch pulls its full travel at; the travel scales
+ * with amount from there, so 0.15 is a faint fringe and 1 twice the pull. */
+const PINNED_GLITCH_AMOUNT = 0.5;
+
 /** What the glitch does on step `step` at amount `k`; null = a clean step.
  * The latest run to start plays until it ends, then the picture is clean
  * until the next one. A pinned glitch hits with its kind on every step, the
- * row, shift and corner dealt fresh each step. */
+ * row, shift and corner dealt fresh each step; with no clean steps to thin
+ * out, its amount sets how far each hit pulls instead. */
 export function glitchHitAt(step: number, k: number, pin?: GlitchKind): GlitchHit | null {
   if (pin) {
     return {
       kind: pin,
       row: 0.15 + 0.7 * stepHash(step, 3),
-      shift: (stepHash(step, 4) < 0.5 ? -1 : 1) * (0.06 + 0.1 * stepHash(step, 5)),
+      shift: (stepHash(step, 4) < 0.5 ? -1 : 1) * (0.06 + 0.1 * stepHash(step, 5)) * (k / PINNED_GLITCH_AMOUNT),
       focus: { x: 0.15 + 0.7 * stepHash(step, 7), y: 0.15 + 0.7 * stepHash(step, 8) },
     };
   }
@@ -839,8 +875,12 @@ export function effectPreviewState(
     }
     case "burn":
       return { cssFilter: "", burn: burnAt(tLocal, dur ?? BURN_SECONDS, k) };
+    case "char":
+      return { cssFilter: "", burn: burnAt(tLocal, dur ?? BURN_SECONDS, k, CHAR_PALETTE) };
     case "scorch":
       return scorchState(tLocal, k);
+    case "film":
+      return filmState(tLocal, dur ?? FILM_SECONDS, k);
     case "shake": {
       const amp = SHAKE_AMP * k; // design px
       return {
@@ -1171,9 +1211,10 @@ export function applyEffectToCanvas(
       const [x1, y1] = pt(hi);
       const band = ctx.createLinearGradient(x0, y0, x1, y1);
       const at = (f: number) => (f - lo) / (hi - lo);
-      band.addColorStop(at(s.p - 2 * s.w), rgba(BURN_FLAME, 0));
-      band.addColorStop(at(s.p), rgba(BURN_FLAME, 1));
-      band.addColorStop(at(s.p + 2 * s.w), rgba(BURN_FLAME, 0));
+      const flame = s.rgb ?? BURN_FLAME;
+      band.addColorStop(at(s.p - 2 * s.w), rgba(flame, 0));
+      band.addColorStop(at(s.p), rgba(flame, 1));
+      band.addColorStop(at(s.p + 2 * s.w), rgba(flame, 0));
       over("source-over", s.alpha * b.alpha, (c) => {
         c.fillStyle = band;
         c.fillRect(0, 0, W, H);
@@ -1530,8 +1571,12 @@ export function effectFilterLines(
     }
     case "burn":
       return burnFilterLines(inLabel, outLabel, k, start, end, chroma);
+    case "char":
+      return burnFilterLines(inLabel, outLabel, k, start, end, chroma, CHAR_PALETTE);
     case "scorch":
       return scorchFilterLines(inLabel, outLabel, k, start, end, tag, chroma);
+    case "film":
+      return filmFilterLines(inLabel, outLabel, k, start, end, tag, chroma);
     case "shake": {
       // The shaken copy renders on its own branch (overscaled, then cropped
       // with time-jittered offsets) and replaces the frame only inside the
@@ -1750,17 +1795,95 @@ function scorchFilterLines(
   ];
 }
 
+/**
+ * The film flash, a light leak's fourth course: the flash a film-strip
+ * transition throws over a cut. The picture washes warm orange, a brighter
+ * band glows across the lower middle, and the strip's sprocket holes blaze
+ * cream along the top edge — rising, holding through the middle of the
+ * element and handing the picture back by its end. A 3–5 frame element over
+ * a cut is the template look. Every renderer lays the same screen washes,
+ * so the preview, the in-tab export and the ffmpeg geq agree.
+ */
+
+/** Length the flash plays over when nothing gives it one: four frames. */
+export const FILM_SECONDS = 4 / 30;
+
+/** The warm wash over the whole frame, the glow band, and the holes: a
+ * screen color, a peak alpha, and a patch (none = the whole frame). */
+const FILM_WASHES: { color: [number, number, number]; alpha: number; area?: WashArea }[] = [
+  { color: [240, 148, 58], alpha: 0.7 },
+  { color: [255, 192, 112], alpha: 0.5, area: { x: 0.5, y: 0.62, rx: 0.9, ry: 0.22, inner: 0.2 } },
+  ...[0.17, 0.5, 0.83].map((x) => ({
+    color: [255, 246, 224] as [number, number, number],
+    alpha: 1,
+    area: { x, y: 0.05, rx: 0.09, ry: 0.09, inner: 0.6 },
+  })),
+];
+
+/** Share of the element the flash spends rising, and again falling. */
+const FILM_RAMP = 0.3;
+
+/** The flash's strength `u` of the way through: up over the first ramp,
+ * full through the middle, down over the last, e.g. 0.15 → 0.5. */
+const filmGain = (u: number) => Math.max(0, Math.min(1, (1 - Math.abs(2 * u - 1)) / (2 * FILM_RAMP)));
+
+function filmState(tLocal: number, dur: number, k: number): EffectPreviewState {
+  const g = filmGain(dur > 0 ? tLocal / dur : 1) * k;
+  return {
+    cssFilter: "",
+    washes: FILM_WASHES.map((w) => ({ color: hex(w.color), alpha: w.alpha * g, mode: "screen", area: w.area })),
+  };
+}
+
+/** The flash in ffmpeg: one geq over the window screens each wash in the
+ * canvas's order, its alpha the same gain of the frame's own time. */
+function filmFilterLines(
+  inLabel: string,
+  outLabel: string,
+  k: number,
+  start: number,
+  end: number,
+  tag: string,
+  chroma: ChainChroma
+): string[] {
+  if (end <= start) {
+    return [`[${inLabel}]null[${outLabel}]`];
+  }
+  const max = chroma.depth === 10 ? 1023 : 255;
+  const dur = end - start;
+  // Register 1: the gain; register 2: the channel, 0..1, washed in turn.
+  const gain = `st(1,${fmt(k)}*clip((1-abs(2*(T-${fmt(start)})/${fmt(dur)}-1))/${fmt(2 * FILM_RAMP)},0,1))`;
+  const plane = (c: number) => {
+    const washes = FILM_WASHES.map((w) => {
+      const cover = w.area
+        ? `*clip((1-hypot(((X+0.5)/W-${fmt(w.area.x)})/${fmt(w.area.rx)},((Y+0.5)/H-${fmt(w.area.y)})/${fmt(w.area.ry)}))/${fmt(1 - w.area.inner)},0,1)`
+        : "";
+      const b = fmt(w.color[c] / 255);
+      return `st(2,ld(2)+${fmt(w.alpha)}*ld(1)${cover}*(${b}-ld(2)*${b}))`;
+    });
+    return `${gain};st(2,${"rgb"[c]}(X,Y)/${max});${washes.join(";")};${max}*ld(2)`;
+  };
+  const all = `enable='gte(t,${(start - STEP_SLACK).toFixed(5)})*lt(t,${(end - STEP_SLACK).toFixed(5)})'`;
+  const rgb = chroma.depth === 10 ? "gbrp10le" : "gbrp";
+  return [
+    `[${inLabel}]split[flb${tag}][fls${tag}]`,
+    `[fls${tag}]format=${rgb},geq=r='${plane(0)}':g='${plane(1)}':b='${plane(2)}':${all},format=${chroma.pixFmt}[flc${tag}]`,
+    `[flb${tag}][flc${tag}]overlay=0:0:${all}:eof_action=pass${chroma.overlay}[${outLabel}]`,
+  ];
+}
+
 function burnFilterLines(
   inLabel: string,
   outLabel: string,
   k: number,
   start: number,
   end: number,
-  chroma: ChainChroma
+  chroma: ChainChroma,
+  pal: BurnPalette = BURN_PALETTE
 ): string[] {
   const dur = Math.max(end - start, 1e-3);
   const smooth = (x: string) => `(st(1,clip(${x},0,1));ld(1)*ld(1)*(3-2*ld(1)))`;
-  const [flare, yellow, orange, edge, flame] = [BURN_FLARE, BURN_YELLOW, BURN_ORANGE, BURN_EDGE, BURN_FLAME].map((c) =>
+  const [flare, yellow, orange, edge, flame] = [pal.flare, pal.yellow, pal.orange, pal.edge, pal.flame].map((c) =>
     yuvCodes(c, chroma.depth).map(Number)
   );
   const S = BURN_STREAK;

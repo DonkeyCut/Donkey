@@ -13,6 +13,7 @@
 
 import { fexpr } from "./filterGraph";
 import {
+  clampBand,
   CLOCK_SWEEP,
   clampFeather,
   FEATHER_STYLES,
@@ -23,6 +24,7 @@ import {
   SLICE_SHUTTER,
   SLICE_STYLES,
   SLICE_TAPS,
+  takesBand,
   takesFeather,
 } from "../lib/transitionShape";
 import { TRANSITION_XFADE, type TransitionStyle } from "../lib/types";
@@ -123,6 +125,25 @@ function clockExpr(W: number, H: number): string {
 }
 
 /**
+ * A banded wipe: the incoming picture behind the edge, a solid white panel
+ * `band` of the crossed distance just ahead of it, the outgoing picture
+ * past that — the edge standing where `bandEdge` puts it. White is the
+ * limited-range code at the chain's depth; an alpha plane keeps the
+ * outgoing picture's.
+ */
+function bandExpr(style: TransitionStyle, band: number, depth: 8 | 10): string {
+  const b = n(band);
+  const e = `(${PROG}*(1+${b})-${b})`;
+  const s = depth === 10 ? 1023 / 255 : 1;
+  const white = `if(eq(PLANE,0),${n(235 * s)},if(eq(PLANE,3),A,${n(128 * s)}))`;
+  // `d` is how far the pixel sits behind the edge's start, as a share of the
+  // distance crossed: under `e` it is revealed, under `e + band` it is white.
+  const d =
+    style === "wipeleft" ? "((W-X-0.5)/W)" : style === "wiperight" ? "((X+0.5)/W)" : style === "wipeup" ? "((H-Y-0.5)/H)" : "((Y+0.5)/H)";
+  return `if(lt(${d},${e}),B,if(lt(${d},${e}+${b}),${white},A))`;
+}
+
+/**
  * The option string for one xfade join of a W×H frame lasting `seconds`:
  * `transition=<name>` for a built-in, or `transition=custom:expr='…'`.
  * Unknown styles render as a fade.
@@ -132,10 +153,15 @@ export function xfadeTransition(
   feather: number | undefined,
   seconds: number,
   W: number,
-  H: number
+  H: number,
+  band?: number,
+  depth: 8 | 10 = 8
 ): string {
   const known = style as TransitionStyle;
   const kind = TRANSITION_XFADE[known] ?? "fade";
+  if (takesBand(known) && clampBand(band) > 0) {
+    return `transition=custom:expr=${fexpr(bandExpr(known, clampBand(band), depth))}`;
+  }
   if (SLICE_STYLES.includes(known)) {
     return `transition=custom:expr=${fexpr(sliceExpr(known, seconds))}`;
   }

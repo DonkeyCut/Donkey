@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createGradeTransform } from "./gradeMath";
-import { autoGradeFromImageData, colorStatsFromImageData, matchGrade } from "./gradeMatch";
+import { autoGradeFromImageData, colorStatsFromImageData, matchGrade, type ColorStats } from "./gradeMatch";
 
 /** A synthetic frame with tonal and color variety. */
 function testFrame(): Uint8ClampedArray {
@@ -79,6 +79,56 @@ describe("matchGrade", () => {
         expect(pts[i][1]).toBeGreaterThanOrEqual(pts[i - 1][1]);
       }
     }
+  });
+
+  test("a reference of other content never posterizes: every curve segment keeps a bounded slope", () => {
+    // A shadow on a blue-and-orange wall matched to a shadow on beige
+    // pavement: the green quantiles jump 54 -> 164 across eight code values,
+    // which as a curve tears the wall into flat bands of false colour.
+    const stats = (r: number[], g: number[], b: number[]): ColorStats => ({
+      r,
+      g,
+      b,
+      luma: g,
+      meanR: r[3],
+      meanG: g[3],
+      meanB: b[3],
+      meanSat: 0.3,
+      warmth: 1,
+    });
+    const source = stats([50, 59, 126, 153, 227, 230, 232], [42, 52, 113, 147, 155, 160, 171], [23, 48, 60, 74, 132, 149, 161]);
+    const reference = stats([33, 37, 40, 48, 203, 209, 213], [39, 45, 47, 54, 164, 173, 178], [40, 45, 48, 55, 135, 144, 150]);
+    const grade = matchGrade(source, reference)!;
+    for (const ch of ["r", "g", "b"] as const) {
+      const pts = grade.curves?.[ch];
+      expect(pts).toBeDefined();
+      for (let i = 1; i < pts!.length; i++) {
+        const slope = (pts![i][1] - pts![i - 1][1]) / (pts![i][0] - pts![i - 1][0]);
+        // Rounding to whole code values moves a short segment's slope a little.
+        const slack = 1.5 / (pts![i][0] - pts![i - 1][0]);
+        expect(slope).toBeLessThanOrEqual(3 + slack);
+        if (pts![i][1] < 255 && pts![i - 1][1] > 0) expect(slope).toBeGreaterThanOrEqual(1 / 3 - slack);
+      }
+    }
+    // The middle of the range still lands where the reference puts it.
+    const mid = grade.curves!.g!.find(([x]) => x === 147)!;
+    expect(mid[1]).toBe(54);
+  });
+
+  test("strength scales the match: half strength moves every curve point half as far", () => {
+    const src = testFrame();
+    const ref = graded(src, (v, c) => (c === 0 ? v * 1.3 : c === 2 ? v * 0.7 : v));
+    const srcStats = colorStatsFromImageData(src)!;
+    const refStats = colorStatsFromImageData(ref)!;
+    const full = matchGrade(srcStats, refStats)!;
+    const half = matchGrade(srcStats, refStats, 0.5)!;
+    for (const ch of ["r", "b"] as const) {
+      const f = full.curves![ch]!;
+      const h = half.curves![ch]!;
+      expect(h.map(([x]) => x)).toEqual(f.map(([x]) => x));
+      for (let i = 0; i < f.length; i++) expect(Math.abs(h[i][1] - (f[i][0] + f[i][1]) / 2)).toBeLessThanOrEqual(0.5);
+    }
+    expect(matchGrade(srcStats, refStats, 0)).toBeUndefined();
   });
 
   test("stats expose warmth and saturation for the assistant", () => {

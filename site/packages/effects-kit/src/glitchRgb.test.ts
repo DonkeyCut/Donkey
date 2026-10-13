@@ -50,6 +50,21 @@ describe("a pinned glitch", () => {
     expect(effectRecipe({ effect: "flash", glitch: "rgb" })).toBe("flash");
   });
 
+  test("its amount sets how far it pulls: the default 0.5 keeps the travel, lower pulls less, in every renderer", () => {
+    for (const n of [0, 7, 19]) {
+      const at = (k: number) => glitchHitAt(n, k, "rgb")!.shift;
+      expect(at(0.15)).toBeCloseTo(at(0.5) * 0.3, 6);
+      expect(Math.abs(at(0.5))).toBeGreaterThanOrEqual(0.06);
+    }
+    const dy = (k: number) => Math.abs(effectPreviewState("glitch:rgb", k, 0).rgb!.dy);
+    expect(dy(0.15)).toBeCloseTo(dy(0.5) * 0.3, 6);
+    // The ffmpeg graph moves the channels by the same whole pixels.
+    const rv = (k: number) =>
+      Math.abs(Number(/rgbashift=rh=-?\d+:rv=(-?\d+)/.exec(effectFilterLines("in", "out", "glitch:rgb", k, 0, 0.034, 1920, 1080, "t")!.join(";"))![1]));
+    expect(rv(0.15)).toBe(Math.round(dy(0.15)));
+    expect(rv(0.5)).toBe(Math.round(dy(0.5)));
+  });
+
   test("it hits on every step, where the random mix leaves clean ones", () => {
     const steps = [...Array(60).keys()];
     expect(steps.every((n) => glitchHitAt(n, 1, "rgb")?.kind === "rgb")).toBe(true);

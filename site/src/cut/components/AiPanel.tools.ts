@@ -10,6 +10,8 @@
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { WATCH_DETAIL_NOTES, WATCH_DETAILS } from "@/cut/lib/types";
 import { FACT_CLAIM_MAX_CHARS, FACT_CLAIMS_MAX } from "@/lib/inference/factCheck";
+import { URL_BATCH_MAX } from "@/cut/lib/urlBatch";
+import { FIND_MEDIA_DEFAULT, FIND_MEDIA_MAX, FIND_MEDIA_SNAPSHOT_CAP } from "@/cut/lib/findMedia";
 
 export const AI_PANEL_TOOLS = [
   {
@@ -23,6 +25,17 @@ export const AI_PANEL_TOOLS = [
     description:
       "Read a project asset's file name, kind, readable fileSize (KB, MB, GB), exact sizeBytes, duration in seconds, and pixel dimensions. Present fileSize in replies; include exact bytes only when asked. Use this for file-size questions when sizeBytes is absent from the media snapshot. Reads file metadata across browser, Mac, and cloud storage.",
     inputSchema: obj({ asset_id: str("Project asset id from media or an import result") }, ["asset_id"]),
+  },
+  {
+    name: "find_media",
+    description:
+      `Find project media by name: every asset whose name or file name contains query (any case), optionally of one kind, with its id. The context snapshot lists at most ${FIND_MEDIA_SNAPSHOT_CAP} media items (mediaTruncated says when it cut the rest), so use this to reach the others — say the reference images a person just uploaded to a long project. Pages: pass the answer's next as offset for more.`,
+    inputSchema: obj({
+      query: str("Text the name or file name contains (omit for all)"),
+      type: { type: "string", enum: ["video", "image", "audio"], description: "Only this kind of media" },
+      limit: num(`How many to return, 1..${FIND_MEDIA_MAX} (default ${FIND_MEDIA_DEFAULT})`),
+      offset: num("Skip this many matches (the previous answer's next)"),
+    }, []),
   },
   {
     name: "watch_video",
@@ -175,11 +188,17 @@ export const AI_PANEL_TOOLS = [
     inputSchema: obj(
       {
         url: str("The page or media URL to download"),
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          maxItems: URL_BATCH_MAX,
+          description: `Several direct media links at once (up to ${URL_BATCH_MAX}), instead of url — a section's stock footage, say. They download two at a time and come back as results in the order given, each with its assets or its own error, so one dead link never fails the rest. A call answers within about 90s: a link still downloading then comes back pending (it lands in the project on its own — don't import it again; it shows up in media) and links it never reached come back in notStarted — call again with exactly those. Pass this rather than calling import_url once per link`,
+        },
         audio_only: bool(
           "Import only the source's audio track, extracted to an audio file (default false)"
         ),
       },
-      ["url"]
+      []
     ),
   },
   {

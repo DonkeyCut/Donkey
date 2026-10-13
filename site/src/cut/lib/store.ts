@@ -97,7 +97,7 @@ import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { cueEmphasis, mergeEmphasis, remapEmphasis, splitEmphasis, toggleEmphasis, withEmphasis } from "./captionEmphasis";
 import { clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
 import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, CLIP_MIN_SECONDS, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
-import { clampFeather, takesFeather } from "./transitionShape";
+import { clampBand, clampFeather, takesBand, takesFeather } from "./transitionShape";
 import { liftMoveTracks } from "./textMotion";
 import { OWN_SOUND, soundRoom, soundSourceOf, soundWindow, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { cutSound } from "./soundSettings";
@@ -605,6 +605,9 @@ export interface EditorState {
   /** Take a proxy that would not open off its asset, so every reader falls
    * back to the master. A read-only view drops it for this session only. */
   dropAssetProxy: (id: string) => void;
+  /** This page cannot decode the asset's proxy: play the master here and
+   * keep the proxy on the doc for the viewers who can. */
+  holdProxyOff: (id: string) => void;
   /** Give a video asset stored without a length the duration and size a probe
    * read off its file, and open every zero-length clip cut from it to the
    * footage — up to the next clip on its track, so nothing overlaps. A doc
@@ -1505,6 +1508,12 @@ export const DOC_KEYS = [
   "renders",
 ] as const;
 let hydrating = false;
+/** Assets whose proxy this page cannot decode (`holdProxyOff`): their links
+ * are minted without one, while the doc keeps it. */
+const proxyOffHere = new Set<string>();
+const proxyOn = (a: { id: string; proxy?: unknown }) => !!a.proxy && !proxyOffHere.has(a.id);
+/** A held proxy is going to be dropped or replaced: links mint it again. */
+export const releaseProxyHold = (id: string) => void proxyOffHere.delete(id);
 
 /**
  * The invariants every write to the store passes through, wherever it comes
@@ -2089,7 +2098,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
               stale.map((a) => ({
                 ...a,
                 url: held.get(a.fileName) ?? links?.urls.get(a.fileName) ?? mediaUrl(id, a.fileName),
-                ...(a.proxy ? { proxyUrl: links?.urls.get(a.proxy.fileName) ?? mediaUrl(id, a.proxy.fileName) } : {}),
+                ...(a.proxy && proxyOn(a) ? { proxyUrl: links?.urls.get(a.proxy.fileName) ?? mediaUrl(id, a.proxy.fileName) } : {}),
               })),
               ui
             );
@@ -2144,7 +2153,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             ...(kept?.sceneCuts !== undefined ? { sceneCuts: kept.sceneCuts } : {}),
             ...(kept?.peaks !== undefined ? { peaks: kept.peaks } : {}),
             url: mediaUrl(id, a.fileName),
-            ...(a.proxy ? { proxyUrl: mediaUrl(id, a.proxy.fileName) } : {}),
+            ...(a.proxy && proxyOn(a) ? { proxyUrl: mediaUrl(id, a.proxy.fileName) } : {}),
           };
         });
         // Cloud and shared media ride signed R2 URLs, batch-minted once per
@@ -2172,7 +2181,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           if (!current()) return;
           for (const a of assets) {
             a.url = held.get(a.fileName) ?? signed.urls.get(a.fileName) ?? a.url;
-            if (a.proxy) a.proxyUrl = signed.urls.get(a.proxy.fileName) ?? a.proxyUrl;
+            if (a.proxy && proxyOn(a)) a.proxyUrl = signed.urls.get(a.proxy.fileName) ?? a.proxyUrl;
           }
           markSignedBatch(id, signed.expiresAt);
           // A browser project's "mint" hands back session blob URLs, dead on
@@ -2694,6 +2703,26 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }
     },
 
+    holdProxyOff: (id) => {
+      proxyOffHere.add(id);
+      const target = get().assets.find((a) => a.id === id);
+      if (!target?.proxyUrl) return;
+      // Only the page's address goes; `proxy` stays, so the doc saves it.
+      hydrating = true;
+      try {
+        set((s) => ({
+          assets: s.assets.map((a) => {
+            if (a.id !== id) return a;
+            const rest = { ...a };
+            delete rest.proxyUrl;
+            return rest;
+          }),
+        }));
+      } finally {
+        hydrating = false;
+      }
+    },
+
     renameAsset: (id, name) =>
       get().updateAsset(id, {
         name: freeItemName(name, get().assets.filter((a) => a.id !== id).map((a) => a.name)),
@@ -2775,7 +2804,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
             // links that expire.
             if (a.upload || resolveRegisteredBlob(a.url)) return a;
             const url = urls.get(a.fileName) ?? a.url;
-            const proxyUrl = a.proxy ? (urls.get(a.proxy.fileName) ?? a.proxyUrl) : a.proxyUrl;
+            const proxyUrl = a.proxy && proxyOn(a) ? (urls.get(a.proxy.fileName) ?? a.proxyUrl) : a.proxyUrl;
             if (url === a.url && proxyUrl === a.proxyUrl) return a;
             // A still's filmstrip is its source URL, so it moves with it.
             const thumbs =
@@ -5744,6 +5773,7 @@ export function deriveTransitionFields(
     // Only a style with a reveal edge has anything to soften.
     const transitionFeather =
       cut && takesFeather(cut.style) && clampFeather(cut.feather) > 0 ? clampFeather(cut.feather) : undefined;
+    const transitionBand = cut && takesBand(cut.style) && clampBand(cut.band) > 0 ? clampBand(cut.band) : undefined;
     const animOf = (t: TimelineTransition | undefined): ClipAnim | undefined => {
       if (!t) return undefined;
       // Only a style with an edge ramp reaches an open edge — a sound
@@ -5762,12 +5792,13 @@ export function deriveTransitionFields(
       c.transition === transition &&
       c.transitionStyle === transitionStyle &&
       c.transitionFeather === transitionFeather &&
+      c.transitionBand === transitionBand &&
       sameAnim(c.animIn, animIn) &&
       sameAnim(c.animOut, animOut)
     )
       return c;
     changed = true;
-    return { ...c, transition, transitionStyle, transitionFeather, animIn, animOut };
+    return { ...c, transition, transitionStyle, transitionFeather, transitionBand, animIn, animOut };
   });
   return changed ? next : clips;
 }
@@ -5786,6 +5817,7 @@ function sanitizeTransitions(raw: TimelineTransition[] | undefined): TimelineTra
       seconds: clampBarSeconds(t.seconds),
       style: TRANSITION_STYLE_IDS.includes(t.style) ? t.style : "crossfade",
       ...(clampFeather(t.feather) > 0 ? { feather: clampFeather(t.feather) } : {}),
+      ...(clampBand(t.band) > 0 ? { band: clampBand(t.band) } : {}),
       ...(t.hidden ? { hidden: true as const } : {}),
     }));
   return bars.filter(

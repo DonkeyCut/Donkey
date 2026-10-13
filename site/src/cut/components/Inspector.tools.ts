@@ -52,6 +52,7 @@ import {
   STRIPE_LINE_MAX,
   STRIPE_LINE_MIN,
 } from "@donkeycut/effects-kit";
+import { EFFECT_SETTING_ARGS } from "@/cut/components/EffectsPanel.tools";
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { builtinLutCatalogText } from "@/cut/lib/builtinLuts";
 import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
@@ -175,6 +176,8 @@ export const INSPECTOR_TOOLS = [
       motion_blur: bool("Streak the element along its own on-screen movement while it moves (true starts at the default shutter); still frames stay sharp"),
       shutter: num(`Motion blur shutter in 30fps frames, ${SHUTTER_MIN}..${SHUTTER_MAX}: 0.5 is the usual half-open shutter, and past 1 is a stylized long exposure (2–3 smears a whip that settles in a few frames); setting it switches motion blur on`),
       hidden: bool("Hide the element without deleting it"),
+      amount: num("Effects: strength 0.05..1 (see add_effect)"),
+      ...EFFECT_SETTING_ARGS,
       lane: num("Move the element to another row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape."),
     }, []),
   },
@@ -596,7 +599,10 @@ export const INSPECTOR_TOOLS = [
     inputSchema: obj({
       clipId: str("Video clip to grade"),
       ref_asset_id: str("Reference image asset id"),
-      ref_clip_id: str("Reference video clip id (its current frame's base rendering)"),
+      strength: num(
+        "0..1, default 1: how far to take the match. Lower it when the reference shows other content than the clip (a bright window for a dark room, a black foreground the clip lacks) and the full match lifts or crushes tones the reference never had"
+      ),
+      ref_clip_id: str("Reference video clip id (its base rendering: the frame on screen, or one decoded mid-trim when it is off screen)"),
     }, ["clipId"]),
   },
 ] as const satisfies readonly AiToolDef[];

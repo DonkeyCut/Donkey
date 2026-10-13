@@ -23,7 +23,14 @@ import {
   type TransitionStyle,
   type VideoClip,
 } from "@/cut/lib/types";
-import { CLOCK_SWEEP, shapeEase, takesFeather, TRANSITION_FEATHER_MAX } from "@/cut/lib/transitionShape";
+import {
+  CLOCK_SWEEP,
+  shapeEase,
+  takesBand,
+  takesFeather,
+  TRANSITION_BAND_MAX,
+  TRANSITION_FEATHER_MAX,
+} from "@/cut/lib/transitionShape";
 import { Row, useSliderCheckpoint } from "@/cut/components/panelBits";
 import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
@@ -69,6 +76,7 @@ export function TransitionsPanel() {
         {/* One key handler over every group, so arrows walk the whole list
             across section boundaries. */}
         {live && takesFeather(live.style) && <SoftnessRow bar={live} />}
+        {live && takesBand(live.style) && <BandRow bar={live} />}
         <div onKeyDown={pickGridNav}>
           {TRANSITION_STYLE_GROUPS.map((g) => (
             <section key={g.label} className="mb-3 flex flex-col gap-1.5">
@@ -108,6 +116,44 @@ function SoftnessRow({ bar }: { bar: TimelineTransition }) {
           format={(v) => (v ? `${Math.round(v * 100)}%` : "Hard")}
           parse={(raw) => {
             if (raw.trim().toLowerCase() === "hard") {
+              return 0;
+            }
+            const n = parseNumberInput(raw.replace(/%$/, ""));
+            return n === null ? null : n / 100;
+          }}
+          onDraft={write}
+          onCommit={(v) => {
+            write(v);
+            ck.end();
+          }}
+        />
+      </Row>
+    </div>
+  );
+}
+
+/** How wide the white panel running ahead of the selected wipe's edge is:
+ * 0 is none, the top of the range half the frame. A drag is one undo step. */
+function BandRow({ bar }: { bar: TimelineTransition }) {
+  const ck = useSliderCheckpoint();
+  const write = (v: number) => {
+    ck.begin();
+    useEditor.getState().updateTransitionTransient(bar.id, { band: v > 0 ? v : undefined });
+  };
+  return (
+    <div className="mb-3">
+      <Row label="White band">
+        <ValueSlider
+          label="White band width"
+          sliderClassName="data-horizontal:w-24"
+          valueClassName="w-9 text-muted-foreground"
+          value={bar.band ?? 0}
+          min={0}
+          max={TRANSITION_BAND_MAX}
+          step={0.01}
+          format={(v) => (v ? `${Math.round(v * 100)}%` : "None")}
+          parse={(raw) => {
+            if (raw.trim().toLowerCase() === "none") {
               return 0;
             }
             const n = parseNumberInput(raw.replace(/%$/, ""));

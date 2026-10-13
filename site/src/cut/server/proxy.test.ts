@@ -61,6 +61,9 @@ describe("proxy", () => {
     expect(args[args.indexOf("-profile:v") + 1]).toBe("main10");
     expect(args[args.indexOf("-c:a") + 1]).toBe("aac");
     expect(args[args.indexOf("-movflags") + 1]).toBe("+faststart");
+    // A keyframe every second: the preview seeks into the proxy at every
+    // cut, and a seek decodes from the keyframe before it.
+    expect(args[args.indexOf("-force_key_frames") + 1]).toBe("expr:gte(t,n_forced*1)");
 
     const vt = proxyFfmpegArgs("in.mov", "out.mp4", {
       encoder: "hevc_videotoolbox",

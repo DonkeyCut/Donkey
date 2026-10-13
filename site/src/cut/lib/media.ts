@@ -2136,9 +2136,10 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
         }
       }
       // A ProRes master previews through the WASM decoder until its proxy
-      // lands; the proxy is built behind the editor, once the bytes are at
-      // rest in the project's own storage.
-      if (openProject && !asset.upload && needsProxy(asset)) void ensureProxy(openProject, asset);
+      // lands, and a heavy video streamed from the cloud stalls at its cuts;
+      // the proxy is built behind the editor, once the bytes are at rest in
+      // the project's own storage.
+      if (openProject && !asset.upload && needsProxy(asset, getBackend().kind === "cloud")) void ensureProxy(openProject, asset);
       // Footage stored without a length — a shelf row that was never measured
       // — reads its own before anything is swept from it: a zero-length sweep
       // has no tiles to place and no buckets to fill, and the clips cut from

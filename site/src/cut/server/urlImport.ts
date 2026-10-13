@@ -5,6 +5,7 @@ import { addDownloaded, type LibraryAsset, type LibrarySource } from "./library"
 import { assertLocalRuntime } from "./local-only";
 import { mediaDir, mediaPath as projectMediaPath, readProject } from "./projects";
 import { download, type Downloaded, type DownloadOptions } from "./urlDownload";
+import { URL_BUSY_MESSAGE, URL_DOWNLOADS_MAX } from "../lib/urlBatch";
 import { uniqueName } from "./util";
 
 // Import a URL (TikTok, YouTube, Instagram, an X post, a page, …) into the
@@ -12,8 +13,9 @@ import { uniqueName } from "./util";
 // resolved from the widened PATH — tool-path.ts — exactly like ffmpeg); this
 // module owns the local landing spots and the concurrency guard.
 
-// A small ceiling so a burst of pastes can't spawn unbounded downloads.
-const MAX_ACTIVE = 2;
+// A small ceiling so a burst of pastes can't spawn unbounded downloads; the
+// chat's URL batches run that many lanes and wait out a busy answer.
+const MAX_ACTIVE = URL_DOWNLOADS_MAX;
 let active = 0;
 
 /** Run one guarded download and hand the files to `consume` before the temp
@@ -29,7 +31,7 @@ async function withDownload<T>(
   assertLocalRuntime();
   if (!/^https?:\/\//i.test(url.trim())) throw new Error("Enter a valid http(s) URL.");
   if (active >= MAX_ACTIVE) {
-    throw new Error("Too many downloads in progress. Try again in a moment.");
+    throw new Error(URL_BUSY_MESSAGE);
   }
   active++;
   try {

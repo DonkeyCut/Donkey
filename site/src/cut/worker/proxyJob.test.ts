@@ -3,7 +3,7 @@ import { writeFile } from "node:fs/promises";
 import type { prisma } from "@/lib/prisma";
 import { runProxyJob, type ProxyJobIO } from "./proxyJob";
 
-function harness(taken: string[] = []) {
+function harness(taken: string[] = [], spec: Record<string, unknown> = { file: "clip.mov" }) {
   const findMany = mock(async (_args: unknown) => { void _args; return taken.map((fileName) => ({ fileName })); });
   const io = {
     db: { cutMediaObject: { findMany } } as unknown as typeof prisma,
@@ -20,13 +20,22 @@ function harness(taken: string[] = []) {
     duration: mock(async () => 2),
     settings: mock(async () => ({ proxyMaxHeight: 1080, proxyCrf: 20 })),
   } satisfies ProxyJobIO;
-  const job = { id: "proxy-1", userId: "owner", projectId: "project", kind: "proxy", outName: null, spec: { file: "clip.mov" } };
+  const job = { id: "proxy-1", userId: "owner", projectId: "project", kind: "proxy", outName: null, spec };
   const handle = { tmpDir: "", outPath: "", progress: 0, log: [] as string[] };
   const run = (canceled = () => false) => runProxyJob(job, handle, canceled, io);
   return { run, io, handle, findMany };
 }
 
 describe("proxy worker", () => {
+  test("a job that asks for a smaller copy gets it, never one past the account's size", async () => {
+    const small = harness([], { file: "clip.mov", maxHeight: 720 });
+    await small.run();
+    expect(small.io.make.mock.calls[0][3]).toMatchObject({ maxHeight: 720 });
+    const big = harness([], { file: "clip.mov", maxHeight: 4320 });
+    await big.run();
+    expect(big.io.make.mock.calls[0][3]).toMatchObject({ maxHeight: 1080 });
+  });
+
   test("builds the proxy at the account's size and quality and registers it exempt beside the master", async () => {
     const h = harness();
     expect(await h.run()).toEqual({ fileName: "clip.proxy.mp4", sizeBytes: 5, width: 64, height: 64 });

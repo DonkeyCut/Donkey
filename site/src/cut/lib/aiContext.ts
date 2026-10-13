@@ -2,6 +2,7 @@
 
 import { formatBytes } from "@/lib/bytes";
 import { isLinkedAssetType, isTimelineId, sanitizeTimelines, timelineAspect, TIMELINE_IDS, TIMELINE_LABELS, type TimelineBody, type TimelineId } from "./types";
+import { FIND_MEDIA_SNAPSHOT_CAP } from "./findMedia";
 import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import { hasOverlayAnim, retimeOf, speedCurveOf, WHEEL_LABELS, WHEEL_ZONES, type ClipSound, type OutputSpace, type SpeedNode } from "@donkeycut/effects-kit";
 import { chatOwner } from "./chatAssets";
@@ -48,7 +49,12 @@ function transitionToNext(sp: ClipSpan, index: number, spans: ClipSpan[]) {
   const seconds = sp.clip.transition ?? 0;
   if (seconds <= 0 || index >= spans.length - 1) return null;
   const style = sp.clip.transitionStyle ?? "crossfade";
-  return { style, seconds: r(sp.transitionOut), ...(sp.clip.transitionFeather ? { feather: sp.clip.transitionFeather } : {}) };
+  return {
+    style,
+    seconds: r(sp.transitionOut),
+    ...(sp.clip.transitionFeather ? { feather: sp.clip.transitionFeather } : {}),
+    ...(sp.clip.transitionBand ? { band: sp.clip.transitionBand } : {}),
+  };
 }
 
 /** The clip's own effects — entrance/exit animations, box styling, and its
@@ -328,6 +334,8 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
     overlays: core.overlays,
     subtitles: core.subtitles,
     publish: s.publish,
+    // The Details tab's notes: where the cut keeps its source links.
+    ...(s.notes.text || s.notes.publishedAt || s.notes.links.some(Boolean) ? { notes: s.notes } : {}),
     view: {
       pxPerSec: r(s.pxPerSec),
       timelineH: s.timelineH,
@@ -433,10 +441,11 @@ function describeState(
   // The cap trims the tail of a huge media list, and a source someone has
   // watched and written up stays regardless of where it sits: the record is
   // what later decisions are made from.
+  const mediaCap = opts.fullCues ? Infinity : FIND_MEDIA_SNAPSHOT_CAP;
   const shownAssets =
-    visibleAssets.length <= cueCap
+    visibleAssets.length <= mediaCap
       ? visibleAssets
-      : visibleAssets.filter((a, i) => i < cueCap || (a.watch?.notes?.length ?? 0) > 0);
+      : visibleAssets.filter((a, i) => i < mediaCap || (a.watch?.notes?.length ?? 0) > 0);
   const spans = getClipSpans(s.clips, s.assets);
   const duration = totalDuration(s.clips);
   const assetById = new Map(s.assets.map((a) => [a.id, a]));
@@ -672,6 +681,7 @@ function describeState(
             seconds: r(t.seconds),
             style: t.style,
             ...(t.feather ? { feather: t.feather } : {}),
+            ...(t.band ? { band: t.band } : {}),
             ...(t.hidden ? { hidden: true } : {}),
             ...(plays.length > 0
               ? { plays: plays.map((p) => ({ at: p.kind, clipId: p.clipId })) }
@@ -894,6 +904,7 @@ function describeOverlay(o: Overlay) {
       ...(o.effect === "zoom"
         ? { focus: { x: r(o.focus?.x ?? 0.5), y: r(o.focus?.y ?? 0.5) } }
         : {}),
+      ...(o.effect === "lightleak" && o.leak ? { leak: o.leak } : {}),
       ...(o.effect === "glitch" && o.glitch ? { glitch: o.glitch } : {}),
       ...(o.effect === "flash" && o.tone ? { tone: o.tone } : {}),
       ...(o.effect === "flash" && o.rate ? { rate: r(o.rate), rhythm: o.rhythm ?? "strobe" } : {}),

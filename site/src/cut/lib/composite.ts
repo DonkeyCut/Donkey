@@ -25,7 +25,18 @@ import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
 import { clipRecipe, peekClipLut, requestClipLut, type ClipLut, type RecipeSource } from "./lutBuild";
 import { createRasterCanvas } from "./raster";
-import { CLOCK_SWEEP, clampFeather, featherAlpha, shapeEase, SLICE_TAPS, sliceStreak, takesFeather } from "./transitionShape";
+import {
+  bandEdge,
+  CLOCK_SWEEP,
+  clampBand,
+  clampFeather,
+  featherAlpha,
+  shapeEase,
+  SLICE_TAPS,
+  sliceStreak,
+  takesBand,
+  takesFeather,
+} from "./transitionShape";
 import { clipCovers, clipFrameAt, clipPosed, clipZoom, contentRect, DEFAULT_BACKGROUND, isFullRect, rectOf, shadowInk, TRANSITION_BLUR } from "./types";
 import type { ClipShadow, FrameRect, TransitionStyle, VideoClip } from "./types";
 
@@ -1386,8 +1397,11 @@ export class FrameCompositor {
     }
     // A softened edge: the incoming shot fades in across a ramp along the
     // edge, the same profile the ffmpeg expression computes per pixel.
+    // A white band ahead of a wipe's edge draws a hard edge, so it wins
+    // over a feather.
+    const band = takesBand(style) ? clampBand(d.masterClip.transitionBand) : 0;
     const feather = clampFeather(d.masterClip.transitionFeather);
-    if (feather > 0 && takesFeather(style)) {
+    if (feather > 0 && takesFeather(style) && band === 0) {
       drawMaster();
       this.drawFeathered(style, p, feather, () => drawInc(1));
       return;
@@ -1437,20 +1451,32 @@ export class FrameCompositor {
       case "wiperight":
       case "wipeup":
       case "wipedown": {
-        // Hard reveal edge traveling in the named direction.
-        const r =
+        // Hard reveal edge traveling in the named direction; a band runs a
+        // solid white panel just ahead of it (`bandEdge`).
+        const e = bandEdge(p, band);
+        const [r, b] =
           style === "wipeleft"
-            ? { x: (1 - p) * W, y: 0, w: p * W, h: H }
+            ? [{ x: (1 - e) * W, y: 0, w: e * W, h: H }, { x: (1 - e - band) * W, y: 0, w: band * W, h: H }]
             : style === "wiperight"
-              ? { x: 0, y: 0, w: p * W, h: H }
+              ? [{ x: 0, y: 0, w: e * W, h: H }, { x: e * W, y: 0, w: band * W, h: H }]
               : style === "wipeup"
-                ? { x: 0, y: (1 - p) * H, w: W, h: p * H }
-                : { x: 0, y: 0, w: W, h: p * H };
+                ? [{ x: 0, y: (1 - e) * H, w: W, h: e * H }, { x: 0, y: (1 - e - band) * H, w: W, h: band * H }]
+                : [{ x: 0, y: 0, w: W, h: e * H }, { x: 0, y: e * H, w: W, h: band * H }];
         drawMaster();
-        clipped(
-          () => ctx.rect(r.x, r.y, r.w, r.h),
-          () => drawInc(1)
-        );
+        if (e > 0) {
+          clipped(
+            () => ctx.rect(r.x, r.y, r.w, r.h),
+            () => drawInc(1)
+          );
+        }
+        if (band > 0) {
+          ctx.save();
+          ctx.globalAlpha = 1;
+          ctx.globalCompositeOperation = "source-over";
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(b.x, b.y, b.w, b.h);
+          ctx.restore();
+        }
         break;
       }
       case "circleopen": {

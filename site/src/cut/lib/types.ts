@@ -287,7 +287,8 @@ export interface StoredAsset {
   /** The person's override of what this source's code values mean. */
   colorProfile?: SourceProfile;
   /** A preview proxy of a master the browser cannot play at speed (a ProRes
-   * master, an HDR file on a browser that tone-maps): a bt709-tagged HEVC
+   * master, an HDR file on a browser that tone-maps, a 4K or high-bitrate
+   * video streamed from the cloud): a bt709-tagged HEVC
    * file beside the master in the project's media. The preview reads it; an
    * export reads the master. */
   proxy?: { fileName: string; sizeBytes: number };
@@ -694,6 +695,9 @@ export interface VideoClip {
   /** Softness of that transition's reveal edge (the bar's `feather`);
    * absent = a hard edge. */
   transitionFeather?: number;
+  /** Width of the white band running ahead of that wipe's edge (the bar's
+   * `band`); absent = none. */
+  transitionBand?: number;
   /** Entrance animation on this clip's own head (absent = none). Unlike a
    * transition it belongs to one clip and never moves its neighbors. */
   animIn?: ClipAnim;
@@ -825,6 +829,10 @@ export interface TimelineTransition {
    * (0..TRANSITION_FEATHER_MAX); absent = a hard edge. Wipes, circles and
    * splits take it. */
   feather?: number;
+  /** A solid white panel running just ahead of a wipe's edge, as a share of
+   * the frame the edge crosses (0..TRANSITION_BAND_MAX); absent = none.
+   * Wipes take it; it draws a hard edge, so it overrides a feather. */
+  band?: number;
   /** Hidden bars stay on the row (grayed) and keep the boundary they line up
    * with, so nothing else claims it, but play nothing — the cut renders hard
    * in the preview and in every export. */

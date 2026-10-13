@@ -223,8 +223,8 @@ import { isGradePresetTemplate, listSavedGrades, saveGradePreset } from "./grade
 import { isStylePresetTemplate } from "./stylePresets";
 import { findLibraryAsset, listLibrary } from "./libraryList";
 import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
-import { sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
-import { applyOverlayPatchSettled, assetClipUses, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { baseFrameAt, sampleClipBaseFrameData, sourceProfileOf, toBaseRendering } from "./baseFrame";
+import { applyOverlayPatchSettled, assetClipUses, assetIdsOnAnyTimeline, clipLen, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
 import { mixSpecFor, renderProjectFrame, renderProjectFrames } from "./exportRender";
 import { renderMix } from "./audioMix";
@@ -319,7 +319,9 @@ import {
   type AudioClip,
   type ClipShadow,
   type ColorGrade,
+  type EffectOverlay,
   type FontId,
+  isLinkedAssetType,
   type MediaAsset,
   type Selection,
   type ShapeKind,
@@ -332,7 +334,9 @@ import {
   WATCH_DETAILS,
   type WatchDetail,
 } from "./types";
-import { clampFeather } from "./transitionShape";
+import { BAND_STYLES, clampBand, clampFeather, takesBand } from "./transitionShape";
+import { importEach } from "./urlBatch";
+import { findMedia } from "./findMedia";
 
 import { soundSourceOf, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { bindRecording, unbindRecording } from "./soundBind";
@@ -436,17 +440,30 @@ const GRADE_KEYS = [
  * rendering (through the source conversion, before any grade — what Auto
  * reads), or `graded` through the clip's LUT, preset and adjustments too, or
  * an image asset's pixels. */
+/** A clip's frame decoded from its file at the middle of its trim, for a clip
+ * the preview has no frame of — off screen, or not decoded yet. The decode
+ * reads the base rendering, as the on-screen sample does. */
+async function offscreenClipFrameData(
+  s: ReturnType<typeof useEditor.getState>,
+  clip: VideoClip,
+  w: number,
+  h: number
+): Promise<Uint8ClampedArray | null> {
+  const asset = s.assets.find((a) => a.id === clip.assetId);
+  if (!asset?.url) return null;
+  const frame = await baseFrameAt(asset.url, (clip.in + clip.out) / 2, { width: w, height: h, fit: "fill" });
+  const ctx = frame?.canvas.getContext("2d") as CanvasRenderingContext2D | null | undefined;
+  return ctx ? ctx.getImageData(0, 0, w, h).data : null;
+}
+
 async function colorStatsForRef(
   s: ReturnType<typeof useEditor.getState>,
   ref: { clipId?: string; assetId?: string; graded?: boolean }
 ): Promise<ColorStats> {
   if (ref.clipId) {
     const clip = requireItem(s.clips, ref.clipId, "video clip");
-    const data = sampleClipBaseFrameData(clip.id, 192, 108);
-    if (!data)
-      throw new ToolError(
-        "No decoded frame for that clip yet — seek into it so it is on screen, then retry."
-      );
+    const data = sampleClipBaseFrameData(clip.id, 192, 108) ?? (await offscreenClipFrameData(s, clip, 192, 108));
+    if (!data) throw new ToolError("Could not decode a frame of that clip's file.");
     if (ref.graded && clip.grade) {
       // The same recipe the Color panel's tiles draw with: the base rendering
       // through the clip's LUT, preset and adjustments.
@@ -634,32 +651,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         },
       });
     }
-    // A light leak's course: drift is the default and stores as absence.
-    if (effect === "lightleak" && input.leak !== undefined) {
-      if (!(LEAK_COURSES as readonly unknown[]).includes(input.leak))
-        throw new ToolError(`leak is one of ${LEAK_COURSES.join(", ")}.`);
-      useEditor.getState().updateOverlay(sel.id, { leak: input.leak === "drift" ? undefined : (input.leak as LeakCourse) });
-    }
-    // A glitch pinned to one kind; the random mix stores as absence.
-    if (effect === "glitch" && input.glitch !== undefined) {
-      if (!(GLITCH_KINDS as readonly unknown[]).includes(input.glitch)) {
-        throw new ToolError(`glitch is one of ${GLITCH_KINDS.join(", ")}.`);
-      }
-      useEditor.getState().updateOverlay(sel.id, { glitch: input.glitch as GlitchKind });
-    }
-    // A flash's tone and strobe: white and a single pop store as absence.
-    if (effect === "flash" && input.tone !== undefined) {
-      if (!(FLASH_TONES as readonly unknown[]).includes(input.tone)) {
-        throw new ToolError(`tone is one of ${FLASH_TONES.join(", ")}.`);
-      }
-      useEditor.getState().updateOverlay(sel.id, { tone: input.tone === "black" ? "black" : undefined });
-    }
-    if (effect === "flash" && isNum(input.rate)) {
-      useEditor.getState().updateOverlay(sel.id, { rate: input.rate > 0 ? clamp(input.rate, FLASH_RATE_MIN, FLASH_RATE_MAX) : undefined });
-    }
-    if (effect === "flash" && input.rhythm !== undefined) {
-      useEditor.getState().updateOverlay(sel.id, { rhythm: flashRhythm(input.rhythm) });
-    }
+    const settings = effectSettings(effect as EffectId, input);
+    if (Object.keys(settings).length) useEditor.getState().updateOverlay(sel.id, settings);
     const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
     return { id: o.id, effect, start: round2(o.start), end: round2(o.end) };
   },
@@ -780,6 +773,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
     const dur = Math.max(0.1, o.end - o.start);
     let kf = o.kf;
+    const sent = new Set<number>();
     if (raw.length === 0) {
       s.clearOverlayKeys(o.id);
       kf = undefined;
@@ -789,6 +783,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       s.pushHistory();
       for (const k of raw as Record<string, unknown>[]) {
         if (!isNum(k.t)) throw new ToolError("Every key needs a time `t`.");
+        sent.add(round2(clamp(k.t, 0, dur)));
         s.setOverlayKey(
           o.id,
           clamp(k.t, 0, dur),
@@ -810,7 +805,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       kf = useEditor.getState().overlays.find((x) => x.id === o.id)?.kf;
     }
-    return { id: o.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })) };
+    // A merge keeps keys this call never named; say which, so a key meant to
+    // go is not sent around again and again.
+    const kept = raw.length ? (kf ?? []).map((k) => round2(k.t)).filter((t) => !sent.has(t)) : [];
+    return {
+      id: o.id,
+      keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })),
+      ...(kept.length
+        ? { kept, note: `Keys at ${kept.join(", ")}s were already on the track and stay; to drop them, clear the track with an empty keys list, then send the full list.` }
+        : {}),
+    };
   },
 
   set_group_camera: (s, input) => {
@@ -1044,10 +1048,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const bar = after.transitions.find((t) =>
       (roles.get(t.id) ?? []).some((r) => r.kind !== "in" && r.clipId === clip.id)
     );
-    // The softness lands on the bar inside the same undo step.
+    // The softness and the band land on the bar inside the same undo step.
     if (bar && isNum(input.feather)) {
       const feather = clampFeather(input.feather);
       after.updateTransitionTransient(bar.id, { feather: feather > 0 ? feather : undefined });
+      after = useEditor.getState();
+    }
+    if (bar && isNum(input.band)) {
+      if (!takesBand(bar.style)) throw new ToolError(`band is for the wipes only (${BAND_STYLES.join(", ")}).`);
+      const band = clampBand(input.band);
+      after.updateTransitionTransient(bar.id, { band: band > 0 ? band : undefined });
       after = useEditor.getState();
     }
     const next = after.clips.find((c) => c.id === clip.id)!;
@@ -1057,6 +1067,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       transition: next.transition ?? 0,
       style: next.transitionStyle ?? "crossfade",
       ...(next.transitionFeather ? { feather: next.transitionFeather } : {}),
+      ...(next.transitionBand ? { band: next.transitionBand } : {}),
     };
   },
 
@@ -1111,6 +1122,33 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     return {
       id: asset.id, name: asset.name, fileName: asset.fileName, kind: asset.type,
       sizeBytes, fileSize: formatBytes(sizeBytes), duration: round2(asset.duration), width: asset.width, height: asset.height,
+    };
+  },
+
+  find_media: (s, input) => {
+    // The same media the snapshot would show this chat, past its cap.
+    const placed = placedAssetIds(s);
+    const chatId = chatOwner();
+    const visible = s.assets.filter((a) => !isLinkedAssetType(a.type) && !hiddenFromChat(a, chatId, placed));
+    const type = input.type === "video" || input.type === "image" || input.type === "audio" ? input.type : undefined;
+    const found = findMedia(visible, {
+      query: typeof input.query === "string" ? input.query : undefined,
+      type,
+      limit: isNum(input.limit) ? input.limit : undefined,
+      offset: isNum(input.offset) ? input.offset : undefined,
+    });
+    return {
+      total: found.total,
+      assets: found.page.map((a) => ({
+        id: a.id,
+        name: a.name,
+        type: a.type,
+        fileName: a.fileName,
+        duration: round2(a.duration),
+        ...(a.width !== undefined ? { width: a.width, height: a.height } : {}),
+        ...(a.folderId != null ? { folderId: a.folderId } : {}),
+      })),
+      ...(found.next !== undefined ? { next: found.next } : {}),
     };
   },
 
@@ -2992,7 +3030,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const targets = (ids ?? [String(input.id)]).map((id) => requireItem(s.overlays, id, "overlay element"));
       // One undo step for the whole write, however many elements it lands on.
       s.pushHistory();
-      for (const o of targets) applyOverlayPatchSettled(o.id, overlayPatch(input, o.kind ?? "text", o));
+      for (const o of targets) {
+        applyOverlayPatchSettled(o.id, overlayPatch(input, o.kind ?? "text", o));
+        // An effect's own settings — its course, kind, tone, strobe — change
+        // in place, so the element keeps its id, lane and timing.
+        if (isEffectOverlay(o)) {
+          const settings = effectSettings(o.effect, input);
+          if (Object.keys(settings).length) useEditor.getState().updateOverlay(o.id, settings);
+        }
+      }
       const report = (id: string) => {
         const next = useEditor.getState().overlays.find((x) => x.id === id)!;
         return {
@@ -3971,17 +4017,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   import_url: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
-      const url = String(input.url ?? "").trim();
-      if (!url) throw new ToolError("A URL is required.");
       // Captured before the download: the media files under the chat that
       // asked, even if the user switches threads while it downloads.
       const chatId = chatOwner();
-      const { assets, text } = await importUrlMedia(projectId, url, {
-        audio: input.audio_only === true,
-      });
-      for (const asset of assets) tagChatAsset(asset.id, chatId);
-      return {
-        assets: assets.map((asset) => ({
+      const describe = (assets: MediaAsset[]) =>
+        assets.map((asset) => ({
           assetId: asset.id,
           name: asset.name,
           kind: asset.type,
@@ -3990,7 +4030,38 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           width: asset.width,
           height: asset.height,
           duration: round2(asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration),
-        })),
+        }));
+      // A list downloads a few at a time; each URL answers on its own row.
+      if (Array.isArray(input.urls) && input.urls.length > 0) {
+        const rows = await importEach(input.urls.map(String), async (u) => {
+          const { assets } = await importUrlMedia(projectId, u, { audio: input.audio_only === true });
+          for (const asset of assets) tagChatAsset(asset.id, chatId);
+          return describe(assets);
+        }).catch((e) => {
+          throw new ToolError(e instanceof Error ? e.message : String(e));
+        });
+        const results = rows.filter((r) => !("notStarted" in r)).map((r) => ("value" in r ? { url: r.url, assets: r.value } : r));
+        const notStarted = rows.filter((r) => "notStarted" in r).map((r) => r.url);
+        const pending = rows.some((r) => "pending" in r);
+        return {
+          results,
+          ...(notStarted.length ? { notStarted } : {}),
+          // A long list answers in parts, inside the tool call's time.
+          ...(pending || notStarted.length
+            ? {
+                note: `${pending ? "Pending links are still downloading and land in the project on their own; don't import them again. " : ""}${notStarted.length ? "Call import_url again with the notStarted urls." : ""}`.trim(),
+              }
+            : {}),
+        };
+      }
+      const url = String(input.url ?? "").trim();
+      if (!url) throw new ToolError("A URL is required.");
+      const { assets, text } = await importUrlMedia(projectId, url, {
+        audio: input.audio_only === true,
+      });
+      for (const asset of assets) tagChatAsset(asset.id, chatId);
+      return {
+        assets: describe(assets),
         ...(text ? { sourceText: text } : {}),
       };
   },
@@ -4608,6 +4679,25 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   delete_asset: (s, input) => {
+      // The sweep: every asset no timeline uses, open or parked.
+      if (input.unused === true || Array.isArray(input.asset_ids)) {
+        let gone: MediaAsset[];
+        if (input.unused === true) {
+          const used = assetIdsOnAnyTimeline(s);
+          gone = s.assets.filter((a) => !used.has(a.id));
+        } else {
+          const want = (input.asset_ids as unknown[]).filter((v): v is string => typeof v === "string");
+          gone = want.map((id) => requireItem(s.assets, id, "project asset"));
+        }
+        const uses = assetClipUses(s, new Set(gone.map((a) => a.id)));
+        for (const a of gone) useEditor.getState().removeAsset(a.id);
+        return {
+          removed: gone.length,
+          names: gone.slice(0, 30).map((a) => a.name),
+          ...(gone.length > 30 ? { namesTruncated: true } : {}),
+          clipsRemoved: uses,
+        };
+      }
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       const uses = assetClipUses(s, new Set([asset.id]));
       s.removeAsset(asset.id);
@@ -4952,6 +5042,28 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return patch;
   },
 
+  set_project_notes: (s, input) => {
+      const strings = (v: unknown, k: string) => {
+        if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) throw new ToolError(`${k} must be a list of strings.`);
+        return (v as string[]).map((x) => x.trim()).filter(Boolean);
+      };
+      const patch: Partial<{ text: string; publishedAt: string; links: string[] }> = {};
+      let links = input.links !== undefined ? strings(input.links, "links") : undefined;
+      if (input.add_links !== undefined) {
+        const base = links ?? s.notes.links.filter(Boolean);
+        links = [...base, ...strings(input.add_links, "add_links").filter((l) => !base.includes(l))];
+      }
+      if (links) patch.links = links;
+      if (typeof input.text === "string") patch.text = input.text;
+      if (typeof input.published_at === "string") {
+        if (input.published_at && !/^\d{4}-\d{2}-\d{2}$/.test(input.published_at)) throw new ToolError("published_at is a date as yyyy-mm-dd.");
+        patch.publishedAt = input.published_at;
+      }
+      if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
+      s.setNotes(patch);
+      return useEditor.getState().notes;
+  },
+
   switch_timeline: async (_s, input) => {
       if (!isTimelineId(input.timeline))
         throw new ToolError(`timeline must be one of ${TIMELINE_IDS.join(", ")}.`);
@@ -5087,17 +5199,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
   },
 
-  set_color_grade: (s, input) => {
+  set_color_grade: async (s, input) => {
       const clip = requireItem(s.clips, input.clipId, "video clip");
       // reset and auto rebuild the manual layer; the preset and LUT stay.
       let grade: ColorGrade =
         input.reset === true ? { preset: clip.grade?.preset, lut: clip.grade?.lut } : { ...clip.grade };
       if (input.auto === true) {
-        const data = sampleClipBaseFrameData(clip.id);
-        if (!data)
-          throw new ToolError(
-            "No decoded frame for that clip yet — seek into it so it is on screen, then retry."
-          );
+        const data = sampleClipBaseFrameData(clip.id) ?? (await offscreenClipFrameData(s, clip, 96, 54));
+        if (!data) throw new ToolError("Could not decode a frame of that clip's file.");
         grade = { ...autoGradeFromImageData(data), preset: clip.grade?.preset, lut: clip.grade?.lut };
       }
       for (const k of GRADE_KEYS) if (isNum(input[k])) grade[k] = input[k];
@@ -5301,7 +5410,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         clipId: typeof input.ref_clip_id === "string" ? input.ref_clip_id : undefined,
         assetId: typeof input.ref_asset_id === "string" ? input.ref_asset_id : undefined,
       });
-      const grade = matchGrade(source, reference);
+      const grade = matchGrade(source, reference, isNum(input.strength) ? input.strength : 1);
       // The frames already agree: the clip's own grade stays as it is rather
       // than being wiped by a match that has nothing to say.
       if (!grade)
@@ -6839,6 +6948,41 @@ function patternInput(
     spec.angle = Math.round(clamp(input.pattern_angle, -90, 90)) || undefined;
   }
   return { value: spec };
+}
+
+/**
+ * The settings an effect of this kind takes from a tool call: a light leak's
+ * course, a glitch's pinned kind, a flash's tone, strobe rate and rhythm.
+ * Only the keys the call names come back, each as the value to store
+ * (undefined clears it back to the default); a setting the effect doesn't
+ * take is skipped. Shared by add_effect and update_overlay.
+ */
+function effectSettings(effect: EffectId, input: Record<string, unknown>): Partial<EffectOverlay> {
+  const patch: Partial<EffectOverlay> = {};
+  // A light leak's course: drift is the default and stores as absence.
+  if (effect === "lightleak" && input.leak !== undefined) {
+    if (!(LEAK_COURSES as readonly unknown[]).includes(input.leak))
+      throw new ToolError(`leak is one of ${LEAK_COURSES.join(", ")}.`);
+    patch.leak = input.leak === "drift" ? undefined : (input.leak as LeakCourse);
+  }
+  // A glitch pinned to one kind; the random mix stores as absence.
+  if (effect === "glitch" && input.glitch !== undefined) {
+    if (!(GLITCH_KINDS as readonly unknown[]).includes(input.glitch)) {
+      throw new ToolError(`glitch is one of ${GLITCH_KINDS.join(", ")}.`);
+    }
+    patch.glitch = input.glitch as GlitchKind;
+  }
+  if (effect !== "flash") return patch;
+  // A flash's tone and strobe: white and a single pop store as absence.
+  if (input.tone !== undefined) {
+    if (!(FLASH_TONES as readonly unknown[]).includes(input.tone)) {
+      throw new ToolError(`tone is one of ${FLASH_TONES.join(", ")}.`);
+    }
+    patch.tone = input.tone === "black" ? "black" : undefined;
+  }
+  if (isNum(input.rate)) patch.rate = input.rate > 0 ? clamp(input.rate, FLASH_RATE_MIN, FLASH_RATE_MAX) : undefined;
+  if (input.rhythm !== undefined) patch.rhythm = flashRhythm(input.rhythm);
+  return patch;
 }
 
 function overlayPatch(
