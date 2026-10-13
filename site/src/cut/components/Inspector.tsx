@@ -98,6 +98,7 @@ import {
   restingMaskFrame,
   AMOUNTLESS_EFFECTS,
   displayWords,
+  CYCLE_HOLD_MAX,
   CYCLE_SCALE_MAX,
   CYCLE_SCALE_MIN,
   FONT_CYCLE_FACES_MAX,
@@ -115,7 +116,7 @@ import {
   type OverlayFontCycle,
   type TextWeight,
 } from "@donkeycut/effects-kit";
-import { SHADOW, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN, STRIPES_DEFAULT, type ShadowSpec, type StripesPattern } from "@donkeycut/effects-kit";
+import { SHADOW, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN, STRIPES_DEFAULT, type FlashPulse, type ShadowSpec, type StripesPattern } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
 import { bindRecording, unbindRecording } from "@/cut/lib/soundBind";
 import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
@@ -124,7 +125,10 @@ import { PANEL_GLOBAL, usePanelState, useRememberedScroll } from "@/cut/lib/pane
 import { playheadAt, usePreviewTime } from "@/cut/lib/playhead";
 import { allFonts, CLIP_MAX_ZOOM, clipCovers, clipKeyed, clipPoseAt, clipZoom, contentRect } from "@/cut/lib/types";
 import { AnimationTiles } from "@/cut/components/AnimationTiles";
-import { FlashPulseRows } from "@/cut/components/FlashPulseRows";
+import { LOOP_SPEED_MAX, LOOP_SPEED_MIN } from "@/cut/components/AnimationTiles.tools";
+import { STICKER_W_MIN } from "@/cut/components/Inspector.tools";
+import { TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/cut/components/Timeline.tools";
+import { FlashFadeRow, FlashPulseRows, type PulseWrite } from "@/cut/components/FlashPulseRows";
 import { ColorField } from "@/cut/components/ColorField";
 import { wordTimesFor } from "@/cut/lib/textWords";
 import { NumberField } from "@/cut/components/NumberField";
@@ -144,8 +148,12 @@ import {
   deleteStylePreset,
   listStylePresets,
   saveStylePreset,
+  styleMatches,
+  updateStylePreset,
   type StylePreset,
 } from "@/cut/lib/stylePresets";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { PICKED_RING } from "@/cut/lib/assetPick";
 import {
   deleteSoundPreset,
   saveSoundPreset,
@@ -2230,8 +2238,8 @@ function TextPanel({ overlay: o }: { overlay: TextOverlay }) {
             className="ml-auto w-[74px]"
             icon={<Type />}
             value={o.size}
-            min={24}
-            max={240}
+            min={TEXT_SIZE_MIN}
+            max={TEXT_SIZE_MAX}
             step={1}
             presets={TEXT_SIZES}
             format={(v) => String(Math.round(v))}
@@ -2470,19 +2478,57 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
     }
   };
 
+  // Overwrite a saved style with this title's look, in place in the chip row.
+  const update = async (p: StylePreset) => {
+    const projectId = useEditor.getState().projectId;
+    if (!projectId || busy) return;
+    setBusy(true);
+    try {
+      const next = await updateStylePreset(projectId, p, o);
+      setPresets((prev) => (prev ?? []).flatMap((x) => (x !== p ? [x] : next ? [next] : [])));
+    } catch {
+      // Signed out or offline shelf — the saved style keeps its old look.
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (presets === null) return null;
+
+  // A title that wears no saved style as-is has a look to push into one.
+  const worn = presets.find((p) => styleMatches(p.style, o));
+  const canUpdate = presets.length > 0 && !worn;
   return (
     <div className="mb-1.5">
       <div className="mb-1 flex items-center justify-between">
         <span className="text-[13px] text-muted-foreground">Styles</span>
         {!naming && (
-          <button
-            type="button"
-            className="text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
-            onClick={() => setNaming(true)}
-          >
-            Save style
-          </button>
+          <div className="flex items-center gap-3">
+            {canUpdate && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={busy}
+                  className="text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Update style
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {presets.map((p) => (
+                    <DropdownMenuItem key={`${p.residency}:${p.id}`} onClick={() => void update(p)}>
+                      {p.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <button
+              type="button"
+              className="text-[11.5px] text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setNaming(true)}
+            >
+              Save style
+            </button>
+          </div>
         )}
       </div>
       {naming && (
@@ -2510,7 +2556,10 @@ export function StylePresetsRow({ overlay: o, peers }: { overlay: TextOverlay; p
               <button
                 type="button"
                 title={`Apply ${p.name}`}
-                className="flex items-center gap-1.5 rounded-md border border-input px-2 py-1 text-[11.5px] transition-colors hover:border-ring"
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md border border-input px-2 py-1 text-[11.5px] transition-colors hover:border-ring",
+                  p === worn && PICKED_RING
+                )}
                 onClick={() => {
                   const st = useEditor.getState();
                   st.pushHistory();
@@ -2967,7 +3016,18 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
             </Button>
           </div>
           <Row label="Weight">
-            <WeightSelect value={face.weight ?? o.weight} onChange={(weight) => commit(setFace(i, { weight }))} />
+            <div className="flex items-center gap-1.5">
+              <WeightSelect value={face.weight ?? o.weight} onChange={(weight) => commit(setFace(i, { weight }))} />
+              <SegGroup>
+                <SegToggle
+                  label="Italic"
+                  active={face.italic ?? !!o.italic}
+                  onClick={() => commit(setFace(i, { italic: !(face.italic ?? !!o.italic) }))}
+                >
+                  <Italic />
+                </SegToggle>
+              </SegGroup>
+            </div>
           </Row>
           <Row label="Size">
             <ValueSlider
@@ -3008,6 +3068,29 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
               }}
               onCommit={(v) => {
                 write(setFace(i, { tracking: v / 100 }));
+                ck.end();
+              }}
+            />
+          </Row>
+          {/* Hold: how long this face shows; 0 follows the cycle's rate. */}
+          <Row label="Hold">
+            <ValueSlider
+              label="Hold"
+              sliderClassName="data-horizontal:w-24"
+              valueClassName="w-9 text-muted-foreground"
+              value={face.hold ?? 0}
+              min={0}
+              max={CYCLE_HOLD_MAX}
+              step={1 / 60}
+              snap={[0]}
+              format={(v) => (v > 0 ? `${v.toFixed(2)}s` : "Rate")}
+              parse={parseNumberInput}
+              onDraft={(v) => {
+                ck.begin();
+                write(setFace(i, { hold: v > 0 ? v : undefined }));
+              }}
+              onCommit={(v) => {
+                write(setFace(i, { hold: v > 0 ? v : undefined }));
                 ck.end();
               }}
             />
@@ -3408,8 +3491,8 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
           sliderClassName="data-horizontal:w-24"
           valueClassName="w-9 text-muted-foreground"
           value={anim.loop?.speed ?? 1}
-          min={0.25}
-          max={4}
+          min={LOOP_SPEED_MIN}
+          max={LOOP_SPEED_MAX}
           step={0.25}
           snap={[1]}
           format={(v) => `${v.toFixed(2)}×`}
@@ -4944,6 +5027,15 @@ function PatternSection({ overlay: o }: { overlay: ShapeOverlay }) {
   );
 }
 
+/** A flash element's setting, drafted while a slider drags. */
+function writeFlash(id: string, patch: FlashPulse, how: PulseWrite) {
+  if (how === "draft") {
+    useEditor.getState().updateOverlayTransient(id, patch);
+    return;
+  }
+  useEditor.getState().updateOverlay(id, patch);
+}
+
 function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
   const amountCk = useSliderCheckpoint();
   return (
@@ -4959,12 +5051,10 @@ function EffectPanel({ overlay: o }: { overlay: EffectOverlay }) {
           {o.effect === "lightleak" && <LeakCourseRow overlay={o} />}
           {o.effect === "glitch" && <GlitchKindRow overlay={o} />}
           {o.effect === "flash" && (
-            <FlashPulseRows
-              pulse={o}
-              write={(patch, how) =>
-                how === "draft" ? useEditor.getState().updateOverlayTransient(o.id, patch) : useEditor.getState().updateOverlay(o.id, patch)
-              }
-            />
+            <>
+              <FlashPulseRows pulse={o} write={(patch, how) => writeFlash(o.id, patch, how)} />
+              <FlashFadeRow pulse={o} write={(patch, how) => writeFlash(o.id, patch, how)} />
+            </>
           )}
           <Row label="Amount">
             <ValueSlider
@@ -5246,10 +5336,10 @@ function StickerPanel({ overlay: o }: { overlay: StickerOverlay }) {
             sliderClassName="data-horizontal:w-24"
             valueClassName="w-9 text-muted-foreground"
             value={o.w}
-            min={0.02}
+            min={STICKER_W_MIN}
             max={1}
-            step={0.01}
-            format={(v) => String(Math.round(v * 100))}
+            step={0.005}
+            format={(v) => (v < 0.1 ? (v * 100).toFixed(1) : String(Math.round(v * 100)))}
             parse={parsePercentInput}
             onDraft={(v) => {
               widthCk.begin();

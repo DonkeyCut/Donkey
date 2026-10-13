@@ -84,3 +84,9 @@ test("match_color_grade strength takes the match part of the way", async () => {
   await runAiTool("match_color_grade", { clipId: dark.id, ref_clip_id: mid.id, strength: 0.5 });
   expect(curveAt20()).toBe(60);
 });
+
+test("strength 0 says it took none of the match, not that the footage already matches", async () => {
+  const clip = useEditor.getState().clips[0];
+  const out = (await runAiTool("match_color_grade", { clipId: clip.id, ref_clip_id: clip.id, strength: 0 })) as { note?: string };
+  expect(out.note).toContain("strength 0");
+});

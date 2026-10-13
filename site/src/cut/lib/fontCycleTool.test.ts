@@ -36,6 +36,19 @@ const failure = async (args: Record<string, unknown>) => {
 describe("set_overlay_animation font cycle", () => {
   beforeEach(reset);
 
+  test("each face can hold its own time and set italic", async () => {
+    const o = await aTitle();
+    await runAiTool("set_overlay_animation", {
+      id: o.id,
+      font_cycle: [{ font: "impact", hold: 0.25 }, { font: "serif", italic: true, hold: 99 }, { font: "mono", hold: 0 }],
+    });
+    expect(titles()[0].anim?.fonts?.faces).toEqual([
+      { font: "impact", hold: 0.25 },
+      { font: "serif", italic: true, hold: 10 },
+      { font: "mono" },
+    ]);
+  });
+
   test("a new cycle runs the title's length at the default rate", async () => {
     const o = await aTitle();
     await runAiTool("set_overlay_animation", {

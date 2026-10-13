@@ -10,6 +10,7 @@
 
 import { CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, EASE_IDS, EDGE_STAGGER_MAX, ELEMENT_BLUR_MAX, TILT_MAX } from "@donkeycut/effects-kit";
 import {
+  CYCLE_HOLD_MAX,
   CYCLE_SCALE_MAX,
   CYCLE_SCALE_MIN,
   FONT_CYCLE_FACES_MAX,
@@ -30,6 +31,7 @@ import {
   OVERLAY_ANIM_MIN_SECONDS,
   GLYPH_ANIM_STYLE_IDS,
   GLYPH_LOOP_STYLE_IDS,
+  LOOP_PERIODS,
   DIVE_ANIM_STYLE_IDS,
   edgeNotes,
   OVERLAY_ANIM_STYLE_IDS,
@@ -55,11 +57,24 @@ const LONG_RAMPS = OVERLAY_ANIM_STYLE_IDS.filter((id) => edgeMaxSeconds(id) !== 
   .join("");
 const RAMP_SECONDS = `${OVERLAY_ANIM_MIN_SECONDS}..${OVERLAY_ANIM_MAX_SECONDS} (default ${OVERLAY_ANIM_DEFAULT_SECONDS}${LONG_RAMPS})`;
 
+/** The loop rate multiplier's range: at the top a spin turns twice a second,
+ * fast enough for a loading spinner. */
+export const LOOP_SPEED_MIN = 0.25;
+export const LOOP_SPEED_MAX = 8;
+
+/** How far beyond the frame a keyed position may sit, so an element can enter
+ * or leave across an edge; its resting position stays on the frame. */
+export const OVERLAY_KEY_POS_MIN = -0.5;
+export const OVERLAY_KEY_POS_MAX = 1.5;
+
+// Each loop's cycle at speed 1, e.g. "spin 4s", so a rate can be set from a measured one.
+const LOOP_CYCLES = OVERLAY_LOOP_STYLE_IDS.map((id) => `${id} ${LOOP_PERIODS[id]}s`).join(", ");
+
 export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_animation",
     description:
-      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; ${TEXT_ONLY_ANIM_STYLE_IDS.join(", ")} animate titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece; in_stagger/out_stagger set how much of their ramp the hand-off from the first letter to the last takes, so a 1.6s drop at stagger 0.8 lands a letter every ~0.27s, each moving for ~0.3s. ${edgeNotes()} ${DIVE_ANIM_STYLE_IDS.join(", ")} as the exit is the zoom-through-a-letter transition: the shot after the element shows once the ink has filled the frame, so it needs no freeze frames, image stills or per-letter keyframes. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; set_overlay_keyframes is the precise way to move an element and the default reach, so name a move when it is exactly what you mean — the two compose together. Word effects — words_style, titles only — play the line word by word, timed against the cut's transcript when there is one and spread across the element's own span when there is not: an emphasis travels along a line that is fully up, and a build assembles the line as it is spoken. It is the slot for "make each word pop as I say it" and for "have the words appear one by one". A typewriter entrance on a title can carry a caret: a thin bar at the end of the typed text, solid while it types, then blinking every ${CARET_BLINK_SECONDS}s — the typed comment or search box of a call-to-action card. A hit plays one motion once at a moment inside the element (hit_at seconds from its start), between its entrance and exit: ${hitNotes()}. Use press for a button being pressed, a tap on a UI element, a like or post button; pair it with a click from stock_search kind "sound" placed at the same moment when the tap should be heard. A font cycle flickers a title through typefaces — a new face font_cycle_rate times a second, from font_cycle_at for font_cycle_seconds — and then the title settles back into its own face: the typeface-shuffle beat of a teaser title. Give each face a scale (and tracking) so it fills about the room the title's own face does; a wide tracked title cycling through condensed or hand-drawn faces wants tracking 0 and a scale above 1 on them.`,
+      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; ${TEXT_ONLY_ANIM_STYLE_IDS.join(", ")} animate titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece; in_stagger/out_stagger set how much of their ramp the hand-off from the first letter to the last takes, so a 1.6s drop at stagger 0.8 lands a letter every ~0.27s, each moving for ~0.3s. ${edgeNotes()} ${DIVE_ANIM_STYLE_IDS.join(", ")} as the exit is the zoom-through-a-letter transition: the shot after the element shows once the ink has filled the frame, so it needs no freeze frames, image stills or per-letter keyframes. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; set_overlay_keyframes is the precise way to move an element and the default reach, so name a move when it is exactly what you mean — the two compose together. Word effects — words_style, titles only — play the line word by word, timed against the cut's transcript when there is one and spread across the element's own span when there is not: an emphasis travels along a line that is fully up, and a build assembles the line as it is spoken. It is the slot for "make each word pop as I say it" and for "have the words appear one by one". A typewriter entrance on a title can carry a caret: a thin bar at the end of the typed text, solid while it types, then blinking every ${CARET_BLINK_SECONDS}s — the typed comment or search box of a call-to-action card. A hit plays one motion once at a moment inside the element (hit_at seconds from its start), between its entrance and exit: ${hitNotes()}. Use press for a button being pressed, a tap on a UI element, a like or post button; pair it with a click from stock_search kind "sound" placed at the same moment when the tap should be heard. A font cycle flickers a title through typefaces — a new face font_cycle_rate times a second, from font_cycle_at for font_cycle_seconds — and then the title settles back into its own face: the typeface-shuffle beat of a teaser title. Give each face a scale (and tracking) so it fills about the room the title's own face does; a wide tracked title cycling through condensed or hand-drawn faces wants tracking 0 and a scale above 1 on them. A face's hold sets how long it shows, so changes that land on the music's beats are one face per beat with its measured hold; faces repeat in the list to revisit a typeface.`,
     inputSchema: obj({
       id: str("Overlay element id"),
       move: {
@@ -89,7 +104,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
         enum: [...OVERLAY_LOOP_STYLE_IDS, "none"],
         description: 'Loop style, or "none" to clear',
       },
-      loop_speed: num("Loop rate multiplier 0.25..4 (default 1)"),
+      loop_speed: num(`Loop rate multiplier ${LOOP_SPEED_MIN}..${LOOP_SPEED_MAX} (default 1); one cycle takes its base time over the speed — ${LOOP_CYCLES} — so a loading spinner that turns once every 0.8s is spin at speed 5`),
       words_style: {
         type: "string",
         enum: [...WORD_EFFECT_IDS, "none"],
@@ -128,6 +143,8 @@ export const OVERLAY_ANIMATION_TOOLS = [
             weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Weight of this face; default the title's own" },
             scale: num(`Size multiplier on the title's own size, ${CYCLE_SCALE_MIN}..${CYCLE_SCALE_MAX} (default 1)`),
             tracking: num("Letter spacing in em for this face; default the title's own"),
+            italic: bool("Italic for this face; default the title's own"),
+            hold: num(`Seconds this face shows, up to ${CYCLE_HOLD_MAX}; default one step at font_cycle_rate`),
           },
           ["font"]
         ),
@@ -142,18 +159,19 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_keyframes",
     description:
-      `Give an overlay element a keyframed pose track — the default way to animate one, because a key names the exact pose at the exact second where a preset ramp approximates it. Each key is a whole pose at a time measured in seconds from the element's own start; the pose moves between keys along the key's ease (${EASE_IDS.join(", ")}; default linear) and holds outside them. Omitted fields on a key take the element's current value. scale_x/scale_y stretch one side over scale (a screen switching off: scale_y to 0.02, then scale_x to 0.02); tilt_x/tilt_y turn the element in 3D perspective about its horizontal/vertical axis (tilt_x positive tips the top edge away, tilt_y the right edge; ±${TILT_MAX}°): a bar falling back, a card swinging open. blur softens the element (px at the 1080 short side, 0..${ELEMENT_BLUR_MAX}): keyed with opacity it is depth of field — the card being read sharp, its neighbours blurred and dimmed while a group camera (set_group_camera) pushes in. Pass an empty list to clear the track and return the element to its resting pose. Preset In/Out/Loop animation still composes on top, so a keyframed title can also fade in.`,
+      `Give an overlay element a keyframed pose track — the default way to animate one, because a key names the exact pose at the exact second where a preset ramp approximates it. Each key is a whole pose at a time measured in seconds from the element's own start; the pose moves between keys along the key's ease (${EASE_IDS.join(", ")}; default linear) and holds outside them. Omitted fields on a key take the element's current value. scale_x/scale_y stretch one side over scale (a screen switching off: scale_y to 0.02, then scale_x to 0.02); tilt_x/tilt_y turn the element in 3D perspective about its horizontal/vertical axis (tilt_x positive tips the top edge away, tilt_y the right edge; ±${TILT_MAX}°): a bar falling back, a card swinging open. blur softens the element (px at the 1080 short side, 0..${ELEMENT_BLUR_MAX}): keyed with opacity it is depth of field — the card being read sharp, its neighbours blurred and dimmed while a group camera (set_group_camera) pushes in. Keys merge into the track the element already has — one at an existing time replaces that key, the rest stay — so pass replace true to lay a new track over an old one in one call. Pass an empty list to clear the track and return the element to its resting pose. Preset In/Out/Loop animation still composes on top, so a keyframed title can also fade in.`,
     inputSchema: obj(
       {
         id: str("Overlay element id"),
+        replace: bool("true drops the element's existing keys first; default false merges these into them"),
         keys: {
           type: "array",
           description: "Keys in any order; two at the same time collapse to one",
           items: obj(
             {
               t: num("Seconds from the element's start"),
-              x: num(`Center x, fraction of frame width 0..1 (${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX} for a grouped element)`),
-              y: num(`Center y, fraction of frame height 0..1 (${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX} for a grouped element)`),
+              x: num(`Center x, fraction of frame width, ${OVERLAY_KEY_POS_MIN}..${OVERLAY_KEY_POS_MAX}: past 0..1 the element sits beyond the edge, for one that enters or leaves across it, like a pointer sliding in from below (${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX} for a grouped element)`),
+              y: num(`Center y, fraction of frame height, ${OVERLAY_KEY_POS_MIN}..${OVERLAY_KEY_POS_MAX} (${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX} for a grouped element)`),
               scale: num("Size multiplier, 1 = the element's own size (0.1..4)"),
               scale_x: num("Width over scale, 0..4 (default 1)"),
               scale_y: num("Height over scale, 0..4 (default 1)"),

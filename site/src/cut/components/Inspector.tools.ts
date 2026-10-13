@@ -53,6 +53,11 @@ import {
   STRIPE_LINE_MIN,
 } from "@donkeycut/effects-kit";
 import { EFFECT_SETTING_ARGS } from "@/cut/components/EffectsPanel.tools";
+import { TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/cut/components/Timeline.tools";
+
+/** The narrowest a sticker draws, as a frame-width fraction: about 10 px on
+ * a 1920 frame, room for a mouse pointer or a small UI icon. */
+export const STICKER_W_MIN = 0.005;
 import { bool, ids, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { builtinLutCatalogText } from "@/cut/lib/builtinLuts";
 import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
@@ -123,17 +128,17 @@ export const INSPECTOR_TOOLS = [
   {
     name: "update_overlay",
     description:
-      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/inks/fill_opacity/radius/stroke/pattern/shadow; stickers take w/h. A shadow on a title or shape takes color, blur, opacity and offset; a colored shadow at shadow_y 0 is a glow. Every kind takes name, timing, position, rotation, opacity, blur, motion blur, hidden. This is the tool for 'make this text better' requests too. Pass ids to land one change on several elements at once (a group, every title in a run): fields a kind lacks are skipped on that element, and the whole write is one undo step.",
+      "Update any overlay element — title, shape, or sticker — by id (from the selection or state). Titles take text/size/font/weight/color/shadow/plate; shapes take w/h/fill/inks/fill_opacity/radius/stroke/pattern/shadow; stickers take w/h. Effects take amount and their own settings (leak, glitch, tone, rate, rhythm, fade — see add_effect), changed in place so the element keeps its id, lane and timing. A shadow on a title or shape takes color, blur, opacity and offset; a colored shadow at shadow_y 0 is a glow. Every kind takes name, timing, position, rotation, opacity, blur, motion blur, hidden. This is the tool for 'make this text better' requests too. Pass ids to land one change on several elements at once (a group, every title in a run): fields a kind lacks are skipped on that element, and the whole write is one undo step.",
     inputSchema: obj({
       id: str("Overlay element id"),
       ids: { type: "array", items: { type: "string" }, description: "Several element ids to change together (instead of id)" },
       name: str("What the person calls this element — shown on its timeline chip and inspector title (empty string clears it, back to what it is)"),
       text: str("New text (titles)"),
-      start: num("Start s"),
-      end: num("End s"),
+      start: num("Start s. Alone it moves the element, its length riding along; with end it sets both edges. A start that lands on another element on the same row slides this one on to the next free spot, so shrink the neighbour first"),
+      end: num("End s. Alone it trims or extends in place, pushing the later elements on the row along"),
       x: num(`Center x 0..1; a grouped element reaches ${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX}, off the frame, for its group camera`),
       y: num(`Center y 0..1; a grouped element reaches ${CAMERA_WORLD_MIN}..${CAMERA_WORLD_MAX}`),
-      size: num("Font size px at 1080w (titles)"),
+      size: num(`Font size px at 1080w (titles), ${TEXT_SIZE_MIN}..${TEXT_SIZE_MAX}`),
       color: str("CSS text color (titles)"),
       font: str("Font id (titles; see the graphics skill)"),
       weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Font weight (titles): 400 regular, 500 medium, 600 semibold, 700 bold, 800 extra bold, 900 black" },
@@ -153,8 +158,8 @@ export const INSPECTOR_TOOLS = [
         enum: [...TEXT_TEXTURES, "none"],
         description: 'Titles: grain inside the letters: "stipple" breaks each letter into spray-paint specks along its left edge, solid by its middle (the gritty teaser title); "none" makes the type solid again',
       },
-      w: num("Width, fraction of frame width (shapes/stickers)"),
-      h: num("Height, fraction of frame height (shapes/stickers; a sticker's 0 returns it to the source's aspect)"),
+      w: num(`Width, fraction of frame width (shapes 0.01..2, stickers ${STICKER_W_MIN}..1.5: a 36 px mouse pointer is about 0.012)`),
+      h: num(`Height, fraction of frame height (shapes; stickers ${STICKER_W_MIN}..1.5, and 0 returns a sticker to its source's aspect)`),
       fill: str("Fill color (shapes)"),
       inks: {
         type: "array",
@@ -460,7 +465,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_color_grade",
     description:
-      `Color-grade a video clip's basic sliders (any track; stills too): the Light group (${GRADE_BASIC_FIELDS.filter((f) => f.group === "light").map((f) => f.key).join(", ")}), the Color group (${GRADE_BASIC_FIELDS.filter((f) => f.group === "color").map((f) => f.key).join(", ")}) and the Detail pair (${GRADE_DETAIL_FIELDS.map((f) => f.key).join(", ")}). Fields patch the clip's current grade: only the ones you pass change, and every value 0 is neutral. The light sliders work in linear light on the picture after its source conversion and LUT; manual adjustments layer OVER the clip's color preset (set_color_preset), never replacing it. reset:true clears the manual grade first (the preset and LUT stay); auto:true fits a starting grade from the clip's base rendering (auto-tone: exposure to middle gray, contrast stretch, gray-world white balance — needs the clip's frame decoded, so seek into it first if this errors), and explicit fields then override it. Preview, timeline thumbnails, and export all render the same result. Read read_color_stats before grading so the numbers ground the move. Pass ids or all_clips to land the same patch on several clips as one undo step.`,
+      `Color-grade a video clip's basic sliders (any track; stills too): the Light group (${GRADE_BASIC_FIELDS.filter((f) => f.group === "light").map((f) => f.key).join(", ")}), the Color group (${GRADE_BASIC_FIELDS.filter((f) => f.group === "color").map((f) => f.key).join(", ")}) and the Detail pair (${GRADE_DETAIL_FIELDS.map((f) => f.key).join(", ")}). Fields patch the clip's current grade: only the ones you pass change, and every value 0 is neutral. The light sliders work in linear light on the picture after its source conversion and LUT; manual adjustments layer OVER the clip's color preset (set_color_preset), never replacing it. reset:true clears the manual grade first (the preset and LUT stay); auto:true fits a starting grade from the clip's base rendering (auto-tone: exposure to middle gray, contrast stretch, gray-world white balance), and explicit fields then override it. Preview, timeline thumbnails, and export all render the same result. Read read_color_stats before grading so the numbers ground the move. Pass ids or all_clips to land the same patch on several clips as one undo step.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
       ...manyClips,
@@ -585,7 +590,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "read_color_stats",
     description:
-      "Read color statistics off a frame — per-channel and luma quantiles (0..255), channel means, mean saturation, and warmth (red/blue midtone ratio; >1 warm, <1 cool). Pass clipId for a video clip's current frame (seek into the clip first if it errors) or assetId for an image (a chat attachment or Media import). A clip reads as its base rendering — through the source conversion, before any LUT or grade, so the numbers describe the footage itself; graded:true reads it through the clip's LUT, preset and adjustments, which is how a move is verified. Read the base before grading — never grade blind — and the graded frame after.",
+      "Read color statistics off a frame — per-channel and luma quantiles (0..255), channel means, mean saturation, and warmth (red/blue midtone ratio; >1 warm, <1 cool). Pass clipId for a video clip's frame (the one on screen when the playhead is in the clip, otherwise one decoded from its file at the middle of its trim) or assetId for an image (a chat attachment or Media import). A clip reads as its base rendering — through the source conversion, before any LUT or grade, so the numbers describe the footage itself; graded:true reads it through the clip's LUT, preset and adjustments, which is how a move is verified. Read the base before grading — never grade blind — and the graded frame after.",
     inputSchema: obj({
       clipId: str("Video clip id (its current frame)"),
       assetId: str("Image asset id (chat attachment or import)"),
@@ -595,7 +600,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "match_color_grade",
     description:
-      "Match a video clip's color to a reference, computed from the pixels: per-channel quantile mapping compiled into tone curves plus a saturation delta. The computed curves carry the whole look, so the match replaces the clip's entire grade, preset and LUT included. The reference is ref_asset_id (an attached or imported image) or ref_clip_id (another clip's current frame). Use when the user shares a look to copy or asks to match two shots; refine afterward with the other grading tools, checking read_color_stats.",
+      "Match a video clip's color to a reference, computed from the pixels: per-channel quantile mapping compiled into tone curves (each segment's slope bounded, so a reference of other content shifts the look without tearing gradients into bands) plus a saturation delta. The computed curves carry the whole look, so the match replaces the clip's entire grade, preset and LUT included. The reference is ref_asset_id (an attached or imported image) or ref_clip_id (another clip's frame). Use when the user shares a look to copy or asks to match two shots; refine afterward with the other grading tools, checking read_color_stats.",
     inputSchema: obj({
       clipId: str("Video clip to grade"),
       ref_asset_id: str("Reference image asset id"),

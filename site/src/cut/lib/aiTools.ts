@@ -4,6 +4,7 @@ import { readFolder, sharedFolderPage } from "@/cut/lib/folderBrowse";
 import { parseFolderLink } from "@/cut/lib/folderReference";
 import { cloudRequest } from "@/cut/lib/backend/cloud";
 import { assetTypeOf, importFileToProject } from "@/cut/lib/media";
+import { saveSvgSticker } from "@/cut/lib/svgSticker";
 import { linkIdForAsset, uploadLinkedFile, syncLinkedLibrary, isLinkedType } from "@/cut/lib/linkedLibrary/registry";
 
 import { formatBytes } from "@/lib/bytes";
@@ -96,6 +97,8 @@ import {
   penClosed,
   type RemovalStroke,
   type StrokeStyleId,
+  CYCLE_HOLD_MAX,
+  CYCLE_HOLD_MIN,
   CYCLE_SCALE_MAX,
   CYCLE_SCALE_MIN,
   FONT_CYCLE_FACES_MAX,
@@ -109,23 +112,27 @@ import {
   type GlitchKind,
   FLASH_RATE_MAX,
   FLASH_RATE_MIN,
+  FLASH_FADE_CHOICES,
+  FLASH_FADE_NONE,
   FLASH_RHYTHMS,
+  loopPeriod,
   FLASH_TONES,
   TEXT_TEXTURES,
   type CycleFace,
+  type FlashFade,
   type FlashRhythm,
   type TextWeight,
 } from "@donkeycut/effects-kit";
 import type { AiPanelToolName } from "@/cut/components/AiPanel.tools";
-import type { OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
+import { LOOP_SPEED_MAX, LOOP_SPEED_MIN, OVERLAY_KEY_POS_MAX, OVERLAY_KEY_POS_MIN, type OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
 import type { AudioToolName } from "@/cut/components/AudioPanel.tools";
 import type { CameraCardToolName } from "@/cut/components/CameraCardSection.tools";
 import type { EditorToolName } from "@/cut/components/Editor.tools";
 import type { EffectsToolName } from "@/cut/components/EffectsPanel.tools";
-import { SHAPE_KINDS, type ElementsToolName } from "@/cut/components/ElementsPanel.tools";
+import { SHAPE_KINDS, SVG_STICKER_MAX_CHARS, type ElementsToolName } from "@/cut/components/ElementsPanel.tools";
 import type { VideoGenToolName } from "@/cut/components/GeneratePanel.tools";
 import type { ImageGenToolName } from "@/cut/components/ImageGenPanel.tools";
-import type { InspectorToolName } from "@/cut/components/Inspector.tools";
+import { STICKER_W_MIN, type InspectorToolName } from "@/cut/components/Inspector.tools";
 import type { GroupPanelToolName } from "@/cut/components/GroupPanel.tools";
 import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, ELEMENT_BLUR_MAX, SHUTTER_MAX, SHUTTER_MIN, TILT_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
 import { cleanInks, LETTER_SPACING_MAX, LETTER_SPACING_MIN, PATTERN_KINDS, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN, STRIPES_DEFAULT, type PatternSpec, type ShadowSpec } from "@donkeycut/effects-kit";
@@ -138,7 +145,7 @@ import type { SceneToolName } from "@/cut/components/SceneCard.tools";
 import type { SidePanelToolName } from "@/cut/components/SidePanel.tools";
 import type { StockToolName } from "@/cut/components/StockPanels.tools";
 import type { SubtitlesToolName } from "@/cut/components/SubtitlesPanel.tools";
-import type { TimelineToolName } from "@/cut/components/Timeline.tools";
+import { TEXT_SIZE_MAX, TEXT_SIZE_MIN, type TimelineToolName } from "@/cut/components/Timeline.tools";
 import type { TopBarToolName } from "@/cut/components/TopBar.tools";
 import type { TransitionsToolName } from "@/cut/components/TransitionsPanel.tools";
 import { apiFetch, apiJson, getBackend } from "./backend";
@@ -232,7 +239,7 @@ import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./
 import { framesAt, readMediaFileSize } from "./mediaRead";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
-import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, placedAssetIds } from "./aiContext";
+import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, placedAssetIds, roundT } from "./aiContext";
 import { CARD_SIDES, newCard, normalizeCard, type CardSide } from "./cameraCard";
 import { CAPTION_STYLES, captionEmphasis, cueSpot, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount } from "./subtitles";
 import { cueEmphasis, emphasisIndicesOf, emphasizedWords } from "./captionEmphasis";
@@ -342,6 +349,15 @@ import { soundSourceOf, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { bindRecording, unbindRecording } from "./soundBind";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+/** A time written out to the microsecond — 1.016667 for 61/60 — sits a hair
+ * past its frame, so that frame still shows what came before. One within 10 µs
+ * of a frame at a common rate (the 1/600 s grid holds 24, 25, 30, 50 and 60
+ * fps) lands on it exactly. */
+const FRAME_GRID = 600;
+const onFrame = (t: number) => {
+  const n = Math.round(t * FRAME_GRID);
+  return Math.abs(t * FRAME_GRID - n) < FRAME_GRID * 1e-5 ? n / FRAME_GRID : t;
+};
 /** A rotation input in degrees, kept to tenths: a screen in the shot can lean
  *  a fraction of a degree, and whatever is fitted onto it has to match. */
 const degInput = (n: number) => Math.round(clamp(n, -180, 180) * 10) / 10;
@@ -451,6 +467,16 @@ async function offscreenClipFrameData(
 ): Promise<Uint8ClampedArray | null> {
   const asset = s.assets.find((a) => a.id === clip.assetId);
   if (!asset?.url) return null;
+  // A still on the track has no frames to seek: draw the image itself.
+  if (asset.type === "image") {
+    const img = await decodeRasterImageUrl(asset.url);
+    if (!img || !img.width) return null;
+    const c = createRasterCanvas(w, h);
+    const ctx = c.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!ctx) return null;
+    ctx.drawImage(img.source, 0, 0, w, h);
+    return toBaseRendering(ctx.getImageData(0, 0, w, h).data, sourceProfileOf(asset));
+  }
   const frame = await baseFrameAt(asset.url, (clip.in + clip.out) / 2, { width: w, height: h, fit: "fill" });
   const ctx = frame?.canvas.getContext("2d") as CanvasRenderingContext2D | null | undefined;
   return ctx ? ctx.getImageData(0, 0, w, h).data : null;
@@ -600,21 +626,32 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (sel?.kind !== "overlay") throw new ToolError("Could not create the shape.");
     applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "shape"));
     const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-    return { id: o.id, shape, start: round2(o.start), end: round2(o.end) };
+    return { id: o.id, shape, start: roundT(o.start), end: roundT(o.end) };
   },
 
-  add_sticker: (s, input) => {
-    const assetId = typeof input.asset_id === "string" && input.asset_id ? input.asset_id : undefined;
-    if (!assetId) throw new ToolError("Pass asset_id.");
+  add_sticker: async (s, input) => {
+    const svg = typeof input.svg === "string" && input.svg.trim() ? input.svg : undefined;
+    let assetId = typeof input.asset_id === "string" && input.asset_id ? input.asset_id : undefined;
+    if (!assetId && !svg) throw new ToolError("Pass asset_id, or svg markup to draw the sticker from.");
+    if (svg && !assetId) {
+      if (!s.projectId) throw new ToolError("No project open.");
+      if (svg.length > SVG_STICKER_MAX_CHARS) throw new ToolError(`svg is over ${SVG_STICKER_MAX_CHARS} characters.`);
+      const name = typeof input.name === "string" && input.name.trim() ? input.name.trim() : "Drawn sticker";
+      const drawn = await saveSvgSticker(s.projectId, svg, name).catch((e: unknown) => {
+        throw new ToolError(e instanceof Error ? e.message : String(e));
+      });
+      assetId = drawn.id;
+      s = useEditor.getState();
+    }
     const stickerAsset = s.assets.find((a) => a.id === assetId);
     if (stickerAsset?.type !== "image") throw new ToolError(`No image asset with id ${assetId}.`);
     if (isNum(input.start)) s.seek(input.start);
-    s.addSticker({ assetId, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}), ...aimedLane(input) });
+    s.addSticker({ assetId: assetId!, ...(isLottieAsset(stickerAsset) ? { lottie: true } : {}), ...aimedLane(input) });
     const sel = useEditor.getState().selection;
     if (sel?.kind !== "overlay") throw new ToolError("Could not create the sticker.");
     applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
     const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-    return { id: o.id, assetId, start: round2(o.start), end: round2(o.end) };
+    return { id: o.id, assetId, start: roundT(o.start), end: roundT(o.end) };
   },
 
   create_sticker: async (s, input) => {
@@ -629,7 +666,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (sel?.kind !== "overlay") throw new ToolError("Could not place the sticker.");
     applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "sticker"));
     const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-    return { id: o.id, assetId: asset.id, start: round2(o.start), end: round2(o.end) };
+    return { id: o.id, assetId: asset.id, start: roundT(o.start), end: roundT(o.end) };
   },
 
   add_effect: (s, input) => {
@@ -654,7 +691,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const settings = effectSettings(effect as EffectId, input);
     if (Object.keys(settings).length) useEditor.getState().updateOverlay(sel.id, settings);
     const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-    return { id: o.id, effect, start: round2(o.start), end: round2(o.end) };
+    return { id: o.id, effect, start: roundT(o.start), end: roundT(o.end) };
   },
 
   set_overlay_animation: (s, input) => {
@@ -714,7 +751,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
     }
     const rawLoop = input.loop_style;
-    const speed = isNum(input.loop_speed) ? clamp(input.loop_speed, 0.25, 4) : undefined;
+    const speed = isNum(input.loop_speed) ? clamp(input.loop_speed, LOOP_SPEED_MIN, LOOP_SPEED_MAX) : undefined;
     if (typeof rawLoop === "string") {
       if (rawLoop === "none") delete anim.loop;
       else if (!(OVERLAY_LOOP_STYLE_IDS as string[]).includes(rawLoop))
@@ -764,7 +801,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     applyFontCycleInput(o, anim, input);
     s.updateOverlay(o.id, { anim: hasOverlayAnim(anim) ? anim : undefined });
     const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
-    return { id: next.id, anim: next.anim ?? null };
+    // The loop's real cycle, so a rate set to match a measured one can be
+    // checked without reading it off frames.
+    const cycle = loopPeriod(next.anim);
+    return { id: next.id, anim: next.anim ?? null, ...(cycle ? { loop_cycle_seconds: Math.round(cycle * 1000) / 1000 } : {}) };
   },
 
   set_overlay_keyframes: (s, input) => {
@@ -781,15 +821,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Each key builds on the pose already at its time, so a key that only
       // names `x` keeps whatever the element was doing otherwise.
       s.pushHistory();
+      // replace starts the track over, in the same undo step as its keys.
+      if (input.replace === true) s.updateOverlaysTransient([{ id: o.id, patch: { kf: undefined } }]);
       for (const k of raw as Record<string, unknown>[]) {
         if (!isNum(k.t)) throw new ToolError("Every key needs a time `t`.");
-        sent.add(round2(clamp(k.t, 0, dur)));
+        sent.add(roundT(onFrame(clamp(k.t, 0, dur))));
         s.setOverlayKey(
           o.id,
-          clamp(k.t, 0, dur),
+          onFrame(clamp(k.t, 0, dur)),
           {
-            ...(isNum(k.x) ? { x: clampOverlayPos(k.x, o) } : {}),
-            ...(isNum(k.y) ? { y: clampOverlayPos(k.y, o) } : {}),
+            ...(isNum(k.x) ? { x: o.groupId ? clampOverlayPos(k.x, o) : clamp(k.x, OVERLAY_KEY_POS_MIN, OVERLAY_KEY_POS_MAX) } : {}),
+            ...(isNum(k.y) ? { y: o.groupId ? clampOverlayPos(k.y, o) : clamp(k.y, OVERLAY_KEY_POS_MIN, OVERLAY_KEY_POS_MAX) } : {}),
             ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
             ...(isNum(k.scale_x) ? { scaleX: clamp(k.scale_x, 0, 4) } : {}),
             ...(isNum(k.scale_y) ? { scaleY: clamp(k.scale_y, 0, 4) } : {}),
@@ -807,12 +849,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     }
     // A merge keeps keys this call never named; say which, so a key meant to
     // go is not sent around again and again.
-    const kept = raw.length ? (kf ?? []).map((k) => round2(k.t)).filter((t) => !sent.has(t)) : [];
+    const kept = raw.length && input.replace !== true ? (kf ?? []).map((k) => roundT(k.t)).filter((t) => !sent.has(t)) : [];
     return {
       id: o.id,
-      keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })),
+      keys: (kf ?? []).map((k) => ({ ...k, t: roundT(k.t) })),
       ...(kept.length
-        ? { kept, note: `Keys at ${kept.join(", ")}s were already on the track and stay; to drop them, clear the track with an empty keys list, then send the full list.` }
+        ? { kept, note: `Keys at ${kept.join(", ")}s were already on the track and stay; pass replace true with the full list to drop them.` }
         : {}),
     };
   },
@@ -853,7 +895,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     return {
       groupId,
       start: round2(next.start),
-      keys: next.keys.map((k) => ({ ...k, t: round2(k.t), x: round2(k.x), y: round2(k.y), scale: round2(k.scale) })),
+      keys: next.keys.map((k) => ({ ...k, t: roundT(k.t), x: round2(k.x), y: round2(k.y), scale: round2(k.scale) })),
       motionBlur: next.motionBlur ?? null,
     };
   },
@@ -873,7 +915,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         s.pushHistory();
         s.updateClipTransient(clip.id, { motionBlur });
       }
-      return { id: clip.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })), motionBlur: motionBlur ?? null };
+      return { id: clip.id, keys: (kf ?? []).map((k) => ({ ...k, t: roundT(k.t) })), motionBlur: motionBlur ?? null };
     }
     if (!Array.isArray(raw)) throw new ToolError("keys must be a list.");
     if (raw.length === 0) {
@@ -904,7 +946,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     if (motionBlur !== clip.motionBlur) {
       useEditor.getState().updateClipTransient(clip.id, { motionBlur });
     }
-    return { id: clip.id, keys: (kf ?? []).map((k) => ({ ...k, t: round2(k.t) })), motionBlur: motionBlur ?? null };
+    return { id: clip.id, keys: (kf ?? []).map((k) => ({ ...k, t: roundT(k.t) })), motionBlur: motionBlur ?? null };
   },
 
   set_mask: (s, input) => {
@@ -1041,6 +1083,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       style = TRANSITION_STYLE_IDS.find((x) => x === requested);
       if (!style) throw new ToolError(`Unknown style. Use one of: ${TRANSITION_STYLE_IDS.join(", ")}.`);
     }
+    // Refused before anything lands, so a failed call changes nothing.
+    if (isNum(input.band) && input.seconds > 0 && !takesBand(style ?? clip.transitionStyle ?? "crossfade"))
+      throw new ToolError(`band is for the wipes only (${BAND_STYLES.join(", ")}).`);
     s.setClipTransition(clip.id, input.seconds, style);
     let after = useEditor.getState();
     // The bar's own id rides the result so remove_transition can round-trip it.
@@ -1054,8 +1099,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       after.updateTransitionTransient(bar.id, { feather: feather > 0 ? feather : undefined });
       after = useEditor.getState();
     }
-    if (bar && isNum(input.band)) {
-      if (!takesBand(bar.style)) throw new ToolError(`band is for the wipes only (${BAND_STYLES.join(", ")}).`);
+    if (bar && isNum(input.band) && takesBand(bar.style)) {
       const band = clampBand(input.band);
       after.updateTransitionTransient(bar.id, { band: band > 0 ? band : undefined });
       after = useEditor.getState();
@@ -1161,8 +1205,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Composited through the render path, so the frame carries what the
       // finished file would carry — clips, transitions, effects, elements,
       // captions — the preview's video layer alone leaves its DOM elements
-      // floating above it.
-      const total = totalDuration(s.clips);
+      // floating above it. The cut runs as long as anything on it does, so a
+      // cut of shapes and titles alone is reachable past 0.
+      const total = projectDuration(s);
       const at = clamp(isNum(input.t) ? input.t : playheadAt(), 0, Math.max(0, total - 0.001));
       const frame = frameOf(s.aspect);
       const k = CAPTURE_LONG_SIDE / Math.max(frame.w, frame.h);
@@ -1210,7 +1255,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError("Pass times: [seconds] — the moments of the cut to check, or [{at, source}] when the cut sits at a different second than the source does.");
       if (moments.length > MAX_COMPARE)
         throw new ToolError(`That is ${moments.length} moments — ${MAX_COMPARE} is the most one call reads. Check these, fix what is off, then call again for the rest.`);
-      const total = totalDuration(s.clips);
+      const total = projectDuration(s);
       const frame = frameOf(s.aspect);
       const k = CAPTURE_LONG_SIDE / Math.max(frame.w, frame.h);
       const size = { width: Math.round(frame.w * k), height: Math.round(frame.h * k) };
@@ -2613,7 +2658,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         knownFont(input.font);
       }
       if (isNum(input.start)) s.seek(input.start);
-      s.addOverlay(aimedLane(input));
+      s.addOverlay({ ...aimedLane(input), seed: "defaults" });
       const sel = useEditor.getState().selection;
       if (sel?.kind !== "overlay") throw new ToolError("Could not create the title.");
       applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "text"));
@@ -2669,7 +2714,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             });
         }
         useEditor.getState().seek(line.start);
-        useEditor.getState().addOverlay({ lane });
+        useEditor.getState().addOverlay({ lane, seed: "defaults" });
         const sel = useEditor.getState().selection;
         if (sel?.kind !== "overlay") return;
         applyOverlayPatchSettled(sel.id, {
@@ -2695,7 +2740,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         });
         useEditor.getState().updateOverlay(sel.id, { anim: line.anim });
         const o = useEditor.getState().overlays.find((x) => x.id === sel.id);
-        if (o) made.push({ id: o.id, start: round2(o.start), end: round2(o.end), text: line.text });
+        if (o) made.push({ id: o.id, start: roundT(o.start), end: roundT(o.end), text: line.text });
       });
       const faces = [...new Set(composed.map((l) => l.font))];
       const moves = [...new Set(composed.map((l) => l.move))].filter((m) => m !== "none");
@@ -3028,16 +3073,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const ids = Array.isArray(input.ids) && input.ids.length ? input.ids.map(String) : null;
       if (!ids && typeof input.id !== "string") throw new ToolError("Pass id or ids.");
       const targets = (ids ?? [String(input.id)]).map((id) => requireItem(s.overlays, id, "overlay element"));
+      // An effect's own settings — its course, kind, tone, strobe — change
+      // in place, so the element keeps its id, lane and timing. Read them all
+      // first: a bad value refuses the call before anything is written.
+      const settings = new Map(targets.flatMap((o) => (isEffectOverlay(o) ? [[o.id, effectSettings(o.effect, input)] as const] : [])));
       // One undo step for the whole write, however many elements it lands on.
       s.pushHistory();
       for (const o of targets) {
         applyOverlayPatchSettled(o.id, overlayPatch(input, o.kind ?? "text", o));
-        // An effect's own settings — its course, kind, tone, strobe — change
-        // in place, so the element keeps its id, lane and timing.
-        if (isEffectOverlay(o)) {
-          const settings = effectSettings(o.effect, input);
-          if (Object.keys(settings).length) useEditor.getState().updateOverlay(o.id, settings);
-        }
+        const own = settings.get(o.id);
+        if (own && Object.keys(own).length) useEditor.getState().updateOverlaysTransient([{ id: o.id, patch: own }]);
       }
       const report = (id: string) => {
         const next = useEditor.getState().overlays.find((x) => x.id === id)!;
@@ -3045,8 +3090,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           id: next.id,
           kind: next.kind ?? "text",
           ...(isTextOverlay(next) ? { text: next.text, color: next.color, size: next.size } : {}),
-          start: round2(next.start),
-          end: round2(next.end),
+          start: roundT(next.start),
+          end: roundT(next.end),
         };
       };
       return ids ? { overlayIds: targets.map((o) => o.id), updated: targets.map((o) => report(o.id)) } : report(targets[0].id);
@@ -4679,14 +4724,20 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   delete_asset: (s, input) => {
-      // The sweep: every asset no timeline uses, open or parked.
-      if (input.unused === true || Array.isArray(input.asset_ids)) {
+      // The sweep: every asset no timeline uses, open or parked — of the
+      // ones this chat can see: another thread's unplaced media and the
+      // project's fonts and LUTs stay.
+      const listed = Array.isArray(input.asset_ids) && input.asset_ids.length > 0;
+      if (input.unused === true || listed) {
         let gone: MediaAsset[];
         if (input.unused === true) {
           const used = assetIdsOnAnyTimeline(s);
-          gone = s.assets.filter((a) => !used.has(a.id));
+          const placed = placedAssetIds(s);
+          const chatId = chatOwner();
+          const spare = s.assets.filter((a) => !used.has(a.id) && !isLinkedAssetType(a.type));
+          gone = spare.filter((a) => !hiddenFromChat(a, chatId, placed));
         } else {
-          const want = (input.asset_ids as unknown[]).filter((v): v is string => typeof v === "string");
+          const want = [...new Set((input.asset_ids as unknown[]).filter((v): v is string => typeof v === "string"))];
           gone = want.map((id) => requireItem(s.assets, id, "project asset"));
         }
         const uses = assetClipUses(s, new Set(gone.map((a) => a.id)));
@@ -5051,7 +5102,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       let links = input.links !== undefined ? strings(input.links, "links") : undefined;
       if (input.add_links !== undefined) {
         const base = links ?? s.notes.links.filter(Boolean);
-        links = [...base, ...strings(input.add_links, "add_links").filter((l) => !base.includes(l))];
+        links = [...new Set([...base, ...strings(input.add_links, "add_links")])];
       }
       if (links) patch.links = links;
       if (typeof input.text === "string") patch.text = input.text;
@@ -5083,7 +5134,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const out: Record<string, number> = {};
       if (input.fit) {
         const el = document.querySelector<HTMLElement>(".tl-scroll");
-        const dur = totalDuration(s.clips);
+        const dur = projectDuration(s);
         if (el && dur > 0) {
           s.setPxPerSec((el.clientWidth - 60) / dur);
           el.scrollLeft = 0;
@@ -5410,14 +5461,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         clipId: typeof input.ref_clip_id === "string" ? input.ref_clip_id : undefined,
         assetId: typeof input.ref_asset_id === "string" ? input.ref_asset_id : undefined,
       });
-      const grade = matchGrade(source, reference, isNum(input.strength) ? input.strength : 1);
-      // The frames already agree: the clip's own grade stays as it is rather
-      // than being wiped by a match that has nothing to say.
+      const strength = isNum(input.strength) ? input.strength : 1;
+      const grade = matchGrade(source, reference, strength);
+      // The frames already agree, or strength 0 asked for none of the match:
+      // the clip's own grade stays as it is.
       if (!grade)
         return {
           id: clip.id,
           grade: clip.grade ?? "neutral",
-          note: "The footage already matches the reference — nothing changed.",
+          note: strength <= 0 ? "strength 0 takes none of the match — nothing changed." : "The footage already matches the reference — nothing changed.",
         };
       // The computed curves carry the whole look, so the match replaces the
       // clip's grade — a preset left underneath would double the move.
@@ -5580,6 +5632,8 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "sync_lyrics",
   "align_to_audio",
   "stock_add",
+  "read_color_stats",
+  "match_color_grade",
 ]);
 
 /** Tools that need the editor page itself: motion tracking runs MediaPipe's
@@ -5837,7 +5891,7 @@ function textSequenceLines(
       start: isNum(l.start) ? Math.max(0, l.start) : NaN,
       end: isNum(l.end) ? l.end : NaN,
       ...(typeof l.color === "string" ? { color: l.color } : {}),
-      ...(isNum(l.size) ? { size: clamp(Math.round(l.size), 16, 320) } : {}),
+      ...(isNum(l.size) ? { size: clamp(Math.round(l.size), TEXT_SIZE_MIN, TEXT_SIZE_MAX) } : {}),
       ...(l.emphasis === "whisper" || l.emphasis === "hero" || l.emphasis === "normal"
         ? { emphasis: l.emphasis }
         : {}),
@@ -6495,16 +6549,15 @@ function applyFontCycleInput(
 
   // Timing: held inside the element, with the rate in its supported range.
   const dur = Math.max(0.1, o.end - o.start);
-  const at = clamp(isNum(input.font_cycle_at) ? input.font_cycle_at : (anim.fonts?.at ?? 0), 0, dur - 0.05);
-  const seconds = clamp(
-    isNum(input.font_cycle_seconds) ? input.font_cycle_seconds : (anim.fonts?.seconds ?? dur - at),
-    0.05,
-    dur - at
+  const at = onFrame(clamp(isNum(input.font_cycle_at) ? input.font_cycle_at : (anim.fonts?.at ?? 0), 0, dur - 0.05));
+  const seconds = onFrame(
+    clamp(isNum(input.font_cycle_seconds) ? input.font_cycle_seconds : (anim.fonts?.seconds ?? dur - at), 0.05, dur - at)
   );
   const rate = isNum(input.font_cycle_rate)
     ? clamp(input.font_cycle_rate, FONT_CYCLE_RATE_MIN, FONT_CYCLE_RATE_MAX)
     : (anim.fonts?.rate ?? FONT_CYCLE_RATE);
-  const round = (v: number) => Math.round(v * 1000) / 1000;
+  // To the microsecond, so a run that starts on a frame stays on it.
+  const round = (v: number) => onFrame(Math.round(v * 1e6) / 1e6);
   anim.fonts = { faces, at: round(at), seconds: round(seconds), rate };
 }
 
@@ -6528,6 +6581,8 @@ function cycleFaceOf(raw: unknown): CycleFace {
     ...(isTextWeight(f.weight) ? { weight: f.weight } : {}),
     ...(isNum(f.scale) && f.scale !== 1 ? { scale: clamp(f.scale, CYCLE_SCALE_MIN, CYCLE_SCALE_MAX) } : {}),
     ...(isNum(f.tracking) ? { tracking: clamp(f.tracking, -0.05, 0.5) } : {}),
+    ...(typeof f.italic === "boolean" ? { italic: f.italic } : {}),
+    ...(isNum(f.hold) && f.hold > 0 ? { hold: onFrame(clamp(f.hold, CYCLE_HOLD_MIN, CYCLE_HOLD_MAX)) } : {}),
   };
 }
 
@@ -6952,8 +7007,8 @@ function patternInput(
 
 /**
  * The settings an effect of this kind takes from a tool call: a light leak's
- * course, a glitch's pinned kind, a flash's tone, strobe rate and rhythm.
- * Only the keys the call names come back, each as the value to store
+ * course, a glitch's pinned kind, a flash's tone, strobe rate, rhythm and
+ * fade. Only the keys the call names come back, each as the value to store
  * (undefined clears it back to the default); a setting the effect doesn't
  * take is skipped. Shared by add_effect and update_overlay.
  */
@@ -6982,6 +7037,13 @@ function effectSettings(effect: EffectId, input: Record<string, unknown>): Parti
   }
   if (isNum(input.rate)) patch.rate = input.rate > 0 ? clamp(input.rate, FLASH_RATE_MIN, FLASH_RATE_MAX) : undefined;
   if (input.rhythm !== undefined) patch.rhythm = flashRhythm(input.rhythm);
+  // A fade of none is the pop again, and stores as absence.
+  if (input.fade !== undefined) {
+    if (!(FLASH_FADE_CHOICES as readonly unknown[]).includes(input.fade)) {
+      throw new ToolError(`fade is one of ${FLASH_FADE_CHOICES.join(", ")}.`);
+    }
+    patch.fade = input.fade === FLASH_FADE_NONE ? undefined : (input.fade as FlashFade);
+  }
   return patch;
 }
 
@@ -6991,8 +7053,8 @@ function overlayPatch(
   place?: { groupId?: string; shadow?: boolean | ShadowSpec; pattern?: PatternSpec }
 ) {
   const patch: Record<string, unknown> = {};
-  if (isNum(input.start)) patch.start = Math.max(0, input.start);
-  if (isNum(input.end)) patch.end = input.end;
+  if (isNum(input.start)) patch.start = onFrame(Math.max(0, input.start));
+  if (isNum(input.end)) patch.end = onFrame(input.end);
   if (isNum(input.lane)) patch.lane = Math.max(0, Math.round(input.lane));
   if (isNum(input.x)) patch.x = clampOverlayPos(input.x, place);
   if (isNum(input.y)) patch.y = clampOverlayPos(input.y, place);
@@ -7012,7 +7074,7 @@ function overlayPatch(
     // double-escape multi-line titles.
     if (typeof input.text === "string" && input.text.trim())
       patch.text = input.text.replace(/\\n/g, "\n");
-    if (isNum(input.size)) patch.size = clamp(Math.round(input.size), 16, 320);
+    if (isNum(input.size)) patch.size = clamp(Math.round(input.size), TEXT_SIZE_MIN, TEXT_SIZE_MAX);
     if (typeof input.color === "string") patch.color = input.color;
     // Only ids the registry knows: an unknown one is refused, since it would
     // render the default face and leave the Inspector's font menu blank.
@@ -7090,9 +7152,9 @@ function overlayPatch(
     return patch;
   }
 
-  if (isNum(input.w)) patch.w = clamp(input.w, 0.02, 1.5);
+  if (isNum(input.w)) patch.w = clamp(input.w, STICKER_W_MIN, 1.5);
   // A sticker's height is its own once set; 0 hands it back to the source's
   // aspect.
-  if (isNum(input.h)) patch.h = input.h > 0 ? clamp(input.h, 0.02, 1.5) : undefined;
+  if (isNum(input.h)) patch.h = input.h > 0 ? clamp(input.h, STICKER_W_MIN, 1.5) : undefined;
   return patch;
 }

@@ -8,6 +8,7 @@ import {
   isAudioEffect,
   LEAK_TINT,
   leakGradient,
+  lightbarBox,
   streakGradient,
   washBackground,
 } from "@donkeycut/effects-kit";
@@ -159,7 +160,18 @@ export function StageEffectPaint({ lane }: { lane: number }) {
   const washes = states.flatMap((s) => s.washes ?? []);
   const leaks = states.flatMap((s) => (s.leak ? [s.leak] : []));
   const burns = states.flatMap((s) => (s.burn ? [s.burn] : []));
-  if (!grain && !vignette && !flash && !dark && washes.length === 0 && leaks.length === 0 && burns.length === 0) return null;
+  const bars = states.flatMap((s) => s.bars ?? []);
+  if (
+    !grain &&
+    !vignette &&
+    !flash &&
+    !dark &&
+    washes.length === 0 &&
+    leaks.length === 0 &&
+    burns.length === 0 &&
+    bars.length === 0
+  )
+    return null;
   return (
     <div className="pointer-events-none absolute inset-0">
       {grain > 0 && grainUrl && (
@@ -225,6 +237,15 @@ export function StageEffectPaint({ lane }: { lane: number }) {
             />
           )}
         </div>
+      ))}
+      {bars.map((b, i) => (
+        // Each light bar added onto the picture, as the canvas pass's
+        // "lighter" composite does.
+        <div
+          key={`bar-${i}`}
+          className="absolute inset-y-0"
+          style={{ ...lightbarBox(b), mixBlendMode: "plus-lighter" }}
+        />
       ))}
     </div>
   );

@@ -19,6 +19,11 @@ import { TEXT_MOVE_IDS, TEXT_MOVE_NOTES } from "@/cut/lib/textMotion";
 import { LETTER_SPACING_MAX, LETTER_SPACING_MIN, OVERLAY_ANIM_STYLE_IDS, TEXT_TEXTURES, TEXT_WEIGHTS } from "@donkeycut/effects-kit";
 import { REGION_MAX_SCALE, TIMELINE_IDS, TIMELINE_LABELS } from "@/cut/lib/types";
 
+/** The title sizes the assistant and the inspector set, px at a 1080 short
+ * side. */
+export const TEXT_SIZE_MIN = 16;
+export const TEXT_SIZE_MAX = 1600;
+
 export const TIMELINE_TOOLS = [
   {
     name: "select",
@@ -251,7 +256,7 @@ export const TIMELINE_TOOLS = [
       end: num("End time s (default: start+3)"),
       x: num("Center x 0..1 (default 0.5)"),
       y: num("Center y 0..1 (default 0.42)"),
-      size: num("Font size px at 1080w (default 88)"),
+      size: num(`Font size px at 1080w, ${TEXT_SIZE_MIN}..${TEXT_SIZE_MAX} (default 88); a capital is about 0.7 of the size tall, so one letter filling a third of a 1080 frame is about 500`),
       color: str("CSS color (default #FFFFFF)"),
       font: str("Font id (see the graphics skill; default sf)"),
       weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Font weight: 400 regular, 500 medium, 600 semibold, 700 bold, 800 extra bold, 900 black" },
@@ -306,7 +311,7 @@ export const TIMELINE_TOOLS = [
             },
             section: str('Passage label ("verse", "chorus", "bridge") — a new label restarts the type and color rotas'),
             color: str("Override the run's color for this line"),
-            size: num("Override the composed size for this line"),
+            size: num(`Override the composed size for this line, ${TEXT_SIZE_MIN}..${TEXT_SIZE_MAX}`),
             font: str("Override the face carrying this line"),
             x: num("Frame-width fraction 0..1, overriding the layout"),
             y: num("Frame-height fraction 0..1, overriding the layout"),

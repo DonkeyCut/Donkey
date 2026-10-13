@@ -115,9 +115,10 @@ interface Posable {
   camera?: GroupCamera;
 }
 
-/** Two keys closer than this are the same key. Half a frame at 30fps, so a
- * key can be dropped on any frame and still replace the one already there. */
-export const KEY_EPSILON = 1 / 60;
+/** Two keys closer than this are the same key. Half a frame at 60fps, so a
+ * key can be dropped on any frame and still replace the one already there,
+ * while keys on neighbouring 60fps frames stay apart. */
+export const KEY_EPSILON = 1 / 120;
 
 /** The element's pose with no keys in play. */
 export function restingPose(o: Posable): OverlayPose {

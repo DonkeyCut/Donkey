@@ -838,6 +838,42 @@ describe("title lanes", () => {
   });
 
   describe("keyframes", () => {
+    test("the chat keys an element in from beyond the frame while its rest stays on it", async () => {
+      const t1 = title({ start: 0, end: 4 });
+      useEditor.setState({ overlays: [t1] });
+      await runAiTool("set_overlay_keyframes", { id: t1.id, keys: [{ t: 0, x: -0.2, y: 1.1 }, { t: 1, x: 0.5, y: 0.5 }, { t: 2, y: 9 }] });
+      expect(overlayById(t1.id).kf!.map((k) => [k.x, k.y])).toEqual([[-0.2, 1.1], [0.5, 0.5], [0.5, 1.5]]);
+      await runAiTool("update_overlay", { id: t1.id, y: 1.1 });
+      expect(overlayById(t1.id).y).toBeCloseTo(0.98);
+    });
+
+    test("the chat's keys merge into the track unless it asks to replace it", async () => {
+      const t1 = title({ start: 0, end: 4 });
+      useEditor.setState({ overlays: [t1] });
+      await runAiTool("set_overlay_keyframes", { id: t1.id, keys: [{ t: 0, x: 0.2 }, { t: 3, x: 0.8 }] });
+      await runAiTool("set_overlay_keyframes", { id: t1.id, keys: [{ t: 1, x: 0.4 }] });
+      expect(overlayById(t1.id).kf!.map((k) => k.t)).toEqual([0, 1, 3]);
+      const out = await runAiTool("set_overlay_keyframes", { id: t1.id, replace: true, keys: [{ t: 0.5, x: 0.3 }, { t: 2, x: 0.6 }] });
+      expect(overlayById(t1.id).kf!.map((k) => [k.t, k.x])).toEqual([[0.5, 0.3], [2, 0.6]]);
+      expect((out as { keys: { t: number }[] }).keys.map((k) => k.t)).toEqual([0.5, 2]);
+    });
+
+    test("a loop's rate comes back as the seconds one cycle takes", async () => {
+      const t1 = title({ start: 0, end: 4 });
+      useEditor.setState({ overlays: [t1] });
+      const out = (await runAiTool("set_overlay_animation", { id: t1.id, loop_style: "spin", loop_speed: 5 })) as { loop_cycle_seconds?: number };
+      expect(out.loop_cycle_seconds).toBeCloseTo(0.8, 5);
+    });
+
+    test("a sticker can be drawn as small as a mouse pointer", async () => {
+      const st = title({ kind: "sticker", assetId: "img", w: 0.2 } as unknown as Partial<TextOverlay>);
+      useEditor.setState({ overlays: [st] });
+      await runAiTool("update_overlay", { id: st.id, w: 0.012 });
+      expect((overlayById(st.id) as unknown as { w: number }).w).toBeCloseTo(0.012, 4);
+      await runAiTool("update_overlay", { id: st.id, w: 0.001 });
+      expect((overlayById(st.id) as unknown as { w: number }).w).toBeCloseTo(0.005, 4);
+    });
+
     test("a key captures the pose and the track drops when the last one goes", () => {
       const t1 = title({ start: 2, end: 6, x: 0.4, rotation: 30, opacity: 0.5 });
       useEditor.setState({ overlays: [t1] });

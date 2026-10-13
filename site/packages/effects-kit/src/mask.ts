@@ -494,6 +494,12 @@ export function maskComposite(
   target.save();
   target.setTransform(1, 0, 0, 1, 0, 0);
   target.globalAlpha = 1;
+  // A shadowed element leaves its shadow set, and browsers shadow this draw
+  // too: the cut would keep the layer at the shadow's opacity.
+  target.shadowColor = "transparent";
+  target.shadowBlur = 0;
+  target.shadowOffsetX = 0;
+  target.shadowOffsetY = 0;
   target.globalCompositeOperation = invert ? "destination-out" : "destination-in";
   target.drawImage(coverage, 0, 0);
   target.restore();

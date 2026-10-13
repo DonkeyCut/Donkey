@@ -19,6 +19,7 @@ import { usePreviewTime } from "@/cut/lib/playhead";
 import { clipWindow, maxClipFade, useEditor } from "@/cut/lib/store";
 import { PLATE_COLOR, PLATE_OPACITY, PLATE_RADIUS } from "@/cut/lib/textRender";
 import { TEXT_SIZES } from "@/cut/lib/textStyle";
+import { TEXT_SIZE_MAX, TEXT_SIZE_MIN } from "@/cut/components/Timeline.tools";
 import {
   clampOverlayPos,
   CLIP_MAX_ZOOM,
@@ -431,8 +432,8 @@ function TextRows({ texts }: { texts: TextOverlay[] }) {
           icon={<Type />}
           value={size.value}
           mixed={size.mixed}
-          min={24}
-          max={240}
+          min={TEXT_SIZE_MIN}
+          max={TEXT_SIZE_MAX}
           step={1}
           presets={TEXT_SIZES}
           format={(v) => String(Math.round(v))}

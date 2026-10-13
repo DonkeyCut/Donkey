@@ -22,6 +22,7 @@ export type VisualEffectId =
   | "blur"
   | "vignette"
   | "lightleak"
+  | "lightbars"
   | "flash"
   | "shake"
   | "negative"
@@ -67,6 +68,9 @@ export interface EffectOverlay extends OverlayBase {
   rate?: number;
   /** How a strobe's pulses land; absent = strobe. */
   rhythm?: FlashRhythm;
+  /** A flash that ramps across the whole element instead of popping:
+   * absent = the pop (or the strobe). */
+  fade?: FlashFade;
 }
 
 /** A flash's color: `white` pops the picture bright, `black` dips it dark. */
@@ -85,8 +89,22 @@ export const FLASH_RATE_MAX = 15;
 export const FLASH_RHYTHMS = ["strobe", "flicker"] as const;
 export type FlashRhythm = (typeof FLASH_RHYTHMS)[number];
 
-/** What a flash plays beyond its amount: its tone, strobe rate and rhythm. */
-export type FlashPulse = Pick<EffectOverlay, "tone" | "rate" | "rhythm">;
+/** A flash that ramps instead of popping, evenly across its element and up
+ * to the full tone at amount 1: `to` fades the picture into the tone (a fade
+ * to black over the end of a scene), `from` starts on the tone and clears (a
+ * fade up from black). It covers everything on the rows behind its own, so
+ * on the front row it fades a whole stacked page as one. */
+export const FLASH_FADES = ["to", "from"] as const;
+export type FlashFade = (typeof FLASH_FADES)[number];
+
+/** The fade a person or the assistant picks: `none` is the pop (or the
+ * strobe) and stores as absence. */
+export const FLASH_FADE_NONE = "none";
+export const FLASH_FADE_CHOICES = [FLASH_FADE_NONE, ...FLASH_FADES] as const;
+export type FlashFadeChoice = (typeof FLASH_FADE_CHOICES)[number];
+
+/** What a flash plays beyond its amount: its tone, strobe rate, rhythm and fade. */
+export type FlashPulse = Pick<EffectOverlay, "tone" | "rate" | "rhythm" | "fade">;
 
 /** How far past a frame's time a pulse is read, in pulses: at the top rate
  * every 30 fps frame lands on a pulse's edge, and the nudge keeps rounding
@@ -169,6 +187,7 @@ export const EFFECT_IDS: VisualEffectId[] = [
   "blur",
   "vignette",
   "lightleak",
+  "lightbars",
   "flash",
   "shake",
   "negative",
@@ -252,6 +271,7 @@ export const EFFECT_LABELS: Record<EffectId, string> = {
   blur: "Blur",
   vignette: "Vignette",
   lightleak: "Light leak",
+  lightbars: "Light bars",
   flash: "Flash",
   shake: "Shake",
   negative: "Negative",
@@ -489,6 +509,254 @@ export const burnStreakGradient = (s: BurnStreak) =>
   `${rgba(s.rgb ?? BURN_FLAME, 1)} ${(s.p * 100).toFixed(1)}%, ` +
   `${rgba(s.rgb ?? BURN_FLAME, 0)} ${((s.p + 2 * s.w) * 100).toFixed(1)}%)`;
 
+/**
+ * Light bars, the streaming-service sting: the camera flies down a ribbon of
+ * glowing vertical lines — warm reds, oranges and pinks on the left, blues on
+ * the right — across the element's length. Every line hangs at its own
+ * depth, so the ribbon opens as one narrow warm column with every line packed
+ * inside it, bursts out to fill the frame as its nearest lines rush past,
+ * keeps flowing outward as the deeper lines spread after them, flares red
+ * and pink as the last broad lines pass close, and ends on the one red line
+ * the camera was flying at, widening until it sweeps off the right edge.
+ * Bars are added onto the picture (over black, they are the picture);
+ * amount is their brightness.
+ */
+
+/** Length the bars play over when nothing gives them one. */
+export const LIGHTBARS_SECONDS = 1.65;
+
+/** One line of the ribbon. It starts `th` frame widths off the camera's
+ * axis with half-width `w`; both grow as T / (T - u), `u` the share of the
+ * element played and `T` the share at which the camera reaches the line's
+ * depth (past 1, it never does). It lights over `LB_ON_SPAN` from `on` and
+ * goes out over `LB_OFF_SPAN` up to `off`; `a` is its peak opacity. */
+interface RibbonLine {
+  T: number;
+  th: number;
+  w: number;
+  rgb: [number, number, number];
+  a: number;
+  on?: number;
+  off?: number;
+}
+
+const LB_RED: [number, number, number] = [248, 18, 6];
+const LB_DEEP: [number, number, number] = [165, 6, 2];
+const LB_ORANGE: [number, number, number] = [255, 104, 32];
+const LB_AMBER: [number, number, number] = [255, 168, 64];
+const LB_PINK: [number, number, number] = [255, 72, 128];
+const LB_ROSE: [number, number, number] = [255, 214, 222];
+const LB_VIOLET: [number, number, number] = [168, 76, 210];
+const LB_BLUE: [number, number, number] = [26, 76, 255];
+const LB_NAVY: [number, number, number] = [16, 36, 196];
+const LB_CYAN: [number, number, number] = [44, 186, 255];
+const LB_ICE: [number, number, number] = [130, 206, 255];
+
+/** The camera's axis across the frame: the column opens on it, and every
+ * line flows outward from it. */
+const LB_AXIS = 0.46;
+/** Lines dim over the last `LB_NEAR` of their approach, so a line rushing
+ * past sweeps through rather than blanking the frame. */
+const LB_NEAR = 0.03;
+/** Shares of the element the ribbon takes to appear, a late line to light
+ * and a line with an `off` to go out. */
+const LB_APPEAR = 0.05;
+const LB_ON_SPAN = 0.04;
+const LB_OFF_SPAN = 0.03;
+/** Lines one ffmpeg expression draws; the ribbon is drawn in runs of them. */
+const LB_FFMPEG_RUN = 30;
+
+/** The line the camera flies at: inside the column at the start, the one
+ * left once the rest have passed, and reached as the element ends. */
+const LB_ANCHOR: RibbonLine = { T: 1, th: 0.0088, w: 0.0026, rgb: [255, 36, 8], a: 1 };
+
+/** The ribbon, dealt once from a fixed hash so every renderer draws the same
+ * lines: the warm column the camera bursts through, then warm lines left of
+ * the axis and cool ones right of it, the outer ones leaving first, then the
+ * broad lines of the closing flare and the anchor. */
+const RIBBON: RibbonLine[] = (() => {
+  const deal = (n: number) => {
+    const v = Math.sin(n * 91.345 + 47.853) * 24634.6345;
+    return v - Math.floor(v);
+  };
+  type Palette = [[number, number, number], number][];
+  const pick = (r: number, pal: Palette) => {
+    let acc = 0;
+    for (const [rgb, p] of pal) {
+      acc += p;
+      if (r < acc) return rgb;
+    }
+    return pal[pal.length - 1][0];
+  };
+  const column: Palette = [
+    [LB_RED, 0.42],
+    [LB_DEEP, 0.34],
+    [LB_ORANGE, 0.1],
+    [LB_AMBER, 0.09],
+    [LB_VIOLET, 0.05],
+  ];
+  const flare: Palette = [
+    [LB_ROSE, 0.25],
+    [LB_PINK, 0.25],
+    [LB_VIOLET, 0.2],
+    [LB_ORANGE, 0.15],
+    [LB_RED, 0.15],
+  ];
+  const warm: Palette = [
+    [LB_RED, 0.34],
+    [LB_DEEP, 0.24],
+    [LB_ORANGE, 0.14],
+    [LB_PINK, 0.12],
+    [LB_ROSE, 0.06],
+    [LB_AMBER, 0.05],
+    [LB_VIOLET, 0.05],
+  ];
+  const cool: Palette = [
+    [LB_BLUE, 0.44],
+    [LB_NAVY, 0.26],
+    [LB_CYAN, 0.16],
+    [LB_ICE, 0.08],
+    [LB_VIOLET, 0.06],
+  ];
+  // The depth at which a line `th` off the axis leaves the frame's edge
+  // `exit` of the way through.
+  const reach = (th: number, exit: number) => exit / (1 - Math.abs(th) / (th < 0 ? LB_AXIS : 1 - LB_AXIS));
+  const lines: RibbonLine[] = [];
+  for (let i = 0; i < 48; i++) {
+    lines.push({
+      T: 0.278 + 0.04 * deal(i + 500),
+      th: -0.04 + (0.08 * (i + deal(i))) / 48,
+      w: 0.0004 + 0.002 * deal(i + 100) ** 2,
+      rgb: pick(deal(i + 200), column),
+      a: 0.25 + 0.5 * deal(i + 300) ** 0.7,
+    });
+  }
+  for (let i = 0; i < 26; i++) {
+    const f = (i + deal(i + 800)) / 26; // outer to inner
+    const th = -0.2 + 0.18 * f;
+    lines.push({
+      T: reach(th, 0.4 + 0.3 * f ** 1.5 + 0.04 * (deal(i + 700) - 0.5)),
+      th,
+      w: 0.0006 + 0.0026 * deal(i + 1000) ** 2,
+      rgb: pick(deal(i + 1100), warm),
+      a: (0.3 + 0.5 * deal(i + 1200) ** 0.7) * (f < 0.45 ? 1.5 : 0.55),
+      on: 0.25 + 0.04 * deal(i + 900),
+    });
+  }
+  // The burst's bright middle, gone as the field settles.
+  for (let i = 0; i < 12; i++) {
+    const th = -0.035 + (0.07 * (i + deal(i + 4800))) / 12;
+    lines.push({
+      T: reach(th, 0.38 + 0.07 * deal(i + 4700)),
+      th,
+      w: 0.0006 + 0.0024 * deal(i + 5000) ** 2,
+      rgb: pick(deal(i + 5100), flare),
+      a: 0.5 + 0.4 * deal(i + 5200),
+      on: 0.24,
+    });
+  }
+  for (let i = 0; i < 16; i++) {
+    const th = -0.02 + (0.045 * (i + deal(i + 1800))) / 16;
+    lines.push({
+      T: reach(th, 0.72 + 0.06 * deal(i + 1700)),
+      th,
+      w: 0.0006 + 0.0022 * deal(i + 2000) ** 2,
+      rgb: pick(deal(i + 2100), warm),
+      a: 0.3 + 0.5 * deal(i + 2200) ** 0.7,
+      on: 0.25 + 0.04 * deal(i + 1900),
+    });
+  }
+  for (let i = 0; i < 30; i++) {
+    const f = (i + deal(i + 2800)) / 30; // inner to outer
+    const th = 0.03 + 0.2 * f;
+    lines.push({
+      T: reach(th, 0.63 - 0.15 * f + 0.04 * (deal(i + 2700) - 0.5)),
+      th,
+      w: 0.0008 + 0.0032 * deal(i + 3000) ** 2,
+      rgb: pick(deal(i + 3100), cool),
+      a: 0.65 * (0.45 + 0.55 * deal(i + 3200) ** 0.7),
+      on: 0.25 + 0.04 * deal(i + 2900),
+    });
+  }
+  // The closing flare: broad red and pink lines passing close to the axis,
+  // and a far red band that glows on the left while they do.
+  lines.push(
+    { T: 0.792, th: -0.012, w: 0.0024, rgb: LB_RED, a: 0.8, on: 0.5 },
+    { T: 0.778, th: 0.01, w: 0.0018, rgb: LB_ROSE, a: 0.8, on: 0.5 },
+    { T: 0.788, th: 0.016, w: 0.0012, rgb: LB_PINK, a: 0.8, on: 0.5 },
+    { T: 0.8, th: -0.02, w: 0.0014, rgb: LB_RED, a: 0.8, on: 0.5 },
+    { T: 0.805, th: 0.022, w: 0.001, rgb: LB_PINK, a: 0.6, on: 0.5 },
+    { T: 6, th: -0.27, w: 0.022, rgb: LB_RED, a: 0.9, on: 0.72, off: 0.84 }
+  );
+  return [...lines, LB_ANCHOR];
+})();
+
+/** A bar's profile across its half-width: a solid core out to `LB_CORE`,
+ * fading to nothing at `LB_EDGE`, inside a faint glow reaching `LB_HALO`.
+ * Piecewise linear, so a gradient's color stops draw it exactly. */
+const LB_CORE = 0.6;
+const LB_EDGE = 1.5;
+const LB_HALO = 4;
+const LB_HALO_SHARE = 0.2;
+const lbProfile = (d: number) => {
+  const a = Math.abs(d);
+  const core = Math.max(0, Math.min(1, (LB_EDGE - a) / (LB_EDGE - LB_CORE)));
+  return (1 - LB_HALO_SHARE) * core + LB_HALO_SHARE * Math.max(0, 1 - a / LB_HALO);
+};
+/** The profile's breakpoints, in half-widths from the center. */
+export const LIGHTBAR_STOPS = [-LB_HALO, -LB_EDGE, -LB_CORE, 0, LB_CORE, LB_EDGE, LB_HALO].map((d) => ({
+  d,
+  f: lbProfile(d),
+}));
+
+/** One bar on screen: center `x` and half-width `w` as frame-width
+ * fractions, color, and opacity. */
+export interface LightBar {
+  x: number;
+  w: number;
+  rgb: [number, number, number];
+  alpha: number;
+}
+
+const clip01 = (v: number) => Math.max(0, Math.min(1, v));
+
+/** The bars on screen `tLocal` seconds into an element `dur` long, at
+ * amount `k`. Lines the camera has passed and bars wholly off the frame are
+ * left out. */
+export function lightbarsAt(tLocal: number, dur: number, k: number): LightBar[] {
+  const u = clip01(tLocal / Math.max(dur, 1e-3));
+  const appear = Math.min(1, u / LB_APPEAR);
+  const gain = 0.4 + 0.6 * k;
+  return RIBBON.flatMap((l) => {
+    const left = l.T - u;
+    if (left <= 1e-3) return [];
+    const s = l.T / left;
+    const x = LB_AXIS + l.th * s;
+    const w = l.w * s;
+    const on = l.on ? clip01((u - l.on) / LB_ON_SPAN) : 1;
+    const off = l.off ? clip01((l.off - u) / LB_OFF_SPAN) : 1;
+    const alpha = l.a * gain * appear * on * off * Math.min(1, left / LB_NEAR);
+    if (alpha <= 0.002 || x + LB_HALO * w < 0 || x - LB_HALO * w > 1) return [];
+    return [{ x, w, rgb: l.rgb, alpha }];
+  });
+}
+
+/** One bar as a CSS box — the DOM twin of the canvas pass's horizontal
+ * gradient: a full-height layer only as wide as the bar's glow (cut to the
+ * frame), its gradient in the box's own coordinates. Add it onto the picture
+ * (plus-lighter); compositing scales with the bars' width, not their count. */
+export function lightbarBox(b: LightBar): { left: string; width: string; background: string } {
+  const lo = Math.max(0, b.x + LIGHTBAR_STOPS[0].d * b.w);
+  const hi = Math.min(1, b.x + LIGHTBAR_STOPS[LIGHTBAR_STOPS.length - 1].d * b.w);
+  const span = Math.max(hi - lo, 1e-6);
+  const at = (s: { d: number }) => fmt(((b.x + s.d * b.w - lo) / span) * 100);
+  return {
+    left: `${fmt(lo * 100)}%`,
+    width: `${fmt(span * 100)}%`,
+    background: `linear-gradient(to right, ${LIGHTBAR_STOPS.map((s) => `${rgba(b.rgb, b.alpha * s.f)} ${at(s)}%`).join(", ")})`,
+  };
+}
+
 /** The ellipse a wash covers, in frame fractions: center (x, y), radii (rx,
  * ry). The wash holds its full strength out to `inner` of the way to the rim
  * and fades to nothing at it. */
@@ -560,6 +828,8 @@ export interface EffectPreviewState {
   glow?: { blurFrac: number; alpha: number; mode: "screen" | "lighten"; bright?: boolean };
   /** A film burn climbing over the picture (see `burnAt`). */
   burn?: BurnPaint;
+  /** Light bars added onto the picture (see `lightbarsAt`). */
+  bars?: LightBar[];
 }
 
 /** A host-registered effect recipe: the same dual-renderer shape the
@@ -716,6 +986,8 @@ function glitchRunAt(step: number, k: number): { kind: GlitchKind; len: number }
 /** The amount a pinned glitch pulls its full travel at; the travel scales
  * with amount from there, so 0.15 is a faint fringe and 1 twice the pull. */
 const PINNED_GLITCH_AMOUNT = 0.5;
+/** The furthest rgbashift moves a channel, px. */
+const RGBASHIFT_MAX = 255;
 
 /** What the glitch does on step `step` at amount `k`; null = a clean step.
  * The latest run to start plays until it ends, then the picture is clean
@@ -867,8 +1139,13 @@ export function effectPreviewState(
       };
     case "flash": {
       // One pop at the element start, decaying over ~0.4s; on a strobe, the
-      // tone held hard for the first half of every pulse.
+      // tone held hard for the first half of every pulse; on a fade, the
+      // tone ramped evenly across the element, to full at amount 1.
       const tone = pulse?.tone === "black" ? "black" : undefined;
+      if (pulse?.fade && dur) {
+        const u = Math.max(0, Math.min(1, tLocal / dur));
+        return { cssFilter: "", flash: k * (pulse.fade === "to" ? u : 1 - u), ...(tone ? { flashTone: tone } : {}) };
+      }
       const rate = flashRate(pulse);
       const gain = rate ? flashOn(tLocal, rate, pulse?.rhythm) : Math.exp(-9 * Math.max(0, tLocal));
       return { cssFilter: "", flash: Math.min(1, 0.85 * k * gain), ...(tone ? { flashTone: tone } : {}) };
@@ -877,6 +1154,8 @@ export function effectPreviewState(
       return { cssFilter: "", burn: burnAt(tLocal, dur ?? BURN_SECONDS, k) };
     case "char":
       return { cssFilter: "", burn: burnAt(tLocal, dur ?? BURN_SECONDS, k, CHAR_PALETTE) };
+    case "lightbars":
+      return { cssFilter: "", bars: lightbarsAt(tLocal, dur ?? LIGHTBARS_SECONDS, k) };
     case "scorch":
       return scorchState(tLocal, k);
     case "film":
@@ -1221,6 +1500,25 @@ export function applyEffectToCanvas(
       });
     }
   }
+
+  if (state.bars) {
+    // Each bar a horizontal gradient through the profile's stops, all summed
+    // in one pass ("lighter" inside it too) and added onto the picture the
+    // way the DOM twin's plus-lighter does: one mask and composite a frame
+    // however many bars are up.
+    const bars = state.bars;
+    const lo = LIGHTBAR_STOPS[0].d;
+    const hi = LIGHTBAR_STOPS[LIGHTBAR_STOPS.length - 1].d;
+    over("lighter", 1, (c) => {
+      c.globalCompositeOperation = "lighter";
+      for (const b of bars) {
+        const g = c.createLinearGradient((b.x + lo * b.w) * W, 0, (b.x + hi * b.w) * W, 0);
+        for (const st of LIGHTBAR_STOPS) g.addColorStop((st.d - lo) / (hi - lo), rgba(b.rgb, b.alpha * st.f));
+        c.fillStyle = g;
+        c.fillRect(Math.floor((b.x + lo * b.w) * W), 0, Math.ceil((hi - lo) * b.w * W) + 2, H);
+      }
+    });
+  }
 }
 
 /**
@@ -1400,14 +1698,17 @@ function glitchFilterLines(
     return lines;
   }
 
+  const clampShift = (n: number) => Math.max(-RGBASHIFT_MAX, Math.min(RGBASHIFT_MAX, n));
   // Rgb, pinned only: one channel shift per step, gated to it, since
   // rgbashift takes whole px and no expressions. A 2-frame burst is 1–2.
   const shifts = hits
     .filter((x) => x.hit.kind === "rgb")
     .map((x) => {
       const o = glitchRgb(x.hit);
-      const rh = Math.round((o.dx * px) / 1080);
-      const rv = Math.round((o.dy * px) / 1080);
+      // rgbashift refuses a shift past 255 px, which a full-amount pull
+      // reaches on an 8K frame.
+      const rh = clampShift(Math.round((o.dx * px) / 1080));
+      const rv = clampShift(Math.round((o.dy * px) / 1080));
       return `rgbashift=rh=${rh}:rv=${rv}:bh=${-rh}:bv=${-rv}:enable='${win(x)}'`;
     });
   lines.push(`[gbo${tag}]${shifts.join(",")}[${outLabel}]`);
@@ -1546,6 +1847,18 @@ export function effectFilterLines(
       // per frame by geq — `T` is the frame's time, so the gain rides every
       // frame of the window. White adds to luma; black pulls every plane
       // toward black at the canvas pass's alpha.
+      if (pulse?.fade) {
+        // The fade's even ramp: every plane pulled toward the tone at the
+        // canvas pass's alpha, white as well as black.
+        const u = `clip((T-${fmt(start)})/${fmt(Math.max(1e-3, end - start))},0,1)`;
+        const keep = `(1-${fmt(k)}*${pulse.fade === "to" ? u : `(1-${u})`})`;
+        const mid = code(128, chroma.depth);
+        const toward = code(pulse.tone === "black" ? 16 : 235, chroma.depth);
+        return [
+          `[${inLabel}]geq=lum='${toward}+(lum(X,Y)-${toward})*${keep}':` +
+            `cb='${mid}+(cb(X,Y)-${mid})*${keep}':cr='${mid}+(cr(X,Y)-${mid})*${keep}':${en}[${outLabel}]`,
+        ];
+      }
       const rate = flashRate(pulse);
       const p = `((T-${fmt(start)})*${fmt(rate)}+${PULSE_NUDGE})`;
       // A flicker deals each pulse its strength with the same sine hash as
@@ -1573,6 +1886,8 @@ export function effectFilterLines(
       return burnFilterLines(inLabel, outLabel, k, start, end, chroma);
     case "char":
       return burnFilterLines(inLabel, outLabel, k, start, end, chroma, CHAR_PALETTE);
+    case "lightbars":
+      return lightbarsFilterLines(inLabel, outLabel, k, start, end, width, height, tag, chroma);
     case "scorch":
       return scorchFilterLines(inLabel, outLabel, k, start, end, tag, chroma);
     case "film":
@@ -1610,6 +1925,91 @@ export function effectFilterLines(
     default:
       return null;
   }
+}
+
+/**
+ * The light bars in ffmpeg. The bars run the frame's full height, so one geq
+ * draws them into a single row — every bar's profile at the frame's time,
+ * summed per channel in RGB the way the canvas adds them — and the row is
+ * stretched to the frame and added onto the picture by `blend`, on a branch
+ * laid back over the frame only inside the window.
+ */
+function lightbarsFilterLines(
+  inLabel: string,
+  outLabel: string,
+  k: number,
+  start: number,
+  end: number,
+  width: number,
+  height: number,
+  tag: string,
+  chroma: ChainChroma
+): string[] {
+  if (end <= start) {
+    return [`[${inLabel}]null[${outLabel}]`];
+  }
+  const dur = end - start;
+  const max = chroma.depth === 10 ? 1023 : 255;
+  const gain = 0.4 + 0.6 * k;
+  // Registers: 0 the progress u, 2 the ribbon's appearance, 4 the pixel's
+  // offset from the camera's axis as a frame fraction, 7 the channel's
+  // running sum.
+  const setup =
+    `st(0,clip((T-${fmt(start)})/${fmt(dur)},0,1));st(2,min(1,ld(0)/${LB_APPEAR}));` +
+    `st(4,(X+0.5)/W-${LB_AXIS});st(7,0)`;
+  // A bar's profile at its distance `d` in half-widths, the canvas
+  // gradient's ramp.
+  const profile = (d: string) =>
+    `(${fmt(1 - LB_HALO_SHARE)}*clip((${LB_EDGE}-${d})/${fmt(LB_EDGE - LB_CORE)},0,1)+` +
+    `${fmt(LB_HALO_SHARE)}*max(0,1-${d}/${LB_HALO}))`;
+  // One statement a bar: ffmpeg's expression parser runs out of room on a
+  // ribbon's worth of two-statement bars. A line's offset and half-width
+  // both grow as T / (T - u), so its distance in half-widths is the pixel's
+  // offset scaled back by (T - u) / T against the line's starting place.
+  // Lines are thousandths of the frame wide, so their numbers keep six
+  // significant figures.
+  const n = (v: number) => Number(v.toPrecision(6)).toString();
+  const plane = (lines: RibbonLine[], c: 0 | 1 | 2) => {
+    const terms = lines.filter((l) => l.rgb[c] > 0).map((l) => {
+      const near = l.T - 1 < LB_NEAR ? `*clip((${n(l.T)}-ld(0))/${LB_NEAR},0,1)` : "";
+      const on = l.on ? `*clip((ld(0)-${n(l.on)})/${LB_ON_SPAN},0,1)` : "";
+      const off = l.off ? `*clip((${n(l.off)}-ld(0))/${LB_OFF_SPAN},0,1)` : "";
+      const weight = `${n((l.rgb[c] / 255) * l.a * gain)}*ld(2)${near}${on}${off}`;
+      const d = `abs(ld(4)*(1-ld(0)/${n(l.T)})-${n(l.th)})/${n(l.w)}`;
+      return `st(7,ld(7)+${weight}*${profile(d)})`;
+    });
+    return `${setup};${terms.join(";")};${max}*min(1,ld(7))`;
+  };
+  const rgb = chroma.depth === 10 ? "gbrp10le" : "gbrp";
+  const win = gate(start, end);
+  // ffmpeg can't hold the whole ribbon in one expression, so each run of
+  // lines draws its own row and the rows are added up: the light is never
+  // negative, so clipping each sum at full and then the total is the
+  // canvas's one clip of the total.
+  const runs: RibbonLine[][] = [];
+  for (let i = 0; i < RIBBON.length; i += LB_FFMPEG_RUN) runs.push(RIBBON.slice(i, i + LB_FFMPEG_RUN));
+  const row = (i: number) => `lbr${i}${tag}`;
+  const rows = runs.map(
+    (lines, i) =>
+      `[lbs${i}${tag}]format=${rgb},geq=r='${plane(lines, 0)}':g='${plane(lines, 1)}':b='${plane(lines, 2)}'[${row(i)}]`
+  );
+  let sum = row(0);
+  const adds = runs.slice(1).map((_, j) => {
+    const next = `lbsum${j + 1}${tag}`;
+    const line = `[${sum}][${row(j + 1)}]blend=all_mode=addition[${next}]`;
+    sum = next;
+    return line;
+  });
+  return [
+    `[${inLabel}]split=3[lbo${tag}][lbg${tag}][lbs${tag}]`,
+    `[lbs${tag}]crop=iw:1:0:0,split=${runs.length}${runs.map((_, i) => `[lbs${i}${tag}]`).join("")}`,
+    ...rows,
+    ...adds,
+    `[${sum}]scale=${width}:${height}:flags=neighbor[lbl${tag}]`,
+    `[lbg${tag}]format=${rgb}[lbp${tag}]`,
+    `[lbp${tag}][lbl${tag}]blend=all_mode=addition:${win},format=${chroma.pixFmt}[lbc${tag}]`,
+    `[lbo${tag}][lbc${tag}]overlay=0:0:${win}:eof_action=pass${chroma.overlay}[${outLabel}]`,
+  ];
 }
 
 /** Steps a second the export's burn is drawn at: one per frame at 60 fps. */

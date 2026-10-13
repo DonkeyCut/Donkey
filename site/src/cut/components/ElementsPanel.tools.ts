@@ -11,6 +11,9 @@ import { DOODLE_FPS, DOODLE_INKS_MAX, PATTERN_KINDS, SHADOW_BLUR_MAX, SHADOW_OFF
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { SHAPE_LABELS, type ShapeKind } from "@/cut/lib/types";
 
+/** The longest SVG markup add_sticker draws a sticker from. */
+export const SVG_STICKER_MAX_CHARS = 20000;
+
 /** Every shape the panel's grid shows, in `SHAPE_LABELS` order. */
 export const SHAPE_KINDS = Object.keys(SHAPE_LABELS) as ShapeKind[];
 
@@ -55,9 +58,11 @@ export const ELEMENTS_TOOLS = [
   {
     name: "add_sticker",
     description:
-      "Add a sticker overlay from a project image asset (asset ids come from `media`; sticker uploads carry origin \"sticker\"). Width is a frame-width fraction; height follows the source's own aspect unless h sets it.",
+      "Add a sticker overlay from a project image asset (asset ids come from `media`; sticker uploads carry origin \"sticker\"), or draw one from SVG markup you write: pass svg instead of asset_id for a vector graphic no shape covers — a UI icon (download arrow, stacked episodes, speech-bubble subtitles, skip-next), a mouse pointer, a loading-spinner arc, a badge with lettering, a logo mark, line-art doodles around a title (sparkles, starbursts, fireworks, swirls, hearts drawn as thin white strokes). The markup is drawn to a transparent PNG (1024 px on its long side, keeping the viewBox's aspect), saved as an origin-\"sticker\" asset and placed; the result carries its assetId to place it again without redrawing. Width is a frame-width fraction; height follows the source's own aspect unless h sets it.",
     inputSchema: obj({
-      asset_id: str("Project image asset id"),
+      asset_id: str("Project image asset id (or pass svg)"),
+      svg: str(`SVG markup for a drawn sticker, instead of asset_id: one <svg viewBox=\"…\"> element with inline shapes, paths and text, no scripts or outside files, at most ${SVG_STICKER_MAX_CHARS} characters. Fill the viewBox with the graphic — empty margin becomes clear padding in the sticker`),
+      name: str("Drawn sticker only: the asset's name in Media (default \"Drawn sticker\")"),
       start: num("Start time s (default: playhead)"),
       end: num("End time s (default: start+3)"),
       x: num("Center x 0..1 (default 0.5)"),

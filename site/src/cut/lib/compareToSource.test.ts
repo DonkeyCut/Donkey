@@ -125,3 +125,23 @@ test("the source is read in one pass, in play order, at a height that keeps its 
   // frame — and mediabunny's sink refuses the pair outright.
   expect(Object.keys(reads[0].size as object)).toEqual(["height"]);
 });
+
+test("a cut built only from elements is checked at the moments asked for", async () => {
+  // No track-0 clip: the cut's length is its elements' and its soundtrack's.
+  useEditor.setState({ clips: [] });
+  // A still element is drawn once and reused as a bitmap; the stub surface
+  // has no pixels to hand over. Another file's stub may be installed already.
+  const was = globalThis.createImageBitmap;
+  globalThis.createImageBitmap = (async () => ({ width: 1, height: 1, close() {} })) as never;
+  try {
+    await runAiTool("add_shape", { shape: "rect", start: 0, end: 3, w: 1, h: 1, fill: "#C53CD4" });
+    const frame = (await runAiTool("capture_frame", { t: 1.9 })) as { at: number };
+    expect(frame.at).toBeCloseTo(1.9, 3);
+    const out = (await runAiTool("compare_to_source", { asset_id: "ref", times: [2.5] })) as {
+      checked: { at: number }[];
+    };
+    expect(out.checked[0].at).toBeCloseTo(2.5, 3);
+  } finally {
+    globalThis.createImageBitmap = was;
+  }
+});

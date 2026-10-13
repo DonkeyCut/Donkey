@@ -18,7 +18,7 @@ import { shiftSpan, type SpecSound } from "../lib/soundSource";
 import { masterRawMix, packStems } from "./exportAudio";
 import { STEM_CHANNELS, STEM_RATE, type StemDef } from "../lib/stems";
 import { CLIP_MAX_ZOOM, CLIP_MIN_SECONDS, clipFrameAt, regionPx, TRANSITION_ZOOM, type ColorGrade } from "../lib/types";
-import { audioFxFilters, buildClipLut, elementLook, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, effectRecipe, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type EaseId, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildClipLut, elementLook, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, effectRecipe, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type EaseId, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -404,10 +404,11 @@ export interface ExportSpec {
     leak?: LeakCourse;
     /** The kind a glitch is pinned to. */
     glitch?: GlitchKind;
-    /** A flash's tone, strobe rate and rhythm. */
+    /** A flash's tone, strobe rate, rhythm and fade. */
     tone?: FlashTone;
     rate?: number;
     rhythm?: FlashRhythm;
+    fade?: FlashFade;
     /** Its row in the element stack; lane 0 is the top. */
     lane?: number;
     start: number;

@@ -45,6 +45,8 @@ const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "captions_generate",
   "subtitles_from_visuals",
   "stock_add",
+  "read_color_stats",
+  "match_color_grade",
   ...PAGE_ONLY_TOOLS,
 ]);
 
@@ -156,6 +158,12 @@ async function flush(doc: OpenDoc): Promise<void> {
   doc.stored = merged;
 }
 
+/** True when a tool input carries svg markup to draw. */
+function hasSvgMarkup(input: unknown): boolean {
+  const svg = (input as { svg?: unknown } | null)?.svg;
+  return typeof svg === "string" && svg.trim() !== "";
+}
+
 /** Run one tool call against the engine-held store for `projectId`,
  * persisting the doc after it. The bridge calls this when no editor tab is
  * attached to the chat session. */
@@ -169,6 +177,12 @@ async function executeHeadlessTool(
       output: { noEditor: true, note: DETACHED_UI_NOTE },
     };
   if (PAGE_MEDIA_TOOLS.has(toolName)) return { errorText: DETACHED_MEDIA_ERROR };
+
+  // A sticker drawn from svg markup rasterizes it, and the engine has no
+  // canvas; placing an existing sticker asset is a doc edit and runs here.
+  if (toolName === "add_sticker" && hasSvgMarkup(input)) {
+    return { errorText: DETACHED_MEDIA_ERROR };
+  }
   if (toolName === "read_folder") {
     const args = (input ?? {}) as { reference?: { scope?: string }; link?: string };
     const ref = args.reference ?? (args.link ? parseFolderLink(args.link) : null);

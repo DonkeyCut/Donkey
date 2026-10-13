@@ -50,6 +50,15 @@ describe("update_overlay on an effect", () => {
     expect(overlay(glitch)).toMatchObject({ glitch: "rgb" });
   });
 
+  test("a flash's fade comes off again with none, back to the pop", async () => {
+    const { id } = (await runAiTool("add_effect", { effect: "flash", start: 2, end: 3, fade: "to" })) as { id: string };
+    expect(overlay(id)).toMatchObject({ fade: "to" });
+    await runAiTool("update_overlay", { id, fade: "none" });
+    expect((overlay(id) as { fade?: string }).fade).toBeUndefined();
+    const props = INSPECTOR_TOOLS.find((t) => t.name === "update_overlay")!.inputSchema.properties as Record<string, { enum?: string[] }>;
+    expect(props.fade.enum).toContain("none");
+  });
+
   test("a setting the effect doesn't take is skipped, like any field a kind lacks", async () => {
     const { id } = (await runAiTool("add_effect", { effect: "flash", start: 2, end: 3 })) as { id: string };
     await runAiTool("update_overlay", { id, leak: "burn" });
@@ -58,6 +67,6 @@ describe("update_overlay on an effect", () => {
 
   test("the tool's schema offers the effect settings", () => {
     const props = INSPECTOR_TOOLS.find((t) => t.name === "update_overlay")!.inputSchema.properties as Record<string, unknown>;
-    for (const k of ["amount", "leak", "glitch", "tone", "rate", "rhythm"]) expect(Object.keys(props)).toContain(k);
+    for (const k of ["amount", "leak", "glitch", "tone", "rate", "rhythm", "fade"]) expect(Object.keys(props)).toContain(k);
   });
 });

@@ -8,7 +8,7 @@
  * textStyle.ts stays what it was: the implicit "last used" style.
  */
 
-import { pickTextStyle } from "@donkeycut/effects-kit";
+import { pickTextStyle, TEXT_STYLE_FIELDS } from "@donkeycut/effects-kit";
 import { deleteTemplate, fetchLibrary, saveTemplate } from "./library";
 import type { Residency } from "./residency";
 import type { TextStyle } from "./textStyle";
@@ -55,6 +55,32 @@ export async function listStylePresets(): Promise<StylePreset[]> {
     .filter((p): p is StylePreset => p !== null);
 }
 
+/** Whether a title already wears a preset's look, field for field. A field
+ * the preset leaves unset matches a title that leaves it unset too. */
+export function styleMatches(style: TextStyle, overlay: TextOverlay): boolean {
+  const own = pickTextStyle(overlay);
+  return TEXT_STYLE_FIELDS.every((f) => sameValue(style[f], own[f]));
+}
+
+/** Two stored values are equal whatever order their keys come back in (a
+ * cloud shelf's jsonb reorders them); a key set to undefined is absent, as it
+ * is once stored. Arrays keep their order. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) {
+    return false;
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => sameValue(v, b[i]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].every((k) => sameValue(left[k], right[k]));
+}
+
 /** Save the given title's look as a named preset on the active shelf. */
 export async function saveStylePreset(
   projectId: string,
@@ -81,6 +107,19 @@ export async function saveStylePreset(
     cues: [],
   });
   return presetOf(saved);
+}
+
+/** Overwrite a preset with the given title's look, keeping its name. Every
+ * shelf already saves and deletes templates, so the new look lands on the
+ * active shelf and the old preset comes off once it has. */
+export async function updateStylePreset(
+  projectId: string,
+  preset: StylePreset,
+  overlay: TextOverlay
+): Promise<StylePreset | null> {
+  const next = await saveStylePreset(projectId, preset.name, overlay);
+  await deleteStylePreset(preset);
+  return next;
 }
 
 export function deleteStylePreset(preset: StylePreset): Promise<void> {

@@ -72,6 +72,14 @@ describe("keyframe poses", () => {
     expect(keyIndexAt(kf, 1)).toBe(0);
     expect(removeKeyAt(kf, 1).length).toBe(0);
   });
+
+  test("keys one 60fps frame apart stay two keys", () => {
+    // A squash that snaps in on the next frame: 10.883 then 10.9 on a 60fps cut.
+    const a = 5.816667;
+    const kf = upsertKey([key(a, { x: 0.2 })], key(a + 1 / 60, { x: 0.9 }));
+    expect(kf.map((k) => k.x)).toEqual([0.2, 0.9]);
+    expect(keyIndexAt(kf, a + 1 / 60)).toBe(1);
+  });
 });
 
 describe("presets composing over a pose", () => {

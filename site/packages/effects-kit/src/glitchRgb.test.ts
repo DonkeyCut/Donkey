@@ -124,4 +124,13 @@ describe("a pinned glitch", () => {
     expect(under[down]).toBeGreaterThan(200);
     expect(under[up]).toBeLessThan(40);
   });
+
+  test("its ffmpeg shift stays inside rgbashift's ±255 px on an 8K export at full amount", () => {
+    // At amount 1 the pull is twice the default's, and on an 8K frame that
+    // ran to 335 px: ffmpeg refuses the value and the whole export fails.
+    const lines = effectFilterLines("in", "out", "glitch:rgb", 1, 0, 1, 7680, 4320, "t")!.join(";");
+    const values = [...lines.matchAll(/r[hv]=(-?\d+)/g)].map((m) => Math.abs(Number(m[1])));
+    expect(values.length).toBeGreaterThan(0);
+    expect(Math.max(...values)).toBeLessThanOrEqual(255);
+  });
 });

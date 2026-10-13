@@ -1,6 +1,6 @@
 "use client";
 
-import { FLASH_RHYTHMS, FLASH_RATE_MAX, FLASH_TONES, type FlashRhythm, type FlashPulse, type FlashTone } from "@donkeycut/effects-kit";
+import { FLASH_FADE_CHOICES, FLASH_FADE_NONE, FLASH_RHYTHMS, FLASH_RATE_MAX, FLASH_TONES, type FlashFadeChoice, type FlashRhythm, type FlashPulse, type FlashTone } from "@donkeycut/effects-kit";
 import { Row, useSliderCheckpoint } from "@/cut/components/panelBits";
 import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
@@ -8,12 +8,13 @@ import { cn } from "@/lib/utils";
 
 const FLASH_TONE_LABELS: Record<FlashTone, string> = { white: "White", black: "Black" };
 const FLASH_RHYTHM_LABELS: Record<FlashRhythm, string> = { strobe: "Strobe", flicker: "Flicker" };
+const FLASH_FADE_LABELS: Record<FlashFadeChoice, string> = { none: "Off", to: "To", from: "From" };
 
 /** How a write lands: `draft` while a slider drags (one undo step, closed by
  * the checkpoint), `commit` for a single click. */
 export type PulseWrite = "draft" | "commit";
 
-/** A two-way segmented choice in the flash rows. */
+/** A segmented choice in the flash rows. */
 function Segmented<T extends string>({ items, value, labels, onPick }: { items: readonly T[]; value: T; labels: Record<T, string>; onPick: (v: T) => void }) {
   return (
     <div className="flex w-36 rounded-lg border border-input p-0.5 text-[11.5px] font-medium">
@@ -84,5 +85,20 @@ export function FlashPulseRows({ pulse, write }: { pulse: FlashPulse; write: (pa
         </Row>
       )}
     </>
+  );
+}
+
+/** A flash element's fade: off (the pop), into the tone, or out of it,
+ * evenly across the element. Off writes as absence. */
+export function FlashFadeRow({ pulse, write }: { pulse: FlashPulse; write: (patch: FlashPulse, how: PulseWrite) => void }) {
+  return (
+    <Row label="Fade">
+      <Segmented
+        items={FLASH_FADE_CHOICES}
+        value={pulse.fade ?? FLASH_FADE_NONE}
+        labels={FLASH_FADE_LABELS}
+        onPick={(c) => write({ fade: c === FLASH_FADE_NONE ? undefined : c }, "commit")}
+      />
+    </Row>
   );
 }

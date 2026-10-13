@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { Canvas } from "skia-canvas";
 import { cutAtFaces, cycleFaceAt, cycleFaceTag, fontCycleCuts, fontCycleVariants, withFontCycle } from "./fontCycle";
+import { planAnimatedLayers, renderOverlayFrames, type RenderEnv } from "./render";
 import type { TextOverlay } from "./types";
 
 const title = (fonts?: NonNullable<TextOverlay["anim"]>["fonts"]): TextOverlay => ({
@@ -66,5 +68,42 @@ describe("the font cycle", () => {
     expect(cycleFaceTag(title(CYCLE), 0.65)).toBe("|face1");
     expect(cycleFaceTag(title(CYCLE), 0.1)).toBe("");
     expect(fontCycleCuts(title(), 2)).toEqual([]);
+  });
+
+  test("a face's hold sets its own step, so the changes land on the beat", () => {
+    const held = {
+      faces: [{ font: "caveat", hold: 0.25 }, { font: "anton", italic: true }, { font: "bebas", hold: 0.05 }],
+      at: 0.5,
+      seconds: 1,
+      rate: 10,
+    };
+    expect(cycleFaceAt(held, 0.5)?.font).toBe("caveat");
+    expect(cycleFaceAt(held, 0.74)?.font).toBe("caveat");
+    expect(cycleFaceAt(held, 0.75)?.font).toBe("anton");
+    expect(cycleFaceAt(held, 0.85)?.font).toBe("bebas");
+    expect(cycleFaceAt(held, 0.9)?.font).toBe("caveat");
+    expect(withFontCycle(title(held), 0.8).italic).toBe(true);
+    expect(withFontCycle(title(held), 0.6).italic).toBeUndefined();
+    expect(fontCycleCuts(title(held), 2)).toEqual([0.5, 0.75, 0.85, 0.9, 1.15, 1.25, 1.3, 1.5]);
+    expect(fontCycleVariants(title(held)).map((v) => v.font)).toEqual(["caveat", "anton", "bebas"]);
+  });
+
+  test("the canvas and ffmpeg exports change face at the held steps", async () => {
+    const held = { faces: [{ font: "caveat", hold: 0.25 }, { font: "anton" }, { font: "bebas", hold: 0.05 }], at: 0.5, seconds: 1, rate: 10 };
+    const o = title(held);
+    const cuts = [0.5, 0.75, 0.85, 0.9, 1.15, 1.25, 1.3, 1.5].map((t) => +(o.start + t).toFixed(3));
+    const layers = planAnimatedLayers(o, 10);
+    const starts = layers.map((l) => +l.start.toFixed(3));
+    for (const c of cuts) expect(starts.includes(c)).toBe(true);
+    expect((layers.find((l) => Math.abs(l.start - 2.75) < 1e-6)?.overlay as TextOverlay | undefined)?.font).toBe("anton");
+    const env: RenderEnv = {
+      fontStack: () => "Arial",
+      createCanvas: (w, h) => new Canvas(w, h) as unknown as HTMLCanvasElement,
+      canvasToPngBlob: async (c) => new Blob([new Uint8Array(await (c as unknown as Canvas).toBuffer("png"))]),
+    };
+    const set = await renderOverlayFrames(o, 270, 480, 30, env);
+    let t = o.start;
+    const edges = set.entries.map((e) => +(t += e.duration).toFixed(3));
+    for (const c of cuts) expect(edges.includes(c)).toBe(true);
   });
 });

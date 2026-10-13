@@ -41,6 +41,9 @@ import {
 } from "./types";
 
 const r = (n: number) => Math.round(n * 100) / 100;
+/** Element times to the millisecond: a 60 fps frame is 0.0167 s, which two
+ * decimals blur. editor_state and the tool results both read times through it. */
+export const roundT = (n: number) => Math.round(n * 1000) / 1000;
 
 /** The transition this clip applies into the next one, clamped to the live
  * overlap the same way the preview and export are. Null when there's no
@@ -641,7 +644,7 @@ function describeState(
       ...(sp.clip.grade ? { colorGrade: sp.clip.grade } : {}),
       ...(sp.clip.mask ? { mask: sp.clip.mask } : {}),
       ...(sp.clip.kf?.length
-        ? { keyframes: sp.clip.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
+        ? { keyframes: sp.clip.kf.map((k) => ({ ...k, t: roundT(k.t), x: r(k.x), y: r(k.y) })) }
         : {}),
       ...(sp.clip.motionBlur ? { motionBlur: r(sp.clip.motionBlur) } : {}),
       ...clipEffects(sp.clip, live, { aspect: s.aspect, assetById }),
@@ -702,7 +705,7 @@ function describeState(
             groupCameras: cams.map((c) => ({
               groupId: c.groupId,
               start: r(c.start),
-              keys: c.keys.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y), scale: r(k.scale), rotation: r(k.rotation) })),
+              keys: c.keys.map((k) => ({ ...k, t: roundT(k.t), x: r(k.x), y: r(k.y), scale: r(k.scale), rotation: r(k.rotation) })),
               ...(c.motionBlur ? { motionBlur: r(c.motionBlur) } : {}),
             })),
           }
@@ -852,7 +855,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     ...(c.mask ? { mask: c.mask } : {}),
     ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),
     ...(c.kf?.length
-      ? { keyframes: c.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
+      ? { keyframes: c.kf.map((k) => ({ ...k, t: roundT(k.t), x: r(k.x), y: r(k.y) })) }
       : {}),
     ...(c.motionBlur ? { motionBlur: r(c.motionBlur) } : {}),
   };
@@ -863,8 +866,8 @@ function describeOverlay(o: Overlay) {
     kind: o.kind ?? "text",
     ...(o.groupId ? { groupId: o.groupId } : {}),
     name: overlayName(o),
-    start: r(o.start),
-    end: r(o.end),
+    start: roundT(o.start),
+    end: roundT(o.end),
     x: r(o.x),
     y: r(o.y),
     ...(o.rotation ? { rotation: o.rotation } : {}),
@@ -873,7 +876,7 @@ function describeOverlay(o: Overlay) {
     ...(o.motionBlur ? { motionBlur: r(o.motionBlur) } : {}),
     ...(hasOverlayAnim(o.anim) ? { anim: o.anim } : {}),
     ...(o.kf?.length
-      ? { keyframes: o.kf.map((k) => ({ ...k, t: r(k.t), x: r(k.x), y: r(k.y) })) }
+      ? { keyframes: o.kf.map((k) => ({ ...k, t: roundT(k.t), x: r(k.x), y: r(k.y) })) }
       : {}),
     ...(o.mask ? { mask: o.mask } : {}),
     ...(o.lane ? { lane: o.lane } : {}),
@@ -908,6 +911,7 @@ function describeOverlay(o: Overlay) {
       ...(o.effect === "glitch" && o.glitch ? { glitch: o.glitch } : {}),
       ...(o.effect === "flash" && o.tone ? { tone: o.tone } : {}),
       ...(o.effect === "flash" && o.rate ? { rate: r(o.rate), rhythm: o.rhythm ?? "strobe" } : {}),
+      ...(o.effect === "flash" && o.fade ? { fade: o.fade } : {}),
     };
   }
   return {

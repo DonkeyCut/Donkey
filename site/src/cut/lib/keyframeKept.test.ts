@@ -20,13 +20,13 @@ test("keys the call left in place come back named, with the way to drop them", a
     note?: string;
   };
   expect(out.kept).toEqual([1]);
-  expect(out.note).toContain("empty keys list");
+  expect(out.note).toContain("replace");
 });
 
-test("a call that names every key, or clears the track, reports nothing kept", async () => {
+test("a call that names every key, or replaces the track, reports nothing kept", async () => {
   const all = (await runAiTool("set_overlay_keyframes", { id: "t1", keys: [{ t: 0, y: 0.56 }, { t: 1, y: 0.56 }, { t: 1.5, y: 0.56 }] })) as { kept?: number[] };
   expect(all.kept).toBeUndefined();
-  const cleared = (await runAiTool("set_overlay_keyframes", { id: "t1", keys: [] })) as { kept?: number[]; keys: unknown[] };
-  expect(cleared.kept).toBeUndefined();
-  expect(cleared.keys).toHaveLength(0);
+  const rep = (await runAiTool("set_overlay_keyframes", { id: "t1", replace: true, keys: [{ t: 0, y: 0.56 }] })) as { kept?: number[]; keys: unknown[] };
+  expect(rep.kept).toBeUndefined();
+  expect(rep.keys).toHaveLength(1);
 });

@@ -419,6 +419,10 @@ export type SubtitleStatus = "idle" | "running" | "ready" | "empty" | "error";
 
 export type SaveState = "saved" | "dirty" | "saving" | "error";
 
+/** Where a new title's look starts: the last title the person styled, or the
+ * built-in defaults. */
+export type TitleSeed = "remembered" | "defaults";
+
 export interface EditorState {
   projectId: string | null;
   projectName: string;
@@ -677,7 +681,7 @@ export interface EditorState {
    * undo like any other edit. */
   releaseGenClips: () => void;
   /** Place a title element; a drop (or the assistant) passes where it landed. */
-  addOverlay: (aim?: { at?: number; lane?: number }) => void;
+  addOverlay: (aim?: { at?: number; lane?: number; seed?: TitleSeed }) => void;
   /** Add a vector shape element on the title lanes at the playhead. */
   /** Place a shape element; a drop passes where it landed. */
   addShape: (shape: ShapeKind, aim?: { at?: number; lane?: number }) => void;
@@ -1217,7 +1221,9 @@ function settleOverlayFootprint(id: string, patch: OverlayPatch) {
   const others = st.overlays
     .filter((o) => o.id !== id && (o.lane ?? 0) === (self.lane ?? 0))
     .sort((a, b) => a.start - b.start);
-  const len = Math.max(0.2, self.end - self.start);
+  // Its own length: a card cut on the beat can run a few frames, and a floor
+  // here would read it as overlapping the next card and slide it away.
+  const len = Math.max(1e-3, self.end - self.start);
   if (moved) {
     const at = nextFreeStart(
       others.map((o) => ({ start: o.start, end: o.end })),
@@ -1795,6 +1801,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (history.length > HISTORY_CAP) history.shift();
       future.length = 0; // a real edit invalidates the redo branch
     }
+  };
+
+  /** An undo inside a batch spends its checkpoint, so the rest of the batch
+   * takes a fresh one from where the undo left the doc — else the next undo in
+   * the same chat turn would step back into the turn before. */
+  const rearmBatch = () => {
+    if (batchDepth > 0) pending = { snap: snapshot(), seq: docSeq };
   };
 
   const push = () => {
@@ -3052,8 +3065,10 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     addOverlay: (aim) => {
       // Seed the visual style from the last-used title so repeated titles in a
-      // project share one look; fall back to the built-in defaults.
-      const remembered = readTextStyle();
+      // project share one look; fall back to the built-in defaults. The
+      // assistant asks for the defaults: its tools state them, and a look
+      // remembered from another title would ride along unseen.
+      const remembered = aim?.seed === "defaults" ? {} : readTextStyle();
       addElement("text", (start, end, lane) => ({
         id: uid(),
         kind: "text",
@@ -5276,6 +5291,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (!prev) return false;
       future.push(snapshot());
       restoreDoc(prev);
+      rearmBatch();
       return true;
     },
 
@@ -5286,6 +5302,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       history.push(snapshot());
       if (history.length > HISTORY_CAP) history.shift();
       restoreDoc(next);
+      rearmBatch();
       return true;
     },
   };

@@ -11,6 +11,7 @@ import {
   isAudioEffect,
   LEAK_TINT,
   leakGradient,
+  lightbarBox,
   streakGradient,
   type EffectId,
 } from "@donkeycut/effects-kit";
@@ -80,7 +81,7 @@ const GROUPS = [
   { id: "audio", label: "Sound" },
 ] as const;
 
-const MOVING: EffectId[] = ["zoom", "grain", "vhs", "glitch", "lightleak", "flash", "shake", "huecycle"];
+const MOVING: EffectId[] = ["zoom", "grain", "vhs", "glitch", "lightleak", "lightbars", "flash", "shake", "huecycle"];
 
 const groupOf = (id: EffectId): EffectGroup =>
   isAudioEffect(id) ? "audio" : MOVING.includes(id) ? "moving" : "filters";
@@ -1009,6 +1010,13 @@ export function EffectSwatch({
       {!!st.flash && (
         <span className="absolute inset-0 bg-white" style={{ opacity: Math.min(0.75, st.flash) }} />
       )}
+      {st.bars?.map((b, j) => (
+        <span
+          key={`bar-${j}`}
+          className="absolute inset-y-0"
+          style={{ ...lightbarBox(b), mixBlendMode: "plus-lighter" }}
+        />
+      ))}
     </span>
   );
 }

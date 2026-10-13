@@ -19,6 +19,11 @@ export interface CycleFace {
   scale?: number;
   /** Letter spacing, em; absent = the title's own. */
   tracking?: number;
+  /** Italic for this face; absent = the title's own. */
+  italic?: boolean;
+  /** Seconds this face shows before the next; absent = one step at the
+   * cycle's rate. Holds put each change on the music's beat. */
+  hold?: number;
 }
 
 /** The cycle: `faces` in order, `rate` changes a second, running from `at`
@@ -36,7 +41,10 @@ export const FONT_CYCLE_RATE = 15;
 export const FONT_CYCLE_RATE_MIN = 2;
 export const FONT_CYCLE_RATE_MAX = 30;
 /** The most faces one cycle walks. */
-export const FONT_CYCLE_FACES_MAX = 12;
+export const FONT_CYCLE_FACES_MAX = 48;
+/** A face's hold bounds, seconds: a frame at 60 fps up to a long hold. */
+export const CYCLE_HOLD_MIN = 1 / 60;
+export const CYCLE_HOLD_MAX = 10;
 /** Face scale bounds. */
 export const CYCLE_SCALE_MIN = 0.5;
 export const CYCLE_SCALE_MAX = 4;
@@ -47,6 +55,13 @@ const STEP_SLACK = 1e-4;
 
 const rateOf = (c: OverlayFontCycle) =>
   Math.max(FONT_CYCLE_RATE_MIN, Math.min(FONT_CYCLE_RATE_MAX, c.rate > 0 ? c.rate : FONT_CYCLE_RATE));
+
+/** How long a face shows: its own hold, or one step at the cycle's rate. */
+const stepOf = (c: OverlayFontCycle, f: CycleFace) =>
+  f.hold && f.hold > 0 ? Math.max(CYCLE_HOLD_MIN, Math.min(CYCLE_HOLD_MAX, f.hold)) : 1 / rateOf(c);
+
+/** Seconds one walk through every face takes. */
+const periodOf = (c: OverlayFontCycle) => c.faces.reduce((sum, f) => sum + stepOf(c, f), 0);
 
 /** The cycle a text element carries, or nothing — other kinds have no face. */
 export function overlayFontCycle(o: Overlay): OverlayFontCycle | undefined {
@@ -60,8 +75,16 @@ export function overlayFontCycle(o: Overlay): OverlayFontCycle | undefined {
 export function cycleFaceAt(c: OverlayFontCycle, tLocal: number): CycleFace | null {
   const u = tLocal - c.at;
   if (u < -STEP_SLACK || u >= c.seconds - STEP_SLACK) return null;
-  const step = Math.max(0, Math.floor((u + STEP_SLACK) * rateOf(c)));
-  return c.faces[step % c.faces.length];
+
+  // Walk one period's steps to the face whose span holds this moment.
+  // Example: holds 0.25, 0.1, 0.05 put u = 0.3 in the second face.
+  const w = Math.max(0, u + STEP_SLACK) % periodOf(c);
+  let edge = 0;
+  for (const f of c.faces) {
+    edge += stepOf(c, f);
+    if (w < edge) return f;
+  }
+  return c.faces[c.faces.length - 1];
 }
 
 /** The element as it is set `tLocal` seconds in: the cycle's face while it
@@ -81,6 +104,7 @@ export function withFontCycle<T extends Overlay>(o: T, tLocal: number): T {
     weight: face.weight ?? t.weight,
     size: t.size * scale,
     letterSpacing: face.tracking ?? t.letterSpacing,
+    italic: face.italic ?? t.italic,
     anim: { ...o.anim, fonts: undefined },
   } as T;
 }
@@ -91,13 +115,12 @@ export function withFontCycle<T extends Overlay>(o: T, tLocal: number): T {
 export function fontCycleCuts(o: Overlay, dur: number): number[] {
   const c = overlayFontCycle(o);
   if (!c) return [];
-  const rate = rateOf(c);
   const end = Math.min(dur, c.at + c.seconds);
   const cuts: number[] = [];
-  for (let i = 0; ; i++) {
-    const t = c.at + i / rate;
-    if (t >= end - 1e-3) break;
+  let t = c.at;
+  for (let i = 0; t < end - 1e-3; i++) {
     if (t > 1e-3) cuts.push(Math.round(t * 1e4) / 1e4);
+    t += stepOf(c, c.faces[i % c.faces.length]);
   }
   if (end > 1e-3 && end < dur - 1e-3) cuts.push(Math.round(end * 1e4) / 1e4);
   return cuts;
@@ -125,7 +148,12 @@ export function cutAtFaces<S extends { start: number; end: number }>(spans: S[],
 export function fontCycleVariants<T extends Overlay>(o: T): T[] {
   const c = overlayFontCycle(o);
   if (!c) return [];
-  return c.faces.map((_, i) => withFontCycle(o, c.at + (i + 0.5) / rateOf(c)));
+  let edge = c.at;
+  return c.faces.map((f) => {
+    const mid = edge + stepOf(c, f) / 2;
+    edge += stepOf(c, f);
+    return withFontCycle(o, mid);
+  });
 }
 
 /** A tag naming the face showing at `tLocal`, for a sampler that caches
