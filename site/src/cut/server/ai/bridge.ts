@@ -79,18 +79,23 @@ export function unregisterSession(key: string) {
   sessionProjects.delete(key);
 }
 
-/** The chat stream carries a tool's output without its frames: the model
- * gets them through the returned result, the page never draws them, and one
- * watch_video's contact sheets would otherwise fill the turn journal. */
+/** The chat stream carries a tool's output without its frames or sound: the
+ * model gets them through the returned result, the page never draws or plays
+ * them, and one watch_video's contact sheets or a few listen_audio stretches
+ * would otherwise fill the turn journal. */
 function streamedOutput(output: unknown): unknown {
   if (!output || typeof output !== "object" || Array.isArray(output)) {
     return output;
   }
-  const { image, images, ...rest } = output as Record<string, unknown>;
-  if (image === undefined && images === undefined) {
+  const { image, images, audio, ...rest } = output as Record<string, unknown>;
+  if (image === undefined && images === undefined && audio === undefined) {
     return output;
   }
-  return { ...rest, imagesOmitted: true };
+  return {
+    ...rest,
+    ...(image !== undefined || images !== undefined ? { imagesOmitted: true } : {}),
+    ...(audio !== undefined ? { audioOmitted: true } : {}),
+  };
 }
 
 const TOOL_TIMEOUT_MS = 120_000; // subtitles generation can take a while

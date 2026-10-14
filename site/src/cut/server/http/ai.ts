@@ -23,6 +23,8 @@ import {
 } from "../ai/bridge";
 import { rewriteCaptions, translateCaptions } from "../ai/captions";
 import { writeVisualCues, type VisualFrame } from "../ai/visualSubtitles";
+import { audioAsWords } from "../ai/heardWords";
+import { transcribeAudio } from "../transcribe";
 import { AI_SKILL_INDEX, AI_TOOLS, attachedAssetsBlock, readSkill, skillRelevanceBlock, systemPrompt } from "../ai/catalog";
 import {
   declaresTool,
@@ -79,6 +81,10 @@ function mcpCommand(base: string, sessionKey: string): { command: string; args: 
 }
 
 /** Claude models through the Agent SDK — the user's Claude Code login. */
+/** The longest one editor tool call may take under Codex: the speech
+ * engine's whole-run cap. */
+const CODEX_TOOL_TIMEOUT_S = 600;
+
 async function runClaude(
   emit: UIChunkWriter["write"],
   prompt: string,
@@ -341,6 +347,10 @@ async function codexRun(
     // The editor tools are the whole point of the run, so approve them all.
     "-c",
     `mcp_servers.cut.default_tools_approval_mode="approve"`,
+    // Codex cuts an MCP call off at 60s by default; the editor's waits run to
+    // 100s, and a listen's words can queue behind a caption run.
+    "-c",
+    `mcp_servers.cut.tool_timeout_sec=${CODEX_TOOL_TIMEOUT_S}`,
     session ? prompt : `${systemPrompt()}\n\n${prompt}`
   );
 
@@ -732,6 +742,15 @@ export const aiApi = {
     const result = await callBrowserTool(key, name, args ?? {});
     if (result.errorText !== undefined) {
       return Response.json({ ...mcpText(result.errorText), isError: true });
+    }
+    // The models behind this proxy read text and pictures, so a listen's sound
+    // reaches them as its words, transcribed here on the Mac.
+    if (name === "listen_audio") {
+      try {
+        return Response.json(mcpText(await audioAsWords(result.output, transcribeAudio)));
+      } catch (error) {
+        return Response.json({ ...mcpText(errorMessage(error, "Could not transcribe that stretch.")), isError: true });
+      }
     }
     // Frames come back as data URLs in `image`/`images`; hand them to the
     // model as MCP image blocks. The data text rides first, so a provider

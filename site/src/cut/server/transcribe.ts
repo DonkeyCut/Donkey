@@ -63,9 +63,51 @@ export interface TranscribeJob {
   cues?: Cue[];
 }
 
-const MAX_RUNNING = 1; // on-device transcription is heavy; one at a time
+// A speech run gets a fixed allowance plus twice the audio's length, so a run
+// that hangs gives the queue back in minutes, e.g. 2m20s for a 10s listen. The
+// whole-run cap holds for audio of unknown length.
+const STT_BASE_MS = 120_000;
+const STT_PER_AUDIO_SECOND_MS = 2_000;
+const STT_MAX_MS = 600_000;
+const sttTimeoutMs = (seconds: number) =>
+  Number.isFinite(seconds) ? Math.min(STT_MAX_MS, STT_BASE_MS + seconds * STT_PER_AUDIO_SECOND_MS) : STT_MAX_MS;
+
 // Survives dev-server module reloads; caps the terminal backlog.
-const { jobs, runningCount, retire } = createJobRegistry<TranscribeJob>("__veditorSttJobs");
+const { jobs, retire } = createJobRegistry<TranscribeJob>("__veditorSttJobs");
+
+// On-device transcription is heavy, so jobs take the speech engine one at a
+// time. A job waiting its turn reports running: a caller waits it out the
+// same way it waits out the work itself. A chat waiting on the words goes
+// "next", ahead of captions and background sweep chunks already queued.
+type SpeechPlace = "next" | "last";
+const speechQueue: (() => void)[] = [];
+let speechBusy = false;
+function inSpeechTurn<T>(work: () => Promise<T>, place: SpeechPlace = "last"): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = () => {
+      work()
+        .then(resolve, reject)
+        .finally(() => {
+          const following = speechQueue.shift();
+          if (following) {
+            following();
+          } else {
+            speechBusy = false;
+          }
+        });
+    };
+    if (!speechBusy) {
+      speechBusy = true;
+      start();
+      return;
+    }
+    if (place === "next") {
+      speechQueue.unshift(start);
+    } else {
+      speechQueue.push(start);
+    }
+  });
+}
 
 export function getTranscribeJob(id: string) {
   return jobs.get(id);
@@ -236,18 +278,16 @@ function cuesFromStt(out: string, duration: number): Cue[] {
  * audible mix (the same graph runTranscribe builds with ffmpeg) and posts the
  * wav here — on-device speech then works whatever holds the project, and its
  * real word timings beat the hosted route's interpolated ones. Shares the
- * registry with the project path, so heavy speech still runs one at a time.
+ * speech turn with the project path, so heavy speech still runs one at a time.
  */
 export async function createAudioTranscribeJob(
   audio: Uint8Array,
   opts: { locale?: string; duration?: number } = {}
 ): Promise<TranscribeJob> {
   assertLocalRuntime();
-  const id = crypto.randomUUID().slice(0, 12);
-  if (runningCount() >= MAX_RUNNING) return busyJob(id, "");
-  const job: TranscribeJob = { id, projectId: "", status: "running", stage: "model" };
+  const job: TranscribeJob = { id: crypto.randomUUID().slice(0, 12), projectId: "", status: "running", stage: "model" };
   jobs.set(job.id, job);
-  void runAudioTranscribe(job, audio, opts)
+  void inSpeechTurn(() => runAudioTranscribe(job, audio, opts))
     .catch((err: unknown) => {
       job.status = "error";
       job.error = errorMessage(err, String(err));
@@ -256,50 +296,52 @@ export async function createAudioTranscribeJob(
   return job;
 }
 
+/** Transcribe audio in hand and wait for its words, taking the speech
+ * engine's next turn. The chat bridge reads a listen this way for a model
+ * that takes text and pictures only. `fileName` carries the container the
+ * speech tool reads the bytes as, e.g. "span.aac" for the engine's own cut. */
+export function transcribeAudio(
+  audio: Uint8Array,
+  opts: { locale?: string; duration?: number; fileName?: string } = {}
+): Promise<Cue[]> {
+  assertLocalRuntime();
+  const job: TranscribeJob = { id: crypto.randomUUID().slice(0, 12), projectId: "", status: "running", stage: "model" };
+  return inSpeechTurn(async () => {
+    await runAudioTranscribe(job, audio, opts);
+    return job.cues ?? [];
+  }, "next");
+}
+
 async function runAudioTranscribe(
   job: TranscribeJob,
   audio: Uint8Array,
-  { locale, duration }: { locale?: string; duration?: number }
+  { locale, duration, fileName = "mix.wav" }: { locale?: string; duration?: number; fileName?: string }
 ) {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "veditor-stt-"));
   try {
-    const wav = path.join(tmpDir, "mix.wav");
-    await writeFile(wav, audio);
+    const file = path.join(tmpDir, fileName);
+    await writeFile(file, audio);
     const bin = await ensureStt();
     job.stage = "transcribe";
-    const out = await run(bin, [wav, locale ?? "en-US"]);
-    job.cues = await cuesFromRun(out, wav, duration && duration > 0 ? duration : Infinity);
+    const length = duration && duration > 0 ? duration : Infinity;
+    const out = await run(bin, [file, locale ?? "en-US"], undefined, sttTimeoutMs(length));
+    job.cues = await cuesFromRun(out, file, length);
     job.status = "done";
   } finally {
     void rm(tmpDir, { recursive: true, force: true });
   }
 }
 
-function busyJob(id: string, projectId: string): TranscribeJob {
-  const job: TranscribeJob = {
-    id,
-    projectId,
-    status: "error",
-    stage: "audio",
-    error: "A transcription is already running — wait for it to finish.",
-  };
-  jobs.set(id, job);
-  retire(job);
-  return job;
-}
-
 export async function createTranscribeJob(spec: TranscribeSpec): Promise<TranscribeJob> {
   assertLocalRuntime();
-  const id = crypto.randomUUID().slice(0, 12);
-  if (runningCount() >= MAX_RUNNING) return busyJob(id, spec.projectId);
   const job: TranscribeJob = {
-    id,
+    id: crypto.randomUUID().slice(0, 12),
     projectId: spec.projectId,
     status: "running",
     stage: "audio",
   };
   jobs.set(job.id, job);
-  void runTranscribe(job, spec)
+  void inSpeechTurn(() => runTranscribe(job, spec))
     .catch((err: unknown) => {
       job.status = "error";
       job.error = errorMessage(err, String(err));
@@ -481,7 +523,7 @@ async function runTranscribe(job: TranscribeJob, spec: TranscribeSpec) {
     const bin = await ensureStt();
 
     job.stage = "transcribe";
-    const out = await run(bin, [wav, spec.locale ?? "en-US"]);
+    const out = await run(bin, [wav, spec.locale ?? "en-US"], undefined, sttTimeoutMs(spec.duration));
     job.cues = await cuesFromRun(out, wav, spec.duration);
     job.status = "done";
   } finally {

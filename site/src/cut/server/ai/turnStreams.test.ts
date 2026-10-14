@@ -126,3 +126,16 @@ test("frames reach the model and stay out of the turn journal", async () => {
   expect(JSON.stringify(journaled).length).toBeLessThan(1000);
   unregisterSession("frames");
 });
+
+test("sound reaches the model and stays out of the turn journal", async () => {
+  const chunks: Record<string, unknown>[] = [];
+  registerSession("sound", { write: (chunk) => chunks.push(chunk) });
+  const pending = callBrowserTool("sound", "listen_audio", { asset_id: "a" });
+  const id = String(chunks[0].toolCallId);
+  const audio = `data:audio/wav;base64,${"A".repeat(2_000_000)}`;
+  resolveBrowserTool("sound", id, { output: { coveredTo: 30, audio } });
+  expect(((await pending).output as { audio?: string }).audio).toBe(audio);
+  const journaled = chunks.find((chunk) => chunk.type === "tool-output-available");
+  expect(journaled?.output).toEqual({ coveredTo: 30, audioOmitted: true });
+  unregisterSession("sound");
+});
