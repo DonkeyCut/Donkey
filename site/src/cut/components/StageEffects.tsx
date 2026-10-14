@@ -17,8 +17,10 @@ import { isEffectOverlay, laneOf } from "@/cut/lib/types";
 import {
   hasEffects,
   liveEffectsAt,
+  placeWashes,
   stageEffectFilter,
   stageEffectTransform,
+  washSlotsOf,
   type LiveEffect,
 } from "@/cut/lib/effectStack";
 import "./grain.css";
@@ -146,18 +148,20 @@ export function useEffectLanes(): number[] {
 /** The frame-wide paints of the effects on one lane, over everything under
  * them and under everything above. */
 export function StageEffectPaint({ lane }: { lane: number }) {
+  const overlays = useEditor((s) => s.overlays);
+  const slots = useMemo(() => washSlotsOf(overlays, lane), [overlays, lane]);
   const live = useLiveEffects();
   const states = useMemo(
     () => live.filter((e) => e.lane === lane).map((e) => e.state),
     [live, lane]
   );
-  if (states.length === 0) return null;
+  if (states.length === 0 && slots.length === 0) return null;
   const grainUrl = grainTileUrl();
   const grain = Math.max(0, ...states.map((s) => s.grain ?? 0));
   const vignette = Math.max(0, ...states.map((s) => s.vignette ?? 0));
   const flash = Math.max(0, ...states.map((s) => (s.flashTone ? 0 : (s.flash ?? 0))));
   const dark = Math.max(0, ...states.map((s) => (s.flashTone === "black" ? (s.flash ?? 0) : 0)));
-  const washes = states.flatMap((s) => s.washes ?? []);
+  const { alphas, extra } = placeWashes(slots, states.flatMap((s) => s.washes ?? []));
   const leaks = states.flatMap((s) => (s.leak ? [s.leak] : []));
   const burns = states.flatMap((s) => (s.burn ? [s.burn] : []));
   const bars = states.flatMap((s) => s.bars ?? []);
@@ -166,7 +170,8 @@ export function StageEffectPaint({ lane }: { lane: number }) {
     !vignette &&
     !flash &&
     !dark &&
-    washes.length === 0 &&
+    slots.length === 0 &&
+    extra.length === 0 &&
     leaks.length === 0 &&
     burns.length === 0 &&
     bars.length === 0
@@ -210,7 +215,21 @@ export function StageEffectPaint({ lane }: { lane: number }) {
           })}
         </div>
       ))}
-      {washes.map((w, i) => (
+      {slots.map((w, i) => (
+        // Mounted while the lane holds the effect, painted once: a flash
+        // moves only the opacity, on the compositor.
+        <div
+          key={`slot-${i}`}
+          className="absolute inset-0"
+          style={{
+            background: w.background,
+            opacity: alphas[i],
+            mixBlendMode: w.mode as React.CSSProperties["mixBlendMode"],
+            willChange: "opacity",
+          }}
+        />
+      ))}
+      {extra.map((w, i) => (
         <div
           key={i}
           className="absolute inset-0"

@@ -11,7 +11,13 @@
  * The math is here, apart from React, because both exports walk the same stack.
  */
 
-import { effectPreviewState, effectRecipe, isAudioEffect, type EffectPreviewState } from "@donkeycut/effects-kit";
+import {
+  effectPreviewState,
+  effectRecipe,
+  isAudioEffect,
+  washBackground,
+  type EffectPreviewState,
+} from "@donkeycut/effects-kit";
 import { isEffectOverlay, laneOf, type Overlay } from "./types";
 
 /** One effect live at a moment, with the lane that places it in the stack. */
@@ -39,6 +45,67 @@ export function liveEffectsAt(overlays: Overlay[], t: number): LiveEffect[] {
  * rather than the picture, so they never build a slice. */
 export const hasEffects = (overlays: Overlay[]) =>
   overlays.some((o) => isEffectOverlay(o) && !isAudioEffect(o.effect));
+
+export type Wash = NonNullable<EffectPreviewState["washes"]>[number];
+
+/** One wash layer a lane keeps mounted: its blend and its paint, which never
+ * change while it waits — only its opacity does. */
+export interface WashSlot {
+  key: string;
+  background: string;
+  mode: GlobalCompositeOperation;
+}
+
+const washKey = (w: Wash) => `${w.mode}|${washBackground(w.color, w.area)}`;
+
+/**
+ * The wash layers a lane keeps mounted while it holds an effect that lays any.
+ *
+ * A blend layer mounted as a flash starts, and dropped as it ends, rebuilds
+ * the stage's compositing both times — a held frame in the preview for a
+ * four-frame flash. Mounted for good, at the paint each effect lays (sampled
+ * halfway through it), a flash only moves opacities. Effects that lay the same
+ * wash share its slot: a film flash over every cut is five slots, not five
+ * per cut.
+ */
+export function washSlotsOf(overlays: Overlay[], lane: number): WashSlot[] {
+  const need = new Map<string, WashSlot & { count: number }>();
+  for (const o of overlays) {
+    if (!isEffectOverlay(o) || isAudioEffect(o.effect) || o.hidden || laneOf(o) !== lane) continue;
+    const len = o.end - o.start;
+    const washes = effectPreviewState(effectRecipe(o), o.amount, len / 2, o.focus, o.ramp, len, o).washes ?? [];
+    const counts = new Map<string, number>();
+    for (const w of washes) {
+      const key = washKey(w);
+      const count = (counts.get(key) ?? 0) + 1;
+      counts.set(key, count);
+      const slot = need.get(key);
+      if (!slot) need.set(key, { key, background: washBackground(w.color, w.area), mode: w.mode, count });
+      else slot.count = Math.max(slot.count, count);
+    }
+  }
+  return [...need.values()].flatMap(({ count, ...slot }) => Array.from({ length: count }, () => slot));
+}
+
+/** The live washes laid into a lane's slots: each slot's opacity (0 when no
+ * wash is on it), and the washes no slot matches, which mount for as long as
+ * they play. */
+export function placeWashes(slots: WashSlot[], washes: Wash[]): { alphas: number[]; extra: Wash[] } {
+  const alphas = slots.map(() => 0);
+  const taken = slots.map(() => false);
+  const extra: Wash[] = [];
+  for (const w of washes) {
+    const key = washKey(w);
+    const i = slots.findIndex((s, j) => !taken[j] && s.key === key);
+    if (i < 0) {
+      extra.push(w);
+      continue;
+    }
+    taken[i] = true;
+    alphas[i] = w.alpha;
+  }
+  return { alphas, extra };
+}
 
 /** How the content under an effect moves: a zoom's push in, a shake, and the
  * horizontal jump that reads as tearing. Empty for the effects that only
