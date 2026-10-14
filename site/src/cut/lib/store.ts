@@ -6557,13 +6557,13 @@ export function assetIdsOnAnyTimeline(s: {
   clips: VideoClip[];
   audioClips: AudioClip[];
   overlays: Overlay[];
-  transitions: TimelineTransition[];
-  subtitles: SubtitlesBlock;
-  timelines: Partial<Record<TimelineId, TimelineBody>>;
+  transitions?: TimelineTransition[];
+  subtitles?: SubtitlesBlock;
+  timelines?: Partial<Record<TimelineId, TimelineBody>>;
   assets?: readonly StoredAsset[];
 }): Set<string> {
   const used = assetIdsInUse(s);
-  for (const body of Object.values(s.timelines)) for (const id of assetIdsInUse(body)) used.add(id);
+  for (const body of Object.values(s.timelines ?? {})) for (const id of assetIdsInUse(body)) used.add(id);
   return withBoundSound(used, s.assets);
 }
 

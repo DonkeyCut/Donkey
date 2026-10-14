@@ -9,7 +9,7 @@ import { chatOwner } from "./chatAssets";
 import { useGenerate } from "./generate";
 import { matteBakesAvailable, useMatteBakes } from "./removal/bakeJobs";
 import { cardMatteKey, resolveCardShape } from "./cameraCard";
-import { assetIdsInUse, deriveTransitionFields, getClipSpans, normalizeDocState, overlayLayers, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { assetIdsOnAnyTimeline, deriveTransitionFields, getClipSpans, normalizeDocState, overlayLayers, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import type { VideoProject } from "./genvideo/types";
 import { playheadAt, skimAt } from "./playhead";
 import { cueWordCount } from "./cueChunk";
@@ -412,22 +412,6 @@ interface DescribedState {
   timelines: Partial<Record<TimelineId, TimelineBody>>;
 }
 
-/** The media a project's timelines play, open or parked — clips, overlays,
- * transitions and caption fonts: project content whichever chat made it. */
-export const placedAssetIds = (s: {
-  clips: VideoClip[];
-  audioClips: AudioClip[];
-  overlays?: Overlay[];
-  transitions?: TimelineTransition[];
-  subtitles?: SubtitlesBlock;
-  timelines?: Partial<Record<TimelineId, TimelineBody>>;
-  assets?: readonly MediaAsset[];
-}): Set<string> => {
-  const used = assetIdsInUse({ ...s, overlays: s.overlays ?? [] });
-  for (const body of Object.values(s.timelines ?? {})) for (const id of assetIdsInUse(body)) used.add(id);
-  return used;
-};
-
 /** An asset still owned by another chat: chat-made, tagged to a different
  * thread, and not yet moved onto the timeline. Placed media is project
  * content, so it stays visible even when a chat made it. The same rule reads
@@ -453,7 +437,7 @@ function describeState(
 ) {
   const cueCap = opts.fullCues ? Infinity : 60;
   const chatId = opts.chatId;
-  const placed = placedAssetIds(s);
+  const placed = assetIdsOnAnyTimeline(s);
   const ownedByOtherChat = (a: { origin?: string; chatId?: string; id: string }) =>
     hiddenFromChat(a, chatId, placed);
   // A font asset is a typeface, not footage: it is listed under `fonts` with

@@ -74,6 +74,24 @@ describe("describeDoc", () => {
     expect(describeDoc(doc, { fullCues: true }).media.some((m) => m.id === "g1")).toBe(false);
   });
 
+  test("a recording bound to a video on a parked timeline is placed media, visible to every chat", () => {
+    const doc = richDoc();
+    doc.assets.push(
+      { id: "rec", fileName: "rec.m4a", name: "voice", type: "audio", duration: 4, origin: "chat", chatId: "thread-a" },
+      { id: "vp", fileName: "vp.mp4", name: "parked", type: "video", duration: 4, soundFrom: { assetId: "rec", offset: 0 } }
+    );
+    doc.timelines = {
+      second: {
+        clips: [{ id: "cp", assetId: "vp", track: 0, start: 0, in: 0, out: 2, muted: false }],
+        audioClips: [],
+        transitions: [],
+        overlays: [],
+        subtitles: { cues: [], showOnVideo: true, showOnTimeline: true },
+      },
+    };
+    expect(describeDoc(doc, { fullCues: true, chatId: "thread-b" }).media.some((m) => m.id === "rec")).toBe(true);
+  });
+
   test("colour reads as the grading tools take it: source colour, LUT, wheels by name", async () => {
     const doc = richDoc();
     doc.assets[0] = {

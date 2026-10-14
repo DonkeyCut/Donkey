@@ -238,7 +238,7 @@ import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./
 import { framesAt, readMediaFileSize } from "./mediaRead";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
-import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, placedAssetIds, roundT } from "./aiContext";
+import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
 import { CARD_SIDES, newCard, normalizeCard, type CardSide } from "./cameraCard";
 import { CAPTION_STYLES, captionEmphasis, cueSpot, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount } from "./subtitles";
 import { cueEmphasis, emphasisIndicesOf, emphasizedWords } from "./captionEmphasis";
@@ -1199,7 +1199,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   find_media: (s, input) => {
     // The same media the snapshot would show this chat, past its cap.
-    const placed = placedAssetIds(s);
+    const placed = assetIdsOnAnyTimeline(s);
     const chatId = chatOwner();
     const visible = s.assets.filter((a) => !isLinkedAssetType(a.type) && !hiddenFromChat(a, chatId, placed));
     const type = input.type === "video" || input.type === "image" || input.type === "audio" ? input.type : undefined;
@@ -4326,13 +4326,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const docAssets = ref.doc.assets ?? [];
       const chatId = chatOwner();
       // Another chat's unplaced media is not the reference's to hand over.
-      const placed = placedAssetIds({
+      const placed = assetIdsOnAnyTimeline({
         clips: ref.doc.clips ?? [],
         audioClips: ref.doc.audioClips ?? [],
         overlays: ref.doc.overlays ?? [],
         transitions: ref.doc.transitions ?? [],
         subtitles: ref.doc.subtitles,
         timelines: ref.doc.timelines ?? {},
+        assets: docAssets,
       });
       const assets = ids.map((id) => {
         const a = docAssets.find((x) => x.id === id);
@@ -4802,10 +4803,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         let held = 0;
         if (input.unused === true) {
           const used = assetIdsOnAnyTimeline(s);
-          const placed = placedAssetIds(s);
           const chatId = chatOwner();
           const spare = s.assets.filter((a) => !used.has(a.id) && !isLinkedAssetType(a.type));
-          gone = spare.filter((a) => !hiddenFromChat(a, chatId, placed));
+          gone = spare.filter((a) => !hiddenFromChat(a, chatId, used));
           held = spare.length - gone.length;
         } else {
           const want = [...new Set((input.asset_ids as unknown[]).filter((v): v is string => typeof v === "string"))];
