@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { stubModule } from "@/lib/testing/stubModule";
 import { retimeOf } from "@donkeycut/effects-kit";
 import { AudioBuffer } from "node-web-audio-api";
@@ -32,6 +32,14 @@ let wall = 0;
 let ctxTime = 0;
 let resumes = 0;
 const globals = globalThis as Record<string, unknown>;
+
+// Bun runs every test file in one process: the globals this file fakes go
+// back once its tests are done, so later files read the real clock.
+const realGlobals = { AudioBuffer: globals.AudioBuffer, AudioContext: globals.AudioContext, performance: globals.performance };
+afterAll(() => {
+  Object.assign(globals, realGlobals);
+});
+
 globals.AudioBuffer ??= AudioBuffer;
 globals.performance = { now: () => wall * 1000 } as Performance;
 
