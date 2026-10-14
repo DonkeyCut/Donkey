@@ -28,6 +28,7 @@ const READ_ONLY = new Set([
   "stock_search",
   "list_voices",
   "wait_for_renders",
+  "wait_for_uploads",
   "seek",
   "select",
   "select_items",

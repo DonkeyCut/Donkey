@@ -20,6 +20,7 @@ import { libraryFontId, listLibraryFonts, listLutChoices } from "./linkedLibrary
 import { savedGradesKnown } from "./gradePresets";
 import { sourceProfileOf } from "./baseFrame";
 import { groupCameras } from "./groupCamera";
+import { isOffline } from "./network";
 import {
   clipZoom,
   frameOf,
@@ -310,6 +311,9 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
     media: core.media,
     mediaTruncated: core.mediaTruncated,
     ...(core.mediaInOtherChats ? { mediaInOtherChats: core.mediaInOtherChats, mediaInOtherChatsNote: core.mediaInOtherChatsNote } : {}),
+    // The browser has no connection: hosted work (renders, cloud reads,
+    // uploads) waits for it, and wait_for_uploads waits with it.
+    ...(isOffline() ? { offline: true } : {}),
     // AI video renders for this project, live from the job store — what
     // "rendering" claims must be grounded in. A done render names the asset
     // it landed as (already in `media`); a failed one carries its error.
@@ -539,6 +543,15 @@ function describeState(
       duration: roundT(a.duration),
       ...(a.origin ? { origin: a.origin } : {}),
       ...(a.folderId != null ? { folderId: a.folderId } : {}),
+      // A file on its way to storage plays and reads from the bytes in this
+      // browser; `upload` says how far it is, or what stopped it.
+      ...(live && a.upload
+        ? {
+            upload: a.upload.error
+              ? { status: "failed", error: a.upload.error }
+              : { status: "uploading", percent: Math.round(a.upload.progress * 100) },
+          }
+        : {}),
       // The recording bound to this video (sync_audio): every clip of it
       // plays that file, recording second = video second + offset.
       ...(a.soundFrom

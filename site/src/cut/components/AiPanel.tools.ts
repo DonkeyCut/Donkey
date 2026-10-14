@@ -178,6 +178,12 @@ export const AI_PANEL_TOOLS = [
     inputSchema: obj({}),
   },
   {
+    name: "wait_for_uploads",
+    description:
+      "Block until this project's files finish uploading and the browser has a connection (up to ~100s), retrying uploads that failed, then report each one: done, failed with the error, or still uploading with its percent. A file still uploading (`upload` on its media entry) already plays and reads from this browser, so editing, watching and listening go ahead without waiting; wait when the ask needs the stored copy (a render or export in the cloud, a share) or when `offline` is set or a call failed on the connection. Then run what waited, in the same turn.",
+    inputSchema: obj({}),
+  },
+  {
     name: "queue_message",
     description:
       "Put a message on the composer queue to run as its own turn after this one finishes, with a fresh view of the project. For a further message the user sent while you were working that you cannot do yet: it needs this turn's finished result (an export, a share, a thumbnail of the final cut), or a fresh look at the timeline once your cuts have landed. Pass the user's words as they wrote them; the row goes out on its own when this turn settles, and your reply says what waits. The ask you were given is never queued — do it now.",

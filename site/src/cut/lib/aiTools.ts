@@ -240,7 +240,7 @@ import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
 import { CARD_SIDES, newCard, normalizeCard, type CardSide } from "./cameraCard";
-import { CAPTION_STYLES, captionEmphasis, cueSpot, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount } from "./subtitles";
+import { CAPTION_STYLES, captionEmphasis, cueSpot, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { cueEmphasis, emphasisIndicesOf, emphasizedWords } from "./captionEmphasis";
 import { findHighlights } from "./highlights";
 import { fuseTimeline, renderFusedTimeline, speechOnsets, speechOver } from "./watch/fuse";
@@ -275,6 +275,8 @@ import {
   type TextMoveId,
 } from "./textMotion";
 import { queueWatchSweep, withSweepPaused } from "./watch/sweep";
+import { retryFailedUploads, uploadInFlight } from "./importQueue";
+import { ConnectionLostError, fetchDropped, isOffline } from "./network";
 import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
@@ -656,7 +658,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (svg.length > SVG_STICKER_MAX_CHARS) throw new ToolError(`svg is over ${SVG_STICKER_MAX_CHARS} characters.`);
       const name = typeof input.name === "string" && input.name.trim() ? input.name.trim() : "Drawn sticker";
       const drawn = await saveSvgSticker(s.projectId, svg, name).catch((e: unknown) => {
-        throw new ToolError(e instanceof Error ? e.message : String(e));
+        throw new ToolError(e instanceof Error ? e.message : String(e), { cause: e });
       });
       assetId = drawn.id;
       s = useEditor.getState();
@@ -1084,7 +1086,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       ...(isNum(input.feather) ? { feather: input.feather } : {}),
       ...(typeof input.invert === "boolean" ? { invert: input.invert } : {}),
     }).catch((e) => {
-      throw new ToolError(e instanceof Error ? e.message : "Could not track the footage.");
+      throw new ToolError(e instanceof Error ? e.message : "Could not track the footage.", { cause: e });
     });
   },
 
@@ -1260,7 +1262,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         { width: Math.round(frame.w * k), height: Math.round(frame.h * k) },
         (asset) => asset.url
       ).catch((e) => {
-        throw new ToolError(e instanceof Error ? e.message : "Could not draw the frame.");
+        throw new ToolError(e instanceof Error ? e.message : "Could not draw the frame.", { cause: e });
       });
       return { image: await rasterCanvasToDataUrl(canvas, "image/jpeg", 0.75), at };
   },
@@ -1308,7 +1310,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const refs = new Map<number, string>();
       if (asset.type === "image") {
         const still = await makeStillFrame(asset.url, "read").catch((e) => {
-          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`);
+          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
         });
         for (const i of order) refs.set(i, still.frames[0].image);
       } else {
@@ -1323,7 +1325,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             if (c) refs.set(i, await rasterCanvasToDataUrl(c.canvas, "image/jpeg", 0.82));
           }
         } catch (e) {
-          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`);
+          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
         }
       }
       for (let i = 0; i < wanted.length; i++)
@@ -1355,10 +1357,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           });
         }
       ).catch((e) => {
-        throw new ToolError(e instanceof Error ? e.message : "Could not draw the cut's frame.");
+        throw new ToolError(e instanceof Error ? e.message : "Could not draw the cut's frame.", { cause: e });
       });
       const images = await composeComparison(pairs).catch((e) => {
-        throw new ToolError(e instanceof Error ? e.message : "Could not compose the comparison.");
+        throw new ToolError(e instanceof Error ? e.message : "Could not compose the comparison.", { cause: e });
       });
       return {
         images,
@@ -1394,7 +1396,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         : "scan";
       if (asset.type === "image") {
         const body = await makeStillFrame(asset.url, detail).catch((e) => {
-          throw new ToolError(e instanceof Error ? e.message : "Could not read the image.");
+          throw new ToolError(e instanceof Error ? e.message : "Could not read the image.", { cause: e });
         });
         return {
           images: [body.frames[0].image],
@@ -1423,7 +1425,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           budgetMs: 90_000,
         })
       ).catch((e) => {
-        throw new ToolError(e instanceof Error ? e.message : "Could not watch the video.");
+        throw new ToolError(e instanceof Error ? e.message : "Could not watch the video.", { cause: e });
       });
       // The metadata persists on the asset (it saves with the project and
       // dies with the asset), so what has been seen survives this thread.
@@ -1777,7 +1779,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         known && input.regenerate !== true
           ? known
           : await detectAssetBeats(asset).catch((e) => {
-              throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
+              throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.", { cause: e });
             });
       const beats = grid.beats.filter((b) => b >= from && (to === undefined || b <= to));
       const toTimeline = (t: number) => roundT(clip!.start + retimeOf(clip!).tAt(t));
@@ -1941,6 +1943,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         truncated: heard.to < (to ?? asset.duration) - 0.05,
         unheardSeconds: unheard,
         ...(nextUnheard ? { unheardFrom: round2(nextUnheard.from) } : {}),
+        // The language its speech is transcribed in, for a model that takes
+        // the sound as its words.
+        locale: asset.language ?? trackLocale(s.subtitles, 0),
         audio: `data:${heard.inline.mimeType};base64,${heard.inline.data}`,
       };
   },
@@ -3552,7 +3557,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // effects burned in. Same render path the canvas's Copy frame uses,
         // so a still the assistant makes and one the user copies match.
         const png = await renderStageFrame(t).catch((e) => {
-          throw new ToolError(e instanceof Error ? e.message : "Could not draw the frame.");
+          throw new ToolError(e instanceof Error ? e.message : "Could not draw the frame.", { cause: e });
         });
         body = {
           ...(await storeStageStill(projectId, png, t, "Could not render the freeze frame.")),
@@ -3876,6 +3881,53 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
   },
 
+  wait_for_uploads: async (s) => {
+      // Files this page is sending to storage, and failed ones a retry may
+      // land. A process with no page sends none.
+      const watched = s.assets.filter((a) => a.upload && uploadInFlight(a.id)).map((a) => a.id);
+      if (watched.length === 0 && !isOffline()) {
+        return { uploads: [], note: "No uploads in flight, and the connection is up." };
+      }
+      if (!isOffline()) {
+        retryFailedUploads();
+      }
+
+      // Poll the store: an upload settles by dropping its `upload` mark, or
+      // by carrying an error. Stay under the tool bridge's 2-minute cap.
+      const deadline = Date.now() + 100_000;
+      const settled = () =>
+        !isOffline() &&
+        watched.every((id) => {
+          const a = useEditor.getState().assets.find((x) => x.id === id);
+          return !a?.upload || a.upload.error !== undefined;
+        });
+      while (Date.now() < deadline && !settled()) {
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      const assets = useEditor.getState().assets;
+      const uploads = watched.map((id) => {
+        const a = assets.find((x) => x.id === id);
+        if (!a) {
+          return { assetId: id, status: "removed" as const };
+        }
+        if (!a.upload) {
+          return { assetId: id, name: a.name, status: "done" as const };
+        }
+        if (a.upload.error) {
+          return { assetId: id, name: a.name, status: "failed" as const, error: a.upload.error };
+        }
+        return { assetId: id, name: a.name, status: "uploading" as const, percent: Math.round(a.upload.progress * 100) };
+      });
+      const offline = isOffline();
+      const waiting = uploads.filter((u) => u.status === "uploading").length;
+      return {
+        uploads,
+        ...(offline ? { offline: true, note: "The browser is still offline; uploads and hosted work resume when the connection returns. Call wait_for_uploads again to keep waiting." } : {}),
+        ...(!offline && waiting > 0 ? { note: `${waiting} still uploading — call wait_for_uploads again to keep waiting.` } : {}),
+      };
+  },
+
   generate_character_video: async (s, input) => {
       const projectId = s.projectId;
       if (!projectId) throw new ToolError("No project open.");
@@ -4144,7 +4196,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           for (const asset of assets) tagChatAsset(asset.id, chatId);
           return describe(assets);
         }).catch((e) => {
-          throw new ToolError(e instanceof Error ? e.message : String(e));
+          throw new ToolError(e instanceof Error ? e.message : String(e), { cause: e });
         });
         const results = rows.filter((r) => !("notStarted" in r)).map((r) => ("value" in r ? { url: r.url, assets: r.value } : r));
         const notStarted = rows.filter((r) => "notStarted" in r).map((r) => r.url);
@@ -5726,7 +5778,32 @@ export async function runAiTool(
   name: string,
   input: Record<string, unknown>
 ): Promise<unknown> {
-  return dispatchTool(useEditor.getState(), name, input);
+  try {
+    return await dispatchTool(useEditor.getState(), name, input);
+  } catch (err) {
+    // A call the connection dropped passes with the connection: the model
+    // waits for it and runs the call again.
+    if (!droppedByConnection(err)) {
+      throw err;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ToolError(
+      `${message} The connection dropped while this ran. Call wait_for_uploads, which waits for the connection and the uploads, then run this call again.`,
+      { cause: err }
+    );
+  }
+}
+
+/** Whether a tool failed on the connection: a dropped request anywhere in its
+ * causes, or, while offline, anything besides the tool turning its input
+ * down (a ToolError of its own, with no failure underneath). */
+function droppedByConnection(err: unknown): boolean {
+  const dropped = (e: unknown): boolean =>
+    e instanceof ConnectionLostError || fetchDropped(e) || (e instanceof Error && e.cause !== undefined && dropped(e.cause));
+  if (dropped(err)) {
+    return true;
+  }
+  return isOffline() && !(err instanceof ToolError && err.cause === undefined);
 }
 
 async function dispatchTool(s: Editor, name: string, input: Record<string, unknown>, operation?: ProjectOperation): Promise<unknown> {
@@ -6172,7 +6249,7 @@ async function openReferenceLink(raw: unknown): Promise<ReferenceProject> {
   const link = parseProjectLink(String(raw ?? ""));
   if (!link) throw new ToolError("Pass a Donkey Cut project link, share link, or project id.");
   return openReference(link).catch((e) => {
-    throw new ToolError(e instanceof Error ? e.message : "Could not read that project.");
+    throw new ToolError(e instanceof Error ? e.message : "Could not read that project.", { cause: e });
   });
 }
 
@@ -6230,7 +6307,7 @@ async function landReferenceAssets(
 ): Promise<LandedAsset[]> {
   if (sources.length === 0) return [];
   return landReferenceAssetsInto(ref, sources, projectId, { chatId, mapped }).catch((e) => {
-    throw new ToolError(e instanceof Error ? e.message : "Could not copy the reference's media.");
+    throw new ToolError(e instanceof Error ? e.message : "Could not copy the reference's media.", { cause: e });
   });
 }
 
@@ -6255,7 +6332,7 @@ async function eachScanned<T>(items: T[], run: (item: T) => Promise<void>) {
 async function fetchSpeech(asset: MediaAsset, from: number, to: number) {
   const heard = soundSpan(asset, from, to);
   const scan = await scanSourceSpeech(heard.asset.url, { from: heard.from, to: heard.to }).catch((e) => {
-    throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
+    throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.", { cause: e });
   });
   return {
     ...scan,
@@ -6313,7 +6390,7 @@ async function fetchSilences(
         thresholdDb,
         minSilence,
       }).catch((e) => {
-        throw new ToolError(e instanceof Error ? e.message : "Could not scan for silence.");
+        throw new ToolError(e instanceof Error ? e.message : "Could not scan for silence.", { cause: e });
       })
     );
   }
@@ -6347,7 +6424,7 @@ async function audioSpanBlob(
 ): Promise<Blob> {
   if (getBackend().kind !== "local")
     return renderAudioSpanWav(asset.url, from, to).catch((e) => {
-      throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
+      throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.", { cause: e });
     });
   const res = await apiFetch(`/api/cut/projects/${projectId}/audio`, {
     method: "POST",
@@ -6364,6 +6441,7 @@ async function audioSpanBlob(
 /** Bound the work per call the way a watch does; the caller listens on from
  * coveredTo. */
 const LISTEN_MAX_S = 600;
+const LISTEN_MIN_S = 0.5;
 
 /**
  * A span's sound, shrunk to whatever the model can take at once. The two
@@ -6387,7 +6465,9 @@ async function listenSpan(
   const to = heard.to;
   const end = Math.min(to ?? from + LISTEN_MAX_S, from + LISTEN_MAX_S);
   let span = end - from;
-  for (let attempt = 0; attempt < 3 && span > 0.5; attempt++) {
+  // The asked stretch reads at any length; a stretch shrunk to fit stops at
+  // LISTEN_MIN_S, below which nothing worth hearing is left.
+  for (let attempt = 0; attempt < 3 && span > (attempt === 0 ? 0 : LISTEN_MIN_S); attempt++) {
     const blob = await audioSpanBlob(projectId, heard.asset, from, round2(from + span));
     const inline = await blobToInlineAudio(blob);
     if (inline) return { inline, from: roundT(heard.back(from)), to: roundT(heard.back(from + span)) };
@@ -6515,7 +6595,7 @@ function soundTarget(s: Editor, id: unknown) {
 async function syncVideoSound(s: Editor, video: MediaAsset, audioId: unknown, clip: VideoClip | undefined) {
   const rec = requireItem(s.assets, audioId, "audio asset");
   const bound = await bindRecording(video.id, rec.id, clip).catch((e: unknown) => {
-    throw new ToolError(e instanceof Error ? e.message : "Could not line the recording up.");
+    throw new ToolError(e instanceof Error ? e.message : "Could not line the recording up.", { cause: e });
   });
   const { assetId, ...rest } = bound;
   return {
