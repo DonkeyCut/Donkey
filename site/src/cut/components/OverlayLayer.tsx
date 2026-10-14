@@ -41,6 +41,7 @@ import {
 import { fitTextToFrame, textBoxSize } from "@/cut/lib/textFit";
 import {
   behindSubjectOverlay,
+  clampKeyPos,
   clampOverlayPos,
   frameOf,
   fontStack,
@@ -988,7 +989,7 @@ function OverlayItem({
     const all = useEditor.getState().overlays;
     return o.groupId ? all.filter((x) => x.groupId === o.groupId) : [o];
   };
-  const clampPos = (v: number) => clampOverlayPos(v, o);
+  const clampPos = (v: number) => (hasOverlayKeys(o) ? clampKeyPos(v, o) : clampOverlayPos(v, o));
 
   /**
    * Commit a live transform. Position and rotation are pose: on a keyframed

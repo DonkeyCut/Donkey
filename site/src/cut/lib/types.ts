@@ -91,11 +91,22 @@ export function normalizeAspect(a: string | undefined | null): Aspect | null {
 
 /** An overlay's center, held far enough inside the frame that the element it
  * belongs to always has a grabbable piece on screen. Every path that writes a
- * position — dragging in the preview, the inspector's own fields — passes
- * through it, so no route can strand an element off-frame. An element in a
- * group may sit anywhere in the camera's world, for a camera to pan to. */
+ * resting position — dragging in the preview, the inspector's own fields —
+ * passes through it. An element in a group may sit anywhere in the camera's
+ * world, for a camera to pan to. */
 export const clampOverlayPos = (v: number, o?: { groupId?: string }) =>
   o?.groupId ? Math.min(CAMERA_WORLD_MAX, Math.max(CAMERA_WORLD_MIN, v)) : Math.min(0.98, Math.max(0.02, v));
+
+/** How far beyond the frame a keyed position may sit, so an element can enter
+ * or leave across an edge; its resting position stays on the frame. */
+export const OVERLAY_KEY_POS_MIN = -0.5;
+export const OVERLAY_KEY_POS_MAX = 1.5;
+
+/** A keyed center: past the frame edge by up to half a frame, for a pointer
+ * that slides in from below. Every path that writes a key — the chat, the
+ * inspector, a preview drag — passes through it. */
+export const clampKeyPos = (v: number, o: { groupId?: string }) =>
+  o.groupId ? clampOverlayPos(v, o) : Math.min(OVERLAY_KEY_POS_MAX, Math.max(OVERLAY_KEY_POS_MIN, v));
 
 /** Output frame in pixels. The short side is pinned to 1080 — the design
  * short side that text scaling and overlay math assume — and the long side

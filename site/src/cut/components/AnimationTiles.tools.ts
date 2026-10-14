@@ -44,6 +44,7 @@ import {
   WORD_SWELL_MIN,
 } from "@donkeycut/effects-kit";
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
+import { OVERLAY_KEY_POS_MAX, OVERLAY_KEY_POS_MIN } from "@/cut/lib/types";
 import {
   MOVE_STRENGTH_MAX,
   MOVE_STRENGTH_MIN,
@@ -61,11 +62,6 @@ const RAMP_SECONDS = `${OVERLAY_ANIM_MIN_SECONDS}..${OVERLAY_ANIM_MAX_SECONDS} (
  * fast enough for a loading spinner. */
 export const LOOP_SPEED_MIN = 0.25;
 export const LOOP_SPEED_MAX = 8;
-
-/** How far beyond the frame a keyed position may sit, so an element can enter
- * or leave across an edge; its resting position stays on the frame. */
-export const OVERLAY_KEY_POS_MIN = -0.5;
-export const OVERLAY_KEY_POS_MAX = 1.5;
 
 // Each loop's cycle at speed 1, e.g. "spin 4s", so a rate can be set from a measured one.
 const LOOP_CYCLES = OVERLAY_LOOP_STYLE_IDS.map((id) => `${id} ${LOOP_PERIODS[id]}s`).join(", ");

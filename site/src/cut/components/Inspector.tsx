@@ -180,6 +180,7 @@ import {
   SPEED_MAX,
   SPEED_MIN,
   assetIsSilent,
+  clampKeyPos,
   clampOverlayPos,
   type AudioClip,
   type BoxStyle,
@@ -3773,15 +3774,16 @@ function TransformRows({ overlay: o }: { overlay: Overlay }) {
   // Position reads as a percentage of the frame, which is what the document
   // stores — an element sits in the same spot at any aspect, and the number
   // means the same thing on a square as on a widescreen.
+  const clampPos = keyed ? clampKeyPos : clampOverlayPos;
   const setPos = (axis: "x" | "y", pct: number) => {
-    const v = clampOverlayPos(pct / 100, o);
+    const v = clampPos(pct / 100, o);
     if (keyed) return setKey({ [axis]: v });
     useEditor.getState().updateOverlayTransient(o.id, { [axis]: v });
   };
   return (
     <Section title="Transform">
       <KeyframeControls overlay={o} />
-      <PositionRow pose={pose} min={clampOverlayPos(-Infinity, o) * 100} max={clampOverlayPos(Infinity, o) * 100} ck={posCk} onSet={setPos} />
+      <PositionRow pose={pose} min={clampPos(-Infinity, o) * 100} max={clampPos(Infinity, o) * 100} ck={posCk} onSet={setPos} />
       {keyed && (
         <Row label="Scale">
           <ValueSlider

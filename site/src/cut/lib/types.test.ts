@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { animStyleOfTransition, AUDIO_TRANSITION_STYLES, clipCovers, contentRect, migrateLegacyTransitions, normalizeAspect, TRANSITION_STYLE_GROUPS, TRANSITION_STYLE_IDS, TRANSITION_STYLE_LABELS, type VideoClip } from "./types";
+import { animStyleOfTransition, AUDIO_TRANSITION_STYLES, clampKeyPos, clipCovers, contentRect, migrateLegacyTransitions, normalizeAspect, TRANSITION_STYLE_GROUPS, TRANSITION_STYLE_IDS, TRANSITION_STYLE_LABELS, type VideoClip } from "./types";
 
 /** A minimal track-0 clip; legacy docs carry retired transitionStyle strings. */
 function clip(
@@ -205,5 +205,13 @@ describe("clipCovers", () => {
     expect(
       clipCovers({ ...base, track: 1, frame: { x: 0.1, y: 0.1, w: 0.4, h: 0.4 } } as VideoClip)
     ).toBe(false);
+  });
+});
+
+describe("clampKeyPos", () => {
+  test("a key may sit past the frame edge so an element can enter across it", () => {
+    expect(clampKeyPos(1.3, {})).toBe(1.3);
+    expect(clampKeyPos(-0.4, {})).toBe(-0.4);
+    expect(clampKeyPos(9, {})).toBe(1.5);
   });
 });

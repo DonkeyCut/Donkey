@@ -123,7 +123,7 @@ import {
   type TextWeight,
 } from "@donkeycut/effects-kit";
 import type { AiPanelToolName } from "@/cut/components/AiPanel.tools";
-import { LOOP_SPEED_MAX, LOOP_SPEED_MIN, OVERLAY_KEY_POS_MAX, OVERLAY_KEY_POS_MIN, type OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
+import { LOOP_SPEED_MAX, LOOP_SPEED_MIN, type OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
 import type { AudioToolName } from "@/cut/components/AudioPanel.tools";
 import type { CameraCardToolName } from "@/cut/components/CameraCardSection.tools";
 import type { EditorToolName } from "@/cut/components/Editor.tools";
@@ -297,6 +297,7 @@ import {
   CLIP_MAX_ZOOM,
   clipCovers,
   DEFAULT_BACKGROUND,
+  clampKeyPos,
   clampOverlayPos,
   clipZoom,
   frameOf,
@@ -844,8 +845,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           o.id,
           onFrame(clamp(k.t, 0, dur)),
           {
-            ...(isNum(k.x) ? { x: o.groupId ? clampOverlayPos(k.x, o) : clamp(k.x, OVERLAY_KEY_POS_MIN, OVERLAY_KEY_POS_MAX) } : {}),
-            ...(isNum(k.y) ? { y: o.groupId ? clampOverlayPos(k.y, o) : clamp(k.y, OVERLAY_KEY_POS_MIN, OVERLAY_KEY_POS_MAX) } : {}),
+            ...(isNum(k.x) ? { x: clampKeyPos(k.x, o) } : {}),
+            ...(isNum(k.y) ? { y: clampKeyPos(k.y, o) } : {}),
             ...(isNum(k.scale) ? { scale: clamp(k.scale, 0.1, 4) } : {}),
             ...(isNum(k.scale_x) ? { scaleX: clamp(k.scale_x, 0, 4) } : {}),
             ...(isNum(k.scale_y) ? { scaleY: clamp(k.scale_y, 0, 4) } : {}),
