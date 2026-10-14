@@ -60,3 +60,14 @@ test("a sound put on a higher lane than it needs is told which lane is free", as
   const packed = (await runAiTool("update_audio", { id, lane: 0 })) as { freeLane?: number };
   expect(packed.freeLane).toBeUndefined();
 });
+
+// A sound timed to a frame (a click under a key press, music under a screen
+// recording's clock) is set to the millisecond, and the chat confirms the
+// placement from what the tool reports back.
+test("a placed and moved sound reports its times to the millisecond", async () => {
+  const placed = (await runAiTool("add_clip", { asset_id: "music", start: 0.617 })) as { start: number };
+  expect(placed.start).toBe(0.617);
+  const id = useEditor.getState().audioClips[0].id;
+  const moved = (await runAiTool("update_audio", { id, start: 0.017, in: 0.5723 })) as { start: number; in: number };
+  expect([moved.start, moved.in]).toEqual([0.017, 0.5723]);
+});

@@ -1,6 +1,7 @@
 import { beforeEach, expect, test } from "bun:test";
 import { TIMELINE_TOOLS } from "@/cut/components/Timeline.tools";
 import { runAiTool } from "./aiTools";
+import { buildAiContext } from "./aiContext";
 import { useEditor } from "./store";
 import { REGION_MAX_SCALE, emptySubtitles } from "./types";
 
@@ -48,4 +49,12 @@ test("the region schema says it may pass the frame edges", () => {
     .properties.region;
   expect(region.properties.x.description).toContain("past");
   expect(region.properties.w.description).toContain(String(REGION_MAX_SCALE));
+});
+
+// The box is measured to a pixel of a 1080 frame; editor_state reads it back
+// at that precision so the chat can confirm what it set.
+test("editor_state reads a layer's region back at the precision it was set", async () => {
+  await runAiTool("update_overlay_video", { id: overlay().id, region: { x: -0.0126, y: 0.2877, w: 1.0131, h: 0.3771 } });
+  const layer = JSON.stringify(buildAiContext({ chatId: null }));
+  expect(layer).toContain('"region":{"x":-0.0126,"y":0.2877,"w":1.0131,"h":0.3771}');
 });

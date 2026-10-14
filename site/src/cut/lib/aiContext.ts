@@ -44,6 +44,9 @@ const r = (n: number) => Math.round(n * 100) / 100;
 /** Element times to the millisecond: a 60 fps frame is 0.0167 s, which two
  * decimals blur. editor_state and the tool results both read times through it. */
 export const roundT = (n: number) => Math.round(n * 1000) / 1000;
+/** Frame fractions to the 1/10,000: a pixel of a 1080 frame is 0.0009, which
+ * two decimals blur by up to five pixels. */
+const rF = (n: number) => Math.round(n * 10000) / 10000;
 
 /** The transition this clip applies into the next one, clamped to the live
  * overlap the same way the preview and export are. Null when there's no
@@ -54,7 +57,7 @@ function transitionToNext(sp: ClipSpan, index: number, spans: ClipSpan[]) {
   const style = sp.clip.transitionStyle ?? "crossfade";
   return {
     style,
-    seconds: r(sp.transitionOut),
+    seconds: roundT(sp.transitionOut),
     ...(sp.clip.transitionFeather ? { feather: sp.clip.transitionFeather } : {}),
     ...(sp.clip.transitionBand ? { band: sp.clip.transitionBand } : {}),
   };
@@ -92,9 +95,9 @@ function clipEffects(clip: VideoClip, live: boolean, frame?: CardFrame) {
       }
     : {};
   return {
-    ...(clip.animIn ? { animIn: { style: clip.animIn.style, seconds: r(clip.animIn.seconds) } } : {}),
+    ...(clip.animIn ? { animIn: { style: clip.animIn.style, seconds: roundT(clip.animIn.seconds) } } : {}),
     ...(clip.animOut
-      ? { animOut: { style: clip.animOut.style, seconds: r(clip.animOut.seconds) } }
+      ? { animOut: { style: clip.animOut.style, seconds: roundT(clip.animOut.seconds) } }
       : {}),
     ...color,
     ...(clip.effects?.length ? { effects: clip.effects } : {}),
@@ -208,13 +211,13 @@ function noteFields(
   if (!notes || notes.length === 0) return {};
   const size = notes.reduce((sum, n) => sum + n.text.length, 0);
   if (full || size <= NOTE_SNAPSHOT_BUDGET)
-    return { observed: notes.map((n) => ({ from: r(n.from), to: r(n.to), text: n.text })) };
+    return { observed: notes.map((n) => ({ from: roundT(n.from), to: roundT(n.to), text: n.text })) };
   const share = Math.max(120, Math.floor(NOTE_SNAPSHOT_BUDGET / notes.length));
   let trimmed = false;
   const observed = notes.map((n) => {
-    if (n.text.length <= share) return { from: r(n.from), to: r(n.to), text: n.text };
+    if (n.text.length <= share) return { from: roundT(n.from), to: roundT(n.to), text: n.text };
     trimmed = true;
-    return { from: r(n.from), to: r(n.to), text: `${n.text.slice(0, share).trimEnd()}…` };
+    return { from: roundT(n.from), to: roundT(n.to), text: `${n.text.slice(0, share).trimEnd()}…` };
   });
   return { observed, ...(trimmed ? { observedText: "shortened here, whole in get_state" } : {}) };
 }
@@ -253,8 +256,8 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
           kind,
           id,
           asset: sp.asset.name,
-          start: r(sp.start),
-          len: r(sp.len),
+          start: roundT(sp.start),
+          len: roundT(sp.len),
           muted: sp.clip.muted,
           ...(sp.clip.hidden ? { hidden: true } : {}),
           ...describeRate(sp.clip),
@@ -272,7 +275,7 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
     if (kind === "cue") {
       const c = s.subtitles.cues.find((x) => x.id === id);
       return c
-        ? { kind, id, text: c.text, start: r(c.start), end: r(c.end), track: c.lane ?? 0, ...cueExtras(c) }
+        ? { kind, id, text: c.text, start: roundT(c.start), end: roundT(c.end), track: c.lane ?? 0, ...cueExtras(c) }
         : { kind, id };
     }
     // The selection's kind stays "overlay" (what select/delete take); the
@@ -285,8 +288,8 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
 
   return {
     project: core.project,
-    playhead: r(playheadAt()),
-    skimmer: skimAt() === null ? null : r(skimAt()!),
+    playhead: roundT(playheadAt()),
+    skimmer: skimAt() === null ? null : roundT(skimAt()!),
     playing: s.playing,
     selection,
     // Every font a title or caption can be set in beyond the built-in list:
@@ -469,7 +472,7 @@ function describeState(
     project: {
       id: s.projectId,
       name: s.projectName,
-      duration: r(duration),
+      duration: roundT(duration),
       // The open timeline is what everything else here describes; the others
       // are parked until switch_timeline opens one.
       timeline: s.timeline,
@@ -479,7 +482,7 @@ function describeState(
           id,
           label: TIMELINE_LABELS[id],
           ...(id === s.timeline ? { open: true } : {}),
-          duration: r(body ? projectDuration(body) : 0),
+          duration: roundT(body ? projectDuration(body) : 0),
           clips: body?.clips.length ?? 0,
           aspect: timelineAspect(s, id),
         };
@@ -499,10 +502,10 @@ function describeState(
           if (!safeArea) return [];
           const keepOut = guideGeometry([p.id], s.aspect).boxes.map((b) => ({
             label: b.label,
-            x: r(b.x),
-            y: r(b.y),
-            w: r(b.w),
-            h: r(b.h),
+            x: rF(b.x),
+            y: rF(b.y),
+            w: rF(b.w),
+            h: rF(b.h),
           }));
           return [[p.id, { safeArea, ...(keepOut.length ? { keepOut } : {}) }]];
         })
@@ -533,7 +536,7 @@ function describeState(
       ...(a.sizeBytes !== undefined ? { sizeBytes: a.sizeBytes, fileSize: formatBytes(a.sizeBytes) } : {}),
       ...(a.width !== undefined ? { width: a.width } : {}),
       ...(a.height !== undefined ? { height: a.height } : {}),
-      duration: r(a.duration),
+      duration: roundT(a.duration),
       ...(a.origin ? { origin: a.origin } : {}),
       ...(a.folderId != null ? { folderId: a.folderId } : {}),
       // The recording bound to this video (sync_audio): every clip of it
@@ -564,7 +567,7 @@ function describeState(
       // footage; only sheets returned in this chat are. `watching` marks the
       // sweep still filling the rest; the spans grow as segments land.
       ...(a.watch && a.watch.ranges.length > 0
-        ? { mapped: a.watch.ranges.map((rg) => ({ from: r(rg.from), to: r(rg.to) })) }
+        ? { mapped: a.watch.ranges.map((rg) => ({ from: roundT(rg.from), to: roundT(rg.to) })) }
         : {}),
       ...(live && watchSweepActive(a.id) ? { watching: true } : {}),
       // The written record of this source — what someone looked at these
@@ -583,8 +586,8 @@ function describeState(
             ...(opts.fullCues && a.speech.segments.length > 0
               ? {
                   transcript: a.speech.segments.map((sg) => ({
-                    start: r(sg.start),
-                    end: r(sg.end),
+                    start: roundT(sg.start),
+                    end: roundT(sg.end),
                     text: sg.text,
                   })),
                 }
@@ -600,12 +603,12 @@ function describeState(
       ...(sp.clip.groupId ? { groupId: sp.clip.groupId } : {}),
       asset: sp.asset.name,
       ...(sp.clip.name ? { name: sp.clip.name } : {}),
-      start: r(sp.start),
-      len: r(sp.len),
-      in: r(sp.clip.in),
-      out: r(sp.clip.out),
+      start: roundT(sp.start),
+      len: roundT(sp.len),
+      in: roundT(sp.clip.in),
+      out: roundT(sp.clip.out),
       // A still has no source length; report its placed length instead of 0.
-      sourceDuration: r(sp.asset.type === "image" ? sp.len : sp.asset.duration),
+      sourceDuration: roundT(sp.asset.type === "image" ? sp.len : sp.asset.duration),
       // A blocked-out shot holds a slot and draws a flat colour — there is no
       // picture here yet, and its label lives on the chip. Without this the
       // label reads as a clip's name and a shell of a cut looks finished.
@@ -628,7 +631,7 @@ function describeState(
       // Track 0 is free-positioned: empty stretches play black.
       ...(() => {
         const prevEnd = index === 0 ? 0 : spans[index - 1].start + spans[index - 1].len;
-        return sp.start - prevEnd > 0.005 ? { gapBefore: r(sp.start - prevEnd) } : {};
+        return sp.start - prevEnd > 0.005 ? { gapBefore: roundT(sp.start - prevEnd) } : {};
       })(),
       ...(() => {
         const t = transitionToNext(sp, index, spans);
@@ -648,7 +651,7 @@ function describeState(
       ...(sp.clip.grade ? { colorGrade: sp.clip.grade } : {}),
       ...(sp.clip.mask ? { mask: sp.clip.mask } : {}),
       ...(sp.clip.kf?.length
-        ? { keyframes: sp.clip.kf.map((k) => ({ ...k, t: roundT(k.t), x: r(k.x), y: r(k.y) })) }
+        ? { keyframes: sp.clip.kf.map((k) => ({ ...k, t: roundT(k.t), x: rF(k.x), y: rF(k.y) })) }
         : {}),
       ...(sp.clip.motionBlur ? { motionBlur: r(sp.clip.motionBlur) } : {}),
       ...clipEffects(sp.clip, live, { aspect: s.aspect, assetById }),
@@ -684,8 +687,8 @@ function describeState(
           return {
             id: t.id,
             ...(t.groupId ? { groupId: t.groupId } : {}),
-            start: r(t.start),
-            seconds: r(t.seconds),
+            start: roundT(t.start),
+            seconds: roundT(t.seconds),
             style: t.style,
             ...(t.feather ? { feather: t.feather } : {}),
             ...(t.band ? { band: t.band } : {}),
@@ -708,8 +711,8 @@ function describeState(
         ? {
             groupCameras: cams.map((c) => ({
               groupId: c.groupId,
-              start: r(c.start),
-              keys: c.keys.map((k) => ({ ...k, t: roundT(k.t), x: r(k.x), y: r(k.y), scale: r(k.scale), rotation: r(k.rotation) })),
+              start: roundT(c.start),
+              keys: c.keys.map((k) => ({ ...k, t: roundT(k.t), x: rF(k.x), y: rF(k.y), scale: r(k.scale), rotation: r(k.rotation) })),
               ...(c.motionBlur ? { motionBlur: r(c.motionBlur) } : {}),
             })),
           }
@@ -740,7 +743,7 @@ function describeState(
       ...(s.subtitles.font ? { font: s.subtitles.font } : {}),
       ...(s.subtitles.size !== undefined ? { size: s.subtitles.size } : {}),
       ...(s.subtitles.x !== undefined || s.subtitles.y !== undefined
-        ? { x: r(s.subtitles.x ?? 0.5), y: r(s.subtitles.y ?? 0.5) }
+        ? { x: rF(s.subtitles.x ?? 0.5), y: rF(s.subtitles.y ?? 0.5) }
         : {}),
       ...(s.subtitles.wordHighlight ? { wordHighlight: true } : {}),
       ...(s.subtitles.accentMode ? { accentMode: s.subtitles.accentMode } : {}),
@@ -758,8 +761,8 @@ function describeState(
       cues: s.subtitles.cues.slice(0, cueCap).map((c) => ({
         id: c.id,
         ...(c.groupId ? { groupId: c.groupId } : {}),
-        start: r(c.start),
-        end: r(c.end),
+        start: roundT(c.start),
+        end: roundT(c.end),
         text: c.text,
         ...(subtitleTracks > 1 ? { track: c.lane ?? 0 } : {}),
         ...cueExtras(c),
@@ -776,7 +779,7 @@ function cueExtras(c: SubtitleCue) {
   const emphasis = emphasizedWords(c);
   return {
     ...(emphasis.length > 0 ? { emphasis } : {}),
-    ...(c.x !== undefined && c.y !== undefined ? { x: r(c.x), y: r(c.y) } : {}),
+    ...(c.x !== undefined && c.y !== undefined ? { x: rF(c.x), y: rF(c.y) } : {}),
   };
 }
 
@@ -804,10 +807,10 @@ function describeAudio(
     ...(a.groupId ? { groupId: a.groupId } : {}),
     asset: assets.get(a.assetId)?.name ?? a.assetId,
     ...(a.name ? { name: a.name } : {}),
-    start: r(a.start),
-    len: r(rt.len),
-    in: r(a.in),
-    out: r(a.out),
+    start: roundT(a.start),
+    len: roundT(rt.len),
+    in: roundT(a.in),
+    out: roundT(a.out),
     volume: r(a.volume),
     fadeIn: r(a.fadeIn ?? 0),
     fadeOut: r(a.fadeOut ?? 0),
@@ -832,10 +835,10 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     asset: assets.get(c.assetId)?.name ?? c.assetId,
     ...(c.name ? { name: c.name } : {}),
     track: c.track,
-    start: r(c.start),
-    len: r(retimeOf(c).len),
-    in: r(c.in),
-    out: r(c.out),
+    start: roundT(c.start),
+    len: roundT(retimeOf(c).len),
+    in: roundT(c.in),
+    out: roundT(c.out),
     muted: c.muted,
     ...splitEditOf(c),
     ...(c.hidden ? { hidden: true } : {}),
@@ -843,7 +846,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     // The frame region this layer occupies: Full covers the frame; Top/Bottom/
     // Left/Right split it; PiP floats inside it.
     layout: regionLabel(rect),
-    region: { x: r(rect.x), y: r(rect.y), w: r(rect.w), h: r(rect.h) },
+    region: { x: rF(rect.x), y: rF(rect.y), w: rF(rect.w), h: rF(rect.h) },
     fit: c.fit ?? "fit",
     ...(clipZoom(c) > 1
       ? { zoom: r(clipZoom(c)), panX: r(c.panX ?? 0), panY: r(c.panY ?? 0) }
@@ -859,7 +862,7 @@ function describeOverlayClip(c: VideoClip, assets: Map<string, { name: string }>
     ...(c.mask ? { mask: c.mask } : {}),
     ...(c.boxStyle ? { boxStyle: c.boxStyle } : {}),
     ...(c.kf?.length
-      ? { keyframes: c.kf.map((k) => ({ ...k, t: roundT(k.t), x: r(k.x), y: r(k.y) })) }
+      ? { keyframes: c.kf.map((k) => ({ ...k, t: roundT(k.t), x: rF(k.x), y: rF(k.y) })) }
       : {}),
     ...(c.motionBlur ? { motionBlur: r(c.motionBlur) } : {}),
   };
@@ -872,15 +875,15 @@ function describeOverlay(o: Overlay) {
     name: overlayName(o),
     start: roundT(o.start),
     end: roundT(o.end),
-    x: r(o.x),
-    y: r(o.y),
+    x: rF(o.x),
+    y: rF(o.y),
     ...(o.rotation ? { rotation: o.rotation } : {}),
     ...(o.opacity !== undefined ? { opacity: r(o.opacity) } : {}),
     ...(o.blur ? { blur: r(o.blur) } : {}),
     ...(o.motionBlur ? { motionBlur: r(o.motionBlur) } : {}),
     ...(hasOverlayAnim(o.anim) ? { anim: o.anim } : {}),
     ...(o.kf?.length
-      ? { keyframes: o.kf.map((k) => ({ ...k, t: roundT(k.t), x: r(k.x), y: r(k.y) })) }
+      ? { keyframes: o.kf.map((k) => ({ ...k, t: roundT(k.t), x: rF(k.x), y: rF(k.y) })) }
       : {}),
     ...(o.mask ? { mask: o.mask } : {}),
     ...(o.lane ? { lane: o.lane } : {}),
@@ -890,8 +893,8 @@ function describeOverlay(o: Overlay) {
     return {
       ...base,
       shape: o.shape,
-      w: r(o.w),
-      h: r(o.h),
+      w: rF(o.w),
+      h: rF(o.h),
       fill: o.fill,
       ...(o.fillOpacity !== undefined ? { fillOpacity: r(o.fillOpacity) } : {}),
       ...(o.radius ? { radius: o.radius } : {}),
@@ -901,7 +904,7 @@ function describeOverlay(o: Overlay) {
     };
   }
   if (o.kind === "sticker") {
-    return { ...base, assetId: o.assetId, w: r(o.w), ...(o.h ? { h: r(o.h) } : {}) };
+    return { ...base, assetId: o.assetId, w: rF(o.w), ...(o.h ? { h: rF(o.h) } : {}) };
   }
   if (o.kind === "effect") {
     return {

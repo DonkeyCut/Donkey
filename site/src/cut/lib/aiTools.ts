@@ -377,14 +377,14 @@ function tracksAfter() {
   const cur = useEditor.getState();
   const row = track0Clips(cur.clips).map((c) => ({
     id: c.id,
-    start: round2(c.start),
-    len: round2(clipLen(c)),
+    start: roundT(c.start),
+    len: roundT(clipLen(c)),
   }));
   const lanes = cur.audioClips.map((a) => ({
     id: a.id,
     lane: a.lane ?? 0,
-    start: round2(a.start),
-    len: round2(a.out - a.in),
+    start: roundT(a.start),
+    len: roundT(a.out - a.in),
   }));
   const parked = parkedTransitions(cur.clips, cur.transitions);
   return {
@@ -396,8 +396,8 @@ function tracksAfter() {
       ? {
           parkedTransitions: parked.map((t) => ({
             id: t.id,
-            start: round2(t.start),
-            seconds: round2(t.seconds),
+            start: roundT(t.start),
+            seconds: roundT(t.seconds),
             style: t.style,
           })),
           parkedTransitionsNote:
@@ -912,7 +912,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const next = groupCameraOf(useEditor.getState().overlays, groupId)!;
     return {
       groupId,
-      start: round2(next.start),
+      start: roundT(next.start),
       keys: next.keys.map((k) => ({ ...k, t: roundT(k.t), x: round2(k.x), y: round2(k.y), scale: round2(k.scale) })),
       motionBlur: next.motionBlur ?? null,
     };
@@ -1193,7 +1193,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const sizeBytes = asset.sizeBytes ?? await readMediaFileSize(asset.url);
     return {
       id: asset.id, name: asset.name, fileName: asset.fileName, kind: asset.type,
-      sizeBytes, fileSize: formatBytes(sizeBytes), duration: round2(asset.duration), width: asset.width, height: asset.height,
+      sizeBytes, fileSize: formatBytes(sizeBytes), duration: roundT(asset.duration), width: asset.width, height: asset.height,
     };
   },
 
@@ -1222,7 +1222,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         name: a.name,
         type: a.type,
         fileName: a.fileName,
-        duration: round2(a.duration),
+        duration: roundT(a.duration),
         ...(a.width !== undefined ? { width: a.width, height: a.height } : {}),
         ...(a.folderId != null ? { folderId: a.folderId } : {}),
       })),
@@ -1348,7 +1348,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         async (canvas, at) => {
           const i = pairs.length;
           pairs.push({
-            t: round2(at),
+            t: roundT(at),
             sourceAt: round2(wanted[i].sourceAt),
             source: refs.get(i)!,
             cut: await rasterCanvasToDataUrl(canvas, "image/jpeg", 0.82),
@@ -1448,7 +1448,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // A source with more to see owes a reading of what just went past:
         // the next watch of it asks for this span's notes first.
         if (body.coveredTo > from && asset.duration - body.coveredTo > 0.5)
-          unwritten.set(asset.id, { from: round2(from), to: round2(body.coveredTo) });
+          unwritten.set(asset.id, { from: roundT(from), to: roundT(body.coveredTo) });
         else unwritten.delete(asset.id);
         // A first look queues the quiet background sweep of the rest of the
         // source — metadata only, merged in as segments land.
@@ -1483,7 +1483,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       // Each cell's time plus why the selector kept it — "global" a hard cut,
       // "action" local motion, "settled" new settled detail (text, ink, UI).
-      const cellInfo = body.frames.map((f) => ({ t: round2(f.t), via: f.via }));
+      const cellInfo = body.frames.map((f) => ({ t: roundT(f.t), via: f.via }));
       // Where a card could sit over what was just watched: the quiet parts of
       // the picture, inside whatever the project's guides keep clear. The
       // watch already measured the busy ones to choose these frames.
@@ -1511,7 +1511,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // The span this pass covered and how closely it looked at it. A
         // stretch seen only at "scan" has been surveyed, not read.
         detail,
-        from: round2(from),
+        from: roundT(from),
         // Seconds no pass has read at a detail that carries type, and where
         // the next close pass would start.
         unreadSeconds: unread,
@@ -1531,8 +1531,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // the source nothing has been written about yet.
         recorded: notesIn((liveAsset ?? asset).watch, from, body.coveredTo),
         unnoted: unnotedSpans((liveAsset ?? asset).watch, asset.duration).map((g) => ({
-          from: round2(g.from),
-          to: round2(g.to),
+          from: roundT(g.from),
+          to: roundT(g.to),
         })),
         source: sourceRef(asset),
         ...(reference
@@ -1542,23 +1542,23 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ? {
               clip: {
                 id: clip.id,
-                timelineStart: round2(clip.start),
-                in: round2(clip.in),
-                out: round2(clip.out),
+                timelineStart: roundT(clip.start),
+                in: roundT(clip.in),
+                out: roundT(clip.out),
                 speed: round2(speed),
                 ...(clip.reverse ? { reverse: true } : {}),
                 ...(clip.smoothSlow ? { smooth: true } : {}),
                 ...(speedCurveOf(clip)
                   ? {
                       speedCurve: speedCurveOf(clip)!.map(([at, rate]) => [round2(at), round2(rate)]),
-                      note: `this clip has a speed curve (average ${round2(speed)}×${clip.reverse ? ", played backward" : ""}): source_t maps to the timeline through the curve, with the clip occupying [${round2(clip.start)}, ${round2(clip.start + retimeOf(clip).len)}]; work in source seconds here`,
+                      note: `this clip has a speed curve (average ${round2(speed)}×${clip.reverse ? ", played backward" : ""}): source_t maps to the timeline through the curve, with the clip occupying [${roundT(clip.start)}, ${round2(clip.start + retimeOf(clip).len)}]; work in source seconds here`,
                     }
                   : clip.reverse
                     ? {
-                        note: `this clip plays backward: timeline_t = ${round2(clip.start)} + (${round2(clip.out)} - source_t) / ${round2(speed)}, for source_t in [${round2(clip.in)}, ${round2(clip.out)}]`,
+                        note: `this clip plays backward: timeline_t = ${roundT(clip.start)} + (${roundT(clip.out)} - source_t) / ${round2(speed)}, for source_t in [${roundT(clip.in)}, ${roundT(clip.out)}]`,
                       }
                     : {
-                        note: `timeline_t = ${round2(clip.start)} + (source_t - ${round2(clip.in)}) / ${round2(speed)}, for source_t in [${round2(clip.in)}, ${round2(clip.out)}]`,
+                        note: `timeline_t = ${roundT(clip.start)} + (source_t - ${roundT(clip.in)}) / ${round2(speed)}, for source_t in [${roundT(clip.in)}, ${roundT(clip.out)}]`,
                       }),
               },
             }
@@ -1608,11 +1608,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         source: sourceRef(asset),
         notes: (cur?.watch?.notes ?? []).map((n) => ({
-          from: round2(n.from),
-          to: round2(n.to),
+          from: roundT(n.from),
+          to: roundT(n.to),
           text: n.text,
         })),
-        unnoted: unnoted.map((g) => ({ from: round2(g.from), to: round2(g.to) })),
+        unnoted: unnoted.map((g) => ({ from: roundT(g.from), to: roundT(g.to) })),
         note:
           "Written onto the source: it saves with the project, rides the editor state from here on, and outlives this conversation's images." +
           (unnoted.length > 0
@@ -1635,12 +1635,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // Pre-map each silence's overlap with the clip's trimmed range onto the
       // timeline so the model cuts on ready numbers.
       const toTimeline = (t: number) =>
-        round2(clip!.start + retimeOf(clip!).tAt(clamp(t, clip!.in, clip!.out)));
+        roundT(clip!.start + retimeOf(clip!).tAt(clamp(t, clip!.in, clip!.out)));
       return {
         silences: silences.map((x) => ({
-          start: round2(x.start),
-          end: round2(x.end),
-          duration: round2(x.duration),
+          start: roundT(x.start),
+          end: roundT(x.end),
+          duration: roundT(x.duration),
           ...(clip && x.end > clip.in && x.start < clip.out
             ? { timeline: { start: toTimeline(x.start), end: toTimeline(x.end) } }
             : {}),
@@ -1650,9 +1650,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ? {
               clip: {
                 id: clip.id,
-                timelineStart: round2(clip.start),
-                in: round2(clip.in),
-                out: round2(clip.out),
+                timelineStart: roundT(clip.start),
+                in: roundT(clip.in),
+                out: roundT(clip.out),
                 speed: round2(speed),
               },
             }
@@ -1722,7 +1722,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError(`Filler detection is unavailable: ${e instanceof Error ? e.message : String(e)}`);
       }
       const floor = cutJudge().fillerCut;
-      const toSource = clip ? (t: number) => round2(retimeOf(clip).srcAt(clamp(t - clip.start, 0, Infinity))) : null;
+      const toSource = clip ? (t: number) => roundT(retimeOf(clip).srcAt(clamp(t - clip.start, 0, Infinity))) : null;
       // Neighbouring filler words are one span: "you know" is a single cut,
       // and every span the caller gets is a cut it can make in one call.
       const kept = words.filter((w) => (answers[w.key]?.noul ?? 0) >= floor);
@@ -1747,8 +1747,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const fillers = spans.map((sp) => ({
         cue_id: sp.cueId,
         text: sp.words.join(" "),
-        start: round2(sp.t0),
-        end: round2(sp.t1),
+        start: roundT(sp.t0),
+        end: roundT(sp.t1),
         ...(sp.estimated ? { estimated: true } : {}),
         ...(toSource ? { source: { start: toSource(sp.t0), end: toSource(sp.t1) } } : {}),
       }));
@@ -1756,7 +1756,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         fillers,
         count: fillers.length,
         track: lane,
-        ...(clip ? { clip: { id: clip.id, timelineStart: round2(clip.start), in: round2(clip.in), out: round2(clip.out) } } : {}),
+        ...(clip ? { clip: { id: clip.id, timelineStart: roundT(clip.start), in: roundT(clip.in), out: roundT(clip.out) } } : {}),
         ...(fillers.some((f) => f.estimated)
           ? { note: "Words marked estimated sit in cues with no word timings; their spans split the cue evenly, so confirm them with listen_audio before a tight cut." }
           : {}),
@@ -1780,7 +1780,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               throw new ToolError(e instanceof Error ? e.message : "Could not read the audio.");
             });
       const beats = grid.beats.filter((b) => b >= from && (to === undefined || b <= to));
-      const toTimeline = (t: number) => round2(clip!.start + retimeOf(clip!).tAt(t));
+      const toTimeline = (t: number) => roundT(clip!.start + retimeOf(clip!).tAt(t));
       return {
         bpm: grid.bpm,
         beats: beats.map(round2),
@@ -1789,9 +1789,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
               timelineBeats: grid.beats.filter((b) => b >= clip.in && b <= clip.out).map(toTimeline),
               clip: {
                 id: clip.id,
-                timelineStart: round2(clip.start),
-                in: round2(clip.in),
-                out: round2(clip.out),
+                timelineStart: roundT(clip.start),
+                in: roundT(clip.in),
+                out: roundT(clip.out),
                 speed: round2(speed),
               },
             }
@@ -1928,9 +1928,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         name: asset.name,
         source: sourceRef(asset),
-        duration: round2(asset.duration),
+        duration: roundT(asset.duration),
         ...(clip ? { clipId: clip.id } : {}),
-        from: round2(heard.from),
+        from: roundT(heard.from),
         ...(soundSourceOf(asset, s.assets).bound
           ? { soundFrom: soundSourceOf(asset, s.assets).asset.name }
           : {}),
@@ -2085,7 +2085,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const at = clip.start + delta;
       return {
         id: clip.id,
-        start: round2(at),
+        start: roundT(at),
         ...(Math.abs(at - Math.max(0, input.start)) > 0.005
           ? { note: "That spot was taken — slid right to the next free one." }
           : {}),
@@ -2136,8 +2136,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         id: c.id,
         track: c.track,
-        start: round2(c.start),
-        len: round2(clipLen(c)),
+        start: roundT(c.start),
+        len: roundT(clipLen(c)),
         layout: regionLabel(rectOf(c)),
       };
   },
@@ -2199,7 +2199,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return {
         id: next.id,
         track: next.track,
-        start: round2(next.start),
+        start: roundT(next.start),
         layout: regionLabel(rectOf(next)),
         fit: next.fit ?? "fit",
         ...(clipZoom(next) > 1 ? { zoom: clipZoom(next) } : {}),
@@ -2250,7 +2250,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const settings = cutClip();
       return {
         source: sourceRef(asset),
-        searched: { from: round2(from), to: round2(to ?? asset.duration) },
+        searched: { from: roundT(from), to: roundT(to ?? asset.duration) },
         clips: clips.map((c, i) => ({
           n: i + 1,
           rank: c.rank,
@@ -2416,8 +2416,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             clipId: clip.id,
             ...(plan
               ? {
-                  in: { from: round2(clip.in), to: round2(plan.in) },
-                  out: { from: round2(clip.out), to: round2(plan.out) },
+                  in: { from: roundT(clip.in), to: roundT(plan.in) },
+                  out: { from: roundT(clip.out), to: roundT(plan.out) },
                 }
               : {}),
             ...(notes
@@ -3190,7 +3190,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         id: a.id,
         ...patch,
         lane: landed.lane ?? 0,
-        ...("start" in patch ? { start: round2(landed.start) } : {}),
+        ...("start" in patch ? { start: roundT(landed.start) } : {}),
         ...audioPackHint(a.id),
       };
   },
@@ -3496,9 +3496,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         kind: "clip",
         sourceId: asset.id,
         name: asset.name,
-        start: round2(next.start),
-        lenBefore: round2(before),
-        lenAfter: round2(clipLen(next)),
+        start: roundT(next.start),
+        lenBefore: roundT(before),
+        lenAfter: roundT(clipLen(next)),
         ...tracksAfter(),
       };
     }
@@ -3515,9 +3515,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         kind: "audio",
         sourceId: asset.id,
         name: asset.name,
-        start: round2(next.start),
-        lenBefore: round2(before),
-        lenAfter: round2(next.out - next.in),
+        start: roundT(next.start),
+        lenBefore: roundT(before),
+        lenAfter: roundT(next.out - next.in),
       };
     }
     const overlay = s.overlays.find((o) => o.id === id);
@@ -4025,7 +4025,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           kind,
           category: v.category,
           aspect: v.aspect,
-          duration: round2(v.duration),
+          duration: roundT(v.duration),
           ...(v.persona ? { persona: v.persona } : {}),
           prompt: v.prompt,
           tags: v.tags,
@@ -4049,7 +4049,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             id: x.id,
             kind: "sound",
             category: x.category,
-            duration: round2(x.duration),
+            duration: roundT(x.duration),
             prompt: x.prompt,
             tags: x.tags,
           });
@@ -4113,7 +4113,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         assetId: asset.id,
         name: asset.name,
         kind: vid ? "video" : sfx ? "sound" : "image",
-        duration: round2(vid || sfx ? asset.duration : IMAGE_CLIP_SECONDS),
+        duration: roundT(vid || sfx ? asset.duration : IMAGE_CLIP_SECONDS),
         addedToTimeline: addToTimeline,
         clipId,
         fromRef: { scope: "stock", id },
@@ -4135,7 +4135,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           sizeBytes: asset.sizeBytes,
           width: asset.width,
           height: asset.height,
-          duration: round2(asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration),
+          duration: roundT(asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration),
         }));
       // A list downloads a few at a time; each URL answers on its own row.
       if (Array.isArray(input.urls) && input.urls.length > 0) {
@@ -4307,7 +4307,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           kind: l.asset.type,
           ...(l.reused ? { reused: true } : {}),
         })),
-        adjustments: adjustments.map((a) => ({ ...a, from: round2(a.from), to: round2(a.to) })),
+        adjustments: adjustments.map((a) => ({ ...a, from: roundT(a.from), to: roundT(a.to) })),
         skipped,
         frame: frame && !!t.project,
         captionLook: captionLook && !!captions && Object.keys(captions).length > 0,
@@ -4347,7 +4347,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           sourceId: l.sourceId,
           name: l.asset.name,
           kind: l.asset.type,
-          duration: round2(l.asset.type === "image" ? IMAGE_CLIP_SECONDS : l.asset.duration),
+          duration: roundT(l.asset.type === "image" ? IMAGE_CLIP_SECONDS : l.asset.duration),
           ...(l.reused ? { reused: true } : {}),
         })),
         note: "The copies preview on cards in this chat; add_clip places one when the user asks for it in the cut. A source this project already held a copy of comes back as that copy, marked reused.",
@@ -4470,7 +4470,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         void enrichAsset(asset);
         tagChatAsset(asset.id, chatId);
         const place = input.add_to_timeline === true || isNum(input.start) || isNum(input.index);
-        return { assetId: asset.id, name: asset.name, kind: asset.type, duration: round2(asset.duration),
+        return { assetId: asset.id, name: asset.name, kind: asset.type, duration: roundT(asset.duration),
           ...(place ? { addedToTimeline: true, clip: placeAssetOnTimeline(asset, input) } : { addedToTimeline: false }) };
       }
       const found = findLibraryAsset((await fetchLibrary()).assets, String(input.id ?? ""));
@@ -4501,7 +4501,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         assetId: asset.id,
         name: asset.name,
         kind: asset.type,
-        duration: round2(asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration),
+        duration: roundT(asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration),
         ...(place
           ? { addedToTimeline: true, clip: placeAssetOnTimeline(asset, input) }
           : { addedToTimeline: false }),
@@ -4531,7 +4531,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       }
       return {
         added: t.name,
-        duration: round2(t.duration),
+        duration: roundT(t.duration),
         parts: t.layers.length + t.audio.length + t.texts.length + t.cues.length,
       };
   },
@@ -4556,7 +4556,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const built = useEditor.getState().selectionTemplate();
       if (!built) throw new ToolError("Could not build a template from those items.");
       const saved = useEditor.getState().addTemplate({ ...built, name });
-      return { id: saved.id, name: saved.name, duration: round2(saved.duration) };
+      return { id: saved.id, name: saved.name, duration: roundT(saved.duration) };
   },
 
   library_organize: async (_s, input) => {
@@ -4771,7 +4771,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             // False means the packets were copied — same picture, new container.
             reencoded: out.reencoded,
             ...(out.unchanged ? { unchanged: true } : {}),
-            duration: round2(out.duration),
+            duration: roundT(out.duration),
             ...(out.width !== undefined ? { width: out.width, height: out.height } : {}),
             // The file stayed where it already lived: a chat attachment on its
             // card in this thread, an import in the Media panel.
@@ -4848,7 +4848,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         count: made.length,
         cues: made
           .slice(0, 60)
-          .map((q) => ({ id: q.id, start: round2(q.start), end: round2(q.end), text: q.text })),
+          .map((q) => ({ id: q.id, start: roundT(q.start), end: roundT(q.end), text: q.text })),
         ...(made.length > 60 ? { cuesTruncated: true } : {}),
         note:
           cur.subtitleStatus === "empty"
@@ -5031,7 +5031,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         return {
           assetId: asset.id,
           name: asset.name,
-          duration: round2(asset.duration),
+          duration: roundT(asset.duration),
           addedToTimeline: false,
           note: "The music finished and was saved to the project it was generated for; the user has since switched projects, so it isn't on this one.",
         };
@@ -5043,7 +5043,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         return {
           assetId: asset.id,
           name: asset.name,
-          duration: round2(asset.duration),
+          duration: roundT(asset.duration),
           addedToTimeline: false,
           note: "The music previews in this chat — the user can play it and drag it onto the soundtrack; pass add_to_timeline or start when they ask for it in the cut.",
         };
@@ -5066,8 +5066,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         assetId: asset.id,
         name: asset.name,
         audioClipId: clipId,
-        start: round2(placedStart),
-        duration: round2(asset.duration),
+        start: roundT(placedStart),
+        duration: roundT(asset.duration),
         volume,
         addedToTimeline: true,
       };
@@ -5094,8 +5094,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         name: out.asset.name,
         audioClipId: sel?.kind === "audio" ? sel.id : null,
         voice,
-        start: round2(out.start),
-        duration: round2(out.asset.duration),
+        start: roundT(out.start),
+        duration: roundT(out.asset.duration),
         duck: out.duck,
         lines: out.lines,
       };
@@ -5198,7 +5198,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const s = useEditor.getState();
       return {
         timeline: s.timeline,
-        duration: round2(projectDuration(s)),
+        duration: roundT(projectDuration(s)),
         clips: s.clips.length,
         audioClips: s.audioClips.length,
         overlays: s.overlays.length,
@@ -5271,8 +5271,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         speed: next.speed ?? 1,
         ...(next.reverse ? { reverse: true } : {}),
         ...(next.smoothSlow ? { smooth: true } : {}),
-        lenBefore: round2(before),
-        lenAfter: round2(clipLen(next)),
+        lenBefore: roundT(before),
+        lenAfter: roundT(clipLen(next)),
         ...tracksAfter(),
       };
   },
@@ -5318,9 +5318,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         id: next.id,
         speed: round2(retimeOf(next).rate),
         ...(next.smoothSlow ? { smooth: true } : {}),
-        nodes: curve ? curve.map(([at, speed]) => ({ at: round2(at), speed: round2(speed) })) : [],
-        lenBefore: round2(before),
-        lenAfter: round2(clipLen(next)),
+        nodes: curve ? curve.map(([at, speed]) => ({ at: roundT(at), speed: round2(speed) })) : [],
+        lenBefore: roundT(before),
+        lenAfter: roundT(clipLen(next)),
         ...tracksAfter(),
       };
   },
@@ -5849,7 +5849,7 @@ async function synthesizeVoiceover(
       assetId: asset.id,
       name: asset.name,
       voice,
-      duration: round2(asset.duration),
+      duration: roundT(asset.duration),
       addedToTimeline: false,
       note: "The voiceover previews in this chat — the user can play it and drag it onto the soundtrack; pass add_to_timeline or start when they ask for it in the cut.",
     };
@@ -5864,8 +5864,8 @@ async function synthesizeVoiceover(
     name: asset.name,
     audioClipId: sel?.kind === "audio" ? sel.id : null,
     voice,
-    start: round2(at),
-    duration: round2(asset.duration),
+    start: roundT(at),
+    duration: roundT(asset.duration),
     duck: duck < 1 ? duck : null,
     addedToTimeline: true,
   };
@@ -5960,8 +5960,8 @@ function textSequenceLines(
     const lane = isNum(input.from_captions) ? Math.max(0, Math.round(input.from_captions)) : 0;
     return laneCues(s.subtitles, lane).map((c) => ({
       text: c.text,
-      start: round2(c.start),
-      end: round2(c.end),
+      start: roundT(c.start),
+      end: roundT(c.end),
     }));
   }
   const raw = Array.isArray(input.lines) ? input.lines : [];
@@ -5999,7 +5999,7 @@ function textSequenceLines(
     // decided — a following line that starts earlier cannot invert it.
     const end = Math.max(Number.isNaN(l.end) ? fallbackEnd : l.end, start + 0.2);
     cursor = end;
-    return { ...l, start: round2(start), end: round2(end) } as ComposeLine;
+    return { ...l, start: roundT(start), end: roundT(end) } as ComposeLine;
   });
 }
 
@@ -6029,7 +6029,7 @@ function notesIn(
 ): { from: number; to: number; text: string }[] {
   return (watch?.notes ?? [])
     .filter((n) => n.to > from && n.from < to)
-    .map((n) => ({ from: round2(n.from), to: round2(n.to), text: n.text }));
+    .map((n) => ({ from: roundT(n.from), to: roundT(n.to), text: n.text }));
 }
 
 /** A clip volume as decibels of gain; silence reads as the quiet floor. */
@@ -6059,7 +6059,7 @@ async function measureMix(s: ReturnType<typeof useEditor.getState>) {
   });
   if (!whole) return { silent: true, note: "Nothing in the cut makes a sound." };
   const channels = Array.from({ length: whole.numberOfChannels }, (_, c) => whole.getChannelData(c));
-  return { ...roundedLoudness(await measureLoudnessSliced(channels, whole.sampleRate)), seconds: round2(whole.duration) };
+  return { ...roundedLoudness(await measureLoudnessSliced(channels, whole.sampleRate)), seconds: roundT(whole.duration) };
 }
 
 function resolveWatchTarget(
@@ -6137,7 +6137,7 @@ function sourceRef(asset: MediaAsset) {
   return {
     assetId: asset.id,
     name: asset.name,
-    duration: round2(asset.duration),
+    duration: roundT(asset.duration),
     type: asset.type,
     sound: soundOf(asset),
   };
@@ -6390,7 +6390,7 @@ async function listenSpan(
   for (let attempt = 0; attempt < 3 && span > 0.5; attempt++) {
     const blob = await audioSpanBlob(projectId, heard.asset, from, round2(from + span));
     const inline = await blobToInlineAudio(blob);
-    if (inline) return { inline, from: round2(heard.back(from)), to: round2(heard.back(from + span)) };
+    if (inline) return { inline, from: roundT(heard.back(from)), to: roundT(heard.back(from + span)) };
     const perSecond = blob.size / span;
     // Leave room for the base64 inflation the cap already accounts for.
     const fits = (MAX_AUDIO_BYTES * 0.9) / perSecond;
@@ -6405,7 +6405,7 @@ async function listenSpan(
  * measured first and the measurement goes in the description. */
 function sweepCandidates(s: Editor, kind: ItemKind): SweepCandidate[] {
   const assetName = (id: string) => s.assets.find((a) => a.id === id)?.name ?? "media";
-  const span = (start: number, len: number) => `starts ${round2(start)}s, ${round2(len)}s long`;
+  const span = (start: number, len: number) => `starts ${roundT(start)}s, ${roundT(len)}s long`;
   if (kind === "clip")
     return s.clips.map((c) => ({
       id: c.id,
@@ -6441,7 +6441,7 @@ function sweepCandidates(s: Editor, kind: ItemKind): SweepCandidate[] {
       id: o.id,
       label: [
         isTextOverlay(o) ? `text "${o.text}"` : `${o.kind ?? "element"} "${o.name ?? o.kind ?? "element"}"`,
-        `${round2(o.start)}s to ${round2(o.end)}s`,
+        `${roundT(o.start)}s to ${roundT(o.end)}s`,
         o.hidden ? "hidden" : "",
       ]
         .filter(Boolean)
@@ -6450,11 +6450,11 @@ function sweepCandidates(s: Editor, kind: ItemKind): SweepCandidate[] {
   if (kind === "cue")
     return s.subtitles.cues.map((c) => ({
       id: c.id,
-      label: `caption "${c.text}", ${round2(c.start)}s to ${round2(c.end)}s`,
+      label: `caption "${c.text}", ${roundT(c.start)}s to ${roundT(c.end)}s`,
     }));
   return s.transitions.map((t) => ({
     id: t.id,
-    label: `${t.style} transition, ${round2(t.seconds)}s at ${round2(t.start)}s${t.hidden ? ", switched off" : ""}`,
+    label: `${t.style} transition, ${roundT(t.seconds)}s at ${roundT(t.start)}s${t.hidden ? ", switched off" : ""}`,
   }));
 }
 
@@ -6834,8 +6834,8 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
       made.push({
         clipId: placed.id,
         assetId: asset.id,
-        start: round2(placed.start),
-        seconds: round2(shot.seconds),
+        start: roundT(placed.start),
+        seconds: roundT(shot.seconds),
         label: asset.block?.label ?? "",
       });
     }
@@ -6887,7 +6887,7 @@ function placeAssetSpans(
       }
       if (!clipId) throw new ToolError("Could not create the clip.");
       useEditor.getState().setClipTrim(clipId, cut.from, cut.to);
-      laid.push({ id: clipId, in: round2(cut.from), out: round2(cut.to) });
+      laid.push({ id: clipId, in: roundT(cut.from), out: roundT(cut.to) });
     }
   } finally {
     useEditor.getState().endHistoryBatch();
@@ -6900,11 +6900,11 @@ function placeAssetSpans(
         id: c.id,
         in: c.in,
         out: c.out,
-        start: round2(live?.start ?? 0),
-        len: round2(c.out - c.in),
+        start: roundT(live?.start ?? 0),
+        len: roundT(c.out - c.in),
       };
     }),
-    seconds: round2(laid.reduce((n, c) => n + c.out - c.in, 0)),
+    seconds: roundT(laid.reduce((n, c) => n + c.out - c.in, 0)),
   };
 }
 
@@ -6927,7 +6927,7 @@ function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>)
         ? useEditor.getState().audioClips.find((x) => x.id === sel.id)
         : undefined;
     if (!c) throw new ToolError("Could not create the soundtrack clip.");
-    return { id: c.id, kind: asset.type, lane: c.lane ?? 0, start: round2(c.start), len: round2(c.out - c.in), ...audioPackHint(c.id) };
+    return { id: c.id, kind: asset.type, lane: c.lane ?? 0, start: roundT(c.start), len: roundT(c.out - c.in), ...audioPackHint(c.id) };
   }
   let clipId: string | null;
   if (isNum(input.index)) {
@@ -6943,8 +6943,8 @@ function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>)
     id: c.id,
     kind: asset.type,
     index: track0Clips(useEditor.getState().clips).findIndex((x) => x.id === c.id),
-    start: round2(c.start),
-    len: round2(c.out - c.in),
+    start: roundT(c.start),
+    len: roundT(c.out - c.in),
   };
 }
 
