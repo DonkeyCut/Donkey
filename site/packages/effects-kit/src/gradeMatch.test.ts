@@ -4,7 +4,8 @@ import { createGradeTransform } from "./gradeMath";
 import { type Lab, deltaE2000, displayToLab } from "./colorDifference";
 import { type ClipColorRecipe, createClipTransform } from "./colorPipeline";
 import { type SourceProfile, appleLogEncode, bt1886Decode } from "./colorSpace";
-import { autoGrade, colorStatsFromImageData, matchGrade, recipeStatsRender } from "./gradeMatch";
+import { type StatsRender, autoGrade, colorStatsFromImageData, matchGrade, recipeStatsRender } from "./gradeMatch";
+import type { ParsedLut } from "./lutFile";
 
 /** A synthetic frame with tonal and color variety. */
 function testFrame(): Uint8ClampedArray {
@@ -39,9 +40,22 @@ const meanDeltaE = (a: Lab[], b: Lab[]) => a.reduce((s, p, i) => s + deltaE2000(
 const recipeFor = (profile: SourceProfile): ClipColorRecipe => ({ profile, output: "sdr", size: 0 });
 
 describe("matchGrade", () => {
-  test("a frame matched to itself is neutral", () => {
+  test("a frame matched to itself is neutral", async () => {
     const render = recipeStatsRender(testFrame(), recipeFor("rec709"));
-    expect(matchGrade(render, render(undefined)!)).toBeUndefined();
+    expect(await matchGrade(render, render(undefined)!)).toBeUndefined();
+  });
+
+  test("a long fit hands the thread back while it runs", async () => {
+    const base = recipeStatsRender(testFrame(), recipeFor("rec709"));
+    // Every try costs a few milliseconds, as a log clip's does in the tab.
+    const slow: StatsRender = (g) => {
+      for (let i = 0; i < 8; i++) base(g);
+      return base(g);
+    };
+    const order: string[] = [];
+    setTimeout(() => order.push("tick"), 0);
+    await matchGrade(slow, base({ exposure: 30 })!).then(() => order.push("fit"));
+    expect(order).toEqual(["tick", "fit"]);
   });
 
   // The eval: a reference made by grading the clip's own frame with a known
@@ -57,26 +71,26 @@ describe("matchGrade", () => {
   ];
   for (const profile of ["rec709", "apple-log-2"] as SourceProfile[]) {
     for (const target of TARGETS) {
-      test(`${profile}: recovers ${JSON.stringify(target)}`, () => {
+      test(`${profile}: recovers ${JSON.stringify(target)}`, async () => {
         const px = testFrame();
         const recipe = recipeFor(profile);
         const render = recipeStatsRender(px, recipe);
-        const grade = matchGrade(render, render(target)!);
+        const grade = await matchGrade(render, render(target)!);
         expect(grade).toBeDefined();
         expect(meanDeltaE(rendered(px, recipe, grade), rendered(px, recipe, target))).toBeLessThan(1);
       });
     }
   }
 
-  test("strength scales every fitted slider", () => {
+  test("strength scales every fitted slider", async () => {
     const render = recipeStatsRender(testFrame(), recipeFor("rec709"));
     const reference = render({ exposure: 16, temperature: 24 })!;
-    const full = matchGrade(render, reference)!;
-    const half = matchGrade(render, reference, 0.5)!;
+    const full = (await matchGrade(render, reference))!;
+    const half = (await matchGrade(render, reference, 0.5))!;
     for (const [k, v] of Object.entries(full)) {
       expect(Math.abs((half as Record<string, number>)[k] ?? 0) - Math.abs((v as number) / 2)).toBeLessThanOrEqual(0.5);
     }
-    expect(matchGrade(render, reference, 0)).toBeUndefined();
+    expect(await matchGrade(render, reference, 0)).toBeUndefined();
   });
 
   test("stats read lightness and each band's cast in CIELAB", () => {
@@ -117,7 +131,26 @@ function frame(...pixels: [number, number, number][]): Uint8ClampedArray {
 
 const autoGrade709 = (px: Uint8ClampedArray) => autoGrade(px, recipeFor("rec709"));
 
+/** A two-node cube that halves every channel: a LUT that darkens. */
+function halvingLut(): ParsedLut {
+  const data = new Float32Array(8 * 3);
+  for (let i = 0; i < 8; i++) {
+    data[i * 3] = (i & 1) * 0.5;
+    data[i * 3 + 1] = ((i >> 1) & 1) * 0.5;
+    data[i * 3 + 2] = ((i >> 2) & 1) * 0.5;
+  }
+  return { cube: { size: 2, data, min: [0, 0, 0], max: [1, 1, 1] } };
+}
+
 describe("autoGrade", () => {
+  test("the fit sees the picture through the clip's LUT and preset", () => {
+    const px = frame([125, 125, 125]);
+    const recipe: ClipColorRecipe = { ...recipeFor("rec709"), grade: { lut: { id: "dark" } } };
+    const bare = autoGrade709(px)?.exposure ?? 0;
+    const through = autoGrade(px, recipe, halvingLut())?.exposure ?? 0;
+    expect(through).toBeGreaterThan(bare + 10);
+  });
+
   test("a mid-gray frame needs nearly nothing", () => {
     const g = autoGrade709(frame([125, 125, 125]));
     expect(Math.abs(g?.exposure ?? 0) <= 1).toBe(true);

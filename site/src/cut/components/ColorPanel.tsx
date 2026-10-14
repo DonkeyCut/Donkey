@@ -758,9 +758,15 @@ function AdjustView({ clip, peers, onBack }: { clip: VideoClip; peers?: readonly
   // own recipe (never the graded preview, which would fold the current grade
   // back into the fit); the sliders show the result and stay fully
   // adjustable after.
-  const autoGrade = () => {
+  const autoGrade = async () => {
     const raw = sampleClipRawFrame(clip.id);
-    if (raw) commit({ ...fitAutoGrade(raw.px, raw.recipe), preset: grade?.preset, lut: grade?.lut });
+    if (!raw) {
+      return;
+    }
+    const kept: ColorGrade = { preset: grade?.preset, lut: grade?.lut };
+    const lutId = lutIdOf(kept);
+    const userLut = lutId ? await loadLibraryLut(lutId) : undefined;
+    commit({ ...fitAutoGrade(raw.px, { ...raw.recipe, grade: kept }, userLut), ...kept });
   };
   const resetAll = () => commit(grade?.preset ? { preset: grade.preset } : undefined);
   return (

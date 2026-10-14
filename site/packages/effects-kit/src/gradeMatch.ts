@@ -14,6 +14,7 @@ import { displayToLab } from "./colorDifference";
 import { type ClipColorRecipe, createClipTransform } from "./colorPipeline";
 import { bt1886Decode } from "./colorSpace";
 import { CONTRAST_POWER_AT_MAX } from "./gradeMath";
+import type { ParsedLut } from "./lutFile";
 
 /** Quantile probes used by stats and matching. */
 export const STAT_QUANTILES = [0.02, 0.1, 0.25, 0.5, 0.75, 0.9, 0.98] as const;
@@ -146,10 +147,13 @@ type PixelRender = (grade: ColorGrade | undefined) => Uint8ClampedArray;
 const FIT_SAMPLE = 4096;
 
 /** A PixelRender over a frame's code values (RGBA) and the recipe that draws
- * them, with the candidate grade in the recipe's place: every try runs the
+ * them, with the candidate grade as the manual layer: every try runs the
  * real pipeline, so a log clip is fitted in scene light exactly as the
- * preview renders it. At most FIT_SAMPLE pixels, evenly spaced. */
-function recipeRender(px: Uint8ClampedArray, recipe: ClipColorRecipe): PixelRender {
+ * preview renders it. The recipe grade's preset and LUT (`userLut` its
+ * table) stay under every try, as they stay on the clip. At most FIT_SAMPLE
+ * pixels, evenly spaced. */
+function recipeRender(px: Uint8ClampedArray, recipe: ClipColorRecipe, userLut?: ParsedLut): PixelRender {
+  const { preset, lut } = recipe.grade ?? {};
   const total = px.length >> 2;
   const stride = Math.max(1, Math.ceil(total / FIT_SAMPLE));
   const sample = new Float32Array(Math.ceil(total / stride) * 3);
@@ -161,7 +165,7 @@ function recipeRender(px: Uint8ClampedArray, recipe: ClipColorRecipe): PixelRend
     n++;
   }
   return (grade) => {
-    const fn = createClipTransform({ ...recipe, grade });
+    const fn = createClipTransform({ ...recipe, grade: { ...grade, ...(preset ? { preset } : {}), ...(lut ? { lut } : {}) } }, userLut);
     const out = new Uint8ClampedArray(n * 4);
     for (let i = 0; i < n; i++) {
       const r = sample[i * 3];
@@ -239,11 +243,12 @@ const AUTO_WB_MAX = 40;
  * 3. White balance — grey-world: the temperature whose render brings the
  *    midtones' red and blue means together, applied in part.
  *
- * Saturation and hue are left alone.
+ * Saturation and hue are left alone. The recipe's grade carries the preset
+ * and LUT the clip keeps, so the fit lands on the picture the clip shows.
  */
-export function autoGrade(px: Uint8ClampedArray, recipe: ClipColorRecipe): ColorGrade | undefined {
+export function autoGrade(px: Uint8ClampedArray, recipe: ClipColorRecipe, userLut?: ParsedLut): ColorGrade | undefined {
   if (px.length < 4) return undefined;
-  const render = recipeRender(px, recipe);
+  const render = recipeRender(px, recipe, userLut);
   const grade: ColorGrade = {};
 
   const start = Math.log(logAverage(render(undefined)));
@@ -298,6 +303,28 @@ const MATCH_PROBE = 2;
 /** The fit stops once no slider would move by more than this much. */
 const MATCH_SETTLED = 0.25;
 const MATCH_ITERATIONS = 40;
+
+/** Longest stretch the fit works before it hands the thread back, so a match
+ * in the tab never holds a preview frame. */
+const FIT_SLICE_MS = 8;
+
+/** Let the thread run other tasks. Headless runtimes have setImmediate,
+ * which lets timers and I/O run first; a page posts a message, which runs
+ * like a zero timer without the clamping a background tab applies to timers. */
+function nextTask(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof setImmediate === "function") {
+      setImmediate(resolve);
+      return;
+    }
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => {
+      ch.port1.close();
+      resolve();
+    };
+    ch.port2.postMessage(null);
+  });
+}
 
 /** The stats of a frame rendered with a candidate grade. */
 export type StatsRender = (grade: ColorGrade | undefined) => ColorStats | undefined;
@@ -356,13 +383,19 @@ export function recipeStatsRender(px: Uint8ClampedArray, recipe: ClipColorRecipe
  * sliders — for a reference whose content differs from the clip's (a bright
  * window for a dark room), where the full match lifts or crushes what the
  * reference never had. Returns undefined when the frames already agree.
+ * The fit runs in slices of FIT_SLICE_MS between other tasks.
  */
-export function matchGrade(render: StatsRender, reference: ColorStats, strength = 1): ColorGrade | undefined {
+export async function matchGrade(render: StatsRender, reference: ColorStats, strength = 1): Promise<ColorGrade | undefined> {
   const k = Math.max(0, Math.min(1, strength));
   if (k === 0) return undefined;
   const gradeOf = (p: number[]): ColorGrade => Object.fromEntries(MATCH_FIELDS.map((f, i) => [f, p[i]]));
   const pull = Math.sqrt(MATCH_PULL) / GRADE_MAX;
-  const residuals = (p: number[]): number[] | null => {
+  let sliceStart = performance.now();
+  const residuals = async (p: number[]): Promise<number[] | null> => {
+    if (performance.now() - sliceStart > FIT_SLICE_MS) {
+      await nextTask();
+      sliceStart = performance.now();
+    }
     const stats = render(normalizeGrade(gradeOf(p)));
     return stats ? [...statsResiduals(stats, reference), ...p.map((v) => pull * v)] : null;
   };
@@ -373,16 +406,17 @@ export function matchGrade(render: StatsRender, reference: ColorStats, strength 
   // Gauss–Newton step, damping eased after a step that helps and raised
   // after one that does not.
   let p = MATCH_FIELDS.map(() => 0);
-  let r = residuals(p);
+  let r = await residuals(p);
   if (!r) return undefined;
   let damping = 1e-2;
   for (let it = 0; it < MATCH_ITERATIONS; it++) {
-    const J = p.map((v, j) => {
+    const J: number[][] = [];
+    for (let j = 0; j < p.length; j++) {
       const q = [...p];
-      q[j] = v + MATCH_PROBE <= GRADE_MAX ? v + MATCH_PROBE : v - MATCH_PROBE;
-      const rq = residuals(q) ?? r!;
-      return rq.map((x, i) => (x - r![i]) / (q[j] - v));
-    });
+      q[j] = p[j] + MATCH_PROBE <= GRADE_MAX ? p[j] + MATCH_PROBE : p[j] - MATCH_PROBE;
+      const rq = (await residuals(q)) ?? r;
+      J.push(rq.map((x, i) => (x - r![i]) / (q[j] - p[j])));
+    }
     const A = J.map((ci) => J.map((cj) => ci.reduce((a, x, i) => a + x * cj[i], 0)));
     const g = J.map((ci) => ci.reduce((a, x, i) => a + x * r![i], 0));
     let stepped = false;
@@ -393,7 +427,7 @@ export function matchGrade(render: StatsRender, reference: ColorStats, strength 
       if (!delta) break;
       const next = p.map((v, i) => clampSlider(v + delta[i]));
       largest = Math.max(...next.map((v, i) => Math.abs(v - p[i])));
-      const rn = residuals(next);
+      const rn = await residuals(next);
       if (rn && sumSq(rn) < sumSq(r)) {
         p = next;
         r = rn;

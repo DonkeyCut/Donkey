@@ -37,7 +37,7 @@ export type HslBand =
  * hueShift spans about ±30 degrees at full range. */
 export type HslTuple = [number, number, number];
 
-/** A preset layered under the manual adjustments. `amount` 0..1 scales the
+/** A preset layered over the manual adjustments. `amount` 0..1 scales the
  * preset toward neutral (default 1); `skin` keeps the preset's color shifts
  * off skin tones. Unknown ids render as neutral, so docs can carry presets
  * from newer catalogs without breaking. */

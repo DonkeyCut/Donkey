@@ -299,6 +299,7 @@ import {
   DEFAULT_BACKGROUND,
   clampKeyPos,
   clampOverlayPos,
+  previewUrl,
   clipZoom,
   frameOf,
   IMAGE_CLIP_SECONDS,
@@ -479,7 +480,9 @@ async function clipRawFrame(
     ctx.drawImage(img.source, 0, 0, w, h);
     return { px: ctx.getImageData(0, 0, w, h).data, recipe: { profile: sourceProfileOf(asset), output: "sdr", size: 0 } };
   }
-  const raw = await rawFrameAt(asset.url, (clip.in + clip.out) / 2, { width: w, height: h, fit: "fill" });
+  // The file the cut plays: a light proxy reads faster than its master, and
+  // carries its own color recipe.
+  const raw = await rawFrameAt(previewUrl(asset), (clip.in + clip.out) / 2, { width: w, height: h, fit: "fill" });
   if (!raw) throw new ToolError("Could not decode a frame of that clip's file.");
   return raw;
 }
@@ -5326,7 +5329,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         input.reset === true ? { preset: clip.grade?.preset, lut: clip.grade?.lut } : { ...clip.grade };
       if (input.auto === true) {
         const raw = await clipRawFrame(s, clip, 96, 54);
-        grade = { ...autoGrade(raw.px, raw.recipe), preset: clip.grade?.preset, lut: clip.grade?.lut };
+        const kept: ColorGrade = { preset: clip.grade?.preset, lut: clip.grade?.lut };
+        const lutId = lutIdOf(kept);
+        const userLut = lutId ? await loadLibraryLut(lutId) : undefined;
+        grade = { ...autoGrade(raw.px, { ...raw.recipe, grade: kept }, userLut), ...kept };
       }
       for (const k of GRADE_KEYS) if (isNum(input[k])) grade[k] = input[k];
       s.updateClip(clip.id, { grade: normalizeGrade(grade) });
@@ -5534,7 +5540,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       });
       const raw = await clipRawFrame(s, clip, 192, 108);
       const strength = isNum(input.strength) ? input.strength : 1;
-      const grade = matchGrade(recipeStatsRender(raw.px, raw.recipe), reference, strength);
+      const grade = await matchGrade(recipeStatsRender(raw.px, raw.recipe), reference, strength);
       // The frames already agree, or strength 0 asked for none of the match:
       // the clip's own grade stays as it is.
       if (!grade)
