@@ -55,19 +55,28 @@ export function warmOrder(
   });
 }
 
+/** Spans read to the end since the project opened, e.g. "url|4|4.5". A play
+ * restarts the walk from the playhead, and the walk passes over these, so a
+ * play costs only what is still unread. */
+const warmed = new Set<string>();
+const spanKey = (span: WarmSpan) => `${span.url}|${span.from}|${span.to}`;
+
 /** Read one span's packets through the shared reader, so the index the
  * playing decoder parses next is the one this parsed. */
 async function warmSpan(span: WarmSpan, signal: AbortSignal): Promise<void> {
   const handle = openMediaShared(span.url);
   try {
     const track = await videoTrackOf(handle.input);
-    if (!track || signal.aborted) return;
-    const sink = new EncodedPacketSink(track);
-    let packet =
-      (await sink.getKeyPacket(span.from, { verifyKeyPackets: true })) ?? (await sink.getFirstPacket());
-    while (packet && packet.timestamp <= span.to && !signal.aborted) {
-      packet = await sink.getNextPacket(packet);
+    if (signal.aborted) return;
+    if (track) {
+      const sink = new EncodedPacketSink(track);
+      let packet =
+        (await sink.getKeyPacket(span.from, { verifyKeyPackets: true })) ?? (await sink.getFirstPacket());
+      while (packet && packet.timestamp <= span.to && !signal.aborted) {
+        packet = await sink.getNextPacket(packet);
+      }
     }
+    if (!signal.aborted) warmed.add(spanKey(span));
   } finally {
     handle.release();
   }
@@ -82,10 +91,11 @@ let walk: Promise<void> | null = null;
  * Resolves when every span has been read or the walk was cancelled. A span
  * that fails is left for the decoder's own read: this is only a head start.
  */
-export function warmClipSpans(spans: WarmSpan[]): Promise<void> {
+export function warmClipSpans(all: WarmSpan[]): Promise<void> {
   running?.abort();
   const ctrl = new AbortController();
   running = ctrl;
+  const spans = all.filter((span) => !warmed.has(spanKey(span)));
   let next = 0;
   const lane = async () => {
     while (!ctrl.signal.aborted && next < spans.length) {
@@ -116,4 +126,5 @@ export function stopClipWarm(): void {
   running?.abort();
   running = null;
   walk = null;
+  warmed.clear();
 }

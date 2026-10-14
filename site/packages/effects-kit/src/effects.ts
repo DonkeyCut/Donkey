@@ -727,34 +727,21 @@ export function lightbarsAt(tLocal: number, dur: number, k: number): LightBar[] 
   const u = clip01(tLocal / Math.max(dur, 1e-3));
   const appear = Math.min(1, u / LB_APPEAR);
   const gain = 0.4 + 0.6 * k;
-  return RIBBON.flatMap((l) => {
+  // One array a frame, with only the bars that show in it.
+  const bars: LightBar[] = [];
+  for (const l of RIBBON) {
     const left = l.T - u;
-    if (left <= 1e-3) return [];
+    if (left <= 1e-3) continue;
     const s = l.T / left;
     const x = LB_AXIS + l.th * s;
     const w = l.w * s;
     const on = l.on ? clip01((u - l.on) / LB_ON_SPAN) : 1;
     const off = l.off ? clip01((l.off - u) / LB_OFF_SPAN) : 1;
     const alpha = l.a * gain * appear * on * off * Math.min(1, left / LB_NEAR);
-    if (alpha <= 0.002 || x + LB_HALO * w < 0 || x - LB_HALO * w > 1) return [];
-    return [{ x, w, rgb: l.rgb, alpha }];
-  });
-}
-
-/** One bar as a CSS box — the DOM twin of the canvas pass's horizontal
- * gradient: a full-height layer only as wide as the bar's glow (cut to the
- * frame), its gradient in the box's own coordinates. Add it onto the picture
- * (plus-lighter); compositing scales with the bars' width, not their count. */
-export function lightbarBox(b: LightBar): { left: string; width: string; background: string } {
-  const lo = Math.max(0, b.x + LIGHTBAR_STOPS[0].d * b.w);
-  const hi = Math.min(1, b.x + LIGHTBAR_STOPS[LIGHTBAR_STOPS.length - 1].d * b.w);
-  const span = Math.max(hi - lo, 1e-6);
-  const at = (s: { d: number }) => fmt(((b.x + s.d * b.w - lo) / span) * 100);
-  return {
-    left: `${fmt(lo * 100)}%`,
-    width: `${fmt(span * 100)}%`,
-    background: `linear-gradient(to right, ${LIGHTBAR_STOPS.map((s) => `${rgba(b.rgb, b.alpha * s.f)} ${at(s)}%`).join(", ")})`,
-  };
+    if (alpha <= 0.002 || x + LB_HALO * w < 0 || x - LB_HALO * w > 1) continue;
+    bars.push({ x, w, rgb: l.rgb, alpha });
+  }
+  return bars;
 }
 
 /** The ellipse a wash covers, in frame fractions: center (x, y), radii (rx,

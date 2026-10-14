@@ -51,10 +51,10 @@
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.8,
+        "p50": 15.7,
         "p95": 32.5,
-        "mean": 18.42,
-        "max": 32.7,
+        "mean": 18.48,
+        "max": 33.5,
         "n": 41
       },
       "longTasks": {
@@ -64,7 +64,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 36,
+      "liveSamples": 57,
       "machine": "desktop"
     },
     {
@@ -75,16 +75,16 @@
       "late": {
         "p50": 0,
         "p95": 0,
-        "mean": 0.05,
-        "max": 1,
+        "mean": 0,
+        "max": 0,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.7,
-        "p95": 16.6,
-        "mean": 16.28,
-        "max": 31.9,
+        "p50": 15.3,
+        "p95": 17.4,
+        "mean": 15.43,
+        "max": 17.6,
         "n": 41
       },
       "longTasks": {
@@ -94,7 +94,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 56,
+      "liveSamples": 65,
       "machine": "desktop"
     },
     {
@@ -112,9 +112,9 @@
       "frameMs": 16.7,
       "scrub": {
         "p50": 15.5,
-        "p95": 16,
-        "mean": 14.83,
-        "max": 32,
+        "p95": 17.5,
+        "mean": 15.89,
+        "max": 32.1,
         "n": 41
       },
       "longTasks": {
@@ -124,7 +124,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 76,
+      "liveSamples": 77,
       "machine": "desktop"
     },
     {
@@ -135,16 +135,16 @@
       "late": {
         "p50": 0,
         "p95": 0,
-        "mean": 0.04,
-        "max": 2,
+        "mean": 0.01,
+        "max": 1,
         "n": 81
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.3,
-        "p95": 16,
-        "mean": 15.31,
-        "max": 51.8,
+        "p50": 15.4,
+        "p95": 17.2,
+        "mean": 15.1,
+        "max": 33,
         "n": 81
       },
       "longTasks": {
@@ -165,46 +165,16 @@
       "late": {
         "p50": 0,
         "p95": 1,
-        "mean": 0.17,
-        "max": 2,
-        "n": 41
-      },
-      "frameMs": 16.7,
-      "scrub": {
-        "p50": 15.7,
-        "p95": 32.3,
-        "mean": 18.42,
-        "max": 49.2,
-        "n": 41
-      },
-      "longTasks": {
-        "p50": 0,
-        "p95": 0,
-        "mean": 0,
-        "max": 0,
-        "n": 0
-      },
-      "liveSamples": 58,
-      "machine": "desktop"
-    },
-    {
-      "name": "drag-across-a-transition",
-      "bucket": "scrub",
-      "pass": true,
-      "notes": [],
-      "late": {
-        "p50": 0,
-        "p95": 1,
         "mean": 0.2,
         "max": 2,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.5,
-        "p95": 32.4,
-        "mean": 18.3,
-        "max": 48.3,
+        "p50": 15.7,
+        "p95": 32.8,
+        "mean": 18.84,
+        "max": 48.6,
         "n": 41
       },
       "longTasks": {
@@ -218,6 +188,36 @@
       "machine": "desktop"
     },
     {
+      "name": "drag-across-a-transition",
+      "bucket": "scrub",
+      "pass": true,
+      "notes": [],
+      "late": {
+        "p50": 0,
+        "p95": 1,
+        "mean": 0.15,
+        "max": 1,
+        "n": 41
+      },
+      "frameMs": 16.7,
+      "scrub": {
+        "p50": 15.5,
+        "p95": 32,
+        "mean": 17.9,
+        "max": 33.3,
+        "n": 41
+      },
+      "longTasks": {
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
+      },
+      "liveSamples": 65,
+      "machine": "desktop"
+    },
+    {
       "name": "jump-across-the-cut",
       "bucket": "scrub",
       "pass": true,
@@ -225,16 +225,16 @@
       "late": {
         "p50": 1,
         "p95": 1,
-        "mean": 0.95,
-        "max": 2,
+        "mean": 0.88,
+        "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
         "p50": 32.1,
-        "p95": 33.2,
-        "mean": 31.18,
-        "max": 64.6,
+        "p95": 33.1,
+        "mean": 30.01,
+        "max": 33.2,
         "n": 41
       },
       "longTasks": {
@@ -289,13 +289,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 810,
+      "presented": 811,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 810
+        "n": 811
       },
       "stallShare": 0,
       "decay": {
@@ -303,8 +303,8 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
         "p50": 0,
@@ -317,7 +317,7 @@
       "liveSources": 12,
       "keptSources": 20,
       "warmMb": 354,
-      "memMb": 1111,
+      "memMb": 1110,
       "machine": "desktop"
     },
     {
@@ -326,13 +326,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3236,
+      "presented": 3237,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 3236
+        "n": 3237
       },
       "stallShare": 0,
       "decay": {
@@ -340,8 +340,8 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
         "p50": 0,
@@ -354,7 +354,7 @@
       "liveSources": 12,
       "keptSources": 20,
       "warmMb": 354,
-      "memMb": 1111,
+      "memMb": 1110,
       "machine": "desktop"
     },
     {
@@ -377,8 +377,8 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
         "p50": 0,
@@ -414,8 +414,8 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
         "p50": 0,
@@ -436,30 +436,30 @@
       "bucket": "playback",
       "pass": true,
       "notes": [],
-      "drops": 0,
-      "presented": 3444,
+      "drops": 5,
+      "presented": 3404,
       "lag": {
         "p50": 0.01,
         "p95": 0.02,
         "mean": 0.01,
-        "max": 0.02,
-        "n": 3444
+        "max": 0.22,
+        "n": 3404
       },
       "stallShare": 0,
       "decay": {
         "first": 0,
-        "last": 0
+        "last": 0.004
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
-        "p50": 0,
-        "p95": 0,
-        "mean": 0,
-        "max": 0,
-        "n": 0
+        "p50": 61,
+        "p95": 354,
+        "mean": 127.4,
+        "max": 354,
+        "n": 5
       },
       "liveSamples": 10,
       "liveSources": 1,
@@ -474,13 +474,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3444,
+      "presented": 3441,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
-        "mean": 0.01,
+        "mean": 0.02,
         "max": 0.03,
-        "n": 3444
+        "n": 3441
       },
       "stallShare": 0,
       "decay": {
@@ -488,14 +488,14 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
-        "p50": 66,
-        "p95": 66,
-        "mean": 66,
-        "max": 66,
+        "p50": 79,
+        "p95": 79,
+        "mean": 79,
+        "max": 79,
         "n": 1
       },
       "liveSamples": 10,
@@ -513,9 +513,9 @@
       "drops": 0,
       "presented": 3444,
       "lag": {
-        "p50": 0.02,
+        "p50": 0.01,
         "p95": 0.03,
-        "mean": 0.02,
+        "mean": 0.01,
         "max": 0.03,
         "n": 3444
       },
@@ -525,15 +525,15 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
-        "p50": 64,
-        "p95": 64,
-        "mean": 62,
-        "max": 64,
-        "n": 2
+        "p50": 54,
+        "p95": 54,
+        "mean": 54,
+        "max": 54,
+        "n": 1
       },
       "liveSamples": 10,
       "liveSources": 1,
@@ -553,7 +553,7 @@
         "p50": 0.01,
         "p95": 0.01,
         "mean": 0.01,
-        "max": 0.01,
+        "max": 0.02,
         "n": 3444
       },
       "stallShare": 0,
@@ -562,8 +562,8 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
         "p50": 0,
@@ -599,8 +599,8 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
         "p50": 0,
@@ -622,13 +622,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 1618,
+      "presented": 1621,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 1618
+        "n": 1621
       },
       "stallShare": 0,
       "decay": {
@@ -636,8 +636,8 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
         "p50": 0,
@@ -650,7 +650,7 @@
       "liveSources": 12,
       "keptSources": 20,
       "warmMb": 354,
-      "memMb": 1112,
+      "memMb": 1111,
       "machine": "desktop"
     },
     {
@@ -692,13 +692,13 @@
       "pass": true,
       "notes": [],
       "drops": 3,
-      "presented": 1094,
+      "presented": 1095,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
-        "mean": 0.02,
+        "mean": 0.01,
         "max": 0.03,
-        "n": 1091
+        "n": 1092
       },
       "stallShare": 0,
       "decay": {
@@ -706,21 +706,21 @@
         "last": 0
       },
       "clock": {
-        "lead": 0.22,
-        "reported": 0.22
+        "lead": 0.04,
+        "reported": 0.04
       },
       "longTasks": {
-        "p50": 177,
-        "p95": 177,
-        "mean": 119.5,
-        "max": 177,
+        "p50": 151,
+        "p95": 151,
+        "mean": 109,
+        "max": 151,
         "n": 2
       },
       "liveSamples": 10,
       "liveSources": 1,
       "keptSources": 1,
       "warmMb": 0,
-      "memMb": 218,
+      "memMb": 209,
       "machine": "desktop"
     }
   ]

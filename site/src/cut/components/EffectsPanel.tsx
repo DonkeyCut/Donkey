@@ -11,7 +11,6 @@ import {
   isAudioEffect,
   LEAK_TINT,
   leakGradient,
-  lightbarBox,
   streakGradient,
   type EffectId,
 } from "@donkeycut/effects-kit";
@@ -39,6 +38,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import "./grain.css";
+import { LightbarCanvas } from "./LightbarCanvas";
 
 /**
  * The Effects tab: time-ranged treatments over the finished cut. A segmented
@@ -1010,13 +1010,7 @@ export function EffectSwatch({
       {!!st.flash && (
         <span className="absolute inset-0 bg-white" style={{ opacity: Math.min(0.75, st.flash) }} />
       )}
-      {st.bars?.map((b, j) => (
-        <span
-          key={`bar-${j}`}
-          className="absolute inset-y-0"
-          style={{ ...lightbarBox(b), mixBlendMode: "plus-lighter" }}
-        />
-      ))}
+      {!!st.bars?.length && <LightbarCanvas bars={st.bars} />}
     </span>
   );
 }

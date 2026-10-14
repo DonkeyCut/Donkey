@@ -8,7 +8,6 @@ import {
   isAudioEffect,
   LEAK_TINT,
   leakGradient,
-  lightbarBox,
   streakGradient,
   washBackground,
 } from "@donkeycut/effects-kit";
@@ -23,6 +22,7 @@ import {
   type LiveEffect,
 } from "@/cut/lib/effectStack";
 import "./grain.css";
+import { LightbarCanvas } from "./LightbarCanvas";
 import { rgbSplitFilter } from "./rgbSplit";
 
 /**
@@ -238,15 +238,7 @@ export function StageEffectPaint({ lane }: { lane: number }) {
           )}
         </div>
       ))}
-      {bars.map((b, i) => (
-        // Each light bar added onto the picture, as the canvas pass's
-        // "lighter" composite does.
-        <div
-          key={`bar-${i}`}
-          className="absolute inset-y-0"
-          style={{ ...lightbarBox(b), mixBlendMode: "plus-lighter" }}
-        />
-      ))}
+      {bars.length > 0 && <LightbarCanvas bars={bars} />}
     </div>
   );
 }

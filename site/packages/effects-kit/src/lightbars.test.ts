@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { describe, expect, test } from "bun:test";
 import { Canvas } from "skia-canvas";
-import { applyEffectToCanvas, EFFECT_IDS, effectFilterLines, effectPreviewState, lightbarBox, lightbarsAt } from "./effects";
+import { applyEffectToCanvas, EFFECT_IDS, effectFilterLines, effectPreviewState, lightbarsAt } from "./effects";
 import { TEST_FFMPEG } from "./testing/ffmpeg";
 
 type Surface = HTMLCanvasElement;
@@ -74,20 +74,6 @@ describe("the light bars' course", () => {
     expect(peak[1]).toBeLessThan(80);
     expect(peak[2]).toBeLessThan(80);
     expect(at(DUR)).toEqual([]);
-  });
-
-  test("the CSS twin places every bar where the canvas draws it, in a box of its own width", () => {
-    for (const b of lightbarsAt(0.5, DUR, 1)) {
-      const box = lightbarBox(b);
-      const left = parseFloat(box.left) / 100;
-      const width = parseFloat(box.width) / 100;
-      expect(left).toBeGreaterThanOrEqual(0);
-      expect(left + width).toBeLessThanOrEqual(1 + 1e-9);
-      expect(width).toBeLessThan(0.5);
-      // The profile's peak stop lands on the bar's center.
-      const stops = [...box.background.matchAll(/ (-?[\d.]+)%/g)].map((m) => Number(m[1]) / 100);
-      expect(Math.abs(left + stops[3] * width - b.x)).toBeLessThan(1e-4);
-    }
   });
 
   test("the canvas pass adds every bar in one composite, however many there are", () => {
