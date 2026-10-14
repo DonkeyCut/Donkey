@@ -14,7 +14,7 @@
 import { renderMix as mixAudio } from "./audioMix";
 import { apiFetch } from "./backend";
 import { cloudBackend } from "./backend/cloud";
-import { mediaUrl, type SubtitleCue } from "./types";
+import { mediaUrl, type MediaAsset, type SubtitleCue } from "./types";
 import { wavHeader } from "./wav";
 
 /** Mirror of the engine's TranscribeSpec (server/transcribe.ts) minus projectId. */
@@ -56,8 +56,12 @@ const round = (n: number) => Math.round(n * 1000) / 1000;
  * different rate. Returns null when nothing audible exists. */
 export function renderMix(
   projectId: string,
-  spec: CloudTranscribeSpec
+  spec: CloudTranscribeSpec,
+  assets: readonly MediaAsset[]
 ): Promise<AudioBuffer | null> {
+  // Each file is read where its asset plays from: a dropped file still
+  // uploading has no stored copy yet, and plays from the bytes in hand.
+  const urls = new Map(assets.map((a) => [a.fileName, a.url]));
   return mixAudio(
     {
       duration: spec.duration,
@@ -66,7 +70,7 @@ export function renderMix(
       // shaping it does not change the timing of.
       items: spec.audio,
     },
-    { sampleRate: RATE, channels: 1, resolve: (file) => mediaUrl(projectId, file) }
+    { sampleRate: RATE, channels: 1, resolve: (file) => urls.get(file) || mediaUrl(projectId, file) }
   );
 }
 

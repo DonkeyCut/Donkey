@@ -1446,7 +1446,7 @@ export async function runTranscription(projectId: string, spec: object): Promise
       throw new Error("Add audio or video to the timeline first.");
     }
     const stale = () => useEditor.getState().projectId !== projectId;
-    const mix = await renderMix(projectId, s);
+    const mix = await renderMix(projectId, s, useEditor.getState().assets);
     if (stale()) return null;
     if (!mix) return []; // nothing audible — no speech, like the engine's short-circuit
     const samples = mix.getChannelData(0);
@@ -4413,7 +4413,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (!s.projectId) return null;
       const spec = cutTranscribeSpec(s);
       if (!spec) return null;
-      const mix = await renderMix(s.projectId, spec);
+      const mix = await renderMix(s.projectId, spec, s.assets);
       if (!mix) return null;
       return { samples: mix.getChannelData(0), sampleRate: mix.sampleRate };
     },

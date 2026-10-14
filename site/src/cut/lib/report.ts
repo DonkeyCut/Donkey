@@ -1,5 +1,7 @@
 "use client";
 
+import { fetchDropped } from "./network";
+
 /**
  * Reporting a failure a feature carried on past.
  *
@@ -54,10 +56,7 @@ function shape(err: unknown): boolean {
       err.name === "QuotaExceededError"
     );
   }
-  return (
-    err instanceof TypeError &&
-    /failed to fetch|network\s*error|load failed|connection/i.test(err.message)
-  );
+  return fetchDropped(err);
 }
 
 /**

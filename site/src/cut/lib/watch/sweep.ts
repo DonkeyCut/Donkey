@@ -95,7 +95,7 @@ async function transcribeFree(
 ): Promise<{ start: number; end: number; text: string }[] | null> {
   if (getBackend().kind === "local") return runTranscription(projectId, spec);
   const stale = () => useEditor.getState().projectId !== projectId;
-  const mix = await renderMix(projectId, spec);
+  const mix = await renderMix(projectId, spec, useEditor.getState().assets);
   if (stale()) return null;
   if (!mix) return []; // nothing audible — no speech, like the engine's short-circuit
   const samples = mix.getChannelData(0);

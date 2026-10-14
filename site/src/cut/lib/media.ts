@@ -11,6 +11,7 @@ import { quotaErrorMessage } from "./backend/cloud";
 import { encodeWav } from "./cloudTranscribe";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
 import { normalizeLink } from "./link";
+import { ConnectionLostError } from "./network";
 import { downloadFromUrl } from "./download";
 import { FONT_RE, LUT_RE } from "./libraryFileType";
 import { markUploadStored, startUpload, uploadInFlight } from "./importQueue";
@@ -280,7 +281,7 @@ export function putSigned(
     }
     xhr.onload = () =>
       xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("Upload failed."));
-    xhr.onerror = () => reject(new Error("Upload failed."));
+    xhr.onerror = () => reject(new ConnectionLostError("Upload failed."));
     xhr.onabort = () => reject(new DOMException("Upload cancelled.", "AbortError"));
     opts?.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(file);
@@ -313,7 +314,7 @@ function postFormWatched(
       if (xhr.status >= 200 && xhr.status < 300 && body.fileName) resolve(body.fileName);
       else reject(new Error(body.error ?? "Upload failed."));
     };
-    xhr.onerror = () => reject(new Error("Upload failed."));
+    xhr.onerror = () => reject(new ConnectionLostError("Upload failed."));
     xhr.onabort = () => reject(new DOMException("Upload cancelled.", "AbortError"));
     opts?.signal?.addEventListener("abort", () => xhr.abort(), { once: true });
     xhr.send(form);

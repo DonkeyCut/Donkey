@@ -41,3 +41,10 @@ export function bindCutNotes(value: unknown): void {
   if (parsed.success) notes = parsed.data;
 }
 export function cutNotes(): Settings["cutNotes"] { return notes; }
+
+let uploads: Settings["cutUploads"] = SETTINGS.cutUploads.default;
+export function bindCutUploads(value: unknown): void {
+  const parsed = SETTINGS.cutUploads.schema.safeParse(value);
+  if (parsed.success) uploads = parsed.data;
+}
+export function cutUploads(): Settings["cutUploads"] { return uploads; }

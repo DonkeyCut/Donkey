@@ -34,7 +34,7 @@ import { cloudUsageQueryKey, useCutMode } from "@/cut/lib/backend/hooks";
 import { browserBackend } from "@/cut/lib/backend/browser";
 import { localBackend } from "@/cut/lib/backend/local";
 import { clearProjectThreads } from "@/cut/lib/chatThreads";
-import { retryUpload } from "@/cut/lib/importQueue";
+import { retryFailedUploads } from "@/cut/lib/importQueue";
 import { backTarget, projectHref, useCutBase } from "@/cut/lib/nav";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
 import { projectDuration, useEditor } from "@/cut/lib/store";
@@ -296,9 +296,6 @@ export function TopBar({
   // dropped file, but a stock or library import lives on the timeline and has
   // no tile there — the save indicator is the one place every import reports.
   const failedImports = useEditor((s) => s.assets.filter((a) => a.upload?.error).length);
-  const retryFailedImports = () => {
-    for (const a of useEditor.getState().assets) if (a.upload?.error) retryUpload(a.id);
-  };
   // Uploads settle in bursts; refresh the storage pill's number when a burst
   // ends. Only the settling edge counts — on mount nothing has landed yet.
   const queryClient = useQueryClient();
@@ -537,7 +534,7 @@ export function TopBar({
               <button
                 type="button"
                 className="font-medium underline underline-offset-2"
-                onClick={retryFailedImports}
+                onClick={retryFailedUploads}
               >
                 Retry
               </button>

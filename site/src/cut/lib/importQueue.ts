@@ -22,6 +22,8 @@ import { getBackend, type CutBackend } from "./backend";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
 import type { PendingImport } from "./media";
 import { storedMediaUrl } from "./mediaSync";
+import { cutUploads } from "./chatRuntime";
+import { connectionLost, isOffline, onReconnect } from "./network";
 import { useEditor } from "./store";
 
 /** Blob URLs owned by the browser store's registry stay alive for the whole
@@ -62,9 +64,78 @@ type Job = {
 
 const jobs = new Map<string, Job>();
 
+// An upload the connection dropped, the way a phone hotspot does, picks back
+// up by itself: after each pause the cutUploads setting lists, and the moment
+// the browser reports the connection back, which also restarts the pauses. A
+// refusal from the server waits for the user's retry.
+const resumes = new Map<string, { attempt: number; timer: ReturnType<typeof setTimeout> | null }>();
+let resumeArmed = false;
+
+/** The connection is back: every failed upload retries with fresh pauses. */
+function resumeAll() {
+  for (const r of resumes.values()) {
+    if (r.timer) {
+      clearTimeout(r.timer);
+    }
+  }
+  resumes.clear();
+  retryFailedUploads();
+}
+
+/** Forget an asset's pending resume, when it lands or leaves. */
+function dropResume(assetId: string) {
+  const r = resumes.get(assetId);
+  if (r?.timer) {
+    clearTimeout(r.timer);
+  }
+  resumes.delete(assetId);
+}
+
+/** Retry every upload that failed, e.g. once the connection is back. */
+export function retryFailedUploads() {
+  for (const a of useEditor.getState().assets) {
+    if (a.upload?.error) {
+      retryUpload(a.id);
+    }
+  }
+}
+
+/** Book the next timed resume of a dropped upload, while any are left. One
+ * waits per asset: a later failure replaces the booked one. */
+function scheduleResume(job: Job) {
+  const id = job.pending.asset.id;
+  const delays = cutUploads().resumeDelaysMs;
+  const prior = resumes.get(id);
+  if (prior?.timer) {
+    clearTimeout(prior.timer);
+  }
+  const attempt = prior?.attempt ?? 0;
+  if (attempt >= delays.length) {
+    resumes.set(id, { attempt, timer: null });
+    return;
+  }
+  const timer = setTimeout(() => {
+    const r = resumes.get(id);
+    if (r) {
+      r.timer = null;
+    }
+    // Offline, the reconnect does it; a retry already under way holds it.
+    const failed = useEditor.getState().assets.find((a) => a.id === id)?.upload?.error;
+    if (isOffline() || jobs.get(id) !== job || !failed) {
+      return;
+    }
+    retryUpload(id);
+  }, delays[attempt]);
+  resumes.set(id, { attempt: attempt + 1, timer });
+}
+
 /** Start the background upload for a prepared import. The asset must already
  * be in the store. */
 export function startUpload(projectId: string, pending: PendingImport) {
+  if (!resumeArmed) {
+    resumeArmed = true;
+    onReconnect(resumeAll);
+  }
   const job: Job = {
     pending,
     projectId,
@@ -129,6 +200,7 @@ export function cancelUpload(assetId: string) {
   const job = jobs.get(assetId);
   if (!job) return;
   jobs.delete(assetId);
+  dropResume(assetId);
   job.controller.abort();
   revokeTabUrl(job.pending.localUrl);
 }
@@ -192,6 +264,7 @@ async function run(job: Job) {
       return dropLanded(job, fileName);
     }
     jobs.delete(asset.id);
+    dropResume(asset.id);
     // The stored file takes over from the source bytes, under the name the
     // copy resolved to (a dropped file reserved it up front; a remote import
     // learns it here), at the address every stored file plays from. Each move
@@ -232,6 +305,9 @@ async function run(job: Job) {
       asset.id,
       uploadPatch(job, 0, err instanceof Error ? err.message : "Upload failed.")
     );
+    if (connectionLost(err)) {
+      scheduleResume(job);
+    }
   } finally {
     release();
   }

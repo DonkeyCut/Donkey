@@ -292,6 +292,19 @@ export const SETTINGS = defineSettings({
     description:
       "How a talk or an interview is read for the moments worth cutting a short from: what a clip may run, how widely the first sweep looks, how many moments earn the close read, and what the ranking weighs.",
   },
+  cutUploads: {
+    schema: z
+      .object({
+        // The pause before each automatic retry of an upload the connection
+        // dropped; the browser's reconnect retries it too.
+        resumeDelaysMs: z.array(z.number().int().min(1000).max(600000)).max(10).readonly(),
+      })
+      .strict(),
+    default: { resumeDelaysMs: [5000, 20000, 60000] },
+    public: true,
+    title: "Upload resume",
+    description: "How an upload the connection dropped picks back up on its own: the pauses before each automatic retry.",
+  },
   cutTracking: {
     schema: z
       .object({
