@@ -151,4 +151,14 @@ describe("folder references", () => {
     } finally { listing.mockRestore(); sync.mockRestore(); resolve.mockRestore(); }
   });
 
+  test("a stock sound effect's id names stock_add and the area that declares it", async () => {
+    useEditor.setState({ projectId: "p1", loaded: true });
+    const listing = spyOn(library, "fetchLibrary").mockResolvedValue({ assets: [], folders: [], templates: [] });
+    try {
+      await expect(runAiTool("library_add", { id: "keyboard-laptop-key" })).rejects.toThrow(
+        /"keyboard-laptop-key" is a stock sound effect.*stock_add.*request_tools.*stock/
+      );
+    } finally { listing.mockRestore(); }
+  });
+
 });

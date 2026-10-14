@@ -4474,8 +4474,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...(place ? { addedToTimeline: true, clip: placeAssetOnTimeline(asset, input) } : { addedToTimeline: false }) };
       }
       const found = findLibraryAsset((await fetchLibrary()).assets, String(input.id ?? ""));
+      // A turn routed away from the stock area doesn't see stock_add, so the
+      // miss names the area to request as well as the tool.
+      if (!found && STOCK_SFX.some((x) => x.id === input.id))
+        throw new ToolError(`"${String(input.id)}" is a stock sound effect, not a Library asset: add it with stock_add (the stock area; call request_tools with ["stock"] if stock_add isn't declared to you).`);
       if (!found)
-        throw new ToolError(`No library asset with id or name "${String(input.id)}". Call library_list with a query for ids; stock sound effects come from stock_search and stock_add.`);
+        throw new ToolError(`No library asset with id or name "${String(input.id)}". Call library_list with a query for ids; stock sound effects come from stock_search and stock_add in the stock area (request_tools ["stock"] if you don't see them).`);
       if ("candidates" in found)
         throw new ToolError(`Several Library assets are named "${String(input.id)}": ${JSON.stringify(found.candidates)}. Pass one id.`);
       const lib = found.asset;
