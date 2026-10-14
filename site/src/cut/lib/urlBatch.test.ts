@@ -78,4 +78,25 @@ describe("importEach", () => {
     );
     expect(out).toEqual([{ url: "a", notStarted: true }]);
   });
+
+  test("a link reported as still downloading lands even when its slot answer comes after the budget", async () => {
+    let tries = 0;
+    const landed: string[] = [];
+    const out = await importEach(
+      ["a"],
+      async (u) => {
+        // The first ask is in flight across the deadline and comes back busy.
+        if (tries++ === 0) {
+          await new Promise((r) => setTimeout(r, 60));
+          throw new Error(URL_BUSY_MESSAGE);
+        }
+        landed.push(u);
+        return u;
+      },
+      { busyWaitMs: 5, budgetMs: 30 }
+    );
+    expect(out).toEqual([{ url: "a", pending: true }]);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(landed).toEqual(["a"]);
+  });
 });

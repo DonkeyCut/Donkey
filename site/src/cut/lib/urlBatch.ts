@@ -49,15 +49,18 @@ export async function importEach<T>(
   const wait = opts.busyWaitMs ?? BUSY_WAIT_MS;
   const deadline = Date.now() + (opts.budgetMs ?? URL_BATCH_BUDGET_MS);
   const rows: (UrlRow<T> | undefined)[] = new Array(list.length);
+  let answered = false;
   // A link turned away as busy (a download started elsewhere holds a slot)
-  // waits and asks again rather than failing, until the budget runs out.
+  // waits and asks again, until the budget runs out. One whose ask was in
+  // flight when the batch answered was reported as still downloading, so it
+  // keeps asking until it starts and lands on its own.
   const attempt = async (url: string): Promise<T> => {
     for (;;) {
       try {
         return await importOne(url);
       } catch (e) {
         if (messageOf(e) !== URL_BUSY_MESSAGE) throw e;
-        if (Date.now() + wait >= deadline) throw OUT_OF_TIME;
+        if (!answered && Date.now() + wait >= deadline) throw OUT_OF_TIME;
         await new Promise((r) => setTimeout(r, wait));
       }
     }
@@ -79,6 +82,7 @@ export async function importEach<T>(
   const outOfTime = new Promise<void>((r) => (timer = setTimeout(r, Math.max(0, deadline - Date.now()))));
   await Promise.race([lanes, outOfTime]);
   clearTimeout(timer);
+  answered = true;
   // A link a lane took up is still downloading; one no lane reached never
   // started.
   return list.map((url, i) => rows[i] ?? (i < next ? { url, pending: true as const } : { url, notStarted: true as const }));
