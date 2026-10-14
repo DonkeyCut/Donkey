@@ -354,7 +354,7 @@ export const TIMELINE_TOOLS = [
         asset_id: str("Project asset that plays there instead"),
         keep_mask: {
           type: "boolean",
-          description: "Video clips: keep the clip's mask because it cuts the layer to a region of the frame (a screen, a window) rather than covering something in the old footage",
+          description: "Video clips: keep the clip's mask when it cuts the layer to a region of the frame, such as a screen or a window",
         },
       },
       ["id", "asset_id"]

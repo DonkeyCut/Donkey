@@ -48,7 +48,7 @@ const RANGE_CASES: [SourceProfile, OutputSpace][] = [
  * fitted value back over: a few percent of the bound. */
 const margin = (n: number) => Math.max(Math.abs(n) * 0.03, 0.01);
 
-/** An expect that records how far each bound is missed instead of throwing. */
+/** An expect that records how far each bound is missed and keeps going. */
 function recorder(): { expect: Expect; total: () => number } {
   let miss = 0;
   const expect: Expect = (v) => ({

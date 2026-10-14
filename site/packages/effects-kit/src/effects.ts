@@ -68,8 +68,8 @@ export interface EffectOverlay extends OverlayBase {
   rate?: number;
   /** How a strobe's pulses land; absent = strobe. */
   rhythm?: FlashRhythm;
-  /** A flash that ramps across the whole element instead of popping:
-   * absent = the pop (or the strobe). */
+  /** A flash that ramps evenly across the whole element; absent = the pop
+   * (or the strobe). */
   fade?: FlashFade;
 }
 
@@ -89,7 +89,7 @@ export const FLASH_RATE_MAX = 15;
 export const FLASH_RHYTHMS = ["strobe", "flicker"] as const;
 export type FlashRhythm = (typeof FLASH_RHYTHMS)[number];
 
-/** A flash that ramps instead of popping, evenly across its element and up
+/** A flash that ramps evenly across its element and up
  * to the full tone at amount 1: `to` fades the picture into the tone (a fade
  * to black over the end of a scene), `from` starts on the tone and clears (a
  * fade up from black). It covers everything on the rows behind its own, so
@@ -408,8 +408,8 @@ export interface BurnPalette {
 const BURN_PALETTE: BurnPalette = { flare: BURN_FLARE, yellow: BURN_YELLOW, orange: BURN_ORANGE, edge: BURN_EDGE, flame: BURN_FLAME };
 
 /** The char's dark stock: the body climbs hot orange, cools through ember to
- * char black, and a thin bright light line crosses it — film burning out on
- * black rather than flaring white. */
+ * char black, and a thin bright light line crosses it — film burning out
+ * into black. */
 export const CHAR_PALETTE: BurnPalette = {
   flare: [240, 118, 30],
   yellow: [120, 38, 12],
@@ -556,7 +556,7 @@ const LB_ICE: [number, number, number] = [130, 206, 255];
  * line flows outward from it. */
 const LB_AXIS = 0.46;
 /** Lines dim over the last `LB_NEAR` of their approach, so a line rushing
- * past sweeps through rather than blanking the frame. */
+ * past sweeps through and the frame stays readable. */
 const LB_NEAR = 0.03;
 /** Shares of the element the ribbon takes to appear, a late line to light
  * and a line with an `off` to go out. */

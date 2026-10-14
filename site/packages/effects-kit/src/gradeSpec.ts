@@ -260,7 +260,7 @@ export const IDENTITY: Record<string, Signature> = {
     },
   },
   western: {
-    process: "sun-baked dust: strongly warm, and muted by the haze rather than punchy",
+    process: "sun-baked dust: strongly warm, and muted by the haze",
     holds: (m, expect) => {
       expect(m.warm.m).toBeGreaterThanOrEqual(12);
       expect(m.sat).toBeLessThanOrEqual(1.0);
@@ -326,7 +326,7 @@ export const IDENTITY: Record<string, Signature> = {
     },
   },
   tungsten: {
-    process: "daylight stock under 3200K tungsten light: a source warming the whole scene, so the cast reaches the shadows rather than washing only the highlights",
+    process: "daylight stock under 3200K tungsten light: a source warming the whole scene, so the cast reaches down into the shadows",
     holds: (m, expect) => {
       expect(m.warm.m).toBeGreaterThanOrEqual(18);
       expect(m.warm.s).toBeGreaterThanOrEqual(12);
@@ -362,7 +362,7 @@ export const IDENTITY: Record<string, Signature> = {
     },
   },
   amber: {
-    process: "an amber wash laid over the grade, weighted to the highlights the way a gel reads rather than a room light",
+    process: "an amber wash laid over the grade, weighted to the highlights the way a gel reads",
     holds: (m, expect) => {
       expect(m.warm.m).toBeGreaterThanOrEqual(20);
       expect(m.warm.h - m.warm.s).toBeGreaterThanOrEqual(30);
@@ -390,7 +390,7 @@ export const IDENTITY: Record<string, Signature> = {
     },
   },
   sepia: {
-    process: "sepia toning: the print's silver is converted to silver sulfide, so the whole frame carries one brown tone rather than a tint over surviving color",
+    process: "sepia toning: the print's silver is converted to silver sulfide, so the whole frame carries one brown tone",
     holds: (m, expect) => {
       expect(m.spread).toBeLessThanOrEqual(0.08);
       expect(m.warm.m).toBeGreaterThanOrEqual(28);

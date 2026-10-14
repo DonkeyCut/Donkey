@@ -3,8 +3,7 @@ import { stubModule } from "@/lib/testing/stubModule";
 import type { MediaAsset } from "./types";
 
 // measure_level says where a clip's loudest sample lands, on its own source
-// clock and on the timeline, so a click can be put on a beat to the sample
-// rather than probed for with silence thresholds 20 ms at a time.
+// clock and on the timeline, so a click can be put on a beat to the sample.
 await stubModule<typeof import("./media")>("./media", import.meta.url, {
   measureSourceLevel: (async () => ({
     rmsDb: -20,

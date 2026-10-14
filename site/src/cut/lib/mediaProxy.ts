@@ -77,7 +77,7 @@ const PROXY_DECODE_CODEC = "hvc1.2.4.L123.B0";
 
 /** Whether this browser decodes the proxy a heavy video would get. A heavy
  * master plays here already, only slowly, so where HEVC does not decode it
- * stays on the master rather than trading it for a file that cannot play. */
+ * stays on the master, the file that plays. */
 async function proxyDecodes(): Promise<boolean> {
   const decoder = (globalThis as { VideoDecoder?: { isConfigSupported?: (c: VideoDecoderConfig) => Promise<{ supported?: boolean }> } }).VideoDecoder;
   if (!decoder?.isConfigSupported) return false;

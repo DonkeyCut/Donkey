@@ -185,7 +185,7 @@ export function capturePosterWhenReady(
 }
 
 /** Draw a stored poster over a canvas, contained and centred so a project whose
- * aspect has changed since is letterboxed rather than stretched. `wanted` is
+ * aspect has changed since is letterboxed. `wanted` is
  * asked again once the image decodes: the stage may have drawn meanwhile. */
 export function paintPoster(canvas: HTMLCanvasElement, data: string, wanted?: () => boolean): Promise<void> {
   return new Promise((resolve) => {

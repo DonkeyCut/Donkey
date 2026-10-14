@@ -43,7 +43,7 @@ export const EFFECT_SETTING_ARGS = {
   fade: {
     type: "string",
     enum: [...FLASH_FADE_CHOICES],
-    description: `flash only: ramp evenly across the whole element instead of popping, to the full tone at amount 1 — "to" fades the picture into the tone, "from" starts on it and clears, "${FLASH_FADE_NONE}" takes the fade off again. On the front row (lane 0, rows moved down with move_row if it is taken) it fades everything behind it as one, so a fade to black over the end of a stacked page (video, scrims, text, buttons, a pointer) goes black together instead of each layer fading on its own and showing the layers through each other`,
+    description: `flash only: ramp evenly across the whole element to the full tone at amount 1 — "to" fades the picture into the tone, "from" starts on it and clears, "${FLASH_FADE_NONE}" takes the fade off again. On the front row (lane 0, rows moved down with move_row if it is taken) it fades everything behind it as one, so a fade to black over the end of a stacked page (video, scrims, text, buttons, a pointer) goes black together as one picture`,
   },
 };
 

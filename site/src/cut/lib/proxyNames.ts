@@ -1,6 +1,6 @@
 /**
  * The light proxy: a heavy video's preview copy, built to stream at a fast
- * cut's pace rather than to grade from. It is capped in bitrate as well as
+ * cut's pace. It is capped in bitrate as well as
  * height — a quality target alone gave a dense 1080p master a proxy heavier
  * than itself — and it carries its own name, so a project still holding an
  * older full-quality proxy for such a video asks again and gets this one.

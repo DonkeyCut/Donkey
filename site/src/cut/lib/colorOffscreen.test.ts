@@ -49,7 +49,7 @@ test("read_color_stats decodes an off-screen clip's frame from its file, mid-tri
   expect(decoded[0]).toMatchObject({ url: "blob:one", time: 4 });
 });
 
-test("match_color_grade grades an off-screen clip instead of asking for a seek", async () => {
+test("match_color_grade grades an off-screen clip with no seek", async () => {
   const [clip] = useEditor.getState().clips;
   // The clip is its own reference: nothing to change, but no seek error.
   const out = (await runAiTool("match_color_grade", { clipId: clip.id, ref_clip_id: clip.id })) as { id: string };
@@ -78,7 +78,7 @@ test("match_color_grade strength takes the match part of the way", async () => {
   expect(Math.abs(exposure() - full / 2)).toBeLessThanOrEqual(1);
 });
 
-test("strength 0 says it took none of the match, not that the footage already matches", async () => {
+test("strength 0 says it took none of the match", async () => {
   const clip = useEditor.getState().clips[0];
   const out = (await runAiTool("match_color_grade", { clipId: clip.id, ref_clip_id: clip.id, strength: 0 })) as { note?: string };
   expect(out.note).toContain("strength 0");

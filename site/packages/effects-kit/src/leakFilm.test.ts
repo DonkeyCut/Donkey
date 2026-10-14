@@ -51,7 +51,7 @@ describe("the film flash", () => {
       const [r, g, b] = rgbAt(d, Math.floor(h.area!.x * S), Math.floor(h.area!.y * S));
       expect(Math.min(r, g, b)).toBeGreaterThan(200);
     }
-    // Between the holes and down the frame: warm, not white.
+    // Between the holes and down the frame: warm.
     const [r, g, b] = rgbAt(d, S / 2, Math.floor(S * 0.6));
     expect(r).toBeGreaterThan(110);
     expect(r - b).toBeGreaterThan(60);

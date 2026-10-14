@@ -988,8 +988,7 @@ export const jobsCloud = {
         return Response.json({ jobId: running.id });
       }
       // A master ffmpeg refused lately would be refused the same way: the
-      // preview stays on the master instead of costing a worker run on every
-      // open. A build that failed for a passing reason retries at once.
+      // preview stays on the master, and no open costs a worker run. A build that failed for a passing reason retries at once.
       const { retryAfterHours } = await getGlobalSetting("cutProxy");
       const failedRows = await prisma.cutRenderJob.findMany({
         where: {

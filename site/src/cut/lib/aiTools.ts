@@ -1210,8 +1210,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       limit: isNum(input.limit) ? input.limit : undefined,
       offset: isNum(input.offset) ? input.offset : undefined,
     });
-    // Matches the chat can't see still exist: it says so rather than calling
-    // the file missing.
+    // Matches the chat can't see still exist, and the answer says so.
     const held = findMedia(
       s.assets.filter((a) => !isLinkedAssetType(a.type) && hiddenFromChat(a, chatId, placed)),
       { query, type }
@@ -6910,7 +6909,7 @@ function placeAssetOnTimeline(asset: MediaAsset, input: Record<string, unknown>)
   const start = isNum(input.start) ? Math.max(0, input.start) : undefined;
   if (asset.type === "audio") {
     // With no lane, a sound placed at a moment lands at that moment on the
-    // lowest lane free there, rather than sliding down lane 0 off its mark.
+    // lowest lane free there, on its mark.
     const lane =
       input.lane !== undefined
         ? audioLaneInput(input.lane)

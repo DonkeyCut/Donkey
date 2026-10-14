@@ -3,8 +3,7 @@ import { runAiTool } from "./aiTools";
 import { useEditor } from "./store";
 import type { VideoClip } from "./types";
 
-// A pen mask cut to a laptop's screen is a region of the frame, not cover for
-// something in the old footage: swapping in a new screen recording dropped it,
+// A pen mask cut to a laptop's screen is a region of the frame: swapping in a new screen recording dropped it,
 // and the chat had to draw the four corners back on.
 
 const screen = { kind: "pen" as const, points: [{ x: -0.5, y: -0.18 }, { x: 0.5, y: -0.18 }, { x: 0.5, y: 0.17 }, { x: -0.48, y: 0.18 }], feather: 0 };
