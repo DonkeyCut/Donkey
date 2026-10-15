@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { Canvas, FontLibrary } from "skia-canvas";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { Canvas, FontLibrary, loadImage } from "skia-canvas";
 
 /** skia's font registry, under a name the hook lint leaves alone. */
 const fontLibrary = FontLibrary;
 import { SETTINGS } from "@/lib/config/registry";
 import { setRasterFactory, type RasterFactory, type RasterSurface } from "./raster";
-import { inkMaskOf, rankFaces, type TitleFace } from "./fontMatch";
+import { GOOGLE_FONTS } from "./fontCatalog";
+import { bundledFaces, inkMaskOf, rankFaces, type TitleFace } from "./fontMatch";
 import { fontStack, registerFonts } from "./types";
 
 // Which bundled face a piece of type on a reference frame is set in: the
@@ -135,5 +138,47 @@ describe("font suggestions", () => {
     const ranked = await rankFaces(ref, "TRAVEL\nDESTINATION", CANDIDATES, fontStack);
     expect(ranked[0]).toMatchObject({ font: "cinzel", weight: 400 });
     await expect(rankFaces(ref, "TRAVEL DESTINATION", CANDIDATES, fontStack)).rejects.toThrow(/2 lines/);
+  });
+});
+
+// Type cut off a reference itself: a reel whose "TRAVEL DESTINATION" title
+// cycles through faces. Each fixture is one held frame's title line, at the
+// frame's own pixels, ranked against every bundled family at its bundled
+// weights, the candidates suggest_font hands rankFaces. The system set is
+// left out: it draws in whatever faces the host has.
+describe("faces off a reference frame", () => {
+  const resolve = createRequire(import.meta.url).resolve;
+  const pkg = (label: string) => label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  let catalog: TitleFace[] = [];
+
+  beforeAll(() => {
+    for (const f of GOOGLE_FONTS) {
+      const p = pkg(f.label);
+      const files = path.join(path.dirname(resolve(`@fontsource/${p}/package.json`)), "files");
+      const face = (w: number, style: string) => path.join(files, `${p}-latin-${w}-${style}.woff2`);
+      fontLibrary.use(f.label, [...f.weights.map((w) => face(w, "normal")), ...(f.italics ?? []).map((w) => face(w, "italic"))]);
+      registerFonts([{ id: f.id, label: f.label, stack: `"${f.label}"` }]);
+    }
+    const ids = new Set(GOOGLE_FONTS.map((f) => f.id));
+    catalog = bundledFaces().filter((f) => ids.has(f.font));
+  });
+
+  async function frameInk(name: string) {
+    const img = await loadImage(new URL(`./fixtures/${name}`, import.meta.url).pathname);
+    const c = new Canvas(img.width, img.height);
+    const ctx = c.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, img.width, img.height);
+    return inkMaskOf(d.data, d.width, d.height);
+  }
+
+  test("the cycle's heavy geometric face matches Prompt Black", async () => {
+    // Held from 6.57 s to 6.87 s, yellow on purple, 85 px of crop. Before
+    // Prompt was bundled the closest face was Montserrat Black at 0.70, under
+    // the good mark, so the tool said nothing bundled matched.
+    const ranked = await rankFaces(await frameInk("font-cycle-heavy-geometric.webp"), "TRAVEL DESTINATION", catalog, fontStack);
+    expect(ranked[0]).toMatchObject({ font: "prompt", weight: 900 });
+    expect(ranked[0].score).toBeGreaterThanOrEqual(good);
+    expect(ranked.find((m) => m.font !== "prompt")!.score).toBeLessThan(good);
   });
 });

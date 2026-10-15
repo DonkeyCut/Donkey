@@ -73,6 +73,7 @@ const FAMILIES = [
   { id: "rubik", label: "Rubik", family: "Rubik", weights: [400, 500, 700, 900] },
   { id: "jost", label: "Jost", family: "Jost", weights: [400, 500, 600, 700] },
   { id: "gloria-hallelujah", label: "Gloria Hallelujah", family: "Gloria Hallelujah", weights: [400] },
+  { id: "prompt", label: "Prompt", family: "Prompt", weights: [900] },
   {
     family: "Roboto",
     weights: [400, 500, 600, 700],
