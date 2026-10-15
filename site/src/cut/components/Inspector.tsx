@@ -118,6 +118,7 @@ import {
 } from "@donkeycut/effects-kit";
 import { SHADOW, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN, STRIPES_DEFAULT, type FlashPulse, type ShadowSpec, type StripesPattern } from "@donkeycut/effects-kit";
 import { BLOCK_COLOR } from "@/cut/lib/blockSource";
+import { beatSwitches, clipBeatTimes, CYCLE_BEAT_STEPS, switchProblem, tidySwitches, timedFontCycle } from "@/cut/lib/fontCycleTiming";
 import { bindRecording, unbindRecording } from "@/cut/lib/soundBind";
 import { SPLIT_EDIT_MAX_S } from "@/cut/lib/soundSource";
 import { clipLen, clipWindow, maxClipFade, useEditor, type EditorState } from "@/cut/lib/store";
@@ -3111,8 +3112,9 @@ function FontCycleFaces({ overlay: o, peers }: { overlay: TextOverlay; peers?: r
   );
 }
 
-/** Where the font cycle starts inside the title, how long it runs, and how
- * many times a second the face changes. */
+/** Where the font cycle starts inside the title, how long it runs, how
+ * many times a second the face changes, and the music beats that can time
+ * every face instead. */
 function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: readonly Overlay[] }) {
   const ck = useSliderCheckpoint();
   const anim = o.anim ?? {};
@@ -3156,11 +3158,98 @@ function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: re
     </Row>
   );
   const secs = (v: number) => `${v.toFixed(2)}s`;
+
+  // Clips whose music has a beat grid; one of them times every face.
+  const clips = useEditor((s) => s.clips);
+  const audioClips = useEditor((s) => s.audioClips);
+  const assets = useEditor((s) => s.assets);
+  const beatClips = useMemo(
+    () =>
+      [...audioClips, ...clips].flatMap((c) => {
+        const asset = assets.find((a) => a.id === c.assetId);
+        return (asset?.beats?.beats.length ?? 0) >= 2 ? [{ clip: c, asset: asset! }] : [];
+      }),
+    [clips, audioClips, assets]
+  );
+  const [fontCycleBeats, setFontCycleBeats] = useState<string>();
+  const [fontCycleBeatStep, setFontCycleBeatStep] = useState<number>(1);
+  const [beatNote, setBeatNote] = useState<string>();
+  const beatSource = beatClips.find((b) => b.clip.id === fontCycleBeats) ?? beatClips[0];
+
+  // A new face on each beat (or every other, or half beat) of the picked
+  // clip inside the cycle's run, the faces repeating to fill it.
+  const timeToBeats = () => {
+    if (!cycle || !beatSource) return;
+    const elDur = o.end - o.start;
+    const beats = clipBeatTimes(beatSource.clip, beatSource.asset).map((t) => t - o.start);
+    const edges = tidySwitches(
+      beatSwitches(beats, fontCycleBeatStep, fontCycleAt, fontCycleAt + fontCycleSeconds),
+      elDur
+    );
+    const problem = switchProblem(edges);
+    if (problem) {
+      setBeatNote(
+        problem.kind === "few"
+          ? "No beat of that clip lands inside the cycle."
+          : problem.kind === "many"
+            ? `That is ${problem.faces} face changes; a cycle holds ${FONT_CYCLE_FACES_MAX}. Pick a longer step.`
+            : `One face would hold ${problem.seconds.toFixed(2)}s, past the ${CYCLE_HOLD_MAX}s limit.`
+      );
+      return;
+    }
+    setBeatNote(undefined);
+    useEditor.getState().pushHistory();
+    writeOverlayAnim(o, anim, { fonts: timedFontCycle(cycle.faces, edges, fontCycleRate) }, peers);
+  };
+
   return (
     <>
       {slider("At", fontCycleAt, 0, Math.max(0, dur - 0.05), 0.05, secs, "at")}
       {slider("Duration", fontCycleSeconds, 0.05, Math.max(0.05, dur - fontCycleAt), 0.05, secs, "seconds")}
       {slider("Rate", fontCycleRate, FONT_CYCLE_RATE_MIN, FONT_CYCLE_RATE_MAX, 1, (v) => `${Math.round(v)}/s`, "rate")}
+      <Row
+        label="Beats"
+        info="Time every face to the music: a new face on each beat of the picked clip inside the cycle, the faces repeating in order. Detect beats on the music clip first. Each face's Hold shows the result."
+      >
+        {beatClips.length === 0 ? (
+          <span className="text-[12px] text-muted-foreground">Detect beats on a clip</span>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <Select value={beatSource?.clip.id} onValueChange={(v) => setFontCycleBeats(String(v))} disabled={!cycle}>
+              <SelectTrigger className="h-8 w-24 text-[12px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {beatClips.map(({ clip, asset }) => (
+                  <SelectItem key={clip.id} value={clip.id} className="text-[12px]">
+                    {asset.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={String(fontCycleBeatStep)}
+              onValueChange={(v) => setFontCycleBeatStep(Number(v))}
+              disabled={!cycle}
+            >
+              <SelectTrigger className="h-8 w-16 text-[12px]" aria-label="Beats per face">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CYCLE_BEAT_STEPS.map((step) => (
+                  <SelectItem key={step} value={String(step)} className="text-[12px]">
+                    {step === 0.5 ? "½ beat" : step === 1 ? "1 beat" : `${step} beats`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="secondary" size="sm" disabled={!cycle} onClick={timeToBeats}>
+              Time
+            </Button>
+          </div>
+        )}
+      </Row>
+      {beatNote && <p className="text-[11px] text-muted-foreground">{beatNote}</p>}
     </>
   );
 }

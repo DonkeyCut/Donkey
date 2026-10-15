@@ -142,6 +142,8 @@ const PANEL_NAME: Record<string, string> = {
   profile: "clip-source-color",
   // A caption's own spot is the cue panel's Own position switch.
   follow_track: "setCuePosition",
+  // Switch times are written as each face's hold, the Hold slider per face.
+  font_cycle_switches: "hold",
 };
 
 /** The basic and detail grade sliders draw from the registries the tool's

@@ -123,6 +123,7 @@ import {
   type TextWeight,
 } from "@donkeycut/effects-kit";
 import type { AiPanelToolName } from "@/cut/components/AiPanel.tools";
+import { beatSwitches, clipBeatTimes, switchProblem, tidySwitches, timedFontCycle, validBeatStep } from "./fontCycleTiming";
 import { LOOP_SPEED_MAX, LOOP_SPEED_MIN, type OverlayAnimationToolName } from "@/cut/components/AnimationTiles.tools";
 import type { AudioToolName } from "@/cut/components/AudioPanel.tools";
 import type { CameraCardToolName } from "@/cut/components/CameraCardSection.tools";
@@ -7227,16 +7228,10 @@ function applyFontCycleInput(
   const round = (v: number) => onFrame(Math.round(v * 1e6) / 1e6);
 
   // Switch times (passed, or the beats of the music's clip) give each face
-  // its own hold, the faces repeating in order to fill them. Example: faces
-  // [a, b] over switches 2.5, 3, 4 on a title at 2 → a at 0.5 for 0.5s,
-  // then b for 1s, and the title's own face after 4.
+  // its own hold, the faces repeating in order to fill them.
   const edges = cycleSwitchesOf(s, o, input, at, seconds);
   if (edges) {
-    const timed = edges.slice(1).map((end, i) => ({
-      ...faces[i % faces.length],
-      hold: round(end - edges[i]),
-    }));
-    anim.fonts = { faces: timed, at: round(edges[0]), seconds: round(edges[edges.length - 1] - edges[0]), rate };
+    anim.fonts = timedFontCycle(faces, edges, rate, round);
     return;
   }
   anim.fonts = { faces, at: round(at), seconds: round(seconds), rate };
@@ -7266,29 +7261,16 @@ function cycleSwitchesOf(
 
   // Inside the element, in order; a switch under a face's shortest hold
   // after the one before it merges into it, the run's end kept.
-  const sorted = edges
-    .filter((t) => t >= -1e-6 && t <= dur + 1e-6)
-    .map((t) => Math.round(clamp(t, 0, dur) * 1e6) / 1e6)
-    .sort((a, b) => a - b);
-  edges = [];
-  for (const t of sorted) {
-    if (edges.length > 0 && t - edges[edges.length - 1] < CYCLE_HOLD_MIN) {
-      if (t === sorted[sorted.length - 1] && edges.length > 1) {
-        edges[edges.length - 1] = t;
-      }
-      continue;
-    }
-    edges.push(t);
-  }
-  if (edges.length < 2)
+  edges = tidySwitches(edges, dur);
+  const problem = switchProblem(edges);
+  if (problem?.kind === "few")
     throw new ToolError("A timed font cycle needs at least two switch times inside the title: the first face's start and the last face's end.");
-  if (edges.length - 1 > FONT_CYCLE_FACES_MAX)
+  if (problem?.kind === "many")
     throw new ToolError(
-      `That run changes face ${edges.length - 1} times; one cycle holds ${FONT_CYCLE_FACES_MAX}. Pass font_cycle_beat_step 2 (every other beat), or shorten the run with font_cycle_seconds.`
+      `That run changes face ${problem.faces} times; one cycle holds ${FONT_CYCLE_FACES_MAX}. Pass font_cycle_beat_step 2 (every other beat), or shorten the run with font_cycle_seconds.`
     );
-  const longest = Math.max(...edges.slice(1).map((t, i) => t - edges[i]));
-  if (longest > CYCLE_HOLD_MAX)
-    throw new ToolError(`One face would hold ${round2(longest)}s; a face holds at most ${CYCLE_HOLD_MAX}s. Add a switch inside that gap.`);
+  if (problem?.kind === "long")
+    throw new ToolError(`One face would hold ${round2(problem.seconds)}s; a face holds at most ${CYCLE_HOLD_MAX}s. Add a switch inside that gap.`);
   return edges;
 }
 
@@ -7311,31 +7293,13 @@ function beatSwitchesOf(
     throw new ToolError(`"${asset?.name ?? clipId}" has no beat grid yet. Call detect_beats with clip_id ${clipId} first, then time the cycle to it.`);
 
   // The beats the clip plays, on the element's clock, in play order.
-  const retime = retimeOf(clip);
-  const beats = grid
-    .filter((b) => b >= clip.in && b <= clip.out)
-    .map((b) => clip.start + retime.tAt(b) - elementStart)
-    .sort((a, b) => a - b);
-
-  // Every Nth beat counted from the run's first, or each beat split evenly.
+  const beats = clipBeatTimes(clip, asset).map((t) => t - elementStart);
   const step = isNum(input.font_cycle_beat_step) && input.font_cycle_beat_step > 0 ? input.font_cycle_beat_step : 1;
-  const whole = step >= 1 ? Math.round(step) : 1;
-  const parts = step < 1 ? Math.round(1 / step) : 1;
-  if (Math.abs((step >= 1 ? whole : 1 / parts) - step) > 1e-3)
+  if (!validBeatStep(step))
     throw new ToolError("font_cycle_beat_step is a whole number of beats (1, 2, 4) or a split of one (0.5, 0.25).");
-  const first = beats.findIndex((t) => t >= from - 1e-6);
-  const picked = (first < 0 ? [] : beats.slice(first)).filter((_, i) => i % whole === 0);
-  const points = picked.flatMap((b, i) =>
-    i + 1 < picked.length ? Array.from({ length: parts }, (_, k) => b + ((picked[i + 1] - b) * k) / parts) : [b]
-  );
-
-  // The switches inside the run, closed by the next one or the run's end.
-  const inside = points.filter((t) => t >= from - 1e-6 && t < to - 1e-6);
-  if (inside.length === 0) throw new ToolError("No beat of that clip lands inside the cycle's run.");
-  const after = points.find((t) => t >= to - 1e-6);
-  const spacing = inside.length > 1 ? (inside[inside.length - 1] - inside[0]) / (inside.length - 1) : to - inside[0];
-  const close = after !== undefined ? to : Math.min(to, inside[inside.length - 1] + spacing);
-  return [...inside, close];
+  const switches = beatSwitches(beats, step, from, to);
+  if (switches.length === 0) throw new ToolError("No beat of that clip lands inside the cycle's run.");
+  return switches;
 }
 
 /** A font id the registry knows, or a refusal naming the one it does not. */
