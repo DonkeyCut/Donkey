@@ -6,7 +6,9 @@
  *
  * It is a slot on the element's animation and changes the type itself, so
  * every painter reads the element through `withFontCycle` at the moment it
- * draws, and every sampler cuts its pictures at `fontCycleCuts`.
+ * draws, and every sampler cuts its pictures at `fontCycleCuts`. A face never
+ * reflows the title: it is set on the lines the title breaks into in its own
+ * type, smaller where one of them would not fit (`settleCycleFace`).
  */
 
 import type { Overlay, TextOverlay } from "./types";
@@ -90,7 +92,8 @@ export function cycleFaceAt(c: OverlayFontCycle, tLocal: number): CycleFace | nu
 /** The element as it is set `tLocal` seconds in: the cycle's face while it
  * runs, its own outside it. Hands back the same object when nothing changes,
  * so a caller can memoize on identity. The face it hands back carries no
- * cycle, so resolving it again changes nothing. */
+ * cycle, so resolving it again changes nothing, and carries the title's own
+ * type in `cycleOwn`, which the painter's measure settles it against. */
 export function withFontCycle<T extends Overlay>(o: T, tLocal: number): T {
   const c = overlayFontCycle(o);
   if (!c) return o;
@@ -106,6 +109,7 @@ export function withFontCycle<T extends Overlay>(o: T, tLocal: number): T {
     letterSpacing: face.tracking ?? t.letterSpacing,
     italic: face.italic ?? t.italic,
     anim: { ...o.anim, fonts: undefined },
+    cycleOwn: { font: t.font, weight: t.weight, italic: t.italic, size: t.size, letterSpacing: t.letterSpacing },
   } as T;
 }
 

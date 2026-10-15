@@ -119,6 +119,11 @@ export interface TextOverlay extends OverlayBase {
    * lines), each resolved to the color, opacity and pose it draws at. Stamped
    * by the word engine at paint time; absent = the line draws as one piece. */
   wordDraw?: WordDraw[];
+  /** The title's own type while its font cycle shows another face. Stamped
+   * by `withFontCycle` on the face it hands back, so every painter sets the
+   * face on the lines the title breaks into in its own type
+   * (`settleCycleFace`); absent on a stored title. */
+  cycleOwn?: Pick<TextOverlay, "font" | "weight" | "italic" | "size" | "letterSpacing">;
 }
 
 export type ShapeKind =

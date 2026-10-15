@@ -3,6 +3,7 @@ import { runAiTool } from "./aiTools";
 import { useEditor } from "./store";
 import { emptySubtitles, isTextOverlay } from "./types";
 import { fontCycleCuts } from "@donkeycut/effects-kit";
+import { cycleFaceAt, fitTextToFrame } from "./textFit";
 
 /** A title's font cycle and its heavy weights through the assistant's tools. */
 
@@ -216,5 +217,18 @@ describe("set_overlay_animation font cycle timed to switches and beats", () => {
     song(Array.from({ length: 60 }, (_, i) => i * 0.25));
     const o = await titleAt(0, 14);
     expect(await failure({ id: o.id, font_cycle: [{ font: "impact" }], font_cycle_beats: "a1" })).toContain("font_cycle_beat_step");
+  });
+});
+
+describe("the preview sets a face on the title's own lines", () => {
+  test("a face wider than the room shrinks rather than breaking the line", async () => {
+    const own = { ...(await aTitle()), text: "TRAVEL DESTINATION", size: 60, letterSpacing: 0, x: 0.5 };
+    const o = { ...own, anim: { fonts: { faces: [{ font: own.font, scale: 1.6 }], at: 0, seconds: 1, rate: 10 } } };
+    expect(fitTextToFrame(own, 1080).split("\n").length).toBe(1);
+    const face = cycleFaceAt(o, 0.5, 1080);
+    expect(isTextOverlay(face) && face.size).toBeLessThan(60 * 1.6);
+    expect(isTextOverlay(face) && fitTextToFrame(face, 1080)).toBe("TRAVEL DESTINATION");
+    // Outside the run the title is its own, untouched.
+    expect(cycleFaceAt(o, 1.5, 1080)).toBe(o);
   });
 });

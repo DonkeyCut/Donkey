@@ -637,13 +637,14 @@ function capToTrack(track: InputVideoTrack, size?: FrameSize): FrameSize | undef
 export async function* framesAt(
   src: string | Blob,
   times: number[],
-  size?: FrameSize
+  size?: FrameSize,
+  opts?: FrameSinkOptions
 ): AsyncGenerator<WrappedCanvas | null> {
   const input = openMedia(src);
   try {
     const track = await videoTrackOf(input);
     if (!track) throw new UnreadableMediaError("This file has no readable video.");
-    yield* frameSink(track, size).canvasesAtTimestamps(times);
+    yield* frameSink(track, size, opts).canvasesAtTimestamps(times);
   } finally {
     input.dispose();
   }

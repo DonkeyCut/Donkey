@@ -1,8 +1,8 @@
 "use client";
 
-import { textWrapRoom, wrapTextToRoom, LINE_HEIGHT, PLATE_PAD_X, PLATE_PAD_Y } from "@donkeycut/effects-kit";
+import { settleCycleFace, textWrapRoom, withFontCycle, wrapTextToRoom, LINE_HEIGHT, PLATE_PAD_X, PLATE_PAD_Y } from "@donkeycut/effects-kit";
 import { createRasterCanvas } from "./raster";
-import { fontStack, type TextOverlay } from "./types";
+import { fontStack, type Overlay, type TextOverlay } from "./types";
 
 /**
  * Keeping written words inside the frame.
@@ -104,6 +104,17 @@ export function fitTextToFrame(o: TextOverlay, frameW: number): string {
   const width = (line: string) => measureLine(line, font, size, o.letterSpacing ?? 0);
   if (o.text.split("\n").every((line) => width(line) <= room)) return o.text;
   return wrapTextToRoom(o.text, room, width);
+}
+
+/** The element as it is set `tLocal` seconds in, a font cycle's face set on
+ * the title's own lines the way the kit's painters set it (`settleCycleFace`),
+ * so the preview never reflows a title the export keeps on one line. */
+export function cycleFaceAt<T extends Overlay>(o: T, tLocal: number, frameW: number): T {
+  const el = withFontCycle(o, tLocal);
+  if (el === o || (el.kind ?? "text") !== "text") return el;
+  return settleCycleFace(el, textWrapRoom(el as TextOverlay, frameW), (type, line) =>
+    measureLine(line, textFontOf(type, type.size), type.size, type.letterSpacing ?? 0)
+  );
 }
 
 /** Resting box in design pixels, measured once for resize gestures. */

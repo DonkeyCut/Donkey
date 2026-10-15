@@ -231,7 +231,7 @@ import { isStylePresetTemplate } from "./stylePresets";
 import { findLibraryAsset, listLibrary } from "./libraryList";
 import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
 import { type RawFrame, type ReadGrade, rawFrameAt, sampleClipRawFrame, sourceProfileOf, toBaseRendering, toGradedRendering } from "./baseFrame";
-import { applyOverlayPatchSettled, assetClipUses, assetIdsOnAnyTimeline, clipLen, footprints, nextFreeStart, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
+import { applyOverlayPatchSettled, assetClipUses, assetIdsOnAnyTimeline, clipLen, footprints, nextFreeStart, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor, CHAT_TURN_LABEL } from "./store";
 import { playheadAt } from "./playhead";
 import { mixSpecFor, renderProjectFrame } from "./exportRender";
 import { renderMix } from "./audioMix";
@@ -1497,9 +1497,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...pictureReport(area),
           source: sourceRef(asset),
           note:
-            (sweep.coveredTo !== undefined
-              ? `The sweep ran out of time at ${sweep.coveredTo}s; sweep again from there for the rest. `
-              : "") + SWEEP_NOTE,
+            (sweep.stopped
+              ? `The source stopped decoding, so the sweep ends at ${sweep.coveredTo}s: ${sweep.stopped} Sweep again from a little past it for the rest. `
+              : sweep.coveredTo !== undefined
+                ? `The sweep ran out of time at ${sweep.coveredTo}s; sweep again from there for the rest. `
+                : "") +
+            (sweep.lost
+              ? `Source frames at ${sweep.lost.map((l) => `${l.source}s`).join(", ")} did not decode (${sweep.lost[0].error}) and are left out of the scores. `
+              : "") +
+            SWEEP_NOTE,
         };
       }
 
@@ -5783,13 +5789,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   undo: (s) => {
-      if (!s.undo()) throw new ToolError("Nothing to undo.");
-      return { ok: true };
+      const before = useEditor.getState();
+      const step = s.undoStep();
+      if (!step) throw new ToolError("Nothing to undo.");
+      return { reverted: stepName(step.label), changes: historyChanges(before, useEditor.getState()) };
   },
 
   redo: (s) => {
-      if (!s.redo()) throw new ToolError("Nothing to redo.");
-      return { ok: true };
+      const before = useEditor.getState();
+      const step = s.redoStep();
+      if (!step) throw new ToolError("Nothing to redo.");
+      return { restored: stepName(step.label), changes: historyChanges(before, useEditor.getState()) };
   },
 
   open_export: (s) => {
@@ -6305,6 +6315,51 @@ function droppedByConnection(err: unknown): boolean {
 }
 
 async function dispatchTool(s: Editor, name: string, raw: Record<string, unknown>, operation?: ProjectOperation): Promise<unknown> {
+  // Every call is its own undo step, named for the tool, however many writes
+  // it makes: inside a chat turn's batch it is a step the chat's undo takes
+  // back alone; outside one it is an ordinary history entry. Undo and redo
+  // step the history themselves.
+  if (name === "undo" || name === "redo") return dispatchRun(s, name, raw, operation);
+  s.beginHistoryBatch(name);
+  try {
+    return await dispatchRun(s, name, raw, operation);
+  } finally {
+    s.endHistoryBatch();
+  }
+}
+
+/** What an undo or redo moved across, for its result: the tool call the step
+ * was, or what kind of edit it was when no tool made it. */
+function stepName(label: string | null): string {
+  if (label === CHAT_TURN_LABEL) return "an earlier chat turn, all of its edits at once";
+  return label ?? "an edit made in the editor";
+}
+
+/** How a history step changed the timeline, by kind: what came, went or
+ * changed, so an undo's result says what it took back. */
+function historyChanges(before: Editor, after: Editor): string {
+  const kinds: [string, { id: string }[], { id: string }[]][] = [
+    ["video clip", before.clips, after.clips],
+    ["sound clip", before.audioClips, after.audioClips],
+    ["element", before.overlays, after.overlays],
+    ["caption", before.subtitles.cues, after.subtitles.cues],
+    ["transition", before.transitions, after.transitions],
+  ];
+  const parts: string[] = [];
+  const count = (n: number, what: string, how: string) => {
+    if (n > 0) parts.push(`${n} ${what}${n === 1 ? "" : "s"} ${how}`);
+  };
+  for (const [what, was, now] of kinds) {
+    const old = new Map(was.map((x) => [x.id, x]));
+    const ids = new Set(now.map((x) => x.id));
+    count(was.filter((x) => !ids.has(x.id)).length, what, "removed");
+    count(now.filter((x) => !old.has(x.id)).length, what, "back");
+    count(now.filter((x) => old.has(x.id) && JSON.stringify(old.get(x.id)) !== JSON.stringify(x)).length, what, "changed");
+  }
+  return parts.length > 0 ? parts.join(", ") : "no timeline item changed";
+}
+
+async function dispatchRun(s: Editor, name: string, raw: Record<string, unknown>, operation?: ProjectOperation): Promise<unknown> {
   const input = snapSeconds(raw) as Record<string, unknown>;
   // "update_title" stays as an alias so older threads keep working.
   const key = name === "update_title" ? "update_overlay" : name;
@@ -6536,8 +6591,8 @@ function textSequenceLines(
     const lane = isNum(input.from_captions) ? Math.max(0, Math.round(input.from_captions)) : 0;
     return laneCues(s.subtitles, lane).map((c) => ({
       text: c.text,
-      start: roundT(c.start),
-      end: roundT(c.end),
+      start: c.start,
+      end: Math.max(c.end, c.start + CLIP_MIN_SECONDS),
     }));
   }
   const raw = Array.isArray(input.lines) ? input.lines : [];
@@ -6565,17 +6620,18 @@ function textSequenceLines(
     .filter((l) => l.text.length > 0);
   // A line with no times follows the one before it; the first starts at the
   // playhead. Every line gets a real span, so nothing lands on top of
-  // anything.
+  // anything. Times stay on the frames they were given (the input snap put
+  // them there): a label per shot holds that shot's frames, one or more.
   let cursor = playheadAt();
   return lines.map((l, i) => {
     const start = Number.isNaN(l.start) ? cursor : l.start;
     const nextStart = lines[i + 1]?.start ?? NaN;
     const fallbackEnd = Number.isNaN(nextStart) ? start + 2 : nextStart;
-    // Every line lands at least 0.2s long, whichever way its end was
+    // Every line lands at least one frame long, whichever way its end was
     // decided — a following line that starts earlier cannot invert it.
-    const end = Math.max(Number.isNaN(l.end) ? fallbackEnd : l.end, start + 0.2);
+    const end = Math.max(Number.isNaN(l.end) ? fallbackEnd : l.end, start + CLIP_MIN_SECONDS);
     cursor = end;
-    return { ...l, start: roundT(start), end: roundT(end) } as ComposeLine;
+    return { ...l, start, end } as ComposeLine;
   });
 }
 

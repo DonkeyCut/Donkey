@@ -57,9 +57,19 @@ let sourceLevel: (t: number) => number = () => 0;
 /** The source's own frame shape. */
 let sourceShape = { w: 90, h: 160 };
 
-async function* framesAt(_src: string | Blob, times: number[], size?: unknown) {
+/** Whether the decoder dies on the frame at a second: the way Chrome's
+ * decoder fails ("Decoding error."), on a hardware read or on any. */
+let dies: (t: number, software: boolean) => boolean = () => false;
+/** Every read's decoder options, in order. */
+const readOpts: unknown[] = [];
+
+async function* framesAt(_src: string | Blob, times: number[], size?: unknown, opts?: { software?: boolean }) {
   reads.push({ times: [...times], size });
-  for (const t of times) yield { canvas: stubCanvas(sourceShape.w, sourceShape.h, sourceLevel(t)), timestamp: t, duration: 0 } as never;
+  readOpts.push(opts);
+  for (const t of times) {
+    if (dies(t, !!opts?.software)) throw new DOMException("Decoding error.", "EncodingError");
+    yield { canvas: stubCanvas(sourceShape.w, sourceShape.h, sourceLevel(t)), timestamp: t, duration: 0 } as never;
+  }
 }
 
 await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, { framesAt });
@@ -68,6 +78,8 @@ const { runAiTool } = await import("./aiTools");
 
 beforeEach(() => {
   reads.length = 0;
+  readOpts.length = 0;
+  dies = () => false;
   sourceLevel = () => 0;
   sourceShape = { w: 90, h: 160 };
   useEditor.setState({
@@ -339,4 +351,49 @@ test("a sweep with nothing inside the source is turned away", async () => {
     runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 2, offset: 40 })
   );
   expect(error).toContain("offset");
+});
+
+type Lost = { lost?: { source: number; error: string }[]; stopped?: string; note: string };
+
+test("a sweep whose decoder dies mid-read opens a fresh one where it died and finishes", async () => {
+  dies = (t, software) => t === 1 && !software;
+  const out = (await runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 2, step: 0.5 })) as Sweep & Lost;
+  expect(out.sampled).toBe(4);
+  expect(out.coveredTo).toBeUndefined();
+  expect(out.lost).toBeUndefined();
+  // The second read picks up at the frame that failed, on software decoding.
+  expect(reads.map((r) => r.times)).toEqual([[0, 0.5, 1, 1.5], [1, 1.5]]);
+  expect(readOpts[1]).toMatchObject({ software: true });
+});
+
+test("a frame no fresh decoder reads is left out of the sweep and named, and the rest is scored", async () => {
+  dies = (t) => t === 1;
+  const out = (await runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 2, step: 0.5 })) as Sweep & Lost;
+  expect(out.sampled).toBe(3);
+  expect(out.lost).toEqual([{ source: 1, error: "Decoding error." }]);
+  expect(out.note).toContain("1s");
+});
+
+test("a source that stops decoding ends the sweep where it stopped, saying where and why", async () => {
+  dies = (t) => t >= 1;
+  const out = (await runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 3, step: 0.5 })) as Sweep & Lost;
+  expect(out.sampled).toBe(2);
+  expect(out.coveredTo).toBe(1);
+  expect(out.stopped).toContain("Decoding error.");
+  expect(out.stopped).toContain("1s");
+  expect(out.note).toContain("Decoding error.");
+});
+
+test("a picture call whose decoder dies reads on with a fresh one", async () => {
+  dies = (t, software) => t > 2 && !software;
+  const out = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1, 3] })) as { checked: unknown[] };
+  expect(out.checked).toHaveLength(2);
+  expect(readOpts.at(-1)).toMatchObject({ software: true });
+});
+
+test("a moment no decoder reads names the second and the decoder's own words", async () => {
+  dies = (t) => t === 3;
+  const error = await message(runAiTool("compare_to_source", { asset_id: "ref", times: [1, 3] }));
+  expect(error).toContain("3s");
+  expect(error).toContain("Decoding error.");
 });

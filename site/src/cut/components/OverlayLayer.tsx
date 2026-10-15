@@ -20,7 +20,7 @@ import {
 } from "@/cut/lib/subtitles";
 import { dealsMarks, doodleBeat, doodleSeed, isInkless, paintDoodle, paintZapInto, SPLIT_CYAN, SPLIT_RED, zapSeed, type TextTexture } from "@donkeycut/effects-kit";
 import { erodeMask, textureMask } from "./textureCss";
-import { countText, drawStreak, elementAtMoment, fontCycleVariants, paintElementCrop, streakTaps, textCssFont, typedChars, withFontCycle } from "@donkeycut/effects-kit";
+import { countText, drawStreak, elementAtMoment, fontCycleVariants, paintElementCrop, streakTaps, textCssFont, typedChars } from "@donkeycut/effects-kit";
 import { holdMemory } from "@/cut/lib/memoryBudget";
 import { stripeGeometry, stripesSolid } from "@donkeycut/effects-kit";
 import { elementCameraAt } from "@/cut/lib/groupCamera";
@@ -38,7 +38,7 @@ import {
   SHADOW,
   wordDrawCss,
 } from "@/cut/lib/textRender";
-import { fitTextToFrame, textBoxSize } from "@/cut/lib/textFit";
+import { cycleFaceAt, fitTextToFrame, textBoxSize } from "@/cut/lib/textFit";
 import {
   behindSubjectOverlay,
   clampKeyPos,
@@ -362,7 +362,7 @@ export function OverlayLayer({
             // A font cycle sets the title in another face at this moment.
             // A selected title holds its own face while paused, since that is
             // the face its grips and the inspector edit.
-            overlay={inRange && (playing || !selected) ? withFontCycle(o, t - o.start) : o}
+            overlay={inRange && (playing || !selected) ? cycleFaceAt(o, t - o.start, frame.w) : o}
             // The skimmer paints the bare frame: the item still renders, its
             // selection chrome (outline, resize handle) does not.
             selected={selected && !scrubbing}
@@ -415,7 +415,7 @@ export function OverlayLayer({
           return (
             <OverlayItem
               key={o.id}
-              overlay={withFontCycle(o, t - o.start)}
+              overlay={cycleFaceAt(o, t - o.start, frame.w)}
               selected={false}
               armed={false}
               grouped={false}

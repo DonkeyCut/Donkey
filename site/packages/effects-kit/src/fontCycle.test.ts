@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Canvas } from "skia-canvas";
+import { Canvas, loadImage } from "skia-canvas";
 import { cutAtFaces, cycleFaceAt, cycleFaceTag, fontCycleCuts, fontCycleVariants, withFontCycle } from "./fontCycle";
-import { planAnimatedLayers, renderOverlayFrames, type RenderEnv } from "./render";
+import { planAnimatedLayers, renderOverlayFrames, settleCycleFace, textRoom, type RenderEnv } from "./render";
 import type { TextOverlay } from "./types";
 
 const title = (fonts?: NonNullable<TextOverlay["anim"]>["fonts"]): TextOverlay => ({
@@ -105,5 +105,69 @@ describe("the font cycle", () => {
     let t = o.start;
     const edges = set.entries.map((e) => +(t += e.duration).toFixed(3));
     for (const c of cuts) expect(edges.includes(c)).toBe(true);
+  });
+});
+
+describe("a face keeps the title's own lines", () => {
+  // A one-line title whose cycle shows a wide face at 1.6×: in that face the
+  // line is wider than the room the title wraps in, and it must stay one line,
+  // set smaller, rather than break in two over whatever sits above it.
+  const wide = { faces: [{ font: "wide", scale: 1.6 }], at: 0, seconds: 1, rate: 10 };
+  const travel = (): TextOverlay => ({ ...title(wide), text: "TRAVEL DESTINATION", size: 60, letterSpacing: 0, start: 0, end: 2 });
+  /** Advance per character: the title's own face 0.6 em, the wide one 0.9 em. */
+  const measure = (type: Pick<TextOverlay, "font" | "size" | "letterSpacing">, line: string) =>
+    line.length * type.size * ((type.font === "wide" ? 0.9 : 0.6) + (type.letterSpacing ?? 0));
+  const room = textRoom(0.5, 1080);
+
+  test("a face too wide for the room shrinks to it and keeps the line whole", () => {
+    const own = travel();
+    expect(measure(own, own.text)).toBeLessThan(room);
+    const face = settleCycleFace(withFontCycle(own, 0.5), room, measure);
+    expect(face.font).toBe("wide");
+    expect(face.text).toBe("TRAVEL DESTINATION");
+    expect(measure(face, face.text)).toBeLessThanOrEqual(room);
+    expect(face.size).toBeLessThan(60 * 1.6);
+  });
+
+  test("a face that fits keeps its size, and the title's own breaks stay where they were", () => {
+    const own = { ...travel(), text: "WELCOME TO\nTRAVEL DESTINATION", size: 30 };
+    const face = settleCycleFace(withFontCycle(own, 0.5), room, measure);
+    expect(face.text).toBe("WELCOME TO\nTRAVEL DESTINATION");
+    expect(face.size).toBe(48);
+    // A title broken by its own room keeps those breaks in a narrower face too.
+    const long = { ...travel(), text: "A VERY LONG TITLE THAT BREAKS IN ITS OWN FACE", size: 60 };
+    const ownLines = settleCycleFace({ ...long, cycleOwn: { font: long.font, weight: long.weight, size: long.size, letterSpacing: 0 } }, room, measure).text;
+    const narrow = settleCycleFace(withFontCycle({ ...long, anim: { fonts: { ...wide, faces: [{ font: "narrow", scale: 0.6 }] } } }, 0.5), room, measure);
+    expect(narrow.text).toBe(ownLines);
+  });
+
+  test("the canvas and ffmpeg exports draw the wide face on one line", async () => {
+    const env: RenderEnv = {
+      fontStack: () => "Arial",
+      createCanvas: (w, h) => new Canvas(w, h) as unknown as HTMLCanvasElement,
+      canvasToPngBlob: async (c) => new Blob([new Uint8Array(await (c as unknown as Canvas).toBuffer("png"))]),
+    };
+    const o: TextOverlay = { ...travel(), font: "own", anim: { fonts: { faces: [{ font: "own", scale: 1.6 }], at: 0, seconds: 1, rate: 10 } } };
+    const set = await renderOverlayFrames(o, 270, 480, 30, env);
+    // The bands of rows with ink in a picture: one per line of type.
+    const bands = async (blob: Blob) => {
+      const img = await loadImage(Buffer.from(await blob.arrayBuffer()));
+      const c = new Canvas(img.width, img.height);
+      const ctx = c.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, img.width, img.height).data;
+      let n = 0;
+      let inked = false;
+      for (let y = 0; y < img.height; y++) {
+        let row = false;
+        for (let x = 0; x < img.width && !row; x++) row = data[(y * img.width + x) * 4 + 3] > 40;
+        if (row && !inked) n++;
+        inked = row;
+      }
+      return n;
+    };
+    // The first picture is the cycle's face, the last the title's own.
+    expect(await bands(set.images[set.entries[0].image])).toBe(1);
+    expect(await bands(set.images[set.entries[set.entries.length - 1].image])).toBe(1);
   });
 });

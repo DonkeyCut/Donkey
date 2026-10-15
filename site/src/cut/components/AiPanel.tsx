@@ -130,7 +130,7 @@ import { formatDuration, useGenScene } from "@/cut/lib/genScene";
 import { lightboxItemFromRef, useLightbox } from "@/cut/lib/lightbox";
 import { refsFromDroppedFiles } from "@/cut/lib/refMedia";
 import { revealRef } from "@/cut/lib/refReveal";
-import { useEditor } from "@/cut/lib/store";
+import { CHAT_TURN_LABEL, useEditor } from "@/cut/lib/store";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { cn } from "@/lib/utils";
 import { cardIconButton } from "@/cut/components/iconButton";
@@ -1459,9 +1459,11 @@ function ChatSession({
 
   // Coalesce every edit the assistant makes in one turn into a single undo
   // step, so ⌘Z reverts the whole turn rather than one tool call at a time.
+  // Each tool call is a step inside it, so the chat's own undo mid-turn takes
+  // back its last call alone.
   useEffect(() => {
     if (!busy) return;
-    useEditor.getState().beginHistoryBatch();
+    useEditor.getState().beginHistoryBatch(CHAT_TURN_LABEL);
     return () => useEditor.getState().endHistoryBatch();
   }, [busy]);
 

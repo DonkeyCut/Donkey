@@ -188,6 +188,7 @@ export const AI_PANEL_TOOLS = [
       "Check the cut against the thing it was built from, in numbers and in pictures. Every frame is scored by `diff`: the mean difference per pixel between your frame and the source's, 0 (the same) to 255, read at one small size so a score means the same thing in every call; under " +
       `${SWEEP_TARGET} reads as the same picture. ` +
       "mode sweep scores every step of the cut (or from/to) with no pictures and returns the median, p95 and max with the worst stretches, each with its peak frame and a 4×4 grid of where in the frame it differs. " +
+      "A decoder that fails mid-read is replaced and the read goes on: `lost` names source frames no decoder read, and a source that stops decoding ends the sweep at `coveredTo` with `stopped` saying where and why. " +
       `mode moments (the default) takes up to ${MAX_COMPARE} \`times\` and hands back each as the source's frame and yours side by side, with its score and grid. ` +
       "Either mode says when a frame matches the source better a few frames away: `shift` is that distance, and a positive one means move what is there later by that much. " +
       "This is how a replica is verified. The loop: sweep, look at the worst stretches' peaks in moments mode, fix what differs, sweep again — until the median is under " +
