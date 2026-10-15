@@ -195,6 +195,10 @@ export interface ComposedLine {
 
 const clampPos = (v: number) => Math.min(0.9, Math.max(0.1, v));
 const round2 = (n: number) => Math.round(n * 100) / 100;
+/** A line held for less than this cuts in and out: an entrance or exit ramp
+ * starts at nothing, so on a label that runs a frame or a few (one per shot
+ * of a fast cut) the ramp would be all there is and the words never show. */
+export const TEXT_RAMP_MIN_SECONDS = 0.2;
 const step = <T,>(arr: readonly T[], n: number): T => arr[((n % arr.length) + arr.length) % arr.length];
 
 /** Comparison form of a line: letters and digits only. Two lines that read
@@ -349,9 +353,10 @@ export function composeTextRun(
     const moveId =
       line.move ??
       (emphasis === "hero" ? ens?.heroMove ?? step(moves, i + sec) : step(moves, i + sec));
+    const ramps = line.end - line.start >= TEXT_RAMP_MIN_SECONDS;
     const anim: OverlayAnim = {
-      in: { style: inStyle, seconds: round2(inSeconds) },
-      ...(look.motion.out ? { out: look.motion.out } : {}),
+      ...(ramps ? { in: { style: inStyle, seconds: round2(inSeconds) } } : {}),
+      ...(ramps && look.motion.out ? { out: look.motion.out } : {}),
       ...(look.motion.loop
         ? { loop: { style: look.motion.loop.style, speed: look.motion.loop.speed ?? 1 } }
         : {}),

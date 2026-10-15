@@ -166,6 +166,36 @@ describe("add_text_sequence", () => {
     for (const w of overlays().filter(isTextOverlay)) expect(w.end).toBeGreaterThan(w.start);
   });
 
+  test("one label per shot keeps each shot's own frames, however short", async () => {
+    // Shots of one to five frames at 30 fps, one label each.
+    const shots = [
+      [0, 1 / 30],
+      [1 / 30, 3 / 30],
+      [3 / 30, 4 / 30],
+      [4 / 30, 9 / 30],
+      [9 / 30, 10 / 30],
+    ];
+    await runAiTool("add_text_sequence", {
+      look: "serif-mood",
+      lines: shots.map(([start, end], i) => ({ text: `SHOT ${i + 1}`, start: Number(start.toFixed(4)), end: Number(end.toFixed(4)) })),
+    });
+    const words = overlays()
+      .filter(isTextOverlay)
+      .sort((a, b) => a.start - b.start);
+    expect(words.length).toBe(shots.length);
+    words.forEach((w, i) => {
+      expect(w.start).toBeCloseTo(shots[i][0], 9);
+      expect(w.end).toBeCloseTo(shots[i][1], 9);
+    });
+  });
+
+  test("a line runs one frame at the least", async () => {
+    await runAiTool("add_text_sequence", { look: "serif-mood", lines: [{ text: "BLINK", start: 1, end: 1 }] });
+    const [w] = overlays().filter(isTextOverlay);
+    expect(w.start).toBe(1);
+    expect(w.end).toBeCloseTo(61 / 60, 9);
+  });
+
   test("a run with nothing to place is refused", async () => {
     let message = "";
     try {
@@ -330,9 +360,12 @@ describe("composing a run", () => {
       TEXT_LOOKS["over-footage"],
       { variation: "bold", frame: { w: 1920, h: 1080 }, cards: [] }
     );
-    const widest = composed[0].text.split("\n").reduce((n, l) => Math.max(n, l.length), 0);
+    const c = composed[0];
+    // Measured the way the run measures it, so the check holds whether the
+    // process has a canvas to ask (a headless raster installed) or not.
+    const widest = Math.max(...c.text.split("\n").map((l) => measureLine(l, textFontOf(c, c.size), c.size)));
     // Centered at x 0.18 there is only 36% of the frame to spread into.
-    expect(widest * composed[0].size * 0.5).toBeLessThanOrEqual(1920 * 0.4);
+    expect(widest).toBeLessThanOrEqual(1920 * 0.4);
   });
 
   test("a repeated hook steps up rather than repeating flat", async () => {

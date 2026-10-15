@@ -6585,8 +6585,8 @@ function textSequenceLines(
     const lane = isNum(input.from_captions) ? Math.max(0, Math.round(input.from_captions)) : 0;
     return laneCues(s.subtitles, lane).map((c) => ({
       text: c.text,
-      start: roundT(c.start),
-      end: roundT(c.end),
+      start: c.start,
+      end: Math.max(c.end, c.start + CLIP_MIN_SECONDS),
     }));
   }
   const raw = Array.isArray(input.lines) ? input.lines : [];
@@ -6614,17 +6614,18 @@ function textSequenceLines(
     .filter((l) => l.text.length > 0);
   // A line with no times follows the one before it; the first starts at the
   // playhead. Every line gets a real span, so nothing lands on top of
-  // anything.
+  // anything. Times stay on the frames they were given (the input snap put
+  // them there): a label per shot holds that shot's frames, one or more.
   let cursor = playheadAt();
   return lines.map((l, i) => {
     const start = Number.isNaN(l.start) ? cursor : l.start;
     const nextStart = lines[i + 1]?.start ?? NaN;
     const fallbackEnd = Number.isNaN(nextStart) ? start + 2 : nextStart;
-    // Every line lands at least 0.2s long, whichever way its end was
+    // Every line lands at least one frame long, whichever way its end was
     // decided — a following line that starts earlier cannot invert it.
-    const end = Math.max(Number.isNaN(l.end) ? fallbackEnd : l.end, start + 0.2);
+    const end = Math.max(Number.isNaN(l.end) ? fallbackEnd : l.end, start + CLIP_MIN_SECONDS);
     cursor = end;
-    return { ...l, start: roundT(start), end: roundT(end) } as ComposeLine;
+    return { ...l, start, end } as ComposeLine;
   });
 }
 
