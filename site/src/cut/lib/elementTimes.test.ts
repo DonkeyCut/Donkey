@@ -40,7 +40,7 @@ test("a card shorter than 0.2 s retimes against its neighbour without sliding", 
   const out = (await runAiTool("update_overlay", { id: a.id, start: 0.316667, end: 0.4 })) as { start: number; end: number };
   expect([out.start, out.end]).toEqual([0.317, 0.4]);
   const after = useEditor.getState().overlays.find((o) => o.id === b.id)!;
-  expect([after.start, after.end]).toEqual([0.4, 0.567]);
+  expect([after.start, after.end]).toEqual([24 / 60, 34 / 60]);
 });
 
 test("key times read back to the millisecond", async () => {
@@ -70,16 +70,19 @@ test("an undo inside a chat turn steps back one edit at a time, never into the t
   s().endHistoryBatch();
 });
 
-test("a time written to the microsecond lands on its frame", async () => {
+test("a time written to the microsecond or the millisecond lands on its frame", async () => {
   // 1.016667 is 61/60 to six places, but sits a hair past frame 61, so that
   // frame would still show what came before.
   const { id } = (await runAiTool("add_shape", { shape: "rect", start: 1.016667, end: 1.233333, lane: 1 })) as { id: string };
   const o = () => useEditor.getState().overlays.find((x) => x.id === id)!;
   expect(o().start).toBe(61 / 60);
   expect(o().end).toBe(74 / 60);
-  // A time meant to the millisecond stays as written.
-  await runAiTool("update_overlay", { id, start: 1.017, end: 1.234 });
-  expect([o().start, o().end]).toEqual([1.017, 1.234]);
+  // So does one written to the millisecond, the way the tools report it;
+  // a time more than half a millisecond off every frame stays as written.
+  await runAiTool("update_overlay", { id, start: 1.017, end: 1.233 });
+  expect([o().start, o().end]).toEqual([61 / 60, 74 / 60]);
+  await runAiTool("update_overlay", { id, start: 1.0177, end: 1.2342 });
+  expect([o().start, o().end]).toEqual([1.0177, 1.2342]);
   const { id: title } = (await runAiTool("add_title", { text: "GO", start: 2, end: 3, lane: 2 })) as { id: string };
   await runAiTool("set_overlay_animation", { id: title, font_cycle: [{ font: "impact", hold: 0.216667 }, { font: "serif" }], font_cycle_at: 0.083333, font_cycle_seconds: 0.5 });
   const fonts = (useEditor.getState().overlays.find((x) => x.id === title) as { anim?: { fonts?: { at: number; faces: { hold?: number }[] } } }).anim?.fonts;

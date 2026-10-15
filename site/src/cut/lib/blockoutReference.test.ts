@@ -176,3 +176,37 @@ test("shorthand is a colour too", async () => {
     color: "#ff5500",
   });
 });
+
+test("a shot one or two frames long goes down as a block, a span and a trim", async () => {
+  // 60 fps: one frame is 1/60 s, two are 1/30 s — the flash cuts of a montage.
+  const out = (await runAiTool("add_clip", { blocks: [{ seconds: 1 / 60 }, { seconds: 2 / 60 }, { seconds: 1 }] })) as {
+    placed: { seconds: number }[];
+  };
+  expect(out.placed.map((p) => p.seconds)).toEqual([0.017, 0.033, 1]);
+  useEditor.setState({ clips: [] });
+  const spans = (await runAiTool("add_clip", { asset_id: "ref", spans: [{ from: 1, to: 1 + 2 / 60 }, { from: 2, to: 3 }] })) as {
+    clips: { len: number }[];
+  };
+  expect(spans.clips.map((c) => c.len)).toEqual([0.033, 1]);
+  const id = useEditor.getState().clips[1]!.id;
+  await runAiTool("trim_clip", { clipId: id, in: 2, out: 2 + 1 / 60 });
+  const c = useEditor.getState().clips.find((x) => x.id === id)!;
+  expect(c.out - c.in).toBeCloseTo(1 / 60, 9);
+});
+
+test("a block under one frame is refused with what to do, and a long list says how to split", async () => {
+  const short = await runAiTool("add_clip", { blocks: [{ seconds: 1 }, { seconds: 0.005 }] }).then(
+    () => "",
+    (e: Error) => e.message
+  );
+  expect(short).toContain("Block 2");
+  expect(short).toContain("one frame");
+  const { BLOCKOUT_MAX } = await import("./blockSource");
+  const many = await runAiTool("add_clip", { blocks: Array.from({ length: BLOCKOUT_MAX + 3 }, () => ({ seconds: 0.5 })) }).then(
+    () => "",
+    (e: Error) => e.message
+  );
+  expect(many).toContain(`first ${BLOCKOUT_MAX}`);
+  expect(many).toContain("other 3");
+  expect(useEditor.getState().clips).toHaveLength(0);
+});

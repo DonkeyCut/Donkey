@@ -13,6 +13,7 @@ const READ_ONLY = new Set([
   "request_tools",
   "capture_frame",
   "compare_to_source",
+  "find_picture",
   "detect_cuts",
   "sample_color",
   "track_element",

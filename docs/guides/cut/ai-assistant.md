@@ -131,7 +131,7 @@ A thread saves one session slot per provider, so switching models mid-thread kee
 | Inline media per model call | 16MB, trimmed oldest-first |
 | Browser tool execution | 120s |
 | One watch-video call | 600s of source, 150 decoded candidates, a 90s decode budget, and 36/16/6 kept frames by detail; the result says where coverage stopped |
-| One blockout call | 40 shots, each 0.2-600s |
+| One blockout call | 160 shots, each 1/60-600s |
 | Snapshot caps | 60 media items, 60 cues |
 | One queued turn job | 1MB of messages, one live turn per project |
 | Saved threads per project | 30 |

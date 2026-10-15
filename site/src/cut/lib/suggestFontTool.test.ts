@@ -107,3 +107,19 @@ test("a region with no type, a sound, and missing words are refused", async () =
   expect(await message(runAiTool("suggest_font", { asset_id: "ref", t: 3, region: REGION, text: " " }))).toContain("text");
   expect(await message(runAiTool("suggest_font", { asset_id: "ref", t: 3, region: { x: 0.5, y: 0.5, w: 0, h: 0.1 }, text: "TRAVEL" }))).toContain("region");
 });
+
+test("inside a picture box, the region, the ink and the size are the box's", async () => {
+  // The picture is the frame's middle half: 1920×540. The same crop as REGION,
+  // given in the box's fractions, and 72px type is 144px at the box's 1080.
+  useEditor.getState().updateAsset("ref", { picture: { x: 0.5, y: 0.5, w: 1, h: 0.5 } });
+  const out = (await runAiTool("suggest_font", {
+    asset_id: "ref",
+    t: 3,
+    region: { x: 0.2, y: 0.3, w: 0.6, h: 0.4 },
+    text: "TRAVEL DESTINATION",
+  })) as Out & { picture?: unknown };
+  expect(out.matches[0]).toMatchObject({ font: "oswald", weight: 700 });
+  expect(Math.abs(out.matches[0].size - 144)).toBeLessThanOrEqual(6);
+  expect(Math.abs(out.ink.y + out.ink.h / 2 - 0.5)).toBeLessThan(0.02);
+  expect(out.picture).toBeDefined();
+});

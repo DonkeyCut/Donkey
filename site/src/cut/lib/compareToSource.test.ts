@@ -222,6 +222,35 @@ test("a source of another shape is scored letterboxed into the cut's frame, and 
   expect(out.frame).toContain("letterboxed");
 });
 
+test("a recording's picture box is what is held against the cut, read at the cut's size", async () => {
+  // A 9:16 phone recording with a 16:9 picture across its middle, against a
+  // 16:9 cut: the box is the cut's shape, so nothing is letterboxed.
+  useEditor.setState({ aspect: "16:9" });
+  useEditor.getState().updateAsset("ref", { picture: { x: 0.5, y: 0.5, w: 1, h: 0.3164 } });
+  const out = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1] })) as {
+    frame?: string;
+    picture?: { h: number };
+    pictureNote?: string;
+  };
+  expect(out.frame).toBeUndefined();
+  expect(out.picture?.h).toBe(0.3164);
+  expect(out.pictureNote).toContain("fraction");
+  // The frame is read tall enough that its picture box is the cut's height.
+  const height = (reads[0].size as { height: number }).height;
+  expect(height * 0.3164).toBeCloseTo(270, -1);
+
+  const sweep = (await runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 1, step: 0.5 })) as {
+    frame?: string;
+    picture?: unknown;
+  };
+  expect(sweep.frame).toBeUndefined();
+  expect(sweep.picture).toBeDefined();
+
+  // "full" scores the whole recorded frame, letterboxed.
+  const whole = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1], picture: "full" })) as { frame?: string };
+  expect(whole.frame).toContain("letterboxed");
+});
+
 type Sweep = {
   images?: unknown;
   sampled: number;

@@ -1,5 +1,5 @@
 import { createRasterCanvas, type RasterSurface } from "./raster";
-import type { MediaAsset, StoredAsset } from "./types";
+import { CLIP_MIN_SECONDS, type MediaAsset, type StoredAsset } from "./types";
 
 // A block is a shot with nothing in it yet: a source that holds a slot on the
 // timeline and draws itself as the colour that shot sits on. It owns no file,
@@ -15,6 +15,14 @@ import type { MediaAsset, StoredAsset } from "./types";
 // never as a caption describing itself.
 
 export const BLOCK_COLOR = "#161A22";
+
+/** The most shots one blockout call lays down: two full detect_cuts passes,
+ * so a template's whole shot list goes down as one undo step. */
+export const BLOCKOUT_MAX = 160;
+/** The shortest block: the shortest clip every renderer plays, one frame. */
+export const BLOCK_MIN_SECONDS = CLIP_MIN_SECONDS;
+/** The longest block. */
+export const BLOCK_MAX_SECONDS = 600;
 
 /** The source a shot stands on until its footage exists. It takes the
  * project's own frame, so a block fills the picture the way the footage that

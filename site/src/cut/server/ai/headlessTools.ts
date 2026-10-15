@@ -39,6 +39,7 @@ const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "freeze_frame",
   "capture_frame",
   "compare_to_source",
+  "find_picture",
   "detect_cuts",
   "sample_color",
   "track_element",

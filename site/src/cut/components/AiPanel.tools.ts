@@ -38,6 +38,24 @@ const frameBox = (what: string) => ({
   description: what,
 });
 
+/** The part of a source's frame the source-reading tools read. */
+const pictureArg = {
+  anyOf: [
+    { type: "string", enum: ["full"] },
+    obj(
+      {
+        x: num("Centre x, fraction of the whole frame's width"),
+        y: num("Centre y, fraction of the whole frame's height"),
+        w: num("Width, fraction of the whole frame's width"),
+        h: num("Height, fraction of the whole frame's height"),
+      },
+      ["x", "y", "w", "h"]
+    ),
+  ],
+  description:
+    'Read inside this box of the source\'s frame, or "full" for the whole frame. Default: the picture box find_picture keeps on the source, else the whole frame. Every x, y, w, h the call takes and returns is a fraction of it.',
+};
+
 export const AI_PANEL_TOOLS = [
   {
     name: "get_state",
@@ -175,7 +193,8 @@ export const AI_PANEL_TOOLS = [
       "This is how a replica is verified. The loop: sweep, look at the worst stretches' peaks in moments mode, fix what differs, sweep again — until the median is under " +
       `${SWEEP_TARGET} and no stretch stands out. ` +
       "Blocks standing in for footage keep a difference no edit removes, so read those by the grid cells over your titles and shapes. " +
-      "Pass `times` as timeline seconds, or {at, source} pairs when the cut sits at a different second than the source does; `offset` maps every bare second and the whole sweep (source second = timeline second + offset).",
+      "Pass `times` as timeline seconds, or {at, source} pairs when the cut sits at a different second than the source does; `offset` maps every bare second and the whole sweep (source second = timeline second + offset). " +
+      "Only the source's picture box is held against your frame (find_picture), so a reference recorded inside an app scores its picture alone.",
     inputSchema: obj(
       {
         asset_id: str("Project asset id of the source the cut was built from"),
@@ -194,6 +213,24 @@ export const AI_PANEL_TOOLS = [
         from: num("sweep: timeline second to start at (default 0)"),
         to: num("sweep: timeline second to stop at (default the cut's end)"),
         step: num("sweep: seconds between samples (default one frame, widened so a long span fits the call)"),
+        picture: pictureArg,
+      },
+      ["asset_id"]
+    ),
+  },
+  {
+    name: "find_picture",
+    description:
+      "Find where a video's picture sits inside its frame: the part that changes over time, apart from letterbox bars or the app a screen recording shows it in — a phone recording of an editing app has its picture across the middle, with buttons and a timeline around it. Reads frames spread over the source (or from/to) and returns `picture`, the box as centre and size in frame fractions, its `aspect`, and `active`, the share of the box that moved. The box is kept on the source: detect_cuts, sample_color, track_element, suggest_font and compare_to_source read inside it from then on, and the x, y, w, h they take and return are fractions of it, so they land on the cut's frame as they are. detect_cuts finds it on its first read of a source. Pass `box` to set it yourself, or \"full\" for the whole frame, when the one found is off.",
+    inputSchema: obj(
+      {
+        asset_id: str("Project asset id of the video (or image, with box)"),
+        from: num("Source start s to read frames from (default 0)"),
+        to: num("Source end s (default the source's end)"),
+        box: {
+          anyOf: [{ type: "string", enum: ["full"] }, frameBox("The picture's box")],
+          description: 'Set the picture box yourself: centre and size as frame fractions, or "full" for the whole frame',
+        },
       },
       ["asset_id"]
     ),
@@ -201,12 +238,13 @@ export const AI_PANEL_TOOLS = [
   {
     name: "detect_cuts",
     description:
-      `Find every hard cut in a stretch of a video source, to the frame. Reads every frame between from and to at a few dozen pixels, scores how much of the picture changed since the frame before, and reports each frame that opens a new shot: \`t\` in SOURCE seconds to the millisecond (the new shot's first frame), its \`frame\` index at the source's \`fps\`, and \`change\`, the percent of the picture that changed — near 100 is a new shot, 10-30 a card or a block of type swapping over the same background. \`shots\` lists the stretches between the cuts with their length in frames. watch_video's sceneChanges come from samples a step apart and lose a shot shorter than the step; this reads every frame, so a five-frame shot in a fast montage is found. Run it before blocking out a reference: add_clip \`blocks\` takes one block per shot at that shot's length. Hard cuts only — a dissolve or a fade changes a little each frame and reads as none. Up to ${DETECT_CUTS_SPAN_MAX}s and ${DETECT_CUTS_MAX} cuts a call; when \`truncated\`, call again from \`coveredTo\`.`,
+      `Find every hard cut in a stretch of a video source, to the frame. Reads every frame between from and to at a few dozen pixels, scores how much of the picture changed since the frame before, and reports each frame that opens a new shot: \`t\` in SOURCE seconds to the millisecond (the new shot's first frame), its \`frame\` index at the source's \`fps\`, and \`change\`, the percent of the picture that changed — near 100 is a new shot, 10-30 a card or a block of type swapping over the same background. \`shots\` lists the stretches between the cuts with their length in frames. watch_video's sceneChanges come from samples a step apart and lose a shot shorter than the step; this reads every frame, so a five-frame shot in a fast montage is found. Run it before blocking out a reference: add_clip \`blocks\` takes one block per shot at that shot's length. Hard cuts only — a dissolve or a fade changes a little each frame and reads as none. Up to ${DETECT_CUTS_SPAN_MAX}s and ${DETECT_CUTS_MAX} cuts a call; when \`truncated\`, call again from \`coveredTo\`. A source with no picture box yet has it found first (find_picture) and kept, and every frame is read inside it, so a card that changes a small part of a recorded frame still counts as the change to the picture it is.`,
     inputSchema: obj(
       {
         asset_id: str("Project asset id of the video"),
         from: num("Source start s (default 0)"),
         to: num(`Source end s (default the source's end, at most ${DETECT_CUTS_SPAN_MAX}s past from)`),
+        picture: pictureArg,
       },
       ["asset_id"]
     ),
@@ -233,6 +271,7 @@ export const AI_PANEL_TOOLS = [
           ),
         },
         colors: num(`Also list this many dominant colours per region, 2..${SAMPLE_COLORS_K_MAX} (default: none)`),
+        picture: pictureArg,
       },
       ["asset_id", "samples"]
     ),
@@ -255,6 +294,7 @@ export const AI_PANEL_TOOLS = [
           enum: [...TRACK_MATCHES],
           description: "shape: the one connected piece the seed sits on (default). ink: every pixel of the colour inside the seed or within — type",
         },
+        picture: pictureArg,
       },
       ["asset_id", "from", "seed"]
     ),
@@ -278,6 +318,7 @@ export const AI_PANEL_TOOLS = [
         ),
         text: str("The words the region shows, as they read, with a line break where the type breaks"),
         count: num("How many faces to return, 1..10 (default 5)"),
+        picture: pictureArg,
       },
       ["asset_id", "region", "text"]
     ),
