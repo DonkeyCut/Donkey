@@ -292,7 +292,7 @@ import { hostedFetch, hostedPost } from "./hosted";
 import { readHostedError } from "./hostedError";
 import { creditPriceQuote, type CreditPriceSheet } from "@/lib/credits/price-sheet";
 import { creditsFromDollars } from "@/lib/credits/format-credits";
-import { blockAsset } from "./blockSource";
+import { BLOCK_MAX_SECONDS, BLOCK_MIN_SECONDS, BLOCKOUT_MAX, blockAsset } from "./blockSource";
 import { cutClip, cutJudge } from "./chatRuntime";
 import { FOLLOW_MODES } from "./trackKeys";
 import { trackMotion } from "./trackMotion";
@@ -311,6 +311,7 @@ import {
   DEFAULT_BACKGROUND,
   clampKeyPos,
   clampOverlayPos,
+  CLIP_MIN_SECONDS,
   previewUrl,
   clipZoom,
   fontStack,
@@ -714,10 +715,9 @@ const MEASURE_BUDGET_MS = 90_000;
  * enough to ride a turn. */
 const CAPTURE_LONG_SIDE = 640;
 
-/** The most shots one blockout lays down. Every block in a call lands as one
- * undo step, and a whole feature's worth of them in a single step is not
- * something anyone can step back through; a caller with more comes back. */
-const MAX_BLOCKS = 40;
+/** A trim that leaves a clip under one frame. */
+const CLIP_TOO_SHORT = `A clip runs at least one frame (${Math.round(CLIP_MIN_SECONDS * 1000) / 1000}s at 60 fps).`;
+
 /** What a comparison's reply teaches about its own numbers. */
 const COMPARE_NOTE =
   "Source on the left, your cut on the right, one picture per moment. diff is how far your frame is from the source's: the mean difference per pixel, 0 (the same) to 255, and under " +
@@ -2593,11 +2593,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const dur = asset?.type === "image" ? Infinity : asset?.duration ?? c.out;
       const patch: Partial<VideoClip> = {};
       if (isNum(input.start)) patch.start = Math.max(0, input.start);
-      if (isNum(input.in)) patch.in = clamp(input.in, 0, dur - 0.1);
-      if (isNum(input.out)) patch.out = clamp(input.out, 0.1, dur);
+      if (isNum(input.in)) patch.in = clamp(input.in, 0, dur - CLIP_MIN_SECONDS);
+      if (isNum(input.out)) patch.out = clamp(input.out, CLIP_MIN_SECONDS, dur);
       if (patch.in !== undefined || patch.out !== undefined) {
-        if ((patch.out ?? c.out) - (patch.in ?? c.in) < 0.1)
-          throw new ToolError("Clip must stay at least 0.1s long.");
+        if ((patch.out ?? c.out) - (patch.in ?? c.in) < CLIP_MIN_SECONDS - 1e-9)
+          throw new ToolError(CLIP_TOO_SHORT);
       }
       if (isNum(input.track)) {
         const track = Math.round(input.track);
@@ -2661,9 +2661,9 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const asset = s.assets.find((a) => a.id === clip.assetId);
       // A still has no source bound, so its clip can stretch to any length.
       const dur = asset?.type === "image" ? Infinity : asset?.duration ?? clip.out;
-      const nextIn = isNum(input.in) ? clamp(input.in, 0, dur - 0.1) : clip.in;
-      const nextOut = isNum(input.out) ? clamp(input.out, 0.1, dur) : clip.out;
-      if (nextOut - nextIn < 0.1) throw new ToolError("Clip must stay at least 0.1s long.");
+      const nextIn = isNum(input.in) ? clamp(input.in, 0, dur - CLIP_MIN_SECONDS) : clip.in;
+      const nextOut = isNum(input.out) ? clamp(input.out, CLIP_MIN_SECONDS, dur) : clip.out;
+      if (nextOut - nextIn < CLIP_MIN_SECONDS - 1e-9) throw new ToolError(CLIP_TOO_SHORT);
       // Trim through the store's resize path so track 0 keeps its no-overlap
       // invariant: extending a clip pushes the following run right.
       s.setClipTrim(clip.id, nextIn, nextOut);
@@ -7457,7 +7457,7 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
   const shots = raw
     .filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null)
     .map((x) => ({
-      seconds: isNum(x.seconds) ? clamp(x.seconds, 0.2, 600) : 0,
+      seconds: isNum(x.seconds) ? Math.min(x.seconds, BLOCK_MAX_SECONDS) : 0,
       label: typeof x.label === "string" ? x.label.trim() : "",
       // The shot's own backdrop, so a cut waiting on its footage still shows
       // the look it is standing in for.
@@ -7466,9 +7466,15 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
     .filter((x) => x.seconds > 0);
   if (shots.length === 0)
     throw new ToolError("Pass blocks: [{seconds, label}] — one entry per shot, in order.");
-  if (shots.length > MAX_BLOCKS)
+  if (shots.length > BLOCKOUT_MAX)
     throw new ToolError(
-      `That is ${shots.length} shots — ${MAX_BLOCKS} is the most one call lays down. Lay the first stretch and call again for the rest.`
+      `That is ${shots.length} shots — ${BLOCKOUT_MAX} is the most one call lays down. Pass the first ${BLOCKOUT_MAX} now, then the other ${shots.length - BLOCKOUT_MAX} in a second call with no start: they append right after the last block.`
+    );
+  // A block is at least one frame: the shortest clip any renderer plays.
+  const short = shots.findIndex((x) => x.seconds < BLOCK_MIN_SECONDS - 1e-9);
+  if (short >= 0)
+    throw new ToolError(
+      `Block ${short + 1} runs ${roundT(shots[short].seconds)}s, under one frame (${roundT(BLOCK_MIN_SECONDS)}s at 60 fps). Give it at least that, or fold it into the shot beside it.`
     );
   const frame = frameOf(s.aspect);
   const made: { clipId: string; assetId: string; start: number; seconds: number; label: string }[] = [];
@@ -7486,7 +7492,10 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
       useEditor.getState().updateClip(clipId, { out: shot.seconds });
       const placed = useEditor.getState().clips.find((c) => c.id === clipId);
       if (!placed) continue;
-      at = undefined; // the rest follow the row
+      // The next block starts where this one ends, on the frame it names: a
+      // sum of frame lengths drifts off k/fps, and a start a hair late shows
+      // the shot before for one frame.
+      at = onFrame(placed.start + shot.seconds);
       made.push({
         clipId: placed.id,
         assetId: asset.id,
@@ -7520,10 +7529,10 @@ function placeAssetSpans(
   const dur = asset.duration > 0 ? asset.duration : Infinity;
   const cuts = spans
     .map((sp) => ({
-      from: clamp(Math.min(sp.from, sp.to), 0, dur - 0.1),
-      to: clamp(Math.max(sp.from, sp.to), 0.1, dur),
+      from: clamp(Math.min(sp.from, sp.to), 0, dur - CLIP_MIN_SECONDS),
+      to: clamp(Math.max(sp.from, sp.to), CLIP_MIN_SECONDS, dur),
     }))
-    .filter((sp) => sp.to - sp.from >= 0.1)
+    .filter((sp) => sp.to - sp.from >= CLIP_MIN_SECONDS - 1e-9)
     .sort((a, b) => a.from - b.from);
   if (cuts.length === 0) throw new ToolError("Every span was empty or outside the source.");
   const s = useEditor.getState();

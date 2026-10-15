@@ -47,10 +47,10 @@ export const isLinkedAssetType = (type: string): type is LinkedAssetType =>
  * an image has no intrinsic duration, so the clip carries this as its `out`. */
 export const IMAGE_CLIP_SECONDS = 8;
 
-/** The shortest clip, seconds: one frame at 30 fps, a flash frame. Every
+/** The shortest clip, seconds: one frame at 60 fps, a flash frame. Every
  * renderer floors a clip's footprint here, so a one-frame clip plays one
  * frame in the preview and in every export. */
-export const CLIP_MIN_SECONDS = 1 / 30;
+export const CLIP_MIN_SECONDS = 1 / 60;
 
 /** Project output frame ratio as "W:H". Presets cover common platforms;
  * any ratio that passes `parseRatio` (e.g. "9:5") is valid. */

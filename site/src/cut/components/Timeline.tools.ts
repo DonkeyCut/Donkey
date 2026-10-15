@@ -18,6 +18,7 @@ import {
 import { TEXT_MOVE_IDS, TEXT_MOVE_NOTES } from "@/cut/lib/textMotion";
 import { LETTER_SPACING_MAX, LETTER_SPACING_MIN, OVERLAY_ANIM_STYLE_IDS, TEXT_TEXTURES, TEXT_WEIGHTS } from "@donkeycut/effects-kit";
 import { REGION_MAX_SCALE, TIMELINE_IDS, TIMELINE_LABELS } from "@/cut/lib/types";
+import { BLOCKOUT_MAX } from "@/cut/lib/blockSource";
 
 /** The title sizes the assistant and the inspector set, px at a 1080 short
  * side. */
@@ -88,7 +89,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "add_clip",
     description:
-      "Put a project asset on the timeline, the same way the user dragging it in would: a video or image lands on video track 0 (at `start`, inserted at `index`, or appended at the end; a taken spot slides it right), audio lands on the soundtrack (at `start`, default the playhead). Asset ids come from `media` in editor_state — imports, attachments, and chat media alike. Call it only when the user asked for the media in the cut (\"add my beach photo\", \"stitch these into a movie\"); otherwise media stays on its card or panel for them to drag. Pass `blocks` instead of an asset to lay out a cut whose footage does not exist yet: one block per shot on track 0, each the length that shot runs, labelled with what belongs there. That is how a video you watched becomes a timeline — the cuts land at their real times, titles and sound go on top, and the person fills each block later. Blocks own no file and store nothing; footage dropped on one takes its place and its length, and replace_item does the same from here. Pass `spans` to cut one source into a run of clips — the moments of a talk worth keeping, with everything between them left out, or a video cut at its own shot boundaries when its picture is what plays.",
+      `Put a project asset on the timeline, the same way the user dragging it in would: a video or image lands on video track 0 (at \`start\`, inserted at \`index\`, or appended at the end; a taken spot slides it right), audio lands on the soundtrack (at \`start\`, default the playhead). Asset ids come from \`media\` in editor_state — imports, attachments, and chat media alike. Call it only when the user asked for the media in the cut ("add my beach photo", "stitch these into a movie"); otherwise media stays on its card or panel for them to drag. Pass \`blocks\` instead of an asset to lay out a cut whose footage does not exist yet: one block per shot on track 0, each the length that shot runs, labelled with what belongs there. That is how a video you watched becomes a timeline — the cuts land at their real times, titles and sound go on top, and the person fills each block later. Blocks own no file and store nothing; footage dropped on one takes its place and its length, and replace_item does the same from here. A block runs one frame (1/60 s) or longer, so detect_cuts' \`shots\` go down as they are, flash cuts included; one call takes up to ${BLOCKOUT_MAX}, and a longer list goes in more calls with no start, each appending after the last block. Pass \`spans\` to cut one source into a run of clips — the moments of a talk worth keeping, with everything between them left out, or a video cut at its own shot boundaries when its picture is what plays.`,
     inputSchema: obj({
       asset_id: str("Project asset id from `media` in editor_state"),
       blocks: {

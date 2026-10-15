@@ -1,6 +1,6 @@
 import { beforeEach, expect, test } from "bun:test";
 import { runAiTool } from "./aiTools";
-import { useEditor } from "./store";
+import { clipLen, useEditor } from "./store";
 
 // The tools report times to the millisecond — frame 22 at 60 fps is 0.367 —
 // and the model writes them back as it read them. A time that sits a third of
@@ -83,5 +83,19 @@ test("the snap never moves a time between frames at 24, 25, 30, 50 or 60 fps", a
   }
   for (const t of [0.3672, 1.2345, 2.0009]) {
     expect(await shapeStart(t)).toBe(t);
+  }
+});
+
+test("blocks written from a shot list land every cut on its frame", async () => {
+  // A fast montage at 60 fps: shots of 22, 2, 3, 1 and 40 frames, each length
+  // written to the millisecond.
+  const lengths = [22, 2, 3, 1, 40];
+  await runAiTool("add_clip", { blocks: lengths.map((n) => ({ seconds: ms(frame(n)) })) });
+  const clips = [...useEditor.getState().clips].sort((a, b) => a.start - b.start);
+  let at = 0;
+  for (const [i, n] of lengths.entries()) {
+    expect(clips[i]!.start).toBe(frame(at));
+    expect(clipLen(clips[i]!)).toBeCloseTo(frame(n), 9);
+    at += n;
   }
 });
