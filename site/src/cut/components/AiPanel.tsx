@@ -117,7 +117,14 @@ import { projectBackend } from "@/cut/lib/residency";
 import { beginBrowserChat, browserChatRunning, cancelBrowserChat, watchBrowserChatTurns } from "@/cut/lib/browserChatTurns";
 import { putCloudThread } from "@/cut/lib/chatCloud";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { AI_MODELS, aiModelProvider as provider, currentChatModel } from "@/cut/lib/aiModels";
+import {
+  AI_MODELS,
+  accountRuns,
+  aiModelProvider as provider,
+  currentChatModel,
+  runnableChatModel,
+  type ChatProvider,
+} from "@/cut/lib/aiModels";
 import { saveAssetToLibrary } from "@/cut/lib/library";
 import { formatDuration, useGenScene } from "@/cut/lib/genScene";
 import { lightboxItemFromRef, useLightbox } from "@/cut/lib/lightbox";
@@ -143,7 +150,8 @@ interface ModelsInfo {
   // A CLI provider's group lists only on `installed` true — unknown (probe
   // still out, or no engine) reads as absent. A provider that is installed
   // but unavailable (e.g. signed out) still lists with its note.
-  providers: Record<string, { available: boolean; note: string; installed?: boolean }>;
+  // A provider's `models` lists what its signed-in account runs.
+  providers: Record<string, ChatProvider>;
 }
 
 /** What an engine send carries past the messages: the editor snapshot the
@@ -1986,15 +1994,13 @@ function ChatSession({
     (m) => m.status === "queued" || m.status === "folding" || m.status === "spawned",
   );
 
-  // The saved model's provider may be uninstalled — its group is hidden from
-  // the picker, so fall back to the first installed provider rather than sit on
-  // a selection the user can no longer see or change.
+  // The saved model's provider may be uninstalled, or its account may not run
+  // it (a ChatGPT login without GPT-6.1 Sol) — the picker hides it, so move to
+  // a model this Mac and account run rather than sit on one that fails.
   useEffect(() => {
-    if (!visible || !info || info.providers[provider(model)]?.installed !== false) return;
-    const fallback = AI_MODELS.find(
-      (m) => !m.hidden && info.providers[provider(m.id)]?.installed !== false,
-    );
-    if (fallback && fallback.id !== model) onModelChange(fallback.id);
+    if (!visible || !info) return;
+    const runnable = runnableChatModel(model, info.providers);
+    if (runnable && runnable !== model) onModelChange(runnable);
   }, [info, model, onModelChange, visible]);
   const outOfCredits = useOutOfCredits((s) => s.out);
   useCreditsRecheck();
@@ -2922,7 +2928,10 @@ function ModelSelector({
   const showTest =
     typeof window !== "undefined" &&
     localStorage.getItem("cut-ai-test") === "1";
-  const models = AI_MODELS.filter((m) => !m.hidden || showTest);
+  // A model the provider's account doesn't run stays out of the list.
+  const models = AI_MODELS.filter(
+    (m) => (!m.hidden || showTest) && (!info || accountRuns(m.id, info.providers)),
+  );
   const groups = [
     "claude",
     "codex",

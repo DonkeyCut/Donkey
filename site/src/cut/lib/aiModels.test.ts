@@ -3,9 +3,12 @@ import { throws } from "node:assert/strict";
 import {
   AI_MODELS,
   RETIRED_CHAT_MODELS,
+  accountRuns,
   aiModelProvider,
   currentChatModel,
+  runnableChatModel,
   type AiModel,
+  type ChatProviders,
 } from "@/cut/lib/aiModels";
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 
@@ -64,5 +67,45 @@ describe("retired chat models", () => {
       expect(currentChatModel(model.id)).toBe(model.id);
     }
     expect(currentChatModel("unknown-model")).toBeUndefined();
+  });
+});
+
+describe("models the signed-in account runs", () => {
+  // The catalog a ChatGPT login served Codex on 2026-10-14: GPT-6.1 Sol and
+  // GPT-6 Astra are in the CLI's bundled list but not yet on this account.
+  const account = ["gpt-6-luna", "gpt-reserve", "gpt-5.6-terra", "gpt-5.6-luna"];
+  const providers: ChatProviders = {
+    claude: { available: true, note: "", installed: true },
+    codex: { available: true, note: "", installed: true, models: account },
+    gemini: { available: true, note: "", installed: true },
+  };
+
+  test("a GPT pick the ChatGPT account lacks moves to the first GPT model it runs", () => {
+    expect(runnableChatModel("gpt-6.1-sol", providers)).toBe("gpt-5.6-terra");
+    expect(runnableChatModel("gpt-6-astra", providers)).toBe("gpt-5.6-terra");
+  });
+
+  test("a pick the account runs stays", () => {
+    expect(runnableChatModel("gpt-6-luna", providers)).toBe("gpt-6-luna");
+    expect(runnableChatModel("claude-opus-5-5", providers)).toBe("claude-opus-5-5");
+  });
+
+  test("the picker offers only the GPT models the account runs", () => {
+    const offered = AI_MODELS.filter((m) => accountRuns(m.id, providers)).map((m) => m.id);
+    expect(offered).not.toContain("gpt-6.1-sol");
+    expect(offered).not.toContain("gpt-6-astra");
+    expect(offered).toContain("gpt-5.6-terra");
+    expect(offered).toContain("claude-opus-5-5");
+  });
+
+  test("an engine that names no account models leaves every model runnable", () => {
+    const unlisted: ChatProviders = { ...providers, codex: { available: true, note: "", installed: true } };
+    expect(runnableChatModel("gpt-6.1-sol", unlisted)).toBe("gpt-6.1-sol");
+  });
+
+  test("a pick whose provider is not installed moves to the first installed one", () => {
+    const off = { available: false, note: "", installed: false };
+    const geminiOnly: ChatProviders = { claude: off, codex: off, gemini: providers.gemini };
+    expect(runnableChatModel("gpt-6.1-sol", geminiOnly)).toBe(geminiModelRoleNames.chat);
   });
 });

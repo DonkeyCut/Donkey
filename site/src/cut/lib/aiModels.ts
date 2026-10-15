@@ -51,3 +51,42 @@ export function aiModelProvider(id: string): AiModel["provider"] {
   if (!model) throw new Error(`Unknown chat model: ${id}`);
   return model.provider;
 }
+
+/** What the engine reports for one provider. `models` lists the ids the
+ * signed-in account can run, when the provider's CLI can say: a ChatGPT
+ * login gets a per-account Codex catalog, and a model missing from it fails
+ * every turn with "not supported when using Codex with a ChatGPT account". */
+export interface ChatProvider {
+  available: boolean;
+  note: string;
+  installed?: boolean;
+  models?: string[];
+}
+
+export type ChatProviders = Partial<Record<AiModel["provider"], ChatProvider>>;
+
+/** Whether the account behind the model's provider runs it; true when the
+ * engine names no account list. */
+export function accountRuns(id: string, providers: ChatProviders): boolean {
+  const models = providers[aiModelProvider(id)]?.models;
+  if (!models) return true;
+  return models.includes(id);
+}
+
+/** The model a pick runs as: itself when its provider is installed and the
+ * account runs it, else the first model of the same provider the account
+ * runs, else the first model of any installed provider.
+ * Example: "gpt-6.1-sol" on a ChatGPT account without it → "gpt-5.6-terra". */
+export function runnableChatModel(id: string, providers: ChatProviders): string | undefined {
+  const runs = (m: AiModel) =>
+    !m.hidden && providers[m.provider]?.installed !== false && accountRuns(m.id, providers);
+  const picked = AI_MODELS.find((m) => m.id === id);
+  if (picked && providers[picked.provider]?.installed !== false && accountRuns(id, providers)) {
+    return id;
+  }
+
+  // Same provider first, so a GPT pick stays on GPT.
+  const sibling = AI_MODELS.find((m) => m.provider === picked?.provider && runs(m));
+  if (sibling) return sibling.id;
+  return AI_MODELS.find(runs)?.id;
+}

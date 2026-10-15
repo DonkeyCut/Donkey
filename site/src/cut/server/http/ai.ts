@@ -41,6 +41,7 @@ import {
 import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
 import { pendingAsk } from "../../lib/chatResume";
 import { codexCommand } from "../tool-path";
+import { codexAccountModels } from "../ai/codexModels";
 import { errorMessage } from "../util";
 
 interface ChatBody {
@@ -510,8 +511,21 @@ function probe(cmd: string, args: string[]): Promise<{ ok: boolean; note: string
   });
 }
 
+// `codex debug models` prints each model's full instructions; 8 MB holds a catalog.
+const CODEX_CATALOG_MAX_BYTES = 8 * 1024 * 1024;
+
+/** The models Codex serves the signed-in account, read from `codex debug
+ * models`; undefined when the CLI cannot say. */
+function codexModels(cmd: string): Promise<string[] | undefined> {
+  return new Promise((resolve) => {
+    execFile(cmd, ["debug", "models"], { timeout: 8000, maxBuffer: CODEX_CATALOG_MAX_BYTES }, (err, stdout) => {
+      resolve(err ? undefined : codexAccountModels(stdout));
+    });
+  });
+}
+
 // Providers rarely change mid-session; cache probes for a minute.
-type ProviderStatus = { ok: boolean; note: string; installed: boolean };
+type ProviderStatus = { ok: boolean; note: string; installed: boolean; models?: string[] };
 let aiProbe: {
   at: number;
   value: { claude: ProviderStatus; codex: ProviderStatus };
@@ -667,26 +681,30 @@ export const aiApi = {
   async models() {
     let value = aiProbe && Date.now() - aiProbe.at < 60_000 ? aiProbe.value : null;
     if (!value) {
-      const [claude, codexLogin] = await Promise.all([
+      const codexCmd = await codexCommand();
+      const [claude, codexLogin, codexAccount] = await Promise.all([
         probe("claude", ["--version"]),
-        probe(await codexCommand(), ["login", "status"]),
+        probe(codexCmd, ["login", "status"]),
+        codexModels(codexCmd),
       ]);
       // The login probe running at all means codex is installed; only its
       // ENOENT failure (carried through in codexLogin) marks it missing.
+      // A ChatGPT login runs only the models its account catalog lists.
       const codex: ProviderStatus = codexLogin.ok
         ? /logged in/i.test(codexLogin.note)
-          ? { ok: true, note: codexLogin.note, installed: true }
+          ? { ok: true, note: codexLogin.note, installed: true, models: codexAccount }
           : { ok: false, note: "Not signed in — run: codex login", installed: true }
         : codexLogin;
       value = { claude, codex };
       aiProbe = { at: Date.now(), value };
     }
     // The model catalog lives in the page (src/cut/lib/aiModels.ts); the
-    // engine only reports which provider CLIs are usable on this Mac.
+    // engine reports which provider CLIs are usable on this Mac and which
+    // models the Codex account runs.
     return Response.json({
       providers: {
         claude: { available: value.claude.ok, note: value.claude.note, installed: value.claude.installed },
-        codex: { available: value.codex.ok, note: value.codex.note, installed: value.codex.installed },
+        codex: { available: value.codex.ok, note: value.codex.note, installed: value.codex.installed, models: value.codex.models },
         // Gemini chats run from the page through Donkey's hosted inference;
         // the browser overlays the real availability from its sign-in probe.
         gemini: { available: true, note: "runs on your Donkey account", installed: true },
