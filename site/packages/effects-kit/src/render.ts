@@ -466,12 +466,65 @@ export function wrapTextToRoom(
   return out.join("\n");
 }
 
+/** The type a line is measured in: a title's own, or a face of its cycle. */
+export type TextType = Pick<TextOverlay, "font" | "weight" | "italic" | "size" | "letterSpacing">;
+
+/**
+ * A face of a title's font cycle, set on the title's own lines.
+ *
+ * A face is wider or narrower than the title's own type, and broken to the
+ * room in its own measure it would reflow: a one-line title in a wide face at
+ * 1.6× drops its last word onto a second line, over whatever sits above or
+ * below it. So the lines are the ones the title breaks into in its own type
+ * (`cycleOwn`), and where one of them is wider than the room in the face, the
+ * face is set smaller until the widest fits. Every painter calls this with
+ * its own measure — the canvas it draws on, the face the browser has loaded —
+ * so the preview, the canvas export and the ffmpeg frames set the same lines
+ * at the same size. Anything that is not a cycle's face comes back as it is.
+ */
+export function settleCycleFace<T extends Overlay>(
+  o: T,
+  room: number,
+  measure: (type: TextType, line: string) => number
+): T {
+  if ((o.kind ?? "text") !== "text") return o;
+  const { cycleOwn: own, ...face } = o as TextOverlay;
+  if (!own) return o;
+  const text = wrapTextToRoom(face.text, room, (line) => measure(own, line));
+  const lines = text.split("\n");
+  let size = face.size;
+  // Type widens in step with its size, so one scale brings the widest line
+  // onto the room; the margin and a second pass take up what hinting rounds.
+  for (let pass = 0; pass < 3 && room > 0; pass++) {
+    const widest = Math.max(0, ...lines.map((line) => measure({ ...face, size }, line)));
+    if (widest <= room) break;
+    size *= (room / widest) * 0.999;
+  }
+  return { ...face, text, size } as unknown as T;
+}
+
+/** `settleCycleFace` measured the way the painter measures: on a canvas in
+ * the frame's pixels, with both faces resident first. */
+async function settledFace(o: TextOverlay, frame: PaintFrame, env: RenderEnv): Promise<TextOverlay> {
+  const own = o.cycleOwn;
+  if (!own) return o;
+  const cssOf = (type: TextType) => textCssFont({ ...o, ...type }, type.size * frame.scale, env);
+  await Promise.all([ensureFontLoaded(cssOf(own), o.text), ensureFontLoaded(cssOf(o), o.text)]);
+  const ctx = newCanvas(env, 1, 1).getContext("2d")!;
+  return settleCycleFace(o, textWrapRoom(o, frame.width), (type, line) => {
+    ctx.font = cssOf(type);
+    if ("letterSpacing" in ctx) ctx.letterSpacing = `${(type.letterSpacing ?? 0) * type.size * frame.scale}px`;
+    return ctx.measureText(line).width;
+  });
+}
+
 async function paintText(
   ctx: CanvasRenderingContext2D,
-  overlay: TextOverlay,
+  cycled: TextOverlay,
   frame: PaintFrame,
   env: RenderEnv,
 ) {
+  const overlay = await settledFace(cycled, frame, env);
   const { width, scale } = frame;
   const fpx = overlay.size * scale;
   const cssFont = textCssFont(overlay, fpx, env);
@@ -1242,10 +1295,11 @@ function inkDepth(rgba: Uint8ClampedArray, w: number, h: number): Float32Array {
 /** The box the last drawn character of a title takes, in frame px — laid out
  * the way `paintText` lays it out. */
 async function lastGlyphBox(
-  o: TextOverlay,
+  cycled: TextOverlay,
   frame: PaintFrame,
   env: RenderEnv
 ): Promise<{ x0: number; x1: number; y0: number; y1: number } | null> {
+  const o = await settledFace(cycled, frame, env);
   const fpx = o.size * frame.scale;
   const cssFont = textCssFont(o, fpx, env);
   await ensureFontLoaded(cssFont, o.text);
@@ -1435,7 +1489,7 @@ export async function measureElementBounds(
     const aspect = img && img.width > 0 && img.height > 0 ? img.width / img.height : 1;
     return { cx, cy, w, h: stickerHeight(s, frame, w, aspect) };
   }
-  const o = overlay as TextOverlay;
+  const o = await settledFace(overlay as TextOverlay, frame, env);
   const fpx = o.size * frame.scale;
   const cssFont = textCssFont(o, fpx, env);
   await ensureFontLoaded(cssFont, o.text);
