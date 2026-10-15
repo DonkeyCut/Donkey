@@ -363,15 +363,59 @@ import { soundSourceOf, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { bindRecording, unbindRecording } from "./soundBind";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
-/** A time written out to the microsecond — 1.016667 for 61/60 — sits a hair
- * past its frame, so that frame still shows what came before. One within 10 µs
- * of a frame at a common rate (the 1/600 s grid holds 24, 25, 30, 50 and 60
- * fps) lands on it exactly. */
+/** A time written out to the millisecond — 0.367 for 22/60, as the tools
+ * report it — sits a hair past its frame, so that frame still shows what came
+ * before. One within half a millisecond of a frame at a common rate (the
+ * 1/600 s grid holds 24, 25, 30, 50 and 60 fps) lands on it exactly. Grid
+ * points are 1.67 ms apart, so no time is in reach of two, and a frame
+ * written to the millisecond is at most a third of one off. */
 const FRAME_GRID = 600;
+const FRAME_SNAP_S = 0.0005;
 const onFrame = (t: number) => {
   const n = Math.round(t * FRAME_GRID);
-  return Math.abs(t * FRAME_GRID - n) < FRAME_GRID * 1e-5 ? n / FRAME_GRID : t;
+  return Math.abs(t - n / FRAME_GRID) < FRAME_SNAP_S ? n / FRAME_GRID : t;
 };
+
+/** Tool fields that hold seconds: a timeline or source time, or a length. */
+const SECONDS_FIELDS: ReadonlySet<string> = new Set([
+  "start",
+  "end",
+  "in",
+  "out",
+  "at",
+  "t",
+  "times",
+  "seconds",
+  "from",
+  "to",
+  "source",
+  "delta",
+  "hold",
+  "duration",
+  "lead",
+  "tail",
+  "hit_at",
+  "font_cycle_at",
+  "font_cycle_seconds",
+  "font_cycle_switches",
+]);
+
+/** A tool's input with every seconds field on the frame it names, walked
+ * through lists and nested records (keys, lines, spans, blocks), so every
+ * tool takes a time the way the tools report one. Example: { start: 0.367 }
+ * → { start: 22/60 }. */
+function snapSeconds(value: unknown, field?: string): unknown {
+  if (typeof value === "number") {
+    return field !== undefined && SECONDS_FIELDS.has(field) && Number.isFinite(value) ? onFrame(value) : value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => snapSeconds(v, field));
+  }
+  if (value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, snapSeconds(v, k)]));
+  }
+  return value;
+}
 /** A rotation input in degrees, kept to tenths: a screen in the shot can lean
  *  a fraction of a degree, and whatever is fitted onto it has to match. */
 const degInput = (n: number) => Math.round(clamp(n, -180, 180) * 10) / 10;
@@ -6222,7 +6266,8 @@ function droppedByConnection(err: unknown): boolean {
   return isOffline() && !(err instanceof ToolError && err.cause === undefined);
 }
 
-async function dispatchTool(s: Editor, name: string, input: Record<string, unknown>, operation?: ProjectOperation): Promise<unknown> {
+async function dispatchTool(s: Editor, name: string, raw: Record<string, unknown>, operation?: ProjectOperation): Promise<unknown> {
+  const input = snapSeconds(raw) as Record<string, unknown>;
   // "update_title" stays as an alias so older threads keep working.
   const key = name === "update_title" ? "update_overlay" : name;
   const run = (toolRuns as Partial<Record<string, ToolRun>>)[key];
