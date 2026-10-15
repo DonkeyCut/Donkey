@@ -236,7 +236,9 @@ import { playheadAt } from "./playhead";
 import { mixSpecFor, renderProjectFrame, renderProjectFrames } from "./exportRender";
 import { renderMix } from "./audioMix";
 import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./loudness";
-import { framesAt, readMediaFileSize } from "./mediaRead";
+import { frameAt, framesAt, readMediaFileSize } from "./mediaRead";
+import { bundledFaces, inkMaskOf, rankFaces } from "./fontMatch";
+import { cutFontMatch } from "./fontMatchSettings";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
@@ -307,6 +309,7 @@ import {
   clampOverlayPos,
   previewUrl,
   clipZoom,
+  fontStack,
   frameOf,
   IMAGE_CLIP_SECONDS,
   isEffectOverlay,
@@ -576,6 +579,14 @@ const MAX_BLOCKS = 40;
 // Each moment is two frames drawn and one picture composed; a handful at a
 // time keeps the call inside the bridge's deadline and the reply readable.
 const MAX_COMPARE = 4;
+/** Faces suggest_font hands back by default, and at most. */
+const FONT_SUGGESTIONS = 5;
+const FONT_SUGGESTIONS_MAX = 10;
+/** The longest side a suggest_font crop is read at, px: type this tall is
+ * already far finer than the grid it is scored on. */
+const FONT_CROP_MAX = 1600;
+/** Design px on a frame's short side, the unit a title's size is in. */
+const DESIGN_SHORT_SIDE = 1080;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -1768,6 +1779,89 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ? { note: "Words marked estimated sit in cues with no word timings; their spans split the cue evenly, so confirm them with listen_audio before a tight cut." }
           : {}),
         ...(fillers.length === 0 ? { note: "No filler words on this track." } : {}),
+      };
+  },
+
+  suggest_font: async (s, input) => {
+      // Which bundled face a reference's type is set in: its ink in the
+      // region against every face this process can draw, set in the same
+      // words. Reads one frame of the source.
+      const asset = requireItem(s.assets, input.asset_id, "project asset");
+      if (asset.type === "audio")
+        throw new ToolError(`"${asset.name}" is audio — it has no type to read. Pass the video or image the words show on.`);
+      const text = typeof input.text === "string" ? input.text.trim() : "";
+      if (!text) throw new ToolError("Pass text: the words the region shows, as they read, with a line break where the type breaks.");
+      const r = (input.region ?? {}) as Record<string, unknown>;
+      if (![r.x, r.y, r.w, r.h].every(isNum) || !((r.w as number) > 0 && (r.h as number) > 0))
+        throw new ToolError("Pass region: {x, y, w, h} in frame fractions, x/y its top-left corner, around the type and little else.");
+      const t = clamp(isNum(input.t) ? input.t : 0, 0, Math.max(0, asset.duration - 0.001));
+
+      // The frame, then the region of it at a size the scoring can use.
+      let source: CanvasImageSource;
+      let fw: number;
+      let fh: number;
+      if (asset.type === "image") {
+        const img = await decodeRasterImageUrl(asset.url);
+        if (!img) throw new ToolError(`Could not read "${asset.name}".`);
+        ({ source, width: fw, height: fh } = img);
+      } else {
+        const frame = await frameAt(asset.url, t).catch((e) => {
+          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+        });
+        if (!frame) throw new ToolError(`Could not read "${asset.name}" at ${round2(t)}s.`);
+        source = frame.canvas as CanvasImageSource;
+        fw = frame.canvas.width;
+        fh = frame.canvas.height;
+      }
+      const x0 = clamp(r.x as number, 0, 1) * fw;
+      const y0 = clamp(r.y as number, 0, 1) * fh;
+      const sw = Math.max(1, Math.min(fw - x0, (r.w as number) * fw));
+      const sh = Math.max(1, Math.min(fh - y0, (r.h as number) * fh));
+      const k = Math.min(1, FONT_CROP_MAX / Math.max(sw, sh));
+      const cw = Math.max(1, Math.round(sw * k));
+      const ch = Math.max(1, Math.round(sh * k));
+      const crop = createRasterCanvas(cw, ch);
+      const ctx = crop.getContext("2d") as CanvasRenderingContext2D | null;
+      if (!ctx) throw new ToolError("No 2D context to read the frame on.");
+      ctx.drawImage(source, x0, y0, sw, sh, 0, 0, cw, ch);
+      const ref = inkMaskOf(ctx.getImageData(0, 0, cw, ch).data, cw, ch);
+      crop.width = 0;
+      if (!ref.box)
+        throw new ToolError("No type stands out from its ground in that region. Check where the words sit with watch_video at detail original, then pass a region around them.");
+
+      // Every face ranked; the size each would need to fill the ink's height.
+      const ranked = await rankFaces(ref, text, bundledFaces(), fontStack).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : "Could not set the faces.", { cause: e });
+      });
+      const count = Math.round(clamp(isNum(input.count) ? input.count : FONT_SUGGESTIONS, 1, FONT_SUGGESTIONS_MAX));
+      const labels = new Map(allFonts().map((f) => [f.id, f.label]));
+      const matches = ranked.slice(0, count).map((m) => ({
+        font: m.font,
+        label: labels.get(m.font) ?? m.font,
+        weight: m.weight,
+        ...(m.italic ? { italic: true } : {}),
+        score: m.score,
+        size: m.typePx > 0 ? Math.round((m.typePx / k / Math.min(fw, fh)) * DESIGN_SHORT_SIDE) : null,
+        tracking: m.tracking,
+      }));
+      const good = cutFontMatch().goodScore;
+      const best = matches[0];
+      const round3 = (v: number) => Math.round(v * 1000) / 1000;
+      return {
+        t: round2(t),
+        text,
+        ink: {
+          x: round3((x0 + ref.box.x / k) / fw),
+          y: round3((y0 + ref.box.y / k) / fh),
+          w: round3(ref.box.w / k / fw),
+          h: round3(ref.box.h / k / fh),
+        },
+        verdict: best && best.score >= good ? "match" : "no_match",
+        matches,
+        note:
+          best && best.score >= good
+            ? `${best.label} ${best.weight}${best.italic ? " italic" : ""} matches (a match scores ${good}+). Set it with its weight, size (px at the 1080 short side, for the same ink height) and tracking (em); faces scoring near it are close cuts worth a look with compare_to_source.`
+            : `Nothing bundled matches closely (best ${best?.score ?? 0}; a match scores ${good}+), so the reference is likely set in a face Donkey does not bundle. Tell the user so, name the closest face here as the stand-in you use, and say the Library takes their own font files.`,
       };
   },
 
@@ -5777,6 +5871,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "sync_audio",
   "capture_frame",
   "compare_to_source",
+  "suggest_font",
   "render_preview",
   "freeze_frame",
   "create_sticker",

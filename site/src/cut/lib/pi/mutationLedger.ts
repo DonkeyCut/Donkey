@@ -13,6 +13,7 @@ const READ_ONLY = new Set([
   "request_tools",
   "capture_frame",
   "compare_to_source",
+  "suggest_font",
   "watch_video",
   "note_source",
   "detect_silence",
