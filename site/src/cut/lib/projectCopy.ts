@@ -6,7 +6,7 @@
 // the editor's move.
 import type { CutBackend } from "./backend/types";
 import { fetchCloudThreads, putCloudThread } from "./chatCloud";
-import { mergeThreads, readProjectThreads, writeProjectThreads } from "./chatThreads";
+import { loadProjectThreads, mergeThreads, readProjectThreads, writeProjectThreads } from "./chatThreads";
 import { ensureLinkedOnCloud, linkedIdsIn } from "./linkedLibrary";
 import { uploadProjectMediaTo } from "./media";
 import { localMediaFile } from "./mediaSync";
@@ -25,6 +25,7 @@ async function copyChatThreads(
   srcProjectId: string,
   dstProjectId: string
 ): Promise<void> {
+  await loadProjectThreads(srcProjectId);
   const threads = mergeThreads(
     await fetchCloudThreads(src, srcProjectId),
     readProjectThreads(srcProjectId)

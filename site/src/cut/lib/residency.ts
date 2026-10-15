@@ -192,6 +192,33 @@ export async function resolveProjectPlacement(projectId: string): Promise<Projec
   return { mode: "cloud", reachable: true };
 }
 
+/**
+ * Whether a project is deleted everywhere it could live: the browser store
+ * doesn't hold it, a reachable engine answers 404, and the cloud answers 404.
+ * Anything that can't answer — an engine this browser has used but that isn't
+ * running, a signed-out cloud, a network error — keeps it, so a closed app
+ * never costs a project its chat history.
+ */
+export async function projectGone(projectId: string): Promise<boolean> {
+  if (await browserHasProject(projectId).catch(() => true)) return false;
+  if (servedFromEngine() || engineOrigin() !== "") {
+    try {
+      const res = await localBackend.fetch(`/api/cut/projects/${projectId}`, { method: "HEAD" });
+      if (res.status !== 404) return false;
+    } catch {
+      return false;
+    }
+  } else if (engineSeen()) {
+    return false;
+  }
+  try {
+    const res = await cloudBackend.fetch(`/api/cut/projects/${projectId}`, { method: "HEAD" });
+    return res.status === 404;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveProjectMode(projectId: string): Promise<CutMode> {
   return (await resolveProjectPlacement(projectId)).mode;
 }

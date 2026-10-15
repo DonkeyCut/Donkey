@@ -17,10 +17,13 @@
 import { currentEngineUser } from "./api";
 
 const DB_NAME = "cut";
-// v1 held only the per-project view state; v2 adds this store beside it.
-const DB_VERSION = 2;
+// v1 held only the per-project view state; v2 adds this store beside it; v3
+// adds the chat history (chatThreads.ts), which outgrew localStorage.
+const DB_VERSION = 3;
 const UI_STORE = "project-ui";
 const SNAPSHOT_STORE = "snapshots";
+/** Each project's chat thread list, keyed by project id. */
+export const CHAT_STORE = "chat-threads";
 
 /** A snapshot older than this is dropped on read — too old to be a useful
  * head start, and old enough that painting it would be a lie. */
@@ -39,8 +42,17 @@ export function openCutDb(): Promise<IDBDatabase> {
       const names = req.result.objectStoreNames;
       if (!names.contains(UI_STORE)) req.result.createObjectStore(UI_STORE);
       if (!names.contains(SNAPSHOT_STORE)) req.result.createObjectStore(SNAPSHOT_STORE);
+      if (!names.contains(CHAT_STORE)) req.result.createObjectStore(CHAT_STORE);
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      // A newer tab upgrading the database waits on every open connection;
+      // step aside so it can, and reopen at the next read.
+      req.result.onversionchange = () => {
+        req.result.close();
+        db = null;
+      };
+      resolve(req.result);
+    };
     req.onerror = () => reject(req.error);
   })
     .then((conn) => {

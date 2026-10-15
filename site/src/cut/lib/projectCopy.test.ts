@@ -16,6 +16,7 @@ await stubModule("./chatCloud", import.meta.url, {
   putCloudThread: async () => {},
 });
 await stubModule("./chatThreads", import.meta.url, {
+  loadProjectThreads: async () => {},
   readProjectThreads: () => [],
   writeProjectThreads: () => {},
   mergeThreads: () => [],

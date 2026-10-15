@@ -1,5 +1,5 @@
 // Cloud mirror of a project's chat threads. Local and browser projects keep
-// chat purely in localStorage; a cloud project's threads also sync to the hosted
+// chat purely in this browser (chatThreads.ts); a cloud project's threads also sync to the hosted
 // /projects/:id/chats routes so the history follows the account across
 // devices. Threads stay opaque here — the module reads only id and updatedAt
 // to merge, and ships the same slimmed payload the panel writes to storage.
@@ -9,6 +9,7 @@ import {
   chatThreadDeleted,
   deleteStoredThread,
   isStoredThread,
+  loadProjectThreads,
   mergeThreads,
   readProjectThreads,
   writeProjectThreads,
@@ -62,7 +63,9 @@ export async function putCloudThread(
 /** Merge changed conversations and retry local saves, including offline deletions. */
 export function ensureCloudThreads(projectId: string, refresh = false): Promise<void> {
   const backend = getBackend();
-  if (backend.kind === "local" || backend.kind === "browser") return Promise.resolve();
+  // The engine and browser stores keep no copy of their own: the history this
+  // browser holds is all there is, once it has loaded.
+  if (backend.kind === "local" || backend.kind === "browser") return loadProjectThreads(projectId);
   if (!syncState || syncState.projectId !== projectId || syncState.backend !== backend)
     syncState = { projectId, backend, versions: new Map(), seeded: false, dirty: true };
   const state = syncState;
@@ -76,6 +79,8 @@ export function ensureCloudThreads(projectId: string, refresh = false): Promise<
 
 async function syncThreads(state: NonNullable<typeof syncState>): Promise<void> {
   const { projectId, backend, versions } = state;
+  // Merge into what this browser stored, never into a not-yet-read empty list.
+  await loadProjectThreads(projectId);
   const path = `/api/cut/projects/${projectId}/chats`;
   const response = await backend.fetch(`${path}?revisions=1`);
   if (!response.ok) throw new Error("Could not read the project's chats.");
@@ -172,7 +177,7 @@ async function flushOne(key: string, keepalive = false): Promise<void> {
       syncState.versions.delete(entry.threadId);
       syncState.dirty = true;
     }
-    // The thread is still in localStorage; the next sync pushes it up.
+    // The thread is still stored in this browser; the next sync pushes it up.
   }
 }
 

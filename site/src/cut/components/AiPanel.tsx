@@ -59,9 +59,15 @@ import {
   chatThreadDeleted,
   deleteStoredThread,
   isStoredThread,
+  loadProjectThreads,
+  queueKey,
   readActiveChat,
   readRawThreads,
   recordThread,
+  seenRepliesKey,
+  subscribeThreadSaveFailure,
+  threadSaveFailure,
+  threadsLoaded,
   writeActiveChat,
   writeRawThreads,
   subscribeChatThreads,
@@ -187,7 +193,6 @@ interface ChatThread {
 
 
 const THREAD_LIMIT = 30;
-const seenRepliesKey = (projectId: string) => `cut-ai-seen-replies-${projectId}`;
 
 // Which reply each thread has been read up to, per project: a small store
 // over localStorage, so the panel reads it as a snapshot and any writer —
@@ -408,8 +413,6 @@ const FAVS_KEY = "cut-ai-favs";
 // Waiting composer-queue rows, saved per thread so a reload or a project
 // switch brings them back. Running and done rows stay out — their turns die
 // with the page.
-const queueKey = (projectId: string, threadId: string) =>
-  `cut-ai-queue-${projectId}-${threadId}`;
 function readStoredQueue(
   projectId: string,
   threadId: string,
@@ -581,20 +584,29 @@ export function AiPanel({
   useEffect(() => {
     onStatusChange(projectId, chatStatus);
   }, [projectId, chatStatus, onStatusChange]);
-  // The owner's chat opens from this browser's storage at once; the cloud
-  // copy merges in behind it and a session reloads its thread when the merge
-  // writes it. A shared viewer has no thread of their own, so their view
-  // waits for the owner's threads to land before it can pick one.
-  const [chatsReady, setChatsReady] = useState(!readOnly);
+  // The owner's chat opens once this browser's stored history has loaded
+  // (IndexedDB, so a beat after mount — opening before it would show an empty
+  // thread and save it over the real one); the cloud copy merges in behind it
+  // and a session reloads its thread when the merge writes it. A shared viewer
+  // has no thread of their own, so their view waits for the owner's threads
+  // to land before it can pick one.
+  const [chatsReady, setChatsReady] = useState(() => !readOnly && threadsLoaded(projectId));
   useEffect(() => {
     let alive = true;
-    void ensureCloudThreads(projectId).then(() => {
-      if (alive) setChatsReady(true);
-    });
+    void loadProjectThreads(projectId)
+      .then(() => {
+        if (!alive) return;
+        setThreads(readThreads(projectId));
+        if (!readOnly) setChatsReady(true);
+        return ensureCloudThreads(projectId);
+      })
+      .then(() => {
+        if (alive) setChatsReady(true);
+      });
     return () => {
       alive = false;
     };
-  }, [projectId]);
+  }, [projectId, readOnly]);
 
   useEffect(() => {
     let stopped = false;
@@ -1058,6 +1070,8 @@ function ChatSession({
   // A transient warning in the folder tab above the composer — the same slot
   // the credits tab uses — for refusals like the frame capacity below.
   const [notice, setNotice] = useState<string | null>(null);
+  // History that can't be saved is lost on reload, so say so while it lasts.
+  const saveFailure = useSyncExternalStore(subscribeThreadSaveFailure, threadSaveFailure, () => null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showNotice = (msg: string) => {
     setNotice(msg);
@@ -2202,6 +2216,17 @@ function ChatSession({
               >
                 <TriangleAlert className="size-3 shrink-0" />
                 <span>{notice}</span>
+              </div>
+            )}
+            {!outOfCredits && !notice && saveFailure && (
+              <div
+                className={cn(
+                  "ai-save-failure-tab pointer-events-auto mx-1.5 flex items-center gap-1.5 rounded-t-lg border border-b-0 border-amber-500/30 bg-amber-50 px-3 pt-1.5 pb-2.5 text-[11px] text-amber-800",
+                  trayVisible && "-mb-1",
+                )}
+              >
+                <TriangleAlert className="size-3 shrink-0" />
+                <span>{saveFailure}</span>
               </div>
             )}
             {trayVisible && (

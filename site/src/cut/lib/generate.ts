@@ -8,7 +8,7 @@ import { cloudBackend } from "./backend/cloud";
 import { localBackend } from "./backend/local";
 import { normalizeRef, type AssetRef } from "./assetRef";
 import { bytesFromBase64 } from "./bytes";
-import { readThreadIds } from "./chatThreads";
+import { loadProjectThreads, readThreadIds, threadsLoaded } from "./chatThreads";
 import { composeGenPrompt, foldTextRefs } from "./composeGen";
 import {
   projectWriteMode,
@@ -323,6 +323,8 @@ const JOBS_CAP = 50;
  * how a resumed caller (the scene pipeline) adopts a running job's result
  * instead of billing a second take. */
 const settlements = new Map<string, Promise<GenerateJob>>();
+// Projects whose chat history the resume sweep has asked to load.
+const threadLoads = new Set<string>();
 
 /** The settled-job promise for a running render, when this session owns it. */
 export function videoJobSettlement(jobId: string): Promise<GenerateJob> | undefined {
@@ -898,6 +900,15 @@ export const useGenerate = create<GenerateState>((set, get) => {
         return ids;
       };
       for (const j of get().jobs) {
+        // A project's history loads from IndexedDB; until it has, a missing
+        // thread means unread, not deleted. Sweep again once it lands.
+        if (j.chatId && !threadsLoaded(j.projectId)) {
+          if (!threadLoads.has(j.projectId)) {
+            threadLoads.add(j.projectId);
+            void loadProjectThreads(j.projectId).then(() => get().resumeRunningJobs());
+          }
+          continue;
+        }
         // A render whose owning thread no longer exists — the thread was deleted,
         // or its whole project was (which clears the project's threads) — must
         // never land: drop it so a reload can't resurrect media the user removed.

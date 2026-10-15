@@ -31,9 +31,11 @@ import {
   availableResidencies,
   backendFor,
   listedResidencies,
+  projectGone,
   projectsSnapshotKey,
   type Residency,
 } from "./residency";
+import { sweepGoneProjectThreads } from "./chatThreads";
 import type { ProjectFolder, ProjectSummary } from "./types";
 
 export { backendFor };
@@ -70,6 +72,18 @@ function seedFromSnapshot<T>(client: QueryClient, queryKey: readonly unknown[], 
   return () => {
     alive = false;
   };
+}
+
+// Each residency's latest listing this page. Once every live one has
+// answered, chat history this browser holds for a project none of them lists
+// is checked against its backends and dropped if the project is gone —
+// deleted from another tab, another device, or with its folder.
+const listings = new Map<Residency, Set<string>>();
+function noteListing(r: Residency, data: ProjectsSection): void {
+  listings.set(r, new Set(data.projects.map((p) => p.id)));
+  if (!availableResidencies().every((x) => listings.has(x))) return;
+  const listed = new Set([...listings.values()].flatMap((ids) => [...ids]));
+  void sweepGoneProjectThreads(listed, projectGone);
 }
 
 async function fetchProjectsSection(r: Residency): Promise<ProjectsSection> {
@@ -109,6 +123,7 @@ export function useProjectsSection(r: Residency, { list, live }: { list: boolean
       try {
         const data = await fetchProjectsSection(r);
         writeSnapshot(projectsSnapshotKey(r), data);
+        noteListing(r, data);
         return data;
       } catch (err) {
         if (r === "local" && cutMode() === "local") {
