@@ -259,6 +259,29 @@ export const AI_PANEL_TOOLS = [
     ),
   },
   {
+    name: "suggest_font",
+    description:
+      "Name the face a reference's type is set in: reads the source's frame at t, lifts the ink inside region off its ground, and ranks every face Donkey can set a title in — each bundled family at each bundled weight, the system set and the account's own fonts — by how closely its glyphs for the same words match, tracking solved so each runs as wide as the reference. Call it for each distinct face while rebuilding a reference's titles, so the font, weight, size and tracking come from the frame. Pass the words exactly as they read, case and line breaks included, and a region close around them read off watch_video at detail original. Returns the best faces with score (0..1), size (px at the 1080 short side, for the same ink height) and tracking (em), plus the ink's box in frame fractions. verdict no_match means nothing bundled is close: the reference uses a face Donkey does not bundle, so say so and name the stand-in you use.",
+    inputSchema: obj(
+      {
+        asset_id: str("Project asset id of the reference (video or image)"),
+        t: num("Source second the type shows at (default 0)"),
+        region: obj(
+          {
+            x: num("Left edge, frame fraction"),
+            y: num("Top edge, frame fraction"),
+            w: num("Width, frame fraction"),
+            h: num("Height, frame fraction"),
+          },
+          ["x", "y", "w", "h"]
+        ),
+        text: str("The words the region shows, as they read, with a line break where the type breaks"),
+        count: num("How many faces to return, 1..10 (default 5)"),
+      },
+      ["asset_id", "region", "text"]
+    ),
+  },
+  {
     name: "find_highlights",
     description:
       "Find the moments in a long source worth cutting a short from, best first. Reads what is SAID over the source — its transcript, or the project's caption cues where they cover it — and ranks every stretch of it on three things: whether it stands on its own to someone who lands on it cold, whether its opening holds them, and whether it finishes the thought. A talk or an interview holds a handful of these and an hour of material that only makes sense in place; this is how the handful is found without watching all of it. Each result is one or more spans in SOURCE seconds with the words over them — two spans means two moments that belong together with the middle cut out, and `add_clip` with `spans` lays that down as one run of clips. The source needs a transcript: listen_audio starts one and it fills in behind you. Ranking reads the words alone, so a moment that reads well can still be someone glancing away — watch_video the spans before you commit to a look. Nothing is written to the timeline by this call.",

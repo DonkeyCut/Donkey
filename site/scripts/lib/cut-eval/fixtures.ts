@@ -21,6 +21,7 @@ export const SAFE_TOOLS = new Set([
   "list_skills",
   "read_skill",
   "capture_frame",
+  "suggest_font",
   "watch_video",
   "detect_silence",
   "find_filler",

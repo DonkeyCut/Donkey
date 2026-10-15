@@ -61,6 +61,7 @@ export const READ_COMMANDS = new Set([
   "detect_cuts",
   "sample_color",
   "track_element",
+  "suggest_font",
   "listen_audio",
   "detect_silence",
   "detect_beats",

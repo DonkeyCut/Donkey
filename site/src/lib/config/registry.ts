@@ -473,6 +473,14 @@ export const SETTINGS = defineSettings({
     description:
       "The shutter a newly switched-on motion blur starts at, as a share of a 30fps frame. 0.5 is the half-open shutter of most filmed footage; higher streaks harder.",
   },
+  cutFontMatch: {
+    schema: z.object({ goodScore: z.number().min(0).max(1) }).strict(),
+    default: { goodScore: 0.72 },
+    public: true,
+    title: "Font suggestions",
+    description:
+      "The score (0..1, glyph overlap times width agreement) a bundled face has to reach before suggest_font calls it a match; under it the reference is reported as set in a face Donkey does not bundle.",
+  },
   cutLoudness: {
     schema: z
       .object({

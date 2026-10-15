@@ -235,7 +235,9 @@ import { playheadAt } from "./playhead";
 import { mixSpecFor, renderProjectFrame } from "./exportRender";
 import { renderMix } from "./audioMix";
 import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./loudness";
-import { framesAt, readMediaFileSize } from "./mediaRead";
+import { frameAt, framesAt, readMediaFileSize } from "./mediaRead";
+import { bundledFaces, inkMaskOf, rankFaces } from "./fontMatch";
+import { cutFontMatch } from "./fontMatchSettings";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
 import { compareMoments, sweepSource } from "./sourceCompare";
 import { sampleColors, scanCuts, trackElement, type FrameBox } from "./measure/sourceMeasure";
@@ -310,6 +312,7 @@ import {
   clampOverlayPos,
   previewUrl,
   clipZoom,
+  fontStack,
   frameOf,
   IMAGE_CLIP_SECONDS,
   isEffectOverlay,
@@ -648,6 +651,14 @@ const SWEEP_NOTE =
   "Look at them: compare_to_source with times [{at, source}] at those peaks, fix what differs, then sweep again, until the median is under target. " +
   "shift on a stretch, or timing for the whole span, means the source matches better that many seconds away: positive, move it later by that much; negative, earlier. " +
   "onBlocks is the share of samples over blocks standing in for footage; those keep a difference no edit removes.";
+/** Faces suggest_font hands back by default, and at most. */
+const FONT_SUGGESTIONS = 5;
+const FONT_SUGGESTIONS_MAX = 10;
+/** The longest side a suggest_font crop is read at, px: type this tall is
+ * already far finer than the grid it is scored on. */
+const FONT_CROP_MAX = 1600;
+/** Design px on a frame's short side, the unit a title's size is in. */
+const DESIGN_SHORT_SIDE = 1080;
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -895,7 +906,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     }
     applyCaretInput(o, anim, input);
     applyHitInput(o, anim, input);
-    applyFontCycleInput(o, anim, input);
+    applyFontCycleInput(s, o, anim, input);
     s.updateOverlay(o.id, { anim: hasOverlayAnim(anim) ? anim : undefined });
     const next = useEditor.getState().overlays.find((x) => x.id === o.id)!;
     // The loop's real cycle, so a rate set to match a measured one can be
@@ -1948,6 +1959,89 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ? { note: "Words marked estimated sit in cues with no word timings; their spans split the cue evenly, so confirm them with listen_audio before a tight cut." }
           : {}),
         ...(fillers.length === 0 ? { note: "No filler words on this track." } : {}),
+      };
+  },
+
+  suggest_font: async (s, input) => {
+      // Which bundled face a reference's type is set in: its ink in the
+      // region against every face this process can draw, set in the same
+      // words. Reads one frame of the source.
+      const asset = requireItem(s.assets, input.asset_id, "project asset");
+      if (asset.type === "audio")
+        throw new ToolError(`"${asset.name}" is audio — it has no type to read. Pass the video or image the words show on.`);
+      const text = typeof input.text === "string" ? input.text.trim() : "";
+      if (!text) throw new ToolError("Pass text: the words the region shows, as they read, with a line break where the type breaks.");
+      const r = (input.region ?? {}) as Record<string, unknown>;
+      if (![r.x, r.y, r.w, r.h].every(isNum) || !((r.w as number) > 0 && (r.h as number) > 0))
+        throw new ToolError("Pass region: {x, y, w, h} in frame fractions, x/y its top-left corner, around the type and little else.");
+      const t = clamp(isNum(input.t) ? input.t : 0, 0, Math.max(0, asset.duration - 0.001));
+
+      // The frame, then the region of it at a size the scoring can use.
+      let source: CanvasImageSource;
+      let fw: number;
+      let fh: number;
+      if (asset.type === "image") {
+        const img = await decodeRasterImageUrl(asset.url);
+        if (!img) throw new ToolError(`Could not read "${asset.name}".`);
+        ({ source, width: fw, height: fh } = img);
+      } else {
+        const frame = await frameAt(asset.url, t).catch((e) => {
+          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+        });
+        if (!frame) throw new ToolError(`Could not read "${asset.name}" at ${round2(t)}s.`);
+        source = frame.canvas as CanvasImageSource;
+        fw = frame.canvas.width;
+        fh = frame.canvas.height;
+      }
+      const x0 = clamp(r.x as number, 0, 1) * fw;
+      const y0 = clamp(r.y as number, 0, 1) * fh;
+      const sw = Math.max(1, Math.min(fw - x0, (r.w as number) * fw));
+      const sh = Math.max(1, Math.min(fh - y0, (r.h as number) * fh));
+      const k = Math.min(1, FONT_CROP_MAX / Math.max(sw, sh));
+      const cw = Math.max(1, Math.round(sw * k));
+      const ch = Math.max(1, Math.round(sh * k));
+      const crop = createRasterCanvas(cw, ch);
+      const ctx = crop.getContext("2d") as CanvasRenderingContext2D | null;
+      if (!ctx) throw new ToolError("No 2D context to read the frame on.");
+      ctx.drawImage(source, x0, y0, sw, sh, 0, 0, cw, ch);
+      const ref = inkMaskOf(ctx.getImageData(0, 0, cw, ch).data, cw, ch);
+      crop.width = 0;
+      if (!ref.box)
+        throw new ToolError("No type stands out from its ground in that region. Check where the words sit with watch_video at detail original, then pass a region around them.");
+
+      // Every face ranked; the size each would need to fill the ink's height.
+      const ranked = await rankFaces(ref, text, bundledFaces(), fontStack).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : "Could not set the faces.", { cause: e });
+      });
+      const count = Math.round(clamp(isNum(input.count) ? input.count : FONT_SUGGESTIONS, 1, FONT_SUGGESTIONS_MAX));
+      const labels = new Map(allFonts().map((f) => [f.id, f.label]));
+      const matches = ranked.slice(0, count).map((m) => ({
+        font: m.font,
+        label: labels.get(m.font) ?? m.font,
+        weight: m.weight,
+        ...(m.italic ? { italic: true } : {}),
+        score: m.score,
+        size: m.typePx > 0 ? Math.round((m.typePx / k / Math.min(fw, fh)) * DESIGN_SHORT_SIDE) : null,
+        tracking: m.tracking,
+      }));
+      const good = cutFontMatch().goodScore;
+      const best = matches[0];
+      const round3 = (v: number) => Math.round(v * 1000) / 1000;
+      return {
+        t: round2(t),
+        text,
+        ink: {
+          x: round3((x0 + ref.box.x / k) / fw),
+          y: round3((y0 + ref.box.y / k) / fh),
+          w: round3(ref.box.w / k / fw),
+          h: round3(ref.box.h / k / fh),
+        },
+        verdict: best && best.score >= good ? "match" : "no_match",
+        matches,
+        note:
+          best && best.score >= good
+            ? `${best.label} ${best.weight}${best.italic ? " italic" : ""} matches (a match scores ${good}+). Set it with its weight, size (px at the 1080 short side, for the same ink height) and tracking (em); faces scoring near it are close cuts worth a look with compare_to_source.`
+            : `Nothing bundled matches closely (best ${best?.score ?? 0}; a match scores ${good}+), so the reference is likely set in a face Donkey does not bundle. Tell the user so, name the closest face here as the stand-in you use, and say the Library takes their own font files.`,
       };
   },
 
@@ -5960,6 +6054,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "detect_cuts",
   "sample_color",
   "track_element",
+  "suggest_font",
   "render_preview",
   "freeze_frame",
   "create_sticker",
@@ -6891,8 +6986,11 @@ function applyHitInput(
 /** set_overlay_animation's font-cycle fields, written onto `anim`. A new
  * cycle runs from the element's start to its end at the default rate; an
  * empty face list removes it. Only font ids the registry knows are kept, so
- * the cycle never shows a face the user could not pick. */
+ * the cycle never shows a face the user could not pick. Switch times or a
+ * clip's beat grid time the faces instead: each face holds from one switch
+ * to the next. */
 function applyFontCycleInput(
+  s: Editor,
   o: { kind?: string; start: number; end: number },
   anim: OverlayAnim,
   input: Record<string, unknown>
@@ -6902,7 +7000,9 @@ function applyFontCycleInput(
     raw !== undefined ||
     isNum(input.font_cycle_at) ||
     isNum(input.font_cycle_seconds) ||
-    isNum(input.font_cycle_rate);
+    isNum(input.font_cycle_rate) ||
+    input.font_cycle_switches !== undefined ||
+    input.font_cycle_beats !== undefined;
   if (!named) return;
 
   // An empty list clears the cycle.
@@ -6926,7 +7026,117 @@ function applyFontCycleInput(
     : (anim.fonts?.rate ?? FONT_CYCLE_RATE);
   // To the microsecond, so a run that starts on a frame stays on it.
   const round = (v: number) => onFrame(Math.round(v * 1e6) / 1e6);
+
+  // Switch times (passed, or the beats of the music's clip) give each face
+  // its own hold, the faces repeating in order to fill them. Example: faces
+  // [a, b] over switches 2.5, 3, 4 on a title at 2 → a at 0.5 for 0.5s,
+  // then b for 1s, and the title's own face after 4.
+  const edges = cycleSwitchesOf(s, o, input, at, seconds);
+  if (edges) {
+    const timed = edges.slice(1).map((end, i) => ({
+      ...faces[i % faces.length],
+      hold: round(end - edges[i]),
+    }));
+    anim.fonts = { faces: timed, at: round(edges[0]), seconds: round(edges[edges.length - 1] - edges[0]), rate };
+    return;
+  }
   anim.fonts = { faces, at: round(at), seconds: round(seconds), rate };
+}
+
+/** The face-change times of a timed font cycle, in seconds from the element's
+ * start, first to last: font_cycle_switches as passed, or the stored beat
+ * grid of the font_cycle_beats clip inside the cycle's run [at, at+seconds].
+ * Null when neither is named. */
+function cycleSwitchesOf(
+  s: Editor,
+  o: { start: number; end: number },
+  input: Record<string, unknown>,
+  at: number,
+  seconds: number
+): number[] | null {
+  const dur = o.end - o.start;
+  let edges: number[];
+  if (input.font_cycle_switches !== undefined) {
+    if (!Array.isArray(input.font_cycle_switches)) throw new ToolError("font_cycle_switches must be a list of timeline seconds.");
+    edges = input.font_cycle_switches.filter(isNum).map((t) => t - o.start);
+  } else if (input.font_cycle_beats !== undefined) {
+    edges = beatSwitchesOf(s, String(input.font_cycle_beats), input, o.start, at, at + seconds);
+  } else {
+    return null;
+  }
+
+  // Inside the element, in order; a switch under a face's shortest hold
+  // after the one before it merges into it, the run's end kept.
+  const sorted = edges
+    .filter((t) => t >= -1e-6 && t <= dur + 1e-6)
+    .map((t) => Math.round(clamp(t, 0, dur) * 1e6) / 1e6)
+    .sort((a, b) => a - b);
+  edges = [];
+  for (const t of sorted) {
+    if (edges.length > 0 && t - edges[edges.length - 1] < CYCLE_HOLD_MIN) {
+      if (t === sorted[sorted.length - 1] && edges.length > 1) {
+        edges[edges.length - 1] = t;
+      }
+      continue;
+    }
+    edges.push(t);
+  }
+  if (edges.length < 2)
+    throw new ToolError("A timed font cycle needs at least two switch times inside the title: the first face's start and the last face's end.");
+  if (edges.length - 1 > FONT_CYCLE_FACES_MAX)
+    throw new ToolError(
+      `That run changes face ${edges.length - 1} times; one cycle holds ${FONT_CYCLE_FACES_MAX}. Pass font_cycle_beat_step 2 (every other beat), or shorten the run with font_cycle_seconds.`
+    );
+  const longest = Math.max(...edges.slice(1).map((t, i) => t - edges[i]));
+  if (longest > CYCLE_HOLD_MAX)
+    throw new ToolError(`One face would hold ${round2(longest)}s; a face holds at most ${CYCLE_HOLD_MAX}s. Add a switch inside that gap.`);
+  return edges;
+}
+
+/** Face changes on a clip's beat grid, seconds from the element's start: the
+ * beats (every `step`th, or each split into 1/step parts) that land inside
+ * the run, closed by the next one or the run's end. */
+function beatSwitchesOf(
+  s: Editor,
+  clipId: string,
+  input: Record<string, unknown>,
+  elementStart: number,
+  from: number,
+  to: number
+): number[] {
+  const clip = s.clips.find((c) => c.id === clipId) ?? s.audioClips.find((c) => c.id === clipId);
+  if (!clip) throw new ToolError(`No clip with id ${clipId}. font_cycle_beats takes the clip that plays the music.`);
+  const asset = s.assets.find((a) => a.id === clip.assetId);
+  const grid = asset?.beats?.beats ?? [];
+  if (grid.length < 2)
+    throw new ToolError(`"${asset?.name ?? clipId}" has no beat grid yet. Call detect_beats with clip_id ${clipId} first, then time the cycle to it.`);
+
+  // The beats the clip plays, on the element's clock, in play order.
+  const retime = retimeOf(clip);
+  const beats = grid
+    .filter((b) => b >= clip.in && b <= clip.out)
+    .map((b) => clip.start + retime.tAt(b) - elementStart)
+    .sort((a, b) => a - b);
+
+  // Every Nth beat counted from the run's first, or each beat split evenly.
+  const step = isNum(input.font_cycle_beat_step) && input.font_cycle_beat_step > 0 ? input.font_cycle_beat_step : 1;
+  const whole = step >= 1 ? Math.round(step) : 1;
+  const parts = step < 1 ? Math.round(1 / step) : 1;
+  if (Math.abs((step >= 1 ? whole : 1 / parts) - step) > 1e-3)
+    throw new ToolError("font_cycle_beat_step is a whole number of beats (1, 2, 4) or a split of one (0.5, 0.25).");
+  const first = beats.findIndex((t) => t >= from - 1e-6);
+  const picked = (first < 0 ? [] : beats.slice(first)).filter((_, i) => i % whole === 0);
+  const points = picked.flatMap((b, i) =>
+    i + 1 < picked.length ? Array.from({ length: parts }, (_, k) => b + ((picked[i + 1] - b) * k) / parts) : [b]
+  );
+
+  // The switches inside the run, closed by the next one or the run's end.
+  const inside = points.filter((t) => t >= from - 1e-6 && t < to - 1e-6);
+  if (inside.length === 0) throw new ToolError("No beat of that clip lands inside the cycle's run.");
+  const after = points.find((t) => t >= to - 1e-6);
+  const spacing = inside.length > 1 ? (inside[inside.length - 1] - inside[0]) / (inside.length - 1) : to - inside[0];
+  const close = after !== undefined ? to : Math.min(to, inside[inside.length - 1] + spacing);
+  return [...inside, close];
 }
 
 /** A font id the registry knows, or a refusal naming the one it does not. */

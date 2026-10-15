@@ -91,4 +91,4 @@ import "@fontsource/gloria-hallelujah/400.css";
 import { GOOGLE_FONTS } from "./fontCatalog";
 import { registerFonts } from "./types";
 
-registerFonts(GOOGLE_FONTS.map((f) => ({ ...f, stack: `"${f.label}"` })));
+registerFonts(GOOGLE_FONTS.map((f) => ({ id: f.id, label: f.label, stack: `"${f.label}"` })));

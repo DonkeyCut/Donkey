@@ -4,6 +4,7 @@ import { bindCutColor } from "@/cut/lib/colorSettings";
 import { bindCutExportPasses } from "@/cut/lib/exportPassSettings";
 import { bindCutSound } from "@/cut/lib/soundSettings";
 import { bindCutMotion } from "@/cut/lib/motionSettings";
+import { bindCutFontMatch } from "@/cut/lib/fontMatchSettings";
 import { bindCutLoudness } from "@/cut/lib/loudnessSettings";
 import { bindCutMediaCache } from "@/cut/lib/chunkCache";
 
@@ -56,6 +57,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
     bindCutColor(config.data.settings.cutColor);
     bindCutSound(config.data.settings.cutSound);
     bindCutMotion(config.data.settings.cutMotion);
+    bindCutFontMatch(config.data.settings.cutFontMatch);
     bindCutLoudness(config.data.settings.cutLoudness);
     bindCutExportPasses(config.data.settings.cutExportPasses);
     bindCutMediaCache(config.data.settings.cutMediaCache);
