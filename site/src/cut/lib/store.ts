@@ -1005,12 +1005,20 @@ export interface EditorState {
   /** Step the history; false when there is nothing to step to. */
   undo: () => boolean;
   redo: () => boolean;
+  /** The same steps, answering what the step took back or put back: the
+   * label its batch was opened with (a chat tool's name), or null when it
+   * had none. Null when there is nothing to step to. */
+  undoStep: () => { label: string | null } | null;
+  redoStep: () => { label: string | null } | null;
   upsertRender: (r: RenderRecord) => void;
   removeRenders: (ids: string[]) => void;
   pushHistory: () => void;
   /** Coalesce every edit until the matching `endHistoryBatch` into one undo
-   * step. Used so a whole assistant turn reverts with a single ⌘Z. */
-  beginHistoryBatch: () => void;
+   * step. Used so a whole assistant turn reverts with a single ⌘Z. A batch
+   * opened directly inside another (one chat tool call inside the turn) is a
+   * step of its own while the outer one is open, so an undo mid-turn takes
+   * back that call alone; `label` names what the step was for. */
+  beginHistoryBatch: (label?: string) => void;
   endHistoryBatch: () => void;
   /** Copy the selected clip/audio/overlay/title/cue(s) to the timeline clipboard. */
   copySelection: () => boolean;
@@ -1033,6 +1041,10 @@ export interface EditorState {
   pasteCopies: (items: TimelineClipboardItem[], at: number) => NonNullable<Selection>[] | null;
 }
 
+/** The label a chat turn's batch opens with, so an undo that steps back into
+ * an earlier turn says that it took the whole turn. */
+export const CHAT_TURN_LABEL = "chat turn";
+
 // Per-project undo/redo stacks; both reset when a project loads. Capped so a
 // long session (each snapshot deep-copies every clip/cue) can't grow unbounded.
 const HISTORY_CAP = 100;
@@ -1050,6 +1062,22 @@ let docSeq = 0;
 /** >0 while a run of edits is being coalesced into one undo step (see
  * beginHistoryBatch). One checkpoint is captured when it goes 0→1. */
 let batchDepth = 0;
+/** While a batch is open, the checkpoints of the batches opened directly
+ * inside it — one per chat tool call — so the chat's undo mid-turn takes back
+ * its last call, not the whole turn so far. Gone once the outer batch closes:
+ * after the turn, ⌘Z takes the turn back whole. */
+const steps: DocSnapshot[] = [];
+/** The inner batch's checkpoint, committed to `steps` as it closes if the doc
+ * changed meanwhile (see sealStep). */
+let stepPending: { snap: DocSnapshot; seq: number } | null = null;
+/** What each checkpoint was taken for — the label its batch opened with —
+ * kept off the snapshot so every copy of the stacks carries it for free. */
+const historyLabels = new WeakMap<DocSnapshot, string>();
+/** Redo entries an undo of an inner step left, which go back onto `steps`. */
+const stepRedos = new WeakSet<DocSnapshot>();
+/** Set when an undo inside the open batch took a step back, so the batch's
+ * close checks whether anything of the turn is left to record. */
+let stepUndone = false;
 
 /** The project-wide fields a history snapshot also carries, as they stood
  * when a timeline was closed. */
@@ -1813,6 +1841,42 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
    * the same chat turn would step back into the turn before. */
   const rearmBatch = () => {
     if (batchDepth > 0) pending = { snap: snapshot(), seq: docSeq };
+    rearmStep();
+  };
+
+  /** The same for an inner batch an undo ran inside: the undo is not that
+   * batch's edit to record. */
+  const rearmStep = () => {
+    if (batchDepth > 1) stepPending = { snap: snapshot(), seq: docSeq };
+  };
+
+  /** Seal the inner batch's checkpoint into `steps` if the doc changed under
+   * it, the way flush seals an outer one. */
+  const sealStep = () => {
+    if (!stepPending) return;
+    const p = stepPending;
+    stepPending = null;
+    if (docSeq !== p.seq) {
+      steps.push(p.snap);
+      if (steps.length > HISTORY_CAP) steps.shift();
+      future.length = 0;
+    }
+  };
+
+  /** Drop the open batch's checkpoint when the doc stands where it did as the
+   * batch opened — every step of it undone — so the batch records no step
+   * that changes nothing, and an undo past it reaches the edit before. */
+  const dropIdlePending = () => {
+    if (pending && JSON.stringify(snapshot()) === JSON.stringify(pending.snap)) pending = null;
+  };
+
+  /** A checkpoint of the doc as it stands, carrying `like`'s label: the entry
+   * the other stack gets when a step moves across. */
+  const labelledSnapshot = (like: DocSnapshot): DocSnapshot => {
+    const snap = snapshot();
+    const label = historyLabels.get(like);
+    if (label !== undefined) historyLabels.set(snap, label);
+    return snap;
   };
 
   const push = () => {
@@ -1907,6 +1971,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       history.length = 0;
       future.length = 0;
       pending = null;
+      steps.length = 0;
+      stepPending = null;
       parkedHistory.clear();
       // A fresh project owns no live run — any prior run's render-owned ids are
       // stale, and the loaded clips are ordinary, fully-undoable content.
@@ -2508,7 +2574,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       };
       for (const snap of history) scrub(snap);
       for (const snap of future) scrub(snap);
+      for (const snap of steps) scrub(snap);
       if (pending) scrub(pending.snap);
+      if (stepPending) scrub(stepPending.snap);
     },
 
     releaseGenClips: () => {
@@ -2533,7 +2601,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       };
       for (const snap of history) graft(snap);
       for (const snap of future) graft(snap);
+      for (const snap of steps) graft(snap);
       if (pending) graft(pending.snap);
+      if (stepPending) graft(stepPending.snap);
       genClipIds.clear();
       genAudioIds.clear();
     },
@@ -2542,16 +2612,29 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
 
     pushHistory: push,
 
-    beginHistoryBatch: () => {
+    beginHistoryBatch: (label) => {
       if (batchDepth === 0) {
         flush(); // seal any prior edit before opening the batch
         pending = { snap: snapshot(), seq: docSeq };
+        if (label) historyLabels.set(pending.snap, label);
+      } else if (batchDepth === 1) {
+        // A batch inside the open one: a step of its own until the outer closes.
+        sealStep();
+        stepPending = { snap: snapshot(), seq: docSeq };
+        if (label) historyLabels.set(stepPending.snap, label);
       }
       batchDepth++;
     },
     endHistoryBatch: () => {
       batchDepth = Math.max(0, batchDepth - 1);
-      if (batchDepth === 0) flush(); // commit the whole run as one undo step
+      if (batchDepth === 1) sealStep();
+      if (batchDepth === 0) {
+        sealStep();
+        steps.length = 0;
+        if (stepUndone) dropIdlePending();
+        stepUndone = false;
+        flush(); // commit the whole run as one undo step
+      }
     },
 
     setAspect: (a) => {
@@ -2654,8 +2737,12 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         selectedKey: null,
       });
       // A batch still open (a chat turn's run of edits) keeps going on this
-      // timeline, as one undo step of its own.
+      // timeline, as one undo step of its own; its inner steps stay behind
+      // inside the step the leaving timeline just recorded.
+      steps.length = 0;
+      stepPending = null;
       if (batchDepth > 0) pending = { snap: snapshot(), seq: docSeq };
+      rearmStep();
     },
     setColorSpace: (space) => {
       if (get().colorSpace === space || get().readOnly) return;
@@ -2874,7 +2961,9 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           .map((a) => (a.soundFrom?.assetId === id ? withAssetField(a, "soundFrom", undefined) : a));
       for (const snap of history) scrub(snap);
       for (const snap of future) scrub(snap);
+      for (const snap of steps) scrub(snap);
       if (pending) scrub(pending.snap);
+      if (stepPending) scrub(stepPending.snap);
       for (const parked of parkedHistory.values()) [...parked.history, ...parked.future].forEach(scrub);
       const dropFile = () => {
         const s = get();
@@ -5304,25 +5393,51 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       return selection;
     },
 
-    undo: () => {
+    undo: () => get().undoStep() !== null,
+
+    redo: () => get().redoStep() !== null,
+
+    undoStep: () => {
+      sealStep();
+      // Inside an open batch the last inner step goes back alone.
+      const step = batchDepth > 0 ? steps.pop() : undefined;
+      if (step) {
+        const now = labelledSnapshot(step);
+        stepRedos.add(now);
+        future.push(now);
+        restoreDoc(step);
+        stepUndone = true;
+        rearmStep();
+        return { label: historyLabels.get(step) ?? null };
+      }
+      if (batchDepth > 0 && stepUndone) dropIdlePending();
       flush(); // commit any uncommitted edit before stepping back
       const prev = history.pop();
-      if (!prev) return false;
-      future.push(snapshot());
+      if (!prev) return null;
+      future.push(labelledSnapshot(prev));
       restoreDoc(prev);
       rearmBatch();
-      return true;
+      return { label: historyLabels.get(prev) ?? null };
     },
 
-    redo: () => {
-      flush();
+    redoStep: () => {
+      sealStep();
+      // An open batch keeps its checkpoint: the redo is part of its run.
+      if (batchDepth === 0) flush();
       const next = future.pop();
-      if (!next) return false;
-      history.push(snapshot());
-      if (history.length > HISTORY_CAP) history.shift();
+      if (!next) return null;
+      const now = labelledSnapshot(next);
+      const inner = batchDepth > 0 && stepRedos.has(next);
+      if (inner) {
+        steps.push(now);
+      } else {
+        history.push(now);
+        if (history.length > HISTORY_CAP) history.shift();
+      }
       restoreDoc(next);
-      rearmBatch();
-      return true;
+      if (inner) rearmStep();
+      else rearmBatch();
+      return { label: historyLabels.get(next) ?? null };
     },
   };
 });

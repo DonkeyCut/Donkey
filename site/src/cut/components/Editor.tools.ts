@@ -20,12 +20,12 @@ export const EDITOR_TOOLS = [
   },
   {
     name: "undo",
-    description: "Undo the last edit (unlimited).",
+    description: "Undo the last edit (unlimited). In a turn, each undo takes back your last change-making tool call alone, every write it made; past this turn's first call it takes back the previous turn whole. The result names what it reverted and what changed.",
     inputSchema: obj({}),
   },
   {
     name: "redo",
-    description: "Redo the last undone edit.",
+    description: "Redo the last undone edit. The result names what it put back.",
     inputSchema: obj({}),
   },
 ] as const satisfies readonly AiToolDef[];
