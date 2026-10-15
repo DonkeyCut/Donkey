@@ -115,6 +115,13 @@ const AHEAD_S = 5;
  * device claims. Well past a Bluetooth headset, and short of anything that
  * would read as the playhead refusing to move. */
 const MAX_LATENCY_S = 0.4;
+/** How long a play follows the sound's clock alone before the wall may carry
+ * it. A new context's device opens after the context does: Chrome on a Mac
+ * reports `running` at once, holds `currentTime` at zero for a quarter second
+ * and reports no output latency until the device is open. The wall running on
+ * through that read as a clock jump, put the playhead ahead of a sound that
+ * had not started, and stepped it back once the latency arrived. */
+const START_WAIT_S = 1;
 /** Sound late by more than this, mid-play, is a hole the listener hears: the
  * scheduling runs seconds ahead, so a window that misses its moment means the
  * thread was gone for that long. A voice's first window is a different thing
@@ -268,6 +275,12 @@ export class PreviewMixer {
   /** Timeline time, context time and wall time of the same instant. Everything
    * scheduled is placed against this. */
   private anchor: { timeline: number; ctx: number; wall: number } | null = null;
+  /** Wall time (performance.now) the play began, for `START_WAIT_S`. */
+  private startedAt = 0;
+  /** The latest time `now()` has answered this play, so it never answers
+   * less: a device reporting more latency mid-play holds the picture until
+   * the sound reaches it. */
+  private shown = 0;
   private decoded = new Map<string, FittedWindow>();
   private readonly releaseMemory = holdMemory("mixerAudio", () => decodedBytes(this.decoded));
 
@@ -338,6 +351,7 @@ export class PreviewMixer {
     if (!this.anchor) return 0;
     // A hold is the clock standing still on purpose; nothing about it is drift.
     if (this.holding) return this.heldAt;
+    if (this.starting()) return this.show(this.heard(this.followSound()));
     const wall = this.anchor.timeline + (performance.now() - this.anchor.wall) / 1000;
     // A browser holds an `AudioContext` suspended until the page has been
     // interacted with, and a suspended context's clock does not move. Reading
@@ -346,7 +360,7 @@ export class PreviewMixer {
     // the playhead by however long it stayed asleep. So the wall carries the cut
     // until the audio clock agrees with it, and a clock that disagrees is
     // re-anchored rather than believed.
-    if (!this.ctx || this.ctx.state !== "running") return wall;
+    if (!this.ctx || this.ctx.state !== "running") return this.show(wall);
     const graph = this.anchor.timeline + (this.ctx.currentTime - this.anchor.ctx);
     // Measured on the graph's clock, which is the one the anchor was taken on.
     // Comparing the heard clock against the wall would read the device's own
@@ -363,9 +377,35 @@ export class PreviewMixer {
       // where the clock now stands.
       meterClockJump();
       this.restart(wall);
-      return this.heard(wall);
+      return this.show(this.heard(wall));
     }
-    return this.heard(graph);
+    return this.show(this.heard(graph));
+  }
+
+  /** Whether the play is inside its `START_WAIT_S`. */
+  private starting(): boolean {
+    return performance.now() - this.startedAt < START_WAIT_S * 1000;
+  }
+
+  /**
+   * The graph's clock, with the wall kept level with it.
+   *
+   * While the device opens the graph's clock stands still and so does the
+   * playhead, at the play position. The wall is pulled along so that once the
+   * wait is over it carries on from the same moment: a context that never
+   * starts — a page nobody has touched — plays on in silence from there.
+   */
+  private followSound(): number {
+    const anchor = this.anchor!;
+    const graph = anchor.timeline + (this.ctx!.currentTime - anchor.ctx);
+    anchor.wall = performance.now() - (graph - anchor.timeline) * 1000;
+    return graph;
+  }
+
+  /** `t`, or the latest time already answered if that is later. */
+  private show(t: number): number {
+    this.shown = Math.max(this.shown, t);
+    return this.shown;
   }
 
   /**
@@ -378,10 +418,11 @@ export class PreviewMixer {
    */
   private at(): number {
     if (!this.anchor) return 0;
+    if (this.starting()) return Math.max(this.shown, this.heard(this.followSound()));
     const wall = this.anchor.timeline + (performance.now() - this.anchor.wall) / 1000;
-    if (!this.ctx || this.ctx.state !== "running") return wall;
+    if (!this.ctx || this.ctx.state !== "running") return Math.max(this.shown, wall);
     const graph = this.anchor.timeline + (this.ctx.currentTime - this.anchor.ctx);
-    return this.heard(Math.abs(graph - wall) > 0.25 ? wall : graph);
+    return Math.max(this.shown, this.heard(Math.abs(graph - wall) > 0.25 ? wall : graph));
   }
 
   /**
@@ -462,6 +503,8 @@ export class PreviewMixer {
     void ctx.resume();
     this.restart(t);
     this.anchor = { timeline: t, ctx: ctx.currentTime, wall: performance.now() };
+    this.startedAt = this.anchor.wall;
+    this.shown = t;
   }
 
   /**

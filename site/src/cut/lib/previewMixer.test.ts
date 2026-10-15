@@ -80,11 +80,18 @@ class FakeSource {
  * an output device being switched, a tab the browser has put down. */
 let resumeBlockedUntil = 0;
 let liveCtx: FakeContext | null = null;
+/** The output device behind a new context: until the wall reaches this the
+ * context says it is running while its clock stands at zero and it reports no
+ * output latency — Chrome on a Mac, a quarter second after the press. */
+let deviceOpensAt = 0;
+let deviceLatency = 0;
 
 class FakeContext {
   state = "running";
   baseLatency = 0;
-  outputLatency = 0;
+  get outputLatency() {
+    return wall >= deviceOpensAt ? deviceLatency : 0;
+  }
   destination = {};
   get currentTime() {
     return ctxTime;
@@ -253,7 +260,7 @@ function step(): void {
   wall += FRAME_S;
   // The graph's clock is the context's, and a context that is not running does
   // not keep one.
-  if (liveCtx?.state === "running") ctxTime += FRAME_S;
+  if (liveCtx?.state === "running" && wall >= deviceOpensAt) ctxTime += FRAME_S;
   for (const w of waiting.splice(0)) {
     if (w.at <= wall) w.wake();
     else waiting.push(w);
@@ -284,6 +291,8 @@ function reset(file: { endEarlyAt?: number; trackEnd?: number } = {}): void {
   hangUntil = 0;
   openCostS = 0;
   resumeBlockedUntil = 0;
+  deviceOpensAt = 0;
+  deviceLatency = 0;
   headStart = HEAD_START_S;
   liveCtx = null;
   endEarlyAt = file.endEarlyAt ?? Infinity;
@@ -471,6 +480,34 @@ describe("the preview's sound over a link that only just keeps up", () => {
     expect(played.length).toBeGreaterThan(0);
     expect(Math.min(...played.map((p) => p.from))).toBeLessThan(0.4);
     expect(walks.opened).toBe(1);
+  });
+
+  test("a play's clock waits for its device and never steps back", async () => {
+    // The failure this is here for: a first play created the context, whose
+    // clock stood at zero while the output device opened. The wall ran on, the
+    // standstill read as a clock jump, and the playhead was re-anchored a
+    // quarter second ahead of a sound that had not started. Once the device
+    // reported its latency the picture stepped back by that much.
+    reset();
+    deviceOpensAt = 0.4;
+    deviceLatency = 0.2;
+    const mixer = new PreviewMixer();
+    mixer.start(0);
+    liveCtx = (mixer as unknown as { ctx: FakeContext }).ctx;
+    const times: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      step();
+      const t = mixer.now();
+      times.push(t);
+      // The sound starts on the context's clock, and leaves the speakers the
+      // device's latency after that.
+      expect(t).toBeLessThanOrEqual(Math.max(0, ctxTime - liveCtx.outputLatency) + 1e-9);
+      mixer.update(t, [voice]);
+      await settle();
+    }
+    mixer.dispose();
+    for (let i = 1; i < times.length; i++) expect(times[i]).toBeGreaterThanOrEqual(times[i - 1]);
+    expect(times[times.length - 1]).toBeGreaterThan(1);
   });
 
   test("a short sound ahead of the playhead plays whole, and again for free", async () => {
