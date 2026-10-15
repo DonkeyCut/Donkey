@@ -552,6 +552,9 @@ function describeState(
               : { status: "uploading", percent: Math.round(a.upload.progress * 100) },
           }
         : {}),
+      // Where the picture sits inside a recorded frame (find_picture): the
+      // box the measuring tools read inside, centre and size as fractions.
+      ...(a.picture && (a.picture.w < 1 || a.picture.h < 1) ? { picture: a.picture } : {}),
       // The recording bound to this video (sync_audio): every clip of it
       // plays that file, recording second = video second + offset.
       ...(a.soundFrom

@@ -240,7 +240,8 @@ import { bundledFaces, inkMaskOf, rankFaces } from "./fontMatch";
 import { cutFontMatch } from "./fontMatchSettings";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
 import { compareMoments, sweepSource } from "./sourceCompare";
-import { sampleColors, scanCuts, trackElement, type FrameBox } from "./measure/sourceMeasure";
+import { findPicture, sampleColors, scanCuts, trackElement, type FrameBox } from "./measure/sourceMeasure";
+import { FULL_FRAME, isFullFrame } from "./measure/picture";
 import { DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
@@ -621,6 +622,41 @@ function trackPath(boxes: { t: number; box: FrameBox | null }[]) {
     thinned,
   };
 }
+
+/** The part of a source's frame a reading tool reads: `picture` as passed
+ * ("full" for the whole frame, or a box), else the picture box stored on the
+ * asset, else the whole frame. */
+function pictureArea(asset: MediaAsset, input: Record<string, unknown>): FrameBox {
+  if (input.picture === "full") return FULL_FRAME;
+  if (typeof input.picture === "string")
+    throw new ToolError(`picture is a box {x, y, w, h} in frame fractions, or "full" for the whole frame — got "${input.picture}".`);
+  return frameBoxOf(input.picture, "picture") ?? asset.picture ?? FULL_FRAME;
+}
+
+/** Find a video's picture over [from, to) and keep it on the asset — the
+ * whole frame when nothing around a picture holds still. */
+async function storePicture(asset: MediaAsset, from: number, to: number) {
+  const found = await withSweepPaused(() => findPicture(asset.url, { from, to })).catch((e) => {
+    throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+  });
+  useEditor.getState().updateAsset(asset.id, { picture: found?.box ?? FULL_FRAME });
+  return found;
+}
+
+/** The picture box a reading read inside, for its result: the box and what
+ * its numbers are fractions of. Nothing when it read the whole frame. */
+function pictureReport(area: FrameBox) {
+  if (isFullFrame(area)) return {};
+  return {
+    picture: { x: rF(area.x), y: rF(area.y), w: rF(area.w), h: rF(area.h) },
+    pictureNote: PICTURE_NOTE,
+  };
+}
+
+/** What a reading inside a picture box says about its own numbers. */
+const PICTURE_NOTE =
+  "This read only the source's picture box (`picture`, centre and size as fractions of the whole recorded frame) — the part the picture fills, apart from the bars or app around it. " +
+  'Every x, y, w, h passed in or handed back here is a fraction of that box, so it lands on the cut\'s frame as it is. picture: "full" reads the whole recorded frame; find_picture sets the box.';
 
 /** Frame fractions to the 1/10,000: a pixel of a 1080 frame is 0.0009. */
 const rF = (n: number) => Math.round(n * 10000) / 10000;
@@ -1385,6 +1421,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const failed = (fallback: string) => (e: unknown) => {
         throw new ToolError(e instanceof Error ? e.message : fallback, { cause: e });
       };
+      // Only the source's picture box is held against the cut's frame.
+      const area = pictureArea(asset, input);
 
       // The sweep: numbers over a span, at a step, under a time budget.
       if (input.mode === "sweep") {
@@ -1397,10 +1435,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             step: isNum(input.step) ? input.step : undefined,
             offset,
           },
-          total
+          total,
+          area
         ).catch(failed(`Could not sweep "${asset.name}".`));
         return {
           ...sweep,
+          ...pictureReport(area),
           source: sourceRef(asset),
           note:
             (sweep.coveredTo !== undefined
@@ -1423,13 +1463,56 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError("Pass times: [seconds] — the moments of the cut to check, or [{at, source}] when the cut sits at a different second than the source does. To score the whole cut first, pass mode: \"sweep\".");
       if (moments.length > MAX_COMPARE)
         throw new ToolError(`That is ${moments.length} moments — ${MAX_COMPARE} is the most one call reads. Check these, fix what is off, then call again for the rest; mode: "sweep" scores every frame without pictures.`);
-      const out = await compareMoments(doc, asset, moments, total).catch(failed("Could not compare the frames."));
+      const out = await compareMoments(doc, asset, moments, total, area).catch(failed("Could not compare the frames."));
       return {
         ...out,
+        ...pictureReport(area),
         // The same shape every look returns, so a record opened by a
         // comparison knows what the other senses may ask of this source.
         source: sourceRef(asset),
         note: COMPARE_NOTE,
+      };
+  },
+
+  find_picture: async (s, input) => {
+      // Where the picture sits inside the source's frame: found from what
+      // changes over time, or set as the model sees it. Kept on the asset,
+      // where every source-reading tool reads inside it from then on.
+      const asset = measuredSource(s, input, "picture");
+      let found: Awaited<ReturnType<typeof findPicture>> = null;
+      let box: FrameBox;
+      if (input.box === "full") {
+        box = FULL_FRAME;
+      } else if (input.box !== undefined && input.box !== null) {
+        box = frameBoxOf(input.box, "box")!;
+      } else {
+        if (asset.type === "image")
+          throw new ToolError(`"${asset.name}" is a still — nothing in it changes to find its picture by. Pass box: the picture's {x, y, w, h} as you see it.`);
+        const from = clamp(isNum(input.from) ? input.from : 0, 0, asset.duration);
+        const to = isNum(input.to) ? clamp(input.to, from, asset.duration) : asset.duration;
+        if (!(to > from)) throw new ToolError("from/to describe an empty range of the source.");
+        found = await storePicture(asset, from, to);
+        box = found?.box ?? FULL_FRAME;
+      }
+      useEditor.getState().updateAsset(asset.id, { picture: box });
+
+      // Its size in the source's pixels, when the source's size is known.
+      const pw = asset.width ? box.w * asset.width : 0;
+      const ph = asset.height ? box.h * asset.height : 0;
+      const full = isFullFrame(box);
+      return {
+        picture: { x: rF(box.x), y: rF(box.y), w: rF(box.w), h: rF(box.h) },
+        full,
+        ...(found ? { active: found.active } : {}),
+        ...(pw > 0 && ph > 0 ? { pixels: { width: Math.round(pw), height: Math.round(ph) }, aspect: round2(pw / ph) } : {}),
+        source: sourceRef(asset),
+        note:
+          input.box === undefined && !found
+            ? "Too little of the frame changes to tell the picture from what is around it, so the tools read the whole frame. Pass box once you can see where the picture sits (watch_video at detail original)."
+            : full
+              ? "The picture fills the whole frame; the tools read all of it."
+              : "The picture fills this box of the recorded frame (centre and size as frame fractions). detect_cuts, sample_color, track_element, suggest_font and compare_to_source read inside it from now on, and their x, y, w, h are fractions of it, so they land on the cut's frame as they are. " +
+                "aspect is its shape; set_aspect to match when the copy should. A box that is off — check it on a watch_video frame at detail original — is set with box.",
       };
   },
 
@@ -1441,8 +1524,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const asked = isNum(input.to) ? clamp(input.to, 0, asset.duration) : asset.duration;
       const to = Math.min(asked, from + DETECT_CUTS_SPAN_MAX);
       if (!(to > from)) throw new ToolError("from/to describe an empty range of the source.");
+      // A source read for the first time has its picture found and kept, so
+      // a change that fills the picture counts in full when the picture is a
+      // small part of a recorded frame.
+      if (input.picture === undefined && !asset.picture) {
+        await storePicture(asset, 0, asset.duration);
+      }
+      const area = pictureArea(useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset, input);
       const scan = await withSweepPaused(() =>
-        scanCuts(asset.url, { from, to, maxCuts: DETECT_CUTS_MAX, budgetMs: MEASURE_BUDGET_MS })
+        scanCuts(asset.url, {
+          from,
+          to,
+          maxCuts: DETECT_CUTS_MAX,
+          budgetMs: MEASURE_BUDGET_MS,
+          ...(isFullFrame(area) ? {} : { area }),
+        })
       ).catch((e) => {
         throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
       });
@@ -1466,6 +1562,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         truncated,
         cuts: scan.cuts.map((c) => ({ t: roundT(c.t), frame: c.frame, change: c.change })),
         shots,
+        ...pictureReport(area),
         source: sourceRef(asset),
         note:
           (scan.cuts.length === 0 ? "No hard cut in this span. " : "") +
@@ -1498,7 +1595,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         return { t, box, point };
       });
       const k = isNum(input.colors) ? clamp(Math.round(input.colors), 1, SAMPLE_COLORS_K_MAX) : 1;
-      const read = await withSweepPaused(() => sampleColors(asset.url, asset.type === "image" ? "image" : "video", samples, k)).catch((e) => {
+      const area = pictureArea(asset, input);
+      const read = await withSweepPaused(() => sampleColors(asset.url, asset.type === "image" ? "image" : "video", samples, k, area)).catch((e) => {
         throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
       });
       return {
@@ -1509,6 +1607,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...(smp.point ? {} : { w: rF(smp.box.w), h: rF(smp.box.h) }),
           ...read[i],
         })),
+        ...pictureReport(area),
         source: sourceRef(asset),
       };
   },
@@ -1526,8 +1625,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const end = Math.max(0, asset.duration - 0.001);
       const from = asset.type === "video" ? clamp(isNum(input.from) ? input.from : 0, 0, end) : 0;
       const to = asset.type === "video" && isNum(input.to) && input.to > from ? clamp(input.to, 0, asset.duration) : undefined;
+      const area = pictureArea(asset, input);
       const run = await withSweepPaused(() =>
         trackElement(asset.url, asset.type === "image" ? "image" : "video", {
+          area,
           from,
           ...(to !== undefined ? { to } : {}),
           seed,
@@ -1565,6 +1666,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           error: Math.round(m.error * 1000) / 1000,
         })),
         ...(to !== undefined ? { coveredTo: roundT(run.coveredTo), truncated: run.truncated } : {}),
+        ...pictureReport(area),
         source: sourceRef(asset),
       };
   },
@@ -1765,6 +1867,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // Frame fractions, quietest first: where a title or caption can go
         // over this stretch without covering the picture or the platform's UI.
         ...(spots.length > 0 ? { textFits: spots } : {}),
+        // The picture box found or set on this source, so what the sheets
+        // show and what the measuring tools read are told apart.
+        ...(asset.picture && !isFullFrame(asset.picture)
+          ? {
+              picture: { x: rF(asset.picture.x), y: rF(asset.picture.y), w: rF(asset.picture.w), h: rF(asset.picture.h) },
+              pictureNote:
+                "The source's picture fills this box of its frame (centre and size, frame fractions); the sheets show the whole frame. detect_cuts, sample_color, track_element, suggest_font and compare_to_source read inside the box and speak in its fractions.",
+            }
+          : {}),
         note: reference
           ? tiled +
             "This is a look at a reference project for deciding which of this project's sources plays its part — nothing is written to the reference and no note is owed. " +
@@ -1993,10 +2104,14 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         fw = frame.canvas.width;
         fh = frame.canvas.height;
       }
-      const x0 = clamp(r.x as number, 0, 1) * fw;
-      const y0 = clamp(r.y as number, 0, 1) * fh;
-      const sw = Math.max(1, Math.min(fw - x0, (r.w as number) * fw));
-      const sh = Math.max(1, Math.min(fh - y0, (r.h as number) * fh));
+      // The region is in the picture box's fractions; the crop is the frame's.
+      const area = pictureArea(asset, input);
+      const left = area.x - area.w / 2;
+      const top = area.y - area.h / 2;
+      const x0 = (left + clamp(r.x as number, 0, 1) * area.w) * fw;
+      const y0 = (top + clamp(r.y as number, 0, 1) * area.h) * fh;
+      const sw = Math.max(1, Math.min(fw - x0, (r.w as number) * area.w * fw));
+      const sh = Math.max(1, Math.min(fh - y0, (r.h as number) * area.h * fh));
       const k = Math.min(1, FONT_CROP_MAX / Math.max(sw, sh));
       const cw = Math.max(1, Math.round(sw * k));
       const ch = Math.max(1, Math.round(sh * k));
@@ -2021,7 +2136,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         weight: m.weight,
         ...(m.italic ? { italic: true } : {}),
         score: m.score,
-        size: m.typePx > 0 ? Math.round((m.typePx / k / Math.min(fw, fh)) * DESIGN_SHORT_SIDE) : null,
+        size: m.typePx > 0 ? Math.round((m.typePx / k / Math.min(fw * area.w, fh * area.h)) * DESIGN_SHORT_SIDE) : null,
         tracking: m.tracking,
       }));
       const good = cutFontMatch().goodScore;
@@ -2031,11 +2146,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         t: round2(t),
         text,
         ink: {
-          x: round3((x0 + ref.box.x / k) / fw),
-          y: round3((y0 + ref.box.y / k) / fh),
-          w: round3(ref.box.w / k / fw),
-          h: round3(ref.box.h / k / fh),
+          x: round3(((x0 + ref.box.x / k) / fw - left) / area.w),
+          y: round3(((y0 + ref.box.y / k) / fh - top) / area.h),
+          w: round3(ref.box.w / k / fw / area.w),
+          h: round3(ref.box.h / k / fh / area.h),
         },
+        ...pictureReport(area),
         verdict: best && best.score >= good ? "match" : "no_match",
         matches,
         note:
@@ -6051,6 +6167,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "sync_audio",
   "capture_frame",
   "compare_to_source",
+  "find_picture",
   "detect_cuts",
   "sample_color",
   "track_element",

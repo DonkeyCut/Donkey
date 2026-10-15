@@ -1,8 +1,10 @@
 import { renderProjectFrames } from "./exportRender";
+import { FULL_FRAME, isFullFrame } from "./measure/picture";
+import type { FrameBox } from "./measure/sourceMeasure";
 import { bestShift, diffPixels, meanDiff, runShift, SCORE_LONG_SIDE, SWEEP_TARGET, sweepStats, worstStretches } from "./frameDiff";
 import { composeComparison, makeStillFrame } from "./media";
 import { framesAt } from "./mediaRead";
-import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
+import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl, type RasterSurface } from "./raster";
 import type { ExportDoc } from "./renderSnapshot";
 import { clipLen } from "./store";
 import { DEFAULT_BACKGROUND, frameOf, type MediaAsset } from "./types";
@@ -64,13 +66,42 @@ function blockAt(doc: ExportDoc, t: number): string | undefined {
   return undefined;
 }
 
+/** `area` of a `w`×`h` frame, in its pixels. */
+function areaPx(area: FrameBox, w: number, h: number) {
+  return { x: (area.x - area.w / 2) * w, y: (area.y - area.h / 2) * h, w: area.w * w, h: area.h * h };
+}
+
+/** A source frame's picture box as a JPEG for the side-by-side: the frame
+ * itself when the box is the whole of it. */
+async function pictureUrl(area: FrameBox, source: CanvasImageSource, w: number, h: number): Promise<string> {
+  if (isFullFrame(area)) {
+    return rasterCanvasToDataUrl(source as RasterSurface, "image/jpeg", 0.82);
+  }
+  const r = areaPx(area, w, h);
+  const canvas = createRasterCanvas(Math.max(1, Math.round(r.w)), Math.max(1, Math.round(r.h)));
+  const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
+  if (!ctx) {
+    throw new Error("No 2d context to crop the source's picture on.");
+  }
+  ctx.drawImage(source, r.x, r.y, r.w, r.h, 0, 0, canvas.width, canvas.height);
+  try {
+    return await rasterCanvasToDataUrl(canvas, "image/jpeg", 0.82);
+  } finally {
+    canvas.width = 0;
+  }
+}
+
+/** The read height that gives the source's picture box `height` rows. */
+const readHeight = (area: FrameBox, height: number) => Math.round(height / area.h);
+
 /**
- * Reads any frame down to the score's size, in the cut's shape. A source of
- * another shape is letterboxed into it over the cut's background, the way a
- * clip of that shape would sit on the timeline, and the scorer remembers it
- * did so the result can say so.
+ * Reads any frame down to the score's size, in the cut's shape. Only the
+ * source's picture box is read — the part of its frame the cut copies. A
+ * picture of another shape is letterboxed into the cut's frame over its
+ * background, the way a clip of that shape would sit on the timeline, and the
+ * scorer remembers it did so the result can say so.
  */
-function makeScorer(doc: ExportDoc) {
+function makeScorer(doc: ExportDoc, area: FrameBox) {
   const size = sizeOf(doc, SCORE_LONG_SIDE);
   const canvas = createRasterCanvas(size.width, size.height);
   const ctx = canvas.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D | null;
@@ -87,42 +118,55 @@ function makeScorer(doc: ExportDoc) {
     get letterboxed() {
       return letterboxed;
     },
-    pixels(source: CanvasImageSource, w: number, h: number): Uint8ClampedArray {
-      ctx.fillStyle = doc.background ?? DEFAULT_BACKGROUND;
-      ctx.fillRect(0, 0, size.width, size.height);
-      if (Math.abs(w / h / (size.width / size.height) - 1) <= ASPECT_SLACK) {
-        ctx.drawImage(source, 0, 0, size.width, size.height);
-      } else {
-        letterboxed = { w, h };
-        const k = Math.min(size.width / w, size.height / h);
-        const dw = w * k;
-        const dh = h * k;
-        ctx.drawImage(source, (size.width - dw) / 2, (size.height - dh) / 2, dw, dh);
-      }
-      return ctx.getImageData(0, 0, size.width, size.height).data;
+    /** A source frame, read inside its picture box. */
+    pixels(source: CanvasImageSource, fw: number, fh: number): Uint8ClampedArray {
+      return draw(source, areaPx(area, fw, fh));
+    },
+    /** One of the cut's own frames, read whole. */
+    cut(source: CanvasImageSource, fw: number, fh: number): Uint8ClampedArray {
+      return draw(source, { x: 0, y: 0, w: fw, h: fh });
     },
   };
+
+  function draw(source: CanvasImageSource, r: { x: number; y: number; w: number; h: number }): Uint8ClampedArray {
+    ctx!.fillStyle = doc.background ?? DEFAULT_BACKGROUND;
+    ctx!.fillRect(0, 0, size.width, size.height);
+    if (Math.abs(r.w / r.h / (size.width / size.height) - 1) <= ASPECT_SLACK) {
+      ctx!.drawImage(source, r.x, r.y, r.w, r.h, 0, 0, size.width, size.height);
+    } else {
+      letterboxed = { w: r.w, h: r.h };
+      const k = Math.min(size.width / r.w, size.height / r.h);
+      const dw = r.w * k;
+      const dh = r.h * k;
+      ctx!.drawImage(source, r.x, r.y, r.w, r.h, (size.width - dw) / 2, (size.height - dh) / 2, dw, dh);
+    }
+    return ctx!.getImageData(0, 0, size.width, size.height).data;
+  }
 }
 
 /** The line a result carries when the source was letterboxed to score it. */
-function frameNote(doc: ExportDoc, shape: { w: number; h: number } | undefined): string | undefined {
+function frameNote(doc: ExportDoc, shape: { w: number; h: number } | undefined, area: FrameBox): string | undefined {
   if (!shape) {
     return undefined;
   }
   return (
-    `The source's frame is ${round1(shape.w / shape.h)}:1 and the cut's is ${doc.aspect}, so scores read the source letterboxed into the cut's frame over its background. ` +
+    `The source's ${isFullFrame(area) ? "frame" : "picture box"} is ${round1(shape.w / shape.h)}:1 and the cut's is ${doc.aspect}, so scores read the source letterboxed into the cut's frame over its background. ` +
     "Bars the cut does not have count as difference; set_aspect to the source's shape when the copy should match it."
   );
 }
 
-/** A still source's one frame, as the scorer reads it. */
-async function stillPixels(asset: MediaAsset, scorer: ReturnType<typeof makeScorer>) {
+/** A still source's one frame, as the scorer reads it, and its picture box
+ * as the side-by-side shows it. */
+async function stillPixels(asset: MediaAsset, scorer: ReturnType<typeof makeScorer>, area: FrameBox) {
   const still = await makeStillFrame(asset.url, "read");
   const img = await decodeRasterImageUrl(still.frames[0].image);
   if (!img) {
     throw new Error(`Could not read "${asset.name}".`);
   }
-  return { image: still.frames[0].image, pixels: scorer.pixels(img.source, img.width, img.height) };
+  const image = isFullFrame(area)
+    ? still.frames[0].image
+    : await pictureUrl(area, img.source, img.width, img.height);
+  return { image, pixels: scorer.pixels(img.source, img.width, img.height) };
 }
 
 /** One moment checked: where it was read on each clock, the score, the grid,
@@ -139,10 +183,11 @@ export async function compareMoments(
   doc: ExportDoc,
   asset: MediaAsset,
   moments: { at: number; sourceAt: number }[],
-  total: number
+  total: number,
+  area: FrameBox = FULL_FRAME
 ): Promise<{ images: string[]; checked: Checked[]; frame?: string }> {
   const size = sizeOf(doc, COMPARE_LONG_SIDE);
-  const scorer = makeScorer(doc);
+  const scorer = makeScorer(doc, area);
   const wanted = moments.map((m) => ({
     at: clamp(m.at, 0, Math.max(0, total - 0.001)),
     sourceAt: clamp(m.sourceAt, 0, Math.max(0, asset.duration - 0.001)),
@@ -156,7 +201,7 @@ export async function compareMoments(
   const pixels = new Map<number, Uint8ClampedArray>();
   const pictures = new Map<number, string>();
   if (asset.type === "image") {
-    const still = await stillPixels(asset, scorer);
+    const still = await stillPixels(asset, scorer, area);
     for (const m of wanted) {
       pixels.set(key(m.sourceAt), still.pixels);
       pictures.set(key(m.sourceAt), still.image);
@@ -167,16 +212,18 @@ export async function compareMoments(
       .map((k) => k / 1000);
     // The source keeps its own aspect: a height alone lets a widescreen
     // reference stay widescreen beside a vertical cut, which is half of what
-    // the comparison is for. Asking for both dimensions squashes it.
+    // the comparison is for. Asking for both dimensions squashes it. The
+    // height is its picture box's, so a picture inside a bigger frame is
+    // read at the size the cut's frame is.
     let seen = 0;
-    for await (const c of framesAt(asset.url, times, { height: size.height })) {
+    for await (const c of framesAt(asset.url, times, { height: readHeight(area, size.height) })) {
       const k = key(times[seen++]);
       if (!c) {
         continue;
       }
       pixels.set(k, scorer.pixels(c.canvas, c.canvas.width, c.canvas.height));
       if (centers.has(k)) {
-        pictures.set(k, await rasterCanvasToDataUrl(c.canvas, "image/jpeg", 0.82));
+        pictures.set(k, await pictureUrl(area, c.canvas, c.canvas.width, c.canvas.height));
       }
     }
   }
@@ -193,7 +240,7 @@ export async function compareMoments(
   const checked: Checked[] = [];
   await renderProjectFrames(doc, wanted.map((m) => m.at), size, (a) => a.url, async (canvas, at) => {
     const m = wanted[pairs.length];
-    const cut = scorer.pixels(canvas, canvas.width, canvas.height);
+    const cut = scorer.cut(canvas, canvas.width, canvas.height);
     const { diff, grid } = diffPixels(cut, pixels.get(key(m.sourceAt))!, scorer.size.width, scorer.size.height);
     const near: { shift: number; diff: number }[] = [];
     for (let k = -SHIFT_REACH; k <= SHIFT_REACH; k++) {
@@ -222,7 +269,7 @@ export async function compareMoments(
     });
   });
   const images = await composeComparison(pairs);
-  const frame = frameNote(doc, scorer.letterboxed);
+  const frame = frameNote(doc, scorer.letterboxed, area);
   return { images, checked, ...(frame ? { frame } : {}) };
 }
 
@@ -271,7 +318,8 @@ export async function sweepSource(
   doc: ExportDoc,
   asset: MediaAsset,
   span: { from: number; to: number; step?: number; offset: number },
-  total: number
+  total: number,
+  area: FrameBox = FULL_FRAME
 ): Promise<SweepResult> {
   const from = clamp(span.from, 0, total);
   const to = clamp(span.to, from, total);
@@ -296,7 +344,7 @@ export async function sweepSource(
   }
 
   const size = sizeOf(doc, SWEEP_LONG_SIDE);
-  const scorer = makeScorer(doc);
+  const scorer = makeScorer(doc, area);
   const width = SHIFT_REACH * 2 + 1;
   const near = new Float32Array(samples.length * width).fill(NaN);
   const diffs: number[] = [];
@@ -306,8 +354,8 @@ export async function sweepSource(
 
   // The source side: a still answers every sample with its one frame; a
   // video is pulled a frame at a time, in step with the render.
-  const still = asset.type === "image" ? (await stillPixels(asset, scorer)).pixels : null;
-  const reader = still ? null : framesAt(asset.url, samples.map((s) => s.source), { height: size.height });
+  const still = asset.type === "image" ? (await stillPixels(asset, scorer, area)).pixels : null;
+  const reader = still ? null : framesAt(asset.url, samples.map((s) => s.source), { height: readHeight(area, size.height) });
   const started = performance.now();
   try {
     await renderProjectFrames(doc, samples.map((s) => s.at), size, (a) => a.url, async (canvas) => {
@@ -321,7 +369,7 @@ export async function sweepSource(
         const c = next.done ? null : next.value;
         src = c ? scorer.pixels(c.canvas, c.canvas.width, c.canvas.height) : null;
       }
-      const cut = scorer.pixels(canvas, canvas.width, canvas.height);
+      const cut = scorer.cut(canvas, canvas.width, canvas.height);
 
       // The sample's own score, then the timing read: this cut frame against
       // the source samples before it, and the cut frames before it against
@@ -377,7 +425,7 @@ export async function sweepSource(
   });
   const timing = still ? undefined : runShift(near, SHIFT_REACH, 0, diffs.length - 1, step);
   const onBlocks = scored.filter((s) => blockAt(doc, s.at)).length / scored.length;
-  const frame = frameNote(doc, scorer.letterboxed);
+  const frame = frameNote(doc, scorer.letterboxed, area);
   const reached = diffs.length < samples.length ? samples[diffs.length].at : undefined;
   return {
     mode: "sweep",

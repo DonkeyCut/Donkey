@@ -11,6 +11,7 @@ import type { WrappedCanvas } from "mediabunny";
 import { hexOf, regionColor, parseHex, type PixelRect, type Pixels, type Rgb } from "./color";
 import { changePct, gridMeans, pickCuts } from "./cuts";
 import { fitMoves, type Move } from "./easeFit";
+import { FULL_FRAME, areaOf, findPictureBox, intoArea, type PictureFind } from "./picture";
 import { inkBox, shapeBox } from "./track";
 
 /** A box as the editor places one: centre and size, frame fractions. */
@@ -30,6 +31,10 @@ const COLOR_LONG_SIDE = 1920;
 const TRACK_LONG_SIDE = 720;
 /** Reads a pass back off by this much so the frame on `from` is scored. */
 const LEAD_S = 0.001;
+/** Long side the picture box is found at: a pixel is 0.16% of the frame. */
+const PICTURE_LONG_SIDE = 640;
+/** Frames sampled across a source to find its picture. */
+const PICTURE_SAMPLES = 48;
 
 /** An open video source: its display size, first timestamp and frame reads. */
 interface SourceVideo {
@@ -95,10 +100,25 @@ async function imagePixels(url: string, longSide: number): Promise<Pixels> {
   return { data: image.data, width: w, height: h };
 }
 
-/** The read size for a source at `longSide`, never past its own pixels. */
-function sizeAt(width: number, height: number, longSide: number): FrameSize {
-  const k = Math.min(1, longSide / Math.max(width, height, 1));
+/** The read size for a source whose `area` is `longSide` on its long side,
+ * never past its own pixels. */
+function sizeAt(width: number, height: number, longSide: number, area: FrameBox = FULL_FRAME): FrameSize {
+  const k = Math.min(1, longSide / Math.max(width * area.w, height * area.h, 1));
   return { width: Math.max(1, Math.round(width * k)), height: Math.max(1, Math.round(height * k)), fit: "fill" };
+}
+
+/** The pixels of `px` inside `r`, as a picture of their own. */
+function cropPixels(px: Pixels, r: PixelRect): Pixels {
+  const x0 = Math.max(0, Math.min(px.width - 1, Math.round(r.x)));
+  const y0 = Math.max(0, Math.min(px.height - 1, Math.round(r.y)));
+  const w = Math.max(1, Math.min(px.width - x0, Math.round(r.w)));
+  const h = Math.max(1, Math.min(px.height - y0, Math.round(r.h)));
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const from = ((y0 + y) * px.width + x0) * 4;
+    data.set(px.data.subarray(from, from + w * 4), y * w * 4);
+  }
+  return { data, width: w, height: h };
 }
 
 /** A centre-and-size box in frame fractions, as pixels of `px`. */
@@ -140,21 +160,29 @@ export interface CutScan {
  * budget, and `coveredTo` says where the next pass picks up. */
 export async function scanCuts(
   url: string,
-  opts: { from: number; to: number; maxCuts: number; budgetMs: number }
+  opts: { from: number; to: number; maxCuts: number; budgetMs: number; area?: FrameBox }
 ): Promise<CutScan> {
   return withSourceVideo(url, async (v) => {
+    // Inside a picture box, the frame is read big enough that the box alone
+    // is the scan's size: a change that fills the picture fills the grid.
+    const area = opts.area ?? FULL_FRAME;
+    const size: FrameSize = {
+      width: Math.min(v.width, Math.round(SCAN_SIZE.width! / area.w)),
+      height: Math.min(v.height, Math.round(SCAN_SIZE.height! / area.h)),
+      fit: "fill",
+    };
     const deadline = Date.now() + opts.budgetMs;
     const times: number[] = [];
     const durations: number[] = [];
     const scores: number[] = [];
     let prev: Float32Array | null = null;
     let outOfTime = false;
-    for await (const f of v.frames(Math.max(0, opts.from - LEAD_S), opts.to, SCAN_SIZE)) {
+    for await (const f of v.frames(Math.max(0, opts.from - LEAD_S), opts.to, size)) {
       if (Date.now() > deadline) {
         outOfTime = true;
         break;
       }
-      const grid = gridMeans(f);
+      const grid = gridMeans(opts.area ? cropPixels(f, toPixels(f, area)) : f);
       scores.push(prev ? changePct(prev, grid) : NaN);
       times.push(f.t);
       durations.push(f.duration);
@@ -194,15 +222,18 @@ export async function sampleColors(
   url: string,
   kind: "video" | "image",
   samples: ColorSample[],
-  k: number
+  k: number,
+  area: FrameBox = FULL_FRAME
 ): Promise<ReturnType<typeof regionColor>[]> {
+  // Each sample's box is in the area's fractions; the reads are the frame's.
+  samples = samples.map((s) => ({ ...s, box: intoArea(area, s.box) }));
   if (kind === "image") {
     const px = await imagePixels(url, COLOR_LONG_SIDE);
     return samples.map((s) => regionColor(px, toPixels(px, s.box), k));
   }
   const times = [...new Set(samples.map((s) => s.t))].sort((a, b) => a - b);
   return withSourceVideo(url, async (v) => {
-    const size = sizeAt(v.width, v.height, COLOR_LONG_SIDE);
+    const size = sizeAt(v.width, v.height, COLOR_LONG_SIDE, area);
     const out = new Array<ReturnType<typeof regionColor>>(samples.length);
     let at = 0;
     for await (const f of v.framesAt(times, size)) {
@@ -245,8 +276,11 @@ export async function trackElement(
     tolerance: number;
     match: TrackMatch;
     maxFrames: number;
+    /** The picture box the seed, within and every box out are fractions of. */
+    area?: FrameBox;
   }
 ): Promise<TrackRun> {
+  const area = opts.area ?? FULL_FRAME;
   let truncated = false;
   let coveredTo = opts.to ?? opts.from;
 
@@ -255,16 +289,16 @@ export async function trackElement(
   let near: PixelRect | null = null;
   const boxes: TrackRun["boxes"] = [];
   const read = (t: number, px: Pixels) => {
-    const seed = toPixels(px, opts.seed);
+    const seed = toPixels(px, intoArea(area, opts.seed));
     if (!target) target = parseHex(regionColor(px, seed).hex)!;
-    const area = opts.within ? toPixels(px, opts.within) : opts.match === "ink" ? seed : { x: 0, y: 0, w: px.width, h: px.height };
+    const look = opts.within ? toPixels(px, intoArea(area, opts.within)) : opts.match === "ink" ? seed : toPixels(px, area);
     const found =
       opts.match === "ink"
-        ? inkBox(px, target, opts.tolerance, area)
-        : (shapeBox(px, target, opts.tolerance, area, near ?? seed) ??
-          (near ? shapeBox(px, target, opts.tolerance, area, seed) : null));
+        ? inkBox(px, target, opts.tolerance, look)
+        : (shapeBox(px, target, opts.tolerance, look, near ?? seed) ??
+          (near ? shapeBox(px, target, opts.tolerance, look, seed) : null));
     if (found) near = found;
-    boxes.push({ t, box: found ? toFrame(px, found) : null });
+    boxes.push({ t, box: found ? areaOf(area, toFrame(px, found)) : null });
   };
 
   let size = { width: 1, height: 1 };
@@ -276,7 +310,7 @@ export async function trackElement(
     read(0, px);
   } else {
     await withSourceVideo(url, async (v) => {
-      const at = sizeAt(v.width, v.height, TRACK_LONG_SIDE);
+      const at = sizeAt(v.width, v.height, TRACK_LONG_SIDE, area);
       size = { width: at.width!, height: at.height! };
       if (opts.to === undefined || opts.to <= opts.from) {
         for await (const f of v.framesAt([opts.from], at)) {
@@ -304,7 +338,7 @@ export async function trackElement(
   if (boxes.length > 2) {
     const ts = boxes.map((b) => b.t);
     for (const prop of ["x", "y", "w", "h"] as const) {
-      const step = 1 / (prop === "x" || prop === "w" ? size.width : size.height);
+      const step = 1 / (prop === "x" || prop === "w" ? size.width * area.w : size.height * area.h);
       for (const m of fitMoves(ts, boxes.map((b) => (b.box ? b.box[prop] : null)), step)) moves.push({ ...m, prop });
     }
     moves.sort((a, b) => a.from - b.from);
@@ -318,4 +352,19 @@ export async function trackElement(
     coveredTo,
     truncated,
   };
+}
+
+/** The box a video's picture fills inside its frame, found from frames
+ * sampled evenly over [from, to): the part that changes, apart from bars and
+ * an app's chrome around it. Null when too little moves to tell. */
+export async function findPicture(url: string, opts: { from: number; to: number }): Promise<PictureFind | null> {
+  return withSourceVideo(url, async (v) => {
+    const span = Math.max(0, opts.to - opts.from);
+    const times = Array.from({ length: PICTURE_SAMPLES }, (_, i) => opts.from + ((i + 0.5) * span) / PICTURE_SAMPLES);
+    const frames: Pixels[] = [];
+    for await (const f of v.framesAt(times, sizeAt(v.width, v.height, PICTURE_LONG_SIDE))) {
+      if (f) frames.push(f);
+    }
+    return findPictureBox(frames);
+  });
 }

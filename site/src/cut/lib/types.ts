@@ -252,6 +252,10 @@ export interface StoredAsset {
   speech?: AssetSpeech;
   /** The music's beat grid — dots on the clip, snap targets for every edge. */
   beats?: AssetBeats;
+  /** Where the video's picture sits inside its frame, as centre and size
+   * frame fractions: the part that changes, apart from letterbox bars or the
+   * app a recording shows it in. The measuring tools read inside it. */
+  picture?: { x: number; y: number; w: number; h: number };
   /** How this asset entered the project. Absent = the user imported it (drag,
    * drop, or upload), so it belongs in the Media panel. Any value marks media
    * Cut created or fetched — it lives where it was made (the timeline, a

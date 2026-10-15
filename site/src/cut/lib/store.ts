@@ -5321,14 +5321,14 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
   };
 });
 
-/** Whether any asset's beat grid or source-colour override was rewritten
+/** Whether any asset's beat grid, picture box or source-colour override was rewritten
  * between two asset lists. An asset arriving or leaving is no edit; only a
  * value changing under an id that was already there counts. */
 function beatsEdited(prev: MediaAsset[], next: MediaAsset[]): boolean {
   const before = new Map(prev.map((a) => [a.id, a]));
   return next.some((a) => {
     const was = before.get(a.id);
-    return !!was && (was.beats !== a.beats || was.colorProfile !== a.colorProfile || was.soundFrom !== a.soundFrom);
+    return !!was && (was.beats !== a.beats || was.picture !== a.picture || was.colorProfile !== a.colorProfile || was.soundFrom !== a.soundFrom);
   });
 }
 
@@ -5493,7 +5493,7 @@ export const docTimelines = (() => {
 export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
   return assets
     .filter((a) => !tabOnlyUpload(a))
-    .map(({ id, fileName, name, type, duration, sizeBytes, width, height, origin, chatId, folderId, language, watch, speech, beats, sceneCuts, copiedFrom, block, color, colorProfile, proxy, soundFrom }) => ({
+    .map(({ id, fileName, name, type, duration, sizeBytes, width, height, origin, chatId, folderId, language, watch, speech, beats, picture, sceneCuts, copiedFrom, block, color, colorProfile, proxy, soundFrom }) => ({
       id,
       fileName,
       name,
@@ -5509,6 +5509,7 @@ export function storedAssets(assets: MediaAsset[]): StoredAsset[] {
       ...(watch !== undefined ? { watch } : {}),
       ...(speech !== undefined ? { speech } : {}),
       ...(beats !== undefined ? { beats } : {}),
+      ...(picture !== undefined ? { picture } : {}),
       ...(sceneCuts !== undefined ? { sceneCuts } : {}),
       ...(copiedFrom !== undefined ? { copiedFrom } : {}),
       ...(block !== undefined ? { block } : {}),
