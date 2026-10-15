@@ -1027,6 +1027,10 @@ export interface EditorState {
    * the playhead otherwise) — sliding past anything already on the target
    * lane — and select the pasted item(s). */
   paste: (at?: number) => boolean;
+  /** Paste `items` at `at` the way `paste` lands the clipboard, and answer
+   * what landed, or null when nothing could. Copies from another timeline
+   * come in this way, leaving the clipboard to the person. */
+  pasteCopies: (items: TimelineClipboardItem[], at: number) => NonNullable<Selection>[] | null;
 }
 
 // Per-project undo/redo stacks; both reset when a project loads. Capped so a
@@ -5287,15 +5291,17 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       clipboard = [];
     },
 
-    paste: (at = previewAt()) => {
+    paste: (at = previewAt()) => get().pasteCopies(clipboard, at) !== null,
+
+    pasteCopies: (items, at) => {
       const s = get();
-      if (s.readOnly || !clipboard.length || !Number.isFinite(at)) return false;
-      if (clipboard.some((cb) => clipboardItemAssetIds(cb).some((id) => !s.assets.some((a) => a.id === id)))) return false;
+      if (s.readOnly || !items.length || !Number.isFinite(at)) return null;
+      if (items.some((cb) => clipboardItemAssetIds(cb).some((id) => !s.assets.some((a) => a.id === id)))) return null;
       push();
-      const { next, selection } = pasteTimelineItems(s, clipboard, Math.max(0, at), uid);
+      const { next, selection } = pasteTimelineItems(s, items, Math.max(0, at), uid);
       set({ ...next, subtitles: { ...s.subtitles, cues: next.subtitles.cues },
         selection: selection[selection.length - 1] ?? null, multiSelection: selection, selectedKey: null });
-      return true;
+      return selection;
     },
 
     undo: () => {

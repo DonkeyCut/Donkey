@@ -8,7 +8,7 @@
  */
 
 import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
-import { WATCH_DETAIL_NOTES, WATCH_DETAILS } from "@/cut/lib/types";
+import { TIMELINE_IDS, WATCH_DETAIL_NOTES, WATCH_DETAILS } from "@/cut/lib/types";
 import { FACT_CLAIM_MAX_CHARS, FACT_CLAIMS_MAX } from "@/lib/inference/factCheck";
 import { URL_BATCH_MAX } from "@/cut/lib/urlBatch";
 import { FIND_MEDIA_DEFAULT, FIND_MEDIA_MAX, FIND_MEDIA_SNAPSHOT_CAP } from "@/cut/lib/findMedia";
@@ -45,6 +45,7 @@ export const AI_PANEL_TOOLS = [
       "Read the full current editor state: clips, soundtrack, overlay elements (titles, shapes, stickers), subtitles, selection, playhead, view settings, publish metadata. Use this whenever the context snapshot is not enough or might be stale. A big cut read whole can run past what a result carries: name the sections you need (soundtrack, overlays, videoTrack, overlayVideo, transitions, subtitles, media, project, …) to check an edit.",
     inputSchema: obj({
       sections: { type: "array", items: { type: "string" }, description: "Top-level sections to return (the playhead always rides along); omit for everything" },
+      timeline: { type: "string", enum: [...TIMELINE_IDS], description: "Read another timeline's items (videoTrack, soundtrack, overlays, …) without opening it; omit for the open one" },
     }),
   },
   {

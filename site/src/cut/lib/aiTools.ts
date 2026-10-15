@@ -16,7 +16,7 @@ import { submitPreviewSnapshot } from "./exportClient";
 
 import { ITEM_KIND_IDS, ITEM_KINDS, ROW_ITEM_KINDS, type ItemKind } from "./itemKinds";
 import { insertItemRow, packRows } from "./laneTracks";
-import { timelineItem } from "./timelineItems";
+import { timelineCopies, timelineItem } from "./timelineItems";
 import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previewSelection";
 
 import { libraryShareTargetSchema, shareSettingsSchema, librarySharePath } from "@/cut/lib/librarySharing";
@@ -244,7 +244,7 @@ import { sampleColors, scanCuts, trackElement, type FrameBox } from "./measure/s
 import { DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
-import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
+import { buildAiContext, describeCameraCard, describeDoc, describeParkedTimeline, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
 import { CARD_SIDES, newCard, normalizeCard, type CardSide } from "./cameraCard";
 import { CAPTION_STYLES, captionEmphasis, cueSpot, EMPHASIS_SCALE_MAX, EMPHASIS_SCALE_MIN, laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { cueEmphasis, emphasisIndicesOf, emphasizedWords } from "./captionEmphasis";
@@ -330,7 +330,9 @@ import {
   SIDE_PANEL_TABS,
   SPEED_FLOOR,
   isTimelineId,
+  parkedTimeline,
   TIMELINE_IDS,
+  TIMELINE_LABELS,
   TRANSITION_STYLE_IDS,
   type AnimStyle,
   type AssetWatch,
@@ -1261,10 +1263,17 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     return { id: next.id, which, style: anim?.style ?? "none", seconds: anim?.seconds ?? 0 };
   },
 
-  get_state: (_s, input) => {
+  get_state: (s, input) => {
+      if (input.timeline !== undefined && !isTimelineId(input.timeline))
+        throw new ToolError(`timeline must be one of ${TIMELINE_IDS.join(", ")}.`);
       // The tool result carries the whole transcript; the per-message context
       // snapshot trims it, so this is how the model pulls every cue when needed.
-      const full = buildAiContext({ fullCues: true }) as Record<string, unknown>;
+      // A parked timeline reads as its items alone.
+      const full = (
+        isTimelineId(input.timeline) && input.timeline !== s.timeline
+          ? describeParkedTimeline(input.timeline)
+          : buildAiContext({ fullCues: true })
+      ) as Record<string, unknown>;
       const want: unknown[] = Array.isArray(input.sections) ? input.sections : [];
       if (want.length === 0) return full;
       // A big cut read whole runs past what a tool result can carry; a read
@@ -1273,7 +1282,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const bad = want.filter((k) => typeof k !== "string" || !names.includes(k));
       if (bad.length > 0) throw new ToolError(`Unknown section ${bad.join(", ")}; sections are ${names.join(", ")}.`);
       return Object.fromEntries(
-        names.filter((k) => k === "playhead" || want.includes(k)).map((k) => [k, full[k]])
+        names.filter((k) => k === "playhead" || k === "timeline" || want.includes(k)).map((k) => [k, full[k]])
       );
   },
 
@@ -5535,6 +5544,34 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (Object.keys(patch).length === 0) throw new ToolError("Nothing to change.");
       s.setNotes(patch);
       return useEditor.getState().notes;
+  },
+
+  copy_from_timeline: (s, input) => {
+      if (!isTimelineId(input.timeline))
+        throw new ToolError(`timeline must be one of ${TIMELINE_IDS.join(", ")}.`);
+      const ids = Array.isArray(input.ids) ? input.ids.filter((id): id is string => typeof id === "string") : [];
+      if (ids.length === 0) throw new ToolError("Name the items to copy in ids.");
+      const source = input.timeline === s.timeline ? s : parkedTimeline(s, input.timeline);
+      // Each id is found in whichever item list holds it on the source.
+      const found = ids.map((id) => {
+        const kind = ITEM_KIND_IDS.find((k) => timelineItem(source, { kind: k, id } as NonNullable<Selection>));
+        return kind ? ({ kind, id } as NonNullable<Selection>) : null;
+      });
+      const missing = ids.filter((_, i) => !found[i]);
+      if (missing.length > 0)
+        throw new ToolError(`${TIMELINE_LABELS[input.timeline]} has no item ${missing.join(", ")}; get_state with timeline "${input.timeline}" lists its items.`);
+      const items = timelineCopies(source, found);
+      const at = isNum(input.at) ? Math.max(0, input.at) : Math.min(...items.map((cb) => cb.item.start));
+      const landed = s.pasteCopies(items, at);
+      if (!landed) throw new ToolError("Nothing could be copied onto this timeline.");
+      const now = useEditor.getState();
+      return {
+        timeline: now.timeline,
+        copied: landed.map((sel) => {
+          const item = timelineItem(now, sel)!;
+          return { kind: sel.kind, id: sel.id, start: roundT(item.start) };
+        }),
+      };
   },
 
   switch_timeline: async (_s, input) => {
