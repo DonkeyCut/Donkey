@@ -12,7 +12,7 @@ import { creditValidity, OfferButton, OfferDialog, OfferDismiss, subscribeOfferC
 import { useEngineUser } from "@/cut/lib/backend/hooks";
 import { useInvalidateOnSettle } from "@/cut/lib/hosted";
 import { track } from "@/lib/analytics";
-import { formatUsd } from "@/lib/credits/format-usd";
+import { compactCredits, formatCredits } from "@/lib/credits/format-credits";
 import { useStartCheckout } from "@/queries/billing";
 import { subscribeBonusQueryKey, useSubscribeBonus, type SubscribeBonus } from "@/queries/credits";
 
@@ -105,7 +105,7 @@ function OpenOffer({ offer }: { offer: SubscribeBonus }) {
   }, [minutes, queryClient]);
   if (minutes === 0) return null;
 
-  const dollars = formatUsd(offer.dollars);
+  const credits = formatCredits(offer.dollars);
   const subscribe = () => {
     track("subscribe_bonus_checkout_started", {
       dollars: Number(offer.dollars),
@@ -122,20 +122,20 @@ function OpenOffer({ offer }: { offer: SubscribeBonus }) {
       <button
         type="button"
         className={PILL}
-        aria-label={`${dollars} in credits with Pro, ${timeLeftLabel(minutes)}`}
+        aria-label={`${credits} with Pro, ${timeLeftLabel(minutes)}`}
         onClick={() => setOpen(true)}
       >
         <Gift className="size-3.5" />
-        {dollars} with Pro · {timeLeftLabel(minutes)}
+        {compactCredits(offer.dollars)} credits with Pro · {timeLeftLabel(minutes)}
       </button>
       <OfferDialog
         open={open}
         onOpenChange={setOpen}
         banner="subscribe"
-        title={`Get ${dollars} in credits with Pro`}
+        title={`Get ${credits} with Pro`}
         closesAt={offer.closesAt}
         {...subscribeOfferCopy({
-          credits: dollars,
+          credits,
           expiresAt: offer.creditsExpireAt,
           lifetimeDays: offer.creditsLifetimeDays,
         })}

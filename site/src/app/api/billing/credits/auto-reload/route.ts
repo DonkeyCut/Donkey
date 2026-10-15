@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { creditMicrosPerCredit } from "@/lib/credits/amounts";
+import { creditMicrosPerDollar } from "@/lib/credits/amounts";
 import {
   creditTopUpMaxDollars,
   creditTopUpMinDollars,
@@ -23,7 +23,7 @@ type AutoReloadRow = {
 };
 
 function dollarsFromMicros(micros: bigint): number {
-  return Number(micros / creditMicrosPerCredit);
+  return Number(micros / creditMicrosPerDollar);
 }
 
 function serialize(config: AutoReloadRow | null) {
@@ -87,9 +87,9 @@ export const PUT = withDonkeyAuth(async (request) => {
     );
   }
 
-  const amountMicros = BigInt(parsed.data.amountDollars) * creditMicrosPerCredit;
+  const amountMicros = BigInt(parsed.data.amountDollars) * creditMicrosPerDollar;
   const thresholdMicros =
-    BigInt(parsed.data.thresholdDollars) * creditMicrosPerCredit;
+    BigInt(parsed.data.thresholdDollars) * creditMicrosPerDollar;
 
   await prisma.creditAutoReload.upsert({
     create: {

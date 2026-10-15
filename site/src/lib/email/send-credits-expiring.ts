@@ -1,7 +1,7 @@
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { DONKEY_LOGO_CID, DONKEY_LOGO_PNG_BASE64 } from "@/emails/_components/logo";
 import CreditsExpiringEmail from "@/emails/credits-expiring";
-import { formatUsdPlain } from "@/lib/credits/format-usd";
+import { formatCredits } from "@/lib/credits/format-credits";
 import { formatCreditExpiry } from "@/lib/credits/top-up";
 import { bulkFrom, emailFrom, type EmailMessage, type EmailUser } from "@/lib/email/resend";
 import { unsubscribeActionUrl, unsubscribePageUrl } from "@/lib/email/unsubscribe";
@@ -20,9 +20,9 @@ export function buildCreditsExpiringEmail(user: EmailUser, credits: string, expi
     from,
     to: user.email,
     replyTo: emailFrom() || from,
-    subject: `Your ${formatUsdPlain(credits)} in AI credits expires ${formatCreditExpiry(expiresAt)}`,
+    subject: `Your ${formatCredits(credits)} expire ${formatCreditExpiry(expiresAt)}`,
     react: CreditsExpiringEmail({
-      credits: formatUsdPlain(credits),
+      credits: formatCredits(credits),
       editorUrl: `${DONKEYCUT_CANONICAL}/app`,
       expiresOn: formatCreditExpiry(expiresAt),
       name: firstName,

@@ -1,7 +1,7 @@
 import { DONKEY_LOGO_CID, DONKEY_LOGO_PNG_BASE64 } from "@/emails/_components/logo";
 import CreditsOfferedEmail from "@/emails/credits-offered";
 import { creditMicrosToString } from "@/lib/credits/amounts";
-import { formatUsdPlain } from "@/lib/credits/format-usd";
+import { formatCredits } from "@/lib/credits/format-credits";
 import { formatCreditExpiry } from "@/lib/credits/top-up";
 import { bulkFrom, emailFrom, type EmailMessage, type EmailUser } from "@/lib/email/resend";
 import { unsubscribeActionUrl, unsubscribePageUrl } from "@/lib/email/unsubscribe";
@@ -24,13 +24,13 @@ export function buildCreditsOfferedEmail(
 ): EmailMessage {
   const from = bulkFrom();
   if (!from) throw new Error("No bulk sender configured.");
-  const credits = formatUsdPlain(creditMicrosToString(offer.amountMicros));
+  const credits = formatCredits(creditMicrosToString(offer.amountMicros));
   const firstName = user.name.trim().split(/\s+/)[0] || user.name;
   return {
     from,
     to: user.email,
     replyTo: emailFrom() || from,
-    subject: `${credits} in AI credits is waiting for you`,
+    subject: `${credits} are waiting for you`,
     react: CreditsOfferedEmail({
       claimBy: formatCreditExpiry(offer.closesAt),
       claimUrl: offer.claimUrl,

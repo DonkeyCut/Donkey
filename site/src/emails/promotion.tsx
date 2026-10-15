@@ -90,7 +90,7 @@ PromotionEmail.PreviewProps = {
   preview: "Hey Ada,",
   blocks: [
     { kind: "text", text: "Hey Ada," },
-    { kind: "text", text: "Get Pro before October 29 and every month that starts by then includes $100 of AI, 5× the usual $20." },
+    { kind: "text", text: "Get Pro before October 29 and every month that starts by then includes 100,000 AI credits, 5× the usual 20,000." },
     { kind: "button" },
     { kind: "text", text: "David" },
   ],

@@ -22,7 +22,7 @@ import { DonkeyMark } from "./_components/DonkeyMark";
 
 type CreditsOfferedEmailProps = {
   name: string;
-  // The offer, as USD ("$25.00").
+  // The offer, in credits ("25,000 credits").
   credits: string;
   // How long the credits live once claimed, already worded ("7 days"), or
   // null when they never expire.
@@ -44,21 +44,21 @@ export default function CreditsOfferedEmail({
   return (
     <Html>
       <Head />
-      <Preview>{credits} in AI credits is waiting on your Donkey Cut account.</Preview>
+      <Preview>{credits} are waiting on your Donkey Cut account.</Preview>
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
         <Body className="bg-white font-sans text-[#0F0E0D]">
           <Container className="mx-auto max-w-[520px] px-6 py-12">
             <DonkeyMark />
             <Text className="text-[15px] leading-relaxed">Hey {name},</Text>
             <Text className="text-[15px] leading-relaxed">
-              I added {credits} in AI credits to your Donkey Cut account. Click
+              I added {credits} to your Donkey Cut account. Click
               below to claim them.
             </Text>
             <Button
               href={claimUrl}
               className="rounded-lg bg-[#0F0E0D] px-6 py-3 text-[15px] font-semibold text-[#F5EFE0]"
             >
-              Claim {credits} in credits
+              Claim {credits}
             </Button>
             <Text className="text-[15px] leading-relaxed">
               The link works until {claimBy}.{" "}
@@ -94,7 +94,7 @@ export default function CreditsOfferedEmail({
 
 CreditsOfferedEmail.PreviewProps = {
   name: "Ada",
-  credits: "$25.00",
+  credits: "25,000 credits",
   lifetime: "7 days",
   claimBy: "September 10, 2026",
   claimUrl: "https://donkeycut.com/app?claim=preview",

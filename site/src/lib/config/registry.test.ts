@@ -28,6 +28,16 @@ describe("the product's settings registry", () => {
     expect(resolved.invalid).toEqual([{ key: "experimentResults", layer: "override" }]);
   });
 
+  test("the signup grant is set to the cent", () => {
+    // Cents are the smallest step su can set: 0.5 is 500 credits, and a stored
+    // whole-dollar override keeps parsing.
+    const schema = SETTINGS.signupCredits.schema;
+    for (const dollars of [0, 0.07, 0.29, 0.5, 3]) {
+      expect(schema.safeParse({ dollars, expiresAfterDays: 7 }).success).toBe(true);
+    }
+    expect(schema.safeParse({ dollars: 0.005, expiresAfterDays: 7 }).success).toBe(false);
+  });
+
   test("an override of one field replaces the whole value", () => {
     const value = { ...SETTINGS.experimentResults.default, shipPValue: 0.1 };
     const resolved = resolveSettings({ experimentResults: value }, []);

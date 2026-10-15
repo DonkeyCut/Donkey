@@ -23,7 +23,8 @@ import { DonkeyMark } from "./_components/DonkeyMark";
 
 type WelcomeEmailProps = {
   name: string;
-  // Null when the account received no signup credits.
+  // The signup grant as people read it ("500 credits"); null when the
+  // account received none.
   credits: string | null;
   unsubscribeUrl: string;
 };
@@ -63,7 +64,7 @@ export default function WelcomeEmail({
             </Text>
             {credits !== null && (
               <Text className="text-[15px] leading-relaxed">
-                I also added ${credits} in AI credits to your account so you
+                I also added {credits} to your account so you
                 can try AI Chat or generate videos, images, audio, and more.
               </Text>
             )}
@@ -105,6 +106,6 @@ export default function WelcomeEmail({
 
 WelcomeEmail.PreviewProps = {
   name: "Ada",
-  credits: "3",
+  credits: "500 credits",
   unsubscribeUrl: "https://donkeycut.com/unsubscribe?token=preview",
 } satisfies WelcomeEmailProps;

@@ -1,8 +1,8 @@
 export const zeroCreditMicros = BigInt(0);
-export const creditMicrosPerCredit = BigInt("1000000");
+export const creditMicrosPerDollar = BigInt("1000000");
 // $1 = 100 cents = 1,000,000 micros, so 1 cent = 10,000 micros. Single source for
 // the Stripe-cents conversion used by subscription allowances and off-session charges.
-export const creditMicrosPerCent = creditMicrosPerCredit / BigInt(100);
+export const creditMicrosPerCent = creditMicrosPerDollar / BigInt(100);
 
 export function creditStringToMicros(value: string | undefined) {
   const trimmed = value?.trim();
@@ -16,7 +16,7 @@ export function creditStringToMicros(value: string | undefined) {
   }
 
   const sign = match[1] === "-" ? -BigInt(1) : BigInt(1);
-  const whole = BigInt(match[2]) * creditMicrosPerCredit;
+  const whole = BigInt(match[2]) * creditMicrosPerDollar;
   const fractional = BigInt((match[3] ?? "").padEnd(6, "0"));
 
   return sign * (whole + fractional);
@@ -25,8 +25,8 @@ export function creditStringToMicros(value: string | undefined) {
 export function creditMicrosToString(value: bigint) {
   const sign = value < zeroCreditMicros ? "-" : "";
   const absolute = value < zeroCreditMicros ? -value : value;
-  const whole = absolute / creditMicrosPerCredit;
-  const fractional = absolute % creditMicrosPerCredit;
+  const whole = absolute / creditMicrosPerDollar;
+  const fractional = absolute % creditMicrosPerDollar;
   const fractionalText = fractional.toString().padStart(6, "0").replace(/0+$/u, "");
 
   return fractionalText ? `${sign}${whole}.${fractionalText}` : `${sign}${whole}`;

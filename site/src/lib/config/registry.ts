@@ -536,8 +536,9 @@ export const SETTINGS = defineSettings({
   signupCredits: {
     schema: z
       .object({
-        // USD the signup hook grants a new account; 0 grants nothing.
-        dollars: z.number().int().min(0).max(maxCreditGrantDollars),
+        // USD the signup hook grants a new account, to the cent; 0 grants
+        // nothing. People see it as credits: 0.5 → 500 credits.
+        dollars: z.number().multipleOf(0.01).min(0).max(maxCreditGrantDollars),
         // Days the grant stays spendable; null keeps it forever.
         expiresAfterDays: z.number().int().min(1).max(maxCreditGrantExpiryDays).nullable(),
       })
@@ -545,7 +546,7 @@ export const SETTINGS = defineSettings({
     default: { dollars: 0, expiresAfterDays: 7 },
     public: false,
     title: "Signup credits",
-    description: "USD a new account is granted at signup, and how many days the grant lives.",
+    description: "USD a new account is granted at signup, shown as 1,000 credits per dollar, and how many days the grant lives.",
   },
   emailSendBudget: {
     schema: z

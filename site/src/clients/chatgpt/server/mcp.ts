@@ -20,6 +20,7 @@ import { MAX_COMMANDS_PER_BATCH } from "@/cut/server/cloud/commands";
 import { DOC_EXPORT_PRESETS } from "@/cut/lib/exportPresets";
 import { bindCutLoudness, cutLoudness, LOUDNESS_CHOICES, LOUDNESS_IDS } from "@/cut/lib/loudnessSettings";
 import { getGlobalSetting } from "@/lib/config/effective";
+import { formatCredits } from "@/lib/credits/format-credits";
 import {
   chatgptConfig,
   RESOURCE_METADATA_PATH,
@@ -517,7 +518,7 @@ function describeProjectView(view: ProjectView): string {
   if (view.account) {
     const { credits, storageBytes, storageQuotaBytes, plan } = view.account;
     const storage = typeof storageQuotaBytes !== "number" ? `${mb(storageBytes)} MB used` : `${mb(storageBytes)} of ${mb(storageQuotaBytes)} MB used`;
-    return `Plan: ${plan}. AI credits: $${credits}. Cloud storage: ${storage}. Editing, previews and exports spend no credits.`;
+    return `Plan: ${plan}. AI credit balance: ${formatCredits(credits)}. Cloud storage: ${storage}. Editing, previews and exports spend no credits.`;
   }
   if (view.view === "projects") {
     if (!view.projects.length) {

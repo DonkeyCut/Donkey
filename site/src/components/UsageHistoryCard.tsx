@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { formatCreditCharge } from "@/lib/credits/format-credits";
 import { cn } from "@/lib/utils";
 
 type RecentCall = UsageHistory["recent"][number];
@@ -31,19 +32,13 @@ function callKey(call: RecentCall): string {
   return `${call.createdAt}-${call.requestKind}-${call.costCredits}`;
 }
 
-// Cents by default, but show a third decimal when a value carries sub-cent
-// precision (many app calls cost a fraction of a cent) so they aren't all
-// "$0.00". Clean values stay at 2 decimals — min 2 / max 3 fraction digits.
+// A charge in credits, rounded up so a sub-credit call reads as 1; a zero or
+// unreadable value reads as 0 credits.
 function formatCostValue(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
-    return "$0.00";
+    return formatCreditCharge(0);
   }
-  return value.toLocaleString("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 3,
-  });
+  return formatCreditCharge(value);
 }
 
 function formatCallCost(call: RecentCall): string {
@@ -60,7 +55,7 @@ function conversationLabel(conversationId: string): string {
 }
 
 // A conversation block's combined cost for its header. An all-included block has
-// no credit cost, so label it "Included" rather than "$0.00".
+// no credit cost, so label it "Included".
 function blockCostSummary(calls: RecentCall[]): string {
   if (calls.every((call) => call.billingStatus === "included")) {
     return "Included";

@@ -61,7 +61,7 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
   const subscribe = () => {
     if (!offer.data) return;
     track("subscribe_bonus_checkout_started", {
-      dollars: Number(offer.data.credits.replace(/[^0-9.]/g, "")),
+      dollars: Number(offer.data.dollars),
       minutesLeft: offer.data.closesAt ? Math.max(0, Math.ceil((Date.parse(offer.data.closesAt) - Date.now()) / 60_000)) : 0,
       source: "email",
     });
@@ -94,14 +94,14 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
     cta = <OfferButton onClick={onClose}>OK</OfferButton>;
     secondary = null;
   } else if (done) {
-    title = `${offer.data.credits} is on your account`;
-    body = `${offer.data.credits} in AI credits is ready to spend.${
-      done.expiresAt ? ` It expires ${formatCreditExpiry(new Date(done.expiresAt))}.` : ""
+    title = `${offer.data.credits} added to your account`;
+    body = `They’re ready to spend.${
+      done.expiresAt ? ` They expire ${formatCreditExpiry(new Date(done.expiresAt))}.` : ""
     }`;
     cta = <OfferButton onClick={onClose}>Start editing</OfferButton>;
     secondary = null;
   } else if (offer.data.claim === "subscribe") {
-    title = `Get ${offer.data.credits} in credits with Pro`;
+    title = `Get ${offer.data.credits} with Pro`;
     ({ body, terms } = subscribeOfferCopy({
       credits: offer.data.credits,
       expiresAt: null,
@@ -114,7 +114,7 @@ function OpenDialog({ token, onClose }: { token: string; onClose: () => void }) 
       </OfferButton>
     );
   } else {
-    title = `${offer.data.credits} in credits is waiting`;
+    title = `${offer.data.credits} are waiting`;
     ({ body, terms } = claimOfferCopy({
       credits: offer.data.credits,
       closesAt: offer.data.closesAt,

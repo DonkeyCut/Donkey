@@ -21,7 +21,7 @@ import { DonkeyMark } from "./_components/DonkeyMark";
 
 type CreditsExpiringEmailProps = {
   name: string;
-  // What is left of the grant, as USD ("$2.57").
+  // What is left of the grant, in credits ("2,570 credits").
   credits: string;
   // The day it expires, already worded ("September 14, 2026").
   expiresOn: string;
@@ -40,7 +40,7 @@ export default function CreditsExpiringEmail({
     <Html>
       <Head />
       <Preview>
-        The {credits} in AI credits on your Donkey Cut account expires on {expiresOn}.
+        The {credits} on your Donkey Cut account expire on {expiresOn}.
       </Preview>
       <Tailwind config={{ presets: [pixelBasedPreset] }}>
         <Body className="bg-white font-sans text-[#0F0E0D]">
@@ -48,8 +48,8 @@ export default function CreditsExpiringEmail({
             <DonkeyMark />
             <Text className="text-[15px] leading-relaxed">Hey {name},</Text>
             <Text className="text-[15px] leading-relaxed">
-              Just a quick heads up: the {credits} in AI credits on your Donkey
-              Cut account expires on {expiresOn}. Any unused credits will
+              Just a quick heads up: the {credits} on your Donkey Cut account
+              expire on {expiresOn}. Any unused credits will
               disappear after that.
             </Text>
             <Text className="text-[15px] leading-relaxed">
@@ -88,7 +88,7 @@ export default function CreditsExpiringEmail({
 
 CreditsExpiringEmail.PreviewProps = {
   name: "Ada",
-  credits: "$2.57",
+  credits: "2,570 credits",
   expiresOn: "September 14, 2026",
   editorUrl: "https://donkeycut.com/app",
   unsubscribeUrl: "https://donkeycut.com/unsubscribe?token=preview",

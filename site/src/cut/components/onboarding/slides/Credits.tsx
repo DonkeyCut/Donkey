@@ -3,11 +3,12 @@
 import { useEffect, useRef } from "react";
 
 import { burstConfetti } from "@/cut/components/onboarding/confetti";
+import { creditCountLabel, creditsFromDollars } from "@/lib/credits/format-credits";
 import { formatCreditExpiry } from "@/lib/credits/top-up";
 
 // The signup grant already landed when the account was created, so this slide
-// never grants anything — it says what's there: the USD the grant carried, read
-// from the account. That's as true on a replay as on a first run, so the words
+// never grants anything — it says what's there: the credits the grant carried,
+// read from the account. That's as true on a replay as on a first run, so the words
 // don't change between them; the burst fires every time the slide is reached.
 // A grant with an expiry names the date under the amount.
 export function CreditsSlide({
@@ -38,20 +39,19 @@ export function CreditsSlide({
       />
       <div className="relative max-w-[900px]">
         {/* One line, two sizes: the amount at display size in coral, the words
-            a couple of steps down and thin beside it. Cents belong on a
-            balance, not on the offer. */}
+            a couple of steps down and thin beside it. */}
         <h2 className="flex flex-wrap items-baseline justify-center gap-x-4 leading-[1.02] tracking-[-0.03em]">
           <span className="text-[clamp(40px,7.4vw,84px)] font-semibold text-coral tabular-nums">
-            ${credits}
+            {creditCountLabel(creditsFromDollars(credits, "down"))}
           </span>
           <span className="text-[clamp(26px,4.4vw,52px)] font-light">
-            in AI credits is on us
+            on us
           </span>
         </h2>
         {/* Ragged right on a narrow measure: the line breaks stay put instead
             of the last line floating in the middle of the slide. */}
         <p className="mx-auto mt-4 max-w-[460px] text-left text-[16px] leading-[1.55] text-[#454545]">
-          Already in your account — nothing to claim. Spend it on generated
+          Already in your account — nothing to claim. Spend them on generated
           video, audio and images.
         </p>
         {expiresAt !== null && (

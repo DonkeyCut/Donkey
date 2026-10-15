@@ -44,7 +44,7 @@ export function creditValidity(offer: { expiresAt: string | null; lifetimeDays: 
 export function claimOfferCopy(offer: { credits: string; closesAt: string | null; lifetimeDays: number | null }): OfferCopy {
   const by = offer.closesAt ? ` Claim them by ${formatCreditExpiry(new Date(offer.closesAt))}.` : "";
   return {
-    body: `You have ${offer.credits} in AI credits.${by}`,
+    body: `You have ${offer.credits} to claim.${by}`,
     terms: offer.lifetimeDays !== null ? `Once claimed, they’re valid for ${offer.lifetimeDays} days.` : null,
   };
 }
@@ -57,7 +57,7 @@ export function subscribeOfferCopy(offer: {
   lifetimeDays: number | null;
 }): OfferCopy {
   return {
-    body: `Subscribe to Pro for ${CUT_PRO.price} and get ${offer.credits} in extra AI credits.`,
+    body: `Subscribe to Pro for ${CUT_PRO.price} and get an extra ${offer.credits}.`,
     terms: creditValidity(offer),
   };
 }

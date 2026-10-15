@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
 import { creditMicrosToString } from "@/lib/credits/amounts";
-import { formatUsdPlain } from "@/lib/credits/format-usd";
+import { formatCredits } from "@/lib/credits/format-credits";
 import { getCreditBalance } from "@/lib/credits/inference";
 import { isLinkClaimedKind, isSubscribeClaimedKind } from "@/lib/credits/offerKinds";
 import {
@@ -54,7 +54,8 @@ export const GET = withDonkeyAuth(async (request) => {
     claim,
     claimed: offer.claimedAt !== null,
     closesAt: offer.closesAt?.toISOString() ?? null,
-    credits: formatUsdPlain(creditMicrosToString(offer.amountMicros)),
+    credits: formatCredits(creditMicrosToString(offer.amountMicros)),
+    dollars: creditMicrosToString(offer.amountMicros),
     expiresAt: offer.grant?.expiresAt?.toISOString() ?? null,
     lifetimeDays: offer.expiresAfterDays,
   });

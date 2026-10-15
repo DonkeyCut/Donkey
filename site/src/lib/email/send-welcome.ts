@@ -1,5 +1,6 @@
 import { DONKEY_LOGO_CID, DONKEY_LOGO_PNG_BASE64 } from "@/emails/_components/logo";
 import WelcomeEmail from "@/emails/welcome";
+import { formatCredits } from "@/lib/credits/format-credits";
 import { bulkFrom, emailFrom, type EmailMessage, type EmailUser } from "@/lib/email/resend";
 import { unsubscribeActionUrl, unsubscribePageUrl } from "@/lib/email/unsubscribe";
 import { prisma } from "@/lib/prisma";
@@ -25,7 +26,7 @@ export function buildWelcomeEmail(user: EmailUser, credits: string | null): Emai
     replyTo: emailFrom() || from,
     subject: "Thanks for signing up ❤️",
     react: WelcomeEmail({
-      credits,
+      credits: credits === null ? null : formatCredits(credits),
       name: firstName,
       unsubscribeUrl: unsubscribePageUrl(user.id),
     }),

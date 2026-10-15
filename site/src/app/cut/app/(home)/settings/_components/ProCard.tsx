@@ -19,9 +19,15 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { activeProPromotion, CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
 import { creditLifeClause, formatDeadline, minutesLeft } from "@/cut/components/SubscribeBonusPill";
 import { track } from "@/lib/analytics";
-import { formatUsd } from "@/lib/credits/format-usd";
+import { creditCountLabel, creditsFromDollars, creditsPerDollar, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
 import { useSubscribeBonus } from "@/queries/credits";
 import { useAccountConfig } from "@/queries/accountConfig";
+
+// A whole-dollar allowance as the credits it buys: $20 → "20,000 credits".
+const allowanceCredits = (dollars: number) => creditCountLabel(dollars * creditsPerDollar);
+
+// The left-over half of "12,300 of 20,000 credits"; the total carries the unit.
+const leftCount = (dollars: string) => formatCreditCount(creditsFromDollars(dollars, "down"));
 
 // The promotion's last day, the way the card names it.
 const lastDayLabel = (day: string) =>
@@ -76,13 +82,13 @@ export function ProCard() {
           {promotion.lastDay !== null ? (
             <>
               <span className="font-medium">Get Pro by {lastDayLabel(promotion.lastDay)}</span> and every
-              month that starts by then includes ${promotion.allowanceDollars} of AI, {promotion.multiplier}× the
-              usual ${CUT_PRO.monthlyDollars}.
+              month that starts by then includes {allowanceCredits(promotion.allowanceDollars)}, {promotion.multiplier}× the
+              usual {allowanceCredits(CUT_PRO.monthlyDollars)}.
             </>
           ) : (
             <>
-              Every month currently includes ${promotion.allowanceDollars} of AI, {promotion.multiplier}× the
-              usual ${CUT_PRO.monthlyDollars}.
+              Every month currently includes {allowanceCredits(promotion.allowanceDollars)}, {promotion.multiplier}× the
+              usual {allowanceCredits(CUT_PRO.monthlyDollars)}.
             </>
           )}
         </CardContent>
@@ -91,8 +97,8 @@ export function ProCard() {
         <CardContent className="text-sm text-muted-foreground">
           <div className="space-y-1">
             <div className="text-foreground">
-              {formatUsd(data.allowanceRemaining)} of{" "}
-              {formatUsd(data.monthlyAllowance)} included left this month
+              {leftCount(data.allowanceRemaining)} of{" "}
+              {formatCredits(data.monthlyAllowance)} left this month
             </div>
             {data.endsAt ? (
               <div className="text-foreground">
@@ -109,13 +115,13 @@ export function ProCard() {
             {promotion ? (
               <div>
                 {promotion.lastDay !== null
-                  ? `Months that start by ${lastDayLabel(promotion.lastDay)} include $${promotion.allowanceDollars} of AI.`
-                  : `Each new month includes $${promotion.allowanceDollars} of AI.`}
+                  ? `Months that start by ${lastDayLabel(promotion.lastDay)} include ${allowanceCredits(promotion.allowanceDollars)}.`
+                  : `Each new month includes ${allowanceCredits(promotion.allowanceDollars)}.`}
               </div>
             ) : null}
             {offer?.status === "claimed" ? (
               <div>
-                Your {formatUsd(offer.dollars)} {offer.origin === "app" ? "subscribe bonus" : "credit offer"} landed in
+                Your {formatCredits(offer.dollars)} {offer.origin === "app" ? "subscribe bonus" : "credit offer"} landed in
                 your credits.
               </div>
             ) : null}
@@ -124,7 +130,7 @@ export function ProCard() {
       ) : offer && offerOpen ? (
         <CardContent className="text-sm text-foreground">
           Subscribe for {CUT_PRO.price} by {formatDeadline(offer.closesAt)} and get a one-time{" "}
-          {formatUsd(offer.dollars)} in credits.{creditLifeClause(offer)}
+          {formatCredits(offer.dollars)}.{creditLifeClause(offer)}
         </CardContent>
       ) : null}
       <CardFooter className="gap-3">

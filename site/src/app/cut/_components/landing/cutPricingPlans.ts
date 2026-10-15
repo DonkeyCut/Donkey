@@ -1,5 +1,11 @@
 import type { PricingPlan } from "@/app/_components/landing/pricingPlans";
 import { promotionCovers, type AllowancePromotion } from "@/lib/billing/allowance-promotion";
+import { creditsPerDollar, formatCreditCount } from "@/lib/credits/format-credits";
+
+// The Pro price in USD a month; the included AI allowance equals it, so the
+// card names the credits it buys.
+const proMonthlyDollars = 20;
+const proMonthlyCredits = formatCreditCount(proMonthlyDollars * creditsPerDollar);
 
 // What Pro costs and what it gets you, in one place: the landing card below
 // and the welcome sequence's last slide both read it, so the price can't say
@@ -7,12 +13,12 @@ import { promotionCovers, type AllowancePromotion } from "@/lib/billing/allowanc
 export const CUT_PRO = {
   body: "Generate rich media with AI.",
   // The plan price in USD a month. The included AI allowance equals it.
-  monthlyDollars: 20,
+  monthlyDollars: proMonthlyDollars,
   // What Pro adds. The landing card sits beside the Free card and opens with a
   // line pointing at it; nothing else does, so that line isn't in here.
   features: [
     "100 GB of cloud storage",
-    "Generous AI credits every month",
+    `${proMonthlyCredits} AI credits every month`,
     "Image, video, voiceover, and music generation",
   ],
   price: "$20/month",

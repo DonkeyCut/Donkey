@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { auth } from "@/lib/auth";
 import { ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
+import { creditCountLabel, creditsPerDollar } from "@/lib/credits/format-credits";
 import {
   creditTopUpKind,
   creditTopUpMaxDollars,
@@ -36,7 +37,7 @@ export const POST = withDonkeyAuth(async (request) => {
     return NextResponse.json(
       {
         error: "invalid_request",
-        message: `Enter a whole-dollar amount between $${creditTopUpMinDollars} and $${creditTopUpMaxDollars}.`,
+        message: `Choose between ${creditCountLabel(creditTopUpMinDollars * creditsPerDollar)} and ${creditCountLabel(creditTopUpMaxDollars * creditsPerDollar)}, in whole thousands.`,
       },
       { status: 400 },
     );
@@ -65,7 +66,7 @@ export const POST = withDonkeyAuth(async (request) => {
         price_data: {
           currency: "usd",
           product_data: {
-            description: `$${amountDollars} of Donkey inference credits`,
+            description: creditCountLabel(amountDollars * creditsPerDollar),
             name: "Donkey credits",
           },
           unit_amount: dollarsToStripeCents(amountDollars),

@@ -15,7 +15,7 @@ import { useHostedBalance, useInvalidateOnSettle } from "@/cut/lib/hosted";
 import { useCutBase } from "@/cut/lib/nav";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import { track } from "@/lib/analytics";
-import { formatUsd } from "@/lib/credits/format-usd";
+import { compactCredits, creditsFromDollars, formatCredits } from "@/lib/credits/format-credits";
 import { CREDITS_PILL_FLAG } from "@/lib/feature-flags";
 import { useProSubscription } from "@/queries/billing";
 import { creditBalanceQueryKey, useCreditBalance, type CreditBalance } from "@/queries/credits";
@@ -25,20 +25,6 @@ import { useAccountFlags } from "@/queries/featureFlags";
 // up under the pointer, where they say it can be clicked.
 const PILL =
   "flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border border-transparent px-3 py-1.5 text-xs font-medium tabular-nums text-muted-foreground transition-colors hover:border-border hover:bg-card hover:shadow-xs";
-
-/** The bar's reading of a balance: cents while there is less than $10, where
- * each one changes what the next generation can be, and whole dollars past
- * that, where they are noise. A round amount drops the ".00" either way. */
-export function compactUsd(dollars: number): string {
-  const cents = Math.round(dollars * 100);
-  const showCents = dollars < 10 && cents % 100 !== 0;
-  return dollars.toLocaleString("en-US", {
-    currency: "USD",
-    style: "currency",
-    minimumFractionDigits: showCents ? 2 : 0,
-    maximumFractionDigits: showCents ? 2 : 0,
-  });
-}
 
 export function CreditsPill() {
   const user = useEngineUser();
@@ -50,9 +36,10 @@ export function CreditsPill() {
   return <BalancePill />;
 }
 
-function BalancePill() {
+/** Keeps the cached balance current with this tab's own charges: whoever
+ * reads the balance mounts this, so it holds with the pill hidden too. */
+export function useLiveCreditBalance() {
   const queryClient = useQueryClient();
-  const balance = useCreditBalance();
   const reported = useHostedBalance((s) => s.balance);
 
   // A charged call reported the balance it left: that is the balance, with no
@@ -65,6 +52,12 @@ function BalancePill() {
   }, [reported, queryClient]);
   // A call that answered without one: re-read once its charge has landed.
   useInvalidateOnSettle(creditBalanceQueryKey);
+}
+
+function BalancePill() {
+  const queryClient = useQueryClient();
+  const balance = useCreditBalance();
+  useLiveCreditBalance();
   // Background work — renders, cloud jobs — charges without a call from this
   // tab, and a top-up happens on another page; a slow poll keeps the number
   // honest between them, and a focus refetch catches the trip back from billing.
@@ -86,12 +79,14 @@ function BalancePill() {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label={`Credits: ${compactUsd(dollars)}`}
-        onClick={() => track("cut_credits_pill_clicked", { dollars })}
+        aria-label={`Credits: ${formatCredits(balance.data.balance)}`}
+        onClick={() =>
+          track("cut_credits_pill_clicked", { credits: creditsFromDollars(balance.data.balance, "down"), dollars })
+        }
         className={PILL}
       >
         <Zap className="size-3.5" />
-        {compactUsd(dollars)}
+        {compactCredits(balance.data.balance)}
       </PopoverTrigger>
       <PopoverContent side="bottom" align="end" sideOffset={6} className="w-64 p-0">
         <PlanCard balance={balance.data.balance} />
@@ -127,7 +122,7 @@ function PlanCard({ balance }: { balance: string }) {
       <div className="flex items-center gap-2.5 border-t border-border px-4 py-3">
         <Zap className="size-4 text-muted-foreground" />
         <span className="flex-1 text-muted-foreground">Credits</span>
-        <span className="font-medium tabular-nums">{formatUsd(balance)}</span>
+        <span className="font-medium tabular-nums">{formatCredits(balance)}</span>
       </div>
     </div>
   );
