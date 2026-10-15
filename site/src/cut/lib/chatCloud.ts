@@ -5,8 +5,11 @@
 // to merge, and ships the same slimmed payload the panel writes to storage.
 import { cutMode, getBackend, type CutBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
+import { compactThreadForCloud } from "./chatCompact";
 import {
   chatThreadDeleted,
+  cloudThreadSaved,
+  cloudThreadSaveFailed,
   deleteStoredThread,
   isStoredThread,
   loadProjectThreads,
@@ -51,13 +54,37 @@ export async function putCloudThread(
   thread: StoredThread
 ): Promise<void> {
   if (backend.kind !== "cloud") return;
-  const res = await backend.fetch(`/api/cut/projects/${projectId}/chats/${thread.id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(thread),
-  });
-  if (res.status === 410) { deleteStoredThread(projectId, thread.id); return; }
-  if (!res.ok) throw new Error("Could not save a chat thread.");
+  await sendCloudThread(backend, projectId, thread);
+}
+
+/** PUT a thread's cloud copy — compacted to fit the server's limit — and say
+ * when it doesn't land. A 410 means the thread was deleted elsewhere; a 409 is
+ * another tab's save winning a race, which the next sync merges. */
+async function sendCloudThread(backend: CutBackend, projectId: string, thread: unknown, keepalive = false): Promise<void> {
+  const id = (thread as StoredThread).id;
+  const body = JSON.stringify(compactThreadForCloud(thread));
+  let res: Response;
+  try {
+    res = await backend.fetch(`/api/cut/projects/${projectId}/chats/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body,
+      // A keepalive request carries at most 64 KB; a bigger one would be
+      // refused outright, so it goes as a plain request and may not finish.
+      keepalive: keepalive && body.length < 60_000,
+    });
+  } catch (err) {
+    cloudThreadSaveFailed(err);
+    throw err;
+  }
+  if (res.status === 410) { deleteStoredThread(projectId, id); return; }
+  if (res.status === 409) throw new Error("The conversation changed on the server.");
+  if (!res.ok) {
+    const err = new Error(`Could not save a chat thread (${res.status}).`);
+    cloudThreadSaveFailed(err);
+    throw err;
+  }
+  cloudThreadSaved();
 }
 
 /** Merge changed conversations and retry local saves, including offline deletions. */
@@ -164,14 +191,7 @@ async function flushOne(key: string, keepalive = false): Promise<void> {
     // a cloud project, and by the time the debounce fires the user may have
     // closed it — with the Mac app running, the ambient backend is then the
     // engine, which has no chats route and no copy of this project.
-    const response = await cloudBackend.fetch(`/api/cut/projects/${entry.projectId}/chats/${entry.threadId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(entry.data),
-      keepalive,
-    });
-    if (response.status === 410) deleteStoredThread(entry.projectId, entry.threadId);
-    else if (!response.ok) throw new Error("Could not save the conversation.");
+    await sendCloudThread(cloudBackend, entry.projectId, entry.data, keepalive);
   } catch {
     if (syncState?.projectId === entry.projectId) {
       syncState.versions.delete(entry.threadId);
@@ -182,8 +202,8 @@ async function flushOne(key: string, keepalive = false): Promise<void> {
 }
 
 /** Push every queued save now instead of waiting out the debounce. */
-export function flushCloudThreadSaves(keepalive = false): void {
-  for (const key of [...pending.keys()]) void flushOne(key, keepalive);
+export function flushCloudThreadSaves(keepalive = false): Promise<void> {
+  return Promise.all([...pending.keys()].map((key) => flushOne(key, keepalive))).then(() => undefined);
 }
 
 /** Delete the server copy of a thread (deleted or pruned locally). */

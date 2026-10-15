@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { bindCutMode, releaseCutMode } from "./backend";
 import { cloudBackend, knownDocVersion } from "./backend/cloud";
-import { ensureCloudThreads } from "./chatCloud";
-import { chatThreadDeleted, deleteStoredThread, readProjectThreads, writeProjectThreads } from "./chatThreads";
+import { ensureCloudThreads, flushCloudThreadSaves, putCloudThread, queueCloudThreadSave } from "./chatCloud";
+import { CLOUD_THREAD_BUDGET } from "./chatCompact";
+import { chatThreadDeleted, deleteStoredThread, readProjectThreads, threadSaveFailure, writeProjectThreads } from "./chatThreads";
 
 const originalFetch = globalThis.fetch;
 const storage = new Map<string, string>();
@@ -85,4 +86,34 @@ test("observing a newer scene document preserves the loaded cloud save base", as
   expect(knownDocVersion("observe-scene")).toBe("1");
   await cloudBackend.fetch(path, { method: "PUT", body: "{}" });
   expect(putBase).toBe("1");
+});
+
+test("a long thread goes up compacted, and a refused cloud save is told until one lands", async () => {
+  const parts = Array.from({ length: 295 }, (_, i) => ({
+    type: "tool-listen_audio", toolCallId: `c${i}`, state: "output-available", input: {},
+    output: { name: "voice", audio: `data:audio/wav;base64,${"x".repeat(20_000)}` },
+  }));
+  const thread = { id: "long", updatedAt: 1, messages: [{ id: "a", role: "assistant", parts }] };
+  const bodies: string[] = [];
+  let status = 500;
+  stubFetch((_url, init) => {
+    if (init?.method === "PUT") { bodies.push(String(init.body)); return Response.json({}, { status }); }
+    return Response.json([]);
+  });
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    queueCloudThreadSave("compact", thread);
+    await flushCloudThreadSaves();
+    expect(bodies[0].length).toBeLessThanOrEqual(CLOUD_THREAD_BUDGET);
+    expect(JSON.parse(bodies[0]).messages[0].parts).toHaveLength(295);
+    expect(threadSaveFailure()).toContain("cloud");
+    await expect(putCloudThread(cloudBackend, "compact", thread)).rejects.toThrow();
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes("cloud"))).toHaveLength(1);
+    status = 200;
+    queueCloudThreadSave("compact", { ...thread, updatedAt: 2 });
+    await flushCloudThreadSaves();
+    expect(threadSaveFailure()).toBeNull();
+  } finally {
+    warn.mockRestore();
+  }
 });

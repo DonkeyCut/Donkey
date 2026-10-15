@@ -287,9 +287,9 @@ function readThreads(projectId: string): ChatThread[] {
   return readRawThreads(projectId).filter((t) => isStoredThread(t) && !t.deleted) as ChatThread[];
 }
 
-/** Persisted copies drop frame payloads (data URLs) from tool outputs — one
- * watch_video result carries a few MB of frames and localStorage holds a few
- * MB per origin in total. The live thread keeps its images; replayed turns only
+/** Persisted copies drop frame and sound payloads (data URLs) from tool
+ * outputs — one watch_video result carries a few MB of frames, and every
+ * project's history shares this browser's storage. The live thread keeps its images; replayed turns only
  * ever reuse text parts, so nothing downstream misses them. */
 function slimForStorage(list: ChatThread[]): ChatThread[] {
   const bulky = (v: unknown) =>
@@ -343,18 +343,16 @@ function slimForStorage(list: ChatThread[]): ChatThread[] {
         const out = (p as { output?: unknown }).output;
         if (!out || typeof out !== "object") return p;
         const o = out as Record<string, unknown>;
-        if (
-          !bulky(o.image) &&
-          !(Array.isArray(o.images) && o.images.some(bulky))
-        )
-          return p;
+        const frames = bulky(o.image) || (Array.isArray(o.images) && o.images.some(bulky));
+        // listen_audio's clip, as the server's stream drops it too.
+        const sound = typeof o.audio === "string" && o.audio.startsWith("data:");
+        if (!frames && !sound) return p;
         return {
           ...p,
           output: {
             ...o,
-            image: undefined,
-            images: undefined,
-            imagesOmitted: true,
+            ...(frames ? { image: undefined, images: undefined, imagesOmitted: true } : {}),
+            ...(sound ? { audio: undefined, audioOmitted: true } : {}),
           },
         } as typeof p;
       }),

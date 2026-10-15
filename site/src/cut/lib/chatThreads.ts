@@ -122,6 +122,7 @@ export function useThreadStore(store: ThreadStore | null): void {
   queue = Promise.resolve();
   flushScheduled = false;
   goneChecked.clear();
+  warned.local = false;
   setSaveFailure(null);
 }
 
@@ -358,18 +359,22 @@ export async function flushThreadSaves(): Promise<void> {
 }
 
 // A failed save is told once in the console and shown in the panel until a
-// save lands again.
-let saveFailure: string | null = null;
-let warned = false;
+// save lands again — for this browser's copy and for a cloud project's server
+// copy alike.
+const failures: Record<"local" | "cloud", string | null> = { local: null, cloud: null };
+const warned = { local: false, cloud: false };
 const failureChanges = new Set<() => void>();
-function setSaveFailure(message: string | null): void {
-  if (message === saveFailure) return;
-  saveFailure = message;
+function setFailure(where: "local" | "cloud", message: string | null): void {
+  if (message === failures[where]) return;
+  failures[where] = message;
   for (const onChange of failureChanges) onChange();
 }
+function setSaveFailure(message: string | null): void {
+  setFailure("local", message);
+}
 function saveFailed(err: unknown): void {
-  if (!warned) {
-    warned = true;
+  if (!warned.local) {
+    warned.local = true;
     console.warn("[chat] couldn't save chat history in this browser", err);
   }
   setSaveFailure(
@@ -378,8 +383,20 @@ function saveFailed(err: unknown): void {
       : "Chat history couldn't be saved in this browser.",
   );
 }
+/** A cloud project's thread didn't reach the server. It is still in this
+ * browser and the next sync retries it. */
+export function cloudThreadSaveFailed(err: unknown): void {
+  if (!warned.cloud) {
+    warned.cloud = true;
+    console.warn("[chat] couldn't save chat history to the cloud", err);
+  }
+  setFailure("cloud", "Chat history couldn't be saved to the cloud — it's kept in this browser and will retry.");
+}
+export function cloudThreadSaved(): void {
+  setFailure("cloud", null);
+}
 export function threadSaveFailure(): string | null {
-  return saveFailure;
+  return failures.local ?? failures.cloud;
 }
 export function subscribeThreadSaveFailure(onChange: () => void): () => void {
   failureChanges.add(onChange);

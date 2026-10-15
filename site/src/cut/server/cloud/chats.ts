@@ -7,8 +7,8 @@ import type { Prisma } from "@/generated/prisma/client";
 
 import { caught, err } from "./util";
 
-// Well above a slimmed thread (data-URL frames are stripped client-side), well
-// below anything that could hurt the database.
+// Well below anything that could hurt the database. The client compacts its
+// cloud copy under this (chatCompact.ts), trimming the oldest bulky results.
 const MAX_THREAD_BYTES = 4_000_000;
 
 /** Polling reads row versions; transcript bodies are fetched only after a change. */
