@@ -116,3 +116,49 @@ test("the top of the ladder is bounded, and only it walks twice", () => {
   expect(watchGeometry("scan").rewalk).toBe(false);
   expect(watchGeometry("read").rewalk).toBe(false);
 });
+
+test("a hard cut is reported on the first frame of the new shot, to the millisecond", async () => {
+  // A 60 fps source whose picture turns from black to white at frame 61
+  // (1.0167s). The sweep only says the cut sits between two samples a second
+  // apart; the reported time has to be the frame itself.
+  const FPS = 60;
+  const CUT_FRAME = 61;
+  const shade = (t: number) => (Math.floor(t * FPS + 1e-6) >= CUT_FRAME ? 255 : 0);
+  type Painted = { getContext: () => unknown; shade: number };
+  const surface = (): Painted => {
+    const own: Painted = {
+      shade: 0,
+      getContext: () => ({
+        drawImage(src: Painted) { own.shade = src.shade; },
+        getImageData(_x: number, _y: number, width: number, height: number) {
+          return { data: new Uint8ClampedArray(width * height * 4).fill(own.shade) };
+        },
+      }),
+    };
+    return own;
+  };
+  const shot = (t: number) => {
+    const canvas = surface();
+    canvas.shade = shade(t);
+    return { canvas, timestamp: Math.floor(t * FPS + 1e-6) / FPS, duration: 1 / FPS } as unknown as WrappedCanvas;
+  };
+  const input = { dispose() {} } as unknown as Input;
+  const track = { getDisplayWidth: async () => 320, getDisplayHeight: async () => 180 } as unknown as InputVideoTrack;
+  const spies = [
+    spyOn(mediaRead, "openMedia").mockReturnValue(input),
+    spyOn(mediaRead, "videoTrackOf").mockResolvedValue(track),
+    spyOn(raster, "createRasterCanvas").mockImplementation(() => surface() as unknown as raster.RasterSurface),
+    spyOn(mediaRead, "frameSink").mockReturnValue({
+      getCanvas: async (t) => shot(t),
+      async *canvases(start = 0, end = Infinity) {
+        for (let f = Math.floor(start * FPS + 1e-6); f / FPS < end; f++) yield shot(f / FPS);
+      },
+      async *canvasesAtTimestamps(times) {
+        for await (const t of times) yield shot(t);
+      },
+    }),
+  ];
+  restores.push(...spies.map((spy) => () => spy.mockRestore()));
+  const result = await sampleWatchFrames("fixture.mp4", { from: 0, to: 3, interval: 1, metadataOnly: true });
+  expect(result.sceneChanges).toEqual([1.017]);
+});

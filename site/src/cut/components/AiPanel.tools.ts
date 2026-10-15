@@ -13,6 +13,30 @@ import { FACT_CLAIM_MAX_CHARS, FACT_CLAIMS_MAX } from "@/lib/inference/factCheck
 import { URL_BATCH_MAX } from "@/cut/lib/urlBatch";
 import { FIND_MEDIA_DEFAULT, FIND_MEDIA_MAX, FIND_MEDIA_SNAPSHOT_CAP } from "@/cut/lib/findMedia";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "@/cut/lib/frameDiff";
+import { EASE_IDS } from "@donkeycut/effects-kit";
+import {
+  DETECT_CUTS_MAX,
+  DETECT_CUTS_SPAN_MAX,
+  SAMPLE_COLOR_MAX,
+  SAMPLE_COLORS_K_MAX,
+  TRACK_FRAMES_MAX,
+  TRACK_MATCHES,
+  TRACK_TOLERANCE_DEFAULT,
+} from "@/cut/lib/measure/limits";
+
+/** A box on a source's frame as the editor places one: centre and size. */
+const frameBox = (what: string) => ({
+  ...obj(
+    {
+      x: num("Centre x, fraction of frame width"),
+      y: num("Centre y, fraction of frame height"),
+      w: num("Width, fraction of frame width"),
+      h: num("Height, fraction of frame height"),
+    },
+    ["x", "y", "w", "h"]
+  ),
+  description: what,
+});
 
 export const AI_PANEL_TOOLS = [
   {
@@ -43,7 +67,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "watch_video",
     description:
-      "Watch a video source with your own eyes: samples candidate frames on a dense steady floor plus one just after each line the source speaks — what a video shows changes when what it says changes, so a transcribed source is read on its own clock and a caption track lands a frame per card — keeps only the ones that actually differ, and tiles them into timestamped contact-sheet images — so every cell is a distinct moment and a gap between stamps means nothing changed there. Also returns sceneChanges, hard-cut times refined to about a third of a second of the true boundary (the time is where the new shot first appears) — though a shot shorter than the sampling step can fall between candidates, so where short cuts matter, re-watch narrow with a small interval_seconds. When the clip has captions or the source's own transcript exists, a fused timeline places each kept frame inside the speech it belongs to. Pass clip_id to watch a timeline clip's source (the result includes that clip's source↔timeline time math) or asset_id for any project video or image. `detail` decides how many pixels each kept frame is worth: scan tiles many small cells for coverage, read enlarges them for on-screen text, original hands back the source's own frames for matching type, colour and edges. A contact-sheet cell is a quarter of the frame's width, so a small caption arrives too small to read — when the job is words on screen or a look to reproduce, spend the pixels instead of guessing. `textFits` comes back with the frames: the parts of the picture that stay quiet across everything just watched, inside whatever the project's guides keep clear, quietest first — where a title or caption can go without covering the subject or the source's own on-screen text. The stamp burned into each cell is SOURCE seconds — what trim_clip's in/out use — not timeline seconds. Coverage ends where the result says it does: `coveredTo` is how far you have looked and `unwatchedSeconds` is how much of the source you have NOT — everything before coveredTo was seen, nothing after it was. Reading is measured apart from seeing: `unreadSeconds` is how much of the source no pass has looked at closely enough to read its type, and `unreadFrom` is where the next close pass starts. Both ride the asset, so they carry what every earlier chat read as well as this one. Continue from coveredTo until unwatchedSeconds is 0 before you describe, summarize, or reproduce the source as a whole; a `to` you chose yourself ends a call with truncated false and the rest of the video still unseen. Watching builds the source's frame map (moment times + cut candidates), persisted on the asset; media entries list those spans as `mapped`, and your first watch starts a quiet background sweep that maps the rest (`watching: true` while it runs). The map aims your watches — a mapped span is NOT footage you have seen; only sheets returned in this conversation are, so watch any span you need to actually look at. Every pass ends with note_source: the sheets are conversation-local and drop out as the chat grows, so write what this stretch showed against its source seconds and it stays on the asset for every later turn. The result carries `recorded` (what is already written about the stretch you just watched) and `unnoted` (the spans of this source nothing describes yet); watching a source that still owes a note is refused. Read the watching-and-cutting skill before editing footage by content.",
+      "Watch a video source with your own eyes: samples candidate frames on a dense steady floor plus one just after each line the source speaks — what a video shows changes when what it says changes, so a transcribed source is read on its own clock and a caption track lands a frame per card — keeps only the ones that actually differ, and tiles them into timestamped contact-sheet images — so every cell is a distinct moment and a gap between stamps means nothing changed there. Also returns sceneChanges, hard-cut times on the first frame of the new shot, to the millisecond — though a shot shorter than the sampling step can fall between candidates, so where every cut matters, detect_cuts reads every frame. When the clip has captions or the source's own transcript exists, a fused timeline places each kept frame inside the speech it belongs to. Pass clip_id to watch a timeline clip's source (the result includes that clip's source↔timeline time math) or asset_id for any project video or image. `detail` decides how many pixels each kept frame is worth: scan tiles many small cells for coverage, read enlarges them for on-screen text, original hands back the source's own frames for matching type, colour and edges. A contact-sheet cell is a quarter of the frame's width, so a small caption arrives too small to read — when the job is words on screen or a look to reproduce, spend the pixels instead of guessing. `textFits` comes back with the frames: the parts of the picture that stay quiet across everything just watched, inside whatever the project's guides keep clear, quietest first — where a title or caption can go without covering the subject or the source's own on-screen text. The stamp burned into each cell is SOURCE seconds — what trim_clip's in/out use — not timeline seconds. Coverage ends where the result says it does: `coveredTo` is how far you have looked and `unwatchedSeconds` is how much of the source you have NOT — everything before coveredTo was seen, nothing after it was. Reading is measured apart from seeing: `unreadSeconds` is how much of the source no pass has looked at closely enough to read its type, and `unreadFrom` is where the next close pass starts. Both ride the asset, so they carry what every earlier chat read as well as this one. Continue from coveredTo until unwatchedSeconds is 0 before you describe, summarize, or reproduce the source as a whole; a `to` you chose yourself ends a call with truncated false and the rest of the video still unseen. Watching builds the source's frame map (moment times + cut candidates), persisted on the asset; media entries list those spans as `mapped`, and your first watch starts a quiet background sweep that maps the rest (`watching: true` while it runs). The map aims your watches — a mapped span is NOT footage you have seen; only sheets returned in this conversation are, so watch any span you need to actually look at. Every pass ends with note_source: the sheets are conversation-local and drop out as the chat grows, so write what this stretch showed against its source seconds and it stays on the asset for every later turn. The result carries `recorded` (what is already written about the stretch you just watched) and `unnoted` (the spans of this source nothing describes yet); watching a source that still owes a note is refused. Read the watching-and-cutting skill before editing footage by content.",
     inputSchema: obj({
       clip_id: str("Video clip id, track 0 or overlay (defaults from/to to its trimmed in/out)"),
       asset_id: str("Project asset id (video or image) — watch the source itself"),
@@ -171,6 +195,67 @@ export const AI_PANEL_TOOLS = [
         step: num("sweep: seconds between samples (default one frame, widened so a long span fits the call)"),
       },
       ["asset_id"]
+    ),
+  },
+  {
+    name: "detect_cuts",
+    description:
+      `Find every hard cut in a stretch of a video source, to the frame. Reads every frame between from and to at a few dozen pixels, scores how much of the picture changed since the frame before, and reports each frame that opens a new shot: \`t\` in SOURCE seconds to the millisecond (the new shot's first frame), its \`frame\` index at the source's \`fps\`, and \`change\`, the percent of the picture that changed — near 100 is a new shot, 10-30 a card or a block of type swapping over the same background. \`shots\` lists the stretches between the cuts with their length in frames. watch_video's sceneChanges come from samples a step apart and lose a shot shorter than the step; this reads every frame, so a five-frame shot in a fast montage is found. Run it before blocking out a reference: add_clip \`blocks\` takes one block per shot at that shot's length. Hard cuts only — a dissolve or a fade changes a little each frame and reads as none. Up to ${DETECT_CUTS_SPAN_MAX}s and ${DETECT_CUTS_MAX} cuts a call; when \`truncated\`, call again from \`coveredTo\`.`,
+    inputSchema: obj(
+      {
+        asset_id: str("Project asset id of the video"),
+        from: num("Source start s (default 0)"),
+        to: num(`Source end s (default the source's end, at most ${DETECT_CUTS_SPAN_MAX}s past from)`),
+      },
+      ["asset_id"]
+    ),
+  },
+  {
+    name: "sample_color",
+    description:
+      `Read the colour of a source's pixels: the hex of a region or a point of a frame at a source second, so a block, a shape, a title or a background takes the reference's colour as a number. Contact-sheet cells are JPEGs and shift colour; this reads the decoded frame as the preview shows it. Each sample is a moment \`t\` (SOURCE seconds) and a box — x/y its centre and w/h its size as frame fractions, the box add_shape takes; leave out w/h to read a point. Returns per sample \`hex\`, the region's median colour, and \`spread\`, how far its pixels stray from it on average (0-255: under 10 is a flat fill, over 40 a mix — read \`dominant\` there). \`colors\` 2-${SAMPLE_COLORS_K_MAX} adds \`dominant\`, the colours the region is made of with their shares, largest first: a card and the type on it, a bar and the shot behind it. Read a point inside a flat fill for its colour, a box over a title for its ink and its ground. Up to ${SAMPLE_COLOR_MAX} samples a call, at one moment or each at its own. Works on a still image too (t is ignored).`,
+    inputSchema: obj(
+      {
+        asset_id: str("Project asset id (video or image)"),
+        samples: {
+          type: "array",
+          description: `Up to ${SAMPLE_COLOR_MAX} regions to read`,
+          items: obj(
+            {
+              t: num("Source second"),
+              x: num("Centre x, fraction of frame width"),
+              y: num("Centre y, fraction of frame height"),
+              w: num("Width, fraction of frame width (omit with h for a point)"),
+              h: num("Height, fraction of frame height"),
+            },
+            ["x", "y"]
+          ),
+        },
+        colors: num(`Also list this many dominant colours per region, 2..${SAMPLE_COLORS_K_MAX} (default: none)`),
+      },
+      ["asset_id", "samples"]
+    ),
+  },
+  {
+    name: "track_element",
+    description:
+      `Measure where an element of a source's picture sits, frame by frame, and how it moves, so a grow, a slide or a pop is keyed with set_overlay_keyframes to the reference's own numbers. Give a stretch of a video (SOURCE seconds) and a \`seed\` box on the element at \`from\`; boxes in and out are x/y centre and w/h size as frame fractions — what add_shape, add_title and the keys take. The element is found by colour: \`color\` (sample_color reads it), or else the seed's median colour on the first frame, so draw the seed inside the element's edges at a moment it is on screen. \`match\` shape follows the one connected piece of that colour the seed sits on — a card, a bar, a sticker — as it moves and changes size; ink takes every pixel of that colour inside the seed (or \`within\`), the ink of a line of type whose letters are separate pieces: its centre is where the title sits and its height is about 0.7 of the font size when the line is capitals. Leave out \`to\` to measure one frame. \`moves\` lists each move of x, y, w and h with from/to (the source seconds it starts and lands), start/end values, the ease that fits it (${EASE_IDS.join(", ")}) and \`error\`, the RMS miss as a share of the move: under 0.03 is that curve, over 0.1 none fits and the move keys from \`path\` point by point. A size move keys as scale: w over the element's resting w. \`path\` lists the box wherever it changes (a hold is one entry); a null box is a frame where the element was not found. Up to ${TRACK_FRAMES_MAX} frames a call; when \`truncated\`, continue from \`coveredTo\`. Works on a still image too (one frame).`,
+    inputSchema: obj(
+      {
+        asset_id: str("Project asset id (video or image)"),
+        from: num("Source second the seed shows the element at"),
+        to: num("Source end s; omit to measure the one frame at from"),
+        seed: frameBox("A box on the element at from — inside its edges for shape, around the line for ink"),
+        within: frameBox("Only look inside this box (default: the whole frame for shape, the seed for ink)"),
+        color: str("The element's colour as #RRGGBB (default: the seed's median colour)"),
+        tolerance: num(`Per-channel distance from color that still counts as it, 0..255 (default ${TRACK_TOLERANCE_DEFAULT}); raise it for a gradient or a soft edge`),
+        match: {
+          type: "string",
+          enum: [...TRACK_MATCHES],
+          description: "shape: the one connected piece the seed sits on (default). ink: every pixel of the colour inside the seed or within — type",
+        },
+      },
+      ["asset_id", "from", "seed"]
     ),
   },
   {

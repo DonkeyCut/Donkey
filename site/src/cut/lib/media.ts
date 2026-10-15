@@ -1302,6 +1302,7 @@ export async function captureFreezeFrame(
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
 /** Decoded audio for a span of a source, chunk by chunk, so scanning a long
  * file costs one decoded chunk at a time rather than a decoded copy of the
@@ -1442,6 +1443,7 @@ const CANDIDATE_CAP = 150; // decodes per call — the densest sweep
 const SELECT_CELL = 480; // what the selector decodes at when the frames are bigger
 const REFINE_TARGET_S = 0.35; // localize each hard cut to about this window
 const REFINE_MAX_PROBES = 48; // extra seeks the refinement pass may spend per call
+const CUT_WALK_EPS = 0.0005; // half a millisecond: lands a walk's ends on the frames they name
 const AIMED_SHARE = 0.5; // most of the cap aimed moments may take from the floor
 const MERGE_EPS = 0.15; // two candidate times this close are one decode
 
@@ -1570,8 +1572,9 @@ export async function makeStillFrame(
  * moments `at` aims at, then let the shared selector keep the frames that
  * actually differ. sceneChanges are
  * hard-cut times: each "global" keep says a cut lies inside the grid step
- * before it, and a short bisection pass narrows that window to about
- * REFINE_TARGET_S — the reported time is where the new shot is first seen.
+ * before it, a short bisection pass narrows that window to about
+ * REFINE_TARGET_S, and an in-order walk of the window's frames reports the
+ * first frame of the new shot, to the millisecond.
  * A shot shorter than the candidate step can still fall between samples; a
  * narrow re-watch with a small interval is the recall pass.
  *
@@ -1648,13 +1651,30 @@ export async function sampleWatchFrames(
     if (!sigCtx) throw new Error("Could not sample the video.");
     const deadline = Date.now() + (opts.budgetMs ?? Infinity);
     const outOfTime = () => Date.now() > deadline;
-    const sigG16At = async (t: number): Promise<Float32Array | null> => {
-      const one = await baseFrameSink(track, { width: cw, height: ch, fit: "fill" }, reading).getCanvas(t);
-      if (!one) return null;
+    const sigG16Of = (canvas: CanvasImageSource): Float32Array => {
       sigCtx.imageSmoothingQuality = "high";
-      sigCtx.drawImage(one.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
+      sigCtx.drawImage(canvas, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
       const data = sigCtx.getImageData(0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE).data;
       return frameSig({ width: SIGNATURE_SIZE, height: SIGNATURE_SIZE, channels: 4, data }).g16;
+    };
+    // The timestamp of the first frame in (lo, hi] that differs from `pre`,
+    // decoded in order; null when the walk finds none.
+    const firstNewFrame = async (lo: number, hi: number, pre: Float32Array): Promise<number | null> => {
+      const walk = baseFrameSink(track, { width: cw, height: ch, fit: "fill" }, reading).canvases(lo, hi + CUT_WALK_EPS);
+      try {
+        for await (const frame of walk) {
+          if (frame.timestamp <= lo - CUT_WALK_EPS) continue;
+          const g = sigG16Of(frame.canvas as CanvasImageSource);
+          if (diffCellPct(g, pre, DEDUP_TUNING.GLOBAL_TOL) > DEDUP_TUNING.THRESHOLD) return frame.timestamp;
+        }
+      } finally {
+        await walk.return(undefined);
+      }
+      return null;
+    };
+    const sigG16At = async (t: number): Promise<Float32Array | null> => {
+      const one = await baseFrameSink(track, { width: cw, height: ch, fit: "fill" }, reading).getCanvas(t);
+      return one ? sigG16Of(one.canvas as CanvasImageSource) : null;
     };
 
     // The times are ascending, so the whole span decodes once, in order.
@@ -1761,9 +1781,8 @@ export async function sampleWatchFrames(
     encoded.clear();
 
     // A "global" keep only says the cut lies in the grid step before it.
-    // Bisect that step with a few extra decodes so each reported cut time
-    // sits within REFINE_TARGET_S of the first new-shot frame; the kept
-    // image stays the grid sample.
+    // Bisect that step with a few extra decodes down to REFINE_TARGET_S, then
+    // walk what is left frame by frame; the kept image stays the grid sample.
     let probes = 0;
     const sceneChanges: number[] = [];
     for (const idx of keptIdx) {
@@ -1785,7 +1804,14 @@ export async function sampleWatchFrames(
         if (diffCellPct(g, pre, DEDUP_TUNING.GLOBAL_TOL) > DEDUP_TUNING.THRESHOLD) hi = mid;
         else lo = mid;
       }
-      sceneChanges.push(round2(hi));
+      // The window is a few frames wide now: walk it in order and report the
+      // first frame of the new shot itself, so a cut lands on its frame.
+      const first =
+        pre !== null && probes < REFINE_MAX_PROBES && !outOfTime() && !opts.shouldPause?.()
+          ? await firstNewFrame(lo, hi, pre)
+          : null;
+      if (first !== null) probes++;
+      sceneChanges.push(round3(first ?? hi));
     }
 
     // An interrupted or capped scan only covered what it decoded and kept;
