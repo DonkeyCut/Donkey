@@ -6,6 +6,7 @@ import { hostedPost } from "./hosted";
 import { importFileToProject } from "./media";
 import { NoCreditsError } from "./tts";
 import { mediaSlug, type MediaAsset } from "./types";
+import type { MusicLength } from "@/lib/credits/price-sheet";
 
 // Client side of AI music generation: Gemini/Lyria on Donkey's hosted inference
 // routes, with the user's Donkey sign-in and credits (same-origin on the cut
@@ -14,7 +15,7 @@ import { mediaSlug, type MediaAsset } from "./types";
 // instrumental bed when asked — that comes back inline and saves into the
 // project through the local engine like any other media file.
 
-export type MusicVariant = "clip" | "song";
+export type MusicVariant = MusicLength;
 
 /** The length choices the Music generator offers — the clip model renders a
  * short bed, the pro model a full-length track. */

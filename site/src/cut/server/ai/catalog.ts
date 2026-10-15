@@ -37,6 +37,7 @@ import { EDITOR_TOOLS } from "@/cut/components/Editor.tools";
 import { EFFECT_TREATMENTS, EFFECTS_TOOLS } from "@/cut/components/EffectsPanel.tools";
 import { ELEMENTS_TOOLS, SHAPE_KINDS } from "@/cut/components/ElementsPanel.tools";
 import { VIDEO_GEN_TOOLS } from "@/cut/components/GeneratePanel.tools";
+import { CREDIT_TOOLS } from "@/cut/components/GenerateCost.tools";
 import { IMAGE_GEN_TOOLS } from "@/cut/components/ImageGenPanel.tools";
 import { INSPECTOR_TOOLS } from "@/cut/components/Inspector.tools";
 import { GROUP_PANEL_TOOLS } from "@/cut/components/GroupPanel.tools";
@@ -91,6 +92,7 @@ export const AI_TOOLS: AiToolDef[] = [
   ...AUDIO_TOOLS,
   ...IMAGE_GEN_TOOLS,
   ...VIDEO_GEN_TOOLS,
+  ...CREDIT_TOOLS,
   ...SCENE_TOOLS,
   ...STOCK_TOOLS,
   ...LIBRARY_TOOLS,
@@ -158,19 +160,19 @@ export const TOOL_AREAS: Record<string, { blurb: string; tools: AiToolDef[] }> =
   },
   audio: {
     blurb: "voiceover, music generation, reading subtitles aloud, the voice list",
-    tools: [...AUDIO_TOOLS],
+    tools: [...AUDIO_TOOLS, ...CREDIT_TOOLS],
   },
   image_gen: {
     blurb: "generate an image with a hosted model",
-    tools: [...IMAGE_GEN_TOOLS],
+    tools: [...IMAGE_GEN_TOOLS, ...CREDIT_TOOLS],
   },
   video_gen: {
     blurb: "generate a video clip or a talking character video with a hosted model; a better version or another take of an existing clip is a fresh render",
-    tools: [...VIDEO_GEN_TOOLS],
+    tools: [...VIDEO_GEN_TOOLS, ...CREDIT_TOOLS],
   },
   scene: {
     blurb: "scene productions: plan, approve, regenerate, recut and restyle a narrated multi-shot cut",
-    tools: [...SCENE_TOOLS],
+    tools: [...SCENE_TOOLS, ...CREDIT_TOOLS],
   },
   stock: {
     blurb: "search the bundled stock footage, images, characters and sound effects, and add one to the project",
@@ -541,7 +543,7 @@ subtitles_set_view: showOnVideo (preview + export burn-in), showOnTimeline (ambe
 Caption look: set_caption_look carries the whole look — the visual presets (${Object.keys(CAPTION_STYLES).join(", ")}), size, font, and the word effect with its color, swell and fade settings; the Subtitles panel offers the same, and each track's caption drags to a new spot in the preview. The word effects play the caption as it is said:\n${wordEffectCatalog()}\ncaptions_generate's clean/hook/punchy choice shapes the caption text it writes; the visual preset is separate.`,
 
   "ai-generation": `# Stock media & AI generation
-Three ways to get footage the user doesn't have: bundled stock (local, free), a URL they point at (import_url downloads TikTok / YouTube / Instagram / direct links, free), and hosted generation (signed in, spends credits). Prefer stock when it genuinely fits; generate when the shot needs to be specific.
+Three ways to get footage the user doesn't have: bundled stock (local, free), a URL they point at (import_url downloads TikTok / YouTube / Instagram / direct links, free), and hosted generation (signed in, spends credits; credit_prices gives what each costs and the balance, so call it before quoting a price). Prefer stock when it genuinely fits; generate when the shot needs to be specific.
 Stock: stock_search browses the bundled catalogs — footage clips and images in 8 categories, ~20 UGC talking characters, and one-shot sound effects in ${STOCK_SFX_CATEGORIES.length} families (${STOCK_SFX_CATEGORIES.join(", ")}) — matching prompts, categories, and tags. stock_add imports an item into the project as a chat card; add_to_timeline:true (or a start) also drops it on the timeline when the user asked — footage and stills on the video track, a sound on the soundtrack at the playhead or the start given. A sound effect is a file placed on the beat — a whoosh on a scene change, a click when something pops up, a riser into a reveal, a hit on the landing shot, a glitch on a jump cut — searched with kind "sound"; an audio treatment (add_effect) changes how what is already there sounds. In the UI footage and images live in the Video and Image tabs beside the generators (clicking a stock tile seeds the generate panel with its prompt), and the sound effects sit in the Effects tab's Sound family under the treatments.
 Generation:
 - generate_image(prompt, aspect?, resolution?, reference_asset_ids?, add_to_timeline?, index?): the hosted image model renders the prompt at 16:9, 9:16, or 1:1 (default: the supported shape closest to the project aspect) and 1K/2K/4K. The still previews in the chat; placed (add_to_timeline:true or an index) it rides video track 0 as a still clip (8s default, stretchable). Great for a cover/hook frame (index 0), a background, or a b-roll still.

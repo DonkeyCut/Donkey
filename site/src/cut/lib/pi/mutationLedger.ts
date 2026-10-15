@@ -27,6 +27,7 @@ const READ_ONLY = new Set([
   "library_list_folder",
   "stock_search",
   "list_voices",
+  "credit_prices",
   "wait_for_renders",
   "wait_for_uploads",
   "seek",

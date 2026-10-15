@@ -23,6 +23,7 @@ import { useLightbox } from "@/cut/lib/lightbox";
 import { refsFromDroppedFiles } from "@/cut/lib/refMedia";
 import { useEditor } from "@/cut/lib/store";
 import { nearestAspect, type MediaAsset } from "@/cut/lib/types";
+import { imageMicros } from "@/lib/credits/price-sheet";
 import { cn } from "@/lib/utils";
 import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
@@ -30,6 +31,7 @@ import { cardIconButton } from "./iconButton";
 import { PillSelect } from "./PillSelect";
 import { GeneratedAssetMenu } from "./GeneratedAssetMenu";
 import { HostedErrorText } from "./hostedError";
+import { CostTag, NOT_ENOUGH_CREDITS, useGenerateCost } from "./GenerateCost";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 // The generate-image panel: an always-on column in the Image tab, sitting left
@@ -95,6 +97,9 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
       .getState()
       .setAspect(nearestAspect(useEditor.getState().aspect, IMAGE_ASPECTS));
   }, []);
+
+  // One image per press, at a flat price whatever its size.
+  const cost = useGenerateCost((sheet) => imageMicros(sheet, 1));
 
   const go = () => {
     const { text, refs: all } = collectRefs(prompt.trim(), refs, candidates);
@@ -178,11 +183,12 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
 
         <Button
           className="w-full shrink-0"
-          disabled={!prompt.trim() || signedIn === false}
+          disabled={!prompt.trim() || signedIn === false || cost.short}
           onClick={go}
         >
           <Sparkles data-icon="inline-start" />
-          Generate image
+          {cost.short ? NOT_ENOUGH_CREDITS : "Generate image"}
+          <CostTag cost={cost} />
         </Button>
 
         {signedIn === false && (

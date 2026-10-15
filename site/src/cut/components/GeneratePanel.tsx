@@ -34,11 +34,13 @@ import {
   type VideoResolution,
   DEFAULT_VIDEO_RESOLUTION,
 } from "@/cut/lib/videoModels";
+import { videoRenderMicros } from "@/lib/credits/price-sheet";
 import { cn } from "@/lib/utils";
 import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
 import { GeneratedAssetMenu } from "./GeneratedAssetMenu";
 import { HostedErrorText } from "./hostedError";
+import { CostTag, NOT_ENOUGH_CREDITS, useGenerateCost } from "./GenerateCost";
 import { cardIconButton } from "./iconButton";
 import { PillSelect } from "./PillSelect";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -92,6 +94,9 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
     durationSeconds !== null && durationSeconds >= minSeconds && durationSeconds <= maxSeconds
       ? durationSeconds
       : null;
+  // The render's price follows the size and length picked; Auto bills the
+  // model's longest clip.
+  const cost = useGenerateCost((sheet) => videoRenderMicros(sheet, effResolution, effDuration));
   const durationOptions = [
     { value: "auto", label: "Auto length" },
     ...Array.from({ length: maxSeconds - minSeconds + 1 }, (_, i) => {
@@ -265,11 +270,12 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
 
         <Button
           className="gen-go w-full shrink-0"
-          disabled={!prompt.trim() || signedIn === false}
+          disabled={!prompt.trim() || signedIn === false || cost.short}
           onClick={go}
         >
           <Sparkles data-icon="inline-start" />
-          Generate video
+          {cost.short ? NOT_ENOUGH_CREDITS : "Generate video"}
+          <CostTag cost={cost} />
         </Button>
 
         {signedIn === false ? (

@@ -130,6 +130,7 @@ import type { EditorToolName } from "@/cut/components/Editor.tools";
 import type { EffectsToolName } from "@/cut/components/EffectsPanel.tools";
 import { SHAPE_KINDS, SVG_STICKER_MAX_CHARS, type ElementsToolName } from "@/cut/components/ElementsPanel.tools";
 import type { VideoGenToolName } from "@/cut/components/GeneratePanel.tools";
+import type { CreditToolName } from "@/cut/components/GenerateCost.tools";
 import type { ImageGenToolName } from "@/cut/components/ImageGenPanel.tools";
 import { STICKER_W_MIN, type InspectorToolName } from "@/cut/components/Inspector.tools";
 import type { GroupPanelToolName } from "@/cut/components/GroupPanel.tools";
@@ -281,7 +282,10 @@ import { synthesizeMusic } from "./audioGen";
 import { composeMusicPrompt } from "./composeGen";
 import { stockAssetInDoc } from "./genvideo/docWriter";
 import { resolveVoiceAsk, synthesizeSpeech, SPEECH_VOICES } from "./tts";
-import { hostedPost } from "./hosted";
+import { hostedFetch, hostedPost } from "./hosted";
+import { readHostedError } from "./hostedError";
+import { creditPriceQuote, type CreditPriceSheet } from "@/lib/credits/price-sheet";
+import { creditsFromDollars } from "@/lib/credits/format-credits";
 import { blockAsset } from "./blockSource";
 import { cutClip, cutJudge } from "./chatRuntime";
 import { FOLLOW_MODES } from "./trackKeys";
@@ -607,6 +611,7 @@ type BrowserToolName = Exclude<
   | AiPanelToolName
   | AudioToolName
   | CameraCardToolName
+  | CreditToolName
   | EditorToolName
   | EffectsToolName
   | ElementsToolName
@@ -5013,6 +5018,22 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         from,
         cues: laneCues(cur.subtitles, target).length,
       };
+  },
+
+  credit_prices: async () => {
+      // Read live, so a quote follows the same rates the charge uses.
+      const [prices, balance] = await Promise.all([
+        hostedFetch("/api/credits/prices", { cache: "no-store" }),
+        hostedFetch("/api/credits/balance", { cache: "no-store" }),
+      ]);
+      for (const res of [prices, balance]) {
+        if (!res.ok) {
+          throw new ToolError(await readHostedError(res, "Sign in to Donkey to see credit prices.", "Could not read credit prices."));
+        }
+      }
+      const sheet = (await prices.json()) as CreditPriceSheet;
+      const { balance: dollars } = (await balance.json()) as { balance: string };
+      return { ...creditPriceQuote(sheet), balance: creditsFromDollars(dollars, "down") };
   },
 
   list_voices: () => {

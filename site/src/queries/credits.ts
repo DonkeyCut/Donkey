@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
+import type { CreditPriceSheet } from "@/lib/credits/price-sheet";
 import { apiFetch } from "@/queries/apiClient";
 
 export const creditBalanceQueryKey = ["credits", "balance"] as const;
@@ -44,10 +45,17 @@ const readCreditBalance = () => apiFetch<CreditBalance>("/api/credits/balance");
 // How long a read balance stands in for the account's before it is read again.
 const BALANCE_FRESH_MS = 60_000;
 
-export function useCreditBalance() {
+// How a mount treats a cached balance: "refetch" reads it again, "reuse"
+// keeps a read younger than BALANCE_FRESH_MS (a panel that remounts on every
+// tab switch).
+export type BalanceFreshness = "refetch" | "reuse";
+
+export function useCreditBalance(options: { enabled?: boolean; freshness?: BalanceFreshness } = {}) {
   return useQuery({
+    enabled: options.enabled ?? true,
     queryFn: readCreditBalance,
     queryKey: creditBalanceQueryKey,
+    staleTime: options.freshness === "reuse" ? BALANCE_FRESH_MS : 0,
   });
 }
 
@@ -179,5 +187,19 @@ export function useClaimCreditOffer() {
       );
       void queryClient.invalidateQueries({ queryKey: creditBalanceQueryKey });
     },
+  });
+}
+
+export const creditPriceSheetQueryKey = ["credits", "prices"] as const;
+
+// Prices move with a deploy or a rate change, so a read holds for an hour.
+const PRICE_SHEET_FRESH_MS = 60 * 60_000;
+
+export function useCreditPriceSheet(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    enabled: options.enabled ?? true,
+    queryFn: () => apiFetch<CreditPriceSheet>("/api/credits/prices"),
+    queryKey: creditPriceSheetQueryKey,
+    staleTime: PRICE_SHEET_FRESH_MS,
   });
 }

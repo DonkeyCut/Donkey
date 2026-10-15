@@ -131,13 +131,13 @@ provider-enforced schema when Vertex rejects the schema parameters.
 
 ## Hosted Model Credits
 
-Hosted inference is metered per signed-in user, and the backend owns the meter.
-The Mac app sends provider-neutral requests; the backend checks credits, knows
-the rates, debits, and writes the audit rows. Each user has one visible balance,
-with grants, expirations, usage charges, and adjustments recorded behind it.
+Hosted inference is metered per signed-in user, and the backend owns the meter:
+it checks credits, knows the rates, debits, and writes the audit rows. Balances
+are USD micros; people see 1,000 credits per dollar, and a price sheet shows each
+flat-priced generation's cost before it runs.
 
 A provider-invoking route checks credits before it calls the model and charges
-after the provider succeeds. Listing models is free. If the provider or runtime
+after the provider succeeds. If the provider or runtime
 fails after a successful preflight, the route records a zero-cost failed-usage
 event with a sanitized error code.
 
@@ -163,8 +163,7 @@ counted from that moment.
 Outreach notes can place `{{button}}` in its own paragraph when a credit offer
 is enabled. The offer supplies the recipient's claim URL and the button label:
 “Subscribe to Pro” for a subscription offer, or “Claim my AI credits” for a
-direct claim. Validation, test sends, and recipient sends share the same copy
-renderer. Button notes carry HTML and a plain-text version with the link;
+direct claim. Button notes carry HTML and a plain-text version with the link;
 `{{claimUrl}}` remains available as a URL in the text.
 
 Known OpenAI, Gemini, and ElevenLabs models fall back to backend-owned prices
