@@ -8,6 +8,8 @@ import {
 } from "@/lib/credits/amounts";
 import {
   providerCreditPricing,
+  providerPricingCostMicros,
+  type NormalizedUsage,
   type ProviderCreditPricing,
 } from "@/lib/credits/provider-pricing";
 import { isJsonObject, toJsonValue } from "@/lib/inference/json";
@@ -33,19 +35,6 @@ type CreditRateSnapshot = {
   characterCostMicros: bigint;
   fallbackCostMicros: bigint;
   providerPricing?: ProviderCreditPricing;
-};
-
-type NormalizedUsage = {
-  billableOutputTokens: bigint;
-  cachedInputTokens: bigint;
-  durationMillis: bigint;
-  generationCount: bigint;
-  inputTokens: bigint;
-  inputAudioTokens: bigint;
-  outputTokens: bigint;
-  outputAudioTokens: bigint;
-  totalTokens: bigint;
-  characterCost: bigint;
 };
 
 type InferenceUsageStatus = "failed" | "succeeded";
@@ -1239,7 +1228,17 @@ function zeroCreditRate(): CreditRateSnapshot {
   };
 }
 
-const unitScalePerMillion = BigInt("1000000");
+/** What one unit of usage on a route costs, through the same rate lookup and
+ * cost function as the charge: a database override wins over the code price. */
+export async function usageCostMicros(
+  route: string,
+  provider: string,
+  model: string,
+  usage: NormalizedUsage,
+): Promise<bigint> {
+  const rate = await resolveCreditRate(prisma, route, provider, model);
+  return costForUsage(rate, usage);
+}
 
 function costForUsage(rate: CreditRateSnapshot, usage: NormalizedUsage) {
   if (rate.providerPricing) {
@@ -1270,102 +1269,8 @@ function costForProviderPricing(
   rate: CreditRateSnapshot,
   usage: NormalizedUsage,
 ) {
-  const pricing = providerPricingForUsage(rate.providerPricing, usage);
-  if (!pricing) {
-    return rate.fallbackCostMicros;
-  }
-
-  const inputAudioTokens = minBigint(usage.inputAudioTokens, usage.inputTokens);
-  const outputAudioTokens = minBigint(usage.outputAudioTokens, usage.outputTokens);
-  const cachedInputTokens = minBigint(
-    usage.cachedInputTokens,
-    usage.inputTokens - inputAudioTokens,
-  );
-  const uncachedInputTokens = maxBigint(
-    zeroCreditMicros,
-    usage.inputTokens - inputAudioTokens - cachedInputTokens,
-  );
-  const textOutputTokens = maxBigint(
-    zeroCreditMicros,
-    usage.billableOutputTokens - outputAudioTokens,
-  );
-  const inputTokenRate = pricing.inputTokenCostMicrosPerMillion ?? zeroCreditMicros;
-  const cachedInputTokenRate =
-    pricing.cachedInputTokenCostMicrosPerMillion ?? inputTokenRate;
-  const outputTokenRate = pricing.outputTokenCostMicrosPerMillion ?? zeroCreditMicros;
-  const inputAudioTokenRate =
-    pricing.inputAudioTokenCostMicrosPerMillion ?? inputTokenRate;
-  const outputAudioTokenRate =
-    pricing.outputAudioTokenCostMicrosPerMillion ?? outputTokenRate;
-
-  const tokenAndUnitCostMicros =
-    perMillionCost(uncachedInputTokens, inputTokenRate) +
-    perMillionCost(cachedInputTokens, cachedInputTokenRate) +
-    perMillionCost(inputAudioTokens, inputAudioTokenRate) +
-    perMillionCost(textOutputTokens, outputTokenRate) +
-    perMillionCost(outputAudioTokens, outputAudioTokenRate) +
-    usage.characterCost * (pricing.characterCostMicros ?? zeroCreditMicros) +
-    usage.generationCount * (pricing.generationCostMicros ?? zeroCreditMicros);
-  const durationCostMicros = ceilDivide(
-    usage.durationMillis * (pricing.durationSecondCostMicros ?? zeroCreditMicros),
-    BigInt(1000),
-  );
-  const costMicros =
-    tokenAndUnitCostMicros +
-    (pricing.durationCostOnlyWhenNoTokenUsage && tokenAndUnitCostMicros > zeroCreditMicros
-      ? zeroCreditMicros
-      : durationCostMicros);
-
+  const costMicros = providerPricingCostMicros(rate.providerPricing, usage);
   return costMicros > zeroCreditMicros ? costMicros : rate.fallbackCostMicros;
-}
-
-function providerPricingForUsage(
-  pricing: ProviderCreditPricing | undefined,
-  usage: NormalizedUsage,
-) {
-  if (!pricing) {
-    return undefined;
-  }
-
-  const contextTokens = usage.totalTokens > zeroCreditMicros
-    ? usage.totalTokens
-    : usage.inputTokens + usage.outputTokens;
-  if (
-    pricing.longContext &&
-    pricing.longContextThresholdTokens &&
-    contextTokens > pricing.longContextThresholdTokens
-  ) {
-    return {
-      ...pricing,
-      ...pricing.longContext,
-      longContext: undefined,
-    };
-  }
-
-  return pricing;
-}
-
-function perMillionCost(units: bigint, microsPerMillion: bigint) {
-  if (units <= zeroCreditMicros || microsPerMillion <= zeroCreditMicros) {
-    return zeroCreditMicros;
-  }
-
-  return ceilDivide(units * microsPerMillion, unitScalePerMillion);
-}
-
-function ceilDivide(numerator: bigint, denominator: bigint) {
-  if (denominator <= zeroCreditMicros) {
-    throw new Error("Cannot divide by zero.");
-  }
-  if (numerator <= zeroCreditMicros) {
-    return zeroCreditMicros;
-  }
-
-  return (numerator + denominator - BigInt(1)) / denominator;
-}
-
-function minBigint(left: bigint, right: bigint) {
-  return left < right ? left : right;
 }
 
 function maxBigint(left: bigint, right: bigint) {

@@ -66,6 +66,18 @@ export const geminiOmniTokensPerSecond: Record<GeminiOmniResolution, number> = {
  * count the same thing. */
 export const geminiOmniUnitTokens = geminiOmniTokensPerSecond["360p"];
 
+/** Billing units for a render: seconds of 360p-equivalent output, from the
+ * length (the model's ceiling when unset) times the resolution's tokens per
+ * second. A 10s 720p clip is 30 units. The submit bills this count and the
+ * price on the Generate button reads it. */
+export function geminiOmniRenderUnits(
+  resolution: GeminiOmniResolution,
+  durationSeconds: number | undefined,
+): number {
+  const seconds = durationSeconds ?? geminiOmniDurationSeconds.max;
+  return Math.max(1, Math.ceil((seconds * geminiOmniTokensPerSecond[resolution]) / geminiOmniUnitTokens));
+}
+
 // Generative speech (Gemini TTS): text in, spoken audio out, with prompt-driven
 // style direction and inline audio tags. Bump here when adopting a newer TTS model.
 export const geminiTtsModels = {

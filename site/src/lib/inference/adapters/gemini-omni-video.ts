@@ -16,9 +16,8 @@ import {
   geminiOmniDurationSeconds,
   geminiOmniMaxReferenceImages,
   geminiOmniModels,
+  geminiOmniRenderUnits,
   geminiOmniResolutions,
-  geminiOmniTokensPerSecond,
-  geminiOmniUnitTokens,
   type GeminiOmniResolution,
 } from "@/lib/inference/gemini-models";
 import { ensureConfigured } from "@/lib/inference/http";
@@ -140,17 +139,12 @@ export function createGeminiOmniVideoAssetProvider(
     return { resolution: resolutionRaw as GeminiOmniResolution, durationSeconds };
   }
 
-  // Billing units for a request: seconds of 360p-equivalent output, from the
-  // length (the model's ceiling when unset) times the resolution's tokens per
-  // second. The route holds the balance to this count before the submit, and
-  // the submit bills the same count.
+  // Billing units for a request (geminiOmniRenderUnits). The route holds the
+  // balance to this count before the submit, and the submit bills the same
+  // count.
   function generationUnits(parameters: JsonObject): number {
     const { resolution, durationSeconds } = renderShape(parameters);
-    const seconds = durationSeconds ?? geminiOmniDurationSeconds.max;
-    return Math.max(
-      1,
-      Math.ceil((seconds * geminiOmniTokensPerSecond[resolution]) / geminiOmniUnitTokens),
-    );
+    return geminiOmniRenderUnits(resolution, durationSeconds);
   }
 
   async function generateAsset({

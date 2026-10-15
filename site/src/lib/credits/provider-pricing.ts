@@ -576,3 +576,117 @@ function ceilDivide(numerator: bigint, denominator: bigint) {
 
   return (numerator + denominator - BigInt(1)) / denominator;
 }
+
+/** Usage in the units provider pricing bills: tokens, characters, rendered
+ * milliseconds, and flat generations. */
+export type NormalizedUsage = {
+  billableOutputTokens: bigint;
+  cachedInputTokens: bigint;
+  durationMillis: bigint;
+  generationCount: bigint;
+  inputTokens: bigint;
+  inputAudioTokens: bigint;
+  outputTokens: bigint;
+  outputAudioTokens: bigint;
+  totalTokens: bigint;
+  characterCost: bigint;
+};
+
+const unitScalePerMillion = BigInt("1000000");
+const millisPerSecond = BigInt(1000);
+
+/** What a usage costs at a provider's code price, in micros; zero with no
+ * price. The charge and the price sheet both run through here. */
+export function providerPricingCostMicros(
+  providerPricing: ProviderCreditPricing | undefined,
+  usage: NormalizedUsage,
+): bigint {
+  const pricing = providerPricingForUsage(providerPricing, usage);
+  if (!pricing) {
+    return zeroCreditMicros;
+  }
+
+  const inputAudioTokens = minBigint(usage.inputAudioTokens, usage.inputTokens);
+  const outputAudioTokens = minBigint(usage.outputAudioTokens, usage.outputTokens);
+  const cachedInputTokens = minBigint(
+    usage.cachedInputTokens,
+    usage.inputTokens - inputAudioTokens,
+  );
+  const uncachedInputTokens = maxBigint(
+    zeroCreditMicros,
+    usage.inputTokens - inputAudioTokens - cachedInputTokens,
+  );
+  const textOutputTokens = maxBigint(
+    zeroCreditMicros,
+    usage.billableOutputTokens - outputAudioTokens,
+  );
+  const inputTokenRate = pricing.inputTokenCostMicrosPerMillion ?? zeroCreditMicros;
+  const cachedInputTokenRate =
+    pricing.cachedInputTokenCostMicrosPerMillion ?? inputTokenRate;
+  const outputTokenRate = pricing.outputTokenCostMicrosPerMillion ?? zeroCreditMicros;
+  const inputAudioTokenRate =
+    pricing.inputAudioTokenCostMicrosPerMillion ?? inputTokenRate;
+  const outputAudioTokenRate =
+    pricing.outputAudioTokenCostMicrosPerMillion ?? outputTokenRate;
+
+  const tokenAndUnitCostMicros =
+    perMillionCost(uncachedInputTokens, inputTokenRate) +
+    perMillionCost(cachedInputTokens, cachedInputTokenRate) +
+    perMillionCost(inputAudioTokens, inputAudioTokenRate) +
+    perMillionCost(textOutputTokens, outputTokenRate) +
+    perMillionCost(outputAudioTokens, outputAudioTokenRate) +
+    usage.characterCost * (pricing.characterCostMicros ?? zeroCreditMicros) +
+    usage.generationCount * (pricing.generationCostMicros ?? zeroCreditMicros);
+  const durationCostMicros = ceilDivide(
+    usage.durationMillis * (pricing.durationSecondCostMicros ?? zeroCreditMicros),
+    millisPerSecond,
+  );
+  return (
+    tokenAndUnitCostMicros +
+    (pricing.durationCostOnlyWhenNoTokenUsage && tokenAndUnitCostMicros > zeroCreditMicros
+      ? zeroCreditMicros
+      : durationCostMicros)
+  );
+}
+
+function providerPricingForUsage(
+  pricing: ProviderCreditPricing | undefined,
+  usage: NormalizedUsage,
+) {
+  if (!pricing) {
+    return undefined;
+  }
+
+  const contextTokens = usage.totalTokens > zeroCreditMicros
+    ? usage.totalTokens
+    : usage.inputTokens + usage.outputTokens;
+  if (
+    pricing.longContext &&
+    pricing.longContextThresholdTokens &&
+    contextTokens > pricing.longContextThresholdTokens
+  ) {
+    return {
+      ...pricing,
+      ...pricing.longContext,
+      longContext: undefined,
+    };
+  }
+
+  return pricing;
+}
+
+function perMillionCost(units: bigint, microsPerMillion: bigint) {
+  if (units <= zeroCreditMicros || microsPerMillion <= zeroCreditMicros) {
+    return zeroCreditMicros;
+  }
+
+  return ceilDivide(units * microsPerMillion, unitScalePerMillion);
+}
+
+function minBigint(left: bigint, right: bigint) {
+  return left < right ? left : right;
+}
+
+function maxBigint(left: bigint, right: bigint) {
+  return left > right ? left : right;
+}
