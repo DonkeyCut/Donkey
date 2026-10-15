@@ -7,8 +7,8 @@ import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 import { chatRuntime, cutJudge } from "@/cut/lib/chatRuntime";
 import { ChatRequests } from "@/cut/lib/chatRequests";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, type ChatTransport, type UIMessage, type UIMessageChunk } from "ai";
+import { Chat, useChat } from "@ai-sdk/react";
+import { DefaultChatTransport, type ChatInit, type ChatTransport, type UIMessage, type UIMessageChunk } from "ai";
 import {
   ArrowUp,
   Brain,
@@ -61,9 +61,11 @@ import {
   isStoredThread,
   readActiveChat,
   readRawThreads,
+  recordThread,
   writeActiveChat,
   writeRawThreads,
   subscribeChatThreads,
+  type ThreadRecorder,
 } from "@/cut/lib/chatThreads";
 import {
   deleteCloudThread,
@@ -106,9 +108,9 @@ import { withChatProject } from "@/cut/lib/projectChatTools";
 import { runAiTool } from "@/cut/lib/aiTools";
 import { holdEditorChat } from "@/cut/lib/editorWork";
 import { recoverSceneCall } from "@/cut/lib/chatRecovery";
-import { replayChatStream } from "@/cut/lib/chatReplay";
-import { INTERRUPTED_ERROR, isResumeMessage, RESUME_LIMIT, resumePrompt, scrubLostTurn, unfinishedAsk, type ResumeMetadata, type TurnSettled } from "@/cut/lib/chatResume";
-import { answerEngineGate, claimEngineTool, cancelEngineChat, foldIntoEngineChat, joinRunningEngineChat } from "@/cut/lib/engineChat";
+import { countChunks, replayChatStream } from "@/cut/lib/chatReplay";
+import { INTERRUPTED_ERROR, isResumeMessage, journalAhead, RESUME_LIMIT, resumePrompt, scrubLostTurn, unfinishedAsk, type JournalMark, type ResumeMetadata, type TurnSettled } from "@/cut/lib/chatResume";
+import { answerEngineGate, claimEngineTool, cancelEngineChat, foldIntoEngineChat, joinRunningEngineChat, peekEngineChat } from "@/cut/lib/engineChat";
 import { messageText } from "@/cut/lib/messageText";
 import { EngineGate, engineInstant, handledSince, judgeEngineTurn } from "@/cut/lib/pi/engineTurn";
 import type { EngineRoute } from "@/cut/server/ai/turnCatalog";
@@ -178,6 +180,9 @@ interface ChatThread {
   /** The pi loop's LLM context (structured tool history included), when the
    * thread has run on it. */
   pi?: AgentMessage[];
+  /** How much of its newest engine turn's journal the thread was saved from,
+   * once that turn ended. */
+  journal?: JournalMark;
 }
 
 
@@ -933,6 +938,33 @@ async function accountJudges(queryClient: QueryClient): Promise<boolean> {
   }
 }
 
+type ChatEvents = Pick<ChatInit<UIMessage>, "onError" | "onFinish" | "onData" | "onToolCall">;
+
+/** A session's Chat. Its callbacks and transport route to the ones the latest
+ * commit bound, as useChat does with its own, so the Chat can live outside
+ * the hook and the thread's record can follow it directly. */
+function sessionChat(id: string, messages: UIMessage[] | undefined) {
+  type Bound = ChatEvents & { transport: ChatTransport<UIMessage> };
+  let bound: Bound | null = null;
+  const transport = () => {
+    if (!bound) throw new Error("The chat is not ready yet.");
+    return bound.transport;
+  };
+  const chat = new Chat<UIMessage>({
+    id,
+    messages,
+    transport: {
+      sendMessages: (options) => transport().sendMessages(options),
+      reconnectToStream: (options) => transport().reconnectToStream(options),
+    },
+    onError: (error) => bound?.onError?.(error),
+    onFinish: (event) => bound?.onFinish?.(event),
+    onData: (part) => bound?.onData?.(part),
+    onToolCall: (call) => bound?.onToolCall?.(call),
+  });
+  return { chat, bind: (next: Bound) => { bound = next; } };
+}
+
 /** Running sessions stay mounted for the lifetime of their editor. */
 function ChatSession({
   projectId,
@@ -1085,6 +1117,13 @@ function ChatSession({
   const completedMessageId = useRef(initialThread?.completedMessageId);
   const turnSettled = useRef<TurnSettled | undefined>(initialThread?.turnSettled);
   const resumed = useRef(initialThread?.resumed ?? 0);
+  // The journal chunks the newest engine turn's stream handed the chat, and
+  // the mark the thread keeps once that turn ends (see journalAhead).
+  const streamed = useRef<JournalMark | null>(null);
+  const journalMark = useRef(initialThread?.journal);
+  // A replay catching the thread up to the engine's journal: "finished" when
+  // that turn is over, so its tool calls and gate are history, not requests.
+  const catchingUp = useRef<"running" | "finished" | null>(null);
   const userStopped = useRef(false);
   // A dropped connection with continuations left: the turn rests, then resumes.
   const [retryDisconnect, setRetryDisconnect] = useState(false);
@@ -1186,6 +1225,7 @@ function ChatSession({
         // A new turn opens with no verdict; a continuation keeps its ask's count.
         turnSettled.current = undefined;
         userStopped.current = false;
+        streamed.current = null;
         const newest = options.messages.at(-1);
         if (!newest || !isResumeMessage(newest)) resumed.current = 0;
         if (provider(currentModel()) === "gemini") {
@@ -1219,30 +1259,41 @@ function ChatSession({
         const ask = options.messages.findLast((m) => m.role === "user" && !isResumeMessage(m));
         engineGateRef.current = decision?.route.gate ? new EngineGate(ask ? messageText(ask) : "") : null;
         const send: EngineSend = { context: deps.buildContext(), route: decision?.route };
-        return engine().sendMessages({ ...options, body: { ...options.body, ...send } });
+        return countChunks(await engine().sendMessages({ ...options, body: { ...options.body, ...send } }), (mark) => { streamed.current = mark; });
       },
       reconnectToStream: async (options) => {
         if (provider(currentModel()) === "gemini") return Promise.resolve(null);
         setClientTools(false);
+        streamed.current = null;
         let replay: ReadableStream<UIMessageChunk> | null = null;
         try {
           const stream = await engine().reconnectToStream(options);
-          replay = stream ? await replayChatStream(stream, prepareReplay, attachReplay, completedMessageId.current) : null;
+          // A catch-up replays the reply the thread already counts as done.
+          replay = stream ? await replayChatStream(stream, prepareReplay, attachReplay, catchingUp.current ? undefined : completedMessageId.current) : null;
         } finally {
           // A replay settles the reconnect when it finishes (onFinish); with
           // nothing to replay the resume effect moves on to a continuation.
-          if (!replay) setReconnect("done");
+          if (!replay) {
+            catchingUp.current = null;
+            setReconnect("done");
+          }
         }
-        return replay;
+        return replay && countChunks(replay, (mark) => { streamed.current = mark; });
       },
     };
   }, [threadId, projectId, currentModel, sessionFor, setClientTools, prepareReplay, attachReplay, registerBrowserTurn, queryClient]);
 
-  const { messages, setMessages, sendMessage, stop, status, error, clearError, resumeStream } = useChat({
-    id: threadId,
-    messages: initialThread && settleInterruptedTools(initialThread.messages),
-    transport,
+  // The session owns its Chat so the thread's record can follow the chat's
+  // own state (recordThread, below) rather than this component's renders: a
+  // tab that cannot paint keeps streaming and running tools while React may
+  // commit nothing.
+  const [session] = useState(() => sessionChat(threadId, initialThread && settleInterruptedTools(initialThread.messages)));
+  const chat = session.chat;
+  const { messages, setMessages, sendMessage, stop, status, error, clearError, resumeStream } = useChat({ chat });
+  // Bound on every commit, so the Chat always reaches the newest closures.
+  const chatEvents: ChatEvents = {
     onError: () => {
+      catchingUp.current = null;
       finishBrowserTurn.current?.();
       finishBrowserTurn.current = null;
       endChatTurn(threadId);
@@ -1253,7 +1304,12 @@ function ChatSession({
       finishBrowserTurn.current?.();
       finishBrowserTurn.current = null;
       if (chatThreadDeleted(projectId, threadId)) return;
-      if (!isAbort && !isDisconnect && !isError) completedMessageId.current = message.id;
+      catchingUp.current = null;
+      if (!isAbort && !isDisconnect && !isError) {
+        completedMessageId.current = message.id;
+        // The whole turn landed: the thread now holds this much of its journal.
+        if (streamed.current?.messageId === message.id) journalMark.current = streamed.current;
+      }
       // A verdict holds the thread for the user. A detach (this panel closing
       // its reader while the engine keeps working) and a dropped connection
       // with continuations left leave none, so the turn resumes.
@@ -1280,6 +1336,7 @@ function ChatSession({
         messages: recoverSceneCall(finished, threadId, useEditor.getState().projectId === projectId ? useEditor.getState().genvideo : undefined),
         sessions: { ...providerSessions.current },
         pi: readPiSession(threadId) ?? previous?.pi,
+        journal: journalMark.current,
       };
       seenThreadAt.current = thread.updatedAt;
       writeThreads(projectId, [thread, ...stored.filter((item) => item.id !== threadId)]);
@@ -1300,7 +1357,7 @@ function ChatSession({
       }
       // The engine's turn is signing off: judge its record and answer with
       // the next pass's steer, or none to let it close.
-      if (part.type === "data-gate") {
+      if (part.type === "data-gate" && catchingUp.current !== "finished") {
         const { gateId, reply } = part.data as { gateId: string; reply: string };
         const gate = engineGateRef.current;
         const sessionKey = sessionKeyRef.current;
@@ -1317,6 +1374,8 @@ function ChatSession({
       // Gemini turns already executed the tool in the transport loop; their
       // tool chunks are display-only.
       if (clientToolsRef.current) return;
+      // A finished turn replayed to catch up already ran its tools.
+      if (catchingUp.current === "finished") return;
       // Execute on the editor store, then hand the result back to the
       // server-side bridge (which is holding the provider's tool call open).
       const sessionKey = sessionKeyRef.current;
@@ -1348,13 +1407,17 @@ function ChatSession({
         }
       })();
     },
-  });
+  };
+  useLayoutEffect(() => session.bind({ transport, ...chatEvents }));
 
   const savedScene = useEditor((s) => s.projectId === projectId ? s.genvideo : undefined);
   useLayoutEffect(() => {
     replayHandler.current = (id, requestId) => {
       const lastUser = messages.findLast((m) => m.role === "user");
-      if (requestId && lastUser?.id !== requestId) return false;
+      // A catch-up already matched the journal's reply to the thread's last
+      // message; a message folded into that turn sits after its ask.
+      const caughtUp = catchingUp.current !== null && messages.at(-1)?.id === id;
+      if (requestId && lastUser?.id !== requestId && !caughtUp) return false;
       setMessages((current) => current.map((m) => m.id === id ? { ...m, parts: [] } : m));
       return true;
     };
@@ -1413,7 +1476,67 @@ function ChatSession({
   useEffect(() => {
     if (busy) return holdEditorChat(projectId);
   }, [busy, projectId]);
-  const receivedThread = useRef(false);
+  // Keep the thread saved (so it shows up in the Threads panel) as it grows.
+  // A save rereads, re-slims, and rewrites the project's whole stored history —
+  // synchronous main-thread work that scales with everything the chats have
+  // ever produced — and a streaming turn changes the chat every chunk, so
+  // saving on each change ground the editor down as transcripts grew. A
+  // change arms one save, at most once per THREAD_SAVE_MS, that reads the
+  // chat as it stands when it lands; turn end, thread switch, and pagehide
+  // flush it, so nothing is lost. The recorder follows the Chat itself, not
+  // this component's renders: a screen-locked or background tab keeps
+  // streaming and running tools while it commits nothing, and its record
+  // used to stop at the last render before the screen went dark.
+  const saveThreadNow = useCallback((live: UIMessage[]) => {
+    if (live.length === 0 || chatThreadDeleted(projectId, threadId)) return;
+    const firstUser = live.find((m) => m.role === "user");
+    const stored = readThreads(projectId);
+    // The pi transcript is held for the recent threads only; a thread whose
+    // session has been let go reads back as undefined, and writing that would
+    // erase the tool-call context the stored one still has. What is on disk
+    // stands until a live session replaces it.
+    const thread: ChatThread = {
+      id: threadId,
+      title: (firstUser ? messageText(firstUser) : "").slice(0, 80) || "New chat",
+      updatedAt: Date.now(),
+      messages: recoverSceneCall(live, threadId, useEditor.getState().genvideo),
+      sessions: { ...providerSessions.current },
+      completedMessageId: completedMessageId.current,
+      turnSettled: turnSettled.current,
+      resumed: resumed.current,
+      pi: readPiSession(threadId) ?? stored.find((t) => t.id === threadId)?.pi,
+      journal: journalMark.current,
+    };
+    seenThreadAt.current = thread.updatedAt;
+    writeThreads(projectId, [thread, ...stored.filter((t) => t.id !== threadId)]);
+    // Cloud projects mirror the thread server-side (debounced while it streams).
+    queueCloudThreadSave(projectId, slimForStorage([thread])[0]);
+  }, [projectId, threadId]);
+  const recorder = useRef<ThreadRecorder | null>(null);
+  // A thread switch unmounts this session mid-throttle; the page going away
+  // skips unmounts entirely. Both flush the waiting save.
+  useEffect(() => {
+    const record = recordThread(chat, saveThreadNow, THREAD_SAVE_MS);
+    recorder.current = record;
+    const onPageHide = () => {
+      record.flush();
+      flushCloudThreadSaves(true);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      recorder.current = null;
+      record.stop();
+      flushCloudThreadSaves();
+    };
+  }, [chat, saveThreadNow]);
+  // Land the final transcript locally and on the server as soon as the turn
+  // settles instead of waiting out the save throttle.
+  useEffect(() => {
+    if (busy) return;
+    recorder.current?.flush();
+    flushCloudThreadSaves();
+  }, [busy]);
   useEffect(() => {
     const receive = () => {
       if (chatThreadDeleted(projectId, threadId)) {
@@ -1429,14 +1552,17 @@ function ChatSession({
       const thread = readThreads(projectId).find((t) => t.id === threadId);
       if (!thread || thread.updatedAt <= seenThreadAt.current) return;
       seenThreadAt.current = thread.updatedAt;
-      receivedThread.current = true;
       completedMessageId.current = thread.completedMessageId;
       turnSettled.current = thread.turnSettled;
       resumed.current = thread.resumed ?? 0;
+      journalMark.current = thread.journal;
       providerSessions.current = { ...thread.sessions };
       dropPiSession(threadId);
       hydratePiSession(threadId, thread.pi);
-      setMessages(thread.messages);
+      // Read back from storage: the copy is not saved back over itself.
+      const apply = () => setMessages(thread.messages);
+      if (recorder.current) recorder.current.quietly(apply);
+      else apply();
     };
     const unsubscribe = subscribeChatThreads(projectId, receive);
     receive();
@@ -1466,84 +1592,6 @@ function ChatSession({
     useEditor.getState().beginHistoryBatch(CHAT_TURN_LABEL);
     return () => useEditor.getState().endHistoryBatch();
   }, [busy]);
-
-  // Keep the thread saved (so it shows up in the Threads panel) as it grows.
-  // A save rereads, re-slims, and rewrites the project's whole stored history —
-  // synchronous main-thread work that scales with everything the chats have
-  // ever produced — and a streaming turn replaces `messages` every chunk, so
-  // saving on each change ground the editor down as transcripts grew. The
-  // newest snapshot parks in a ref and lands at most once per THREAD_SAVE_MS;
-  // turn end, thread switch, and pagehide flush it, so nothing is lost.
-  const pendingThread = useRef<ChatThread | null>(null);
-  const saveTimer = useRef<number | null>(null);
-  const saveThreadNow = useCallback(() => {
-    const thread = pendingThread.current;
-    pendingThread.current = null;
-    if (!thread || chatThreadDeleted(projectId, thread.id)) return;
-    if (saveTimer.current !== null) {
-      window.clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-    }
-    const stored = readThreads(projectId);
-    // The pi transcript is held for the recent threads only; a thread whose
-    // session has been let go reads back as undefined, and writing that would
-    // erase the tool-call context the stored one still has. What is on disk
-    // stands until a live session replaces it.
-    const merged = {
-      ...thread,
-      completedMessageId: completedMessageId.current,
-      turnSettled: turnSettled.current,
-      resumed: resumed.current,
-      pi: thread.pi ?? stored.find((t) => t.id === thread.id)?.pi,
-    };
-    seenThreadAt.current = merged.updatedAt;
-    writeThreads(projectId, [merged, ...stored.filter((t) => t.id !== thread.id)]);
-    // Cloud projects mirror the thread server-side (debounced while it streams).
-    queueCloudThreadSave(projectId, slimForStorage([merged])[0]);
-  }, [projectId]);
-  useEffect(() => {
-    if (messages.length === 0) return;
-    if (receivedThread.current) { receivedThread.current = false; return; }
-    const firstUser = messages.find((m) => m.role === "user");
-    const title = (firstUser ? messageText(firstUser) : "").slice(0, 80) || "New chat";
-    pendingThread.current = {
-      id: threadId,
-      title,
-      updatedAt: Date.now(),
-      messages: recoverSceneCall(messages, threadId, useEditor.getState().genvideo),
-      sessions: { ...providerSessions.current },
-      pi: readPiSession(threadId),
-    };
-    if (saveTimer.current === null) {
-      saveTimer.current = window.setTimeout(() => {
-        saveTimer.current = null;
-        saveThreadNow();
-      }, THREAD_SAVE_MS);
-    }
-  }, [messages, threadId, projectId, saveThreadNow]);
-
-  // Land the final transcript locally and on the server as soon as the turn
-  // settles instead of waiting out the save throttle.
-  useEffect(() => {
-    if (busy) return;
-    saveThreadNow();
-    flushCloudThreadSaves();
-  }, [busy, saveThreadNow]);
-
-  // A thread switch unmounts this session mid-throttle; the page going away
-  // skips unmounts entirely. Both flush the parked snapshot.
-  useEffect(() => {
-    const onPageHide = () => {
-      saveThreadNow();
-      flushCloudThreadSaves(true);
-    };
-    window.addEventListener("pagehide", onPageHide);
-    return () => {
-      window.removeEventListener("pagehide", onPageHide);
-      saveThreadNow();
-      flushCloudThreadSaves();
-    };
-  }, [saveThreadNow]);
 
   // Stay glued to the newest message while the user sits at the bottom;
   // scrolling up releases the glue until they return. The ResizeObserver
@@ -1902,6 +1950,39 @@ function ChatSession({
     runningAskRef.current = messageText(ask);
     dispatchChat(() => sendMessage({ text: resumePrompt(ask), metadata }));
   }, [status, busy, requests, dispatchChat, readOnly, projectLoaded, currentAvailable, model, signedIn, info, reconnect, resumeOwed, resumeStream, setMessages, sendMessage, projectId, threadId]);
+
+  // A thread that ended but whose saved copy falls short of the engine's
+  // journal of that turn — the page lost renders or saves while it ran, or
+  // the copy predates journal marks — replays the journal to catch up. The
+  // engine is asked when the thread opens and whenever the tab comes back
+  // into view; an unfinished turn takes the reconnect above instead, which
+  // replays the same journal.
+  const [journal, setJournal] = useState<(JournalMark & { running: boolean }) | null>(null);
+  const engineThread = provider(model) !== "gemini" && !!info && !readOnly;
+  useEffect(() => {
+    if (!engineThread) return;
+    let alive = true;
+    const peek = () => {
+      if (document.hidden) return;
+      void peekEngineChat(projectId, threadId).then((found) => {
+        if (alive) setJournal(found);
+      });
+    };
+    peek();
+    document.addEventListener("visibilitychange", peek);
+    return () => {
+      alive = false;
+      document.removeEventListener("visibilitychange", peek);
+    };
+  }, [engineThread, projectId, threadId]);
+  useEffect(() => {
+    if (!journal || status !== "ready" || busy || requests.snapshot() || !projectLoaded || resumeOwed()) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the peek answered once; clearing it gates the catch-up to one replay
+    setJournal(null);
+    if (!journalAhead(messages, journalMark.current, journal)) return;
+    catchingUp.current = journal.running ? "running" : "finished";
+    dispatchChat(() => resumeStream());
+  }, [journal, status, busy, requests, projectLoaded, resumeOwed, messages, dispatchChat, resumeStream]);
 
   // Drain the queue as turns settle. drainedRef keeps it to one dispatch per
   // ready period — the effect re-runs when the queue changes before useChat

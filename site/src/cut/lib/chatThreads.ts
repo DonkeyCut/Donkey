@@ -145,3 +145,54 @@ export function deleteStoredThread(projectId: string, threadId: string): void {
   const threads = readProjectThreads(projectId).filter((t) => t.id !== threadId);
   writeProjectThreads(projectId, [{ id: threadId, updatedAt: Date.now(), deleted: true }, ...threads]);
 }
+
+/** The live state of one chat as the AI SDK's Chat holds it: its messages and
+ * the change callback its own React hook subscribes through. */
+export interface ChatSource<M> {
+  readonly messages: M[];
+  "~registerMessagesCallback": (onChange: () => void) => () => void;
+}
+
+export interface ThreadRecorder {
+  /** Save now if a change is waiting. */
+  flush: () => void;
+  /** Apply a change that came from storage without saving it back. */
+  quietly: (apply: () => void) => void;
+  /** Stop following, saving whatever is still waiting. */
+  stop: () => void;
+}
+
+/** Keep a thread's stored copy following its chat. Saves hang off the chat's
+ * own state rather than the panel's renders: a tab that cannot paint (the
+ * screen locked, the window minimised, the tab behind another) may commit no
+ * render for minutes while its stream and tools keep running, and every part
+ * that arrives meanwhile still lands. A change arms one save, which reads the
+ * chat as it stands when it fires, so a save never writes an older copy than
+ * the chat holds. */
+export function recordThread<M>(chat: ChatSource<M>, save: (messages: M[]) => void, waitMs: number): ThreadRecorder {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let quiet = false;
+  const land = () => {
+    timer = null;
+    save(chat.messages);
+  };
+  const unsubscribe = chat["~registerMessagesCallback"](() => {
+    if (!quiet && timer === null) timer = setTimeout(land, waitMs);
+  });
+  const flush = () => {
+    if (timer === null) return;
+    clearTimeout(timer);
+    land();
+  };
+  return {
+    flush,
+    quietly: (apply) => {
+      quiet = true;
+      try { apply(); } finally { quiet = false; }
+    },
+    stop: () => {
+      unsubscribe();
+      flush();
+    },
+  };
+}

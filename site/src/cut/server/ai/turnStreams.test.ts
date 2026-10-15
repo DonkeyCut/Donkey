@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { UIMessageChunk } from "ai";
-import { cancelTurnStream, followTurnStream, startTurnStream } from "./turnStreams";
+import { cancelTurnStream, followTurnStream, peekTurnStream, startTurnStream } from "./turnStreams";
 import { askPageGate, callBrowserTool, claimBrowserTool, detachSession, registerSession, resolveBrowserTool, resolvePageGate, unregisterSession } from "./bridge";
 import { createProject, readProject } from "../projects";
 
@@ -34,6 +34,24 @@ test("the engine completes with no readers and replays the finished journal", as
   output.close();
   const replay = await followTurnStream("project", "chat");
   expect(await replay.text()).toContain("Finished after closing the tab.");
+});
+
+test("a peek reports how far the journal reaches while the turn runs and after", async () => {
+  expect(await peekTurnStream("project", "never")).toBeNull();
+  let output!: ReadableStreamDefaultController<UIMessageChunk>;
+  const response = await startTurnStream("project", "peek", () => new ReadableStream({ start(controller) {
+    output = controller;
+    controller.enqueue({ type: "start", messageId: "turn-peek" });
+    controller.enqueue({ type: "tool-input-available", toolCallId: "a", toolName: "add_title", input: {} });
+  } }), () => {}, () => {});
+  await response.body!.cancel();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(await peekTurnStream("project", "peek")).toEqual({ messageId: "turn-peek", chunks: 2, running: true });
+  output.enqueue({ type: "tool-output-available", toolCallId: "a", output: {} });
+  output.enqueue({ type: "finish" });
+  output.close();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(await peekTurnStream("project", "peek")).toEqual({ messageId: "turn-peek", chunks: 4, running: false });
 });
 
 test("Stop cancels the run explicitly", async () => {

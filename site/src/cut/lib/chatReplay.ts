@@ -1,4 +1,19 @@
 import type { UIMessageChunk } from "ai";
+import type { JournalMark } from "./chatResume";
+
+/** Count the chunks an engine turn's stream hands the chat. The engine's
+ * journal counts the same chunks, so a finished turn's count is the mark its
+ * saved thread keeps (see journalAhead). */
+export function countChunks(source: ReadableStream<UIMessageChunk>, count: (mark: JournalMark) => void): ReadableStream<UIMessageChunk> {
+  let mark: JournalMark | null = null;
+  return source.pipeThrough(new TransformStream<UIMessageChunk, UIMessageChunk>({
+    transform(chunk, controller) {
+      if (chunk.type === "start" && chunk.messageId) mark = { messageId: chunk.messageId, chunks: 0 };
+      if (mark) count(mark = { ...mark, chunks: mark.chunks + 1 });
+      controller.enqueue(chunk);
+    },
+  }));
+}
 
 /** Read the journal identity before the SDK snapshots its current assistant message. */
 export async function replayChatStream(

@@ -1,5 +1,5 @@
 import { chatRuntime } from "../../lib/chatRuntime";
-import { mkdir, open, stat } from "node:fs/promises";
+import { mkdir, open, readFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { UIMessageChunk } from "ai";
@@ -123,6 +123,22 @@ export async function followTurnStream(projectId: string, threadId: string, sign
     "Cache-Control": "no-cache, no-transform",
     "x-vercel-ai-ui-message-stream": "v1",
   } });
+}
+
+/** How much of a thread's newest turn its journal holds, without following
+ * it: the turn's message, the chunks written so far, and whether it still
+ * runs. A page compares the chunks with the ones its saved thread was built
+ * from, and replays the journal when its copy fell behind. Null when the
+ * thread has no journal. */
+export async function peekTurnStream(projectId: string, threadId: string): Promise<{ messageId: string; chunks: number; running: boolean } | null> {
+  const key = keyFor(projectId, threadId);
+  const text = await readFile(fileFor(key), "utf8").catch(() => null);
+  const chunks = text?.split("\n").filter((line) => line.startsWith("data: {")) ?? [];
+  if (chunks.length === 0) return null;
+  let start: { type?: unknown; messageId?: unknown };
+  try { start = JSON.parse(chunks[0].slice("data: ".length)) as typeof start; } catch { return null; }
+  if (start.type !== "start" || typeof start.messageId !== "string") return null;
+  return { messageId: start.messageId, chunks: chunks.length, running: running.has(key) };
 }
 
 export function cancelTurnStream(projectId: string, threadId: string): void {

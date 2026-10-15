@@ -97,6 +97,21 @@ export function unfinishedAsk(
   return ask;
 }
 
+/** How much of an engine turn's journal a record was built from: the turn's
+ * reply and the chunks read for it. A thread keeps the mark of the turn it
+ * last saw end, and the engine answers a peek with its own. */
+export type JournalMark = { messageId: string; chunks: number };
+
+/** Whether the engine's journal holds more of the thread's newest reply than
+ * the saved thread does: a page that lost renders or saves while the turn ran
+ * (or one saved before marks were kept) has a shorter copy, and replays the
+ * journal to catch up. A thread that has moved on past that reply, or whose
+ * mark already covers the journal, is left alone. */
+export function journalAhead(messages: UIMessage[], held: JournalMark | undefined, journal: JournalMark | null | undefined): boolean {
+  if (!journal || messages.at(-1)?.id !== journal.messageId) return false;
+  return held?.messageId !== journal.messageId || held.chunks < journal.chunks;
+}
+
 /** The continuation a resumed turn opens with. It carries the ask itself, so
  * a provider session that never received it still knows the job. */
 export function resumePrompt(ask: UIMessage): string {

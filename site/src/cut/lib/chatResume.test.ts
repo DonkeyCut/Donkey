@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { UIMessage } from "ai";
-import { DETACHED_MEDIA_ERROR, DETACHED_UI_NOTE, INTERRUPTED_ERROR, isResumeMessage, pendingAsk, resumePrompt, scrubLostTurn, unfinishedAsk } from "./chatResume";
+import { DETACHED_MEDIA_ERROR, DETACHED_UI_NOTE, INTERRUPTED_ERROR, isResumeMessage, journalAhead, pendingAsk, resumePrompt, scrubLostTurn, unfinishedAsk } from "./chatResume";
 
 const user = (id: string, text: string, metadata?: Record<string, unknown>): UIMessage =>
   ({ id, role: "user", parts: [{ type: "text", text }], ...(metadata ? { metadata } : {}) }) as UIMessage;
@@ -78,4 +78,18 @@ test("an answered thread sends only the newest message", () => {
 test("a continuation stands alone, since it quotes its ask", () => {
   const messages = [user("a", "cut the pauses"), user("b", resumePrompt(user("a", "cut the pauses")), { resume: true })];
   expect(pendingAsk(messages).text).toBe(resumePrompt(user("a", "cut the pauses")));
+});
+
+test("a thread saved short of its newest turn's journal catches up from it", () => {
+  const messages = [user("ask", "build the titles"), reply("turn-1")];
+  const journal = { messageId: "turn-1", chunks: 900 };
+  // Saved from fewer chunks than the engine wrote, or before marks were kept.
+  expect(journalAhead(messages, { messageId: "turn-1", chunks: 240 }, journal)).toBe(true);
+  expect(journalAhead(messages, undefined, journal)).toBe(true);
+  expect(journalAhead(messages, { messageId: "turn-0", chunks: 2000 }, journal)).toBe(true);
+  // A whole copy, a journal of another turn, a thread that moved on, or no journal.
+  expect(journalAhead(messages, { messageId: "turn-1", chunks: 900 }, journal)).toBe(false);
+  expect(journalAhead(messages, undefined, { messageId: "turn-0", chunks: 900 })).toBe(false);
+  expect(journalAhead([...messages, user("next", "now the music")], undefined, journal)).toBe(false);
+  expect(journalAhead(messages, undefined, null)).toBe(false);
 });

@@ -2,7 +2,7 @@ import { spawn, execFile } from "node:child_process";
 import os from "node:os";
 import { z } from "zod";
 import { SETTINGS } from "@/lib/config/registry";
-import { startTurnStream, followTurnStream, cancelTurnStream } from "../ai/turnStreams";
+import { startTurnStream, followTurnStream, cancelTurnStream, peekTurnStream } from "../ai/turnStreams";
 import { foldIntoTurn, openFoldInbox, type Fold, type FoldInbox } from "../ai/turnFolds";
 import path from "node:path";
 import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -646,6 +646,8 @@ export const aiApi = {
   async resumeChat(req: Request, threadId: string) {
     const projectId = new URL(req.url).searchParams.get("projectId");
     if (!projectId) return Response.json({ error: "A project is required." }, { status: 400 });
+    // A peek reports how far the journal reaches instead of following it.
+    if (new URL(req.url).searchParams.has("peek")) return Response.json({ journal: await peekTurnStream(projectId, threadId) });
     return followTurnStream(projectId, threadId, req.signal);
   },
 

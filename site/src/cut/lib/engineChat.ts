@@ -1,6 +1,6 @@
 import type { UIMessage } from "ai";
 import { localBackend } from "./backend/local";
-import { pendingAsk } from "./chatResume";
+import { pendingAsk, type JournalMark } from "./chatResume";
 
 export async function claimEngineTool(sessionKey: string | null, toolCallId: string): Promise<boolean> {
   const response = await localBackend.fetch("/api/cut/ai/tool-claim", {
@@ -50,6 +50,23 @@ export async function joinRunningEngineChat(
     { signal },
   );
   return response.ok && response.status !== 204 ? response : null;
+}
+
+/** How far the engine's journal of the thread's newest turn reaches, and
+ * whether that turn still runs. Null when the engine keeps no journal for the
+ * thread, cannot be reached, or predates peeking (it answers with the stream
+ * itself, which is left unread). */
+export async function peekEngineChat(projectId: string, threadId: string): Promise<(JournalMark & { running: boolean }) | null> {
+  const response = await localBackend.fetch(
+    `/api/cut/ai/chat/${encodeURIComponent(threadId)}/stream?projectId=${encodeURIComponent(projectId)}&peek=1`,
+  ).catch(() => null);
+  if (!response?.ok || !response.headers.get("Content-Type")?.includes("application/json")) {
+    void response?.body?.cancel().catch(() => {});
+    return null;
+  }
+  const { journal } = await response.json().catch(() => ({})) as { journal?: { messageId?: unknown; chunks?: unknown; running?: unknown } | null };
+  if (typeof journal?.messageId !== "string" || typeof journal.chunks !== "number") return null;
+  return { messageId: journal.messageId, chunks: journal.chunks, running: journal.running === true };
 }
 
 /** Answer the engine's quality gate for a signing-off turn: the steer for its
