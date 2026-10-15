@@ -3,7 +3,8 @@ import { FULL_FRAME, isFullFrame } from "./measure/picture";
 import type { FrameBox } from "./measure/sourceMeasure";
 import { bestShift, diffPixels, meanDiff, runShift, SCORE_LONG_SIDE, SWEEP_TARGET, sweepStats, worstStretches } from "./frameDiff";
 import { composeComparison, makeStillFrame } from "./media";
-import { framesAt } from "./mediaRead";
+import type { WrappedCanvas } from "mediabunny";
+import { framesAt, type FrameSize } from "./mediaRead";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl, type RasterSurface } from "./raster";
 import type { ExportDoc } from "./renderSnapshot";
 import { clipLen } from "./store";
@@ -37,6 +38,17 @@ const SWEEP_BUDGET_MS = 60_000;
 
 /** How many of a sweep's worst stretches come back. */
 const MAX_STRETCHES = 5;
+
+/** Readers a source frame is tried on — the one that failed, then fresh ones
+ * on software decoding — before the frame is given up. */
+const READ_TRIES = 3;
+
+/** Frames given up in a row before the source counts as unreadable from there. */
+const READ_LOST_RUN = 3;
+
+/** The breath before a fresh reader, per try: a decoder lost to contention
+ * comes back once the contention passes. */
+const READ_RETRY_MS = 100;
 
 /** Aspect ratios this close draw edge to edge; anything further letterboxes. */
 const ASPECT_SLACK = 0.01;
@@ -200,6 +212,7 @@ export async function compareMoments(
   const centers = new Set(wanted.map((m) => key(m.sourceAt)));
   const pixels = new Map<number, Uint8ClampedArray>();
   const pictures = new Map<number, string>();
+  const lost: LostFrame[] = [];
   if (asset.type === "image") {
     const still = await stillPixels(asset, scorer, area);
     for (const m of wanted) {
@@ -216,7 +229,7 @@ export async function compareMoments(
     // height is its picture box's, so a picture inside a bigger frame is
     // read at the size the cut's frame is.
     let seen = 0;
-    for await (const c of framesAt(asset.url, times, { height: readHeight(area, size.height) })) {
+    for await (const c of steadyFrames(asset, times, { height: readHeight(area, size.height) }, lost)) {
       const k = key(times[seen++]);
       if (!c) {
         continue;
@@ -229,7 +242,11 @@ export async function compareMoments(
   }
   for (const m of wanted) {
     if (!pictures.has(key(m.sourceAt))) {
-      throw new Error(`Could not read "${asset.name}" at ${Math.round(m.sourceAt * 100) / 100}s.`);
+      const why = lost.find((l) => key(l.source) === key(m.sourceAt));
+      throw new Error(
+        `Could not read "${asset.name}" at ${Math.round(m.sourceAt * 100) / 100}s` +
+          (why ? `: ${why.error} ${READ_TRIES} fresh decoders, the last in software, failed on that frame.` : ".")
+      );
     }
   }
 
@@ -273,6 +290,85 @@ export async function compareMoments(
   return { images, checked, ...(frame ? { frame } : {}) };
 }
 
+/** A source frame the read gave up on: its second and what the decoder said. */
+type LostFrame = { source: number; error: string };
+
+/** The source stopped decoding: READ_LOST_RUN frames in a row failed fresh
+ * readers, the first of them at `source` seconds, the `index`th time asked. */
+class SourceReadError extends Error {
+  constructor(
+    readonly asset: MediaAsset,
+    readonly source: number,
+    readonly index: number,
+    readonly count: number,
+    readonly reason: string
+  ) {
+    super(
+      `"${asset.name}" stopped decoding at ${round3(source)}s (frame ${index + 1} of ${count} read, ${READ_LOST_RUN} in a row failing ` +
+        `${READ_TRIES} fresh decoders each, the last in software): ${reason}`
+    );
+    this.name = "SourceReadError";
+  }
+}
+
+/** What a failed read said, in the decoder's own words. */
+const reasonOf = (e: unknown) => (e instanceof Error ? e.message : String(e)) || "the decoder failed";
+
+/**
+ * The source's frames at `times`, one per time and in order, in one decode
+ * pass that outlives its decoder. A hardware decoder dies mid-read for reasons
+ * that pass — contention for the machine's decode sessions over a long
+ * session — and says only "Decoding error.", so a read that fails opens a
+ * fresh reader on software decoding at the frame it failed on and goes on
+ * from there. A frame that fails READ_TRIES readers is given up — null in its
+ * place and named in `lost` — and READ_LOST_RUN given up in a row end the
+ * read with a SourceReadError naming the first.
+ */
+async function* steadyFrames(
+  asset: MediaAsset,
+  times: number[],
+  size: FrameSize,
+  lost: LostFrame[]
+): AsyncGenerator<WrappedCanvas | null> {
+  let next = 0;
+  let software = false;
+  let tries = 0;
+  let run: { index: number; reason: string } | null = null;
+  while (next < times.length) {
+    const reader = framesAt(asset.url, times.slice(next), size, software ? { software: true } : undefined);
+    try {
+      for (;;) {
+        const step = await reader.next();
+        if (step.done) {
+          return;
+        }
+        next++;
+        tries = 0;
+        run = null;
+        yield step.value;
+      }
+    } catch (e) {
+      tries++;
+      software = true;
+      if (tries >= READ_TRIES) {
+        const reason = reasonOf(e);
+        run ??= { index: next, reason };
+        if (next - run.index + 1 >= READ_LOST_RUN) {
+          throw new SourceReadError(asset, times[run.index], run.index, times.length, run.reason);
+        }
+        lost.push({ source: round3(times[next]), error: reason });
+        next++;
+        tries = 0;
+        yield null;
+      } else {
+        await new Promise((r) => setTimeout(r, READ_RETRY_MS * tries));
+      }
+    } finally {
+      await reader.return(undefined).catch(() => {});
+    }
+  }
+}
+
 /** Thrown inside the render loop when a sweep's time is up. */
 class SweepOutOfTime extends Error {}
 
@@ -305,14 +401,20 @@ export type SweepResult = {
   timing?: { shift: number; diff: number };
   onBlocks?: number;
   frame?: string;
+  /** Source frames no fresh decoder read, left out of the scores. */
+  lost?: LostFrame[];
+  /** Why the sweep ended at `coveredTo` short of its span, when the source
+   * stopped decoding there. */
+  stopped?: string;
 };
 
 /**
  * The sweep: the cut scored against the source at every step of a span, with
  * the source read at a constant offset, and no pictures. The source is read
- * in one pass in lockstep with the render, and each cut frame is also scored
- * against the source samples SHIFT_REACH steps either side, so a stretch that
- * is right but late says how late.
+ * first, in one pass down to the score's size, and its decoder let go before
+ * the cut renders, so no decoder sits open through the render; each cut frame
+ * is then scored against the source samples SHIFT_REACH steps either side, so
+ * a stretch that is right but late says how late.
  */
 export async function sweepSource(
   doc: ExportDoc,
@@ -346,40 +448,58 @@ export async function sweepSource(
   const size = sizeOf(doc, SWEEP_LONG_SIDE);
   const scorer = makeScorer(doc, area);
   const width = SHIFT_REACH * 2 + 1;
-  const near = new Float32Array(samples.length * width).fill(NaN);
+  const started = performance.now();
+  const outOfTime = (j: number) => j > 0 && performance.now() - started > SWEEP_BUDGET_MS;
+
+  // The source side, read whole before the render: a still answers every
+  // sample with its one frame; a video is one decode pass. A frame no decoder
+  // reads is null and drops out; a source that stops decoding ends the sweep
+  // at the first frame it lost.
+  const lost: LostFrame[] = [];
+  let stopped: SourceReadError | undefined;
+  const sources: (Uint8ClampedArray | null)[] = [];
+  const still = asset.type === "image" ? (await stillPixels(asset, scorer, area)).pixels : null;
+  if (still) {
+    sources.push(...samples.map(() => still));
+  } else {
+    try {
+      for await (const c of steadyFrames(asset, samples.map((s) => s.source), { height: readHeight(area, size.height) }, lost)) {
+        if (outOfTime(sources.length)) {
+          break;
+        }
+        sources.push(c ? scorer.pixels(c.canvas, c.canvas.width, c.canvas.height) : null);
+      }
+    } catch (e) {
+      if (!(e instanceof SourceReadError)) {
+        throw e;
+      }
+      stopped = e;
+      sources.length = Math.min(sources.length, e.index);
+    }
+  }
+
+  const near = new Float32Array(sources.length * width).fill(NaN);
   const diffs: number[] = [];
   const grids: number[][][] = [];
   const cuts = new Map<number, Uint8ClampedArray>();
-  const sources = new Map<number, Uint8ClampedArray | null>();
-
-  // The source side: a still answers every sample with its one frame; a
-  // video is pulled a frame at a time, in step with the render.
-  const still = asset.type === "image" ? (await stillPixels(asset, scorer, area)).pixels : null;
-  const reader = still ? null : framesAt(asset.url, samples.map((s) => s.source), { height: readHeight(area, size.height) });
-  const started = performance.now();
   try {
-    await renderProjectFrames(doc, samples.map((s) => s.at), size, (a) => a.url, async (canvas) => {
+    await renderProjectFrames(doc, samples.slice(0, sources.length).map((s) => s.at), size, (a) => a.url, async (canvas) => {
       const j = diffs.length;
-      if (j > 0 && performance.now() - started > SWEEP_BUDGET_MS) {
+      if (outOfTime(j)) {
         throw new SweepOutOfTime();
       }
-      let src = still;
-      if (reader) {
-        const next = await reader.next();
-        const c = next.done ? null : next.value;
-        src = c ? scorer.pixels(c.canvas, c.canvas.width, c.canvas.height) : null;
-      }
+      const src = sources[j];
       const cut = scorer.cut(canvas, canvas.width, canvas.height);
 
       // The sample's own score, then the timing read: this cut frame against
       // the source samples before it, and the cut frames before it against
-      // this source sample. Only the last SHIFT_REACH of each are kept.
+      // this source sample. Only the last SHIFT_REACH cut frames are kept.
       const own = src ? diffPixels(cut, src, scorer.size.width, scorer.size.height) : { diff: NaN, grid: [] };
       diffs.push(own.diff);
       grids.push(own.grid);
       near[j * width + SHIFT_REACH] = own.diff;
       for (let k = 1; k <= SHIFT_REACH && !still; k++) {
-        const back = sources.get(j - k);
+        const back = j - k >= 0 ? sources[j - k] : null;
         if (back) {
           near[j * width + SHIFT_REACH - k] = meanDiff(cut, back);
         }
@@ -389,22 +509,18 @@ export async function sweepSource(
         }
       }
       cuts.set(j, cut);
-      sources.set(j, src);
       cuts.delete(j - SHIFT_REACH);
-      sources.delete(j - SHIFT_REACH);
     });
   } catch (e) {
     if (!(e instanceof SweepOutOfTime)) {
       throw e;
     }
-  } finally {
-    await reader?.return(undefined);
   }
 
   // What was scored: a sample the source had no frame for drops out.
   const scored = diffs.flatMap((diff, i) => (Number.isNaN(diff) ? [] : [{ at: samples[i].at, diff, i }]));
   if (scored.length === 0) {
-    throw new Error(`Could not read "${asset.name}" over ${round3(from)}-${round3(to)}s.`);
+    throw new Error(`Could not read "${asset.name}" over ${round3(from)}-${round3(to)}s${stopped ? `: ${stopped.message}` : "."}`);
   }
   const stats = sweepStats(scored.map((s) => s.diff));
   const worst: Stretch[] = worstStretches(scored, step, SWEEP_TARGET, MAX_STRETCHES).map((w) => {
@@ -441,5 +557,7 @@ export async function sweepSource(
     ...(timing ? { timing } : {}),
     ...(onBlocks > 0 ? { onBlocks: Math.round(onBlocks * 100) / 100 } : {}),
     ...(frame ? { frame } : {}),
+    ...(lost.length > 0 ? { lost } : {}),
+    ...(stopped ? { stopped: `${stopped.message} Cut ${samples[stopped.index].at}s.` } : {}),
   };
 }

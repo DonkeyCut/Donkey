@@ -1497,9 +1497,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...pictureReport(area),
           source: sourceRef(asset),
           note:
-            (sweep.coveredTo !== undefined
-              ? `The sweep ran out of time at ${sweep.coveredTo}s; sweep again from there for the rest. `
-              : "") + SWEEP_NOTE,
+            (sweep.stopped
+              ? `The source stopped decoding, so the sweep ends at ${sweep.coveredTo}s: ${sweep.stopped} Sweep again from a little past it for the rest. `
+              : sweep.coveredTo !== undefined
+                ? `The sweep ran out of time at ${sweep.coveredTo}s; sweep again from there for the rest. `
+                : "") +
+            (sweep.lost
+              ? `Source frames at ${sweep.lost.map((l) => `${l.source}s`).join(", ")} did not decode (${sweep.lost[0].error}) and are left out of the scores. `
+              : "") +
+            SWEEP_NOTE,
         };
       }
 
