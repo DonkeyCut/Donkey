@@ -3214,25 +3214,29 @@ function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: re
         {beatClips.length === 0 ? (
           <span className="text-[12px] text-muted-foreground">Detect beats on a clip</span>
         ) : (
+          <Select value={beatSource?.clip.id} onValueChange={(v) => setFontCycleBeats(String(v))} disabled={!cycle}>
+            <SelectTrigger className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {beatClips.map(({ clip, asset }) => (
+                <SelectItem key={clip.id} value={clip.id} className="text-[12px]">
+                  {asset.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </Row>
+      {beatClips.length > 0 && (
+        <Row label="Each face">
           <div className="flex items-center gap-1.5">
-            <Select value={beatSource?.clip.id} onValueChange={(v) => setFontCycleBeats(String(v))} disabled={!cycle}>
-              <SelectTrigger className="h-8 w-24 text-[12px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {beatClips.map(({ clip, asset }) => (
-                  <SelectItem key={clip.id} value={clip.id} className="text-[12px]">
-                    {asset.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Select
               value={String(fontCycleBeatStep)}
               onValueChange={(v) => setFontCycleBeatStep(Number(v))}
               disabled={!cycle}
             >
-              <SelectTrigger className="h-8 w-16 text-[12px]" aria-label="Beats per face">
+              <SelectTrigger className="h-8 w-20 text-[12px]" aria-label="Beats per face">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -3247,8 +3251,8 @@ function FontCycleSettings({ overlay: o, peers }: { overlay: Overlay; peers?: re
               Time
             </Button>
           </div>
-        )}
-      </Row>
+        </Row>
+      )}
       {beatNote && <p className="text-[11px] text-muted-foreground">{beatNote}</p>}
     </>
   );
