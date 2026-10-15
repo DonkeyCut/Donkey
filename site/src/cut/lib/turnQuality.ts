@@ -385,9 +385,10 @@ export function qualityVerdict(
 
   // A replica nobody held up against the thing it copies. Watching measures
   // what went in and the counts measure what came out; neither says the two
-  // look alike. The number here is moments checked, and it is only asked of a
-  // turn that wrote something down about the source and then made a picture to
-  // hold up — so a comparison has something on both sides to compare.
+  // look alike. The number here is moments and swept frames checked, and it is
+  // only asked of a turn that wrote something down about the source and then
+  // made a picture to hold up — so a comparison has something on both sides to
+  // compare.
   //
   // Only the source the cut was copied from is owed one, and that is the one
   // the turn read furthest into: a turn also picks shots out of the user's own
@@ -405,8 +406,8 @@ export function qualityVerdict(
       step: "check",
       steer:
         `${QUALITY_STEER_PREFIX} Not yet. Nothing has been held up against "${unchecked.name}": you have what it does written down, and no look at whether the cut does it too. ` +
-        "compare_to_source on it, a few moments at a time, spread across what you built — the source's frame and yours side by side. " +
-        "Name what differs and fix it, then check the moments you changed." +
+        "compare_to_source on it with mode sweep, which scores every frame of the cut against the source and names the worst stretches; " +
+        "look at those in moments mode, fix what differs, and sweep again until the median is under its target." +
         standing(work),
     };
 
@@ -523,7 +524,8 @@ export function recordLook(
   cur.kind = kind;
   cur.sound = sound;
   if (tool === "compare_to_source") {
-    cur.compared += Array.isArray(response.checked) ? response.checked.length : 0;
+    // A picture call counts its moments, a sweep the frames it scored.
+    cur.compared += Array.isArray(response.checked) ? response.checked.length : numOf(response.sampled);
     sources.set(id, cur);
     return;
   }

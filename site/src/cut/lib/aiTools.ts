@@ -190,7 +190,6 @@ import {
   importStockAudio,
   importStockVideo,
   importUrlMedia,
-  composeComparison,
   composeSheets,
   makeStillFrame,
   renderAudioSpanWav,
@@ -233,10 +232,12 @@ import { loadLibraryLut, lutIdOf, lutLabel } from "./linkedLibrary";
 import { type RawFrame, type ReadGrade, rawFrameAt, sampleClipRawFrame, sourceProfileOf, toBaseRendering, toGradedRendering } from "./baseFrame";
 import { applyOverlayPatchSettled, assetClipUses, assetIdsOnAnyTimeline, clipLen, footprints, nextFreeStart, track0Clips, laneGapAt, getClipSpans, overlayLaneOrder, overlayLayers, parkedTransitions, projectDuration, resolveTransitions, totalDuration, useEditor } from "./store";
 import { playheadAt } from "./playhead";
-import { mixSpecFor, renderProjectFrame, renderProjectFrames } from "./exportRender";
+import { mixSpecFor, renderProjectFrame } from "./exportRender";
 import { renderMix } from "./audioMix";
 import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./loudness";
-import { framesAt, readMediaFileSize } from "./mediaRead";
+import { readMediaFileSize } from "./mediaRead";
+import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
+import { compareMoments, sweepSource } from "./sourceCompare";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
@@ -573,9 +574,19 @@ const CAPTURE_LONG_SIDE = 640;
  * undo step, and a whole feature's worth of them in a single step is not
  * something anyone can step back through; a caller with more comes back. */
 const MAX_BLOCKS = 40;
-// Each moment is two frames drawn and one picture composed; a handful at a
-// time keeps the call inside the bridge's deadline and the reply readable.
-const MAX_COMPARE = 4;
+/** What a comparison's reply teaches about its own numbers. */
+const COMPARE_NOTE =
+  "Source on the left, your cut on the right, one picture per moment. diff is how far your frame is from the source's: the mean difference per pixel, 0 (the same) to 255, and under " +
+  `${SWEEP_TARGET} reads as the same picture. grid is that difference over the frame in 4×4 cells, top row first, so the hot cells are where to look. ` +
+  "shift means the source matches your frame better that many seconds away: positive, your cut shows it early, so move what is there later by that much; negative, earlier. " +
+  "block names a block standing in for footage, which keeps a difference no edit removes, so judge those moments by the cells over your titles and shapes. " +
+  "Name what differs — colour, the words and their face, where a thing sits, its size, what is moving and how far along it is — fix it with the tools and check again. A moment that matches needs no edit.";
+const SWEEP_NOTE =
+  "diff is the mean difference per pixel between your frame and the source's, 0 (the same) to 255; median is the typical frame, p95 the bad tail, max the worst. " +
+  "worst lists the stretches most off, worst first, each with its peak frame (at on the cut, source on the source) and that frame's 4×4 grid, top row first. " +
+  "Look at them: compare_to_source with times [{at, source}] at those peaks, fix what differs, then sweep again, until the median is under target. " +
+  "shift on a stretch, or timing for the whole span, means the source matches better that many seconds away: positive, move it later by that much; negative, earlier. " +
+  "onBlocks is the share of samples over blocks standing in for footage; those keep a difference no edit removes.";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -1274,9 +1285,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
 
   compare_to_source: async (s, input) => {
       // Building from a reference and looking at the reference are separate
-      // acts, and until they are put in one picture nothing checks the first
-      // against the second. This renders the cut at a moment, reads the source
-      // at the moment it stands for, and hands back the two side by side.
+      // acts, and until they are put side by side nothing checks the first
+      // against the second. The picture call renders the cut at a few
+      // moments beside the source's frames and scores each pair; the sweep
+      // scores a whole stretch with no pictures, to find what to look at.
       const asset = requireItem(s.assets, input.asset_id, "project asset");
       if (asset.type === "audio")
         throw new ToolError(`"${asset.name}" is audio — listen_audio hears it, and a frame is a picture.`);
@@ -1284,97 +1296,68 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // back the same opening frame under four different stamps.
       if (!(asset.duration > 0))
         throw new ToolError(`"${asset.name}" has no length yet — its import is still being read. Try again in a moment.`);
+      if (input.mode !== undefined && !(COMPARE_MODES as readonly unknown[]).includes(input.mode)) {
+        throw new ToolError(`mode is one of ${COMPARE_MODES.join(", ")}.`);
+      }
+      const offset = isNum(input.offset) ? input.offset : 0;
+      const total = projectDuration(s);
+      const doc = {
+        aspect: s.aspect,
+        assets: s.assets,
+        clips: s.clips,
+        audioClips: s.audioClips,
+        overlays: s.overlays,
+        subtitles: s.subtitles,
+        background: s.background,
+      };
+      const failed = (fallback: string) => (e: unknown) => {
+        throw new ToolError(e instanceof Error ? e.message : fallback, { cause: e });
+      };
+
+      // The sweep: numbers over a span, at a step, under a time budget.
+      if (input.mode === "sweep") {
+        const sweep = await sweepSource(
+          doc,
+          asset,
+          {
+            from: isNum(input.from) ? input.from : 0,
+            to: isNum(input.to) ? input.to : total,
+            step: isNum(input.step) ? input.step : undefined,
+            offset,
+          },
+          total
+        ).catch(failed(`Could not sweep "${asset.name}".`));
+        return {
+          ...sweep,
+          source: sourceRef(asset),
+          note:
+            (sweep.coveredTo !== undefined
+              ? `The sweep ran out of time at ${sweep.coveredTo}s; sweep again from there for the rest. `
+              : "") + SWEEP_NOTE,
+        };
+      }
+
+      // The picture call: a few moments, each a picture and a score.
       const raw = Array.isArray(input.times) ? input.times : [];
       const moments = raw
         .map((x) => {
           const rec = (x ?? {}) as Record<string, unknown>;
           const at = isNum(x) ? (x as number) : isNum(rec.at) ? (rec.at as number) : NaN;
-          const sourceAt = isNum(rec.source) ? (rec.source as number) : at;
+          const sourceAt = isNum(rec.source) ? (rec.source as number) : at + offset;
           return { at, sourceAt };
         })
         .filter((m) => Number.isFinite(m.at) && Number.isFinite(m.sourceAt));
       if (moments.length === 0)
-        throw new ToolError("Pass times: [seconds] — the moments of the cut to check, or [{at, source}] when the cut sits at a different second than the source does.");
+        throw new ToolError("Pass times: [seconds] — the moments of the cut to check, or [{at, source}] when the cut sits at a different second than the source does. To score the whole cut first, pass mode: \"sweep\".");
       if (moments.length > MAX_COMPARE)
-        throw new ToolError(`That is ${moments.length} moments — ${MAX_COMPARE} is the most one call reads. Check these, fix what is off, then call again for the rest.`);
-      const total = projectDuration(s);
-      const frame = frameOf(s.aspect);
-      const k = CAPTURE_LONG_SIDE / Math.max(frame.w, frame.h);
-      const size = { width: Math.round(frame.w * k), height: Math.round(frame.h * k) };
-      // The source keeps its own aspect: a height alone lets a widescreen
-      // reference stay widescreen beside a vertical cut, which is half of what
-      // the comparison is for. Asking for both dimensions squashes it.
-      const sourceSize = { height: size.height };
-      const wanted = moments.map((m) => ({
-        at: clamp(m.at, 0, Math.max(0, total - 0.001)),
-        sourceAt: clamp(m.sourceAt, 0, Math.max(0, asset.duration - 0.001)),
-      }));
-      // One decode pass over the source, in play order, however the moments
-      // were asked for.
-      const order = wanted.map((_, i) => i).sort((a, b) => wanted[a].sourceAt - wanted[b].sourceAt);
-      const refs = new Map<number, string>();
-      if (asset.type === "image") {
-        const still = await makeStillFrame(asset.url, "read").catch((e) => {
-          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
-        });
-        for (const i of order) refs.set(i, still.frames[0].image);
-      } else {
-        let seen = 0;
-        try {
-          for await (const c of framesAt(
-            asset.url,
-            order.map((i) => wanted[i].sourceAt),
-            sourceSize
-          )) {
-            const i = order[seen++];
-            if (c) refs.set(i, await rasterCanvasToDataUrl(c.canvas, "image/jpeg", 0.82));
-          }
-        } catch (e) {
-          throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
-        }
-      }
-      for (let i = 0; i < wanted.length; i++)
-        if (!refs.has(i)) throw new ToolError(`Could not read "${asset.name}" at ${round2(wanted[i].sourceAt)}s.`);
-      // One prepared painter for every moment: preparing stamps every title
-      // and may bring up the segmenter, and the document does not change
-      // between them.
-      const pairs: { t: number; sourceAt: number; source: string; cut: string }[] = [];
-      await renderProjectFrames(
-        {
-          aspect: s.aspect,
-          assets: s.assets,
-          clips: s.clips,
-          audioClips: s.audioClips,
-          overlays: s.overlays,
-          subtitles: s.subtitles,
-          background: s.background,
-        },
-        wanted.map((m) => m.at),
-        size,
-        (a) => a.url,
-        async (canvas, at) => {
-          const i = pairs.length;
-          pairs.push({
-            t: roundT(at),
-            sourceAt: round2(wanted[i].sourceAt),
-            source: refs.get(i)!,
-            cut: await rasterCanvasToDataUrl(canvas, "image/jpeg", 0.82),
-          });
-        }
-      ).catch((e) => {
-        throw new ToolError(e instanceof Error ? e.message : "Could not draw the cut's frame.", { cause: e });
-      });
-      const images = await composeComparison(pairs).catch((e) => {
-        throw new ToolError(e instanceof Error ? e.message : "Could not compose the comparison.", { cause: e });
-      });
+        throw new ToolError(`That is ${moments.length} moments — ${MAX_COMPARE} is the most one call reads. Check these, fix what is off, then call again for the rest; mode: "sweep" scores every frame without pictures.`);
+      const out = await compareMoments(doc, asset, moments, total).catch(failed("Could not compare the frames."));
       return {
-        images,
-        checked: pairs.map((p) => ({ at: p.t, source: p.sourceAt })),
+        ...out,
         // The same shape every look returns, so a record opened by a
         // comparison knows what the other senses may ask of this source.
         source: sourceRef(asset),
-        note:
-          "Source on the left, your cut on the right, one picture per moment. Name what differs — colour, the words and their face, where a thing sits, its size, what is moving and how far along it is — then fix it with the tools and check again. A moment that matches needs no edit.",
+        note: COMPARE_NOTE,
       };
   },
 

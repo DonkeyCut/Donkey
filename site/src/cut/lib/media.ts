@@ -1880,11 +1880,8 @@ export async function composeSheets(
  *
  * The pairing is the point. Two images handed over separately are two things
  * to hold in mind at once; side by side in one picture, a colour that drifted,
- * a card sitting too low or a move that peaks early is simply visible. Nothing
- * here measures the difference — a reference is often a recording of another
- * app, where a pixel comparison reads the chrome around the picture as the
- * picture — so the composite is made for an eye to judge and the judging is
- * left to whoever is looking.
+ * a card sitting too low or a move that peaks early is simply visible. The
+ * composite is for the eye; the score beside it comes from frameDiff.ts.
  */
 export async function composeComparison(
   pairs: { t: number; sourceAt: number; source: string; cut: string }[]

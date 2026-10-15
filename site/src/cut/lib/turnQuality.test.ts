@@ -311,6 +311,8 @@ describe("qualityVerdict", () => {
     const verdict = qualityVerdict(answers({ finished: 0.2, closeness: "exact" }), blind, settings);
     expect(verdict?.step).toBe("check");
     expect(verdict?.steer).toContain("compare_to_source");
+    // The check starts with the sweep, which finds what to look at.
+    expect(verdict?.steer).toContain("sweep");
   });
 
 
@@ -519,6 +521,22 @@ describe("recordLook", () => {
     expect(looks.get("a1")!.compared).toBe(2);
     // A comparison reports no coverage, so it must not undo what watching read.
     expect(looks.get("a1")!.unwatched).toBe(0);
+  });
+
+  test("a sweep counts the frames it scored", () => {
+    const looks = new Map<string, WatchedSource>();
+    recordLook(looks, "watch_video", {
+      source: { assetId: "a1", name: "reference.mp4", duration: 71.6, type: "video", sound: "yes" },
+      coveredTo: 71.6,
+      unwatchedSeconds: 0,
+    });
+    recordLook(looks, "compare_to_source", {
+      source: { assetId: "a1", name: "reference.mp4", duration: 71.6, type: "video", sound: "yes" },
+      mode: "sweep",
+      sampled: 120,
+      worst: [],
+    });
+    expect(looks.get("a1")!.compared).toBe(120);
   });
 
   test("a comparison alone opens no record, because it says nothing about coverage", () => {

@@ -12,6 +12,7 @@ import { WATCH_DETAIL_NOTES, WATCH_DETAILS } from "@/cut/lib/types";
 import { FACT_CLAIM_MAX_CHARS, FACT_CLAIMS_MAX } from "@/lib/inference/factCheck";
 import { URL_BATCH_MAX } from "@/cut/lib/urlBatch";
 import { FIND_MEDIA_DEFAULT, FIND_MEDIA_MAX, FIND_MEDIA_SNAPSHOT_CAP } from "@/cut/lib/findMedia";
+import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "@/cut/lib/frameDiff";
 
 export const AI_PANEL_TOOLS = [
   {
@@ -141,13 +142,22 @@ export const AI_PANEL_TOOLS = [
   {
     name: "compare_to_source",
     description:
-      "Check the cut against the thing it was built from: renders your frame at each moment and reads the source's frame at the moment it stands for, handing both back side by side in one picture. This is how a replica is verified — watching the source tells you what it does, and this tells you whether what you made does it too. Pass `times` as timeline seconds, or as {at, source} pairs when the cut sits at a different second than the source does. Up to 4 moments a call; check, fix what is off, call again.",
+      "Check the cut against the thing it was built from, in numbers and in pictures. Every frame is scored by `diff`: the mean difference per pixel between your frame and the source's, 0 (the same) to 255, read at one small size so a score means the same thing in every call; under " +
+      `${SWEEP_TARGET} reads as the same picture. ` +
+      "mode sweep scores every step of the cut (or from/to) with no pictures and returns the median, p95 and max with the worst stretches, each with its peak frame and a 4×4 grid of where in the frame it differs. " +
+      `mode moments (the default) takes up to ${MAX_COMPARE} \`times\` and hands back each as the source's frame and yours side by side, with its score and grid. ` +
+      "Either mode says when a frame matches the source better a few frames away: `shift` is that distance, and a positive one means move what is there later by that much. " +
+      "This is how a replica is verified. The loop: sweep, look at the worst stretches' peaks in moments mode, fix what differs, sweep again — until the median is under " +
+      `${SWEEP_TARGET} and no stretch stands out. ` +
+      "Blocks standing in for footage keep a difference no edit removes, so read those by the grid cells over your titles and shapes. " +
+      "Pass `times` as timeline seconds, or {at, source} pairs when the cut sits at a different second than the source does; `offset` maps every bare second and the whole sweep (source second = timeline second + offset).",
     inputSchema: obj(
       {
         asset_id: str("Project asset id of the source the cut was built from"),
+        mode: { type: "string", enum: [...COMPARE_MODES], description: "moments: pictures and scores at `times` (default); sweep: scores over a span, no pictures" },
         times: {
           type: "array",
-          description: "Moments to check — a timeline second, or {at, source} when the two clocks differ",
+          description: `moments: up to ${MAX_COMPARE} moments to check — a timeline second, or {at, source} when the two clocks differ`,
           items: {
             anyOf: [
               { type: "number" },
@@ -155,8 +165,12 @@ export const AI_PANEL_TOOLS = [
             ],
           },
         },
+        offset: num("Source second minus timeline second, for every moment without its own source and for the sweep (default 0)"),
+        from: num("sweep: timeline second to start at (default 0)"),
+        to: num("sweep: timeline second to stop at (default the cut's end)"),
+        step: num("sweep: seconds between samples (default one frame, widened so a long span fits the call)"),
       },
-      ["asset_id", "times"]
+      ["asset_id"]
     ),
   },
   {
