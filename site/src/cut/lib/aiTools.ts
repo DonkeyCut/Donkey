@@ -237,6 +237,8 @@ import { mixSpecFor, renderProjectFrame, renderProjectFrames } from "./exportRen
 import { renderMix } from "./audioMix";
 import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./loudness";
 import { framesAt, readMediaFileSize } from "./mediaRead";
+import { sampleColors, scanCuts, trackElement, type FrameBox } from "./measure/sourceMeasure";
+import { DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeCameraCard, describeDoc, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
@@ -564,6 +566,65 @@ function statsReport(stats: ColorStats) {
     warmth: r1(stats.warmth),
   };
 }
+
+/** The measuring tools (detect_cuts, sample_color, track_element) read the
+ * source's own pixels: a video, or for "picture" also a still image. */
+function measuredSource(s: Editor, input: Record<string, unknown>, wants: "video" | "picture"): MediaAsset {
+  const asset = requireItem(s.assets, input.asset_id, "project asset");
+  if (asset.type === "audio")
+    throw new ToolError(`"${asset.name}" is audio — listen_audio hears it, and it has no picture to measure.`);
+  if (asset.type === "image" && wants === "video")
+    throw new ToolError(`"${asset.name}" is a still image — one frame, no cuts.`);
+  if (asset.type !== "image" && !(asset.duration > 0))
+    throw new ToolError(`"${asset.name}" has no length yet — its import is still being read. Try again in a moment.`);
+  return asset;
+}
+
+/** A {x, y, w, h} box from a tool argument, clamped to the frame. */
+function frameBoxOf(raw: unknown, name: string): FrameBox | null {
+  if (raw === undefined || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (!isNum(r.x) || !isNum(r.y) || !isNum(r.w) || !isNum(r.h) || r.w <= 0 || r.h <= 0)
+    throw new ToolError(`${name} needs x, y (its centre) and w, h (its size), all frame fractions.`);
+  return { x: clamp(r.x, 0, 1), y: clamp(r.y, 0, 1), w: clamp(r.w, 0, 1), h: clamp(r.h, 0, 1) };
+}
+
+/** A tracked path as a model reads it: an entry wherever the box changes by
+ * a pixel or more, or the element comes or goes — a hold is one entry — and
+ * evenly thinned past TRACK_PATH_MAX. */
+function trackPath(boxes: { t: number; box: FrameBox | null }[]) {
+  const listed: { t: number; box: FrameBox | null }[] = [];
+  const PIXEL = 1 / 1080;
+  for (let i = 0; i < boxes.length; i++) {
+    const b = boxes[i];
+    const last = listed[listed.length - 1];
+    const changed =
+      !last ||
+      i === boxes.length - 1 ||
+      !b.box !== !last.box ||
+      (b.box && last.box && (["x", "y", "w", "h"] as const).some((k) => Math.abs(b.box![k] - last.box![k]) >= PIXEL));
+    if (changed) listed.push(b);
+  }
+  const thinned = listed.length > TRACK_PATH_MAX;
+  const kept = thinned
+    ? Array.from({ length: TRACK_PATH_MAX }, (_, i) => listed[Math.round((i * (listed.length - 1)) / (TRACK_PATH_MAX - 1))])
+    : listed;
+  return {
+    path: kept.map((b) => ({
+      t: roundT(b.t),
+      ...(b.box ? { x: rF(b.box.x), y: rF(b.box.y), w: rF(b.box.w), h: rF(b.box.h) } : { box: null }),
+    })),
+    thinned,
+  };
+}
+
+/** Frame fractions to the 1/10,000: a pixel of a 1080 frame is 0.0009. */
+const rF = (n: number) => Math.round(n * 10000) / 10000;
+/** The side of the box a point is read over, as a frame fraction. */
+const POINT_SIZE = 0.004;
+/** A measuring pass gives back what it covered by this, inside the tool
+ * bridge's deadline. */
+const MEASURE_BUDGET_MS = 90_000;
 
 /** Long side of a captured frame: enough for the model to read a title, small
  * enough to ride a turn. */
@@ -1378,6 +1439,142 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
   },
 
+  detect_cuts: async (s, input) => {
+      // Every frame of the span, scored against the one before: the cuts a
+      // sampled watch can step over, each on its own frame.
+      const asset = measuredSource(s, input, "video");
+      const from = clamp(isNum(input.from) ? input.from : 0, 0, asset.duration);
+      const asked = isNum(input.to) ? clamp(input.to, 0, asset.duration) : asset.duration;
+      const to = Math.min(asked, from + DETECT_CUTS_SPAN_MAX);
+      if (!(to > from)) throw new ToolError("from/to describe an empty range of the source.");
+      const scan = await withSweepPaused(() =>
+        scanCuts(asset.url, { from, to, maxCuts: DETECT_CUTS_MAX, budgetMs: MEASURE_BUDGET_MS })
+      ).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+      });
+      const fps = Math.round(scan.fps * 100) / 100;
+      // The shots between the cuts, from the span's start to where the pass
+      // reached, each with its length in frames.
+      const edges = [from, ...scan.cuts.map((c) => c.t), scan.coveredTo];
+      const shots = edges.slice(1).map((end, i) => ({
+        from: roundT(edges[i]),
+        to: roundT(end),
+        frames: Math.round((end - edges[i]) * scan.fps),
+      }));
+      // The span bound ends a pass the caller asked to run further.
+      const truncated = scan.truncated || to < asked;
+      const more = truncated || to < asset.duration - 0.001;
+      return {
+        fps,
+        framesRead: scan.frames,
+        from: roundT(from),
+        coveredTo: roundT(scan.coveredTo),
+        truncated,
+        cuts: scan.cuts.map((c) => ({ t: roundT(c.t), frame: c.frame, change: c.change })),
+        shots,
+        source: sourceRef(asset),
+        note:
+          (scan.cuts.length === 0 ? "No hard cut in this span. " : "") +
+          (more
+            ? `The source runs on past ${roundT(scan.coveredTo)}s — call again with from: ${roundT(scan.coveredTo)} for the rest. The last shot listed runs on past it.`
+            : "Shot n runs from one cut to the next; the first from `from`, the last to the end."),
+      };
+  },
+
+  sample_color: async (s, input) => {
+      const asset = measuredSource(s, input, "picture");
+      const raw = Array.isArray(input.samples) ? input.samples : [];
+      if (raw.length === 0)
+        throw new ToolError("Pass samples: [{t, x, y, w?, h?}] — a source second and a box (or a point) on the frame, as fractions.");
+      if (raw.length > SAMPLE_COLOR_MAX)
+        throw new ToolError(`That is ${raw.length} samples — ${SAMPLE_COLOR_MAX} is the most one call reads. Read these, then call again for the rest.`);
+      const samples = raw.map((x, i) => {
+        const rec = (x ?? {}) as Record<string, unknown>;
+        if (!isNum(rec.x) || !isNum(rec.y)) throw new ToolError(`Sample ${i + 1} needs x and y, the centre as frame fractions.`);
+        if (asset.type === "video" && !isNum(rec.t)) throw new ToolError(`Sample ${i + 1} needs t, the source second to read.`);
+        const point = !isNum(rec.w) || !isNum(rec.h);
+        const t = asset.type === "video" ? clamp(rec.t as number, 0, Math.max(0, asset.duration - 0.001)) : 0;
+        // A point is the few pixels around it: one decoded pixel is grain.
+        const box: FrameBox = {
+          x: clamp(rec.x, 0, 1),
+          y: clamp(rec.y, 0, 1),
+          w: point ? POINT_SIZE : clamp(rec.w as number, 0, 1),
+          h: point ? POINT_SIZE : clamp(rec.h as number, 0, 1),
+        };
+        return { t, box, point };
+      });
+      const k = isNum(input.colors) ? clamp(Math.round(input.colors), 1, SAMPLE_COLORS_K_MAX) : 1;
+      const read = await withSweepPaused(() => sampleColors(asset.url, asset.type === "image" ? "image" : "video", samples, k)).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+      });
+      return {
+        samples: samples.map((smp, i) => ({
+          ...(asset.type === "video" ? { t: roundT(smp.t) } : {}),
+          x: rF(smp.box.x),
+          y: rF(smp.box.y),
+          ...(smp.point ? {} : { w: rF(smp.box.w), h: rF(smp.box.h) }),
+          ...read[i],
+        })),
+        source: sourceRef(asset),
+      };
+  },
+
+  track_element: async (s, input) => {
+      const asset = measuredSource(s, input, "picture");
+      const seed = frameBoxOf(input.seed, "seed");
+      if (!seed) throw new ToolError("Pass seed: {x, y, w, h} — a box on the element at from, centre and size as frame fractions.");
+      const within = input.within === undefined || input.within === null ? undefined : frameBoxOf(input.within, "within");
+      const color = typeof input.color === "string" && input.color.trim() ? input.color.trim() : undefined;
+      if (color && !/^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) throw new ToolError(`color "${color}" is not a hex colour — pass #RRGGBB.`);
+      const match = TRACK_MATCHES.includes(input.match as (typeof TRACK_MATCHES)[number])
+        ? (input.match as (typeof TRACK_MATCHES)[number])
+        : "shape";
+      const end = Math.max(0, asset.duration - 0.001);
+      const from = asset.type === "video" ? clamp(isNum(input.from) ? input.from : 0, 0, end) : 0;
+      const to = asset.type === "video" && isNum(input.to) && input.to > from ? clamp(input.to, 0, asset.duration) : undefined;
+      const run = await withSweepPaused(() =>
+        trackElement(asset.url, asset.type === "image" ? "image" : "video", {
+          from,
+          ...(to !== undefined ? { to } : {}),
+          seed,
+          ...(within ? { within } : {}),
+          ...(color ? { color } : {}),
+          tolerance: isNum(input.tolerance) ? clamp(input.tolerance, 0, 255) : TRACK_TOLERANCE_DEFAULT,
+          match,
+          maxFrames: TRACK_FRAMES_MAX,
+        })
+      ).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+      });
+      const found = run.boxes.filter((b) => b.box).length;
+      if (found === 0)
+        throw new ToolError(
+          `Nothing of ${run.color} ${match === "ink" ? "inside the seed" : "under or near the seed"} in ${run.boxes.length} frame${run.boxes.length === 1 ? "" : "s"}. ` +
+            "Check the colour with sample_color at a moment the element shows, pass it as color, and raise tolerance for a soft or shaded fill."
+        );
+      const { path, thinned } = trackPath(run.boxes);
+      return {
+        color: run.color,
+        match,
+        ...(run.fps > 0 ? { fps: Math.round(run.fps * 100) / 100 } : {}),
+        framesRead: run.boxes.length,
+        framesFound: found,
+        path,
+        ...(thinned ? { thinned: true } : {}),
+        moves: run.moves.map((m) => ({
+          prop: m.prop,
+          from: roundT(m.from),
+          to: roundT(m.to),
+          start: rF(m.start),
+          end: rF(m.end),
+          ease: m.ease,
+          error: Math.round(m.error * 1000) / 1000,
+        })),
+        ...(to !== undefined ? { coveredTo: roundT(run.coveredTo), truncated: run.truncated } : {}),
+        source: sourceRef(asset),
+      };
+  },
+
   watch_video: async (s, input) => {
       // A look at a reference project's footage decides a mapping and writes
       // nothing: no note owed, no frame map kept, no sweep started.
@@ -1523,7 +1720,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // the next close pass would start.
         unreadSeconds: unread,
         ...(nextUnread ? { unreadFrom: round2(nextUnread.from) } : {}),
-        sceneChanges: body.sceneChanges.map(round2),
+        sceneChanges: body.sceneChanges.map(roundT),
         coveredTo: round2(body.coveredTo),
         truncated: body.truncated,
         // What NOBODY has looked at, anywhere in the source — the union of
@@ -5777,6 +5974,9 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "sync_audio",
   "capture_frame",
   "compare_to_source",
+  "detect_cuts",
+  "sample_color",
+  "track_element",
   "render_preview",
   "freeze_frame",
   "create_sticker",
