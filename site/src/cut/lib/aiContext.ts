@@ -1,7 +1,7 @@
 "use client";
 
 import { formatBytes } from "@/lib/bytes";
-import { isLinkedAssetType, isTimelineId, sanitizeTimelines, timelineAspect, TIMELINE_IDS, TIMELINE_LABELS, type TimelineBody, type TimelineId } from "./types";
+import { isLinkedAssetType, isTimelineId, parkedTimeline, sanitizeTimelines, timelineAspect, TIMELINE_IDS, TIMELINE_LABELS, type TimelineBody, type TimelineId } from "./types";
 import { FIND_MEDIA_SNAPSHOT_CAP } from "./findMedia";
 import { GUIDE_PRESETS, guideFits, guideGeometry, safeAreaOf, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import { hasOverlayAnim, retimeOf, speedCurveOf, WHEEL_LABELS, WHEEL_ZONES, type ClipSound, type OutputSpace, type SpeedNode } from "@donkeycut/effects-kit";
@@ -355,6 +355,27 @@ export function buildAiContext(opts?: { fullCues?: boolean; chatId?: string | nu
   };
 }
 
+/** A parked timeline's items, described the way the open one's are: what
+ * get_state reads with `timeline`, so the chat can copy an item another
+ * timeline holds without opening it. */
+export function describeParkedTimeline(id: TimelineId) {
+  const s = useEditor.getState();
+  const body = parkedTimeline(s, id);
+  const core = describeState({ ...s, ...body, timeline: id }, { fullCues: true, chatId: chatOwner(), live: true });
+  return {
+    timeline: id,
+    aspect: body.aspect,
+    duration: roundT(projectDuration(body)),
+    videoTrack: core.videoTrack,
+    overlayVideo: core.overlayVideo,
+    transitions: core.transitions,
+    soundtrack: core.soundtrack,
+    overlays: core.overlays,
+    ...("groupCameras" in core ? { groupCameras: core.groupCameras } : {}),
+    subtitles: core.subtitles,
+  };
+}
+
 /** A stored document described the way the open project is: the same
  * shape the model reads in <editor_state>, built from the document alone.
  * This is how another project is read as a reference — its edit, its
@@ -489,6 +510,11 @@ function describeState(
           duration: roundT(body ? projectDuration(body) : 0),
           clips: body?.clips.length ?? 0,
           aspect: timelineAspect(s, id),
+          // A parked timeline's sound as it is mixed there, so "Main's music"
+          // is that clip with its trim and levels (copy_from_timeline).
+          ...(id !== s.timeline && body?.audioClips.length
+            ? { soundtrack: body.audioClips.map((a) => ({ id: a.id, ...describeAudio(a, assetById) })) }
+            : {}),
         };
       }),
       aspect: s.aspect,
