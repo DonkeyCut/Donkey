@@ -51,7 +51,7 @@ The composer stays open while a turn runs. A message sent mid-turn waits in a tr
 
 `@` in the composer writes a moment — `@1:34`, where the preview sits — and it holds the frame, so a waiting row names the same picture after the turn rearranges the cut.
 
-Which path runs is chosen by the model id alone. The picker lives in the page so a site deploy updates it for everyone; the engine only reports which CLIs are installed and signed in (probed and cached for a minute), and the page overlays Gemini availability from its own sign-in probe.
+The model id alone picks the path. The picker lives in the page, so a deploy updates it everywhere; the engine reports each CLI's sign-in and the models its Codex account runs, cached a minute, and the page hides any other model.
 
 ## What the model knows
 
