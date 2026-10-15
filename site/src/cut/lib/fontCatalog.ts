@@ -49,6 +49,7 @@ export const GOOGLE_FONTS: BundledFont[] = [
   { id: "rubik", label: "Rubik", weights: [400, 500, 700, 900] },
   { id: "jost", label: "Jost", weights: [400, 500, 600, 700] },
   { id: "gloria-hallelujah", label: "Gloria Hallelujah", weights: [400] },
+  { id: "prompt", label: "Prompt", weights: [900] },
 ];
 
 export const GOOGLE_FONT_IDS = GOOGLE_FONTS.map((f) => f.id);

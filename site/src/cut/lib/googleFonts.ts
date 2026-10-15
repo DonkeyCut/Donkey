@@ -88,6 +88,8 @@ import "@fontsource/jost/500.css";
 import "@fontsource/jost/600.css";
 import "@fontsource/jost/700.css";
 import "@fontsource/gloria-hallelujah/400.css";
+// Black only: the heavy geometric face of a reference's font cycle.
+import "@fontsource/prompt/900.css";
 import { GOOGLE_FONTS } from "./fontCatalog";
 import { registerFonts } from "./types";
 
