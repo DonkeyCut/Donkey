@@ -13,6 +13,7 @@ const auth = betterAuth({
   emailAndPassword: emailPasswordOptions,
   disabledPaths: emailPasswordDisabledPaths,
   hooks: { before: emailPasswordGuard },
+  trustedOrigins: ["https://*.example.com"],
 });
 
 beforeEach(async () => {
@@ -104,4 +105,13 @@ test("external callbacks are rejected for both sign-in and signup", async () => 
   }
   expect(db.user).toHaveLength(3);
   expect(db.session).toHaveLength(0);
+});
+
+test("a callback on a trusted subdomain signs in", async () => {
+  // The back office sends its visitors here with its own address as the
+  // callback; the guard trusts what the auth config trusts.
+  const callbackURL = "https://admin.example.com/analytics";
+  const response = await request("/sign-in/email", { email: "first@example.com", password, callbackURL });
+  expect(response.status).toBe(200);
+  expect((await response.json()).url).toBe(callbackURL);
 });

@@ -14,13 +14,15 @@ export const emailPasswordDisabledPaths = [
   "/verify-email",
 ];
 
+// A callback lands on this site or an origin the auth config trusts, such as
+// the back office on its own subdomain.
 export const emailPasswordGuard = createAuthMiddleware(async (ctx) => {
   if (ctx.path !== "/sign-in/email" && ctx.path !== "/sign-up/email") return;
   const callback: unknown = ctx.body?.callbackURL;
   if (callback !== undefined && (
     typeof callback !== "string" ||
     !URL.canParse(callback, ctx.context.baseURL) ||
-    new URL(callback, ctx.context.baseURL).origin !== new URL(ctx.context.baseURL).origin
+    !ctx.context.isTrustedOrigin(new URL(callback, ctx.context.baseURL).href)
   )) {
     throw new APIError("FORBIDDEN", { message: "Invalid callback URL" });
   }
