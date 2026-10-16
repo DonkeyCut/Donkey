@@ -126,12 +126,26 @@ function sweepStickers(asked: string): void {
   }
 }
 
-function decodeSticker(url: string): Promise<StickerImage | null> {
-  return fetch(url)
-    .then((res) => (res.ok ? res.blob() : Promise.reject(new Error("fetch failed"))))
-    .then((blob) => decodeRasterImage(blob)
-    )
-    .catch(() => null);
+/** Why each sticker's last read came back empty, by asset id: what an export
+ * names when it stops on one. */
+const stickerMisses = new Map<string, string>();
+
+async function decodeSticker(asset: MediaAsset): Promise<StickerImage | null> {
+  try {
+    const res = await fetch(asset.url);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const img = await decodeRasterImage(await res.blob());
+    if (!img) {
+      throw new Error("not a picture");
+    }
+    stickerMisses.delete(asset.id);
+    return img;
+  } catch (err) {
+    stickerMisses.set(asset.id, err instanceof Error ? err.message : String(err));
+    return null;
+  }
 }
 
 /** The kit render env bound to this app: Cut's font stacks, and sticker
@@ -152,7 +166,7 @@ export function cutRenderEnv(assets: MediaAsset[]): RenderEnv {
         // Asked for again: move it to the young end of the cache.
         stickerCache.delete(asset.id);
       } else {
-        hit = decodeSticker(asset.url).then((img) => {
+        hit = decodeSticker(asset).then((img) => {
           // A failed decode is not worth pinning; the next render retries.
           if (!img) stickerCache.delete(asset.id);
           else {
@@ -166,6 +180,29 @@ export function cutRenderEnv(assets: MediaAsset[]): RenderEnv {
       return hit;
     },
   };
+}
+
+/**
+ * Read every sticker an export draws before its first frame. The preview skips
+ * a sticker it cannot read and asks again on the next frame; an export draws
+ * each frame once, so a sticker it cannot read stops it by name. The pictures
+ * stay in the sticker cache for the frames that follow.
+ */
+export async function requireStickers(overlays: Overlay[], assets: MediaAsset[]): Promise<void> {
+  const env = cutRenderEnv(assets);
+  for (const o of overlays) {
+    // Lottie stickers seek their own player, and an element with no asset
+    // draws nothing in the preview either.
+    if (o.kind !== "sticker" || o.hidden || o.lottie || !o.assetId) {
+      continue;
+    }
+    const asset = assets.find((a) => a.id === o.assetId);
+    if (!asset || (await env.resolveAsset!(asset.id))) {
+      continue;
+    }
+    const why = stickerMisses.get(asset.id) ?? "no picture";
+    throw new Error(`The sticker "${o.name ?? asset.name}" could not be read (${why}).`);
+  }
 }
 
 /**

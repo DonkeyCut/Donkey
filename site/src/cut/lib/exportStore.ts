@@ -205,6 +205,9 @@ export const useExports = create<ExportsState>((set, get) => ({
           // is final: the worker sits behind the same gate.
           if (err instanceof DOMException && err.name === "AbortError") throw err;
           if (err instanceof ExportRefusedError) throw err;
+          // The dock shows only the worker's row; the console keeps the
+          // reason the tab gave up, or no one could find it.
+          console.warn("The tab's render failed; the worker renders this export instead.", err);
           await renderOnWorker();
         }
       } else {

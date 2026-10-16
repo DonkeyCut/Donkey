@@ -119,3 +119,20 @@ test("hidden preparation stays hidden when the worker queues its job", async () 
   expect(useExports.getState().dismissed).toEqual(["queued"]);
   expect(useExports.getState().jobs[0].status).toBe("queued");
 });
+
+test("a tab render that fails goes to the worker and says why in the console", async () => {
+  const mode = spyOn(backend, "getBackend").mockReturnValue(exportBackend("cloud"));
+  const probe = spyOn(exportRender, "canRenderInBrowser").mockResolvedValue(true);
+  const failure = new DOMException("The operation failed because it would cause the application to exceed its storage quota.", "QuotaExceededError");
+  const render = spyOn(exportClient, "runBrowserExport").mockRejectedValue(failure);
+  const create = spyOn(exportClient, "createExportJob").mockResolvedValue("queued");
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  restores.push(() => mode.mockRestore(), () => probe.mockRestore(), () => render.mockRestore(), () => create.mockRestore(), () => warn.mockRestore());
+  feed([{ id: "queued", projectId: "project", residency: "cloud", status: "queued", progress: 0 }]);
+
+  await useExports.getState().start("project", useEditor.getState(), {
+    width: 1280, height: 720, ...EXPORT_PRESETS[0].settings,
+  });
+  expect(create).toHaveBeenCalled();
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("worker"), failure);
+});
