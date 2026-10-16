@@ -58,7 +58,6 @@ export const READ_COMMANDS = new Set([
   "watch_video",
   "capture_frame",
   "compare_to_source",
-  "detect_cuts",
   "sample_color",
   "track_element",
   "suggest_font",

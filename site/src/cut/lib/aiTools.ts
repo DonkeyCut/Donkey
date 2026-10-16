@@ -1587,7 +1587,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // A source read for the first time has its picture found and kept, so
       // a change that fills the picture counts in full when the picture is a
       // small part of a recorded frame.
-      if (input.picture === undefined && !asset.picture) {
+      const keepsPicture = input.picture === undefined && !asset.picture;
+      if (keepsPicture) {
         await storePicture(asset, 0, asset.duration);
       }
       const area = pictureArea(useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset, input);
@@ -1623,6 +1624,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         cuts: scan.cuts.map((c) => ({ t: roundT(c.t), frame: c.frame, change: c.change })),
         shots,
         ...pictureReport(area),
+        ...(keepsPicture ? { pictureKept: true as const } : {}),
         source: sourceRef(asset),
         note:
           (scan.cuts.length === 0 ? "No hard cut in this span. " : "") +

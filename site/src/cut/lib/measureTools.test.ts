@@ -115,6 +115,13 @@ test("detect_cuts finds every hard cut to the frame, a five-frame shot included"
   expect(decoded).toHaveLength(FRAMES);
 });
 
+test("detect_cuts says when its first read of a source kept the picture box", async () => {
+  const first = (await runAiTool("detect_cuts", { asset_id: "ref", from: 1.05, to: 2 })) as { pictureKept?: true };
+  expect(first.pictureKept).toBe(true);
+  const again = (await runAiTool("detect_cuts", { asset_id: "ref", from: 1.05, to: 2 })) as { pictureKept?: true };
+  expect(again.pictureKept).toBeUndefined();
+});
+
 test("detect_cuts scans only the span asked for, and a sound has no cuts", async () => {
   const out = (await runAiTool("detect_cuts", { asset_id: "ref", from: 1.05, to: 2 })) as { cuts: { t: number }[] };
   expect(out.cuts.map((c) => c.t)).toEqual([1.083]);

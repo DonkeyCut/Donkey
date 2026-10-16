@@ -9,6 +9,10 @@ test("first-class history tools can queue their editor commands", () => {
   expect(READ_COMMANDS.has("redo")).toBe(false);
 });
 
+test("a command that keeps a picture box on the source saves the document", () => {
+  expect(READ_COMMANDS.has("detect_cuts")).toBe(false);
+});
+
 test("ChatGPT exposes file metadata as a read command", () => {
   expect(READ_COMMANDS.has("get_asset_info")).toBe(true);
   expect(COMMANDS.find((t) => t.name === "get_asset_info")?.inputSchema)

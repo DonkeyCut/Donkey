@@ -13,8 +13,6 @@ const READ_ONLY = new Set([
   "request_tools",
   "capture_frame",
   "compare_to_source",
-  "find_picture",
-  "detect_cuts",
   "sample_color",
   "track_element",
   "suggest_font",
@@ -43,6 +41,12 @@ const READ_ONLY = new Set([
 ]);
 
 export const isMutatingTool = (name: string): boolean => !READ_ONLY.has(name);
+
+// Readings that write only now and then, with how their result says it did:
+// detect_cuts keeps the picture box it finds on its first read of a source.
+const WRITES_WHEN: Record<string, (response: unknown) => boolean> = {
+  detect_cuts: (response) => (response as { pictureKept?: unknown } | undefined)?.pictureKept === true,
+};
 
 export interface LedgerRecord {
   name: string;
@@ -111,6 +115,8 @@ export function recordCall(
   error: string | undefined
 ): void {
   if (!isMutatingTool(name)) return;
+  const wrote = WRITES_WHEN[name];
+  if (wrote && (error || !wrote(response))) return;
   if (error) {
     records.push({ name, ids: [], error });
     return;
