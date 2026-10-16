@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Check,
@@ -27,6 +27,7 @@ import {
 import { framedHref } from "@/cut/lib/hostBridge";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
 import { cn } from "@/lib/utils";
+import { exportsDockOpen, inFlightCount, type DockChoice } from "@/cut/lib/exportsDockView";
 
 /**
  * The app-wide exports dock: one card pinned to the bottom-right that shows
@@ -37,7 +38,7 @@ import { cn } from "@/lib/utils";
  * Cut app layout, above the per-project editor.
  */
 export function ExportsDock() {
-  const [collapsed, setCollapsed] = useState(false);
+  const [choice, setChoice] = useState<DockChoice>(null);
 
   // Poll the feed while the dock is mounted (i.e. the whole time the app is up).
   useEffect(() => {
@@ -56,6 +57,19 @@ export function ExportsDock() {
     [all, dismissed]
   );
 
+  // The dock opens while work is in flight and rests on its header once it
+  // settles; a new export clears whatever was toggled for the last one.
+  const statuses = items.map((i) => i.data.status);
+  const inFlight = inFlightCount(statuses);
+  const lastInFlight = useRef(inFlight);
+  useEffect(() => {
+    if (inFlight > lastInFlight.current) {
+      setChoice(null);
+    }
+    lastInFlight.current = inFlight;
+  }, [inFlight]);
+  const open = exportsDockOpen(statuses, choice);
+
   if (items.length === 0) return null;
 
   const running = items.filter(
@@ -71,7 +85,7 @@ export function ExportsDock() {
 
   return (
     <div className="fixed right-4 bottom-4 z-50 max-h-[calc(100dvh-2rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card shadow-lg">
-      {multi && (
+      {(multi || !open || choice === "open") && (
         <div className="flex items-center gap-2 px-3 py-2">
           <span className="text-xs font-semibold">Exports</span>
           <span className="flex-1 truncate text-[11px] text-muted-foreground tabular-nums">
@@ -92,14 +106,14 @@ export function ExportsDock() {
           <Button
             variant="ghost"
             size="icon-xs"
-            aria-label={collapsed ? "Expand exports" : "Collapse exports"}
-            onClick={() => setCollapsed((c) => !c)}
+            aria-label={open ? "Collapse exports" : "Expand exports"}
+            onClick={() => setChoice(open ? "closed" : "open")}
           >
-            <ChevronDown className={cn("transition-transform", !collapsed && "rotate-180")} />
+            <ChevronDown className={cn("transition-transform", open && "rotate-180")} />
           </Button>
         </div>
       )}
-      {!collapsed && (
+      {open && (
         <div className="max-h-[min(60vh,22rem)] divide-y divide-border overflow-y-auto">
           {items.map((it) =>
             it.kind === "job" ? (
