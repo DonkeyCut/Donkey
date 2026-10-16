@@ -113,14 +113,25 @@ const CORS_HEADERS: Record<string, string> = {
     "Content-Length, Content-Range, Accept-Ranges, ETag, Content-Disposition",
 };
 
-/** An attachment download is the same bytes with one more header, so the cached
- * entry stays the plain object and the header goes on the way out — the cache key
- * ignores the download name, and a stored Content-Disposition would otherwise
- * leak onto every later inline read of that object. */
-function asDownload(res: Response, downloadName: string): Response {
-  if (!downloadName) return res;
+// Sign-in trusts every *.donkeycut.com origin, and this host serves uploads
+// with their stored Content-Type. Sandboxed and unsniffed, an uploaded HTML or
+// SVG file opens as an opaque origin, so its scripts can't act as a trusted one.
+const SANDBOX_HEADERS: Record<string, string> = {
+  "Content-Security-Policy": "sandbox",
+  "X-Content-Type-Options": "nosniff",
+};
+
+/** Headers every object response leaves with. They go on the way out, so edge
+ * entries cached before them are covered too. An attachment download is the
+ * same bytes with one more header, so the cached entry stays the plain object —
+ * the cache key ignores the download name, and a stored Content-Disposition
+ * would otherwise leak onto every later inline read of that object. */
+function asServed(res: Response, downloadName: string): Response {
   const out = new Response(res.body, res);
-  out.headers.set("Content-Disposition", contentDisposition(downloadName));
+  for (const [k, v] of Object.entries(SANDBOX_HEADERS)) out.headers.set(k, v);
+  if (downloadName) {
+    out.headers.set("Content-Disposition", contentDisposition(downloadName));
+  }
   return out;
 }
 
@@ -296,7 +307,7 @@ export async function serveMedia(
     : storeKey;
   const cache = caches.default;
   const hit = await cache.match(lookupKey);
-  if (hit) return asDownload(hit, downloadName);
+  if (hit) return asServed(hit, downloadName);
 
   // The size is only needed to resolve a range; a whole-object request skips
   // this and reads it off the object it is already fetching.
@@ -325,7 +336,7 @@ export async function serveMedia(
     headers.set("Content-Range", `bytes ${range.start}-${range.end}/${size}`);
     headers.set("Content-Length", String(range.end - range.start + 1));
     if (size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(fillCache(env, key, storeKey));
-    return asDownload(new Response(part.body, { status: 206, headers }), downloadName);
+    return asServed(new Response(part.body, { status: 206, headers }), downloadName);
   }
 
   const object = await env.CUT_MEDIA.get(key);
@@ -336,7 +347,7 @@ export async function serveMedia(
   // ingests at R2 speed while this stream goes at the client's pace — a tee
   // couples the two and buffers the difference in memory.
   if (object.size <= MAX_CACHEABLE_BYTES) ctx.waitUntil(fillCache(env, key, storeKey));
-  return asDownload(new Response(object.body, { status: 200, headers }), downloadName);
+  return asServed(new Response(object.body, { status: 200, headers }), downloadName);
 }
 
 /** Cache fills in flight in this isolate, keyed by the stored URL. A cold open

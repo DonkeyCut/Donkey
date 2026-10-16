@@ -203,3 +203,17 @@ describe("serveMedia public stock sounds", () => {
     }
   });
 });
+
+describe("serveMedia sandboxing", () => {
+  // Sign-in trusts every *.donkeycut.com origin, and this host serves uploads
+  // with their stored Content-Type. A sandboxed, unsniffed response keeps an
+  // uploaded HTML or SVG file from running as a trusted origin.
+  test("every object is served sandboxed and unsniffed", async () => {
+    const { env } = makeEnv();
+    const { ctx } = makeCtx();
+    const res = await serveMedia(request(), env, ctx);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Security-Policy")).toBe("sandbox");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+});
