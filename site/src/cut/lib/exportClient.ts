@@ -32,7 +32,7 @@ import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipLen, clipSpeed, getClipSpans, MICRO_GAP_S, openedTimeline, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { drawStreak, elementLook, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, type Mask, type SpeedNode } from "@donkeycut/effects-kit";
-import { renderElementFrames, renderElementPng, renderStillPng } from "./textRender";
+import { renderElementFrames, renderElementPng, renderStillPng, requireStickers } from "./textRender";
 import { CLIP_MIN_SECONDS, clipCovers, clipFrameAt, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
 import { soundSourceOf, spanSoundSpec, spanUsesSoundFeature, specSound } from "./soundSource";
@@ -1400,6 +1400,10 @@ export async function buildExportPayload(
       start: o.start,
       end: Math.min(o.end, duration),
     }));
+
+  // Every sticker the cut shows is read before any is drawn: one that cannot
+  // be read stops the export by name.
+  await requireStickers(doc.overlays.filter((o) => o.start < duration), doc.assets);
 
   for (let i = 0; i < doc.overlays.length; i++) {
     const o = doc.overlays[i];

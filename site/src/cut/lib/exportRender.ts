@@ -53,7 +53,7 @@ import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { MatteAlpha, matteStamp } from "./matteAlpha";
 import { createRasterCanvas, snapshotRaster, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
-import { cutRenderEnv, renderElementCanvas, renderStillPng } from "./textRender";
+import { cutRenderEnv, renderElementCanvas, renderStillPng, requireStickers } from "./textRender";
 import { cardMatteKey } from "./cameraCard";
 import { assetIsSilent, behindSubjectOverlay, clipCovers, frameOf, frontSubjectOverlay, isEffectOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, removalActive } from "./types";
 import type { ClipAnim, ClipSpan, EffectOverlay, MediaAsset, Overlay, StickerOverlay } from "./types";
@@ -1512,6 +1512,9 @@ export class FramePainter {
     this.comp.sourceProvider = sourceLookup(this.doc.assets, renderFile);
     await settleRenderColor(this.doc.assets);
     await ensureClipLuts(this.doc.clips.map((c) => this.comp.recipeFor(c)));
+    // Every sticker the cut shows is read before the first frame: one that
+    // cannot be read stops the render by name.
+    await requireStickers(this.doc.overlays.filter((o) => o.start < this.duration), this.doc.assets);
     this.stacked = [...(await stampText(this.doc))].sort((a, b) => b.stackLane - a.stackLane);
     // The subject pass is created only when something reads the person matte;
     // prepare() makes rasters and the segmenter resident before the first
