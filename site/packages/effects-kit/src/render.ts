@@ -503,19 +503,47 @@ export function settleCycleFace<T extends Overlay>(
   return { ...face, text, size } as unknown as T;
 }
 
+/** The canvas every face settles on, made once through the host's seam: a
+ * measure draws nothing, so one serves every frame and every title. */
+let settleCtx: CanvasRenderingContext2D | null = null;
+
+/** Settled lines and size by everything that decides them, oldest first. A
+ * handful of titles cycle at once, each through a few faces. */
+const settledFaces = new Map<string, { text: string; size: number }>();
+const SETTLED_FACES_MAX = 256;
+
+/** Drop every settled face, for a host whose fonts just changed: a face
+ * measured in a fallback settles again in the real one. */
+export function forgetSettledFaces(): void {
+  settledFaces.clear();
+}
+
 /** `settleCycleFace` measured the way the painter measures: on a canvas in
- * the frame's pixels, with both faces resident first. */
+ * the frame's pixels, with both faces resident first. Each face settles once
+ * per room and scale; a painted frame after that reuses it. */
 async function settledFace(o: TextOverlay, frame: PaintFrame, env: RenderEnv): Promise<TextOverlay> {
   const own = o.cycleOwn;
   if (!own) return o;
   const cssOf = (type: TextType) => textCssFont({ ...o, ...type }, type.size * frame.scale, env);
-  await Promise.all([ensureFontLoaded(cssOf(own), o.text), ensureFontLoaded(cssOf(o), o.text)]);
-  const ctx = newCanvas(env, 1, 1).getContext("2d")!;
-  return settleCycleFace(o, textWrapRoom(o, frame.width), (type, line) => {
-    ctx.font = cssOf(type);
-    if ("letterSpacing" in ctx) ctx.letterSpacing = `${(type.letterSpacing ?? 0) * type.size * frame.scale}px`;
-    return ctx.measureText(line).width;
-  });
+  const room = textWrapRoom(o, frame.width);
+  const key = `${room}|${frame.scale}|${cssOf(own)}|${own.letterSpacing ?? 0}|${cssOf(o)}|${o.letterSpacing ?? 0}|${o.text}`;
+  let hit = settledFaces.get(key);
+  if (!hit) {
+    await Promise.all([ensureFontLoaded(cssOf(own), o.text), ensureFontLoaded(cssOf(o), o.text)]);
+    const ctx = (settleCtx ??= newCanvas(env, 1, 1).getContext("2d")!);
+    const set = settleCycleFace(o, room, (type, line) => {
+      ctx.font = cssOf(type);
+      if ("letterSpacing" in ctx) ctx.letterSpacing = `${(type.letterSpacing ?? 0) * type.size * frame.scale}px`;
+      return ctx.measureText(line).width;
+    });
+    hit = { text: set.text, size: set.size };
+    // Bounded: the oldest settle goes first.
+    if (settledFaces.size >= SETTLED_FACES_MAX) settledFaces.delete(settledFaces.keys().next().value!);
+    settledFaces.set(key, hit);
+  }
+  const face: TextOverlay = { ...o, text: hit.text, size: hit.size };
+  delete face.cycleOwn;
+  return face;
 }
 
 async function paintText(

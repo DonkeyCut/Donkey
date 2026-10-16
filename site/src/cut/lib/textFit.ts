@@ -1,6 +1,6 @@
 "use client";
 
-import { settleCycleFace, textWrapRoom, withFontCycle, wrapTextToRoom, LINE_HEIGHT, PLATE_PAD_X, PLATE_PAD_Y } from "@donkeycut/effects-kit";
+import { cycleFaceAt as faceShowingAt, forgetSettledFaces, overlayFontCycle, settleCycleFace, textWrapRoom, withFontCycle, wrapTextToRoom, LINE_HEIGHT, PLATE_PAD_X, PLATE_PAD_Y, type CycleFace } from "@donkeycut/effects-kit";
 import { createRasterCanvas } from "./raster";
 import { fontStack, type Overlay, type TextOverlay } from "./types";
 
@@ -54,6 +54,8 @@ const widths = new Map<string, number>();
  */
 export function forgetTextWidths(): void {
   widths.clear();
+  settled = new WeakMap();
+  forgetSettledFaces();
 }
 
 /** How wide one line draws, in the same pixels `frameW` is in. Falls back to a
@@ -106,15 +108,37 @@ export function fitTextToFrame(o: TextOverlay, frameW: number): string {
   return wrapTextToRoom(o.text, room, width);
 }
 
+/** Each element's settled faces, one per face, frame width and font state,
+ * so a playing preview resolves a cycling title without re-wrapping it on
+ * every tick. Keyed by the element, so an edit starts afresh. */
+let settled = new WeakMap<Overlay, { face: CycleFace; frameW: number; ready: boolean; out: Overlay }[]>();
+/** Settled faces one element keeps: its faces at a few frame widths. */
+const SETTLED_PER_ELEMENT = 32;
+
 /** The element as it is set `tLocal` seconds in, a font cycle's face set on
  * the title's own lines the way the kit's painters set it (`settleCycleFace`),
- * so the preview never reflows a title the export keeps on one line. */
+ * so the preview never reflows a title the export keeps on one line. One face
+ * at one frame width hands back the same element every tick. */
 export function cycleFaceAt<T extends Overlay>(o: T, tLocal: number, frameW: number): T {
+  const c = overlayFontCycle(o);
+  const face = c ? faceShowingAt(c, tLocal) : null;
+  if (!face) return o;
+
+  // A face already settled at this width, in fonts that have not changed since.
+  const ready = facesReady();
+  const known = settled.get(o) ?? [];
+  for (const k of known) {
+    if (k.face === face && k.frameW === frameW && k.ready === ready) return k.out as T;
+  }
+
   const el = withFontCycle(o, tLocal);
-  if (el === o || (el.kind ?? "text") !== "text") return el;
-  return settleCycleFace(el, textWrapRoom(el as TextOverlay, frameW), (type, line) =>
+  const out = settleCycleFace(el, textWrapRoom(el as TextOverlay, frameW), (type, line) =>
     measureLine(line, textFontOf(type, type.size), type.size, type.letterSpacing ?? 0)
   );
+  if (known.length >= SETTLED_PER_ELEMENT) known.shift();
+  known.push({ face, frameW, ready, out });
+  settled.set(o, known);
+  return out;
 }
 
 /** Resting box in design pixels, measured once for resize gestures. */
