@@ -6,24 +6,16 @@ import { emailPasswordDisabledPaths, emailPasswordGuard, emailPasswordOptions } 
 
 const password = "test-only-account-password-12345";
 const db: Record<string, Record<string, unknown>[]> = {};
-let verificationUrl: string | null = null;
 const auth = betterAuth({
   baseURL: "http://localhost:3000",
   secret: "test-only-auth-secret-with-at-least-32-characters",
   database: memoryAdapter(db),
   emailAndPassword: emailPasswordOptions,
-  emailVerification: {
-    sendVerificationEmail: async ({ url }) => { verificationUrl = url; },
-    sendOnSignUp: false,
-    sendOnSignIn: false,
-    autoSignInAfterVerification: false,
-  },
   disabledPaths: emailPasswordDisabledPaths,
   hooks: { before: emailPasswordGuard },
 });
 
 beforeEach(async () => {
-  verificationUrl = null;
   db.user = ["first", "second", "google-only"].map((id) => ({
     id, email: `${id}@example.com`, name: id, emailVerified: false,
     createdAt: new Date(), updatedAt: new Date(),
@@ -36,33 +28,18 @@ beforeEach(async () => {
   db.session = [];
 });
 
-test("verification requires the signed-in account and changes its status only after the email link is opened", async () => {
+test("email verification is closed, even to a signed-in account", async () => {
   const signIn = await request("/sign-in/email", { email: "first@example.com", password });
   const cookie = signIn.headers.get("set-cookie")!.split(";")[0];
-  const send = (body: Record<string, unknown>, cookieValue = cookie) => auth.handler(new Request("http://localhost:3000/api/auth/send-verification-email", {
-    method: "POST", headers: { "Content-Type": "application/json", Origin: "http://localhost:3000", Cookie: cookieValue },
-    body: JSON.stringify(body),
+  const send = await auth.handler(new Request("http://localhost:3000/api/auth/send-verification-email", {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: "http://localhost:3000", Cookie: cookie },
+    body: JSON.stringify({ email: "first@example.com" }),
   }));
-  expect((await send({ email: "first@example.com" }, "")).status).toBe(401);
-  expect((await send({ email: "second@example.com" })).status).toBe(401);
-  expect((await send({ email: "first@example.com", callbackURL: "https://attacker.example" })).status).toBe(403);
-  expect(verificationUrl).toBeNull();
-  const callbackURL = "/app/settings/profile";
-  expect((await send({ email: "first@example.com", callbackURL })).status).toBe(200);
+  const verify = await auth.handler(new Request("http://localhost:3000/api/auth/verify-email?token=any"));
+
+  expect(send.status).toBe(404);
+  expect(verify.status).toBe(404);
   expect(db.user.find((user) => user.id === "first")!.emailVerified).toBe(false);
-  expect(verificationUrl).not.toBeNull();
-  const link = new URL(verificationUrl!);
-  expect(link.searchParams.get("callbackURL")).toBe(callbackURL);
-  const invalid = new URL(link);
-  invalid.searchParams.set("token", "invalid");
-  await auth.handler(new Request(invalid));
-  expect(db.user.find((user) => user.id === "first")!.emailVerified).toBe(false);
-  const verified = await auth.handler(new Request(link));
-  expect(verified.status).toBe(302);
-  expect(verified.headers.get("location")).toBe(callbackURL);
-  expect(db.user.find((user) => user.id === "first")!.emailVerified).toBe(true);
-  expect(db.user.find((user) => user.id === "second")!.emailVerified).toBe(false);
-  expect(verified.headers.get("set-cookie")).toBeNull();
 });
 
 function request(path: string, body: Record<string, unknown>) {

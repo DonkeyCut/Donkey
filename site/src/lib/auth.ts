@@ -7,7 +7,6 @@ import { AUTH_COOKIE_DOMAIN, DONKEYCUT_CANONICAL, SU_ORIGIN } from "@/cut/lib/ho
 import { provisionSignupGrants } from "@/lib/onboarding/signup-grants";
 import { prisma } from "@/lib/prisma";
 import { emailPasswordDisabledPaths, emailPasswordGuard, emailPasswordOptions } from "@/lib/email-password-auth";
-import { sendVerificationEmail } from "@/lib/email/send-verification";
 import { AUTH_ERROR_PATH } from "@/lib/signInReturn";
 
 // donkeycut.com owns sign-in: the auth pages, the auth API, and the Google
@@ -82,12 +81,6 @@ export const auth = betterAuth({
     },
   },
   emailAndPassword: emailPasswordOptions,
-  emailVerification: {
-    sendVerificationEmail,
-    sendOnSignUp: false,
-    sendOnSignIn: false,
-    autoSignInAfterVerification: false,
-  },
   disabledPaths: emailPasswordDisabledPaths,
   // A provider callback that fails comes back to sign-in, which says so and
   // offers the button again; left unset, production sends it to the landing

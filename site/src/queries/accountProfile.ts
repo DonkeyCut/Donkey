@@ -74,12 +74,3 @@ export function useUpdateDisplayName() {
   });
 }
 
-export function useVerifyEmail() {
-  return useMutation({
-    mutationFn: (email: string) =>
-      apiFetch<{ status: boolean }>("/api/auth/send-verification-email", {
-        method: "POST",
-        body: JSON.stringify({ email, callbackURL: "/app/settings/profile" }),
-      }),
-  });
-}
