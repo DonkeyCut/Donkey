@@ -86,6 +86,7 @@ import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { childrenOf, folderTrail, folderWithin, parentOf, subtreeOf } from "@/cut/lib/folderTree";
 import { PICKED_RING } from "@/cut/lib/assetPick";
+import { projectsHomeView } from "@/cut/lib/projectsHomeView";
 import {
   FolderCrumb,
   FolderMenuItems,
@@ -134,6 +135,7 @@ type SectionData = {
   projects: ProjectSummary[] | null;
   folders: ProjectFolder[];
   error: boolean;
+  loading: boolean;
 };
 
 /** What a delete is about to take: folders and projects, picked together. */
@@ -284,6 +286,7 @@ export function ProjectsHome() {
     // A cached listing on screen outranks a failed revalidation: the cards
     // stay, and only a section with nothing to show says it couldn't load.
     error: q.isError && q.data === undefined,
+    loading: q.isLoading,
   });
   const data: Record<Residency, SectionData> = {
     local: asSection(localSection),
@@ -676,6 +679,7 @@ export function ProjectsHome() {
   const hasContent = residencies.some(
     (r) => (data[r].projects?.length ?? 0) > 0 || data[r].folders.length > 0
   );
+  const homeView = projectsHomeView(residencies.map((r) => data[r]));
 
   // One flat surface: every residency's folders on one shelf and projects in
   // one grid, newest edits first — the per-card badge says where each lives.
@@ -1101,15 +1105,15 @@ export function ProjectsHome() {
 
       {dupError && <p className="mb-4 text-sm text-destructive">{dupError}</p>}
 
-      {!anySettled ? (
+      {homeView === "loading" ? (
         <div className="grid place-items-center py-24 text-muted-foreground">
           <Loader2 className="size-5 animate-spin" />
         </div>
-      ) : !hasContent && residencies.every((r) => data[r].error) ? (
+      ) : homeView === "failed" ? (
         <p className="py-24 text-center text-sm text-muted-foreground">
           Couldn&rsquo;t load these projects.
         </p>
-      ) : !hasContent ? (
+      ) : homeView === "empty" ? (
         <div className="grid min-h-[60vh] place-items-center">
           <div className="flex flex-col items-center gap-4 text-center">
             <div className="grid size-14 place-items-center rounded-2xl bg-muted">
