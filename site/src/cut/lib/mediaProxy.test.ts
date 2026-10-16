@@ -23,7 +23,26 @@ await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, {
     fn({ canRead: async () => storedReads })) as never,
   hasUndecodableVideo: async () => proxyCodec === "hevc" && !hevc,
 });
+/** The stream of the master this browser cannot decode, per asset id. */
+let compatNeeds: Record<string, "audio" | "video"> = {};
+await stubModule<typeof import("./codecSupport")>("./codecSupport", import.meta.url, {
+  compatNeedOf: (async (asset: { id?: string }) => compatNeeds[asset.id ?? ""] ?? null) as never,
+});
+const staged: { name: string; cover: string }[] = [];
+await stubModule<typeof import("./cloudLibraryUpload")>("./cloudLibraryUpload", import.meta.url, {
+  compatInTheCloud: async (file: File, cover: string) => {
+    staged.push({ name: file.name, cover });
+    return new Blob(["webm"], { type: "video/webm" });
+  },
+});
+const enriched: string[] = [];
+const stored: string[] = [];
+await stubModule<typeof import("./media")>("./media", import.meta.url, {
+  enrichAsset: (async (asset: MediaAsset) => void enriched.push(asset.id)) as never,
+  uploadProjectMediaTo: (async (_b: unknown, _p: string, _blob: Blob, name: string) => (stored.push(name), name)) as never,
+});
 const { ensureProxy, HEAVY_PROXY_MAX_HEIGHT, needsProxy, proxyUnreadable, useProxyJobs } = await import("./mediaProxy");
+const { coveredSrc } = await import("./mediaRead");
 const { useEditor } = await import("./store");
 
 const prores = (id: string, extra: Partial<MediaAsset> = {}): MediaAsset => ({
@@ -193,6 +212,87 @@ describe("ensureProxy", () => {
     const b = backend("local", () => Response.json({}));
     await ensureProxy("p", prores("a", { upload: { progress: 0.5 } }), b.api);
     await ensureProxy("p", prores("b", { proxy: { fileName: "b.proxy.mp4", sizeBytes: 1 } }), b.api);
+    expect(b.calls).toHaveLength(0);
+  });
+});
+
+describe("compat proxy", () => {
+  // A browser that cannot decode a master's H.264 or AAC reads that stream
+  // from a compat proxy, built where the project's media is.
+  afterEach(() => {
+    compatNeeds = {};
+    staged.length = 0;
+    enriched.length = 0;
+    stored.length = 0;
+  });
+
+  test("a cloud project asks the worker for the cover and reads the stream from it", async () => {
+    compatNeeds = { a: "video" };
+    const asset = h264("a", { width: 1280, height: 720, sizeBytes: 2_000_000 });
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("cloud", () => Response.json({ fileName: "a.mp4.compat.webm", sizeBytes: 9 }));
+    await ensureProxy("p", asset, b.api);
+    expect(b.calls[0]).toEqual({ path: "/api/cut/projects/p/proxy", body: { file: "a.mp4", compat: "video" } });
+    expect(useEditor.getState().assets[0].proxy).toEqual({ fileName: "a.mp4.compat.webm", sizeBytes: 9 });
+    // The strip waited on the proxy, and reads it now.
+    expect(enriched).toEqual(["a"]);
+    await Promise.resolve();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(coveredSrc("video", asset.url)).toBe("stored:p/a.mp4.compat.webm");
+    expect(coveredSrc("audio", asset.url)).toBe("stored:p/a.mp4.compat.webm");
+  });
+
+  test("a heavy cloud video gets the light cover", async () => {
+    compatNeeds = { a: "audio" };
+    const asset = h264("a");
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("cloud", () => Response.json({ fileName: "a.mp4.compat.light.mp4", sizeBytes: 9 }));
+    await ensureProxy("p", asset, b.api);
+    expect(b.calls[0].body).toEqual({ file: "a.mp4", compat: "audio", maxHeight: HEAVY_PROXY_MAX_HEIGHT });
+    await new Promise((r) => setTimeout(r, 0));
+    // Only the sound reads from the proxy; this browser decodes the picture.
+    expect(coveredSrc("audio", asset.url)).toBe("stored:p/a.mp4.compat.light.mp4");
+    expect(coveredSrc("video", asset.url)).toBe(asset.url);
+  });
+
+  test("a Mac project asks its engine, and an older engine makes none", async () => {
+    compatNeeds = { a: "audio" };
+    features = new Set(["media.proxy", "media.compat"]);
+    const asset = h264("a");
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("local", () => Response.json({ fileName: "a.mp4.compat.mp4", sizeBytes: 4 }));
+    await ensureProxy("p", asset, b.api);
+    expect(b.calls[0].body).toMatchObject({ file: "a.mp4", compat: "audio" });
+
+    features = new Set(["media.proxy"]);
+    useEditor.setState({ projectId: "p", assets: [h264("b")] });
+    compatNeeds = { b: "audio" };
+    const old = backend("local", () => Response.json({}));
+    await ensureProxy("p", h264("b"), old.api);
+    expect(old.calls).toHaveLength(0);
+    expect(useProxyJobs.getState().jobs.b).toEqual({ kind: "none" });
+  });
+
+  test("a browser project borrows the worker through the cloud shelf and stores the cover itself", async () => {
+    compatNeeds = { a: "video" };
+    const asset = h264("a", { url: "blob:a" });
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("master")) as unknown as typeof fetch;
+    try {
+      await ensureProxy("p", asset, backend("browser", () => Response.json({})).api);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(staged).toEqual([{ name: "a.mp4", cover: "video" }]);
+    expect(stored).toEqual(["a.mp4.compat.webm"]);
+    expect(useEditor.getState().assets[0].proxy?.fileName).toBe("a.mp4.compat.webm");
+  });
+
+  test("a cover already on the asset is kept; a VP9 cover carries the sound too", async () => {
+    compatNeeds = { a: "audio" };
+    const b = backend("cloud", () => Response.json({}));
+    await ensureProxy("p", h264("a", { width: 1280, height: 720, sizeBytes: 2_000_000, proxy: { fileName: "a.mp4.compat.webm", sizeBytes: 1 } }), b.api);
     expect(b.calls).toHaveLength(0);
   });
 });

@@ -17,7 +17,9 @@ import { create } from "zustand";
 import { engineFeatures } from "./api";
 import { apiJson } from "./backend";
 import { pollCloudJob } from "./cloudJob";
+import { browserCodecs } from "./codecSupport";
 import { cutColor } from "./colorSettings";
+import { compatCovers } from "./proxyNames";
 import type { LibraryAsset, LibraryData } from "./library";
 import { useLightbox, lightboxItemFromLibrary } from "./lightbox";
 import { backendFor } from "./residency";
@@ -50,6 +52,9 @@ const FAILED = "Could not make a playable copy of this video.";
  * and the shelf's next listing carries the copy. */
 const STILL_QUEUED = "The playable copy is still being made.";
 
+/** Asks checking this browser's codecs, by key, so a second ask waits out the first. */
+const asking = new Set<string>();
+
 /**
  * Have the asset's shelf build its playable copy, then write the copy onto
  * the cached listing and onto the viewer if it is showing this asset. Runs
@@ -61,7 +66,14 @@ export async function ensureLibraryProxy(
   patch: (fn: (d: LibraryData) => LibraryData) => void
 ): Promise<void> {
   const key = libraryProxyKey(a);
-  if (a.type !== "video" || a.proxyFile || useLibraryProxies.getState().jobs[key]) return;
+  if (a.type !== "video" || useLibraryProxies.getState().jobs[key] || asking.has(key)) return;
+  // A browser with no H.264 decoder plays the compat copy (proxyNames.ts).
+  // The Mac's shelf answers browsers that decode it; a browser on that Mac
+  // always does.
+  asking.add(key);
+  const codecs = await browserCodecs().finally(() => asking.delete(key));
+  const compat = a.residency !== "local" && !codecs.h264 ? "video" : null;
+  if (a.proxyFile && (!compat || compatCovers(a.proxyFile, compat))) return;
   setJob(key, { kind: "making", progress: 0 });
   try {
     // A Mac app older than the route has nothing to build the copy with.
@@ -73,7 +85,7 @@ export async function ensureLibraryProxy(
     const res = await backend.fetch(`/api/cut/library/${encodeURIComponent(a.id)}/proxy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ maxHeight: proxyMaxHeight, crf: proxyCrf }),
+      body: JSON.stringify({ maxHeight: proxyMaxHeight, crf: proxyCrf, ...(compat ? { compat } : {}) }),
     });
     const body = await apiJson<LibraryAsset | { jobId: string }>(res);
     if (!res.ok) throw new Error(body.error ?? FAILED);

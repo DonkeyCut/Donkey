@@ -1,3 +1,4 @@
+import { CONVERT_MODES } from "./convertMode";
 import { z } from "zod";
 
 export const CLOUD_LIBRARY_IMPORT_DESCRIPTION =
@@ -7,6 +8,8 @@ export const libraryUploadSchema = z.object({
   key: z.string().min(1),
   name: z.string().min(1).max(512),
   maxHeight: z.number().int().min(2).max(8192).optional(),
+  /** "reencode" rewrites a video stream that already fits (server/convert.ts). */
+  mode: z.enum(CONVERT_MODES).optional(),
   folderId: z.string().min(1).nullable().optional(),
   source: z.object({
     url: z.string().url(),

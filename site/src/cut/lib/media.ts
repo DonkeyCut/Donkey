@@ -16,7 +16,7 @@ import { downloadFromUrl } from "./download";
 import { FONT_RE, LUT_RE } from "./libraryFileType";
 import { markUploadStored, startUpload, uploadInFlight } from "./importQueue";
 import { convertProjectFile, dropProjectFile, mp4DisplayName } from "./mediaConvert";
-import { ensureProxy, needsProxy } from "./mediaProxy";
+import { awaitsCompat, ensureProxy } from "./mediaProxy";
 import {
   audioChunks,
   audioPeaks,
@@ -30,6 +30,7 @@ import {
   readMediaFileSize,
   UnreadableMediaError,
   videoTrackOf,
+  withMedia,
   type IdleGate,
   type MediaHandle,
   type MediaProbe,
@@ -56,6 +57,8 @@ import {
 } from "./raster";
 import { pickThumbTimes, type ThumbProbe } from "./filmstrip";
 import { reportSwallowed } from "./report";
+import { cloudMediaGone, cloudMediaStatus } from "./chunkCache";
+import { landDerived, liveAsset } from "./derivedWrites";
 import { baseFrameAt, baseFramesAt, baseFrameSink, colorReadAt } from "./baseFrame";
 import { colorRecord } from "./colorProbe";
 import { previewFile, sameColorRead } from "./sourceColor";
@@ -797,6 +800,9 @@ export async function resumePendingUploads(
       localUrl: url,
       send: sendStoredUpload(backend, projectId, p.fileName),
     });
+    // The open's sweep ran first and read the cloud, where these bytes have
+    // not landed yet. The strip and the waveform read the local copy instead.
+    void enrichAsset({ ...asset, url, upload });
   }
 }
 
@@ -1969,6 +1975,54 @@ function setStripFailed(assetId: string, failed: boolean) {
   for (const fn of stripListeners) fn();
 }
 
+// Assets whose cloud file is not there, by id — session state, like a failed
+// strip. One read finds the gap and the clip says so; nothing reads the file
+// again until the page reloads or an upload of it starts. The bytes of an
+// upload that never finished live only in the browser that started it, so
+// every other device, and a share of the project, finds nothing.
+const missingMedia = new Set<string>();
+
+/** Whether this asset's file was found missing from the cloud this session. */
+export const missingMediaFor = (assetId: string) => missingMedia.has(assetId);
+
+function setMediaMissing(assetId: string, missing: boolean) {
+  if (missing === missingMedia.has(assetId)) return;
+  if (missing) missingMedia.add(assetId);
+  else missingMedia.delete(assetId);
+  for (const fn of stripListeners) fn();
+}
+
+/** Whether to skip reading this asset's file: it was found missing, and no
+ * upload of it has started since. An upload clears the mark. */
+function knownMissing(asset: MediaAsset): boolean {
+  if (asset.upload) setMediaMissing(asset.id, false);
+  return missingMedia.has(asset.id);
+}
+
+// A cloud route answers this when the request carries no session.
+const UNAUTHORIZED = 401;
+
+/**
+ * Settle a failed read of an asset's file. A file that is not there marks the
+ * asset missing, unless an upload of it is running and the bytes are on their
+ * way. A read refused for want of a session belongs to the session gate, which
+ * hears the same refusal (chunkCache.ts). Neither is a fault to report; every
+ * other failure is reported against `what`, the step that failed.
+ */
+function readFailed(asset: MediaAsset, what: string, err: unknown, subject = asset.fileName) {
+  const live = useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset;
+  if (cloudMediaGone(err)) {
+    if (!live.upload) setMediaMissing(asset.id, true);
+    console.warn(`${what} for ${subject}`, err);
+    return;
+  }
+  if (cloudMediaStatus(err) === UNAUTHORIZED) {
+    console.warn(`${what} for ${subject}`, err);
+    return;
+  }
+  reportSwallowed(what, err, subject);
+}
+
 // A failed enrich books itself more tries. Filmstrip and waveform reads drop
 // out together with the preview's when media reads fail, and the sweep that
 // would try again runs only on project open — so a blip at open used to leave
@@ -2119,6 +2173,37 @@ async function* idleFramesAt(
   }
 }
 
+/** Assets whose file was rewritten this session after reading no frames:
+ * one try each, so a file no converter can fix never loops. */
+const rewritten = new Set<string>();
+
+/**
+ * A strip that read no frames from a stream this page decodes — one that
+ * opens on no keyframe, a broken reference chain — hands the file to the
+ * project's converter for a forced re-encode to clean H.264, once. The asset
+ * keeps its id and moves to the new file, which enriches again. False when
+ * the stream does not decode here at all, or was rewritten already.
+ */
+async function rewriteFrameless(asset: MediaAsset, src: string): Promise<boolean> {
+  const s = useEditor.getState();
+  const projectId = s.projectId;
+  if (!projectId || s.readOnly || asset.upload || rewritten.has(asset.id)) return false;
+  const decodes = await withMedia(src, async (input) => !!(await videoTrackOf(input))).catch(() => false);
+  if (!decodes) return false;
+  rewritten.add(asset.id);
+  void import("./mediaConvert")
+    .then(async (m) => {
+      const made = await m.convertAssetToMp4(projectId, liveAsset(asset.id) ?? asset, { mode: "reencode" });
+      // A converter that kept the file has nothing new to read.
+      if (made.unchanged) setStripFailed(asset.id, true);
+    })
+    .catch((err: unknown) => {
+      setStripFailed(asset.id, true);
+      readFailed(asset, "[cut] frameless rewrite failed", err);
+    });
+  return true;
+}
+
 /** Generate filmstrip thumbnails / waveform peaks and merge them into the
  * store. Safe to call repeatedly; skips assets that are already enriched.
  * `src` overrides where the frames are read from — an import still uploading
@@ -2127,6 +2212,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
   // A block paints itself at whatever size asks, so there is no file to probe
   // and no still to stand in as its strip.
   if (asset.block) return;
+  if (knownMissing(asset)) return;
   if (enrichInFlight.has(asset.id)) return;
   enrichInFlight.add(asset.id);
   const held = importedBytes.get(asset.id);
@@ -2150,20 +2236,24 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       // both read `color`, and a file without it would draw as Rec.709.
       // The asset's live record decides: the import's own probe may have
       // written it while this sweep waited, and that walk is shared.
-      asset = useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset;
+      asset = liveAsset(asset.id) ?? asset;
       if (!asset.color && !asset.upload) {
         const color = await probeMediaColor(held ?? src).catch(() => null);
         if (useEditor.getState().projectId !== openProject) return;
         if (color) {
           await landProbedFacts(asset.id, { color: assetColor(color) });
-          asset = useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset;
+          asset = liveAsset(asset.id) ?? asset;
         }
       }
       // A ProRes master previews through the WASM decoder until its proxy
-      // lands, and a heavy video streamed from the cloud stalls at its cuts;
-      // the proxy is built behind the editor, once the bytes are at rest in
-      // the project's own storage.
-      if (openProject && !asset.upload && needsProxy(asset, getBackend().kind === "cloud")) void ensureProxy(openProject, asset);
+      // lands, a heavy video streamed from the cloud stalls at its cuts, and
+      // a stream this browser cannot decode reads from a compat proxy; the
+      // proxy is built behind the editor, once the bytes are at rest in the
+      // project's own storage.
+      if (openProject && !asset.upload) void ensureProxy(openProject, asset);
+      // A picture this browser cannot decode has nothing to sweep until its
+      // compat proxy lands; the landing enriches the asset again.
+      if (await awaitsCompat(asset, "video")) return;
       // Footage stored without a length — a shelf row that was never measured
       // — reads its own before anything is swept from it: a zero-length sweep
       // has no tiles to place and no buckets to fill, and the clips cut from
@@ -2175,7 +2265,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
           width: probe.width,
           height: probe.height,
         });
-        asset = useEditor.getState().assets.find((a) => a.id === asset.id) ?? asset;
+        asset = liveAsset(asset.id) ?? asset;
         if (!(asset.duration > 0)) throw new UnreadableMediaError("The video has no length.");
       }
       // The clip box draws the sound under the picture, so a video enriches
@@ -2185,12 +2275,12 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
       // long a source's frame grabs take. `[]` is an answer too — a silent
       // file — and stops the strip from re-decoding every open.
       const peaksRun =
-        asset.peaks === undefined
+        asset.peaks === undefined && !(await awaitsCompat(asset, "audio"))
           ? loadPeaks(asset, held ?? src, (partial) =>
-              useEditor.getState().updateAsset(asset.id, { peaks: partial })
+              landDerived(asset.id, { peaks: partial })
             )
               .then((peaks) => {
-                if (peaks) useEditor.getState().updateAsset(asset.id, { peaks });
+                if (peaks) landDerived(asset.id, { peaks });
               })
               .catch((err: unknown) => {
                 // The strip paints on its own; a peaks failure (an expired
@@ -2198,8 +2288,8 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
                 // What the walk had published comes off the asset, so the
                 // next open reads the file again in place of keeping a
                 // strip that stops partway.
-                useEditor.getState().updateAsset(asset.id, { peaks: undefined });
-                reportSwallowed(`[cut] peaks failed for ${asset.fileName}`, err);
+                landDerived(asset.id, { peaks: undefined });
+                readFailed(asset, "[cut] peaks failed", err);
               })
           : undefined;
       if (!stripComplete(asset)) {
@@ -2207,7 +2297,7 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
         const key = stripCacheKey(useEditor.getState().projectId, asset.id);
         const cached = await readCachedStrip(key, asset.duration);
         if (cached) {
-          useEditor.getState().updateAsset(asset.id, {
+          landDerived(asset.id, {
             thumbs: cached.thumbs,
             thumbStep: cached.thumbStep,
             sceneCuts: cached.cuts,
@@ -2216,38 +2306,45 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
           // Midpoint grabs, published tile by tile: the strip fills in as the
           // sweep runs, and the scene pass refines the grab points behind it.
           const { thumbs, thumbStep } = await makeThumbs(src, asset.duration, [], (partial, step) =>
-            useEditor.getState().updateAsset(asset.id, { thumbs: partial, thumbStep: step })
+            landDerived(asset.id, { thumbs: partial, thumbStep: step })
           );
+          // A stream this page decodes that gave no frames has its file
+          // rewritten by a converter, which enriches the asset again.
+          if (!thumbs.length && (await rewriteFrameless(asset, src))) return;
           // An empty strip is a failure, not a result: persisting it would
           // leave the asset looking permanently mid-load.
           if (!thumbs.length) throw new UnreadableMediaError("No frames could be read for the filmstrip.");
-          useEditor.getState().updateAsset(asset.id, { thumbs, thumbStep });
+          landDerived(asset.id, { thumbs, thumbStep });
           writeCache(key, { thumbs, thumbStep, duration: asset.duration, at: Date.now() });
         }
       }
       // The cuts a strip was built without — a fresh sweep, or a cache written
       // before the scene pass finished — are probed once the tiles are up.
-      const live = useEditor.getState().assets.find((a) => a.id === asset.id);
+      const live = liveAsset(asset.id);
       if (live && stripComplete(live) && live.sceneCuts === undefined) {
         void refineSceneCuts(asset.id, src, asset.duration).catch((err) => {
           // Scene cuts only sharpen the strip; the tiles already painted.
-          reportSwallowed(`[cut] scene probe failed for ${asset.fileName}`, err);
+          readFailed(asset, "[cut] scene probe failed", err);
         });
       }
       await peaksRun;
       enrichRetries.delete(asset.id);
     } else if (asset.type === "audio" && !asset.peaks?.length) {
       const openProject = useEditor.getState().projectId;
+      // Sound this browser cannot decode reads from a compat proxy, built
+      // once the bytes are at rest; its landing enriches the asset again.
+      if (openProject && !asset.upload) void ensureProxy(openProject, asset);
+      if (await awaitsCompat(asset, "audio")) return;
       await idlePlayback();
       if (useEditor.getState().projectId !== openProject) return;
-      const publish = (peaks: number[]) => useEditor.getState().updateAsset(asset.id, { peaks });
+      const publish = (peaks: number[]) => landDerived(asset.id, { peaks });
       try {
         const peaks = await loadPeaks(asset, held ?? src, publish);
         if (peaks) publish(peaks);
       } catch (err) {
         // A walk that published partway comes off the asset before the retry
         // below, so the retry reads the file again.
-        useEditor.getState().updateAsset(asset.id, { peaks: undefined });
+        landDerived(asset.id, { peaks: undefined });
         throw err;
       }
       enrichRetries.delete(asset.id);
@@ -2258,11 +2355,9 @@ export async function enrichAsset(asset: MediaAsset, src = asset.url) {
     // reported, which carries it into PostHog error tracking with the file's
     // shape beside the cause (lib/report.ts).
     if (asset.type === "video") setStripFailed(asset.id, true);
-    if (asset.type !== "image") scheduleEnrichRetry(asset.id);
-    reportSwallowed(
-      `[cut] enrich failed for ${asset.fileName} (${asset.type}, ${Math.round(asset.duration)}s)`,
-      err
-    );
+    readFailed(asset, "[cut] enrich failed", err, `${asset.fileName} (${asset.type}, ${Math.round(asset.duration)}s)`);
+    // A missing file stays missing; trying again would ask for the same nothing.
+    if (asset.type !== "image" && !missingMedia.has(asset.id)) scheduleEnrichRetry(asset.id);
   } finally {
     enrichInFlight.delete(asset.id);
   }
@@ -2325,15 +2420,16 @@ export async function detectAssetBeats(asset: MediaAsset): Promise<AssetBeats> {
  * onto the soundtrack track (video assets don't get peaks at import). */
 export async function ensurePeaks(asset: MediaAsset) {
   if (asset.peaks?.length) return;
-  const publish = (peaks: number[]) => useEditor.getState().updateAsset(asset.id, { peaks });
+  if (knownMissing(asset)) return;
+  const publish = (peaks: number[]) => landDerived(asset.id, { peaks });
   try {
     const peaks = await loadPeaks(asset, asset.url, publish);
     if (peaks?.length) publish(peaks);
   } catch (err) {
     // Waveforms are decorative; editing works without them. A walk that
     // published partway comes off the asset, so the next read starts clean.
-    useEditor.getState().updateAsset(asset.id, { peaks: undefined });
-    reportSwallowed(`[cut] peaks failed for ${asset.fileName}`, err);
+    landDerived(asset.id, { peaks: undefined });
+    readFailed(asset, "[cut] peaks failed", err);
   }
 }
 
@@ -2662,10 +2758,10 @@ async function refineSceneCuts(assetId: string, url: string, duration: number) {
   if (sceneProbeInFlight.has(assetId)) return;
   sceneProbeInFlight.add(assetId);
   try {
-    const live = () => useEditor.getState().assets.find((a) => a.id === assetId);
+    const live = () => liveAsset(assetId);
     const { probes, cuts } = await sceneProbe(url, duration);
     if (!live()) return;
-    useEditor.getState().updateAsset(assetId, { sceneCuts: cuts });
+    landDerived(assetId, { sceneCuts: cuts });
     const { count, thumbStep } = thumbGrid(duration);
     // The cuts land in the cache however the tiles turn out. A sweep that
     // moves no grab point still answered the expensive question, and a cache
@@ -2706,7 +2802,7 @@ async function refineSceneCuts(assetId: string, url: string, duration: number) {
     if (!current?.thumbs?.length) return;
     const thumbs = [...current.thumbs];
     for (const [i, tile] of regrabbed) if (i < thumbs.length) thumbs[i] = tile;
-    useEditor.getState().updateAsset(assetId, { thumbs });
+    landDerived(assetId, { thumbs });
     persist(thumbs);
   } finally {
     sceneProbeInFlight.delete(assetId);

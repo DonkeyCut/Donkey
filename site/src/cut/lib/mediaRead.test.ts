@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { stubModule } from "@/lib/testing/stubModule";
 import { CHUNK_SIZE } from "./chunkCache";
-import { spsHooks, urlParallelism } from "./mediaRead";
+import { hasUndecodableVideo, probeMediaFile, readMediaFileSize, spsHooks, UnreadableMediaError, urlParallelism, videoTrackOf } from "./mediaRead";
+
+/** What the stubbed browser decodes; each test sets it. */
+let decodes = { h264: true, aac: true };
+await stubModule<typeof import("./codecSupport")>("./codecSupport", import.meta.url, {
+  browserCodecs: async () => decodes,
+});
 
 /** The cache one reader is given by the memory budget on an ordinary machine. */
 const READER_CACHE = 8 * 2 ** 20;
@@ -49,4 +57,96 @@ describe("SPS color hooks", () => {
       Object.defineProperty(globalThis, "SharedArrayBuffer", sab);
     }
   });
+});
+
+describe("decodability", () => {
+  test("a track whose header mediabunny can't parse reads as undecodable", async () => {
+    // A corrupt SPS throws from inside canDecode ("Invalid exponential-Golomb
+    // code."): the track exists, and no decoder here can open it.
+    const track = { canDecode: async () => { throw new Error("Invalid exponential-Golomb code."); }, codec: "avc" };
+    const input = { getPrimaryVideoTrack: async () => track } as never;
+    // A page: the decodability gate only runs where something plays.
+    const doc = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", { value: {}, configurable: true });
+    try {
+      expect(await videoTrackOf(input)).toBeNull();
+      expect(await hasUndecodableVideo(input)).toBe(true);
+    } finally {
+      if (doc) Object.defineProperty(globalThis, "document", doc);
+      else delete (globalThis as { document?: unknown }).document;
+    }
+  });
+});
+
+describe("H.264 in a browser without it", () => {
+  // Firefox on Linux without the system's codecs decodes no H.264 at all. The
+  // footage imports as it is, from its header, and a compat proxy carries its
+  // picture (mediaProxy.ts); a converter would only write H.264 again.
+  const h264 = () => {
+    const bytes = execFileSync("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=s=64x48:r=10:d=0.5",
+      "-c:v", "libx264", "-f", "mp4", "-movflags", "frag_keyframe+empty_moov", "pipe:1",
+    ]);
+    return new Blob([new Uint8Array(bytes)], { type: "video/mp4" });
+  };
+
+  const asPage = async <T>(run: () => Promise<T>): Promise<T> => {
+    const doc = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", { value: {}, configurable: true });
+    try {
+      return await run();
+    } finally {
+      if (doc) Object.defineProperty(globalThis, "document", doc);
+      else delete (globalThis as { document?: unknown }).document;
+    }
+  };
+
+  test("imports from its header with its picture's size", async () => {
+    decodes = { h264: false, aac: true };
+    const probe = await asPage(() => probeMediaFile(h264()));
+    expect(probe).toMatchObject({ hasVideo: true, width: 64, height: 48 });
+  });
+
+  test("a browser that has H.264 and still cannot open the track converts it", async () => {
+    decodes = { h264: true, aac: true };
+    const err = await asPage(() => probeMediaFile(h264())).catch((e: unknown) => e);
+    expect(err instanceof UnreadableMediaError && err.undecodable).toBe(true);
+  });
+});
+
+describe("unparseable containers", () => {
+  test("a container this page can't parse goes to a converter", async () => {
+    // ffmpeg on this Mac or in the cloud reads far more containers than the
+    // page's demuxers, so the import hands the file on.
+    const err = await probeMediaFile(new Blob([new Uint8Array(4096).fill(7)])).catch((e: unknown) => e);
+
+    expect(err instanceof UnreadableMediaError && err.undecodable).toBe(true);
+  });
+});
+
+describe("url reads", () => {
+  // HTTP statuses a media server answers for a file that is gone, or a range
+  // past the end of one that is empty.
+  const NOT_FOUND = 404;
+  const RANGE_NOT_SATISFIABLE = 416;
+
+  for (const status of [NOT_FOUND, RANGE_NOT_SATISFIABLE]) {
+    test(`a ${status} comes back named, once`, async () => {
+      let asked = 0;
+      const real = globalThis.fetch;
+      globalThis.fetch = (async () => {
+        asked++;
+        return new Response(null, { status });
+      }) as unknown as typeof fetch;
+      try {
+        const err = await readMediaFileSize("https://files.example.com/a.mp4").catch((e: unknown) => e);
+
+        expect((err as Error).name).toBe("MediaFetchError");
+        expect((err as Error).message).toContain(String(status));
+        expect(asked).toBe(1);
+      } finally {
+        globalThis.fetch = real;
+      }
+    });
+  }
 });

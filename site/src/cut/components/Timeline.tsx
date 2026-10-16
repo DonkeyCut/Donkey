@@ -54,7 +54,7 @@ import { keyboardToEditor, shortcutDecline } from "@/cut/lib/shortcutGate";
 import { additiveClick } from "@/cut/lib/hostKeys";
 import { CLIP_GAP, landOnRow, laneDragFor, laneDragParts, laneDragSlots, resolveRow, startLaneMove, startLaneTrim, type LaneDrag, type RowBox } from "@/cut/lib/laneTracks";
 import { reportSwallowed } from "@/cut/lib/report";
-import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockAudio, importStockVideo, peekEdgeFrame, requestEdgeFrame, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
+import { downloadMedia, dropEdgeFrames, ensurePeaks, importImage, importStockAudio, importStockVideo, peekEdgeFrame, requestEdgeFrame, missingMediaFor, revealMedia, stripFailedFor, subscribeStripStatus } from "@/cut/lib/media";
 import { planFilmstrip, type FilmTile } from "@/cut/lib/filmstrip";
 import { waveGain } from "@/cut/lib/waveform";
 import { canSplitItem } from "@/cut/lib/itemKinds";
@@ -1739,7 +1739,7 @@ export function Timeline() {
         }
         placeAssetAt(asset.id, asset.type, next(asset, sticker), audioRow, place, elementRow);
       } catch (err) {
-        reportSwallowed(`[cut] drop failed for ${item.name}`, err);
+        reportSwallowed("[cut] drop failed", err, item.name);
       }
     }
   };
@@ -3914,6 +3914,7 @@ function ClipView({
       <div className="pointer-events-none absolute inset-x-0 top-0" style={{ height: FILM_H }}>
         <Filmstrip frames={filmstrip} grade={clip.grade} failed={stripFailed} hidden={offscreen} block={asset?.block} />
       </div>
+      <MissingChip assetId={asset.id} />
       {clip.grade?.lut && (
         // The LUT badge: the file mark, small, where the clip's chrome sits.
         // eslint-disable-next-line @next/next/no-img-element
@@ -5005,6 +5006,19 @@ function LoadingChip() {
   );
 }
 
+/** Corner chip for a clip whose cloud file is not there (media.ts
+ * missingMediaFor): an upload that never finished, or a file deleted from
+ * under the project. The clip keeps its place and edits; nothing plays. */
+function MissingChip({ assetId }: { assetId: string }) {
+  const missing = useSyncExternalStore(subscribeStripStatus, () => missingMediaFor(assetId), () => false);
+  if (!missing) return null;
+  return (
+    <span className="tl-missing-chip pointer-events-none absolute right-1 bottom-1 z-4 rounded-[5px] bg-black/65 px-1.5 py-px text-[10px] whitespace-nowrap text-white">
+      Missing media
+    </span>
+  );
+}
+
 /** Hover chip that toggles a clip's own audio. Stays visible while the clip is
  * muted so unmuting is one click. */
 function MuteChip({
@@ -5427,6 +5441,7 @@ function AudioView({
         </span>
       )}
       {loading && <LoadingChip />}
+      <MissingChip assetId={asset.id} />
       {!loading && <ClipMenu asset={asset} clip={clip} />}
       {!loading && (
         <MuteChip

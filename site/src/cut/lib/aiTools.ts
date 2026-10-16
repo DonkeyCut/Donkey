@@ -198,6 +198,7 @@ import {
   scanSourceSpeech,
   watchGeometry,
 } from "./media";
+import { convertModeIn } from "./convertMode";
 import { convertAssetToMp4 } from "./mediaConvert";
 import { isLottieAsset } from "./lottieAssets";
 import { AIR, MIN_AIR, placeEdge, REACH, settleJoint, type Pace, type PlacedEdge } from "./cutRefine";
@@ -5260,6 +5261,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const ids = Array.isArray(input.asset_ids) ? input.asset_ids.map((v) => String(v)) : [];
       if (ids.length === 0) throw new ToolError("Pass the asset ids to convert.");
       const maxHeight = isNum(input.max_height) ? Math.round(input.max_height) : undefined;
+      const mode = convertModeIn(input.mode);
+      if (!mode) throw new ToolError("mode is fit or reencode.");
       // Named `assets` so each converted file renders as its own card in the
       // thread (ToolOutputAssets keys off assetId) — the user drops files on
       // the chat and takes the MP4s back from the same place.
@@ -5273,7 +5276,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           continue;
         }
         try {
-          const out = await convertAssetToMp4(projectId, asset, { maxHeight });
+          const out = await convertAssetToMp4(projectId, asset, { maxHeight, mode });
           converted.push({
             assetId: out.assetId,
             // The card now reads `name`; `from` is what the user dropped.

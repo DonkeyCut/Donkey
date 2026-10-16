@@ -53,6 +53,7 @@ import {
 } from "./backend/browser/opfs";
 import { CUT_MEDIA_ORIGIN } from "./hosts";
 import { allowance, holdMemory } from "./memoryBudget";
+import { observeOperationResponse } from "./operationFailure";
 import { SETTINGS, type Settings } from "@/lib/config/registry";
 
 export const CHUNK_SIZE = 2 * 1024 * 1024;
@@ -370,11 +371,39 @@ async function doOpen(id: ChunkIdentity, url: string): Promise<ObjState> {
     if (!state.size) throw new Error("Cloud media answered with no length.");
     state.probe0 = await collect(res, 0, Math.min(CHUNK_SIZE, state.size) - 1, true);
   } else {
-    throw new Error(`Cloud media read failed (${res.status}).`);
+    throw new CloudMediaError(res.status);
   }
   void persistChunk(state, 0, state.probe0);
   void commitMeta(state);
   return state;
+}
+
+/** A cloud media read the server refused, with the status it answered. */
+export class CloudMediaError extends Error {
+  constructor(readonly status: number) {
+    super(`Cloud media read failed (${status}).`);
+    this.name = "CloudMediaError";
+  }
+}
+
+// The answers that mean the bytes are not there: the route has no record of
+// the file, or the media origin holds no object under its key.
+const GONE_STATUSES = new Set([404, 410]);
+
+/** Whether `err`, or a cause behind it, is a cloud read of a file that is not
+ * there — an upload that never finished, or a file deleted from under the doc.
+ * Asking again finds the same nothing. */
+export function cloudMediaGone(err: unknown): boolean {
+  return GONE_STATUSES.has(cloudMediaStatus(err) ?? 0);
+}
+
+/** The status a refused cloud read answered, found through the cause chain,
+ * or null when `err` is some other failure. */
+export function cloudMediaStatus(err: unknown): number | null {
+  for (let at = err, depth = 0; at instanceof Error && depth < 4; depth++, at = at.cause) {
+    if (at instanceof CloudMediaError) return at.status;
+  }
+  return null;
 }
 
 /** `chunks/<keyHash>/<versionTag>/`, with every other version of the same key
@@ -645,7 +674,7 @@ function startRun(state: ObjState, first: number, last: number): Promise<Uint8Ar
       const startB = first * CHUNK_SIZE;
       const endB = Math.min(state.size, (last + 1) * CHUNK_SIZE) - 1;
       const res = await fetchRange(state.url, startB, endB, state.ac.signal);
-      if (!res.ok) throw new Error(`Cloud media read failed (${res.status}).`);
+      if (!res.ok) throw new CloudMediaError(res.status);
       // Each chunk is its own array, so holding one can't pin the whole run,
       // and it settles the moment its own bytes are here.
       await streamRun(res, startB, endB, res.status !== 206, (i, bytes) => {
@@ -974,7 +1003,12 @@ function openThroughRoute(route: string): Promise<ObjState> {
  */
 async function probeRoute(route: string): Promise<ObjState> {
   const res = await fetchRange(route, 0, 0);
-  if (!res.ok) throw new Error(`Cloud media read failed (${res.status}).`);
+  if (!res.ok) {
+    // A 401 here is the session ending under the page — the framed editor's
+    // partitioned cookie aging out mid-edit — which the session gate answers.
+    await observeOperationResponse(res);
+    throw new CloudMediaError(res.status);
+  }
   await res.body?.cancel().catch(() => {});
   const id = chunkIdentity(res.url);
   if (!id) throw new Error("Cloud media route did not land on the media origin.");

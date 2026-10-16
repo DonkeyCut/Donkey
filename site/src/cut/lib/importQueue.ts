@@ -286,12 +286,13 @@ async function run(job: Job) {
       upload: undefined,
       ...(asset.type === "image" ? { thumbs: [url] } : {}),
     });
-    // A ProRes master's preview proxy, or a heavy cloud video's, is built
-    // once the bytes are at rest in the project's own storage, which is now.
+    // A ProRes master's preview proxy, a heavy cloud video's, or the compat
+    // proxy of a stream this browser cannot decode is built once the bytes
+    // are at rest in the project's own storage, which is now.
     const landed = useEditor.getState().assets.find((a) => a.id === asset.id);
-    if (landed) {
+    if (landed && landed.type !== "image") {
       void import("./mediaProxy")
-        .then((m) => (m.needsProxy(landed, job.backend.kind === "cloud") ? m.ensureProxy(job.projectId, landed, job.backend) : undefined))
+        .then((m) => m.ensureProxy(job.projectId, landed, job.backend))
         .catch(() => {});
     }
     // Decoders and voices carry across the URL change on what they already

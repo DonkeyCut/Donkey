@@ -40,7 +40,7 @@ import { sampleClipRawFrame, sourceProfileOf, toBaseRendering } from "@/cut/lib/
 import { useEditor } from "@/cut/lib/store";
 import { usePanelState, useRememberedScroll } from "@/cut/lib/panelState";
 import type { MediaAsset, VideoClip } from "@/cut/lib/types";
-import { needsProxy, useProxyJobs } from "@/cut/lib/mediaProxy";
+import { useProxyJobs } from "@/cut/lib/mediaProxy";
 import {
   cachedLut,
   libraryLutId,
@@ -209,7 +209,7 @@ function SourceColorRow({ clip }: { clip: VideoClip }) {
 function ProxyLine({ asset }: { asset: MediaAsset }) {
   const job = useProxyJobs((s) => s.jobs[asset.id]);
   // A job only exists for a file that needed a proxy where it was asked.
-  if (!job || !needsProxy(asset, true)) return null;
+  if (!job) return null;
   const master = asset.color?.codec?.startsWith("ap") ? "the ProRes master" : "the original file";
   const text =
     job.kind === "making"

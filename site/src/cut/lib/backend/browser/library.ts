@@ -299,14 +299,18 @@ async function removeAsset(id: string): Promise<Response> {
  */
 async function makeProxy(req: Request, id: string): Promise<Response> {
   try {
-    const { maxHeight, crf } = (await req.json()) as { maxHeight?: number; crf?: number };
+    const { maxHeight, crf, compat: asked } = (await req.json()) as { maxHeight?: number; crf?: number; compat?: unknown };
     if (!Number.isFinite(maxHeight) || !Number.isFinite(crf)) return err("maxHeight and crf are required.", 400);
+    const { compatCoverIn, compatCovers, compatProxyNameFor } = await import("../../proxyNames");
+    const compat = compatCoverIn(asked);
     const asset = (await readIndex()).assets.find((a) => a.id === id);
     if (!asset) return err("Library asset not found.", 404);
     if (asset.type !== "video") return err("Only a video takes a playable copy.", 400);
     const dir = await store.libraryMediaDir(true);
     if (!dir) return err("Browser storage is unavailable.", 500);
-    if (asset.proxyFile && (await store.readFileAt(dir, asset.proxyFile))) return json(asset);
+    const held = asset.proxyFile;
+    const answers = !!held && (!compat || compatCovers(held, compat));
+    if (held && answers && (await store.readFileAt(dir, held))) return json(asset);
     const master = await store.readFileAt(dir, asset.fileName);
     if (!master) return err("Media file not found.", 404);
 
@@ -315,7 +319,16 @@ async function makeProxy(req: Request, id: string): Promise<Response> {
     const { probeMediaColor } = await import("../../mediaRead");
     const { code } = await probeMediaColor(master);
     const from = { matrix: code.matrix, fullRange: code.fullRange };
-    let fileName = (await encodeProxyInPage(master, from, dir, asset.fileName, maxHeight!, () => {}))?.fileName;
+    let fileName: string | undefined;
+    if (compat) {
+      // A picture this browser cannot decode has nothing to encode from in
+      // the page; the worker builds the compat copy by way of the cloud shelf.
+      const { compatInTheCloud } = await import("../../cloudLibraryUpload");
+      const blob = await compatInTheCloud(new File([master], asset.fileName), compat);
+      fileName = await store.saveLibraryMedia(blob, compatProxyNameFor(asset.fileName, compat, false));
+    } else {
+      fileName = (await encodeProxyInPage(master, from, dir, asset.fileName, maxHeight!, () => {}))?.fileName;
+    }
     if (!fileName) {
       const blob = await proxyOnTheMac(async () => master, asset.fileName, maxHeight!, crf!);
       if (!blob) return err("This browser can't make a playable copy of this video. Open the Donkey app to make one.", 422);
@@ -331,6 +344,8 @@ async function makeProxy(req: Request, id: string): Promise<Response> {
         return live;
       });
       await register(landed);
+      // The copy this browser could not play leaves with its name.
+      if (held && held !== landed) await dropFiles([held]);
       return json(updated);
     } catch (e) {
       await dropFiles([landed]);

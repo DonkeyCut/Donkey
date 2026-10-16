@@ -11,6 +11,7 @@ import { bindCutMediaCache } from "@/cut/lib/chunkCache";
 import { useEffect, type ReactNode } from "react";
 import { useEnvironment } from "@/cut/lib/environment";
 import { EmbeddedSignInFallback } from "@/cut/components/EmbeddedSignInFallback";
+import { onOperationFailure } from "@/cut/lib/operationFailure";
 
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import {
@@ -31,7 +32,7 @@ import { useAccountConfig } from "@/queries/accountConfig";
 // It binds the account id; SessionGate, one level in, is what holds the app
 // until the id lands, because every engine URL carries it.
 export function RequireSession({ children }: { children: ReactNode }) {
-  const { data: session, isPending } = authClient.useSession();
+  const { data: session, isPending, refetch } = authClient.useSession();
 
   const signedOut = !isPending && !session;
   const userId = session?.user.id;
@@ -39,6 +40,21 @@ export function RequireSession({ children }: { children: ReactNode }) {
   // Framed by the ChatGPT card, the page carries its own partitioned session;
   // a browser that dropped it renews it through the card's tool bridge.
   const { chatgpt: embedded } = useEnvironment();
+
+  // A request refused for want of a session — the framed editor's cookie aged
+  // out mid-edit, or a sign-out in another tab — asks for the session again,
+  // so the gate below offers the reconnect or the sign-in. Refusals arrive in
+  // bursts, one per request in flight; one ask answers them all.
+  useEffect(() => {
+    let asking = false;
+    return onOperationFailure((failure) => {
+      if (failure.code !== "authentication_required" || asking) return;
+      asking = true;
+      void refetch().finally(() => {
+        asking = false;
+      });
+    });
+  }, [refetch]);
 
   useAppLoaded("cut", session?.user);
 

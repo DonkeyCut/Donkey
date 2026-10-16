@@ -23,7 +23,7 @@ import {
   type ParsedLut,
   type SourceProfile,
 } from "@donkeycut/effects-kit";
-import { frameSink, openMedia, videoTrackOf, type FrameCanvasSink, type FrameSize, type FrameSinkOptions } from "./mediaRead";
+import { coveredSrc, frameSink, openMedia, videoTrackOf, type FrameCanvasSink, type FrameSize, type FrameSinkOptions } from "./mediaRead";
 import { sampleClipColorRead, sampleClipFrameData } from "./previewCanvas";
 import { colorRead, fileAt, previewFile, type ColorRead } from "./sourceColor";
 import { useEditor } from "./store";
@@ -147,7 +147,10 @@ export function baseFrameSink(
 }
 
 /** One base-rendering frame of the file at `url`. */
-export async function baseFrameAt(url: string, time: number, size?: FrameSize): Promise<WrappedCanvas | null> {
+export async function baseFrameAt(master: string, time: number, size?: FrameSize): Promise<WrappedCanvas | null> {
+  // A stream this page cannot decode reads from its compat proxy, and the
+  // proxy's own recipe draws it.
+  const url = coveredSrc("video", master);
   const input = openMedia(url);
   try {
     const track = await videoTrackOf(input);
@@ -160,7 +163,10 @@ export async function baseFrameAt(url: string, time: number, size?: FrameSize): 
 
 /** The code values of one frame of the file at `url`, read the way the
  * preview reads them, with the recipe that draws them. */
-export async function rawFrameAt(url: string, time: number, size: FrameSize): Promise<RawFrame | null> {
+export async function rawFrameAt(master: string, time: number, size: FrameSize): Promise<RawFrame | null> {
+  // A stream this page cannot decode reads from its compat proxy, and the
+  // proxy's own recipe draws it.
+  const url = coveredSrc("video", master);
   const input = openMedia(url);
   try {
     const track = await videoTrackOf(input);
@@ -180,14 +186,36 @@ export async function rawFrameAt(url: string, time: number, size: FrameSize): Pr
   }
 }
 
+// The DOMException name WebCodecs gives a decoder that failed on its input.
+const DECODER_FAILURE = "EncodingError";
+
+const decoderFailed = (err: unknown) => err instanceof DOMException && err.name === DECODER_FAILURE;
+
 /** Base-rendering frames at ascending `times`, in one decode pass; null for a
- * time the track has no frame for. */
-export async function* baseFramesAt(url: string, times: number[], size?: FrameSize): AsyncGenerator<WrappedCanvas | null> {
+ * time the track has no frame for.
+ *
+ * A machine's hardware decoder can refuse a stream every other decoder plays
+ * — Linux VA-API, an Android MediaCodec, a phone out of sessions — and says
+ * only "Decoding error.". The pass then goes on in software from the frame it
+ * failed on; a software decoder that fails too ends the read. */
+export async function* baseFramesAt(master: string, times: number[], size?: FrameSize): AsyncGenerator<WrappedCanvas | null> {
+  // A stream this page cannot decode reads from its compat proxy, and the
+  // proxy's own recipe draws it.
+  const url = coveredSrc("video", master);
   const input = openMedia(url);
   try {
     const track = await videoTrackOf(input);
     if (!track) throw new Error("This file has no readable video.");
-    yield* baseFrameSink(track, size, colorReadAt(url)).canvasesAtTimestamps(times);
+    let next = 0;
+    try {
+      for await (const frame of baseFrameSink(track, size, colorReadAt(url)).canvasesAtTimestamps(times)) {
+        next++;
+        yield frame;
+      }
+    } catch (err) {
+      if (!decoderFailed(err)) throw err;
+      yield* baseFrameSink(track, size, colorReadAt(url), { software: true }).canvasesAtTimestamps(times.slice(next));
+    }
   } finally {
     input.dispose();
   }

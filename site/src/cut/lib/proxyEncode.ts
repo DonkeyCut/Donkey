@@ -25,6 +25,7 @@ import {
 import { apiFetch as engineFetch, engineFeatures } from "./api";
 import { hasLocalCompute } from "./backend";
 import { freeName } from "./backend/browser/opfs";
+import type { CompatCover } from "./proxyNames";
 import { audioTrackOf, openMedia, probeMediaFile, videoTrackOf } from "./mediaRead";
 import { encoderLead } from "./encoderLead";
 import { ensureProresDecoder } from "./proresDecoder";
@@ -231,20 +232,24 @@ async function convertSample(
   });
 }
 
-/** Hand the master's bytes to the Mac and take the proxy back; the engine
- * keeps nothing. Null when the app is not there or is older than the route. */
+/** Hand the master's bytes to the Mac and take the proxy back, or the compat
+ * proxy `compat` names (proxyNames.ts); the engine keeps nothing. Null when
+ * the app is not there or is older than the route. */
 export async function proxyOnTheMac(
   master: () => Promise<Blob>,
   masterName: string,
   maxHeight: number,
-  crf: number
+  crf: number,
+  compat?: CompatCover
 ): Promise<Blob | null> {
-  if (!hasLocalCompute() || !(await engineFeatures()).has("media.proxy")) return null;
+  if (!hasLocalCompute()) return null;
+  if (!(await engineFeatures()).has(compat ? "media.compat" : "media.proxy")) return null;
   const bytes = await master();
   const form = new FormData();
   form.append("file", bytes, masterName);
   form.append("maxHeight", String(maxHeight));
   form.append("crf", String(crf));
+  if (compat) form.append("compat", compat);
   const res = await engineFetch("/api/cut/proxy", { method: "POST", body: form });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };

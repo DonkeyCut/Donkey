@@ -47,6 +47,7 @@ import { CHUNK_SIZE, chunkSourceOptions } from "./chunkCache";
 import { probeColor, probeMissingColors, rangeOfBlob, withFoundColors, type ColorProbe, type ReadRange } from "./colorProbe";
 import { pictureAssetIds, type ItemLists } from "./itemKinds";
 import { allowance, holdMemory } from "./memoryBudget";
+import "./mediabunnyLog";
 import { SpsColorRewriter, descriptionLengthSize, spsCodecOf, tagsOfColorSpace } from "./spsColor";
 
 /** What a file turns out to be, read from its container. */
@@ -73,7 +74,7 @@ export interface FrameSize {
 }
 
 export class UnreadableMediaError extends Error {
-  /** The container parsed, but a media stream needs a decoder this runtime lacks. */
+  /** The file needs a demuxer or a decoder this runtime lacks; a converter elsewhere may read it. */
   readonly undecodable: boolean;
 
   constructor(message = "Cut can't read this media file.", undecodable = false) {
@@ -129,9 +130,12 @@ const LOCAL_RETRY_DELAYS_S = [0.5, 1.5];
 
 const urlRetryDelay = (
   previousAttempts: number,
-  _error: unknown,
+  error: unknown,
   src: string | URL | Request
 ): number | null => {
+  // A server's refusal is its answer: a gone file or a range past the end of
+  // an empty one reads the same on the next try.
+  if (error instanceof MediaFetchError && error.status !== undefined) return null;
   // Headless has nothing to hand a giving-up read back to: the engine and the
   // render worker open a file once, and a read that quits fails the job. They
   // keep waiting, on a widening backoff, until the job's own cancellation
@@ -150,9 +154,13 @@ const urlRetryDelay = (
  * error tracking matches on (instrumentation-client.ts) and what keeps a
  * caller's own report of it worded as weather (report.ts). */
 class MediaFetchError extends Error {
-  constructor(message: string, cause?: unknown) {
+  /** The server's answer, for a read it refused. */
+  readonly status?: number;
+
+  constructor(message: string, cause?: unknown, status?: number) {
     super(message, { cause });
     this.name = "MediaFetchError";
+    this.status = status;
   }
 }
 
@@ -176,11 +184,20 @@ function trackedFetch(url: string): typeof fetch {
     if (engine && !engineConnected()) {
       return Promise.reject(new MediaFetchError("The Donkey app isn't running."));
     }
-    return fetch(input, init).catch((err: unknown) => {
-      if (aborted(err)) throw err;
-      if (engine) void confirmEngine();
-      throw new MediaFetchError("Cut couldn't read this media over the network.", err);
-    });
+    return fetch(input, init).then(
+      (res) => {
+        // A refusal is named here as well: the reader's readahead rejects with
+        // nothing awaiting it, and its own wording names neither the read nor
+        // this module.
+        if (!res.ok) throw new MediaFetchError(`Cut couldn't read this media (${res.status}).`, undefined, res.status);
+        return res;
+      },
+      (err: unknown) => {
+        if (aborted(err)) throw err;
+        if (engine) void confirmEngine();
+        throw new MediaFetchError("Cut couldn't read this media over the network.", err);
+      }
+    );
   };
 }
 
@@ -332,12 +349,13 @@ const headless = () => typeof document === "undefined";
 /** A file the container parser doesn't recognize reads back as this module's
  * own error. mediabunny's own text names no file and reads like a bug report,
  * and it reaches the user wherever a read runs — a caption run, an export, a
- * chat tool. */
+ * chat tool. It is marked undecodable: ffmpeg reads far more containers, so an
+ * import hands the file to a converter. */
 async function tracked<T>(read: Promise<T>): Promise<T> {
   try {
     return await read;
   } catch (err) {
-    if (err instanceof UnsupportedInputFormatError) throw new UnreadableMediaError();
+    if (err instanceof UnsupportedInputFormatError) throw new UnreadableMediaError(undefined, true);
     throw err;
   }
 }
@@ -357,7 +375,10 @@ export async function videoTrackOf(input: Input): Promise<InputVideoTrack | null
  * landed, the in-tab export, which always reads the master. */
 async function decodable(track: InputVideoTrack): Promise<boolean> {
   if (headless()) return true;
-  if (await track.canDecode()) return true;
+  // canDecode parses the stream's own header to build the decoder config, and
+  // a corrupt one throws from the parser ("Invalid exponential-Golomb code.").
+  // No decoder here opens that track, which is what false says.
+  if (await track.canDecode().catch(() => false)) return true;
   if (track.codec !== "prores") return false;
   await (await import("./proresDecoder")).ensureProresDecoder();
   return track.canDecode();
@@ -375,10 +396,24 @@ export async function hasUndecodableVideo(input: Input): Promise<boolean> {
   return !!track && !(await decodable(track));
 }
 
+/** The primary video track when it is H.264 in a browser with no H.264
+ * decoder at all (Firefox on Linux without the system's codecs). Its picture
+ * plays from a compat proxy (mediaProxy.ts), so the master imports as it is;
+ * a converter would only write H.264 again. A header the parser cannot read
+ * throws from canDecode, and that file goes to the converters. */
+async function coverableVideo(input: Input): Promise<InputVideoTrack | null> {
+  if (headless()) return null;
+  const track = await tracked(input.getPrimaryVideoTrack());
+  if (!track || track.codec !== "avc") return null;
+  if (await track.canDecode().catch(() => true)) return null;
+  const { browserCodecs } = await import("./codecSupport");
+  return (await browserCodecs()).h264 ? null : track;
+}
+
 /** The primary audio track, or null — same decodability rule as video. */
 export async function audioTrackOf(input: Input): Promise<InputAudioTrack | null> {
   return tracked(input.getPrimaryAudioTrack({
-    filter: (track) => headless() ? track.codec !== null : track.canDecode(),
+    filter: (track) => headless() ? track.codec !== null : track.canDecode().catch(() => false),
   }));
 }
 
@@ -388,8 +423,9 @@ export async function audioTrackOf(input: Input): Promise<InputAudioTrack | null
  * asset that plays black. */
 export async function probeMediaFile(src: string | Blob): Promise<MediaProbe> {
   return withMedia(src, async (input) => {
-    if (!(await input.canRead())) throw new UnreadableMediaError();
-    const [video, audio] = await Promise.all([videoTrackOf(input), audioTrackOf(input)]);
+    if (!(await input.canRead())) throw new UnreadableMediaError(undefined, true);
+    const [decoded, audio] = await Promise.all([videoTrackOf(input), audioTrackOf(input)]);
+    const video = decoded ?? (await coverableVideo(input));
     // Footage this browser can't decode is refused outright. Treating it as
     // audio would be a quieter failure, not a smaller one: the clip would look
     // imported and simply have no picture.
@@ -464,7 +500,6 @@ function rangeReader(src: string | Blob): ReadRange {
       mode: "cors",
       headers: { Range: `bytes=${offset}-${offset + length - 1}` },
     });
-    if (!res.ok) throw new MediaFetchError(`Cut couldn't read the media header (${res.status}).`);
     const bytes = new Uint8Array(await res.arrayBuffer());
     return res.status === 206 ? bytes : bytes.subarray(offset, offset + length);
   };
@@ -627,6 +662,23 @@ function capToTrack(track: InputVideoTrack, size?: FrameSize): FrameSize | undef
   };
 }
 
+/** Each stream a compat proxy covers in this page (mediaProxy.ts), by its
+ * master's address: the readers of that stream open the proxy. A render's
+ * clip reader opens the master itself, so an export reads the original. */
+const streamCovers = { video: new Map<string, string>(), audio: new Map<string, string>() };
+
+/** Replace the covers this page reads through: master address → proxy
+ * address, per stream. */
+export function setStreamCovers(covers: { video: Map<string, string>; audio: Map<string, string> }): void {
+  streamCovers.video = covers.video;
+  streamCovers.audio = covers.audio;
+}
+
+/** Where this page reads `stream` of `src` from. */
+export function coveredSrc<T extends string | Blob>(stream: "video" | "audio", src: T): T | string {
+  return typeof src === "string" ? (streamCovers[stream].get(src) ?? src) : src;
+}
+
 /**
  * Frames at the given times, in one decode pass.
  *
@@ -640,7 +692,7 @@ export async function* framesAt(
   size?: FrameSize,
   opts?: FrameSinkOptions
 ): AsyncGenerator<WrappedCanvas | null> {
-  const input = openMedia(src);
+  const input = openMedia(coveredSrc("video", src));
   try {
     const track = await videoTrackOf(input);
     if (!track) throw new UnreadableMediaError("This file has no readable video.");
@@ -664,7 +716,7 @@ export async function frameAt(
   time: number,
   size?: FrameSize
 ): Promise<WrappedCanvas | null> {
-  return withMedia(src, async (input) => {
+  return withMedia(coveredSrc("video", src), async (input) => {
     const track = await videoTrackOf(input);
     if (!track) throw new UnreadableMediaError("This file has no readable video.");
     return frameSink(track, size).getCanvas(Math.max(0, time));
@@ -683,7 +735,7 @@ export async function* audioChunks(
   from?: number,
   to?: number
 ): AsyncGenerator<WrappedAudioBuffer> {
-  const input = openMedia(src);
+  const input = openMedia(coveredSrc("audio", src));
   try {
     const track = await audioTrackOf(input);
     if (!track) return;
@@ -795,7 +847,8 @@ export interface AudioWalk {
  * shape the frame readers hold, and it is what lets one open file, one
  * container parse and one decoder serve a whole clip.
  */
-export function openAudioWalk(src: string | Blob, from = 0, to?: number): AudioWalk {
+export function openAudioWalk(master: string | Blob, from = 0, to?: number): AudioWalk {
+  const src = coveredSrc("audio", master);
   // A voice on a URL reads the file its picture's source already holds open.
   const handle =
     typeof src === "string"
@@ -895,7 +948,7 @@ export async function audioPeaks(
   let from = 0;
   for (;;) {
     await gate?.idle();
-    const input = openMedia(src);
+    const input = openMedia(coveredSrc("audio", src));
     let read = 0;
     let done = true;
     try {

@@ -42,6 +42,7 @@ import { colorRead, type ColorRead, type ReadFile } from "./sourceColor";
 import type { OutputSpace } from "@donkeycut/effects-kit";
 import { heldSpans, overlayPlan, trackZeroAt, trackZeroPlan } from "./framePlan";
 import { heldFrames, holdOverlays, type HeldFrames } from "./frameGrid";
+import { compatNeedOf } from "./codecSupport";
 import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, withAssetColors } from "./mediaRead";
 import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
@@ -1877,6 +1878,11 @@ export async function canRenderInBrowser(
     !("createWritable" in FileSystemFileHandle.prototype)
   ) {
     return false;
+  }
+  // A master this browser cannot decode — H.264 where none is installed, AAC
+  // its decoder fails on — renders where ffmpeg reads the original.
+  for (const asset of doc.assets) {
+    if (await compatNeedOf(asset)) return false;
   }
   try {
     const trim = sourceExportPlan(doc, settings);

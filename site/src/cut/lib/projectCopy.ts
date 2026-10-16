@@ -11,6 +11,7 @@ import { ensureLinkedOnCloud, linkedIdsIn } from "./linkedLibrary";
 import { uploadProjectMediaTo } from "./media";
 import { localMediaFile } from "./mediaSync";
 import type { ProjectDoc, StoredAsset } from "./types";
+import { compatCoverOf } from "./proxyNames";
 
 /** Move a project's conversations onto the copy.
  *
@@ -127,11 +128,13 @@ export async function copyProjectAcross(
       // each onto its asset when the project is next opened.
       for (const a of assets) {
         if (!a.proxy) continue;
+        // A compat proxy is asked for as the cover it was.
+        const compat = compatCoverOf(a.proxy.fileName);
         void dst
           .fetch(`/api/cut/projects/${summary.id}/proxy`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ file: names.get(a.fileName) ?? a.fileName }),
+            body: JSON.stringify({ file: names.get(a.fileName) ?? a.fileName, ...(compat ? { compat } : {}) }),
           })
           .catch(() => {});
       }

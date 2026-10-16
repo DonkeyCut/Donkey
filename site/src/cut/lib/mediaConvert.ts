@@ -27,6 +27,7 @@ import {
   videoTrackOf,
   UnreadableMediaError,
 } from "./mediaRead";
+import type { ConvertMode } from "./convertMode";
 import { useEditor } from "./store";
 import type { MediaAsset } from "./types";
 
@@ -41,6 +42,8 @@ export interface ConvertSource {
 
 export interface ConvertOptions {
   maxHeight?: number;
+  /** "reencode" rewrites a video stream that already fits (convertMode.ts). */
+  mode?: ConvertMode;
   /** Pinned by work that outlives navigation; defaults to the active one. */
   backend?: CutBackend;
 }
@@ -118,7 +121,7 @@ export async function convertProjectFile(
   // projects, the worker beside R2 for cloud ones. A headless process working
   // a cloud project is that machine, so it converts in-process.
   return backend.kind === "local" || (backend.kind === "cloud" && inPage())
-    ? convertOnBackend(projectId, source, backend, opts.maxHeight)
+    ? convertOnBackend(projectId, source, backend, opts)
     : convertNearThePage(projectId, source, { ...opts, backend });
 }
 
@@ -207,12 +210,12 @@ async function convertOnBackend(
   projectId: string,
   source: ConvertSource,
   backend: CutBackend,
-  maxHeight?: number
+  { maxHeight, mode }: ConvertOptions
 ): Promise<FileConversion> {
   const res = await backend.fetch(`/api/cut/projects/${projectId}/convert`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ file: source.fileName, ...(maxHeight ? { maxHeight } : {}) }),
+    body: JSON.stringify({ file: source.fileName, ...(maxHeight ? { maxHeight } : {}), ...(mode === "reencode" ? { mode } : {}) }),
   });
   let body: ServerConvert;
   if (backend.kind === "cloud") {
@@ -238,7 +241,9 @@ async function convertNearThePage(
   source: ConvertSource,
   opts: ConvertOptions
 ): Promise<FileConversion> {
-  const decodable = await probeMediaFile(source.url).then(() => true, (error: unknown) => {
+  // A forced re-encode is for a stream the page reads no frames from, so the
+  // page has nothing to encode it from; a headless runtime decodes it itself.
+  const decodable = (opts.mode !== "reencode" || !inPage()) && await probeMediaFile(source.url).then(() => true, (error: unknown) => {
     if (error instanceof UnreadableMediaError && error.undecodable) return false;
     throw error;
   });
@@ -258,7 +263,7 @@ async function convertNearThePage(
   return withCloudPreparedMedia(
     new File([response], source.fileName, { type: response.type }),
     (prepared) => land(projectId, source, prepared, opts),
-    { name: source.name, maxHeight: opts.maxHeight },
+    { name: source.name, maxHeight: opts.maxHeight, mode: opts.mode },
   );
 }
 
@@ -285,9 +290,11 @@ async function convertInProcess(
     const height = video ? await video.getDisplayHeight() : 0;
     const cap = opts.maxHeight && opts.maxHeight > 0 ? Math.round(opts.maxHeight) : 0;
     const shrink = !!(cap && height > cap);
+    const forced = opts.mode === "reencode" && !!video;
     // Already the file a conversion would produce — a second pass would copy
     // it to a new name and change nothing.
     if (
+      !forced &&
       MP4_EXT.test(source.fileName) &&
       !shrink &&
       (!video || video.codec === "avc") &&
@@ -304,10 +311,11 @@ async function convertInProcess(
     // A stream already in the target codec is copied packet for packet; what
     // is left over is what gets decoded and re-encoded.
     const reencoded =
-      (!!video && (video.codec !== "avc" || shrink)) || (!!audio && audio.codec !== "aac");
+      (!!video && (video.codec !== "avc" || shrink || forced)) || (!!audio && audio.codec !== "aac");
     const videoOptions: ConversionVideoOptions = {
       codec: "avc",
       ...(shrink ? { height: cap } : {}),
+      ...(forced ? { forceTranscode: true } : {}),
     };
     const audioOptions: ConversionAudioOptions = { codec: "aac" };
 
@@ -347,6 +355,7 @@ async function convertOnTheMac(
   const form = new FormData();
   form.append("file", bytes, source.fileName);
   if (opts.maxHeight) form.append("maxHeight", String(Math.round(opts.maxHeight)));
+  if (opts.mode === "reencode") form.append("mode", opts.mode);
   const res = await engineFetch("/api/cut/convert", { method: "POST", body: form });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
