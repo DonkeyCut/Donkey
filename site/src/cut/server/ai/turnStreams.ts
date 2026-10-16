@@ -1,5 +1,5 @@
 import { chatRuntime } from "../../lib/chatRuntime";
-import { mkdir, open, readFile, stat } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { UIMessageChunk } from "ai";
@@ -11,6 +11,15 @@ const globalTurns = globalThis as unknown as { __cutChatTurns?: Map<string, Turn
 const running = (globalTurns.__cutChatTurns ??= new Map<string, Turn>());
 const keyFor = (projectId: string, threadId: string) => createHash("sha256").update(`${projectId}/${threadId}`).digest("hex");
 const fileFor = (key: string) => path.join(cutDataRoot(), "chat-streams", `${key}.sse`);
+
+// What each journal holds, kept as it is written so a peek never rereads it:
+// the turn's message (null until a start chunk names one) and its chunks. A
+// finished turn also leaves the count beside its journal, for a restarted
+// engine; a journal with neither is counted once from its file.
+type JournalCount = { messageId: string | null; chunks: number };
+const globalJournals = globalThis as unknown as { __cutChatJournals?: Map<string, JournalCount> };
+const journalCounts = () => (globalJournals.__cutChatJournals ??= new Map<string, JournalCount>());
+const countFileFor = (key: string) => path.join(cutDataRoot(), "chat-streams", `${key}.json`);
 
 /** The engine drains a turn into its journal independently of its viewers. */
 export async function startTurnStream(
@@ -28,6 +37,10 @@ export async function startTurnStream(
   running.set(key, turn);
   try {
     await mkdir(path.dirname(fileFor(key)), { recursive: true });
+    // The previous turn's count goes first, so a crash mid-turn never pairs it with this journal.
+    await rm(countFileFor(key), { force: true });
+    const count: JournalCount = { messageId: null, chunks: 0 };
+    journalCounts().set(key, count);
     const file = await open(fileFor(key), "w", 0o600);
     let reader: ReadableStreamDefaultReader<UIMessageChunk>;
     try { reader = source(turn.abort.signal).getReader(); }
@@ -42,10 +55,13 @@ export async function startTurnStream(
           bytes += Buffer.byteLength(data);
           if (bytes > journalBytes) throw new Error("This chat turn exceeded its saved transcript limit.");
           await file.write(data);
+          if (count.chunks === 0 && value.type === "start" && typeof value.messageId === "string") count.messageId = value.messageId;
+          count.chunks++;
         }
       } catch (error) {
         turn.abort.abort();
         await file.write(`data: ${JSON.stringify({ type: "error", errorText: errorMessage(error, "Chat stopped.") })}\n\n`);
+        count.chunks++;
       } finally {
         try { await file.write("data: [DONE]\n\n"); }
         finally {
@@ -53,6 +69,7 @@ export async function startTurnStream(
           running.delete(key);
           reader.releaseLock();
           await file.close();
+          await writeFile(countFileFor(key), JSON.stringify(count), { mode: 0o600 });
         }
       }
     })().catch((error) => console.error("[cut-ai] Could not finish the chat journal:", error));
@@ -132,13 +149,28 @@ export async function followTurnStream(projectId: string, threadId: string, sign
  * thread has no journal. */
 export async function peekTurnStream(projectId: string, threadId: string): Promise<{ messageId: string; chunks: number; running: boolean } | null> {
   const key = keyFor(projectId, threadId);
+  const count = journalCounts().get(key) ?? await readJournalCount(key);
+  if (!count?.messageId || count.chunks === 0) return null;
+  return { messageId: count.messageId, chunks: count.chunks, running: running.has(key) };
+}
+
+/** A journal's count after a restart: the one its finished turn left, else
+ * counted once from the journal itself (a turn the engine died during). */
+async function readJournalCount(key: string): Promise<JournalCount | null> {
+  const saved = await readFile(countFileFor(key), "utf8").then((text) => JSON.parse(text) as JournalCount).catch(() => null);
+  const count = saved ?? await countJournal(key);
+  if (count) journalCounts().set(key, count);
+  return count;
+}
+
+async function countJournal(key: string): Promise<JournalCount | null> {
   const text = await readFile(fileFor(key), "utf8").catch(() => null);
-  const chunks = text?.split("\n").filter((line) => line.startsWith("data: {")) ?? [];
-  if (chunks.length === 0) return null;
-  let start: { type?: unknown; messageId?: unknown };
-  try { start = JSON.parse(chunks[0].slice("data: ".length)) as typeof start; } catch { return null; }
-  if (start.type !== "start" || typeof start.messageId !== "string") return null;
-  return { messageId: start.messageId, chunks: chunks.length, running: running.has(key) };
+  if (text === null) return null;
+  const chunks = text.split("\n").filter((line) => line.startsWith("data: {"));
+  let start: { type?: unknown; messageId?: unknown } = {};
+  try { start = JSON.parse(chunks[0]?.slice("data: ".length) ?? "{}") as typeof start; } catch { /* A torn first line names no turn. */ }
+  const messageId = start.type === "start" && typeof start.messageId === "string" ? start.messageId : null;
+  return { messageId, chunks: chunks.length };
 }
 
 export function cancelTurnStream(projectId: string, threadId: string): void {

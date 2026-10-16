@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { UIMessageChunk } from "ai";
@@ -52,6 +52,27 @@ test("a peek reports how far the journal reaches while the turn runs and after",
   output.close();
   await new Promise((resolve) => setTimeout(resolve, 20));
   expect(await peekTurnStream("project", "peek")).toEqual({ messageId: "turn-peek", chunks: 4, running: false });
+});
+
+test("a peek reads the turn's count without rereading its journal, across an engine restart", async () => {
+  const response = await startTurnStream("project", "peek-restart", () => new ReadableStream({ start(controller) {
+    controller.enqueue({ type: "start", messageId: "turn-restart" });
+    controller.enqueue({ type: "text-start", id: "t" });
+    controller.enqueue({ type: "finish" });
+    controller.close();
+  } }), () => {}, () => {});
+  await response.body!.cancel();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // An engine restart forgets what it held in memory.
+  delete (globalThis as { __cutChatJournals?: unknown }).__cutChatJournals;
+  // The journal is no longer read: garbage in its place leaves the count alone.
+  const streams = path.join(root, "chat-streams");
+  for (const name of await readdir(streams)) {
+    if (!name.endsWith(".sse")) continue;
+    const text = await readFile(path.join(streams, name), "utf8");
+    if (text.includes("turn-restart")) await writeFile(path.join(streams, name), "not a journal");
+  }
+  expect(await peekTurnStream("project", "peek-restart")).toEqual({ messageId: "turn-restart", chunks: 3, running: false });
 });
 
 test("Stop cancels the run explicitly", async () => {
