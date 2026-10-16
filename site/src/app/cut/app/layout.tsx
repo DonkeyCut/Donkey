@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 
 import { NoSessionReplay } from "@/app/_components/NoSessionReplay";
+import { NoTranslate } from "@/app/_components/NoTranslate";
 import { ConnectGate } from "@/cut/components/ConnectGate";
 import { ExportsDock } from "@/cut/components/ExportsDock";
 import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";
@@ -38,6 +39,7 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
       className="app-surface min-h-screen bg-white font-system text-foreground antialiased"
     >
       <NoSessionReplay />
+      <NoTranslate />
       {/* A route whose address carries data — the editor's project id — can't be
           in the prerendered shell, and the framework resolves that above the
           client shell below. The boundary is here so it has somewhere to land. */}

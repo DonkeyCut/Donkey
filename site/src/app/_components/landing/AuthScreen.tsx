@@ -15,6 +15,8 @@ type Props = {
   mode: AuthMode;
   method?: "google" | "email";
   callbackURL?: string;
+  // The `?error=` code a failed provider callback brought back here.
+  authError?: string;
   // CutFooter reads the blog on the server, so the page hands it in.
   footer: ReactNode;
 };
@@ -56,9 +58,11 @@ const copy = {
 
 const GOOGLE_BUTTON_HEIGHT = 56;
 
-export function AuthScreen({ mode, method = "google", callbackURL, footer }: Props) {
+export function AuthScreen({ mode, method = "google", callbackURL, authError, footer }: Props) {
   const [isPending, setIsPending] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(
+    authError ? "Sign-in didn't finish. Please try again." : null,
+  );
   const screenCopy = copy[mode];
   const otherMode: AuthMode = mode === "sign-in" ? "sign-up" : "sign-in";
   const alternateParams = new URLSearchParams();

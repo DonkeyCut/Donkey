@@ -8,6 +8,7 @@ import { provisionSignupGrants } from "@/lib/onboarding/signup-grants";
 import { prisma } from "@/lib/prisma";
 import { emailPasswordDisabledPaths, emailPasswordGuard, emailPasswordOptions } from "@/lib/email-password-auth";
 import { sendVerificationEmail } from "@/lib/email/send-verification";
+import { AUTH_ERROR_PATH } from "@/lib/signInReturn";
 
 // donkeycut.com owns sign-in: the auth pages, the auth API, and the Google
 // OAuth callback all serve on that one origin (the proxy 308s www. to the apex
@@ -84,6 +85,10 @@ export const auth = betterAuth({
     autoSignInAfterVerification: false,
   },
   disabledPaths: emailPasswordDisabledPaths,
+  // A provider callback that fails comes back to sign-in, which says so and
+  // offers the button again; left unset, production sends it to the landing
+  // page with only an `?error=` code to show for it.
+  onAPIError: { errorURL: AUTH_ERROR_PATH },
   hooks: {
     before: emailPasswordGuard,
   },
