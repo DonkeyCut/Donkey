@@ -90,14 +90,19 @@ describe("H.264 in a browser without it", () => {
     return new Blob([new Uint8Array(bytes)], { type: "video/mp4" });
   };
 
+  // A page with no WebCodecs of its own: the stubbed codec list is the only
+  // answer, whatever decoder stand-in another test file left on the global.
   const asPage = async <T>(run: () => Promise<T>): Promise<T> => {
     const doc = Object.getOwnPropertyDescriptor(globalThis, "document");
+    const decoder = Object.getOwnPropertyDescriptor(globalThis, "VideoDecoder");
     Object.defineProperty(globalThis, "document", { value: {}, configurable: true });
+    delete (globalThis as { VideoDecoder?: unknown }).VideoDecoder;
     try {
       return await run();
     } finally {
       if (doc) Object.defineProperty(globalThis, "document", doc);
       else delete (globalThis as { document?: unknown }).document;
+      if (decoder) Object.defineProperty(globalThis, "VideoDecoder", decoder);
     }
   };
 

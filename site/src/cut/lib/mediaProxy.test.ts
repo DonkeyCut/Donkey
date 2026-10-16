@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import { stubModule } from "@/lib/testing/stubModule";
 import type { CutBackend } from "./backend/types";
 import type { MediaAsset } from "./types";
@@ -73,9 +73,20 @@ const h264 = (id: string, extra: Partial<MediaAsset> = {}): MediaAsset => ({
 
 /** What the browser answers when asked whether it decodes the proxy's HEVC. */
 let hevc = true;
-(globalThis as { VideoDecoder?: unknown }).VideoDecoder = {
+// The suite shares one global scope, so the stand-in comes out after this
+// file: left in, every later file's H.264 probe reads as decodable.
+const decoder = globalThis as { VideoDecoder?: unknown };
+const realDecoder = Object.getOwnPropertyDescriptor(decoder, "VideoDecoder");
+decoder.VideoDecoder = {
   isConfigSupported: async () => ({ supported: hevc }),
 };
+afterAll(() => {
+  if (realDecoder) {
+    Object.defineProperty(decoder, "VideoDecoder", realDecoder);
+    return;
+  }
+  delete decoder.VideoDecoder;
+});
 
 function backend(kind: CutBackend["kind"], answer: (path: string, body: unknown) => Response) {
   const calls: { path: string; body: unknown }[] = [];
