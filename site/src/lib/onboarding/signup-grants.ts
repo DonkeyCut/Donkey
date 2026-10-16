@@ -4,23 +4,20 @@ import { getGlobalSetting } from "@/lib/config/effective";
 import { creditStringToMicros } from "@/lib/credits/amounts";
 import { grantCredits } from "@/lib/credits/inference";
 import { creditGrantExpiry } from "@/lib/credits/top-up";
-import { type EmailUser } from "@/lib/email/resend";
-import { deliverEmail } from "@/lib/email/outbox";
-import { welcomeIdempotencyKey } from "@/lib/email/send-welcome";
 import { isDeletedAddress } from "@/lib/onboarding/deleted-account";
 import { claimSignupGrant, signupNetworkKey } from "@/lib/onboarding/signup-network";
 
+type SignupUser = { email: string; id: string };
+
 // Single source of truth for what a new account starts with. All steps are
 // idempotent and keyed to the user, so provisioning can run more than once
-// (e.g. a retried signup) without double-granting, double-seeding, or
-// double-sending. The grant amount and its lifetime are the signupCredits
-// setting; the welcome email names the amount that landed. `headers` are the
-// signup request's, which name the network the account came from.
-export async function provisionSignupGrants(user: EmailUser, headers: Headers | undefined): Promise<void> {
+// (e.g. a retried signup) without double-granting or double-seeding. The
+// grant amount and its lifetime are the signupCredits setting. `headers` are
+// the signup request's, which name the network the account came from.
+export async function provisionSignupGrants(user: SignupUser, headers: Headers | undefined): Promise<void> {
   const setting = await getGlobalSetting("signupCredits");
   // An address that was deleted already had its signup credits once. The
-  // starter project, fonts and welcome still land; the credits do not, and
-  // the welcome email leaves them out.
+  // starter project and fonts still land; the credits do not.
   const returning = await isDeletedAddress(user.email);
   if (returning) {
     console.info("[signup-grants] address returned after deletion; signup credits withheld", {
@@ -38,7 +35,6 @@ export async function provisionSignupGrants(user: EmailUser, headers: Headers | 
       : grantSignupAppCredits(user.id, credits, expiresAt),
     seedStarterProject(user.id),
     seedFontsFolder(user.id),
-    deliverEmail({ idempotencyKey: welcomeIdempotencyKey(user.id), kind: "welcome", payload: { credits }, userId: user.id }),
   ]);
 
   for (const result of results) {

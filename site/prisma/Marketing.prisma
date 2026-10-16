@@ -1,5 +1,5 @@
 // Founder outreach: one row per account per campaign, seeded by the nightly
-// outreach-scan job (src/lib/jobs/outreach-scan.ts) and worked by hand. The
+// outreach-scan job in the back office and worked by hand. The
 // row is a marker, not a mailbox — it carries status, timestamps, and the
 // scan's credit snapshot, never a subject or a message body. The conversation
 // itself lives in the operator's inbox.
@@ -8,7 +8,7 @@ model UserOutreach {
   id           String   @id @default(cuid())
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  // Campaign ids live in code (src/lib/marketing/campaigns.ts).
+  // Campaign ids live in code (the back office's campaigns).
   campaign     String
   // "todo" | "sent" | "replied" | "ignored". The scan creates and retires
   // "todo" rows; every other status is set by a person or by an inbound reply.
@@ -28,7 +28,7 @@ model UserOutreach {
   lastActiveAt DateTime?
   // When the balance last reached zero; null for an account still in credit.
   ranOutAt     DateTime?
-  // Why the scan listed the account (ids in src/lib/marketing/campaigns.ts).
+  // Why the scan listed the account (ids in the back office's campaigns).
   reasons      String[]  @default([])
   // The latest declined Stripe charge inside the payment window.
   paymentFailedAt DateTime?

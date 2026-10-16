@@ -1,6 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { prisma } from "@/lib/prisma";
 
 // Unsubscribe links authenticate with an HMAC over the userId, keyed by a
@@ -18,11 +17,6 @@ function signature(userId: string): Buffer {
   return createHmac("sha256", key).update(userId).digest();
 }
 
-// Token format: `${userId}.${base64url(hmac(userId))}`.
-export function unsubscribeToken(userId: string): string {
-  return `${userId}.${signature(userId).toString("base64url")}`;
-}
-
 export function verifyUnsubscribeToken(token: string): string | null {
   const dot = token.lastIndexOf(".");
   if (dot <= 0) {
@@ -35,16 +29,6 @@ export function verifyUnsubscribeToken(token: string): string | null {
     return null;
   }
   return userId;
-}
-
-// The page a human opens from an email footer.
-export function unsubscribePageUrl(userId: string): string {
-  return `${DONKEYCUT_CANONICAL}/unsubscribe?token=${unsubscribeToken(userId)}`;
-}
-
-// The endpoint mail providers POST to for RFC 8058 one-click unsubscribe.
-export function unsubscribeActionUrl(userId: string): string {
-  return `${DONKEYCUT_CANONICAL}/api/email/unsubscribe?token=${unsubscribeToken(userId)}`;
 }
 
 // The database row is the record every marketing send reads. A missing user

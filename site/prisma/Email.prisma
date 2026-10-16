@@ -1,7 +1,7 @@
 // Per-user email posture: whether the one-time welcome email has gone out, and
 // whether the account has opted out of non-essential email. Transactional and
 // security email ignores the opt-out; any other send must check it first
-// (src/lib/email/unsubscribe.ts).
+// (the back office, which sends all email).
 
 model UserEmailSettings {
   userId                  String    @id
@@ -16,12 +16,12 @@ model UserEmailSettings {
 }
 
 // The outbox. Every email the site sends is a row here first; one drainer
-// sends rows in priority order under the plan's monthly budget
-// (src/lib/email/outbox.ts). The row is the send's record: a retried queue
+// in the back office sends rows in priority order under the plan's monthly
+// budget. The row is the send's record: a retried queue
 // call adds nothing because the idempotency key is unique.
 model EmailSend {
   id             String     @id @default(cuid())
-  // One of EMAIL_KIND_IDS (src/lib/email/kindIds.ts).
+  // One of the back office's email kinds.
   kind           String
   // Higher goes first: the kind's priority when the row was queued.
   priority       Int

@@ -63,16 +63,15 @@ export const auth = betterAuth({
     user: {
       create: {
         // Every new account is provisioned with its signup credit grant, its
-        // starter project, the welcome email, and its Resend contact.
-        // provisionSignupGrants is idempotent and
-        // swallows its own errors, so it never blocks user creation. The
-        // request's headers carry the network the signup came from.
+        // starter project, and its fonts folder. provisionSignupGrants is
+        // idempotent and swallows its own errors, so it never blocks user
+        // creation. The request's headers carry the network the signup came
+        // from.
         after: async (user, context) => {
           await provisionSignupGrants(
             {
               email: user.email,
               id: user.id,
-              name: user.name,
             },
             context?.headers ?? context?.request?.headers,
           );

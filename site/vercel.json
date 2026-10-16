@@ -2,11 +2,6 @@
   "git": { "deploymentEnabled": false },
   "crons": [
     { "path": "/api/chatgpt/gc", "schedule": "15 4 * * *" },
-    { "path": "/api/credits/expire", "schedule": "30 0 * * *" },
-    { "path": "/api/credits/expiry-notices", "schedule": "0 16 * * *" },
-    { "path": "/api/cut-cloud/gc", "schedule": "0 4 * * *" },
-    { "path": "/api/analytics/run", "schedule": "0 1 * * *" },
-    { "path": "/api/experiments/results", "schedule": "0 3 * * *" },
-    { "path": "/api/marketing/outreach/scan", "schedule": "15 1 * * *" }
+    { "path": "/api/cut-cloud/gc", "schedule": "0 4 * * *" }
   ]
 }

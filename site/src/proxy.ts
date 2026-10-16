@@ -59,7 +59,7 @@ const PASSTHROUGH = [
   "/terms",
   "/sign-in",
   "/sign-up",
-  // Email-footer unsubscribe page.
+  // Email-footer unsubscribe page; the back office's emails link here.
   "/unsubscribe",
 ];
 

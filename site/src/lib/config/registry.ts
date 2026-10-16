@@ -1,5 +1,4 @@
 import {
-  DEFAULT_THRESHOLDS,
   defaultSettings as defaultsOf,
   defineSettings,
   publicSettingKeys,
@@ -9,8 +8,6 @@ import {
   type SettingsOf,
 } from "@donkeycut/abexp";
 import { z } from "zod";
-import { creditOfferTermsSchema } from "@/lib/credits/offerTerms";
-import { DEFAULT_EMAIL_PRIORITIES, EMAIL_KIND_IDS } from "@/lib/email/kindIds";
 
 import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/top-up";
 
@@ -20,15 +17,6 @@ import { maxCreditGrantDollars, maxCreditGrantExpiryDays } from "@/lib/credits/t
 // experiment supplies the variant. Client-safe: zod only, so a form reads the
 // same declarations the server validates against. A feature that people might
 // tune ships its setting here in the same change.
-
-function validTimeZone(zone: string): boolean {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: zone });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export const SETTINGS = defineSettings({
   databasePool: {
@@ -96,13 +84,6 @@ export const SETTINGS = defineSettings({
     public: false,
     title: "Shared library",
     description: "Folders, assets, and templates returned per shared library page.",
-  },
-  promotionCreditOffer: {
-    schema: creditOfferTermsSchema.extend({ minimumAccountAgeDays: z.number().int().min(1).max(36500) }).strict(),
-    default: { dollars: 15, claimWindowDays: 3, expiresAfterDays: 28, claim: "link", minimumAccountAgeDays: 7 },
-    public: false,
-    title: "Promotion credit offer",
-    description: "Default credit offer and minimum account age for new promotion drafts. Saved drafts keep their terms.",
   },
   chatRuntime: {
     schema: z.object({
@@ -508,39 +489,6 @@ export const SETTINGS = defineSettings({
     description:
       "The loudness each export target masters to (social, podcast, broadcast), the target an export starts on, and the true-peak ceiling a mastered mix is limited under.",
   },
-  experimentResults: {
-    schema: z
-      .object({
-        // An ended experiment keeps getting a fresh read for this long, so
-        // late conversions still land in it.
-        graceDays: z.number().int().min(0).max(365),
-        // The sample a positive result is believed on.
-        minExposedPerVariant: z.number().int().min(1),
-        minConversions: z.number().int().min(1),
-        // The smaller sample a loss can be called on.
-        earlyMinExposed: z.number().int().min(1),
-        earlyMinConversions: z.number().int().min(1),
-        shipPValue: z.number().min(0).max(1),
-        stopProbability: z.number().min(0).max(1),
-        // The lift the sample-size estimate plans for.
-        plannedRelativeLift: z.number().min(0.01).max(10),
-      })
-      .strict(),
-    default: {
-      graceDays: 30,
-      minExposedPerVariant: DEFAULT_THRESHOLDS.minExposedPerVariant,
-      minConversions: DEFAULT_THRESHOLDS.minConversions,
-      earlyMinExposed: DEFAULT_THRESHOLDS.earlyMinExposed,
-      earlyMinConversions: DEFAULT_THRESHOLDS.earlyMinConversions,
-      shipPValue: DEFAULT_THRESHOLDS.shipPValue,
-      stopProbability: DEFAULT_THRESHOLDS.stopProbability,
-      plannedRelativeLift: DEFAULT_THRESHOLDS.plannedRelativeLift,
-    },
-    public: false,
-    title: "Experiment results",
-    description:
-      "The bars a verdict is called against, and how long an ended experiment keeps being recomputed.",
-  },
   signupCredits: {
     schema: z
       .object({
@@ -570,88 +518,6 @@ export const SETTINGS = defineSettings({
     public: false,
     title: "Signup credits per network",
     description: "How many new accounts from one network get the signup credits within the window; later accounts from it start with none.",
-  },
-  emailSendBudget: {
-    schema: z
-      .object({
-        // Emails the provider's plan includes per billing cycle.
-        monthlyAllowance: z.number().int().min(1).max(10_000_000),
-        // Day of the month the plan renews, at UTC midnight.
-        renewalDay: z.number().int().min(1).max(31),
-        // Slots kept free per work day for emails sent by hand, held for
-        // every work day left in the cycle.
-        manualReserve: z.number().int().min(0).max(100000),
-        manualTimeZone: z.string().refine(validTimeZone, "Unknown IANA time zone"),
-        // Work hours in that zone, start inclusive and end exclusive.
-        manualStartHour: z.number().int().min(0).max(23),
-        manualEndHour: z.number().int().min(1).max(24),
-        manualWeekdaysOnly: z.boolean(),
-        // Days of signup history the transactional forecast averages over.
-        signupLookbackDays: z.number().int().min(1).max(90),
-        // Slots kept free beyond the forecast for transactional email the
-        // forecast cannot see, such as credit offers sent by hand.
-        transactionalHeadroom: z.number().int().min(0).max(1_000_000),
-      })
-      .strict()
-      .refine((v) => v.manualStartHour < v.manualEndHour, { message: "Work hours must end after they start." })
-      // A cycle holds at most 31 work days, so this keeps every ceiling above zero.
-      .refine((v) => v.manualReserve * 31 + v.transactionalHeadroom < v.monthlyAllowance, {
-        message: "The reserves must leave room for bulk sends over a 31-day cycle.",
-      }),
-    default: {
-      monthlyAllowance: 50000,
-      renewalDay: 11,
-      manualReserve: 10,
-      manualTimeZone: "Asia/Seoul",
-      manualStartHour: 9,
-      manualEndHour: 18,
-      manualWeekdaysOnly: true,
-      signupLookbackDays: 7,
-      transactionalHeadroom: 200,
-    },
-    public: false,
-    title: "Email send budget",
-    description:
-      "The plan's monthly allowance and renewal day, the slots held per work day for emails sent by hand, and how the transactional forecast that holds slots ahead of promotions is sized.",
-  },
-  emailPriorities: {
-    schema: z
-      // A kind added after the override was saved reads its default, so the
-      // saved order for the rest keeps holding.
-      .object(
-        Object.fromEntries(
-          EMAIL_KIND_IDS.map((id) => [id, z.number().int().min(0).max(1000).default(DEFAULT_EMAIL_PRIORITIES[id])]),
-        ),
-      )
-      .strict(),
-    default: { ...DEFAULT_EMAIL_PRIORITIES },
-    public: false,
-    title: "Email priorities",
-    description: "The order the outbox sends in when the budget is short: higher goes first. A change applies to emails queued from then on.",
-  },
-  creditExpiryNotice: {
-    schema: z
-      .object({
-        // How many days before a given grant expires its account is emailed.
-        daysBefore: z.number().int().min(1).max(maxCreditGrantExpiryDays),
-      })
-      .strict(),
-    default: { daysBefore: 3 },
-    public: false,
-    title: "Credit expiry notice",
-    description: "How many days before signup or manually granted credits expire the account is emailed.",
-  },
-  manualCreditOffer: {
-    schema: z
-      .object({
-        // Days the emailed claim link stays open after it is sent.
-        claimWindowDays: z.number().int().min(1).max(365),
-      })
-      .strict(),
-    default: { claimWindowDays: 3 },
-    public: false,
-    title: "Manual credit offer",
-    description: "How many days the claim link in a credit offer email stays open.",
   },
   subscribeBonus: {
     schema: z

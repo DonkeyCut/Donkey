@@ -1,6 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { prisma } from "@/lib/prisma";
 
 // A button in a promotion goes through this app first, so the send row learns
@@ -14,11 +13,6 @@ function signature(sendId: string, url: string): Buffer {
   if (!secret) throw new Error("BETTER_AUTH_SECRET is not set.");
   const key = createHmac("sha256", secret).update(TOKEN_DOMAIN).digest();
   return createHmac("sha256", key).update(`${sendId}\n${url}`).digest();
-}
-
-export function clickUrl(sendId: string, url: string): string {
-  const params = new URLSearchParams({ s: sendId, u: url, t: signature(sendId, url).toString("base64url") });
-  return `${DONKEYCUT_CANONICAL}/api/email/click?${params}`;
 }
 
 export function verifyClick(sendId: string, url: string, token: string): boolean {

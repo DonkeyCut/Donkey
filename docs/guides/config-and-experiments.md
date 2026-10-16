@@ -126,7 +126,7 @@ by variant as well.
 ## Promotions
 
 A promotion is one email to an audience, minus anyone an earlier promotion reached; the Pro offers behind it (subscribe bonus, allowance multiplier) are settings. A copy sent to one person by hand carries the same per-person outbox key, so it counts in the promotion and a later segment send skips them.
-Every outbound email is a row in one outbox, sent by one drainer in priority order under the email plan's monthly allowance, shared by the whole site. A promotion is read from the accounts table a page at a time by a job, queues its most recently active recipients first, and stops at what the rest of the billing cycle is forecast to need for welcome and credit emails, and for mail sent by hand on the work days left, then picks up the slots that go unused as the cycle runs down. The allowance, the renewal day, the reserves and the work hours are the Email send budget setting, and the order between kinds is the Email priorities setting.
+Promotions, like every other email and background job, are written, queued and sent by the back office: a separate deployment that shares this database. This site holds the settings that shape the offers and the claim flow that lands them.
 
 A credit promotion is a credit offer: one row that promises an account an
 amount, the credit's life, and the window it can be claimed in, then records
@@ -155,5 +155,5 @@ The framework is the abexp package under the site's packages folder: registry
 shape and resolution, audience, assignment, the experiment schema, and the
 statistics and verdict, with no host code inside. The site binds it in its
 config library, which holds the product's registry, collects the audience
-facts, and stores assignments; the results job sits with the other background
-jobs.
+facts, and stores assignments; the results job runs in the back office with
+the other background jobs.

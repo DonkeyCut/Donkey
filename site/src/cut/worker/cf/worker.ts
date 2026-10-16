@@ -20,8 +20,6 @@ type WorkerEnv = MediaEnv & {
   CUT_RUNNER_SECRET?: string;
   CUT_COPY_EXECUTE_URL: string;
   CUT_COPY_EXECUTE_SECRET: string;
-  JOBS_EXECUTE_URL: string;
-  JOBS_EXECUTE_SECRET: string;
   CLOUDFLARE_KV_API_TOKEN: string;
 };
 
@@ -112,16 +110,12 @@ export default {
     return new Response("donkey-cut-worker", { status: 200 });
   },
 
-  // Queue consumer for both queues in wrangler.jsonc — share copies
-  // (donkey-cut-copy) and the site's generic async jobs (donkey-jobs). Each
-  // drains serially: one message per batch, one batch at a time. The work
-  // itself runs on the hosted API — this handler only paces it and carries the
-  // queue's retry semantics: 2xx acks, anything else redelivers after a delay.
+  // Queue consumer for share copies (donkey-cut-copy), drained serially: one
+  // message per batch, one batch at a time. The copy itself runs on the hosted
+  // API — this handler only paces it and carries the queue's retry semantics:
+  // 2xx acks, anything else redelivers after a delay.
   async queue(batch: QueueBatch, env: WorkerEnv): Promise<void> {
-    const target =
-      batch.queue === "donkey-jobs"
-        ? { url: env.JOBS_EXECUTE_URL, secret: env.JOBS_EXECUTE_SECRET }
-        : { url: env.CUT_COPY_EXECUTE_URL, secret: env.CUT_COPY_EXECUTE_SECRET };
+    const target = { url: env.CUT_COPY_EXECUTE_URL, secret: env.CUT_COPY_EXECUTE_SECRET };
     for (const message of batch.messages) {
       const jobId = (message.body as { jobId?: unknown } | null)?.jobId;
       if (typeof jobId !== "string" || !jobId) {

@@ -15,8 +15,8 @@ import { prisma } from "@/lib/prisma";
 // Donkey Pro: the Mac app subscription.
 export const proPlanKey = "pro";
 
-// Stripe subscription statuses that include the Pro allowance. Exported as a
-// list so a database filter can reuse it (src/lib/jobs/outreach-scan.ts).
+// Stripe subscription statuses that include the Pro allowance, as a list so a
+// database filter can reuse it.
 export const ACTIVE_PRO_STATUSES = ["active", "trialing"] as const;
 
 const activeStatuses = new Set<string>(ACTIVE_PRO_STATUSES);

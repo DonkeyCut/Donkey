@@ -1,8 +1,8 @@
-// Generic deferred work the site runs off the request path. A request writes a
-// row and publishes its id to a Cloudflare Queue; the Cut worker's queue
-// consumer calls back into /api/jobs/worker one message at a time, and the
-// creator polls the row. Job kinds and their payload schemas live in code
-// (src/lib/jobs/registry.ts).
+// Deferred work the back office runs off the request path. A request there
+// writes a row and publishes its id to a Cloudflare Queue; its own queue
+// consumer (donkey-jobs-worker) calls its /api/jobs/worker one at a time,
+// and the creator polls the row. Job kinds and their payload schemas live in
+// its code.
 
 model AsyncJob {
   id        String   @id @default(cuid())
