@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
-import { runFfmpeg, videoEncoder, vtQuality, type RenderHandle } from "./exportPipeline";
+import { hasVp9Encoder, runFfmpeg, videoEncoder, vtQuality, type RenderHandle } from "./exportPipeline";
 import { assertGraphSafe } from "./filterGraph";
 import { streamCodecs } from "./convert";
 import { videoDimensions } from "./util";
@@ -206,6 +206,10 @@ export function vp9Crf(crf: number) {
 /** The compat proxy's sound: Opus, which every browser decodes. */
 const OPUS_KBPS = 128;
 
+/** Picture codecs an MP4 holds as they are, so a sound-only cover can copy
+ * them. Anything else (ProRes, DNxHD) is encoded to H.264. */
+const MP4_PICTURES = new Set(["h264", "hevc", "av1", "vp9", "mpeg4"]);
+
 /** A keyframe every second of the master's time, counted from the last
  * forced one, as the HEVC proxy places them. */
 const KEY_EVERY_SECOND = "expr:if(isnan(prev_forced_t),1,gte(t,prev_forced_t+1))";
@@ -227,7 +231,7 @@ export interface CompatArgs {
 export function compatFfmpegArgs(
   src: string,
   out: string,
-  opts: CompatArgs & { source: ProxySource | null; hasAudio: boolean; h264: string }
+  opts: CompatArgs & { source: ProxySource | null; videoCodec: string | null; hasAudio: boolean; h264: string }
 ): string[] {
   const { source } = opts;
   const cap = Math.max(2, Math.round(opts.maxHeight));
@@ -240,8 +244,10 @@ export function compatFfmpegArgs(
     // A sound-only cover keeps the master's size unless it is a light one.
     const shrink = source.height > cap && (opts.cover === "video" || !!kbps);
     // A Rec.709 limited picture already is what a proxy holds, so a
-    // sound-only cover copies it packet for packet.
-    const copy = opts.cover === "audio" && source.matrix === "bt709" && !source.fullRange && !shrink && !kbps;
+    // sound-only cover copies it packet for packet when the MP4 can hold it.
+    const copy =
+      opts.cover === "audio" && source.matrix === "bt709" && !source.fullRange && !shrink && !kbps &&
+      MP4_PICTURES.has(opts.videoCodec ?? "");
     if (copy) {
       video.push("-c:v", "copy");
     } else {
@@ -289,13 +295,14 @@ export async function makeCompatProxy(
 ): Promise<ProxyOutcome> {
   const codecs = await streamCodecs(src);
   if (opts.cover === "video" && !codecs.video) throw new Error("That file carries no video.");
+  if (opts.cover === "video" && !(await hasVp9Encoder())) throw new Error("This machine's ffmpeg has no VP9 encoder.");
   const [source, dims, h264] = await Promise.all([
     codecs.video ? probeProxySource(src) : Promise.resolve(null),
     codecs.video ? videoDimensions(src) : Promise.resolve(null),
     videoEncoder("h264"),
   ]);
   if (source && dims) source.height = dims.height;
-  await runFfmpeg(handle, compatFfmpegArgs(src, out, { ...opts, source, hasAudio: !!codecs.audio, h264 }), opts.onProgress);
+  await runFfmpeg(handle, compatFfmpegArgs(src, out, { ...opts, source, videoCodec: codecs.video ?? null, hasAudio: !!codecs.audio, h264 }), opts.onProgress);
   const [info, outDims] = await Promise.all([stat(out), source ? videoDimensions(out) : Promise.resolve(null)]);
   return { sizeBytes: info.size, ...(outDims ? { width: outDims.width, height: outDims.height } : {}) };
 }

@@ -320,9 +320,10 @@ async function requestProxy(
   return { fileName: result.fileName, sizeBytes: result.sizeBytes };
 }
 
-/** Build the compat proxy through the residency that can. A browser project
- * hands the master to the Mac for a sound cover, and otherwise to the worker
- * by way of the cloud shelf: the Mac's ffmpeg carries no VP9 encoder. */
+/** Build the compat proxy through the residency that can. The Mac's ffmpeg
+ * carries no VP9 encoder, so it builds only a sound cover; a picture cover for
+ * a browser or Mac project goes to the worker by way of the cloud shelf and is
+ * stored back in the project. */
 async function buildCompat(
   projectId: string,
   asset: MediaAsset,
@@ -331,7 +332,7 @@ async function buildCompat(
   onProgress: (p: number) => void
 ): Promise<Landed | null> {
   const { proxyMaxHeight, proxyCrf } = cutColor();
-  if (backend.kind === "local") {
+  if (backend.kind === "local" && ask.cover === "audio") {
     if (!(await engineFeatures()).has("media.compat")) return null;
     return requestProxy(projectId, backend, { file: asset.fileName, maxHeight: proxyMaxHeight, crf: proxyCrf, compat: ask.cover }, onProgress);
   }

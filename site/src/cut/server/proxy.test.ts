@@ -189,6 +189,16 @@ describe("compat proxy", () => {
     expect(packets(out)).toBe(packets(src));
   }, 60_000);
 
+  test("a Rec.709 picture MP4 can't hold is encoded when only the sound needs Opus", async () => {
+    const src = path.join(dir, "master.mov");
+    ffmpeg(["-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=24:duration=1", "-f", "lavfi", "-i", "sine=duration=1",
+      "-c:v", "prores_ks", "-colorspace", "bt709", "-color_range", "tv", "-c:a", "aac", "-shortest", src]);
+    const out = path.join(dir, "master.mov.compat.mp4");
+    await makeCompatProxy(handle(out), src, out, { cover: "audio", maxHeight: 1080, crf: 20 });
+
+    expect(codecsOf(out)).toEqual(["h264,video", "opus,audio"]);
+  }, 60_000);
+
   test("a picture outside Rec.709 limited is carried into it", async () => {
     const src = phoneClip("fullrange.mp4", ["-colorspace", "smpte170m", "-color_range", "pc"]);
     const out = path.join(dir, "fullrange.mp4.compat.mp4");

@@ -300,6 +300,26 @@ describe("compat proxy", () => {
     expect(useEditor.getState().assets[0].proxy?.fileName).toBe("a.mp4.compat.webm");
   });
 
+  test("a Mac project's picture cover is built by the worker and stored on the Mac", async () => {
+    // The Mac's ffmpeg carries no VP9 encoder, so only a sound cover is the engine's.
+    compatNeeds = { a: "video" };
+    features = new Set(["media.proxy", "media.compat"]);
+    const asset = h264("a", { url: "http://127.0.0.1:41417/file?p=a.mp4" });
+    useEditor.setState({ projectId: "p", assets: [asset] });
+    const b = backend("local", () => Response.json({}));
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response("master")) as unknown as typeof fetch;
+    try {
+      await ensureProxy("p", asset, b.api);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(b.calls).toHaveLength(0);
+    expect(staged).toEqual([{ name: "a.mp4", cover: "video" }]);
+    expect(stored).toEqual(["a.mp4.compat.webm"]);
+    expect(useEditor.getState().assets[0].proxy?.fileName).toBe("a.mp4.compat.webm");
+  });
+
   test("a cover already on the asset is kept; a VP9 cover carries the sound too", async () => {
     compatNeeds = { a: "audio" };
     const b = backend("cloud", () => Response.json({}));

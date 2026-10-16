@@ -464,6 +464,12 @@ function ffmpegEncoders(): Promise<Set<string>> {
   }));
 }
 
+/** Whether this ffmpeg writes VP9: the worker's build does, the Mac's LGPL
+ * build does not. */
+export async function hasVp9Encoder(): Promise<boolean> {
+  return (await ffmpegEncoders()).has("libvpx-vp9");
+}
+
 export async function h264Encoder(): Promise<"libx264" | "h264_videotoolbox"> {
   return (await ffmpegEncoders()).has("libx264") ? "libx264" : "h264_videotoolbox";
 }
