@@ -1014,12 +1014,18 @@ export interface EditorState {
   removeRenders: (ids: string[]) => void;
   pushHistory: () => void;
   /** Coalesce every edit until the matching `endHistoryBatch` into one undo
-   * step. Used so a whole assistant turn reverts with a single ⌘Z. A batch
-   * opened directly inside another (one chat tool call inside the turn) is a
-   * step of its own while the outer one is open, so an undo mid-turn takes
-   * back that call alone; `label` names what the step was for. */
+   * step. Used so a whole assistant turn reverts with a single ⌘Z. Batches
+   * opened while one is open join it: the run ends when the last one closes.
+   * `label` names what the step was for. */
   beginHistoryBatch: (label?: string) => void;
   endHistoryBatch: () => void;
+  /** Open one step inside the open run (a chat tool call inside its turn), so
+   * an undo mid-turn takes back that call alone. With no run open the step is
+   * a run of its own. Steps that overlap share one checkpoint. */
+  beginHistoryStep: (label: string) => HistoryStep;
+  /** Close `step`. A step whose run closed first was cut loose then, so its
+   * close does nothing: the person's edits after the run are their own. */
+  endHistoryStep: (step: HistoryStep) => void;
   /** Copy the selected clip/audio/overlay/title/cue(s) to the timeline clipboard. */
   copySelection: () => boolean;
   /** What the timeline clipboard holds, for a copy that leaves the tab. */
@@ -1039,6 +1045,12 @@ export interface EditorState {
    * what landed, or null when nothing could. Copies from another timeline
    * come in this way, leaving the clipboard to the person. */
   pasteCopies: (items: TimelineClipboardItem[], at: number) => NonNullable<Selection>[] | null;
+}
+
+/** One open step of the history, held by whoever opened it so it closes
+ * itself and no other. */
+export interface HistoryStep {
+  readonly label: string;
 }
 
 /** The label a chat turn's batch opens with, so an undo that steps back into
@@ -1062,13 +1074,20 @@ let docSeq = 0;
 /** >0 while a run of edits is being coalesced into one undo step (see
  * beginHistoryBatch). One checkpoint is captured when it goes 0→1. */
 let batchDepth = 0;
-/** While a batch is open, the checkpoints of the batches opened directly
- * inside it — one per chat tool call — so the chat's undo mid-turn takes back
- * its last call, not the whole turn so far. Gone once the outer batch closes:
- * after the turn, ⌘Z takes the turn back whole. */
+/** While a run is open, the checkpoints of the steps opened inside it — one
+ * per chat tool call — so the chat's undo mid-turn takes back its last call,
+ * not the whole turn so far. Gone once the run closes: after the turn, ⌘Z
+ * takes the turn back whole. */
 const steps: DocSnapshot[] = [];
-/** The inner batch's checkpoint, committed to `steps` as it closes if the doc
- * changed meanwhile (see sealStep). */
+/** The steps open inside the run, by the handle each opener holds. They
+ * share `stepPending`; the last one to close seals it. */
+const openSteps = new Set<HistoryStep>();
+/** What the open steps' shared checkpoint was for: every open step's name. */
+const openStepLabel = () => [...openSteps].map((step) => step.label).join(", ");
+/** Steps that opened with no run open and so hold a run of their own. */
+const runSteps = new WeakSet<HistoryStep>();
+/** The open steps' checkpoint, committed to `steps` as the last of them
+ * closes if the doc changed meanwhile (see sealStep). */
 let stepPending: { snap: DocSnapshot; seq: number } | null = null;
 /** What each checkpoint was taken for — the label its batch opened with —
  * kept off the snapshot so every copy of the stacks carries it for free. */
@@ -1844,14 +1863,16 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     rearmStep();
   };
 
-  /** The same for an inner batch an undo ran inside: the undo is not that
-   * batch's edit to record. */
+  /** The same for an open step an undo ran inside: the undo is not that
+   * step's edit to record. */
   const rearmStep = () => {
-    if (batchDepth > 1) stepPending = { snap: snapshot(), seq: docSeq };
+    if (openSteps.size === 0) return;
+    stepPending = { snap: snapshot(), seq: docSeq };
+    historyLabels.set(stepPending.snap, openStepLabel());
   };
 
-  /** Seal the inner batch's checkpoint into `steps` if the doc changed under
-   * it, the way flush seals an outer one. */
+  /** Seal the open steps' checkpoint into `steps` if the doc changed under
+   * it, the way flush seals a run's. */
   const sealStep = () => {
     if (!stepPending) return;
     const p = stepPending;
@@ -2617,24 +2638,53 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         flush(); // seal any prior edit before opening the batch
         pending = { snap: snapshot(), seq: docSeq };
         if (label) historyLabels.set(pending.snap, label);
-      } else if (batchDepth === 1) {
-        // A batch inside the open one: a step of its own until the outer closes.
-        sealStep();
-        stepPending = { snap: snapshot(), seq: docSeq };
-        if (label) historyLabels.set(stepPending.snap, label);
       }
       batchDepth++;
     },
     endHistoryBatch: () => {
       batchDepth = Math.max(0, batchDepth - 1);
-      if (batchDepth === 1) sealStep();
+      if (batchDepth > 0) return;
+
+      // The run is over: steps still open belong to work that outlived it
+      // (a tool call its stopped turn left running), so they are cut loose
+      // and the edits after this point are nobody's batch.
+      openSteps.clear();
+      sealStep();
+      steps.length = 0;
+      if (stepUndone) dropIdlePending();
+      stepUndone = false;
+      flush(); // commit the whole run as one undo step
+    },
+
+    beginHistoryStep: (label) => {
+      const step: HistoryStep = { label };
+
+      // No run open: the step is an ordinary history entry, named for itself.
       if (batchDepth === 0) {
-        sealStep();
-        steps.length = 0;
-        if (stepUndone) dropIdlePending();
-        stepUndone = false;
-        flush(); // commit the whole run as one undo step
+        runSteps.add(step);
+        get().beginHistoryBatch(label);
+        return step;
       }
+
+      // The first open step takes the checkpoint; one that overlaps it joins
+      // it, named for both, since an undo cannot pull their edits apart.
+      if (openSteps.size === 0) {
+        sealStep();
+        stepPending = { snap: snapshot(), seq: docSeq };
+      }
+      openSteps.add(step);
+      if (stepPending) {
+        historyLabels.set(stepPending.snap, openStepLabel());
+      }
+      return step;
+    },
+    endHistoryStep: (step) => {
+      if (runSteps.delete(step)) {
+        get().endHistoryBatch();
+        return;
+      }
+      if (!openSteps.delete(step)) return;
+      if (openSteps.size === 0) sealStep();
     },
 
     setAspect: (a) => {

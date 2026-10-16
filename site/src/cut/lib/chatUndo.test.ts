@@ -98,3 +98,37 @@ test("an undo past the turn's first call takes back the turn before, and says so
     s().endHistoryBatch();
   }
 });
+
+test("a tool still running when its turn stops leaves the person's next edit its own undo step", async () => {
+  s().beginHistoryBatch("chat turn");
+  // The call opens its step and writes, then settles after the turn stops.
+  const call = runAiTool("add_shape", { shape: "rect", start: 0, end: 2, lane: 3 });
+  s().endHistoryBatch();
+  s().addOverlay();
+  expect(s().overlays.length).toBe(2);
+  await call;
+
+  // ⌘Z takes back the person's title alone; the stopped turn's shape stays.
+  expect(s().undo()).toBe(true);
+  expect(s().overlays.length).toBe(1);
+  expect(s().undo()).toBe(true);
+  expect(s().overlays.length).toBe(0);
+});
+
+test("two threads' turns at once each record their tool calls as steps", async () => {
+  s().beginHistoryBatch("chat turn");
+  s().beginHistoryBatch("chat turn");
+  try {
+    await runAiTool("add_shape", { shape: "rect", start: 0, end: 2, lane: 3 });
+    await runAiTool("add_shape", { shape: "rect", start: 2, end: 4, lane: 3 });
+    const out = (await runAiTool("undo", {})) as { reverted: string };
+    expect(out.reverted).toContain("add_shape");
+    expect(s().overlays.length).toBe(1);
+  } finally {
+    s().endHistoryBatch();
+    s().endHistoryBatch();
+  }
+  // Once both close, ⌘Z takes the two turns back as the one run they shared.
+  expect(s().undo()).toBe(true);
+  expect(s().overlays.length).toBe(0);
+});

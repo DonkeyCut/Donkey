@@ -6320,11 +6320,11 @@ async function dispatchTool(s: Editor, name: string, raw: Record<string, unknown
   // back alone; outside one it is an ordinary history entry. Undo and redo
   // step the history themselves.
   if (name === "undo" || name === "redo") return dispatchRun(s, name, raw, operation);
-  s.beginHistoryBatch(name);
+  const step = s.beginHistoryStep(name);
   try {
     return await dispatchRun(s, name, raw, operation);
   } finally {
-    s.endHistoryBatch();
+    s.endHistoryStep(step);
   }
 }
 
