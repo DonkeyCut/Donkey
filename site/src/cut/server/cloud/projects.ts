@@ -2,6 +2,7 @@
 // docs and metadata in Postgres, media bytes in R2. Every query scopes by userId.
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
+import { timelineEnd } from "@/cut/lib/timelineEnd";
 import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -63,7 +64,7 @@ function summarize(row: ProjectRow, sizeBytes: number): ProjectSummary {
   const clips = Array.isArray(doc.clips) ? doc.clips : [];
   const assets = Array.isArray(doc.assets) ? doc.assets : [];
   const track0 = clips.filter((c) => (c.track ?? 0) === 0);
-  const duration = track0.reduce((sum, c) => sum + Math.max(0, c.out - c.in), 0);
+  const duration = timelineEnd(doc);
   const firstClip = track0[0];
   const firstClipAsset = firstClip ? assets.find((a) => a.id === firstClip.assetId) : undefined;
   const previewAsset =

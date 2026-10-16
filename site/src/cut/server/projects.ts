@@ -3,6 +3,7 @@ import { isDeliveryName } from "../lib/exportDelivery";
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { resolveParent, settleParents, subtreeOf } from "@/cut/lib/folderTree";
+import { timelineEnd } from "@/cut/lib/timelineEnd";
 import type { Aspect, ProjectDoc, ProjectFolder, ProjectSummary } from "@/cut/lib/types";
 import { cutDataRoot } from "./dataDir";
 import { assertLocalRuntime } from "./local-only";
@@ -421,7 +422,7 @@ async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSummary> {
   // the summary's duration, count, or poster. Legacy docs carry no `track` on
   // clips — those are all track 0.
   const track0 = doc.clips.filter((c) => (c.track ?? 0) === 0);
-  const duration = track0.reduce((sum, c) => sum + Math.max(0, c.out - c.in), 0);
+  const duration = timelineEnd(doc);
   // Preview: the first clip's source video, else any video asset.
   const firstClip = track0[0];
   const firstClipAsset = firstClip

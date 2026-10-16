@@ -1,6 +1,7 @@
 "use client";
 import { noteProjectRevision } from "./projectRevision";
 import { freeItemName } from "./itemName";
+import { clipLen, timelineEnd } from "./timelineEnd";
 
 import { EMPTY_GUIDE_LINES, sanitizeGuideLines, sanitizeGuides, type GuideId, type GuideLines } from "./guides";
 import {
@@ -5809,11 +5810,7 @@ export function clipSpeed(c: VideoClip) {
   return s > 0 ? s : 1;
 }
 
-/** Timeline footprint of a clip: its source span through its rate, or through
- * its speed curve when it carries one (see retimeOf). */
-export function clipLen(c: VideoClip | AudioClip) {
-  return Math.max(MIN_LEN, retimeOf(c).len);
-}
+export { clipLen };
 
 /** The longest fade a clip takes: half its footprint, so a fade in and a
  * fade out never overlap. Tenths of a second, like the controls that set it. */
@@ -6781,14 +6778,7 @@ export function projectDuration(s: {
   durClips = s.clips;
   durAudio = s.audioClips;
   durOverlays = s.overlays;
-  let end = 0;
-  // Anything on any row extends the timeline: a layer or soundtrack running
-  // past track 0's end is still reachable, and so is a title or sticker left
-  // standing after the last clip — it plays over black.
-  for (const c of s.clips) end = Math.max(end, c.start + clipLen(c));
-  for (const a of s.audioClips) end = Math.max(end, a.start + clipLen(a));
-  for (const o of s.overlays) end = Math.max(end, o.end);
-  durValue = Math.max(0, end);
+  durValue = timelineEnd(s);
   return durValue;
 }
 

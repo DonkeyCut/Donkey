@@ -19,6 +19,7 @@
 // storage access, because this file rides along in the engine bundle.
 import { registerBlobFile } from "./registry";
 import { isDeliveryName } from "../../exportDelivery";
+import { timelineEnd } from "../../timelineEnd";
 import type { ProjectDoc, ProjectFolder, ProjectSummary } from "../../types";
 import { currentEngineUser } from "../../api";
 
@@ -235,7 +236,7 @@ export async function summarize(id: string, doc: ProjectDoc): Promise<ProjectSum
     name: doc.name,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
-    duration: track0.reduce((sum, c) => sum + Math.max(0, c.out - c.in), 0),
+    duration: timelineEnd(doc),
     clipCount: track0.length,
     assetCount: doc.assets.length,
     previewFile: previewAsset?.fileName,
