@@ -124,7 +124,9 @@ test("a tab render that fails goes to the worker and says why in the console", a
   const mode = spyOn(backend, "getBackend").mockReturnValue(exportBackend("cloud"));
   const probe = spyOn(exportRender, "canRenderInBrowser").mockResolvedValue(true);
   const failure = new DOMException("The operation failed because it would cause the application to exceed its storage quota.", "QuotaExceededError");
-  const render = spyOn(exportClient, "runBrowserExport").mockRejectedValue(failure);
+  const render = spyOn(exportClient, "runBrowserExport").mockImplementation(async () => {
+    throw failure;
+  });
   const create = spyOn(exportClient, "createExportJob").mockResolvedValue("queued");
   const warn = spyOn(console, "warn").mockImplementation(() => {});
   restores.push(() => mode.mockRestore(), () => probe.mockRestore(), () => render.mockRestore(), () => create.mockRestore(), () => warn.mockRestore());
@@ -134,5 +136,7 @@ test("a tab render that fails goes to the worker and says why in the console", a
     width: 1280, height: 720, ...EXPORT_PRESETS[0].settings,
   });
   expect(create).toHaveBeenCalled();
-  expect(warn).toHaveBeenCalledWith(expect.stringContaining("worker"), failure);
+  const [message, error] = warn.mock.calls[0] ?? [];
+  expect(String(message)).toContain("worker");
+  expect(error).toBe(failure);
 });
