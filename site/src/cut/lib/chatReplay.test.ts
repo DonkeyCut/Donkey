@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { Chat } from "@ai-sdk/react";
 import type { UIMessage, UIMessageChunk } from "ai";
 import { countChunks, replayChatStream } from "./chatReplay";
-import { journalAhead, type JournalMark } from "./chatResume";
+import { journalAhead, settledMark, type JournalMark } from "./chatResume";
 
 test("replay identifies the saved reply before exposing any chunks", async () => {
   let prepared = false;
@@ -87,7 +87,7 @@ test("a stream's chunks are counted under its turn", async () => {
   } });
   const reader = countChunks(source, (mark) => marks.push(mark)).getReader();
   while (!(await reader.read()).done);
-  expect(marks.at(-1)).toEqual({ messageId: "turn-1", chunks: 3 });
+  expect(marks.at(-1)).toEqual({ messageId: "turn-1", chunks: 3, ended: true });
 });
 
 // The engine kept the whole turn in its journal while the page's saved copy
@@ -144,4 +144,48 @@ test("a completed thread saved short of its journal catches up by replaying it",
   expect(reply.parts.at(-1)).toMatchObject({ type: "text", text: "FINAL: every title is in." });
   expect(toolCalls).toBe(296);
   expect(journalAhead(chat.messages, mark ?? undefined, peeked)).toBe(false);
+});
+
+// The engine turn failed, so its journal closes with an error chunk. The
+// catch-up replay reads that chunk and the chat finishes with an error; the
+// thread still counts the whole journal, so the next open replays nothing.
+test("a journal that ends in an error replays once", async () => {
+  const journal: UIMessageChunk[] = [
+    { type: "start", messageId: "turn-1", messageMetadata: { requestMessageId: "ask" } },
+    { type: "text-start", id: "t" },
+    { type: "text-delta", id: "t", delta: "Working on it." },
+    { type: "text-end", id: "t" },
+    { type: "error", errorText: "Chat stopped." },
+  ];
+  const saved: UIMessage[] = [
+    { id: "ask", role: "user", parts: [{ type: "text", text: "build the titles" }] },
+    { id: "turn-1", role: "assistant", parts: [] },
+  ];
+  const peeked = { messageId: "turn-1", chunks: journal.length };
+  let streamed: Parameters<typeof settledMark>[0] = null;
+  let held: JournalMark | null = null;
+  let failed = false;
+  const chat = new Chat<UIMessage>({
+    id: "thread-error",
+    messages: saved,
+    onFinish: ({ message, isError, isAbort, isDisconnect }) => {
+      failed = isError;
+      held = settledMark(streamed, message.id, isAbort || isDisconnect || isError ? "cut" : "finished");
+    },
+    transport: {
+      sendMessages: async () => { throw new Error("A catch-up sends nothing."); },
+      reconnectToStream: async () => {
+        const source = new ReadableStream<UIMessageChunk>({ start(controller) {
+          for (const chunk of journal) controller.enqueue(chunk);
+          controller.close();
+        } });
+        const replay = await replayChatStream(source, () => true, () => {});
+        return replay && countChunks(replay, (next) => { streamed = next; });
+      },
+    },
+  });
+  await chat.resumeStream();
+  expect(failed).toBe(true);
+  expect(held).toEqual(peeked);
+  expect(journalAhead(chat.messages, held ?? undefined, peeked)).toBe(false);
 });

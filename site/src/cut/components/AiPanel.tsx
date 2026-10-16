@@ -115,7 +115,7 @@ import { runAiTool } from "@/cut/lib/aiTools";
 import { holdEditorChat } from "@/cut/lib/editorWork";
 import { recoverSceneCall } from "@/cut/lib/chatRecovery";
 import { countChunks, replayChatStream } from "@/cut/lib/chatReplay";
-import { INTERRUPTED_ERROR, isResumeMessage, journalAhead, RESUME_LIMIT, resumePrompt, scrubLostTurn, unfinishedAsk, type JournalMark, type ResumeMetadata, type TurnSettled } from "@/cut/lib/chatResume";
+import { INTERRUPTED_ERROR, isResumeMessage, journalAhead, RESUME_LIMIT, resumePrompt, scrubLostTurn, settledMark, unfinishedAsk, type JournalMark, type ResumeMetadata, type StreamedMark, type TurnSettled } from "@/cut/lib/chatResume";
 import { answerEngineGate, claimEngineTool, cancelEngineChat, foldIntoEngineChat, joinRunningEngineChat, peekEngineChat } from "@/cut/lib/engineChat";
 import { messageText } from "@/cut/lib/messageText";
 import { EngineGate, engineInstant, handledSince, judgeEngineTurn } from "@/cut/lib/pi/engineTurn";
@@ -1131,7 +1131,7 @@ function ChatSession({
   const resumed = useRef(initialThread?.resumed ?? 0);
   // The journal chunks the newest engine turn's stream handed the chat, and
   // the mark the thread keeps once that turn ends (see journalAhead).
-  const streamed = useRef<JournalMark | null>(null);
+  const streamed = useRef<StreamedMark | null>(null);
   const journalMark = useRef(initialThread?.journal);
   // A replay catching the thread up to the engine's journal: "finished" when
   // that turn is over, so its tool calls and gate are history, not requests.
@@ -1317,11 +1317,11 @@ function ChatSession({
       finishBrowserTurn.current = null;
       if (chatThreadDeleted(projectId, threadId)) return;
       catchingUp.current = null;
-      if (!isAbort && !isDisconnect && !isError) {
-        completedMessageId.current = message.id;
-        // The whole turn landed: the thread now holds this much of its journal.
-        if (streamed.current?.messageId === message.id) journalMark.current = streamed.current;
-      }
+      const stop = isAbort || isDisconnect || isError ? "cut" : "finished";
+      if (stop === "finished") completedMessageId.current = message.id;
+      // The stream reached the journal's end — cleanly, or through its closing
+      // error — so the thread now holds that much of it and replays it no more.
+      journalMark.current = settledMark(streamed.current, message.id, stop) ?? journalMark.current;
       // A verdict holds the thread for the user. A detach (this panel closing
       // its reader while the engine keeps working) and a dropped connection
       // with continuations left leave none, so the turn resumes.

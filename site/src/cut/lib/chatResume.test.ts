@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { UIMessage } from "ai";
-import { DETACHED_MEDIA_ERROR, DETACHED_UI_NOTE, INTERRUPTED_ERROR, isResumeMessage, journalAhead, pendingAsk, resumePrompt, scrubLostTurn, unfinishedAsk } from "./chatResume";
+import { DETACHED_MEDIA_ERROR, DETACHED_UI_NOTE, INTERRUPTED_ERROR, isResumeMessage, journalAhead, pendingAsk, resumePrompt, scrubLostTurn, settledMark, unfinishedAsk } from "./chatResume";
 
 const user = (id: string, text: string, metadata?: Record<string, unknown>): UIMessage =>
   ({ id, role: "user", parts: [{ type: "text", text }], ...(metadata ? { metadata } : {}) }) as UIMessage;
@@ -92,4 +92,19 @@ test("a thread saved short of its newest turn's journal catches up from it", () 
   expect(journalAhead(messages, undefined, { messageId: "turn-0", chunks: 900 })).toBe(false);
   expect(journalAhead([...messages, user("next", "now the music")], undefined, journal)).toBe(false);
   expect(journalAhead(messages, undefined, null)).toBe(false);
+});
+
+test("a journal that ended in an error or a stop is marked whole, so it replays once", () => {
+  const messages = [user("ask", "build the titles"), reply("turn-1")];
+  const journal = { messageId: "turn-1", chunks: 7 };
+  // The replay read the journal's closing error chunk, then the chat reported an error.
+  const held = settledMark({ messageId: "turn-1", chunks: 7, ended: true }, "turn-1", "cut");
+  expect(held).toEqual(journal);
+  expect(journalAhead(messages, held ?? undefined, journal)).toBe(false);
+  // A connection cut before the journal closed keeps no mark, so the turn catches up later.
+  expect(settledMark({ messageId: "turn-1", chunks: 4, ended: false }, "turn-1", "cut")).toBeNull();
+  // A clean finish keeps its mark; another turn's stream marks nothing.
+  expect(settledMark({ messageId: "turn-1", chunks: 7, ended: false }, "turn-1", "finished")).toEqual(journal);
+  expect(settledMark({ messageId: "turn-0", chunks: 7, ended: true }, "turn-1", "finished")).toBeNull();
+  expect(settledMark(null, "turn-1", "finished")).toBeNull();
 });

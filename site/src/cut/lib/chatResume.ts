@@ -112,6 +112,24 @@ export function journalAhead(messages: UIMessage[], held: JournalMark | undefine
   return held?.messageId !== journal.messageId || held.chunks < journal.chunks;
 }
 
+/** A mark read off a turn's stream, and whether the stream reached the
+ * journal's closing chunk (finish, error or abort). */
+export type StreamedMark = JournalMark & { ended: boolean };
+
+/** How a turn's stream stopped for the chat: "finished" cleanly, or "cut"
+ * by an error, a stop or a dropped connection. */
+export type StreamStop = "finished" | "cut";
+
+/** The mark a thread keeps when a turn's stream stops. A clean finish or a
+ * stream that read the journal's closing chunk covers the whole journal, so
+ * a failed or stopped turn replays once and then rests. A connection cut
+ * before the journal closed keeps no mark, and the turn catches up later. */
+export function settledMark(streamed: StreamedMark | null, messageId: string, stop: StreamStop): JournalMark | null {
+  if (streamed?.messageId !== messageId) return null;
+  if (stop === "cut" && !streamed.ended) return null;
+  return { messageId: streamed.messageId, chunks: streamed.chunks };
+}
+
 /** The continuation a resumed turn opens with. It carries the ask itself, so
  * a provider session that never received it still knows the job. */
 export function resumePrompt(ask: UIMessage): string {

@@ -1,15 +1,18 @@
 import type { UIMessageChunk } from "ai";
-import type { JournalMark } from "./chatResume";
+import type { StreamedMark } from "./chatResume";
+
+// The chunks that close an engine journal: nothing follows them but [DONE].
+const CLOSING_CHUNKS = new Set<UIMessageChunk["type"]>(["finish", "error", "abort"]);
 
 /** Count the chunks an engine turn's stream hands the chat. The engine's
  * journal counts the same chunks, so a finished turn's count is the mark its
- * saved thread keeps (see journalAhead). */
-export function countChunks(source: ReadableStream<UIMessageChunk>, count: (mark: JournalMark) => void): ReadableStream<UIMessageChunk> {
-  let mark: JournalMark | null = null;
+ * saved thread keeps (see journalAhead and settledMark). */
+export function countChunks(source: ReadableStream<UIMessageChunk>, count: (mark: StreamedMark) => void): ReadableStream<UIMessageChunk> {
+  let mark: StreamedMark | null = null;
   return source.pipeThrough(new TransformStream<UIMessageChunk, UIMessageChunk>({
     transform(chunk, controller) {
-      if (chunk.type === "start" && chunk.messageId) mark = { messageId: chunk.messageId, chunks: 0 };
-      if (mark) count(mark = { ...mark, chunks: mark.chunks + 1 });
+      if (chunk.type === "start" && chunk.messageId) mark = { messageId: chunk.messageId, chunks: 0, ended: false };
+      if (mark) count(mark = { ...mark, chunks: mark.chunks + 1, ended: CLOSING_CHUNKS.has(chunk.type) });
       controller.enqueue(chunk);
     },
   }));
