@@ -3,12 +3,16 @@ import {
   clipAnimFx,
   crossHandles,
   duckGainAt,
+  heldSpans,
+  overlayPlan,
   overlayTransitionFx,
   prerollLead,
   PREROLL_LEAD_S,
   soundCrossGain,
+  trackZeroAt,
   trackZeroPlan,
 } from "./framePlan";
+import { heldFrames } from "./frameGrid";
 import { TRANSITION_BLUR, TRANSITION_ZOOM } from "./types";
 import type { AudioClip, ClipSpan, MediaAsset, VideoClip } from "./types";
 
@@ -349,5 +353,32 @@ describe("prerollLead", () => {
       expect(seat).toBeGreaterThanOrEqual(0);
       expect(seat + lead * speed).toBeCloseTo(inPoint, 5);
     }
+  });
+});
+
+describe("one-frame clips on a 30 fps export", () => {
+  /** Spans of the given lengths laid end to end from `from`. */
+  const laid = (from: number, lens: number[], track = 0): ClipSpan[] => {
+    let at = from;
+    return lens.map((len) => {
+      const span = { clip: videoClip({ start: at, out: len, track }), asset, start: at, len, transitionOut: 0, soundOut: 0, soundAhead: 0, soundBack: 0 };
+      at += len;
+      return span;
+    });
+  };
+
+  test("a track-0 flash between two output frames shows its first picture on the next one", () => {
+    const spans = laid(0, [0.01, 1 / 60, 2]);
+    const held = heldFrames(spans.map((sp) => ({ start: sp.start, end: sp.start + sp.len })), 30);
+    expect(trackZeroAt(spans, held, 1 / 30)).toEqual({ span: spans[1], at: spans[1].start });
+    expect(trackZeroAt(spans, held, 2 / 30)?.span).toBe(spans[2]);
+  });
+
+  test("an upper-track flash between two output frames holds the next one", () => {
+    const spans = laid(0.01, [1 / 60, 2], 1);
+    const held = heldSpans(spans, 30);
+    const live = (t: number) => overlayPlan([1], () => spans, t, held);
+    expect(live(1 / 30).map((l) => [l.span, l.at])).toEqual([[spans[0], spans[0].start]]);
+    expect(live(2 / 30).map((l) => l.span)).toEqual([spans[1]]);
   });
 });

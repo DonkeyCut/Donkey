@@ -33,6 +33,7 @@ import { clipLen, clipSpeed, getClipSpans, MICRO_GAP_S, openedTimeline, overlayL
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
 import { drawStreak, elementLook, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, type Mask, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng, renderStillPng, requireStickers } from "./textRender";
+import { holdOverlays } from "./frameGrid";
 import { CLIP_MIN_SECONDS, clipCovers, clipFrameAt, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
 import { liveReader } from "./liveReader";
 import { soundSourceOf, spanSoundSpec, spanUsesSoundFeature, specSound } from "./soundSource";
@@ -889,6 +890,8 @@ export async function buildExportPayload(
   // Every video's color is read before the spec is: footage the lazy fill
   // has not reached would otherwise go out as Rec.709.
   doc = { ...doc, assets: await withAssetColors(doc.assets, doc) };
+  // Elements shorter than an output frame widen onto the one they hold.
+  doc = { ...doc, overlays: holdOverlays(doc.overlays, settings.fps) };
   const spans = getClipSpans(doc.clips, doc.assets);
   const duration = projectDuration(doc);
   const pngs: ExportPayload["pngs"] = [];

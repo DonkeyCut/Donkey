@@ -18,6 +18,7 @@ import { headSrc, retimeOf } from "@donkeycut/effects-kit";
  * watched the download.
  */
 
+import { heldFrames, showsAt, type HeldFrames } from "./frameGrid";
 import { CLIP_MIN_SECONDS, overlayAnimStyle, TRANSITION_BLUR, TRANSITION_ZOOM } from "./types";
 import type { AudioClip, ClipAnim, ClipSpan, MediaAsset, TransitionStyle, VideoClip } from "./types";
 
@@ -439,6 +440,32 @@ export function trackZeroPlan(master: ClipSpan, spans: ClipSpan[], t: number): T
   };
 }
 
+/** The time a span's picture is read at for a frame at `t`: its first
+ * picture while it holds a frame past its own end. */
+const pictureAt = (sp: ClipSpan, t: number) => (t < sp.start + sp.len ? t : sp.start);
+
+/**
+ * The track-0 span a frame at `t` shows, and the time its picture is read at.
+ * `held` is the track's held frames on an export grid (empty off one), so a
+ * clip shorter than a frame still shows on one.
+ */
+export function trackZeroAt(
+  spans: ClipSpan[],
+  held: readonly (HeldFrames | null)[],
+  t: number
+): { span: ClipSpan; at: number } | null {
+  const i = spans.findIndex((sp, k) => showsAt(sp.start, sp.start + sp.len, held[k] ?? null, t));
+  return i < 0 ? null : { span: spans[i], at: pictureAt(spans[i], t) };
+}
+
+/** The held frames of an upper track's shown spans on an `fps` grid, for
+ * `overlayPlan`. A render works them out once, before its first frame. */
+export function heldSpans(spans: ClipSpan[], fps: number): Map<ClipSpan, HeldFrames | null> {
+  const shown = spans.filter((sp) => !sp.clip.hidden);
+  const held = heldFrames(shown.map((sp) => ({ start: sp.start, end: sp.start + sp.len })), fps);
+  return new Map(shown.map((sp, k) => [sp, held[k]]));
+}
+
 /** One upper-track clip on screen, with its ramps resolved. */
 export interface OverlayPlanItem {
   span: ClipSpan;
@@ -447,6 +474,9 @@ export interface OverlayPlanItem {
   alpha: number;
   zoom: number;
   gain: number;
+  /** The time its picture is read at: `t`, or its start while it holds an
+   * output frame past its own end. */
+  at: number;
 }
 
 /**
@@ -455,12 +485,15 @@ export interface OverlayPlanItem {
  * incoming clip in over the outgoing one.
  *
  * `spansOf` supplies a track's spans; callers pass the store's own
- * `getClipSpans` so span geometry is computed one way everywhere.
+ * `getClipSpans` so span geometry is computed one way everywhere. An export
+ * passes its tracks' `heldSpans`, so a clip shorter than an output frame
+ * holds one.
  */
 export function overlayPlan(
   tracks: number[],
   spansOf: (track: number) => ClipSpan[],
-  t: number
+  t: number,
+  held?: ReadonlyMap<ClipSpan, HeldFrames | null>
 ): OverlayPlanItem[] {
   const live: OverlayPlanItem[] = [];
   for (const track of [...tracks].sort((a, b) => a - b)) {
@@ -468,12 +501,13 @@ export function overlayPlan(
     for (let i = 0; i < spans.length; i++) {
       const sp = spans[i];
       if (sp.clip.hidden) continue;
-      if (t < sp.start || t >= sp.start + sp.len) continue;
+      if (!showsAt(sp.start, sp.start + sp.len, held?.get(sp) ?? null, t)) continue;
       live.push({
         span: sp,
         clip: sp.clip,
         asset: sp.asset,
         ...overlayTransitionFx(sp, spans[i - 1], spans[i + 1], t),
+        at: pictureAt(sp, t),
       });
     }
   }

@@ -430,3 +430,56 @@ describe("a long recording cut out of order", () => {
     240_000
   );
 });
+
+describe("a flash shorter than an output frame", () => {
+  // A 1/60 s red shot on track 1 at 0.01s sits between frames 0 and 1 of a
+  // 30 fps file; a blue shot follows it. The red holds frame 1 and the blue
+  // opens on frame 2, over black on track 0.
+  test.skipIf(!tools)(
+    "holds the frame after its start, and the shot after it opens one later",
+    async () => {
+      const mediaDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-media-"));
+      const tmpDir = await mkdtemp(path.join(os.tmpdir(), "cut-e2e-job-"));
+      try {
+        const solid = (name: string, c: string) =>
+          ff(["-f", "lavfi", "-i", `color=c=${c}:s=64x64:r=60:d=1`, "-pix_fmt", "yuv420p", path.join(mediaDir, name)]);
+        solid("black.mp4", "black");
+        solid("red.mp4", "red");
+        solid("blue.mp4", "blue");
+        const flash = 1 / 60;
+        const spec: ExportSpec = {
+          projectId: "p",
+          width: 64,
+          height: 64,
+          fps: 30,
+          crf: 18,
+          preset: "veryfast",
+          duration: 0.5,
+          clips: [{ file: "black.mp4", in: 0, out: 0.5, muted: true }],
+          overlayVideos: [
+            { file: "red.mp4", in: 0, out: flash, start: 0.01, track: 1, muted: true },
+            { file: "blue.mp4", in: 0, out: 0.4, start: 0.01 + flash, track: 1, muted: true },
+          ],
+          audio: [],
+          overlays: [],
+        };
+        const job: RenderHandle = { tmpDir, outPath: path.join(tmpDir, "out.mp4"), stemsPath: path.join(tmpDir, "stems.zip"), progress: 0, log: [] };
+        await runExport(job, spec, (file) => path.join(mediaDir, file));
+        // A middle pixel of each of the first four frames, as RGB (a 2x2 crop:
+        // 4:2:0 frames crop on even edges).
+        const px = new Uint8Array(
+          ffmpegOut(["-i", job.outPath, "-frames:v", "4", "-vf", "crop=2:2:32:32", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        );
+        const hue = (k: number) => {
+          const [r, g, b] = px.slice(k * 12, k * 12 + 3);
+          return r > 150 && b < 100 ? "red" : b > 150 && r < 100 ? "blue" : r < 40 && g < 40 && b < 40 ? "black" : `${r},${g},${b}`;
+        };
+        expect([0, 1, 2, 3].map(hue)).toEqual(["black", "red", "blue", "blue"]);
+      } finally {
+        await rm(mediaDir, { recursive: true, force: true });
+        await rm(tmpDir, { recursive: true, force: true });
+      }
+    },
+    60_000
+  );
+});

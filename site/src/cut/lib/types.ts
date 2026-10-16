@@ -48,8 +48,9 @@ export const isLinkedAssetType = (type: string): type is LinkedAssetType =>
 export const IMAGE_CLIP_SECONDS = 8;
 
 /** The shortest clip, seconds: one frame at 60 fps, a flash frame. Every
- * renderer floors a clip's footprint here, so a one-frame clip plays one
- * frame in the preview and in every export. */
+ * renderer floors a clip's footprint here, and an export at a lower rate
+ * shows a shorter clip on the output frame at or after its start
+ * (`frameGrid.ts`), so a flash frame never drops out of a file. */
 export const CLIP_MIN_SECONDS = 1 / 60;
 
 /** Project output frame ratio as "W:H". Presets cover common platforms;

@@ -2018,3 +2018,23 @@ describe("windows on floored times", () => {
     }
   });
 });
+
+describe("clips shorter than an output frame", () => {
+  test("an upper-track flash between two frames holds the next one, and the clip after it waits", async () => {
+    const g = (
+      await graphFor({
+        clips: [clip("a.mp4", { out: 2 })],
+        overlayVideos: [
+          { file: "o.mp4", in: 0, out: 1 / 60, start: 0.01, track: 1, muted: true },
+          { file: "o.mp4", in: 1, out: 2, start: 0.01 + 1 / 60, track: 1, muted: true },
+        ],
+      })
+    ).join(";");
+    // Frame 1 (0.0333s) belongs to the flash alone: one held frame from it,
+    // shown half a frame either side of that frame's time.
+    expect(g).toContain("trim=end_frame=1,setpts=PTS-STARTPTS,fps=30,tpad=start=1");
+    expect(g).toContain(`between(t,${(0.5 / 30).toFixed(6)},${(1.5 / 30).toFixed(6)})`);
+    // The clip after it opens on frame 2.
+    expect(g).toContain(`between(t,${(1.5 / 30).toFixed(6)},`);
+  });
+});

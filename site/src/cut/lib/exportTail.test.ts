@@ -29,3 +29,13 @@ test("the clip list runs to the end of the cut, black after the last shot", asyn
   const length = spec.clips.reduce((sum, c) => sum + (c.out - c.in), 0);
   expect(length).toBeCloseTo(5);
 });
+
+test("an effect shorter than a frame still holds one frame of the file", async () => {
+  const flash = { id: "fx", kind: "effect", effect: "negative", start: 1.01, end: 1.01 + 1 / 60, x: 0.5, y: 0.5 } as const;
+  const settings = { ...originalSettings(doc.aspect, doc.clips, doc.assets, doc), fps: 30 };
+  const payload = await buildExportPayload("project", { ...doc, overlays: [flash] }, settings, "export");
+  const [effect] = (payload.spec as { effects: { start: number; end: number }[] }).effects;
+  // Frame 31 (1.0333s) is the first at or after the flash: the window has to cover it.
+  expect(effect.start).toBeLessThanOrEqual(31 / 30);
+  expect(effect.end).toBeGreaterThan(31 / 30);
+});

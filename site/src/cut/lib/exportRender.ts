@@ -40,7 +40,8 @@ import { FrameCompositor, MISSING_FRAME, type Frame } from "./composite";
 import { ensureClipLuts, sourceLookup } from "./lutBuild";
 import { colorRead, type ColorRead, type ReadFile } from "./sourceColor";
 import type { OutputSpace } from "@donkeycut/effects-kit";
-import { overlayPlan, trackZeroPlan } from "./framePlan";
+import { heldSpans, overlayPlan, trackZeroAt, trackZeroPlan } from "./framePlan";
+import { heldFrames, holdOverlays, type HeldFrames } from "./frameGrid";
 import { frameSink, keyframeTimeAt, openMedia, videoTrackOf, withAssetColors } from "./mediaRead";
 import type { InputVideoTrack, WrappedCanvas } from "mediabunny";
 import { allowance, canvasBytes, holdMemory } from "./memoryBudget";
@@ -1127,7 +1128,8 @@ export async function renderProjectToMp4(
   }
 
   const canvas = createRasterCanvas(settings.width, settings.height);
-  const painter = new FramePainter(doc, canvas, resolve);
+  // Elements shorter than an output frame widen onto the one they hold.
+  const painter = new FramePainter({ ...doc, overlays: holdOverlays(doc.overlays, settings.fps) }, canvas, resolve, settings.fps);
 
   const frameDur = 1 / settings.fps;
   const frames = Math.max(1, Math.round(span * settings.fps));
@@ -1485,12 +1487,18 @@ export class FramePainter {
   private overlayTracks: number[] = [];
   private byTrack = new Map<number, ClipSpan[]>();
   private spanOfClip = new Map<string, ClipSpan>();
+  /** The frames clips shorter than an output frame hold, on track 0 and
+   * above; empty for a painter drawing loose moments. */
+  private trackZeroHeld: (HeldFrames | null)[] = [];
+  private overlayHeld = new Map<ClipSpan, HeldFrames | null>();
   private duration: number;
 
+  /** `fps` is the output grid of a render, absent for loose moments. */
   constructor(
     private doc: ExportDoc,
     private canvas: RasterSurface,
-    private resolve: (asset: MediaAsset) => string
+    private resolve: (asset: MediaAsset) => string,
+    private fps?: number
   ) {
     this.comp = new FrameCompositor(canvas);
     this.comp.background = projectBackground(doc.background);
@@ -1562,6 +1570,12 @@ export class FramePainter {
     );
     for (const list of this.byTrack.values())
       for (const sp of list) this.spanOfClip.set(sp.clip.id, sp);
+    if (this.fps) {
+      const fps = this.fps;
+      this.trackZeroHeld = heldFrames(this.spans.map((sp) => ({ start: sp.start, end: sp.start + sp.len })), fps);
+      for (const list of this.byTrack.values())
+        for (const [sp, held] of heldSpans(list, fps)) this.overlayHeld.set(sp, held);
+    }
   }
 
   /**
@@ -1689,18 +1703,20 @@ export class FramePainter {
     const H = canvas.height;
     comp.clear();
 
-    const master = this.spans.find((sp) => t >= sp.start && t < sp.start + sp.len);
-    if (master) {
-      const plan = trackZeroPlan(master, this.spans, t);
-      await this.fetchRemovalMatte(master, t);
-      if (plan.incoming) await this.fetchRemovalMatte(plan.incoming, t);
+    // A clip holding a frame past its own end is drawn as at its start.
+    const shown = trackZeroAt(this.spans, this.trackZeroHeld, t);
+    if (shown) {
+      const { span: master, at } = shown;
+      const plan = trackZeroPlan(master, this.spans, at);
+      await this.fetchRemovalMatte(master, at);
+      if (plan.incoming) await this.fetchRemovalMatte(plan.incoming, at);
       if (plan.backdrop) {
-        await this.fetchRemovalMatte(plan.backdrop.span, t);
+        await this.fetchRemovalMatte(plan.backdrop.span, at);
         const frame = await this.readerFor(plan.backdrop.span.asset).frameAt(plan.backdrop.at);
-        comp.drawLayer(frame, plan.backdrop.span.clip, false, 1, t);
+        comp.drawLayer(frame, plan.backdrop.span.clip, false, 1, at);
       }
-      const masterFrame = master.clip.hidden ? MISSING_FRAME : await this.frameOf(master, t);
-      const incFrame = plan.incoming ? await this.frameOf(plan.incoming, t) : MISSING_FRAME;
+      const masterFrame = master.clip.hidden ? MISSING_FRAME : await this.frameOf(master, at);
+      const incFrame = plan.incoming ? await this.frameOf(plan.incoming, at) : MISSING_FRAME;
       comp.drawCrossJoin(
         plan.style,
         plan.p,
@@ -1719,23 +1735,23 @@ export class FramePainter {
           incAlpha: plan.incAlpha,
           incZoom: plan.incZoom,
         },
-        t
+        at
       );
       if (plan.veil > 0) comp.fillBlackVeil(plan.veil, rectOf(master.clip));
     }
 
     const spansOf = (track: number) => this.byTrack.get(track) ?? [];
-    for (const layer of overlayPlan(this.overlayTracks, spansOf, t)) {
+    for (const layer of overlayPlan(this.overlayTracks, spansOf, t, this.overlayHeld)) {
       const span = this.spanOfClip.get(layer.clip.id);
       if (!span) continue;
-      await this.fetchRemovalMatte(span, t);
-      const frame = await this.frameOf(span, t);
+      await this.fetchRemovalMatte(span, layer.at);
+      const frame = await this.frameOf(span, layer.at);
       comp.drawIntoRect(
         frame,
         rectOf(layer.clip),
         clipCovers(layer.clip),
         layer.alpha,
-        t,
+        layer.at,
         layer.zoom,
         layer.clip
       );

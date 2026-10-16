@@ -18,6 +18,7 @@ import { shiftSpan, type SpecSound } from "../lib/soundSource";
 import { masterRawMix, packStems } from "./exportAudio";
 import { STEM_CHANNELS, STEM_RATE, type StemDef } from "../lib/stems";
 import { CLIP_MAX_ZOOM, CLIP_MIN_SECONDS, clipFrameAt, regionPx, TRANSITION_ZOOM, type ColorGrade } from "../lib/types";
+import { gridFrame, heldFrames, type HeldFrames } from "../lib/frameGrid";
 import { audioFxFilters, buildClipLut, elementLook, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, effectRecipe, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type EaseId, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
@@ -735,13 +736,6 @@ function concatList(holds: { file: string; to: number }[], fps: number): string 
   return lines.join("\n") + "\n";
 }
 
-/** How far past a whole frame a time may sit, in frames, and still count as
- * on it: rounding in a sum of clip lengths never pushes a cut a frame late. */
-const GRID_SLACK = 1e-3;
-
-/** The first output frame at or after `t` seconds. */
-const gridFrame = (t: number, fps: number) => Math.ceil(t * fps - GRID_SLACK);
-
 /** Filters that hold a stream to exactly `count` frames at `fps`: a short
  * one repeats its last frame, a long one is cut. */
 const gridHold = (count: number, fps: number) =>
@@ -1326,6 +1320,15 @@ async function renderPass(
   const overlayVideos = [...(spec.overlayVideos ?? [])].sort(
     (a, b) => a.track - b.track || a.start - b.start
   );
+  // The frames each upper-track clip shorter than an output frame holds,
+  // track by track, and the frame its neighbor then opens on.
+  const overlayHeld = new Map<(typeof overlayVideos)[number], HeldFrames>();
+  for (const track of new Set(overlayVideos.map((oc) => oc.track))) {
+    const lane = overlayVideos.filter((oc) => oc.track === track);
+    heldFrames(lane.map((oc) => ({ start: oc.start, end: oc.start + spanLen(oc) })), spec.fps).forEach((held, i) => {
+      if (held) overlayHeld.set(lane[i], held);
+    });
+  }
   // Every bare patch of frame in the graph — the letterbox around a fitted
   // clip, a gap on track 0, the backdrop behind an edge animation — is the
   // project's own background color. ffmpeg takes it as 0xRRGGBB.
@@ -3073,9 +3076,17 @@ async function renderPass(
     // The clip's first frame is the first one at or after its start, as on
     // track 0. The zoom slices' concat drops the stream's frame-rate
     // metadata, so the fps re-stamp keeps tpad's frames on the grid.
-    filters.push(`[${masked}]fps=${fps},tpad=start=${gridFrame(oc.start, fps)}[${seg}]`);
+    // A clip the grid moved holds exactly its frames from its first picture.
+    const held = overlayHeld.get(oc);
+    filters.push(
+      held
+        ? `[${masked}]fps=${fps},${gridHold(held.last - held.first, fps)},tpad=start=${held.first}[${seg}]`
+        : `[${masked}]fps=${fps},tpad=start=${gridFrame(oc.start, fps)}[${seg}]`
+    );
     const next = `vovv${k}`;
-    const enable = `enable='between(t,${edge(oc.start)},${edge(end)})'`;
+    const enable = held
+      ? `enable='between(t,${edge(held.from)},${edge(held.to)})'`
+      : `enable='between(t,${edge(oc.start)},${edge(end)})'`;
     // The shadow falls on whatever is already there, then the clip goes down
     // over it. Its silhouette is punched out, so the two never fight.
     const oshIdx = overlayShadowInput.get(oc);
