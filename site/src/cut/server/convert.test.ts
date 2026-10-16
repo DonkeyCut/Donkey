@@ -64,6 +64,28 @@ describe("import conversion", () => {
     expect(await convertToMp4(handle(path.join(dir, "unused.mp4")), src, path.join(dir, "unused.mp4"))).toMatchObject({ unchanged: true });
   });
 
+  test("a forced re-encode rewrites an already playable MP4", async () => {
+    // A stream that parses and then yields no frames in the page — a missing
+    // keyframe, a broken reference chain — is rewritten from what ffmpeg
+    // decodes, so the copy starts on a clean keyframe.
+    const src = path.join(dir, "frameless.mp4");
+    const out = path.join(dir, "rewritten.mp4");
+    ffmpeg(["-f", "lavfi", "-i", "color=s=64x64:r=10:d=0.2", "-c:v", "libx264", src]);
+    expect(await convertToMp4(handle(out), src, out, { mode: "reencode" })).toMatchObject({ transcodedVideo: true });
+    expect(await streamCodecs(out)).toMatchObject({ video: "h264" });
+    expect((await readFile(out)).equals(await readFile(src))).toBe(false);
+  });
+
+  test("a file named .mp4 in another container is remuxed", async () => {
+    // A page whose demuxer can't parse the file hands it here; the name alone
+    // must not send it back unchanged.
+    const src = path.join(dir, "mislabeled.mp4");
+    const out = path.join(dir, "remuxed.mp4");
+    ffmpeg(["-f", "lavfi", "-i", "color=s=64x64:r=10:d=0.2", "-c:v", "libx264", "-f", "matroska", src]);
+    expect(await convertToMp4(handle(out), src, out)).toMatchObject({ transcodedVideo: false });
+    expect(execFileSync("ffprobe", ["-v", "error", "-show_entries", "format=format_name", "-of", "csv=p=0", out]).toString()).toContain("mp4");
+  });
+
   test("audio-only phone media becomes playable AAC without a video stream", async () => {
     const src = path.join(dir, "recording.mov");
     const out = path.join(dir, "recording.m4a");

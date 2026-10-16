@@ -6,7 +6,7 @@ import { runLibraryProxyJob, type LibraryProxyIO } from "./libraryProxyJob";
 
 type Row = { id: string; userId: string; mediaObjectId: string; folderId: string | null; deletedAt: Date | null; meta: unknown; createdAt: Date };
 
-function harness(taken: string[] = []) {
+function harness(taken: string[] = [], compat?: string) {
   const row: Row = {
     id: "asset", userId: "owner", mediaObjectId: "master", folderId: "folder", deletedAt: null,
     meta: { name: "IMG_5388.MOV", type: "video", duration: 21.8, width: 1080, height: 1920, title: "Beach" },
@@ -17,7 +17,9 @@ function harness(taken: string[] = []) {
   const takenRead = mock(async (_args: unknown) => { void _args; return taken.map((fileName) => ({ fileName })); });
   const update = mock(async ({ data }: { data: { meta: unknown } }) => ({ ...row, meta: data.meta }));
   const liveRead = mock(async (_args: unknown) => { void _args; return row as Row | null; });
-  const tx = { cutLibraryAsset: { findFirst: liveRead, update } };
+  const oldRead = mock(async (_args: unknown) => { void _args; return { id: "old-proxy", r2Key: "cut/owner/library/IMG_5388.proxy.mp4" } as { id: string; r2Key: string } | null; });
+  const oldDelete = mock(async (_args: unknown) => { void _args; });
+  const tx = { cutLibraryAsset: { findFirst: liveRead, update }, cutMediaObject: { findFirst: oldRead, delete: oldDelete } };
   const io = {
     db: {
       cutLibraryAsset: { findFirst: assetRead },
@@ -31,15 +33,20 @@ function harness(taken: string[] = []) {
       await writeFile(out, "proxy");
       return { sizeBytes: 5, width: 608, height: 1080 };
     }),
+    makeCompat: mock(async (_handle: unknown, _src: string, out: string, opts: { cover: string }) => {
+      void opts;
+      await writeFile(out, "compat");
+      return { sizeBytes: 6 };
+    }),
     duration: mock(async () => 21.8),
     settings: mock(async () => ({ proxyMaxHeight: 1080, proxyCrf: 20 })),
     transact: async <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx as unknown as Prisma.TransactionClient),
     register: mock(async (_tx: Prisma.TransactionClient, object: { fileName: string }) => object.fileName),
   } satisfies LibraryProxyIO;
-  const job = { id: "library-proxy-asset", userId: "owner", projectId: null, kind: "proxy", outName: null, spec: { target: "library", assetId: "asset" } };
+  const job = { id: "library-proxy-asset", userId: "owner", projectId: null, kind: "proxy", outName: null, spec: { target: "library", assetId: "asset", ...(compat ? { compat } : {}) } };
   const handle = { tmpDir: "", outPath: "", progress: 0, log: [] as string[] };
   const run = (canceled = () => false) => runLibraryProxyJob(job, handle, canceled, io);
-  return { run, io, row, update, liveRead, takenRead, handle };
+  return { run, io, row, update, liveRead, takenRead, handle, oldDelete };
 }
 
 describe("library proxy worker", () => {
@@ -69,6 +76,24 @@ describe("library proxy worker", () => {
     const h = harness();
     h.row.meta = { ...(h.row.meta as object), proxyFile: "IMG_5388.proxy.mp4" };
     expect((await h.run()).proxyFile).toBe("IMG_5388.proxy.mp4");
+    expect(h.io.download).not.toHaveBeenCalled();
+  });
+
+  test("a compat ask replaces a copy this browser cannot play and drops the old object", async () => {
+    const h = harness([], "video");
+    h.row.meta = { ...(h.row.meta as object), proxyFile: "IMG_5388.proxy.mp4" };
+    expect((await h.run()).proxyFile).toBe("IMG_5388.MOV.compat.webm");
+    expect(h.io.make).not.toHaveBeenCalled();
+    expect(h.io.makeCompat.mock.calls[0][3]).toMatchObject({ cover: "video", maxHeight: 1080, crf: 20 });
+    expect(h.io.register.mock.calls[0][1]).toMatchObject({ fileName: "IMG_5388.MOV.compat.webm", mime: "video/webm" });
+    expect(h.oldDelete.mock.calls[0][0]).toEqual({ where: { id: "old-proxy" } });
+    expect(h.io.remove.mock.calls[0][0]).toEqual(["cut/owner/library/IMG_5388.proxy.mp4"]);
+  });
+
+  test("a compat ask the copy already covers returns without building", async () => {
+    const h = harness([], "audio");
+    h.row.meta = { ...(h.row.meta as object), proxyFile: "IMG_5388.MOV.compat.webm" };
+    expect((await h.run()).proxyFile).toBe("IMG_5388.MOV.compat.webm");
     expect(h.io.download).not.toHaveBeenCalled();
   });
 

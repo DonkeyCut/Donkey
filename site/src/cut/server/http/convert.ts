@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { convertModeIn } from "../../lib/convertMode";
 import { convertToMp4, mp4NameFor } from "../convert";
 import { errorMessage } from "../util";
 
@@ -21,12 +22,17 @@ export const convertApi = {
         return Response.json({ error: "file is required." }, { status: 400 });
       }
       const maxHeight = Number(form.get("maxHeight"));
+      const mode = convertModeIn(form.get("mode") ?? undefined);
+      if (!mode) {
+        return Response.json({ error: "mode is fit or reencode." }, { status: 400 });
+      }
       const src = path.join(tmp, path.basename(file.name) || "source");
       const out = path.join(tmp, mp4NameFor(path.basename(file.name) || "media"));
       await writeFile(src, new Uint8Array(await file.arrayBuffer()));
       const handle = { tmpDir: tmp, outPath: out, progress: 0, log: [] as string[] };
       const outcome = await convertToMp4(handle, src, out, {
         maxHeight: Number.isFinite(maxHeight) && maxHeight > 0 ? maxHeight : undefined,
+        mode,
       });
       const bytes = await readFile(outcome.unchanged ? src : out);
       return new Response(new Uint8Array(bytes), {

@@ -1,5 +1,6 @@
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { execFile } from "node:child_process";
+import { compatCoverIn, compatProxyNameFor } from "@/cut/lib/proxyNames";
 import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc } from "@/cut/lib/types";
 import { detectSilence, extractAudio, makeFreezeFrame, probeDims, probeDuration } from "../frames";
 import {
@@ -25,7 +26,8 @@ import {
   writeProject,
 } from "../projects";
 import { convertToMp4, mp4NameFor } from "../convert";
-import { makeProxy, proxyNameFor } from "../proxy";
+import { convertModeIn } from "@/cut/lib/convertMode";
+import { makeCompatProxy, makeProxy, proxyNameFor } from "../proxy";
 import { serveFileRange, wantsDownload } from "../serveFile";
 import { importUrlToProject } from "../urlImport";
 import { createTranscribeJob, getTranscribeJob, type TranscribeSpec } from "../transcribe";
@@ -433,8 +435,10 @@ export const projectsApi = {
   async convert(req: Request, { id }: { id: string }) {
     try {
       if (!(await readProject(id))) return err("Project not found.", 404);
-      const body = (await req.json()) as { file?: string; maxHeight?: number };
+      const body = (await req.json()) as { file?: string; maxHeight?: number; mode?: unknown };
       if (!body.file) return err("file is required.", 400);
+      const mode = convertModeIn(body.mode);
+      if (!mode) return err("mode is fit or reencode.", 400);
       const src = mediaPath(id, body.file);
       if (!(await exists(src))) return err("Media file missing from project.", 404);
       const fileName = await uniqueName(mp4NameFor(body.file), (n) => mediaPath(id, n));
@@ -442,6 +446,7 @@ export const projectsApi = {
       const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
       const outcome = await convertToMp4(handle, src, outPath, {
         maxHeight: typeof body.maxHeight === "number" ? body.maxHeight : undefined,
+        mode,
       });
       // Nothing was written for a file that already fits; the project keeps
       // the one it has.
@@ -459,19 +464,23 @@ export const projectsApi = {
   /** Build the preview proxy of a ProRes master in this project (see
    * server/proxy.ts). The proxy lands beside the master; writing it onto the
    * asset is the client's call. The page sends the size and quality it was
-   * configured with. */
+   * configured with, and `compat` for a browser that cannot decode one of
+   * the master's streams (lib/proxyNames.ts). */
   async proxy(req: Request, { id }: { id: string }) {
     try {
       if (!(await readProject(id))) return err("Project not found.", 404);
-      const body = (await req.json()) as { file?: string; maxHeight?: number; crf?: number };
+      const body = (await req.json()) as { file?: string; maxHeight?: number; crf?: number; compat?: unknown };
       if (!body.file) return err("file is required.", 400);
       if (typeof body.maxHeight !== "number" || typeof body.crf !== "number") return err("maxHeight and crf are required.", 400);
+      const compat = compatCoverIn(body.compat);
+      if (body.compat !== undefined && !compat) return err("compat is audio or video.", 400);
       const src = mediaPath(id, body.file);
       if (!(await exists(src))) return err("Media file missing from project.", 404);
-      const fileName = await uniqueName(proxyNameFor(body.file), (n) => mediaPath(id, n));
+      const fileName = await uniqueName(compat ? compatProxyNameFor(body.file, compat, false) : proxyNameFor(body.file), (n) => mediaPath(id, n));
       const outPath = mediaPath(id, fileName);
       const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
-      const outcome = await makeProxy(handle, src, outPath, { maxHeight: body.maxHeight, crf: body.crf });
+      const opts = { maxHeight: body.maxHeight, crf: body.crf };
+      const outcome = compat ? await makeCompatProxy(handle, src, outPath, { ...opts, cover: compat }) : await makeProxy(handle, src, outPath, opts);
       return Response.json({ fileName, ...outcome });
     } catch (e) {
       return caught(e, "Could not make the preview proxy.");

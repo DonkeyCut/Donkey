@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeProxy, probeProxySource, proxyFfmpegArgs, proxyMatrixOf, proxyNameFor } from "./proxy";
+import { makeCompatProxy, makeProxy, probeProxySource, proxyFfmpegArgs, proxyMatrixOf, proxyNameFor } from "./proxy";
 import { openMedia, probeMediaFile, videoTrackOf } from "@/cut/lib/mediaRead";
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), "../lib/fixtures/prores-422hq-10bit.mov");
@@ -154,5 +154,56 @@ describe("proxy", () => {
     // faststart: the index rides ahead of the samples.
     const bytes = await readFile(out);
     expect(bytes.indexOf("moov")).toBeLessThan(bytes.indexOf("mdat"));
+  }, 60_000);
+});
+
+describe("compat proxy", () => {
+  /** Codec names of `file`'s streams, video first. */
+  const codecsOf = (file: string) =>
+    ffprobe(["-show_entries", "stream=codec_type,codec_name", "-of", "csv=p=0", file]).trim().split("\n").sort();
+  /** A one-second phone-like clip: H.264 High picture, AAC sound. */
+  const phoneClip = (name: string, colour: string[] = []) => {
+    const src = path.join(dir, name);
+    ffmpeg(["-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=24:duration=1", "-f", "lavfi", "-i", "sine=duration=1",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", ...colour, "-c:a", "aac", "-shortest", src]);
+    return src;
+  };
+
+  test("a browser without H.264 gets VP9 picture and Opus sound in WebM", async () => {
+    const src = phoneClip("phone.mp4");
+    const out = path.join(dir, "phone.mp4.compat.webm");
+    await makeCompatProxy(handle(out), src, out, { cover: "video", maxHeight: 180, crf: 20 });
+
+    expect(codecsOf(out)).toEqual(["opus,audio", "vp9,video"]);
+    expect(ffprobe(["-show_entries", "format=format_name", "-of", "csv=p=0", out])).toContain("webm");
+    expect(Number(ffprobe(["-select_streams", "v", "-show_entries", "stream=height", "-of", "csv=p=0", out]))).toBe(180);
+  }, 60_000);
+
+  test("a Rec.709 picture is copied when only the sound needs Opus", async () => {
+    const src = phoneClip("rec709.mp4", ["-colorspace", "bt709", "-color_range", "tv"]);
+    const out = path.join(dir, "rec709.mp4.compat.mp4");
+    await makeCompatProxy(handle(out), src, out, { cover: "audio", maxHeight: 1080, crf: 20 });
+
+    expect(codecsOf(out)).toEqual(["h264,video", "opus,audio"]);
+    const packets = (file: string) => ffprobe(["-select_streams", "v", "-show_entries", "packet=size", "-of", "csv=p=0", file]);
+    expect(packets(out)).toBe(packets(src));
+  }, 60_000);
+
+  test("a picture outside Rec.709 limited is carried into it", async () => {
+    const src = phoneClip("fullrange.mp4", ["-colorspace", "smpte170m", "-color_range", "pc"]);
+    const out = path.join(dir, "fullrange.mp4.compat.mp4");
+    await makeCompatProxy(handle(out), src, out, { cover: "audio", maxHeight: 1080, crf: 20 });
+
+    expect(codecsOf(out)).toEqual(["h264,video", "opus,audio"]);
+    expect(ffprobe(["-select_streams", "v", "-show_entries", "stream=color_space,color_range", "-of", "csv=p=0", out]).trim()).toBe("tv,bt709");
+  }, 60_000);
+
+  test("an audio file gets Opus sound alone", async () => {
+    const src = path.join(dir, "voice.m4a");
+    ffmpeg(["-y", "-f", "lavfi", "-i", "sine=duration=1", "-c:a", "aac", src]);
+    const out = path.join(dir, "voice.m4a.compat.mp4");
+    await makeCompatProxy(handle(out), src, out, { cover: "audio", maxHeight: 1080, crf: 20 });
+
+    expect(codecsOf(out)).toEqual(["opus,audio"]);
   }, 60_000);
 });

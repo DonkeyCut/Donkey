@@ -20,6 +20,11 @@ function harness(taken: string[] = [], spec: Record<string, unknown> = { file: "
       await writeFile(out, "proxy");
       return { sizeBytes: 5, width: 64, height: 64 };
     }),
+    makeCompat: mock(async (_handle: unknown, _src: string, out: string, opts: { cover: string; maxHeight: number; crf: number }) => {
+      void opts;
+      await writeFile(out, "compat");
+      return { sizeBytes: 6, width: 64, height: 36 };
+    }),
     duration: mock(async () => 2),
     settings: mock(async () => ({ proxyMaxHeight: 1080, proxyCrf: 20, lightKbps: 6000 })),
   } satisfies ProxyJobIO;
@@ -38,6 +43,18 @@ describe("proxy worker", () => {
     const pro = harness();
     expect((await pro.run()).fileName).toBe("clip.proxy.mp4");
     expect((pro.io.make.mock.calls[0][3] as { maxKbps?: number }).maxKbps).toBeUndefined();
+  });
+
+  test("a compat job builds the cover it names and registers it by its container", async () => {
+    const h = harness([], { file: "clip.mp4", compat: "video" });
+    expect((await h.run()).fileName).toBe("clip.mp4.compat.webm");
+    expect(h.io.make).not.toHaveBeenCalled();
+    expect(h.io.makeCompat.mock.calls[0][3]).toMatchObject({ cover: "video", maxHeight: 1080, crf: 20 });
+    expect(h.io.register.mock.calls[0][0]).toMatchObject({ fileName: "clip.mp4.compat.webm", kind: "proxy", mime: "video/webm" });
+    // A heavy video streamed from the cloud gets the light one.
+    const light = harness([], { file: "clip.mp4", compat: "audio", maxHeight: 1080 });
+    expect((await light.run()).fileName).toBe("clip.mp4.compat.light.mp4");
+    expect(light.io.makeCompat.mock.calls[0][3]).toMatchObject({ cover: "audio", maxKbps: 6000 });
   });
 
   test("a job that asks for a smaller copy gets it, never one past the account's size", async () => {

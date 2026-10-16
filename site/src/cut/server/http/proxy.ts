@@ -1,7 +1,8 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { makeProxy, proxyNameFor } from "../proxy";
+import { compatCoverIn, compatProxyNameFor } from "@/cut/lib/proxyNames";
+import { makeCompatProxy, makeProxy, proxyNameFor } from "../proxy";
 import { errorMessage } from "../util";
 
 /**
@@ -26,15 +27,26 @@ export const proxyApi = {
       if (!Number.isFinite(maxHeight) || !Number.isFinite(crf)) {
         return Response.json({ error: "maxHeight and crf are required." }, { status: 400 });
       }
+      // A browser that cannot decode one of the master's streams asks for
+      // the compat proxy (lib/proxyNames.ts).
+      const asked = form.get("compat");
+      const compat = compatCoverIn(asked);
+      if (asked !== null && !compat) {
+        return Response.json({ error: "compat is audio or video." }, { status: 400 });
+      }
       const name = path.basename(file.name) || "source";
       const src = path.join(tmp, name);
-      const out = path.join(tmp, proxyNameFor(name));
+      const out = path.join(tmp, compat ? compatProxyNameFor(name, compat, false) : proxyNameFor(name));
       await writeFile(src, new Uint8Array(await file.arrayBuffer()));
       const handle = { tmpDir: tmp, outPath: out, progress: 0, log: [] as string[] };
-      await makeProxy(handle, src, out, { maxHeight, crf });
+      if (compat) {
+        await makeCompatProxy(handle, src, out, { maxHeight, crf, cover: compat });
+      } else {
+        await makeProxy(handle, src, out, { maxHeight, crf });
+      }
       const bytes = await readFile(out);
       return new Response(new Uint8Array(bytes), {
-        headers: { "Content-Type": "video/mp4", "Content-Length": String(bytes.length) },
+        headers: { "Content-Type": compat === "video" ? "video/webm" : "video/mp4", "Content-Length": String(bytes.length) },
       });
     } catch (e) {
       return Response.json(

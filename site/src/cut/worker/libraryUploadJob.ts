@@ -56,6 +56,7 @@ export async function runLibraryUploadJob(
     handle.outPath = out;
     const converted = await io.convert(handle, src, out, {
       maxHeight: input.maxHeight,
+      mode: input.mode,
       onProgress: (seconds) => { handle.progress = Math.min(0.95, seconds / duration); },
     });
     checkCanceled();

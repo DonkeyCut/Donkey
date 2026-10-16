@@ -23,7 +23,7 @@ function harness() {
     upload: mock(async (_key: string, _file: string, _mime: string) => { void _file; void _mime; return 5; }),
     remove: mock(async (_keys: string[]) => { void _keys; }),
     convert: mock(async () => ({ transcodedVideo: true, transcodedAudio: false, width: 64, height: 64, unchanged: false })),
-    codecs: mock(async () => ({ video: "hevc", audio: "aac", videoIndex: 0, audioIndex: 1, remux: false, videoNeedsEncoding: true })),
+    codecs: mock(async () => ({ video: "hevc", audio: "aac", videoIndex: 0, audioIndex: 1, remux: false, videoNeedsEncoding: true, mp4: true })),
     duration: mock(async () => 2),
     transact: async <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => run(tx as unknown as Prisma.TransactionClient),
     register,

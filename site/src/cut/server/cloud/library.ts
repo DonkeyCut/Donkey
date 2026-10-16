@@ -25,6 +25,7 @@ import { renderJobCheck } from "./limits";
 import { wakeRenderWorker } from "./wake";
 import { libraryTypeOf } from "@/cut/lib/libraryFileType";
 import { itemName } from "@/cut/lib/itemName";
+import { compatCoverIn, compatCovers } from "@/cut/lib/proxyNames";
 import type { AssetType } from "@/cut/lib/types";
 import { caught, decodeFileParam, dedupeName, err, HttpResponseError, inspirationFolderId, redirect, safeFileName, storableFileName } from "./util";
 
@@ -701,16 +702,21 @@ export const libraryCloud = {
 
   /** Queue the playable copy of a library video the browser cannot decode.
    * A row that already names one answers with itself, and a job already on
-   * its way answers with that job. */
-  async proxy(userId: string, id: string) {
+   * its way answers with that job. `compat` asks for the compat proxy
+   * (lib/proxyNames.ts), which an audio file can take as well. */
+  async proxy(userId: string, id: string, req: Request) {
     try {
+      const { compat: asked } = (await req.json().catch(() => ({}))) as { compat?: unknown };
+      const compat = compatCoverIn(asked);
+      if (asked !== undefined && !compat) return err("compat is audio or video.", 400);
       const asset = await prisma.cutLibraryAsset.findFirst({ where: { id, userId, deletedAt: null } });
       if (!asset) return err("Library asset not found.", 404);
       const obj = await prisma.cutMediaObject.findFirst({ where: { id: asset.mediaObjectId, userId } });
       if (!obj) return err("Library asset not found.", 404);
       const view = assetView(asset, obj);
-      if (view.type !== "video") return err("Only a video takes a playable copy.", 400);
-      if (view.proxyFile) return Response.json(view);
+      const takes = view.type === "video" || (compat === "audio" && view.type === "audio");
+      if (!takes) return err("Only a video takes a playable copy.", 400);
+      if (view.proxyFile && (!compat || compatCovers(view.proxyFile, compat))) return Response.json(view);
       const jobId = libraryProxyJobId(id);
       const existing = await prisma.cutRenderJob.findFirst({ where: { id: jobId, userId } });
       if (existing && (existing.state === "queued" || existing.state === "running")) {
@@ -719,7 +725,7 @@ export const libraryCloud = {
       }
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
-      const spec = { target: "library", assetId: id } as Prisma.InputJsonValue;
+      const spec = { target: "library", assetId: id, ...(compat ? { compat } : {}) } as Prisma.InputJsonValue;
       if (existing) {
         // A finished or failed run goes again under the same id.
         await prisma.cutRenderJob.updateMany({

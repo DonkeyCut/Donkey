@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { getGlobalSetting } from "@/lib/config/effective";
 import type { RenderHandle } from "../server/exportPipeline";
-import { makeProxy, proxyNameFor } from "../server/proxy";
-import { lightProxyNameFor, PROXY_SOURCE_FAULT } from "../lib/proxyNames";
+import { makeCompatProxy, makeProxy, proxyNameFor } from "../server/proxy";
+import { compatCoverIn, compatProxyNameFor, lightProxyNameFor, PROXY_SOURCE_FAULT } from "../lib/proxyNames";
 import { probeDuration } from "../server/frames";
 import { dedupeName } from "../server/cloud/util";
 import { prisma, registerObject, unregisterObjects, type ClaimedJob } from "./db";
@@ -31,6 +31,7 @@ export interface ProxyJobIO {
   register: typeof registerObject;
   unregister: typeof unregisterObjects;
   make: typeof makeProxy;
+  makeCompat: typeof makeCompatProxy;
   duration: typeof probeDuration;
   settings: () => Promise<{ proxyMaxHeight: number; proxyCrf: number; lightKbps: number }>;
 }
@@ -43,6 +44,7 @@ const defaultIO: ProxyJobIO = {
   register: registerObject,
   unregister: unregisterObjects,
   make: makeProxy,
+  makeCompat: makeCompatProxy,
   duration: probeDuration,
   settings: async () => {
     const [color, proxy] = await Promise.all([getGlobalSetting("cutColor"), getGlobalSetting("cutProxy")]);
@@ -67,7 +69,8 @@ export async function runProxyJob(
   if ((job.spec as { target?: string } | null)?.target === "library") {
     return runLibraryProxyJob(job, handle, isCanceled);
   }
-  const { file, maxHeight } = (job.spec ?? {}) as { file?: string; maxHeight?: number };
+  const { file, maxHeight, compat: asked } = (job.spec ?? {}) as { file?: string; maxHeight?: number; compat?: unknown };
+  const compat = compatCoverIn(asked);
   if (!file) throw new Error("Proxy job has no file.");
   const projectId = job.projectId;
   if (!projectId) throw new Error("Proxy job has no project.");
@@ -86,21 +89,27 @@ export async function runProxyJob(
     // A job that names a height is a heavy video's: its proxy is the light
     // copy, capped in bitrate and named apart from a full-quality one.
     const light = !!(maxHeight && maxHeight > 0);
-    const fileName = dedupeName(light ? lightProxyNameFor(file) : proxyNameFor(file), new Set(rows.map((r) => r.fileName)));
+    let name = light ? lightProxyNameFor(file) : proxyNameFor(file);
+    if (compat) {
+      name = compatProxyNameFor(file, compat, light);
+    }
+    const fileName = dedupeName(name, new Set(rows.map((r) => r.fileName)));
     const out = path.join(tmp, fileName);
     handle.outPath = out;
 
     const [total, settings] = await Promise.all([io.duration(src), io.settings()]);
-    const outcome = await io.make(handle, src, out, {
+    const opts = {
       // A heavy video's proxy asks for a smaller copy; none is larger than
       // the account allows.
       maxHeight: maxHeight && maxHeight > 0 ? Math.min(settings.proxyMaxHeight, maxHeight) : settings.proxyMaxHeight,
       crf: settings.proxyCrf,
       ...(light ? { maxKbps: settings.lightKbps } : {}),
-      onProgress: (seconds) => {
+      onProgress: (seconds: number) => {
         if (total > 0) handle.progress = Math.min(0.99, seconds / total);
       },
-    }).catch((e: unknown) => {
+    };
+    const made = compat ? io.makeCompat(handle, src, out, { ...opts, cover: compat }) : io.make(handle, src, out, opts);
+    const outcome = await made.catch((e: unknown) => {
       // ffmpeg ran to its own end and refused the master: the row says the
       // file is at fault, so the route waits before trying it again.
       throw !isCanceled() && refusedInput(handle.proc) ? new InputFault(PROXY_SOURCE_FAULT, e) : e;
@@ -109,13 +118,14 @@ export async function runProxyJob(
 
     const key = mediaKey(job.userId, projectId, fileName);
     try {
-      const bytes = await io.upload(key, out, "video/mp4");
+      const mime = compat === "video" ? "video/webm" : "video/mp4";
+      const bytes = await io.upload(key, out, mime);
       await io.register({
         userId: job.userId,
         projectId,
         r2Key: key,
         fileName,
-        mime: "video/mp4",
+        mime,
         bytes,
         kind: "proxy",
       });

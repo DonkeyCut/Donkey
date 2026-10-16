@@ -93,7 +93,7 @@ setHostMediaStore({
     const fileName = await uniqueName(mp4NameFor(source.fileName), (n) => mediaPath(projectId, n));
     const outPath = mediaPath(projectId, fileName);
     const handle = { tmpDir: "", outPath, progress: 0, log: [] as string[] };
-    const outcome = await convertToMp4(handle, src, outPath, { maxHeight: opts.maxHeight });
+    const outcome = await convertToMp4(handle, src, outPath, { maxHeight: opts.maxHeight, mode: opts.mode });
     return {
       fileName: outcome.unchanged ? source.fileName : fileName,
       ...(outcome.unchanged ? { unchanged: true } : {}),

@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { RenderHandle } from "../server/exportPipeline";
+import { convertModeIn } from "../lib/convertMode";
 import { convertToMp4, mp4NameFor } from "../server/convert";
 import { probeDuration } from "../server/frames";
 import { dedupeName } from "../server/cloud/util";
@@ -38,7 +39,8 @@ export async function runConvertJob(
   if ((job.spec as { target?: string } | null)?.target === "library") {
     return runLibraryUploadJob(job, handle, isCanceled);
   }
-  const { file, maxHeight } = (job.spec ?? {}) as { file?: string; maxHeight?: number };
+  const { file, maxHeight, mode: asked } = (job.spec ?? {}) as { file?: string; maxHeight?: number; mode?: unknown };
+  const mode = convertModeIn(asked) ?? "fit";
   if (!file) throw new Error("Convert job has no file.");
   const projectId = job.projectId;
   if (!projectId) throw new Error("Convert job has no project.");
@@ -61,6 +63,7 @@ export async function runConvertJob(
     const total = await probeDuration(src);
     const outcome = await convertToMp4(handle, src, out, {
       maxHeight,
+      mode,
       onProgress: (seconds) => {
         if (total > 0) handle.progress = Math.min(0.99, seconds / total);
       },

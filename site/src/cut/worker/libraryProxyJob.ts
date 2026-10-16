@@ -4,7 +4,8 @@ import path from "node:path";
 import type { Prisma } from "@/generated/prisma/client";
 import { getGlobalSetting } from "@/lib/config/effective";
 import type { RenderHandle } from "../server/exportPipeline";
-import { makeProxy, proxyNameFor } from "../server/proxy";
+import { makeCompatProxy, makeProxy, proxyNameFor } from "../server/proxy";
+import { compatCoverIn, compatCovers, compatProxyNameFor } from "../lib/proxyNames";
 import { probeDuration } from "../server/frames";
 import { assetView } from "../server/cloud/library";
 import { dedupeName } from "../server/cloud/util";
@@ -19,6 +20,7 @@ export interface LibraryProxyIO {
   upload: typeof uploadFile;
   remove: typeof deleteObjects;
   make: typeof makeProxy;
+  makeCompat: typeof makeCompatProxy;
   duration: typeof probeDuration;
   settings: () => Promise<{ proxyMaxHeight: number; proxyCrf: number }>;
   transact: <T>(run: (tx: Prisma.TransactionClient) => Promise<T>) => Promise<T>;
@@ -31,6 +33,7 @@ const defaultIO: LibraryProxyIO = {
   upload: uploadFile,
   remove: deleteObjects,
   make: makeProxy,
+  makeCompat: makeCompatProxy,
   duration: probeDuration,
   settings: () => getGlobalSetting("cutColor"),
   transact: storageTransaction,
@@ -52,7 +55,8 @@ export async function runLibraryProxyJob(
   isCanceled: () => boolean,
   io: LibraryProxyIO = defaultIO
 ): Promise<LibraryAsset> {
-  const { assetId } = (job.spec ?? {}) as { assetId?: string };
+  const { assetId, compat: asked } = (job.spec ?? {}) as { assetId?: string; compat?: unknown };
+  const compat = compatCoverIn(asked);
   if (!assetId) throw new Error("Library proxy job has no asset.");
   const row = await io.db.cutLibraryAsset.findFirst({ where: { id: assetId, userId: job.userId, deletedAt: null } });
   if (!row) throw new Error(DELETED);
@@ -60,7 +64,8 @@ export async function runLibraryProxyJob(
   if (!media) throw new Error("Library media is missing.");
 
   // A replay, or a second ask after the copy landed, returns what is there.
-  if ((row.meta as { proxyFile?: string } | null)?.proxyFile) return assetView(row, media);
+  const had = (row.meta as { proxyFile?: string } | null)?.proxyFile;
+  if (had && (!compat || compatCovers(had, compat))) return assetView(row, media);
 
   const tmp = await mkdtemp(path.join(os.tmpdir(), "cut-library-proxy-"));
   handle.tmpDir = tmp;
@@ -77,34 +82,51 @@ export async function runLibraryProxyJob(
       where: { userId: job.userId, projectId: null, kind: { in: ["library", "proxy"] } },
       select: { fileName: true },
     });
-    const fileName = dedupeName(proxyNameFor(media.fileName), new Set(rows.map((r) => r.fileName)));
+    const name = compat ? compatProxyNameFor(media.fileName, compat, false) : proxyNameFor(media.fileName);
+    const fileName = dedupeName(name, new Set(rows.map((r) => r.fileName)));
     const out = path.join(tmp, fileName);
     handle.outPath = out;
 
     const [total, settings] = await Promise.all([io.duration(src), io.settings()]);
-    await io.make(handle, src, out, {
+    const opts = {
       maxHeight: settings.proxyMaxHeight,
       crf: settings.proxyCrf,
-      onProgress: (seconds) => {
+      onProgress: (seconds: number) => {
         if (total > 0) handle.progress = Math.min(0.99, seconds / total);
       },
-    });
+    };
+    await (compat ? io.makeCompat(handle, src, out, { ...opts, cover: compat }) : io.make(handle, src, out, opts));
     if (isCanceled()) throw new Error("Proxy canceled.");
 
     key = libraryKey(job.userId, fileName);
-    const bytes = await io.upload(key, out, "video/mp4");
+    const mime = compat === "video" ? "video/webm" : "video/mp4";
+    const bytes = await io.upload(key, out, mime);
+    let replaced: string | undefined;
     const stored = key;
     const updated = await io.transact(async (tx) => {
       // The asset may have been deleted while the copy was built.
       const live = await tx.cutLibraryAsset.findFirst({ where: { id: assetId, userId: job.userId, deletedAt: null } });
       if (!live) throw new Error(DELETED);
       await io.register(tx, {
-        userId: job.userId, projectId: null, r2Key: stored, fileName, mime: "video/mp4", bytes, kind: "proxy",
+        userId: job.userId, projectId: null, r2Key: stored, fileName, mime, bytes, kind: "proxy",
       });
+      // A compat copy takes the place of a copy this browser cannot play;
+      // the old one's object leaves with its name.
+      const before = (live.meta as { proxyFile?: string } | null)?.proxyFile;
+      if (before) {
+        const old = await tx.cutMediaObject.findFirst({ where: { userId: job.userId, projectId: null, kind: "proxy", fileName: before } });
+        if (old) {
+          await tx.cutMediaObject.delete({ where: { id: old.id } });
+          replaced = old.r2Key;
+        }
+      }
       const meta = { ...((live.meta ?? {}) as Record<string, unknown>), proxyFile: fileName };
       return tx.cutLibraryAsset.update({ where: { id: assetId }, data: { meta: meta as Prisma.InputJsonValue } });
     });
     published = true;
+    if (replaced) {
+      await io.remove([replaced]).catch(() => {});
+    }
     return assetView(updated, media);
   } finally {
     try {

@@ -12,9 +12,10 @@ import { MEDIA_REDIRECT_HEADERS, mediaObjectUrl, mediaUrlLifetime } from "./medi
 import { del, head, overlayKey, overlayPrefix, presignPut, projectExportKey } from "./r2";
 import { contentTypeFor } from "../serveFile";
 import { containerOfName, deliveryContainer, exportBaseName, jobWantsStems, specMediaFiles, STEMS_MIME, stemsArchiveName, type ExportContainer, type ExportFiles } from "../../lib/exportDelivery";
+import { convertModeIn } from "../../lib/convertMode";
 import { LOUDNESS_IDS, type LoudnessId } from "../../lib/loudnessSettings";
 import type { DocExportAudio } from "../../lib/exportPresets";
-import { PROXY_SOURCE_FAULT } from "../../lib/proxyNames";
+import { compatCoverIn, compatCovers, isLightProxyName, PROXY_SOURCE_FAULT, type CompatCover } from "../../lib/proxyNames";
 import { addUsage, outputByteCeiling, quotaCheck } from "./usage";
 import { caught, err, redirect } from "./util";
 
@@ -23,6 +24,34 @@ const HOUR_MS = 60 * 60 * 1000;
 /** A master's file name without its extension: what its proxy's name starts
  * with (server/proxy.ts `proxyNameFor`). */
 const proxyStem = (fileName: string) => fileName.replace(/\.[^./\\]+$/, "") || "media";
+
+/** The newest proxy of `file` already built that answers an ask: light or
+ * full quality, and the compat cover it names (lib/proxyNames.ts). */
+async function builtProxy(userId: string, projectId: string, file: string, light: boolean, compat: CompatCover | null) {
+  // A compat proxy is named from the whole master name, as a light one is.
+  let prefix = light ? `${file}.light` : `${proxyStem(file)}.proxy`;
+  if (compat) {
+    prefix = light ? `${file}.compat.light` : `${file}.compat`;
+  }
+  const rows = await prisma.cutMediaObject.findMany({
+    where: { userId, projectId, kind: "proxy", uploadState: "complete", fileName: { startsWith: prefix } },
+    select: { fileName: true, bytes: true },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!compat) {
+    return rows[0] ?? null;
+  }
+
+  // `clip.mp4.compat` also starts `clip.mp4.compat.light`: a full-size ask
+  // takes a full-size proxy that covers the stream.
+  return rows.find((r) => compatCovers(r.fileName, compat) && isLightProxyName(r.fileName) === light) ?? null;
+}
+
+/** Whether a proxy job's spec asked for what this request asks. */
+function sameProxyAsk(spec: unknown, light: boolean, compat: CompatCover | null): boolean {
+  const s = (spec ?? {}) as { maxHeight?: number; compat?: unknown };
+  return (s.maxHeight !== undefined) === light && compatCoverIn(s.compat) === compat;
+}
 
 /** How long finished jobs stay in the export-jobs feed — the engine's registry
  * keeps a bounded terminal backlog; the cloud keeps a day. */
@@ -926,8 +955,10 @@ export const jobsCloud = {
    * files as MP4 and registers it beside the original. */
   async convert(userId: string, projectId: string, req: Request) {
     try {
-      const { file, maxHeight } = (await req.json()) as { file?: string; maxHeight?: number };
+      const { file, maxHeight, mode: askedMode } = (await req.json()) as { file?: string; maxHeight?: number; mode?: unknown };
       if (!file) return err("file is required.", 400);
+      const mode = convertModeIn(askedMode);
+      if (!mode) return err("mode is fit or reencode.", 400);
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
       const over = await quotaCheck(userId, 0, EXPORT_QUOTA_MARGIN);
       if (over) return over;
@@ -943,7 +974,7 @@ export const jobsCloud = {
           userId,
           projectId,
           kind: "convert",
-          spec: { file, ...(maxHeight ? { maxHeight } : {}) } as unknown as Prisma.InputJsonValue,
+          spec: { file, ...(maxHeight ? { maxHeight } : {}), ...(mode === "reencode" ? { mode } : {}) } as unknown as Prisma.InputJsonValue,
         },
       });
       wakeRenderWorker();
@@ -957,11 +988,14 @@ export const jobsCloud = {
    * smaller `maxHeight` it asks for: the worker builds it and
    * registers it beside the master as a quota-exempt object. A proxy already
    * built answers at once, and a job already on its way answers with that
-   * job, so a project copied to the cloud and then opened queues one. */
+   * job, so a project copied to the cloud and then opened queues one.
+   * `compat` asks for the compat proxy (lib/proxyNames.ts). */
   async proxy(userId: string, projectId: string, req: Request) {
     try {
-      const { file, maxHeight: asked } = (await req.json()) as { file?: string; maxHeight?: unknown };
+      const { file, maxHeight: asked, compat: askedCompat } = (await req.json()) as { file?: string; maxHeight?: unknown; compat?: unknown };
       if (!file) return err("file is required.", 400);
+      const compat = compatCoverIn(askedCompat);
+      if (askedCompat !== undefined && !compat) return err("compat is audio or video.", 400);
       const maxHeight = typeof asked === "number" && Number.isFinite(asked) ? Math.round(Math.min(4320, Math.max(360, asked))) : undefined;
       if (!(await getProject(userId, projectId))) return err("Project not found.", 404);
       const source = await prisma.cutMediaObject.findFirst({
@@ -972,17 +1006,13 @@ export const jobsCloud = {
       // A heavy video's request (it names a height) wants the light proxy
       // (lib/proxyNames.ts); a full-quality one built earlier doesn't answer it.
       const light = maxHeight !== undefined;
-      const built = await prisma.cutMediaObject.findFirst({
-        where: { userId, projectId, kind: "proxy", uploadState: "complete", fileName: { startsWith: light ? `${file}.light` : `${proxyStem(file)}.proxy` } },
-        select: { fileName: true, bytes: true },
-        orderBy: { createdAt: "desc" },
-      });
+      const built = await builtProxy(userId, projectId, file, light, compat);
       if (built) return Response.json({ fileName: built.fileName, sizeBytes: Number(built.bytes) });
       const runningRows = await prisma.cutRenderJob.findMany({
         where: { userId, projectId, kind: "proxy", state: { in: ["queued", "running"] }, spec: { path: ["file"], equals: file } },
         select: { id: true, spec: true },
       });
-      const running = runningRows.find((r) => ((r.spec as { maxHeight?: number } | null)?.maxHeight !== undefined) === light);
+      const running = runningRows.find((r) => sameProxyAsk(r.spec, light, compat));
       if (running) {
         wakeRenderWorker();
         return Response.json({ jobId: running.id });
@@ -1002,13 +1032,13 @@ export const jobsCloud = {
         },
         select: { spec: true },
       });
-      if (failedRows.some((r) => ((r.spec as { maxHeight?: number } | null)?.maxHeight !== undefined) === light)) {
+      if (failedRows.some((r) => sameProxyAsk(r.spec, light, compat))) {
         return err("The preview proxy could not be made from this file lately; the original plays instead.", 409);
       }
       const capped = await renderJobCheck(userId);
       if (capped) return capped;
       const row = await prisma.cutRenderJob.create({
-        data: { userId, projectId, kind: "proxy", spec: { file, ...(maxHeight ? { maxHeight } : {}) } as unknown as Prisma.InputJsonValue },
+        data: { userId, projectId, kind: "proxy", spec: { file, ...(maxHeight ? { maxHeight } : {}), ...(compat ? { compat } : {}) } as unknown as Prisma.InputJsonValue },
       });
       wakeRenderWorker();
       return Response.json({ jobId: row.id });

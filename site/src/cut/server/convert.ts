@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { h264Encoder, runFfmpeg, vtQuality, type RenderHandle } from "./exportPipeline";
 import { assertGraphSafe } from "./filterGraph";
+import type { ConvertMode } from "../lib/convertMode";
 import { videoDimensions } from "./util";
 
 /**
@@ -47,10 +48,11 @@ const MP4_EXT = /\.(mp4|m4v)$/i;
  * to leave it alone. */
 export const fitsAlready = (
   file: string,
-  codecs: { video?: string; audio?: string; remux?: boolean; videoNeedsEncoding?: boolean },
+  codecs: { video?: string; audio?: string; remux?: boolean; videoNeedsEncoding?: boolean; mp4?: boolean },
   work: { shrink: boolean }
 ) =>
   MP4_EXT.test(file) &&
+  !!codecs.mp4 &&
   !work.shrink &&
   !codecs.remux &&
   !codecs.videoNeedsEncoding &&
@@ -66,8 +68,9 @@ export type MediaStream = {
   disposition?: { default?: number; attached_pic?: number };
 };
 
-/** Choose the playable audio rendition carried beside optional spatial tracks. */
-export function selectConversionStreams(streams: MediaStream[]) {
+/** Choose the playable audio rendition carried beside optional spatial tracks.
+ * `formatName` is ffprobe's name for the container, e.g. "mov,mp4,m4a,3gp,3g2,mj2". */
+export function selectConversionStreams(streams: MediaStream[], formatName = "") {
   const video = streams.find((s) => s.codec_type === "video" && !s.disposition?.attached_pic);
   const audioTracks = streams.filter((s) => s.codec_type === "audio");
   const knownAudio = audioTracks.filter((s) => s.codec_name && s.codec_name !== "unknown" && s.codec_tag_string !== "apac");
@@ -81,6 +84,9 @@ export function selectConversionStreams(streams: MediaStream[]) {
     videoNeedsEncoding: !!video && (video.codec_name !== "h264" || (!!video.pix_fmt && video.pix_fmt !== "yuv420p" && video.pix_fmt !== "yuvj420p")),
     audioIndex: audio?.index,
     remux: audioTracks.length > 1,
+    // What the bytes are, whatever the name says: a page that can't parse a
+    // file named .mp4 hands it here, and only a remux makes it readable.
+    mp4: formatName.split(",").includes("mp4"),
   };
 }
 
@@ -89,7 +95,7 @@ export function streamCodecs(file: string): Promise<ReturnType<typeof selectConv
   return new Promise((resolve, reject) => {
     const p = spawn("ffprobe", [
       "-v", "error", "-show_entries",
-      "stream=index,codec_type,codec_name,codec_tag_string,pix_fmt:stream_disposition=default,attached_pic",
+      "format=format_name:stream=index,codec_type,codec_name,codec_tag_string,pix_fmt:stream_disposition=default,attached_pic",
       "-of", "json", file,
     ]);
     let out = "";
@@ -103,7 +109,8 @@ export function streamCodecs(file: string): Promise<ReturnType<typeof selectConv
       clearTimeout(timer);
       if (code !== 0) return reject(new Error("Could not inspect this media file."));
       try {
-        resolve(selectConversionStreams((JSON.parse(out).streams ?? []) as MediaStream[]));
+        const probe = JSON.parse(out) as { streams?: MediaStream[]; format?: { format_name?: string } };
+        resolve(selectConversionStreams(probe.streams ?? [], probe.format?.format_name));
       } catch (error) { reject(error); }
     });
     p.on("error", (error) => { clearTimeout(timer); reject(error); });
@@ -119,16 +126,17 @@ export async function convertToMp4(
   handle: RenderHandle,
   src: string,
   out: string,
-  opts: { maxHeight?: number; onProgress?: (seconds: number) => void } = {}
+  opts: { maxHeight?: number; mode?: ConvertMode; onProgress?: (seconds: number) => void } = {}
 ): Promise<ConvertOutcome> {
   const [codecs, dims] = await Promise.all([streamCodecs(src), videoDimensions(src)]);
   if (!codecs.video && !codecs.audio) throw new Error("That file carries no video or audio.");
 
   const cap = opts.maxHeight && opts.maxHeight > 0 ? Math.round(opts.maxHeight) : 0;
   const shrink = !!(cap && dims && dims.height > cap);
-  const transcodedVideo = !!codecs.video && (codecs.videoNeedsEncoding || shrink);
+  const forced = opts.mode === "reencode";
+  const transcodedVideo = !!codecs.video && (codecs.videoNeedsEncoding || shrink || forced);
   const transcodedAudio = !!codecs.audio && !KEEPS_AUDIO.has(codecs.audio);
-  if (fitsAlready(src, codecs, { shrink })) {
+  if (!forced && fitsAlready(src, codecs, { shrink })) {
     return {
       transcodedVideo: false,
       transcodedAudio: false,
