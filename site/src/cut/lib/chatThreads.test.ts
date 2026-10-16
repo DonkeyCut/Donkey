@@ -11,6 +11,7 @@ import {
   mergeThreads,
   readActiveChat,
   readProjectThreads,
+  readQueuedRows,
   readThreadIds,
   recordThread,
   subscribeThreadSaveFailure,
@@ -21,6 +22,7 @@ import {
   useThreadStore,
   writeActiveChat,
   writeProjectThreads,
+  writeQueuedRows,
   writeRawThreads,
   type ThreadStore,
 } from "./chatThreads";
@@ -45,6 +47,7 @@ beforeEach(() => {
  * that refuses a write past it the way the browser does. */
 function memoryStore(quota = Infinity) {
   const lists = new Map<string, unknown[]>();
+  const queues = new Map<string, Record<string, unknown[]>>();
   const size = () => [...lists.values()].reduce((n, list) => n + JSON.stringify(list).length, 0);
   const threadStore: ThreadStore = {
     read: async (projectId) => lists.get(projectId),
@@ -56,10 +59,14 @@ function memoryStore(quota = Infinity) {
         throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
       }
     },
-    remove: async (projectId) => { lists.delete(projectId); },
+    remove: async (projectId) => { lists.delete(projectId); queues.delete(projectId); },
     projects: async () => [...lists.keys()],
+    readQueues: async (projectId) => queues.get(projectId),
+    writeQueues: async (projectId, record) => {
+      if (Object.keys(record).length) queues.set(projectId, record); else queues.delete(projectId);
+    },
   };
-  return { threadStore, lists, size };
+  return { threadStore, lists, queues, size };
 }
 
 const big = (id: string, updatedAt: number, chars: number) => ({ id, updatedAt, messages: [{ id: "m", role: "user", parts: [{ type: "text", text: "x".repeat(chars) }] }] });
@@ -245,6 +252,79 @@ describe("where threads are kept", () => {
     expect(readProjectThreads("p")).toEqual([]);
     expect(readActiveChat("p")).toBeNull();
     expect([...store.keys()]).toEqual(["cut-ai-queue-other-a"]);
+  });
+
+  test("waiting rows with frame grabs past localStorage's room are kept in the thread store", async () => {
+    const { threadStore, queues } = memoryStore();
+    // A browser's localStorage: about 5 MB for the whole origin.
+    const local = (globalThis as unknown as { localStorage: Storage }).localStorage;
+    const setItem = local.setItem;
+    local.setItem = (k: string, v: string) => {
+      const used = [...store.entries()].reduce((n, [key, val]) => n + (key === k ? 0 : key.length + val.length), 0);
+      if (used + k.length + v.length > 5_000_000) throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      setItem(k, v);
+    };
+    useThreadStore(threadStore);
+    await loadProjectThreads("p");
+    const grab = (id: string) => ({ id, text: "use this frame", status: "queued", attachments: [{ scope: "file", id, kind: "image", url: `data:image/jpeg;base64,${"x".repeat(3_000_000)}` }] });
+    expect(() => {
+      writeQueuedRows("p", "a", [grab("r1")]);
+      writeQueuedRows("p", "b", [grab("r2")]);
+    }).not.toThrow();
+    await flushThreadSaves();
+    expect([...store.keys()].filter((k) => k.startsWith("cut-ai-queue-"))).toEqual([]);
+    expect(Object.keys(queues.get("p") ?? {}).sort()).toEqual(["a", "b"]);
+    // A reload reads them back.
+    useThreadStore(threadStore);
+    await loadProjectThreads("p");
+    expect((readQueuedRows("p", "a") as { id: string }[]).map((m) => m.id)).toEqual(["r1"]);
+    // An emptied queue clears its slot.
+    writeQueuedRows("p", "a", []);
+    await flushThreadSaves();
+    expect(Object.keys(queues.get("p") ?? {})).toEqual(["b"]);
+    expect(readQueuedRows("p", "a")).toEqual([]);
+  });
+
+  test("localStorage queues move to the store on first read, freeing the space", async () => {
+    const { threadStore, lists, queues } = memoryStore();
+    lists.set("p", [{ id: "a" }]);
+    lists.set("p-2", [{ id: "c" }]);
+    const row = (id: string) => ({ id, text: id, status: "queued", attachments: [] });
+    store.set("cut-ai-queue-p-a", JSON.stringify([row("r1")]));
+    store.set("cut-ai-queue-p-2-c", JSON.stringify([row("r2")]));
+    // A queue whose project has no history in this browser waits in no thread.
+    store.set("cut-ai-queue-gone-b", JSON.stringify([row("r3")]));
+    store.set("cut-ai-model", "claude");
+    useThreadStore(threadStore);
+    await loadProjectThreads("p");
+    expect((readQueuedRows("p", "a") as { id: string }[]).map((m) => m.id)).toEqual(["r1"]);
+    // Every project's queue moves, each to the project whose id it names.
+    expect(Object.keys(queues.get("p") ?? {})).toEqual(["a"]);
+    expect(Object.keys(queues.get("p-2") ?? {})).toEqual(["c"]);
+    expect([...store.keys()]).toEqual(["cut-ai-model"]);
+  });
+
+  test("a deleted project takes its waiting rows from the store", async () => {
+    const { threadStore, queues } = memoryStore();
+    useThreadStore(threadStore);
+    await loadProjectThreads("p");
+    writeProjectThreads("p", [{ id: "a", updatedAt: 1 }]);
+    writeQueuedRows("p", "a", [{ id: "r", text: "t", status: "queued", attachments: [] }]);
+    await flushThreadSaves();
+    expect(queues.has("p")).toBe(true);
+    clearProjectThreads("p");
+    await flushThreadSaves();
+    expect(queues.has("p")).toBe(false);
+    expect(readQueuedRows("p", "a")).toEqual([]);
+  });
+
+  test("without a thread store, a full localStorage drops the waiting rows without throwing", () => {
+    const local = (globalThis as unknown as { localStorage: Storage }).localStorage;
+    local.setItem = () => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); };
+    store.set("cut-ai-queue-p-a", JSON.stringify([{ id: "old" }]));
+    expect(() => writeQueuedRows("p", "a", [{ id: "new" }])).not.toThrow();
+    // The stale copy goes too: a reload never brings back rows that already ran.
+    expect(readQueuedRows("p", "a")).toEqual([]);
   });
 
   test("threads of projects the listings no longer hold go once the project is confirmed gone", async () => {

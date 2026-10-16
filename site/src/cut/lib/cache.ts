@@ -18,12 +18,15 @@ import { currentEngineUser } from "./api";
 
 const DB_NAME = "cut";
 // v1 held only the per-project view state; v2 adds this store beside it; v3
-// adds the chat history (chatThreads.ts), which outgrew localStorage.
-const DB_VERSION = 3;
+// adds the chat history (chatThreads.ts), which outgrew localStorage; v4 the
+// composer's waiting messages, whose inline frame grabs outgrew it too.
+const DB_VERSION = 4;
 const UI_STORE = "project-ui";
 const SNAPSHOT_STORE = "snapshots";
 /** Each project's chat thread list, keyed by project id. */
 export const CHAT_STORE = "chat-threads";
+/** Each project's waiting composer messages, keyed by project id. */
+export const QUEUE_STORE = "chat-queues";
 
 /** A snapshot older than this is dropped on read — too old to be a useful
  * head start, and old enough that painting it would be a lie. */
@@ -43,6 +46,7 @@ export function openCutDb(): Promise<IDBDatabase> {
       if (!names.contains(UI_STORE)) req.result.createObjectStore(UI_STORE);
       if (!names.contains(SNAPSHOT_STORE)) req.result.createObjectStore(SNAPSHOT_STORE);
       if (!names.contains(CHAT_STORE)) req.result.createObjectStore(CHAT_STORE);
+      if (!names.contains(QUEUE_STORE)) req.result.createObjectStore(QUEUE_STORE);
     };
     req.onsuccess = () => {
       // A newer tab upgrading the database waits on every open connection;

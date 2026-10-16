@@ -60,8 +60,8 @@ import {
   deleteStoredThread,
   isStoredThread,
   loadProjectThreads,
-  queueKey,
   readActiveChat,
+  readQueuedRows,
   readRawThreads,
   recordThread,
   seenRepliesKey,
@@ -69,6 +69,7 @@ import {
   threadSaveFailure,
   threadsLoaded,
   writeActiveChat,
+  writeQueuedRows,
   writeRawThreads,
   subscribeChatThreads,
   type ThreadRecorder,
@@ -398,8 +399,7 @@ function writeThreads(projectId: string, list: ChatThread[]) {
     if (!keptIds.has(t.id)) {
       useGenScene.getState().killThread(t.id);
       deleteCloudThread(projectId, t.id);
-      if (typeof window !== "undefined")
-        localStorage.removeItem(queueKey(projectId, t.id));
+      writeQueuedRows(projectId, t.id, []);
     }
   }
   writeRawThreads(projectId, slimForStorage(kept));
@@ -417,9 +417,7 @@ function readStoredQueue(
 ): QueuedMessage[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(queueKey(projectId, threadId));
-    if (!raw) return [];
-    return (JSON.parse(raw) as QueuedMessage[])
+    return (readQueuedRows(projectId, threadId) as QueuedMessage[])
       .filter(
         (m) =>
           m?.status === "queued" &&
@@ -697,7 +695,7 @@ export function AiPanel({
     // into Media/Library stays.
     deleteChatAssets(id);
     deleteCloudThread(projectId, id);
-    localStorage.removeItem(queueKey(projectId, id));
+    writeQueuedRows(projectId, id, []);
     // Its work dies with it too: a scene run the thread owned aborts and its
     // plan clears — nothing keeps running behind a conversation the user killed.
     useGenScene.getState().killThread(id);
@@ -2067,14 +2065,7 @@ function ChatSession({
   // its slot.
   useEffect(() => {
     if (readOnly) return;
-    const waiting = queue.filter((m) => m.status === "queued");
-    if (waiting.length === 0)
-      localStorage.removeItem(queueKey(projectId, threadId));
-    else
-      localStorage.setItem(
-        queueKey(projectId, threadId),
-        JSON.stringify(waiting),
-      );
+    writeQueuedRows(projectId, threadId, queue.filter((m) => m.status === "queued"));
   }, [queue, projectId, threadId, readOnly]);
 
   // An errored turn holds the queue for review — the drain only fires on

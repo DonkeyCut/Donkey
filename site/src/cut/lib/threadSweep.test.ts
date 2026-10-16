@@ -23,6 +23,8 @@ function heldThreads(...projectIds: string[]) {
     write: async (projectId, list) => void lists.set(projectId, list),
     remove: async (projectId) => void lists.delete(projectId),
     projects: async () => [...lists.keys()],
+    readQueues: async () => undefined,
+    writeQueues: async () => {},
   };
   return { lists, store };
 }

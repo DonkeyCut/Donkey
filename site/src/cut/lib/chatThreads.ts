@@ -61,18 +61,30 @@ export interface ThreadStore {
   read(projectId: string): Promise<unknown[] | undefined>;
   /** Rejects when the browser refuses the write (QuotaExceededError when full). */
   write(projectId: string, list: unknown[]): Promise<void>;
+  /** Drops the project's threads and its waiting messages. */
   remove(projectId: string): Promise<void>;
   projects(): Promise<string[]>;
+  /** The project's waiting composer messages, thread id → rows. */
+  readQueues(projectId: string): Promise<Record<string, unknown[]> | undefined>;
+  /** Replace them; an empty record clears the project's slot. */
+  writeQueues(projectId: string, queues: Record<string, unknown[]>): Promise<void>;
 }
 
-async function chatStore<T>(mode: IDBTransactionMode, op: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+type ChatStoreName = "threads" | "queues";
+
+async function chatStore<T>(
+  mode: IDBTransactionMode,
+  op: (store: IDBObjectStore) => IDBRequest<T>,
+  name: ChatStoreName = "threads",
+): Promise<T> {
   // Loaded on first use, so this module stays a leaf the generate store and
   // the server-free tests can import.
-  const { openCutDb, CHAT_STORE } = await import("./cache");
+  const { openCutDb, CHAT_STORE, QUEUE_STORE } = await import("./cache");
   const conn = await openCutDb();
+  const storeName = name === "queues" ? QUEUE_STORE : CHAT_STORE;
   return new Promise<T>((resolve, reject) => {
-    const tx = conn.transaction(CHAT_STORE, mode);
-    const req = op(tx.objectStore(CHAT_STORE));
+    const tx = conn.transaction(storeName, mode);
+    const req = op(tx.objectStore(storeName));
     tx.oncomplete = () => resolve(req.result);
     tx.onerror = tx.onabort = () => reject(tx.error ?? req.error ?? new Error("chat store transaction failed"));
   });
@@ -81,8 +93,21 @@ async function chatStore<T>(mode: IDBTransactionMode, op: (store: IDBObjectStore
 const indexedDbStore: ThreadStore = {
   read: (projectId) => chatStore("readonly", (s) => s.get(projectId)).then((v) => (Array.isArray(v) ? v : undefined)),
   write: (projectId, list) => chatStore("readwrite", (s) => s.put(list, projectId)).then(() => undefined),
-  remove: (projectId) => chatStore("readwrite", (s) => s.delete(projectId)).then(() => undefined),
+  remove: (projectId) =>
+    Promise.all([
+      chatStore("readwrite", (s) => s.delete(projectId)),
+      chatStore("readwrite", (s) => s.delete(projectId), "queues"),
+    ]).then(() => undefined),
   projects: () => chatStore("readonly", (s) => s.getAllKeys()).then((keys) => keys.map(String)),
+  readQueues: (projectId) =>
+    chatStore("readonly", (s) => s.get(projectId), "queues").then((v) =>
+      v && typeof v === "object" ? (v as Record<string, unknown[]>) : undefined,
+    ),
+  writeQueues: (projectId, queues) =>
+    (Object.keys(queues).length
+      ? chatStore("readwrite", (s) => s.put(queues, projectId), "queues")
+      : chatStore("readwrite", (s) => s.delete(projectId), "queues")
+    ).then(() => undefined),
 };
 
 // The thread store in use: undefined until first needed, null when there is
@@ -99,6 +124,9 @@ const cache = new Map<string, unknown[]>();
 const loads = new Map<string, Promise<void>>();
 const loaded = new Set<string>();
 const dirty = new Set<string>();
+// Each loaded project's waiting composer messages, thread id → rows, read
+// synchronously by a thread as it mounts (after its project's load).
+const queues = new Map<string, Record<string, unknown[]>>();
 let migration: Promise<void> | null = null;
 let queue: Promise<void> = Promise.resolve();
 let flushScheduled = false;
@@ -114,6 +142,7 @@ export function useThreadStore(store: ThreadStore | null): void {
   loads.clear();
   loaded.clear();
   dirty.clear();
+  queues.clear();
   migration = null;
   queue = Promise.resolve();
   flushScheduled = false;
@@ -159,8 +188,71 @@ function migrateLegacyThreads(store: ThreadStore): Promise<void> {
         console.warn(`[chat] couldn't move project ${projectId}'s chat history out of localStorage`, err);
       }
     }
+    await migrateLegacyQueues(store);
   })();
   return migration;
+}
+
+// "cut-ai-queue-": the key with no project, thread, or the hyphen joining them.
+const legacyQueuePrefix = queueKey("", "").slice(0, -1);
+
+function readLocalRows(key: string): unknown[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? "[]") as unknown;
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+function localKeys(prefix: string): string[] {
+  const keys: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) keys.push(key);
+    }
+  } catch {
+    return [];
+  }
+  return keys;
+}
+
+/** Move every waiting queue out of localStorage, where a few inline frame
+ * grabs filled the origin's 5 MB. A key names its project and thread joined
+ * by a hyphen both may contain, so it goes to the longest project id with
+ * history here that prefixes it (`p-2-c` is project `p-2`, thread `c`); one
+ * no project claims has no thread to wait in and is dropped. A project whose
+ * write fails keeps its keys for the next try. */
+async function migrateLegacyQueues(store: ThreadStore): Promise<void> {
+  const keys = localKeys(legacyQueuePrefix);
+  if (!keys.length) return;
+  const projects = (await store.projects()).sort((a, b) => b.length - a.length);
+  const moving = new Map<string, Record<string, unknown[]>>();
+  const movingKeys = new Map<string, string[]>();
+  for (const key of keys) {
+    const projectId = projects.find((id) => key.startsWith(queueKey(id, "")));
+    if (projectId === undefined) {
+      removeLocal(key);
+      continue;
+    }
+    const rows = readLocalRows(key);
+    const record = moving.get(projectId) ?? {};
+    if (rows.length) record[key.slice(queueKey(projectId, "").length)] = rows;
+    moving.set(projectId, record);
+    movingKeys.set(projectId, [...(movingKeys.get(projectId) ?? []), key]);
+  }
+
+  // Rows already in the store are newer than any localStorage copy.
+  for (const [projectId, record] of moving) {
+    try {
+      const stored = (await store.readQueues(projectId)) ?? {};
+      await store.writeQueues(projectId, { ...record, ...stored });
+      if (backing === store) for (const key of movingKeys.get(projectId) ?? []) removeLocal(key);
+    } catch (err) {
+      console.warn(`[chat] couldn't move project ${projectId}'s waiting messages out of localStorage`, err);
+    }
+  }
 }
 
 function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
@@ -181,7 +273,10 @@ export function loadProjectThreads(projectId: string): Promise<void> {
       (async () => {
         await migrateLegacyThreads(store);
         const stored = (await store.read(projectId)) ?? [];
+        const storedQueues = (await store.readQueues(projectId)) ?? {};
         if (backing !== store) return;
+        // Rows written before the load finished are the newest.
+        queues.set(projectId, { ...storedQueues, ...queues.get(projectId) });
         // Anything written before the load finished joins what was stored, as
         // does a localStorage copy the migration couldn't move.
         const early = [...readLegacy(projectId), ...(cache.get(projectId) ?? [])];
@@ -239,6 +334,56 @@ export function writeRawThreads(projectId: string, list: unknown[]): void {
   cache.set(projectId, list);
   notify(projectId);
   schedule(projectId);
+}
+
+/** A thread's waiting composer messages exactly as written. The AI panel owns
+ * the rows; this module owns where they live. */
+export function readQueuedRows(projectId: string, threadId: string): unknown[] {
+  if (memory) return [];
+  if (!threadStore()) return readLocalRows(queueKey(projectId, threadId));
+  return queues.get(projectId)?.[threadId] ?? readLocalRows(queueKey(projectId, threadId));
+}
+
+/** Replace a thread's waiting messages; an empty list clears its slot. Never
+ * throws: a queue that can't be saved costs its rows on a reload. */
+export function writeQueuedRows(projectId: string, threadId: string, rows: unknown[]): void {
+  if (memory) return;
+  const key = queueKey(projectId, threadId);
+  const store = threadStore();
+
+  // No thread store: localStorage, and a refused write drops the stale copy
+  // so a reload never brings back rows that already ran.
+  if (!store) {
+    if (!rows.length) {
+      removeLocal(key);
+      return;
+    }
+    try {
+      localStorage.setItem(key, JSON.stringify(rows));
+    } catch (err) {
+      removeLocal(key);
+      console.warn("[chat] couldn't save the waiting messages in this browser", err);
+    }
+    return;
+  }
+
+  // An empty queue that holds nothing is the common render; it writes nothing.
+  const record = queues.get(projectId) ?? {};
+  if (!rows.length && !(threadId in record)) return;
+  const next = { ...record };
+  if (rows.length) next[threadId] = rows;
+  else delete next[threadId];
+  queues.set(projectId, next);
+  removeLocal(key);
+  void enqueue(async () => {
+    if (!loaded.has(projectId)) await loadProjectThreads(projectId);
+    if (backing !== store) return;
+    try {
+      await store.writeQueues(projectId, queues.get(projectId) ?? {});
+    } catch (err) {
+      console.warn("[chat] couldn't save the waiting messages in this browser", err);
+    }
+  });
 }
 
 /** Run store work in order: a removal never races a save of the same project. */
@@ -444,6 +589,7 @@ export function clearProjectThreads(projectId: string): void {
     return;
   }
   const store = threadStore();
+  queues.delete(projectId);
   if (store) {
     cache.set(projectId, []);
     loaded.add(projectId);
