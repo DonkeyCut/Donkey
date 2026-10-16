@@ -3,7 +3,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 import { bearer } from "better-auth/plugins";
 
-import { AUTH_COOKIE_DOMAIN, DONKEYCUT_CANONICAL, SU_ORIGIN } from "@/cut/lib/hosts";
+import { AUTH_COOKIE_DOMAIN, AUTH_SUBDOMAINS, DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { provisionSignupGrants } from "@/lib/onboarding/signup-grants";
 import { prisma } from "@/lib/prisma";
 import { emailPasswordDisabledPaths, emailPasswordGuard, emailPasswordOptions } from "@/lib/email-password-auth";
@@ -16,19 +16,18 @@ import { AUTH_ERROR_PATH } from "@/lib/signInReturn";
 // it from the localhost request.
 const baseURL = process.env.VERCEL ? DONKEYCUT_CANONICAL : undefined;
 
-// The session is shared with the apex's subdomains: an internal admin app on
-// su.donkeycut.com signs in through this host, and a host-only cookie would
-// never reach it.
-// Scoping the auth cookies to the registrable host lets the session ride
-// across, and listing the subdomain as a trusted origin lets a sign-in started
-// there name its own address as the post-auth callback. Hosted only —
+// The session is shared with the apex's subdomains, which sign in through
+// this host; a host-only cookie would never reach them. Scoping the auth
+// cookies to the registrable host lets the session ride across, and trusting
+// the subdomains lets a sign-in started on one name its own address as the
+// post-auth callback. Hosted only —
 // localhost can't carry a Domain attribute.
 const crossSubDomain = process.env.VERCEL
   ? {
       advanced: {
         crossSubDomainCookies: { domain: AUTH_COOKIE_DOMAIN, enabled: true },
       },
-      trustedOrigins: [DONKEYCUT_CANONICAL, SU_ORIGIN],
+      trustedOrigins: [DONKEYCUT_CANONICAL, AUTH_SUBDOMAINS],
     }
   : {};
 

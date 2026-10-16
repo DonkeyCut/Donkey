@@ -25,12 +25,6 @@ export const CUT_MEDIA_ORIGIN = `https://${CUT_MEDIA_HOST}`;
 // not serve is a card that plays nothing.
 export const STOCK_AUDIO_PUBLIC_KEY = /^stock\/(sfx|music)\/[a-z0-9-]+\.mp3$/;
 
-// Founder outreach replies land here: Resend receives mail for this subdomain
-// and posts it to /api/email/resend-webhook. It is deliberately a subdomain —
-// the MX record belongs to Resend, and the apex keeps whatever routes its mail
-// today (src/lib/marketing/replyAddress.ts).
-export const OUTREACH_REPLY_HOST = "reply.donkeycut.com";
-
 // The Cut Worker's control plane — the /wake the hosted API posts to when it
 // queues a render. Its own custom domain, claimed in wrangler.jsonc beside the
 // media route, so it cannot be revoked by a deploy default the way the
@@ -39,13 +33,12 @@ export const OUTREACH_REPLY_HOST = "reply.donkeycut.com";
 export const CUT_WORKER_HOST = "worker.donkeycut.com";
 export const CUT_WORKER_WAKE_URL = `https://${CUT_WORKER_HOST}/wake`;
 
-// An internal admin app on su.donkeycut.com signs in through this host.
-export const SU_HOST = "su.donkeycut.com";
-export const SU_ORIGIN = `https://${SU_HOST}`;
-
 // The registrable host the auth cookies are scoped to, so a session started on
 // the apex reaches its subdomains.
 export const AUTH_COOKIE_DOMAIN = "donkeycut.com";
+
+// Every subdomain of that host, as a trusted-origin pattern.
+export const AUTH_SUBDOMAINS = `https://*.${AUTH_COOKIE_DOMAIN}`;
 
 // Where the worker's runner calls the hosted API back: production containers
 // (NODE_ENV=production in the image) talk to the canonical host, a dev worker
