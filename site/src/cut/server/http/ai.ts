@@ -41,7 +41,7 @@ import {
 import { STEP_BUDGET, stopText, turnClose, type TurnEnd } from "../../lib/turnBudget";
 import { pendingAsk } from "../../lib/chatResume";
 import { codexCommand } from "../tool-path";
-import { codexAccountModels } from "../ai/codexModels";
+import { codexAccountModels, createCodexCatalog } from "../ai/codexModels";
 import { errorMessage } from "../util";
 
 interface ChatBody {
@@ -524,8 +524,12 @@ function codexModels(cmd: string): Promise<string[] | undefined> {
   });
 }
 
+// The account catalog refreshes behind the probes, so the picker never
+// waits on `codex debug models`.
+const codexCatalog = createCodexCatalog(async () => codexModels(await codexCommand()));
+
 // Providers rarely change mid-session; cache probes for a minute.
-type ProviderStatus = { ok: boolean; note: string; installed: boolean; models?: string[] };
+type ProviderStatus = { ok: boolean; note: string; installed: boolean };
 let aiProbe: {
   at: number;
   value: { claude: ProviderStatus; codex: ProviderStatus };
@@ -684,29 +688,31 @@ export const aiApi = {
     let value = aiProbe && Date.now() - aiProbe.at < 60_000 ? aiProbe.value : null;
     if (!value) {
       const codexCmd = await codexCommand();
-      const [claude, codexLogin, codexAccount] = await Promise.all([
+      const [claude, codexLogin] = await Promise.all([
         probe("claude", ["--version"]),
         probe(codexCmd, ["login", "status"]),
-        codexModels(codexCmd),
       ]);
       // The login probe running at all means codex is installed; only its
       // ENOENT failure (carried through in codexLogin) marks it missing.
-      // A ChatGPT login runs only the models its account catalog lists.
       const codex: ProviderStatus = codexLogin.ok
         ? /logged in/i.test(codexLogin.note)
-          ? { ok: true, note: codexLogin.note, installed: true, models: codexAccount }
+          ? { ok: true, note: codexLogin.note, installed: true }
           : { ok: false, note: "Not signed in — run: codex login", installed: true }
         : codexLogin;
       value = { claude, codex };
       aiProbe = { at: Date.now(), value };
     }
+
+    // A ChatGPT login runs only the models its account catalog lists; the
+    // catalog is read only once the login probe says someone is signed in.
+    const codexAccount = value.codex.ok ? codexCatalog.current() : undefined;
     // The model catalog lives in the page (src/cut/lib/aiModels.ts); the
     // engine reports which provider CLIs are usable on this Mac and which
     // models the Codex account runs.
     return Response.json({
       providers: {
         claude: { available: value.claude.ok, note: value.claude.note, installed: value.claude.installed },
-        codex: { available: value.codex.ok, note: value.codex.note, installed: value.codex.installed, models: value.codex.models },
+        codex: { available: value.codex.ok, note: value.codex.note, installed: value.codex.installed, models: codexAccount },
         // Gemini chats run from the page through Donkey's hosted inference;
         // the browser overlays the real availability from its sign-in probe.
         gemini: { available: true, note: "runs on your Donkey account", installed: true },
