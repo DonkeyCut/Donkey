@@ -1,5 +1,6 @@
 // Rewrites the analytics fixtures the DonkeyKit tests decode — the summary and
-// the first page of accounts. Run it after changing what either carries, then
+// the first page of accounts, folded out of src/lib/analytics/fixtures/
+// analytics-rollup.json. Run it after that fixture or the fold changes, then
 // run the DonkeyKit tests.
 //
 //   npm run analytics:summary-fixture

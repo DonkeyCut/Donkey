@@ -6,17 +6,19 @@ import { fileURLToPath } from "node:url";
 import {
   SUMMARY_FIXTURE_PATH,
   USERS_FIXTURE_PATH,
-  buildRollupFixture,
   buildSummaryFixture,
   buildUsersFixture,
   summaryFixtureJson,
+  readRollupFixture,
   usersFixtureJson,
 } from "./summary-fixture";
 import { analyticsRollupSchema } from "./schema";
 
+// The rollup fixture is the back office's: its own test builds it with the
+// buildRollup production runs, and this copy must match it byte for byte.
 describe("the phone's summary fixture", () => {
   test("is a rollup the dashboards read", async () => {
-    const parsed = analyticsRollupSchema.parse(await buildRollupFixture());
+    const parsed = analyticsRollupSchema.parse(readRollupFixture());
     expect(parsed.days).toHaveLength(3);
     expect(parsed.billing?.days).toHaveLength(4);
     expect(parsed.missing).toEqual([{ day: "2026-08-31", sources: ["db", "posthog"] }]);

@@ -1,168 +1,15 @@
-// The analytics data contract shared by the nightly pipeline, the superuser
-// API, and the dashboard UI. The UI reads rollup.json only — never the
-// database — so this file is the whole interface between them.
+// The analytics rollup as the API reads it. The back office's nightly
+// pipeline writes rollup.json to R2 and keeps its own copy of this contract;
+// the summary and users routes read rollup.json only — never the database —
+// so this file is the whole interface between them.
 import { z } from "zod";
 
 export const ANALYTICS_ROLLUP_VERSION = 1;
 
-// Where the pipeline's files live in R2. Here rather than beside the pipeline
-// so a reader of one file — the rollup route — names it without loading the
-// extraction code.
-const ANALYTICS_PREFIX = "analytics/";
-export const DAYS_PREFIX = `${ANALYTICS_PREFIX}days/`;
-export const dayDbKey = (day: string) => `${DAYS_PREFIX}${day}/db.json`;
-export const dayPosthogKey = (day: string) => `${DAYS_PREFIX}${day}/posthog.json`;
-export const SNAPSHOT_KEY = `${ANALYTICS_PREFIX}snapshot.json`;
-export const ROLLUP_KEY = `${ANALYTICS_PREFIX}rollup.json`;
+// Where the pipeline writes the rollup in R2.
+export const ROLLUP_KEY = "analytics/rollup.json";
 
-// Bit order for the per-day activity masks. Append-only: a new source takes
-// the next bit so already-written rollups keep decoding.
-export const ANALYTICS_DB_SOURCES = [
-  "inference",
-  "renders",
-  "copies",
-  "libraryAssets",
-  "templates",
-  "creditLedger",
-] as const;
-export const ANALYTICS_SOURCES = [...ANALYTICS_DB_SOURCES, "posthog"] as const;
-export type AnalyticsDbSource = (typeof ANALYTICS_DB_SOURCES)[number];
-export type AnalyticsSource = (typeof ANALYTICS_SOURCES)[number];
-
-export const analyticsDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-
-/** UTC calendar day of a moment, as YYYY-MM-DD. */
-export function utcDayOf(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
-
-/** A day shifted by whole UTC days. Also normalizes: a string that is not a
- * real calendar day round-trips to a different string at delta 0. */
-export function addUtcDays(day: string, delta: number): string {
-  const [y, m, d] = day.split("-").map(Number);
-  return utcDayOf(new Date(Date.UTC(y, (m ?? 1) - 1, (d ?? 1) + delta)));
-}
-
-const userIdList = z.array(z.string());
-
-// Per-day extract of DB activity: which users each event table saw that day.
-export const analyticsDbDayFileSchema = z.object({
-  version: z.literal(1),
-  day: analyticsDaySchema,
-  generatedAt: z.string(),
-  active: z.object({
-    inference: userIdList.optional(),
-    renders: userIdList.optional(),
-    copies: userIdList.optional(),
-    libraryAssets: userIdList.optional(),
-    templates: userIdList.optional(),
-    creditLedger: userIdList.optional(),
-  }),
-});
-export type AnalyticsDbDayFile = z.infer<typeof analyticsDbDayFileSchema>;
-
-export const analyticsPosthogDayFileSchema = z.object({
-  version: z.literal(1),
-  day: analyticsDaySchema,
-  generatedAt: z.string(),
-  // Raw distinct_ids. Anonymous pre-sign-in ids ride along and are dropped at
-  // consolidation, so this list's length is not a user count.
-  activeDistinctIds: userIdList,
-});
-export type AnalyticsPosthogDayFile = z.infer<typeof analyticsPosthogDayFileSchema>;
-
-// What the nightly run and the webhook-driven refresh read from Stripe. Money
-// is BigInt micros as decimal strings; times are ISO. Every row keeps its
-// Stripe id so the dashboard links straight to the object.
-export const analyticsStripeSnapshotSchema = z.object({
-  // Root of the Stripe dashboard for this account's mode (live or test).
-  dashboardUrl: z.string(),
-  // Every Pro subscription ever created, whatever its status now.
-  subscriptions: z.array(
-    z.object({
-      id: z.string(),
-      customerId: z.string().nullable(),
-      userId: z.string().nullable(),
-      email: z.string().nullable(),
-      status: z.string(),
-      createdAt: z.string(),
-      // True while the subscription is live but set to end on its own.
-      cancelScheduled: z.boolean(),
-      // When it ends (or ended), and when the person asked for that.
-      cancelAt: z.string().nullable(),
-      canceledAt: z.string().nullable(),
-      // When it stopped, once it has.
-      endedAt: z.string().nullable().catch(null),
-      // What they told the portal on the way out.
-      feedback: z.string().nullable(),
-      comment: z.string().nullable(),
-    }),
-  ),
-  // Every charge ever attempted: paid ones are the revenue, declined ones are
-  // people who tried to pay.
-  charges: z.array(
-    z.object({
-      id: z.string(),
-      paymentIntentId: z.string().nullable(),
-      customerId: z.string().nullable(),
-      userId: z.string().nullable(),
-      email: z.string().nullable(),
-      day: analyticsDaySchema,
-      kind: z.enum(["pro", "topup", "other"]),
-      status: z.enum(["paid", "declined"]),
-      amountMicros: z.string(),
-      failure: z.string().nullable(),
-    }),
-  ),
-  // Refunds issued inside the window.
-  refunds: z.array(
-    z.object({
-      id: z.string(),
-      chargeId: z.string().nullable(),
-      day: analyticsDaySchema,
-      amountMicros: z.string(),
-    }),
-  ),
-  // Checkout pages opened inside the window that expired unpaid.
-  abandonedCheckouts: z.array(
-    z.object({
-      id: z.string(),
-      customerId: z.string().nullable(),
-      email: z.string().nullable(),
-      day: analyticsDaySchema,
-      kind: z.enum(["pro", "topup"]),
-    }),
-  ),
-});
-export type AnalyticsStripeSnapshot = z.infer<typeof analyticsStripeSnapshotSchema>;
-
-export const analyticsSnapshotFileSchema = z.object({
-  version: z.literal(1),
-  generatedAt: z.string(),
-  users: z.array(
-    z.object({
-      id: z.string(),
-      email: z.string(),
-      name: z.string(),
-      createdAt: z.string(),
-      // True for accounts with the super-user role.
-      superUser: z.boolean().optional(),
-      // The onboarding referral answer; present once the user answered.
-      referralAnsweredAt: z.string().optional(),
-      referralSources: z.array(z.string()).optional(),
-      // The free text that comes with picking "other".
-      referralOther: z.string().optional(),
-    }),
-  ),
-  balances: z.array(z.object({ userId: z.string(), balanceMicros: z.string() })),
-  // Cloud storage counters: bytes held in R2 per user, as decimal strings.
-  // Absent from snapshots written before this shipped.
-  storage: z.array(z.object({ userId: z.string(), bytes: z.string() })).optional(),
-  // The billing record, read from Stripe. Absent from snapshots written
-  // before this shipped.
-  stripe: analyticsStripeSnapshotSchema.optional().catch(undefined),
-});
-export type AnalyticsSnapshotFile = z.infer<typeof analyticsSnapshotFileSchema>;
+const analyticsDaySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 // The consolidated window the UI renders. Users come from the latest snapshot,
 // so an account deleted since then carries no history here.
@@ -171,7 +18,7 @@ export const analyticsRollupSchema = z.object({
   generatedAt: z.string(),
   // Oldest → newest; every user's activity array aligns with this.
   days: z.array(analyticsDaySchema),
-  // Bit order of the activity masks (copy of ANALYTICS_SOURCES at write time).
+  // Bit order of the activity masks (the pipeline's source list at write time).
   sources: z.array(z.string()),
   // Day files that were absent or unreadable at consolidation; the UI can gray
   // those columns out. Entries name the file kind: "db" or "posthog".

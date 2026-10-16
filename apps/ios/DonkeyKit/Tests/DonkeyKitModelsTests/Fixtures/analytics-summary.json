@@ -4,18 +4,6 @@
   "activeYesterday": 3,
   "balanceMicros": "3500000",
   "billing": {
-    "canceling": [
-      {
-        "comment": "Export broke.",
-        "customerId": "cus_p",
-        "email": "p@x.test",
-        "endsAt": "2026-09-08T00:00:00.000Z",
-        "feedback": "switched_service",
-        "requestedAt": "2026-08-31T10:00:00.000Z",
-        "subscriptionId": "sub_1"
-      }
-    ],
-    "churned": 1,
     "dashboardUrl": "https://dashboard.stripe.com/test",
     "days": [
       "2026-08-30",
@@ -23,98 +11,110 @@
       "2026-09-01",
       "2026-09-02"
     ],
-    "events": [
+    "subscribers": 2,
+    "canceling": [
       {
-        "amountMicros": "5000000",
-        "customerId": "cus_n",
-        "day": "2026-09-01",
-        "detail": "topup",
-        "email": "n@x.test",
-        "ended": false,
-        "endsAt": null,
-        "kind": "paid",
-        "objectId": "pi_2"
-      },
-      {
-        "amountMicros": null,
+        "subscriptionId": "sub_1",
         "customerId": "cus_p",
-        "day": "2026-08-31",
-        "detail": "switched_service · Export broke.",
         "email": "p@x.test",
-        "ended": false,
         "endsAt": "2026-09-08T00:00:00.000Z",
-        "kind": "canceled",
-        "objectId": "sub_1"
-      },
-      {
-        "amountMicros": "20000000",
-        "customerId": "cus_d",
-        "day": "2026-08-31",
-        "detail": "Your card has insufficient funds.",
-        "email": "d@x.test",
-        "ended": false,
-        "endsAt": null,
-        "kind": "declined",
-        "objectId": "pi_3"
-      },
-      {
-        "amountMicros": "20000000",
-        "customerId": "cus_p",
-        "day": "2026-08-30",
-        "detail": "pro",
-        "email": "p@x.test",
-        "ended": false,
-        "endsAt": null,
-        "kind": "paid",
-        "objectId": "pi_1"
+        "requestedAt": "2026-08-31T10:00:00.000Z",
+        "feedback": "switched_service",
+        "comment": "Export broke."
       }
     ],
+    "churned": 1,
     "funded": 2,
     "fundedMicros": "25000000",
+    "window": {
+      "paidMicros": "25000000",
+      "refundedMicros": "1000000",
+      "netMicros": "24000000",
+      "declinedMicros": "20000000",
+      "declinedCustomers": 1,
+      "abandonedCheckouts": 1,
+      "cancels": 1
+    },
     "revenue": [
       {
-        "cancels": 0,
-        "declinedMicros": "0",
-        "otherMicros": "0",
         "proMicros": "20000000",
+        "topupMicros": "0",
+        "otherMicros": "0",
         "refundedMicros": "0",
-        "topupMicros": "0"
+        "declinedMicros": "0",
+        "cancels": 0
       },
       {
-        "cancels": 1,
+        "proMicros": "0",
+        "topupMicros": "0",
+        "otherMicros": "0",
+        "refundedMicros": "0",
         "declinedMicros": "20000000",
-        "otherMicros": "0",
-        "proMicros": "0",
-        "refundedMicros": "0",
-        "topupMicros": "0"
+        "cancels": 1
       },
       {
-        "cancels": 0,
-        "declinedMicros": "0",
-        "otherMicros": "0",
         "proMicros": "0",
+        "topupMicros": "5000000",
+        "otherMicros": "0",
         "refundedMicros": "0",
-        "topupMicros": "5000000"
+        "declinedMicros": "0",
+        "cancels": 0
       },
       {
-        "cancels": 0,
-        "declinedMicros": "0",
-        "otherMicros": "0",
         "proMicros": "0",
+        "topupMicros": "0",
+        "otherMicros": "0",
         "refundedMicros": "1000000",
-        "topupMicros": "0"
+        "declinedMicros": "0",
+        "cancels": 0
       }
     ],
-    "subscribers": 2,
-    "window": {
-      "abandonedCheckouts": 1,
-      "cancels": 1,
-      "declinedCustomers": 1,
-      "declinedMicros": "20000000",
-      "netMicros": "24000000",
-      "paidMicros": "25000000",
-      "refundedMicros": "1000000"
-    }
+    "events": [
+      {
+        "day": "2026-09-01",
+        "kind": "paid",
+        "email": "n@x.test",
+        "customerId": "cus_n",
+        "objectId": "pi_2",
+        "amountMicros": "5000000",
+        "detail": "topup",
+        "endsAt": null,
+        "ended": false
+      },
+      {
+        "day": "2026-08-31",
+        "kind": "canceled",
+        "email": "p@x.test",
+        "customerId": "cus_p",
+        "objectId": "sub_1",
+        "amountMicros": null,
+        "detail": "switched_service · Export broke.",
+        "endsAt": "2026-09-08T00:00:00.000Z",
+        "ended": false
+      },
+      {
+        "day": "2026-08-31",
+        "kind": "declined",
+        "email": "d@x.test",
+        "customerId": "cus_d",
+        "objectId": "pi_3",
+        "amountMicros": "20000000",
+        "detail": "Your card has insufficient funds.",
+        "endsAt": null,
+        "ended": false
+      },
+      {
+        "day": "2026-08-30",
+        "kind": "paid",
+        "email": "p@x.test",
+        "customerId": "cus_p",
+        "objectId": "pi_1",
+        "amountMicros": "20000000",
+        "detail": "pro",
+        "endsAt": null,
+        "ended": false
+      }
+    ]
   },
   "days": [
     "2026-08-30",
@@ -126,8 +126,20 @@
     "2026-08-31"
   ],
   "referrals": {
+    "sources": [
+      "discord",
+      "tiktok",
+      "instagram",
+      "youtube",
+      "reddit",
+      "search",
+      "friend",
+      "other"
+    ],
     "days": [
       {
+        "day": "2026-08-31",
+        "respondents": 1,
         "counts": [
           0,
           0,
@@ -138,13 +150,13 @@
           0,
           1
         ],
-        "day": "2026-08-31",
         "others": [
           "a podcast"
-        ],
-        "respondents": 1
+        ]
       },
       {
+        "day": "2026-09-01",
+        "respondents": 0,
         "counts": [
           0,
           0,
@@ -155,20 +167,8 @@
           0,
           0
         ],
-        "day": "2026-09-01",
-        "others": [],
-        "respondents": 0
+        "others": []
       }
-    ],
-    "sources": [
-      "discord",
-      "tiktok",
-      "instagram",
-      "youtube",
-      "reddit",
-      "search",
-      "friend",
-      "other"
     ]
   },
   "registered": 3,
