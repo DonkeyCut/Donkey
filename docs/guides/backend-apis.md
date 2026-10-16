@@ -5,7 +5,7 @@ the site's own client views, signed in with a session cookie.
 
 **The one rule:** every route handler is wrapped in `withDonkeyAuth`. A public
 endpoint is a deliberate exception with a product reason — today only Better
-Auth's own routes, the signature-verified Stripe and Resend webhooks, the
+Auth's own routes, the signature-verified Stripe webhook, the
 HMAC-token-verified one-click email unsubscribe and promotion button redirect,
 the token-authorized Cut project and library share viewers, the scoped OAuth
 ChatGPT MCP endpoint and its OAuth discovery/exchange endpoints, authenticated
@@ -159,12 +159,6 @@ client knows to keep the rest of the surface working.
 Credit given by hand is an offer emailed as a claim link; the grant and its
 ledger entry are written when the person claims, with the credit's lifetime
 counted from that moment.
-
-Outreach notes can place `{{button}}` in its own paragraph when a credit offer
-is enabled. The offer supplies the recipient's claim URL and the button label:
-“Subscribe to Pro” for a subscription offer, or “Claim my AI credits” for a
-direct claim. Button notes carry HTML and a plain-text version with the link;
-`{{claimUrl}}` remains available as a URL in the text.
 
 Known OpenAI, Gemini, and ElevenLabs models fall back to backend-owned prices
 unless a database rate overrides them. The fallbacks mirror current public

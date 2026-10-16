@@ -15,7 +15,7 @@ model UserEmailSettings {
   updatedAt               DateTime  @updatedAt
 }
 
-// The outbox. Every email the site sends is a row here first; one drainer
+// The outbox. Every email the back office sends is a row here first; one drainer
 // in the back office sends rows in priority order under the plan's monthly
 // budget. The row is the send's record: a retried queue
 // call adds nothing because the idempotency key is unique.
