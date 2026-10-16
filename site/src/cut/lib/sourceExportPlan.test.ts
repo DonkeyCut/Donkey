@@ -5,7 +5,7 @@ import type { ExportDoc } from "@/cut/lib/renderSnapshot";
 import type { VideoClip } from "@/cut/lib/types";
 
 const doc: ExportDoc = {
-  aspect: "16:9", assets: [{ id: "source", fileName: "source.mp4", name: "Source", type: "video", duration: 904, width: 320, height: 240, url: "",
+  aspect: "4:3", assets: [{ id: "source", fileName: "source.mp4", name: "Source", type: "video", duration: 904, width: 320, height: 240, url: "",
     color: { matrix: "bt709", fullRange: false, bitDepth: 8, detected: "rec709" } }],
   clips: [{ id: "clip", assetId: "source", track: 0, start: 0, in: 15.137, out: 870.437, muted: false }],
   audioClips: [], overlays: [], subtitles: { cues: [], showOnVideo: false, showOnTimeline: false },
@@ -18,6 +18,15 @@ test("a plain trim preserves the source frame and exact source window", async ()
   const payload = await buildExportPayload("project", doc, settings, "export");
   expect(payload.spec).toMatchObject({ sourceSegments: [{ file: "source.mp4", from: 15.137, to: 870.437 }] });
   expect("sourceSegments" in (await buildExportPayload("project", doc, settings, "preview")).spec).toBe(false);
+});
+
+test("a source in another shape than the project renders to the project's frame", () => {
+  // The preview fits a 4:3 clip into a 9:16 frame; the file has to match it.
+  const vertical = { ...doc, aspect: "9:16" as const };
+  expect(sourceSequence(vertical)).toBeNull();
+  const frame = originalSettings(vertical.aspect, vertical.clips, vertical.assets, vertical);
+  expect(frame.height).toBeGreaterThan(frame.width);
+  expect(sourceExportPlan(vertical, frame)).toBeNull();
 });
 
 test("selection ranges resolve inside the original trim", () => {

@@ -1,14 +1,22 @@
 import { recipeIsIdentity } from "@donkeycut/effects-kit";
 import type { ExportDoc } from "@/cut/lib/renderSnapshot";
 import type { ExportSettings } from "@/cut/lib/exportClient";
-import type { VideoClip } from "@/cut/lib/types";
+import { parseRatio, type VideoClip } from "@/cut/lib/types";
 
 export type SourceSegment = { file: string; from: number; to: number };
 
-/** Plain sequential clips can reuse their source tracks. */
+/** How far a source's shape may sit from the project's and still copy: a
+ * 1918×1080 file in a 16:9 project is the same picture. */
+const SHAPE_TOLERANCE = 0.01;
+
+/** Plain sequential clips can reuse their source tracks, when their picture
+ * has the project's shape: the preview fits any other shape into the
+ * project's frame, so that file has to render. */
 export function sourceSequence(doc: ExportDoc) {
   if (!doc.clips.length || doc.audioClips.length || doc.overlays.length ||
       (doc.subtitles.showOnVideo && doc.subtitles.cues.length)) return null;
+  const shape = parseRatio(doc.aspect);
+  if (!shape) return null;
   const clips = [...doc.clips].sort((a, b) => a.start - b.start);
   const segments: { asset: ExportDoc["assets"][number]; from: number; to: number }[] = [];
   let end = 0;
@@ -32,6 +40,7 @@ export function sourceSequence(doc: ExportDoc) {
     // delivery's own encoding copies as is.
     const profile = asset.colorProfile ?? asset.color?.detected ?? "rec709";
     if (!recipeIsIdentity(profile, doc.colorSpace ?? "sdr")) return null;
+    if (Math.abs(asset.width / asset.height / (shape.w / shape.h) - 1) > SHAPE_TOLERANCE) return null;
     if (segments.length && (asset.width !== segments[0].asset.width || asset.height !== segments[0].asset.height)) return null;
     const previous = segments.at(-1);
     if (previous?.asset.id === asset.id && Math.abs(previous.to - clip.in) < 0.000001) previous.to = clip.out;
