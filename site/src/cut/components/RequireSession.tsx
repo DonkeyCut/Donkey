@@ -14,6 +14,7 @@ import { EmbeddedSignInFallback } from "@/cut/components/EmbeddedSignInFallback"
 
 import { authHrefFor } from "@/app/_components/landing/useAppEntryHref";
 import {
+  confirmEngineUser,
   forgetRememberedEngineUser,
   rememberedEngineUser,
   setEngineUser,
@@ -78,7 +79,7 @@ export function RequireSession({ children }: { children: ReactNode }) {
   // Bound in an effect so the render stays free of side effects; SessionGate
   // subscribes to it, so the surfaces redraw the moment the id lands.
   useEffect(() => {
-    if (userId) setEngineUser(userId);
+    if (userId) confirmEngineUser(userId);
   }, [userId]);
 
   useEffect(() => {

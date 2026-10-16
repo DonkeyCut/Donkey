@@ -14,6 +14,10 @@ export const activeChatKey = (projectId: string) => `cut-ai-active-${projectId}`
 export const queueKey = (projectId: string, threadId: string) => `cut-ai-queue-${projectId}-${threadId}`;
 // Which background replies the user has seen, per project.
 export const seenRepliesKey = (projectId: string) => `cut-ai-seen-replies-${projectId}`;
+// The account whose listing last held a project this browser keeps threads
+// for. Every backend answers 404 for another account's project, so only the
+// owner's sweep may read a miss as deleted.
+const ownerKey = (projectId: string) => `cut-ai-owner-${projectId}`;
 
 const changes = new Set<(projectId: string) => void>();
 const notify = (projectId: string) => { for (const onChange of changes) onChange(projectId); };
@@ -59,8 +63,6 @@ export interface ThreadStore {
   write(projectId: string, list: unknown[]): Promise<void>;
   remove(projectId: string): Promise<void>;
   projects(): Promise<string[]>;
-  /** How full the origin's storage is, 0–1, when the browser says. */
-  pressure(): Promise<number | undefined>;
 }
 
 async function chatStore<T>(mode: IDBTransactionMode, op: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -81,10 +83,6 @@ const indexedDbStore: ThreadStore = {
   write: (projectId, list) => chatStore("readwrite", (s) => s.put(list, projectId)).then(() => undefined),
   remove: (projectId) => chatStore("readwrite", (s) => s.delete(projectId)).then(() => undefined),
   projects: () => chatStore("readonly", (s) => s.getAllKeys()).then((keys) => keys.map(String)),
-  pressure: async () => {
-    const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
-    return estimate?.quota ? (estimate.usage ?? 0) / estimate.quota : undefined;
-  },
 };
 
 // The thread store in use: undefined until first needed, null when there is
@@ -104,7 +102,6 @@ const dirty = new Set<string>();
 let migration: Promise<void> | null = null;
 let queue: Promise<void> = Promise.resolve();
 let flushScheduled = false;
-const persistedSize = new Map<string, number>();
 // How long a load waits on the store (another tab can hold the database on an
 // older version) before this tab falls back to localStorage.
 const LOAD_TIMEOUT_MS = 5000;
@@ -117,7 +114,6 @@ export function useThreadStore(store: ThreadStore | null): void {
   loads.clear();
   loaded.clear();
   dirty.clear();
-  persistedSize.clear();
   migration = null;
   queue = Promise.resolve();
   flushScheduled = false;
@@ -137,7 +133,6 @@ function readLegacy(projectId: string): unknown[] {
 }
 
 const merged = (...lists: unknown[][]) => mergeThreads(...lists.map((l) => l.filter(isStoredThread)));
-const sizeOf = (list: unknown[]) => JSON.stringify(list).length;
 
 /** Move every project's localStorage history into the store, once per page,
  * then free the keys. A key whose write fails stays put for the next try. */
@@ -187,7 +182,6 @@ export function loadProjectThreads(projectId: string): Promise<void> {
         await migrateLegacyThreads(store);
         const stored = (await store.read(projectId)) ?? [];
         if (backing !== store) return;
-        persistedSize.set(projectId, sizeOf(stored));
         // Anything written before the load finished joins what was stored, as
         // does a localStorage copy the migration couldn't move.
         const early = [...readLegacy(projectId), ...(cache.get(projectId) ?? [])];
@@ -282,69 +276,18 @@ async function persistDirty(): Promise<void> {
 const isQuotaError = (err: unknown) =>
   !!err && typeof err === "object" && ((err as Error).name === "QuotaExceededError" || (err as { code?: number }).code === 22);
 
+// A save never deletes history to fit. Local and browser projects keep their
+// chat only here, and project media fills the origin's quota far faster than
+// chat does, so a full browser says the save failed and keeps every thread.
 async function persist(store: ThreadStore, projectId: string, list: unknown[]): Promise<void> {
-  const size = sizeOf(list);
-  const growth = size - (persistedSize.get(projectId) ?? 0);
   try {
-    const pressure = await store.pressure().catch(() => undefined);
-    if (pressure !== undefined && pressure > PRESSURE) await makeRoom(store, projectId, growth);
-    for (let attempt = 0; ; attempt++) {
-      try {
-        await store.write(projectId, list);
-        break;
-      } catch (err) {
-        // The browser doesn't say how far over it is: free what this save
-        // adds, then twice that, and so on.
-        if (!isQuotaError(err) || attempt >= 4) throw err;
-        if ((await makeRoom(store, projectId, Math.max(growth, 1024) * 2 ** attempt)) === 0) throw err;
-      }
-    }
-    persistedSize.set(projectId, size);
+    await store.write(projectId, list);
     removeLocal(threadsKey(projectId));
     setSaveFailure(null);
     broadcast(projectId);
   } catch (err) {
     saveFailed(err);
   }
-}
-
-/** Above this share of the origin's quota, a save first clears room. */
-const PRESSURE = 0.9;
-
-/** Free at least `bytes` by dropping the oldest threads of other projects —
- * the open project's history is the last thing to lose. Returns the bytes freed. */
-async function makeRoom(store: ThreadStore, keep: string, bytes: number): Promise<number> {
-  if (bytes <= 0) return 0;
-  const lists = new Map<string, unknown[]>();
-  for (const projectId of await store.projects()) {
-    if (projectId === keep) continue;
-    lists.set(projectId, (loaded.has(projectId) ? cache.get(projectId) : await store.read(projectId)) ?? []);
-  }
-  const candidates = [...lists].flatMap(([projectId, list]) =>
-    list.filter(isStoredThread).filter((t) => !t.deleted).map((thread) => ({ projectId, thread })),
-  );
-  candidates.sort((a, b) => (a.thread.updatedAt ?? 0) - (b.thread.updatedAt ?? 0));
-  let freed = 0;
-  const dropped = new Map<string, Set<string>>();
-  for (const { projectId, thread } of candidates) {
-    if (freed >= bytes) break;
-    freed += JSON.stringify(thread).length;
-    if (!dropped.has(projectId)) dropped.set(projectId, new Set());
-    dropped.get(projectId)!.add(thread.id);
-  }
-  for (const [projectId, ids] of dropped) {
-    const rest = lists.get(projectId)!.filter((t) => !isStoredThread(t) || !ids.has(t.id));
-    if (rest.some((t) => isStoredThread(t) && !t.deleted)) await store.write(projectId, rest);
-    else await store.remove(projectId);
-    persistedSize.set(projectId, sizeOf(rest));
-    if (cache.has(projectId)) cache.set(projectId, rest);
-    for (const id of ids) removeLocal(queueKey(projectId, id));
-    notify(projectId);
-    broadcast(projectId);
-  }
-  const count = [...dropped.values()].reduce((n, ids) => n + ids.size, 0);
-  if (count) console.warn(`[chat] browser storage nearly full; dropped the ${count} oldest chat thread(s) of other projects`);
-  return freed;
 }
 
 /** Wait until every write so far has reached the store. */
@@ -428,7 +371,6 @@ function listenAcrossTabs(): void {
     void store.read(projectId).then((list) => {
       if (backing !== store || dirty.has(projectId)) return;
       cache.set(projectId, list ?? []);
-      persistedSize.set(projectId, sizeOf(list ?? []));
       notify(projectId);
     }, () => {});
   });
@@ -506,7 +448,6 @@ export function clearProjectThreads(projectId: string): void {
     cache.set(projectId, []);
     loaded.add(projectId);
     dirty.delete(projectId);
-    persistedSize.delete(projectId);
     void enqueue(async () => {
       try {
         await store.remove(projectId);
@@ -530,16 +471,38 @@ export function clearProjectThreads(projectId: string): void {
   removeLocal(threadsKey(projectId));
   removeLocal(activeChatKey(projectId));
   removeLocal(seenRepliesKey(projectId));
+  removeLocal(ownerKey(projectId));
   notify(projectId);
 }
 
 // Projects already asked about this page: a listing refetch doesn't re-ask.
 const goneChecked = new Set<string>();
 
-/** Clear the history of projects this browser holds threads for but no
- * listing shows, once `gone` confirms each is deleted (not merely on a
- * backend this page can't reach right now). */
-export async function sweepGoneProjectThreads(listed: Set<string>, gone: (projectId: string) => Promise<boolean>): Promise<void> {
+function readOwner(projectId: string): string | null {
+  try {
+    return localStorage.getItem(ownerKey(projectId));
+  } catch {
+    return null;
+  }
+}
+
+function writeOwner(projectId: string, account: string): void {
+  try {
+    if (localStorage.getItem(ownerKey(projectId)) !== account) localStorage.setItem(ownerKey(projectId), account);
+  } catch {
+    // Storage full/blocked: the project is never swept, so its threads stay.
+  }
+}
+
+/** Clear the history of projects `account` once listed but no listing shows
+ * now, once `gone` confirms each is deleted (not merely on a backend this page
+ * can't reach right now). Threads of a project this account never listed
+ * belong to another account in this browser and are left alone. */
+export async function sweepGoneProjectThreads(
+  listed: Set<string>,
+  account: string,
+  gone: (projectId: string) => Promise<boolean>,
+): Promise<void> {
   if (memory) return;
   const store = threadStore();
   let held: string[] = [];
@@ -557,7 +520,11 @@ export async function sweepGoneProjectThreads(listed: Set<string>, gone: (projec
     return;
   }
   for (const projectId of held) {
-    if (listed.has(projectId) || goneChecked.has(projectId)) continue;
+    if (listed.has(projectId)) {
+      writeOwner(projectId, account);
+      continue;
+    }
+    if (goneChecked.has(projectId) || readOwner(projectId) !== account) continue;
     goneChecked.add(projectId);
     if (await gone(projectId).catch(() => false)) clearProjectThreads(projectId);
   }

@@ -197,7 +197,8 @@ export async function resolveProjectPlacement(projectId: string): Promise<Projec
  * doesn't hold it, a reachable engine answers 404, and the cloud answers 404.
  * Anything that can't answer — an engine this browser has used but that isn't
  * running, a signed-out cloud, a network error — keeps it, so a closed app
- * never costs a project its chat history.
+ * never costs a project its chat history. Every backend also answers 404 for
+ * another account's project, so ask only about projects this account listed.
  */
 export async function projectGone(projectId: string): Promise<boolean> {
   if (await browserHasProject(projectId).catch(() => true)) return false;

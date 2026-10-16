@@ -19,7 +19,7 @@
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { engineLost } from "./api";
+import { confirmedEngineUser, currentEngineUser, engineLost, onEngineUserConfirmed } from "./api";
 import { cutMode } from "./backend";
 import { useCutMode } from "./backend/hooks";
 import { readSnapshot, snapshotKey, writeSnapshot } from "./cache";
@@ -36,6 +36,7 @@ import {
   type Residency,
 } from "./residency";
 import { sweepGoneProjectThreads } from "./chatThreads";
+import { listingSweeper } from "./threadSweep";
 import type { ProjectFolder, ProjectSummary } from "./types";
 
 export { backendFor };
@@ -78,12 +79,14 @@ function seedFromSnapshot<T>(client: QueryClient, queryKey: readonly unknown[], 
 // answered, chat history this browser holds for a project none of them lists
 // is checked against its backends and dropped if the project is gone —
 // deleted from another tab, another device, or with its folder.
-const listings = new Map<Residency, Set<string>>();
-function noteListing(r: Residency, data: ProjectsSection): void {
-  listings.set(r, new Set(data.projects.map((p) => p.id)));
-  if (!availableResidencies().every((x) => listings.has(x))) return;
-  const listed = new Set([...listings.values()].flatMap((ids) => [...ids]));
-  void sweepGoneProjectThreads(listed, projectGone);
+const sweeper = listingSweeper({
+  residencies: availableResidencies,
+  confirmed: confirmedEngineUser,
+  sweep: (listed, account) => sweepGoneProjectThreads(listed, account, projectGone),
+});
+onEngineUserConfirmed(sweeper.retry);
+function noteListing(r: Residency, data: ProjectsSection, as: string | null): void {
+  sweeper.note(r, new Set(data.projects.map((p) => p.id)), as);
 }
 
 async function fetchProjectsSection(r: Residency): Promise<ProjectsSection> {
@@ -121,9 +124,10 @@ export function useProjectsSection(r: Residency, { list, live }: { list: boolean
     queryKey: projectsKey(r),
     queryFn: async () => {
       try {
+        const as = currentEngineUser();
         const data = await fetchProjectsSection(r);
         writeSnapshot(projectsSnapshotKey(r), data);
-        noteListing(r, data);
+        noteListing(r, data, as);
         return data;
       } catch (err) {
         if (r === "local" && cutMode() === "local") {

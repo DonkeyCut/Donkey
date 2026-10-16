@@ -43,7 +43,7 @@ beforeEach(() => {
 
 /** IndexedDB as the thread store sees it: one list per project, and a quota
  * that refuses a write past it the way the browser does. */
-function memoryStore(quota = Infinity, pressure?: number) {
+function memoryStore(quota = Infinity) {
   const lists = new Map<string, unknown[]>();
   const size = () => [...lists.values()].reduce((n, list) => n + JSON.stringify(list).length, 0);
   const threadStore: ThreadStore = {
@@ -58,7 +58,6 @@ function memoryStore(quota = Infinity, pressure?: number) {
     },
     remove: async (projectId) => { lists.delete(projectId); },
     projects: async () => [...lists.keys()],
-    pressure: async () => pressure,
   };
   return { threadStore, lists, size };
 }
@@ -254,39 +253,50 @@ describe("where threads are kept", () => {
     lists.set("elsewhere", [{ id: "b" }]);
     lists.set("deleted", [{ id: "c" }]);
     useThreadStore(threadStore);
+    // The account listed all three once, which makes their threads its own.
+    await sweepGoneProjectThreads(new Set(["kept", "elsewhere", "deleted"]), "me", async () => true);
     const asked: string[] = [];
-    await sweepGoneProjectThreads(new Set(["kept"]), async (id) => { asked.push(id); return id === "deleted"; });
+    await sweepGoneProjectThreads(new Set(["kept"]), "me", async (id) => { asked.push(id); return id === "deleted"; });
     expect(asked.sort()).toEqual(["deleted", "elsewhere"]);
     expect([...lists.keys()].sort()).toEqual(["elsewhere", "kept"]);
     // Each project is asked about once per page.
-    await sweepGoneProjectThreads(new Set(["kept"]), async (id) => { asked.push(id); return false; });
+    await sweepGoneProjectThreads(new Set(["kept"]), "me", async (id) => { asked.push(id); return false; });
     expect(asked).toHaveLength(2);
   });
 
-  test("a full store makes room from other projects' oldest threads first", async () => {
+  test("another account's threads survive this account's sweep", async () => {
+    const { threadStore, lists } = memoryStore();
+    lists.set("theirs", [{ id: "a" }]);
+    lists.set("unlisted", [{ id: "b" }]);
+    useThreadStore(threadStore);
+    await sweepGoneProjectThreads(new Set(["theirs"]), "them", async () => true);
+    // Every backend answers 404 for a project this account doesn't own, so a
+    // miss proves nothing about a project it never listed.
+    useThreadStore(threadStore);
+    const asked: string[] = [];
+    await sweepGoneProjectThreads(new Set(), "me", async (id) => { asked.push(id); return true; });
+    expect(asked).toEqual([]);
+    expect([...lists.keys()].sort()).toEqual(["theirs", "unlisted"]);
+  });
+
+  test("a full store keeps every other project's threads and says the save failed", async () => {
     const { threadStore, lists } = memoryStore(1_000_000);
     lists.set("old", [big("o1", 1, 300_000), big("o2", 5, 300_000)]);
     lists.set("older", [big("o0", 0, 300_000)]);
     useThreadStore(threadStore);
-    await loadProjectThreads("p");
-    writeProjectThreads("p", [big("mine", 9, 200_000)]);
-    await flushThreadSaves();
-    expect(threadSaveFailure()).toBeNull();
-    expect((lists.get("p") as { id: string }[]).map((t) => t.id)).toEqual(["mine"]);
-    // The oldest thread went; the newer one of another project stayed.
-    expect(lists.has("older")).toBe(false);
-    expect((lists.get("old") as { id: string }[]).map((t) => t.id)).toEqual(["o1", "o2"]);
-  });
-
-  test("a store near its quota prunes before it writes", async () => {
-    const { threadStore, lists } = memoryStore(Infinity, 0.95);
-    lists.set("other", [big("o1", 1, 1000), big("o2", 2, 1000)]);
-    useThreadStore(threadStore);
-    await loadProjectThreads("p");
-    writeProjectThreads("p", [big("mine", 9, 500)]);
-    await flushThreadSaves();
-    expect((lists.get("other") as { id: string }[]).map((t) => t.id)).toEqual(["o2"]);
-    expect(lists.has("p")).toBe(true);
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await loadProjectThreads("p");
+      writeProjectThreads("p", [big("mine", 9, 200_000)]);
+      await flushThreadSaves();
+      expect(threadSaveFailure()).toContain("storage is full");
+      expect((lists.get("old") as { id: string }[]).map((t) => t.id)).toEqual(["o1", "o2"]);
+      expect((lists.get("older") as { id: string }[]).map((t) => t.id)).toEqual(["o0"]);
+      // The open chat is still on screen for the page to show.
+      expect(readProjectThreads("p").map((t) => t.id)).toEqual(["mine"]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("a save that still fails is reported once, and clears when a save lands", async () => {

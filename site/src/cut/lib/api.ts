@@ -243,6 +243,30 @@ export function currentEngineUser(): string | null {
   return engineUser;
 }
 
+// The account the resolved session named. The remembered id binds first so
+// cached shelves paint, but only a confirmed id decides whose data is whose.
+let confirmedUser: string | null = null;
+const confirmations = new Set<() => void>();
+
+/** Bind the account the live session resolved to. */
+export function confirmEngineUser(id: string) {
+  setEngineUser(id);
+  if (confirmedUser === id) return;
+  confirmedUser = id;
+  for (const fn of confirmations) fn();
+}
+
+/** The bound account once the live session confirmed it, else null. */
+export function confirmedEngineUser(): string | null {
+  return confirmedUser === engineUser ? confirmedUser : null;
+}
+
+/** Called when the live session confirms an account. */
+export function onEngineUserConfirmed(fn: () => void): () => void {
+  confirmations.add(fn);
+  return () => confirmations.delete(fn);
+}
+
 /** Called when the bound account changes; returns its own unsubscribe. */
 export function subscribeEngineUser(fn: () => void): () => void {
   listeners.add(fn);
