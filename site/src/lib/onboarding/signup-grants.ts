@@ -8,13 +8,15 @@ import { type EmailUser } from "@/lib/email/resend";
 import { deliverEmail } from "@/lib/email/outbox";
 import { welcomeIdempotencyKey } from "@/lib/email/send-welcome";
 import { isDeletedAddress } from "@/lib/onboarding/deleted-account";
+import { claimSignupGrant, signupNetworkKey } from "@/lib/onboarding/signup-network";
 
 // Single source of truth for what a new account starts with. All steps are
 // idempotent and keyed to the user, so provisioning can run more than once
 // (e.g. a retried signup) without double-granting, double-seeding, or
 // double-sending. The grant amount and its lifetime are the signupCredits
-// setting; the welcome email names the amount that landed.
-export async function provisionSignupGrants(user: EmailUser): Promise<void> {
+// setting; the welcome email names the amount that landed. `headers` are the
+// signup request's, which name the network the account came from.
+export async function provisionSignupGrants(user: EmailUser, headers: Headers | undefined): Promise<void> {
   const setting = await getGlobalSetting("signupCredits");
   // An address that was deleted already had its signup credits once. The
   // starter project, fonts and welcome still land; the credits do not, and
@@ -25,7 +27,8 @@ export async function provisionSignupGrants(user: EmailUser): Promise<void> {
       userId: user.id,
     });
   }
-  const credits = returning || setting.dollars <= 0 ? null : String(setting.dollars);
+  const eligible = !returning && setting.dollars > 0;
+  const credits = eligible && (await networkHasGrant(user.id, headers)) ? String(setting.dollars) : null;
   const expiresAt = creditGrantExpiry(setting.expiresAfterDays) ?? null;
   // Settle the steps independently: one failing must not block the others,
   // and signup itself must never fail because a bonus grant hiccupped.
@@ -45,6 +48,30 @@ export async function provisionSignupGrants(user: EmailUser): Promise<void> {
         userId: user.id,
       });
     }
+  }
+}
+
+// Whether the network this signup came from still has a grant to give, under
+// the signupCreditsPerNetwork limit; asking takes one. One person cycling
+// accounts from one connection gets the first few grants and no more. A
+// signup whose address can't be read, or whose claim fails, gets none, so
+// the limit always holds.
+async function networkHasGrant(userId: string, headers: Headers | undefined): Promise<boolean> {
+  try {
+    const key = headers ? signupNetworkKey(headers) : null;
+    if (!key) {
+      console.error("[signup-grants] signup carried no network address; signup credits withheld", { userId });
+      return false;
+    }
+
+    const open = await claimSignupGrant(key, await getGlobalSetting("signupCreditsPerNetwork"));
+    if (!open) {
+      console.info("[signup-grants] network reached its signup grant limit; signup credits withheld", { userId });
+    }
+    return open;
+  } catch (reason) {
+    console.error("[signup-grants] failed to claim a network signup grant; signup credits withheld", { reason, userId });
+    return false;
   }
 }
 

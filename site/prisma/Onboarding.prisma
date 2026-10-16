@@ -34,3 +34,15 @@ model DeletedAccount {
   grantedMicros BigInt   @default(0)
   chargedMicros BigInt   @default(0)
 }
+
+// How many signup credit grants one network has taken in its current window.
+// Signup claims one before granting; a network at the
+// signupCreditsPerNetwork limit gives later accounts none until the window
+// lapses.
+model SignupNetwork {
+  // HMAC of the network address (an IPv6 address collapsed to its /64), so
+  // the table holds no address.
+  networkKey  String   @id
+  windowStart DateTime
+  claims      Int      @default(0)
+}

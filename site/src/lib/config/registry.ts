@@ -556,6 +556,21 @@ export const SETTINGS = defineSettings({
     title: "Signup credits",
     description: "USD a new account is granted at signup, shown as 1,000 credits per dollar, and how many days the grant lives.",
   },
+  signupCreditsPerNetwork: {
+    schema: z
+      .object({
+        // Signup grants one network takes per window; later accounts from it
+        // start with no credits.
+        limit: z.number().int().min(1).max(1000),
+        // Days a network's window runs from its first grant.
+        windowDays: z.number().int().min(1).max(365),
+      })
+      .strict(),
+    default: { limit: 3, windowDays: 7 },
+    public: false,
+    title: "Signup credits per network",
+    description: "How many new accounts from one network get the signup credits within the window; later accounts from it start with none.",
+  },
   emailSendBudget: {
     schema: z
       .object({
