@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { request } from "node:http";
 import * as pipeline from "./exportPipeline";
 import type { Job } from "./jobs";
 import os from "node:os";
@@ -251,8 +252,17 @@ describe("a tab render handed in over HTTP", () => {
       },
     });
     try {
+      // node:http, since another test file may have the global fetch stubbed.
       const put = (where: string, text: string) =>
-        fetch(new URL(where, server.url), { method: "PUT", body: text }).then((r) => r.json());
+        new Promise<unknown>((resolve, reject) => {
+          const req = request(new URL(where, server.url), { method: "PUT" }, (res) => {
+            let out = "";
+            res.on("data", (c: Buffer) => (out += c.toString()));
+            res.on("end", () => resolve(JSON.parse(out)));
+          });
+          req.on("error", reject);
+          req.end(text);
+        });
       expect(await put("/stems", "zip bytes")).toEqual({ status: "running", error: null });
       expect(await put("/file", "mp4 bytes")).toEqual({ status: "done", error: null });
       const file = path.join(projects.exportsDir(projectId), "Wire Render.mp4");
