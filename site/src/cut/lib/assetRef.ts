@@ -597,6 +597,10 @@ export interface EntitySources {
 
 const sec = (t: number) => `${t.toFixed(2)}s`;
 
+// Half of a surrogate pair standing alone, e.g. text cut through the middle of
+// an emoji. encodeURIComponent throws on one.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 const entityRef = (
   id: string,
   name: string,
@@ -607,7 +611,7 @@ const entityRef = (
   id,
   name,
   kind: "text",
-  url: `data:text/plain;charset=utf-8,${encodeURIComponent(payload)}`,
+  url: `data:text/plain;charset=utf-8,${encodeURIComponent(payload.replace(LONE_SURROGATE, "\uFFFD"))}`,
   ...extra,
 });
 

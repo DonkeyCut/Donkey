@@ -84,7 +84,7 @@ export function PlatformPreviewDialog({
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) void v.play();
+    if (v.paused) void v.play().catch(() => {});
     else v.pause();
   };
 

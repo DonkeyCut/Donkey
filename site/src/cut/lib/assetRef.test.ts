@@ -43,6 +43,21 @@ const sources = (patch: Partial<EntitySources> = {}): EntitySources => ({
 });
 
 describe("entityRefs", () => {
+  test("text holding a lone surrogate still makes a ref", () => {
+    // Text cut mid-emoji keeps half a surrogate pair, which encodeURIComponent
+    // refuses: "\ud83d" is the first half of 😀.
+    const refs = entityRefs(
+      sources({
+        overlays: [title("ov-1", 0, { text: "Hi \ud83d" })],
+        subtitles: { cues: [{ id: "cue-1", start: 1, end: 2, text: "bye \ude00" }] },
+      })
+    );
+
+    const payloads = refs.map((r) => decodeURIComponent(r.url.split(",")[1]));
+    expect(payloads[0]).toContain('Text: "Hi \ufffd"');
+    expect(payloads[1]).toContain('Text: "bye \ufffd"');
+  });
+
   test("elements name by content and carry ids in the payload", () => {
     const refs = entityRefs(
       sources({

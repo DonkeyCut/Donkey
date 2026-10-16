@@ -280,7 +280,7 @@ function VideoBody({
   const toggle = () => {
     const el = videoRef.current;
     if (!el) return;
-    if (el.paused) void el.play();
+    if (el.paused) void el.play().catch(() => {});
     else el.pause();
   };
 
@@ -418,7 +418,7 @@ function AudioBody({ item }: { item: LightboxItem }) {
         onToggle={() => {
           const el = audioEl.current;
           if (!el) return;
-          if (el.paused) void el.play();
+          if (el.paused) void el.play().catch(() => {});
           else el.pause();
         }}
         onSeek={(t) => {

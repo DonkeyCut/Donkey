@@ -32,3 +32,16 @@ test("an older scene cannot settle a later call for a different brief", () => {
   const result = recoverSceneCall(input, "chat", { ...scene("done"), brief: "The earlier video" });
   expect((result[0].parts[0] as { errorText: string }).errorText).toBe("Interrupted.");
 });
+
+test("recovers in a browser without Array.prototype.toReversed", () => {
+  // Chrome 109, the last release for Windows 7 and 8, predates toReversed.
+  const toReversed = Object.getOwnPropertyDescriptor(Array.prototype, "toReversed")!;
+  delete (Array.prototype as { toReversed?: unknown }).toReversed;
+  try {
+    const resumed = recoverSceneCall(messages(), "chat", scene("keyframes"));
+
+    expect((resumed[0].parts[0] as { state: string }).state).toBe("input-available");
+  } finally {
+    Object.defineProperty(Array.prototype, "toReversed", toReversed);
+  }
+});
