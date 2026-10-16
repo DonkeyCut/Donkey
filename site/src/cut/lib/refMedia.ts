@@ -330,7 +330,7 @@ export async function refsFromDroppedFiles(
       if (pending) startUpload(projectId, pending);
       refs.push(refFromAsset(asset));
     } catch (err) {
-      reportSwallowed(`[cut] attach failed for ${file.name}`, err);
+      reportSwallowed("[cut] attach failed", err, file.name);
     }
   }
   return refs;

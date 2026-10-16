@@ -741,7 +741,7 @@ export function Editor({
         void uploadLinkedFile(file)
           .then(() => opts?.onOutcome?.({ file, assetId: "" }))
           .catch((err) => {
-            reportSwallowed(`[cut] shelving failed for ${file.name}`, err);
+            reportSwallowed("[cut] shelving failed", err, file.name);
             opts?.onOutcome?.({ file, failed: true });
           });
       }
@@ -835,7 +835,7 @@ export function Editor({
           if (pending) startUpload(projectId, pending);
           opts?.onOutcome?.({ file, assetId: asset.id });
         } catch (err) {
-          reportSwallowed(`[cut] import failed for ${file.name}`, err);
+          reportSwallowed("[cut] import failed", err, file.name);
           opts?.onOutcome?.({ file, failed: true });
         } finally {
           setImporting((n) => n - 1);
@@ -1001,7 +1001,7 @@ export function Editor({
         e.preventDefault();
         for (const file of linked) {
           void uploadLinkedFile(file).catch((err) =>
-            reportSwallowed(`[cut] paste failed for ${file.name}`, err)
+            reportSwallowed("[cut] paste failed", err, file.name)
           );
         }
       }
@@ -1039,7 +1039,7 @@ export function Editor({
             try {
               await placeRefAtPlayhead(ref, { projectId, library, at });
             } catch (err) {
-              reportSwallowed(`[cut] paste failed for ${ref.name}`, err);
+              reportSwallowed("[cut] paste failed", err, ref.name);
             }
           }
         })();

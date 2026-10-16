@@ -529,7 +529,7 @@ export function FolderShelf<F extends DeskFolder>({
       (err: unknown) => {
         release();
         setFailed(err instanceof Error && err.message ? err.message : "Could not create folder.");
-        reportSwallowed(`[cut] folder create failed for ${name}`, err);
+        reportSwallowed("[cut] folder create failed", err, name);
       },
     );
     closeCreate();

@@ -1890,7 +1890,7 @@ function BeatsControl({ asset }: { asset: MediaAsset }) {
         disabled={busy || !!asset.upload}
         onClick={() => {
           void detectAssetBeats(asset).catch((err) => {
-            reportSwallowed(`[cut] beat scan failed for ${asset.fileName}`, err);
+            reportSwallowed("[cut] beat scan failed", err, asset.fileName);
           });
         }}
       >

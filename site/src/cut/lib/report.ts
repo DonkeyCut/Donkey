@@ -7,9 +7,9 @@ import { fetchDropped } from "./network";
  *
  * Cut's read paths — filmstrips, waveforms, the chunk cache, an import that
  * only lost one file — keep working when a read fails, and the failure still
- * has to be visible. `console.error` is that channel: PostHog's autocapture
- * turns one into an `$exception` (see instrumentation-client.ts). Handing it
- * the cause directly goes wrong twice.
+ * has to be visible. Error tracking is that channel (see instrumentation-client.ts),
+ * and `console.error` reaches it too, through PostHog's autocapture. Handing
+ * that the cause directly goes wrong twice.
  *
  * The sentence the call site wrote is dropped. Autocapture picks the `Error`
  * out of the arguments and reports that alone, so a filmstrip that failed on a
@@ -59,15 +59,48 @@ function shape(err: unknown): boolean {
   return fetchDropped(err);
 }
 
+/** Where a report goes: the error and the key error tracking groups it by. */
+type FailureSink = (error: Error, fingerprint: string) => void;
+
+// Unbound — a headless process, a test — a report is a console error. The page
+// binds error tracking here (instrumentation-client.ts).
+let sink: FailureSink = (error) => console.error(error);
+
+/** Send every report to `next` from here on. */
+export function bindFailureSink(next: FailureSink): void {
+  sink = next;
+}
+
 /**
- * Record a failure the feature already handled. `what` is the sentence that
- * ends up in error tracking, so it names the thing that failed and the file it
- * failed on.
+ * The key one kind of failure is grouped under: the step that failed and the
+ * chain of causes behind it, with the file it failed on left out. Error
+ * tracking groups by message otherwise, so a filename in the sentence opened
+ * one issue per file — "peaks failed for IMG_7087.MOV" and "… IMG_7091.MOV"
+ * apart. Signed URLs are masked, since each carries its own signature.
  */
-export function reportSwallowed(what: string, err: unknown): void {
+function fingerprintOf(what: string, err: unknown): string {
+  const parts = [what];
+  for (let at = err, depth = 0; at != null && depth < 4; depth++) {
+    if (!(at instanceof Error)) {
+      parts.push(String(at));
+      break;
+    }
+    parts.push(`${at.name}: ${at.message.replace(/https?:\/\/\S+/g, "<url>")}`);
+    at = at.cause;
+  }
+  return parts.join(" | ");
+}
+
+/**
+ * Record a failure the feature already handled. `what` names the step that
+ * failed, and `subject` the file or item it failed on: the message carries
+ * both, and the grouping only the first.
+ */
+export function reportSwallowed(what: string, err: unknown, subject?: string): void {
+  const message = subject ? `${what} for ${subject}` : what;
   if (transient(err)) {
-    console.warn(what, err);
+    console.warn(message, err);
     return;
   }
-  console.error(new Error(what, { cause: err }));
+  sink(new Error(message, { cause: err }), fingerprintOf(what, err));
 }

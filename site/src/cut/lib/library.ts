@@ -871,7 +871,7 @@ export async function importLibraryAsset(
       height = probe.height;
     }
     repairLibraryAssetMeta(lib, { duration, width, height }).catch((err: unknown) =>
-      reportSwallowed(`[cut] library meta repair failed for ${lib.fileName}`, err),
+      reportSwallowed("[cut] library meta repair failed", err, lib.fileName),
     );
   }
   // On this Mac the engine lands the file with a clone, and it is landed

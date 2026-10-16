@@ -16,9 +16,10 @@ export function onReconnect(work: () => void): void {
 export class ConnectionLostError extends Error {}
 
 /** Whether `err` is fetch giving up on the network, by the TypeError every
- * browser throws for it, e.g. Chrome's "Failed to fetch". */
+ * browser throws for it, e.g. Chrome's "Failed to fetch", or Firefox's "Error
+ * in input stream" for a body cut off mid-read. */
 export function fetchDropped(err: unknown): boolean {
-  return err instanceof TypeError && /failed to fetch|network\s*error|load failed|connection/i.test(err.message);
+  return err instanceof TypeError && /failed to fetch|network\s*error|load failed|connection|input stream/i.test(err.message);
 }
 
 /** Whether `err` is the connection failing rather than a server answering:
