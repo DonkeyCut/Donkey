@@ -400,6 +400,28 @@ export function progressClientJob(id: string, ratio: number): void {
   if (Number.isFinite(ratio)) job.progress = Math.max(job.progress, Math.min(1, Math.max(0, ratio)));
 }
 
+/** Stream a request body into `file`, chunk by chunk. A body whose connection
+ * drops rejects the read, so the caller's catch runs. It reads through the
+ * stream's own reader: under Bun a request body's async iterator throws
+ * "undefined is not a function" once an await has left the tick, and the Node
+ * stream adapter hangs on the same body and leaks the rejection. */
+async function writeBody(body: ReadableStream<Uint8Array>, file: string): Promise<void> {
+  const reader = body.getReader();
+  const out = await open(file, "w");
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        return;
+      }
+      await out.write(value);
+    }
+  } finally {
+    reader.releaseLock();
+    await out.close();
+  }
+}
+
 /**
  * The finished file, streamed into exports/ under the claimed name. Null when
  * the job is no longer a running tab render — canceled from another dock, or
@@ -415,15 +437,7 @@ export async function completeClientJob(
   const partial = `${job.outPath}.part`;
   try {
     if (!body) throw new Error("The export arrived without a file.");
-    // Read chunk by chunk into a file handle. A body whose connection drops
-    // rejects the loop, so the catch below runs; under Bun the Node stream
-    // adapter hangs on the same body and leaks the rejection.
-    const file = await open(partial, "w");
-    try {
-      for await (const chunk of body) await file.write(chunk);
-    } finally {
-      await file.close();
-    }
+    await writeBody(body, partial);
     await rename(partial, job.outPath);
     job.status = "done";
     job.progress = 1;
@@ -452,12 +466,7 @@ export async function completeClientStems(
   const partial = `${job.stemsPath}.part`;
   try {
     if (!body) throw new Error("The stems arrived without a file.");
-    const file = await open(partial, "w");
-    try {
-      for await (const chunk of body) await file.write(chunk);
-    } finally {
-      await file.close();
-    }
+    await writeBody(body, partial);
     await rename(partial, job.stemsPath);
   } catch (err) {
     await rm(partial, { force: true });

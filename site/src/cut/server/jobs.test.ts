@@ -229,3 +229,36 @@ describe("preview publication", () => {
     });
   }
 });
+
+/** The slice of Bun's server the hand-in test starts; the site's types carry no Bun globals. */
+declare const Bun: {
+  serve(options: { port: number; fetch(req: Request): Promise<Response> }): { url: URL; stop(force: boolean): void };
+};
+
+describe("a tab render handed in over HTTP", () => {
+  // The tab PUTs its file to the engine's Bun server, whose request body has
+  // to survive the awaits that open the file it lands in.
+  test("lands the file and its stems from a real request body", async () => {
+    const projectId = (await projects.createProject("Wire Render")).id;
+    const job = await jobs.createClientJob(projectId, "mp4", undefined, "fileAndStems");
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (req) => {
+        const settled = new URL(req.url).pathname === "/stems"
+          ? await jobs.completeClientStems(job.id, req.body)
+          : await jobs.completeClientJob(job.id, req.body);
+        return Response.json({ status: settled?.status ?? null, error: settled?.error ?? null });
+      },
+    });
+    try {
+      const put = (where: string, text: string) =>
+        fetch(new URL(where, server.url), { method: "PUT", body: text }).then((r) => r.json());
+      expect(await put("/stems", "zip bytes")).toEqual({ status: "running", error: null });
+      expect(await put("/file", "mp4 bytes")).toEqual({ status: "done", error: null });
+      const file = path.join(projects.exportsDir(projectId), "Wire Render.mp4");
+      expect(await readFile(file, "utf8")).toBe("mp4 bytes");
+    } finally {
+      server.stop(true);
+    }
+  });
+});
