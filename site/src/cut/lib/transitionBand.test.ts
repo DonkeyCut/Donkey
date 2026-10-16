@@ -1,11 +1,11 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Canvas } from "skia-canvas";
 import { FrameCompositor, type Frame } from "./composite";
-import { setRasterFactory, type RasterSurface } from "./raster";
+import { setRasterFactory, type RasterFactory, type RasterSurface } from "./raster";
 import { bandEdge, clampBand, takesBand } from "./transitionShape";
 import { xfadeTransition } from "../server/transitionExpr";
 import type { TransitionStyle, VideoClip } from "./types";
@@ -26,13 +26,21 @@ const FRAMES = Math.round(SECONDS * FPS);
 const BUNDLED_FFMPEG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../vendor/donkey-tools/ffmpeg");
 const FFMPEG = existsSync(BUNDLED_FFMPEG) ? BUNDLED_FFMPEG : "ffmpeg";
 
+// The suite shares one raster seam, so the skia factory comes out after this
+// file: left in, later files measure and draw with it.
+let restore: RasterFactory | undefined;
 beforeAll(() => {
-  setRasterFactory({
+  restore = setRasterFactory({
     createCanvas: (w, h) => new Canvas(w, h) as unknown as RasterSurface,
     decodeImage: async () => null,
     canvasToBlob: async () => new Blob(),
     snapshot: async (canvas) => canvas as unknown as ImageBitmap,
   });
+});
+afterAll(() => {
+  if (restore) {
+    setRasterFactory(restore);
+  }
 });
 
 function solid(color: string): Frame {
