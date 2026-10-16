@@ -70,7 +70,8 @@ beforeEach(() => {
   } as never);
 });
 
-const REGION = { x: 0.2, y: 0.4, w: 0.6, h: 0.2 };
+// Centre and size, frame fractions, like every picture tool.
+const REGION = { x: 0.5, y: 0.5, w: 0.6, h: 0.2 };
 type Out = {
   verdict: string;
   ink: { x: number; y: number; w: number; h: number };
@@ -88,8 +89,9 @@ test("the face the reference is set in comes first, with the size that matches i
   // 72px type on a 1080-tall frame is 72px at the 1080 short side.
   expect(Math.abs(out.matches[0].size - 72)).toBeLessThanOrEqual(3);
   expect(Math.abs(out.matches[0].tracking)).toBeLessThan(0.03);
-  // The ink, in frame fractions, sits centred where it was drawn.
-  expect(Math.abs(out.ink.x + out.ink.w / 2 - 0.5)).toBeLessThan(0.01);
+  // The ink's centre, in frame fractions, is where it was drawn: the x/y
+  // add_title takes as they are.
+  expect(Math.abs(out.ink.x - 0.5)).toBeLessThan(0.01);
   expect(out.matches.length).toBeLessThanOrEqual(5);
 });
 
@@ -102,7 +104,7 @@ test("type in a face Donkey does not bundle is reported as that", async () => {
 });
 
 test("a region with no type, a sound, and missing words are refused", async () => {
-  expect(await message(runAiTool("suggest_font", { asset_id: "ref", t: 3, region: { x: 0, y: 0, w: 0.1, h: 0.1 }, text: "TRAVEL" }))).toContain("No type");
+  expect(await message(runAiTool("suggest_font", { asset_id: "ref", t: 3, region: { x: 0.05, y: 0.05, w: 0.1, h: 0.1 }, text: "TRAVEL" }))).toContain("No type");
   expect(await message(runAiTool("suggest_font", { asset_id: "song", t: 3, region: REGION, text: "TRAVEL" }))).toContain("audio");
   expect(await message(runAiTool("suggest_font", { asset_id: "ref", t: 3, region: REGION, text: " " }))).toContain("text");
   expect(await message(runAiTool("suggest_font", { asset_id: "ref", t: 3, region: { x: 0.5, y: 0.5, w: 0, h: 0.1 }, text: "TRAVEL" }))).toContain("region");
@@ -115,11 +117,11 @@ test("inside a picture box, the region, the ink and the size are the box's", asy
   const out = (await runAiTool("suggest_font", {
     asset_id: "ref",
     t: 3,
-    region: { x: 0.2, y: 0.3, w: 0.6, h: 0.4 },
+    region: { x: 0.5, y: 0.5, w: 0.6, h: 0.4 },
     text: "TRAVEL DESTINATION",
   })) as Out & { picture?: unknown };
   expect(out.matches[0]).toMatchObject({ font: "oswald", weight: 700 });
   expect(Math.abs(out.matches[0].size - 144)).toBeLessThanOrEqual(6);
-  expect(Math.abs(out.ink.y + out.ink.h / 2 - 0.5)).toBeLessThan(0.02);
+  expect(Math.abs(out.ink.y - 0.5)).toBeLessThan(0.02);
   expect(out.picture).toBeDefined();
 });

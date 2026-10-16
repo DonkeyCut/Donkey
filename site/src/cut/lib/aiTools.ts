@@ -2144,7 +2144,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (!text) throw new ToolError("Pass text: the words the region shows, as they read, with a line break where the type breaks.");
       const r = (input.region ?? {}) as Record<string, unknown>;
       if (![r.x, r.y, r.w, r.h].every(isNum) || !((r.w as number) > 0 && (r.h as number) > 0))
-        throw new ToolError("Pass region: {x, y, w, h} in frame fractions, x/y its top-left corner, around the type and little else.");
+        throw new ToolError("Pass region: {x, y, w, h} in frame fractions, x/y its centre, around the type and little else.");
       const t = clamp(isNum(input.t) ? input.t : 0, 0, Math.max(0, asset.duration - 0.001));
 
       // The frame, then the region of it at a size the scoring can use.
@@ -2168,10 +2168,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const area = pictureArea(asset, input);
       const left = area.x - area.w / 2;
       const top = area.y - area.h / 2;
-      const x0 = (left + clamp(r.x as number, 0, 1) * area.w) * fw;
-      const y0 = (top + clamp(r.y as number, 0, 1) * area.h) * fh;
-      const sw = Math.max(1, Math.min(fw - x0, (r.w as number) * area.w * fw));
-      const sh = Math.max(1, Math.min(fh - y0, (r.h as number) * area.h * fh));
+      // A region centred near an edge is cut at the frame.
+      const rx0 = (left + (clamp(r.x as number, 0, 1) - (r.w as number) / 2) * area.w) * fw;
+      const ry0 = (top + (clamp(r.y as number, 0, 1) - (r.h as number) / 2) * area.h) * fh;
+      const x0 = Math.max(0, rx0);
+      const y0 = Math.max(0, ry0);
+      const sw = Math.max(1, Math.min(fw, rx0 + (r.w as number) * area.w * fw) - x0);
+      const sh = Math.max(1, Math.min(fh, ry0 + (r.h as number) * area.h * fh) - y0);
       const k = Math.min(1, FONT_CROP_MAX / Math.max(sw, sh));
       const cw = Math.max(1, Math.round(sw * k));
       const ch = Math.max(1, Math.round(sh * k));
@@ -2206,8 +2209,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         t: round2(t),
         text,
         ink: {
-          x: round3(((x0 + ref.box.x / k) / fw - left) / area.w),
-          y: round3(((y0 + ref.box.y / k) / fh - top) / area.h),
+          x: round3(((x0 + (ref.box.x + ref.box.w / 2) / k) / fw - left) / area.w),
+          y: round3(((y0 + (ref.box.y + ref.box.h / 2) / k) / fh - top) / area.h),
           w: round3(ref.box.w / k / fw / area.w),
           h: round3(ref.box.h / k / fh / area.h),
         },

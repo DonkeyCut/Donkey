@@ -303,15 +303,15 @@ export const AI_PANEL_TOOLS = [
   {
     name: "suggest_font",
     description:
-      "Name the face a reference's type is set in: reads the source's frame at t, lifts the ink inside region off its ground, and ranks every face Donkey can set a title in — each bundled family at each bundled weight, the system set and the account's own fonts — by how closely its glyphs for the same words match, tracking solved so each runs as wide as the reference. Call it for each distinct face while rebuilding a reference's titles, so the font, weight, size and tracking come from the frame. Pass the words exactly as they read, case and line breaks included, and a region close around them read off watch_video at detail original. Returns the best faces with score (0..1), size (px at the 1080 short side, for the same ink height) and tracking (em), plus the ink's box in frame fractions. verdict no_match means nothing bundled is close: the reference uses a face Donkey does not bundle, so say so and name the stand-in you use.",
+      "Name the face a reference's type is set in: reads the source's frame at t, lifts the ink inside region off its ground, and ranks every face Donkey can set a title in — each bundled family at each bundled weight, the system set and the account's own fonts — by how closely its glyphs for the same words match, tracking solved so each runs as wide as the reference. Call it for each distinct face while rebuilding a reference's titles, so the font, weight, size and tracking come from the frame. Pass the words exactly as they read, case and line breaks included, and a region close around them read off watch_video at detail original. Returns the best faces with score (0..1), size (px at the 1080 short side, for the same ink height) and tracking (em), plus the ink's box as centre and size in frame fractions — its x/y are add_title's. verdict no_match means nothing bundled is close: the reference uses a face Donkey does not bundle, so say so and name the stand-in you use.",
     inputSchema: obj(
       {
         asset_id: str("Project asset id of the reference (video or image)"),
         t: num("Source second the type shows at (default 0)"),
         region: obj(
           {
-            x: num("Left edge, frame fraction"),
-            y: num("Top edge, frame fraction"),
+            x: num("Centre x, frame fraction"),
+            y: num("Centre y, frame fraction"),
             w: num("Width, frame fraction"),
             h: num("Height, frame fraction"),
           },
