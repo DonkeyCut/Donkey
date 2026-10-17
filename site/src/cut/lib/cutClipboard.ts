@@ -76,23 +76,35 @@ export function payloadFromHtml(html: string | null | undefined): CutClipboardPa
   }
 }
 
+// What a browser throws when the page may not write the clipboard: the
+// ChatGPT card's frame blocks it by permissions policy.
+const CLIPBOARD_REFUSED = "NotAllowedError";
+
 /** Put a copy on the system clipboard: the tokens as text, the payload in
  * the HTML flavor. A browser without `ClipboardItem` takes the text alone,
- * and the copy pastes within its own tab from the timeline clipboard. */
+ * and the copy pastes within its own tab from the timeline clipboard, as it
+ * does on a page the clipboard refuses. */
 export async function writeCutClipboard(text: string, payload: CutClipboardPayload | null): Promise<void> {
   const clip = navigator.clipboard;
   if (!clip) return;
-  if (payload && typeof ClipboardItem !== "undefined" && typeof clip.write === "function") {
-    const html = clipboardHtml(text, payload);
-    await clip.write([
-      new ClipboardItem({
-        "text/plain": new Blob([text], { type: "text/plain" }),
-        "text/html": new Blob([html], { type: "text/html" }),
-      }),
-    ]);
-    return;
+  try {
+    if (payload && typeof ClipboardItem !== "undefined" && typeof clip.write === "function") {
+      const html = clipboardHtml(text, payload);
+      await clip.write([
+        new ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        }),
+      ]);
+      return;
+    }
+    await clip.writeText(text);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === CLIPBOARD_REFUSED) {
+      return;
+    }
+    throw err;
   }
-  await clip.writeText(text);
 }
 
 /** Copy timeline selection to both the editor clipboard and the system clipboard. */

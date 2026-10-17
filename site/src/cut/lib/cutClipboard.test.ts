@@ -1,6 +1,13 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 
-import { clipboardHtml, pasteCutPayload, payloadAssets, payloadFromHtml, type CutClipboardPayload } from "./cutClipboard";
+import {
+  clipboardHtml,
+  pasteCutPayload,
+  payloadAssets,
+  payloadFromHtml,
+  writeCutClipboard,
+  type CutClipboardPayload,
+} from "./cutClipboard";
 import { richDoc } from "./fixtures/richDoc";
 import { EMPTY_LIBRARY } from "./assetRef";
 import { setPlayhead } from "./playhead";
@@ -63,6 +70,32 @@ describe("the clipboard flavor", () => {
     expect(assets.map((a) => a.id).sort()).toEqual(["f0", "m0", "s0", "v0"]);
     // Stored shape only: nothing runtime rides along.
     expect("url" in assets[0]).toBe(false);
+  });
+});
+
+describe("writing the system clipboard", () => {
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const savedItem = (globalThis as { ClipboardItem?: unknown }).ClipboardItem;
+  const withClipboard = (write: () => Promise<void>) => {
+    Object.defineProperty(globalThis, "navigator", { value: { clipboard: { write, writeText: write } }, configurable: true });
+    Object.assign(globalThis, { ClipboardItem: class {} });
+  };
+  afterAll(() => {
+    if (saved) Object.defineProperty(globalThis, "navigator", saved);
+    Object.assign(globalThis, { ClipboardItem: savedItem });
+  });
+
+  test("a page the clipboard refuses keeps the copy in its own tab", async () => {
+    // The ChatGPT card's frame blocks the Clipboard API by permissions policy.
+    withClipboard(() => Promise.reject(new DOMException("blocked by a permissions policy", "NotAllowedError")));
+
+    expect(await writeCutClipboard("@c0", payloadOf(["c0"]))).toBeUndefined();
+  });
+
+  test("any other clipboard failure still surfaces", async () => {
+    withClipboard(() => Promise.reject(new DOMException("bad blob", "DataError")));
+
+    await expect(writeCutClipboard("@c0", payloadOf(["c0"]))).rejects.toThrow("bad blob");
   });
 });
 
