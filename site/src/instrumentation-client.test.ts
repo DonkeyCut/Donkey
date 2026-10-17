@@ -114,6 +114,41 @@ describe("before_send", () => {
     expect(beforeSend(exception(report, cause))).not.toBeNull();
   });
 
+  test("drops a cancellation nothing was left waiting on", () => {
+    // A discarded chat round aborts its request; the abort's own reason
+    // reaches the page as an unhandled rejection with the abort() call as its
+    // stack, or no stack at all.
+    const chrome = {
+      type: "DOMException",
+      value: "AbortError: signal is aborted without reason",
+      stacktrace: { frames: [{ filename: "https://donkeycut.com/_next/static/chunks/a.js" }] },
+    };
+    const safari = { type: "DOMException", value: "AbortError: The operation was aborted." };
+
+    expect(beforeSend(exception(chrome))).toBeNull();
+    expect(beforeSend(exception(safari))).toBeNull();
+  });
+
+  test("keeps a worded report whose cause is a cancellation", () => {
+    const report = { type: "Error", value: "[cut] export failed" };
+    const cause = { type: "DOMException", value: "AbortError: signal is aborted without reason" };
+
+    expect(beforeSend(exception(report, cause))).not.toBeNull();
+  });
+
+  test("drops a compile error in code no file holds", () => {
+    const evaluated = { type: "SyntaxError", value: "Octal escape sequences are not allowed in template strings." };
+
+    expect(beforeSend(exception(evaluated))).toBeNull();
+  });
+
+  test("keeps a response body that failed to parse", () => {
+    // Response.json() rejects from native code, with no frame of ours.
+    const ours = { type: "SyntaxError", value: "Unexpected token '<', \"<!DOCTYPE \"... is not valid JSON" };
+
+    expect(beforeSend(exception(ours))).not.toBeNull();
+  });
+
   test("keeps an error our own code threw", () => {
     const ours = {
       type: "TypeError",

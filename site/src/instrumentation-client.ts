@@ -124,6 +124,25 @@ const translatorArtifact = (item: { value?: string }) => {
 const droppedFetch = (item: { type?: string; value?: string }) =>
   item?.type === "TypeError" && typeof item.value === "string" && fetchDropped(new TypeError(item.value));
 
+/**
+ * Whether this exception is a cancellation, reported bare. Cut stops work it
+ * no longer wants by aborting it — a discarded chat round, a superseded read
+ * — and an abort whose rejection nothing awaited reaches the page carrying
+ * only the abort() call, or no stack at all. report.ts holds back the same
+ * shape; a failure worded around an abort keeps it as its cause and stays.
+ */
+const cancellation = (item: { type?: string; value?: string }) =>
+  item?.type === "DOMException" && typeof item.value === "string" && item.value.startsWith("AbortError:");
+
+/**
+ * Whether this exception is a compile error in code no file holds. A shipped
+ * chunk that failed to parse names its file, so a syntax error with no frame
+ * at all came from source something evaluated into the page. A body that
+ * failed to parse as JSON also arrives frameless, from native code, and stays.
+ */
+const evaluatedSyntaxError = (item: { type?: string; value?: string; stacktrace?: { frames?: unknown[] } }) =>
+  item?.type === "SyntaxError" && !item.stacktrace?.frames?.length && !/JSON/.test(item.value ?? "");
+
 // A tab left open across a deploy recovers from the old build's missing chunks.
 if (process.env.NODE_ENV === "production") {
   reloadOnChunkError(window);
@@ -161,7 +180,9 @@ if (process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV === "production"
             opaqueScriptError(list[0]) ||
             browserNoise(list[0]) ||
             translatorArtifact(list[0]) ||
-            droppedFetch(list[0])
+            droppedFetch(list[0]) ||
+            cancellation(list[0]) ||
+            evaluatedSyntaxError(list[0])
           ) {
             return null;
           }
