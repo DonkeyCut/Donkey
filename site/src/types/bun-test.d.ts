@@ -50,4 +50,10 @@ declare module "bun:test" {
     <T extends (...args: never[]) => unknown>(fn: T): T & Spy<T>;
     module(specifier: string, factory: () => unknown): void;
   };
+  /** Fake timers, for the tests that move the clock themselves. */
+  export const jest: {
+    useFakeTimers(): void;
+    useRealTimers(): void;
+    advanceTimersByTime(ms: number): void;
+  };
 }

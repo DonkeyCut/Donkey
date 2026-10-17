@@ -944,6 +944,9 @@ export function narrowSpecToRange(spec: ExportSpec): ExportSpec {
 /** A clip's frame region in even pixels, or null when it fills the whole frame
  * (the common case, which keeps the plain full-frame filter path). */
 
+/** How far an ffmpeg run has got, as its stats line prints it. */
+const STATS_CURSOR = /size=\s*\S+\s+time=\S+/g;
+
 /**
  * Spawn ffmpeg for one pass, tracking `job.proc` so a cancel kills the live
  * process, bounding silence with the stall watchdog, and (when `onProgress` is
@@ -960,21 +963,31 @@ export function runFfmpeg(
     const proc = spawn("ffmpeg", args);
     job.proc = proc;
     // Stall watchdog: legit exports can run long, so bound silence, not total
-    // time — kill only if ffmpeg emits nothing for STALL_MS.
+    // time — kill only if ffmpeg makes no progress for STALL_MS. A wedged
+    // ffmpeg keeps printing its stats line with the cursor frozen
+    // ("size= 256KiB time=00:00:00.16"), so a repeated cursor is silence.
     const STALL_MS = 120_000;
     let watchdog: ReturnType<typeof setTimeout> | undefined;
+    let cursor: string | undefined;
     const bump = () => {
       clearTimeout(watchdog);
       watchdog = setTimeout(() => {
         proc.kill("SIGKILL");
-        reject(new Error("Export stalled — no ffmpeg output for 120s."));
+        reject(new Error("Export stalled — no ffmpeg progress for 120s."));
       }, STALL_MS);
       watchdog.unref();
     };
     bump();
     proc.stderr.on("data", (chunk: Buffer) => {
-      bump();
       const text = chunk.toString();
+
+      // Log lines are progress; a stats line is progress when its cursor moved.
+      const stats = text.match(STATS_CURSOR)?.at(-1);
+      if (stats === undefined || stats !== cursor) {
+        bump();
+      }
+      cursor = stats ?? cursor;
+
       job.log.push(text);
       if (job.log.length > 200) job.log.shift();
       if (onProgress) {

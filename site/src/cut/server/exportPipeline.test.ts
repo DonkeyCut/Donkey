@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { retimeOf } from "@donkeycut/effects-kit";
 import {
@@ -7,6 +9,7 @@ import {
   narrowSpecToRange,
   passWindows,
   runExport,
+  runFfmpeg,
   videoCodecArgs,
   type ExportPipelineIO,
   type ExportSpec,
@@ -2036,5 +2039,58 @@ describe("clips shorter than an output frame", () => {
     expect(g).toContain(`between(t,${(0.5 / 30).toFixed(6)},${(1.5 / 30).toFixed(6)})`);
     // The clip after it opens on frame 2.
     expect(g).toContain(`between(t,${(1.5 / 30).toFixed(6)},`);
+  });
+});
+
+describe("the ffmpeg stall watchdog", () => {
+  // A wedged ffmpeg keeps printing its stats line twice a second with the
+  // cursor frozen ("frame=    4 ... time=00:00:00.16"). The watchdog counts
+  // that as silence. The fake ffmpeg prints two stats lines, the second a
+  // frozen repeat or a step on, and the fake clock runs 130s across them.
+  const LINE = (time: string) => `frame=    4 fps=0.0 q=-0.0 size=     256KiB time=${time} bitrate=12559.5kbits/s speed=0.0007x\r`;
+  const FAKE_FFMPEG = [
+    "#!/bin/bash",
+    `printf '${LINE("00:00:00.16")}' >&2`,
+    "read -r",
+    `[ "$1" = frozen ] && printf '${LINE("00:00:00.16")}' >&2 || printf '${LINE("00:00:00.20")}' >&2`,
+    "read -r",
+  ].join("\n");
+
+  const runAcross = async (mode: "frozen" | "moving") => {
+    const bin = await mkdtemp(path.join(os.tmpdir(), "cut-stall-"));
+    await writeFile(path.join(bin, "ffmpeg"), FAKE_FFMPEG);
+    await chmod(path.join(bin, "ffmpeg"), 0o755);
+    const pathBefore = process.env.PATH;
+    process.env.PATH = `${bin}:${pathBefore}`;
+    jest.useFakeTimers();
+    try {
+      const job: RenderHandle = { tmpDir: bin, outPath: path.join(bin, "out.mp4"), progress: 0, log: [] };
+      const run = runFfmpeg(job, [mode]);
+      const settled = run.then(() => "done", (err: Error) => err.message);
+      const stderr = job.proc!.stderr!;
+      const nextLine = () => new Promise((resolve) => stderr.once("data", resolve));
+
+      // Each step waits for ffmpeg's line, moves the clock, then lets the
+      // fake print its next line.
+      await nextLine();
+      jest.advanceTimersByTime(100_000);
+      job.proc!.stdin!.write("\n");
+      await nextLine();
+      jest.advanceTimersByTime(30_000);
+      job.proc!.stdin!.write("\n");
+      return await settled;
+    } finally {
+      jest.useRealTimers();
+      process.env.PATH = pathBefore;
+      await rm(bin, { recursive: true, force: true });
+    }
+  };
+
+  test("kills a run whose stats line stops moving", async () => {
+    expect(await runAcross("frozen")).toContain("stalled");
+  });
+
+  test("keeps a run whose stats line moves on", async () => {
+    expect(await runAcross("moving")).toBe("done");
   });
 });

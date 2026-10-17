@@ -119,7 +119,7 @@ describe("proxy worker", () => {
     const killed = harness();
     killed.io.make.mockImplementation(async (handle: unknown) => {
       (handle as RenderHandle).proc = { signalCode: "SIGKILL", exitCode: null } as never;
-      throw new Error("Export stalled — no ffmpeg output for 120s.");
+      throw new Error("Export stalled — no ffmpeg progress for 120s.");
     });
     expect((await killed.run().catch((e: unknown) => e)) instanceof InputFault).toBe(false);
   });
