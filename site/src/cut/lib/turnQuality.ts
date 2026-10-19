@@ -1,11 +1,11 @@
 import type { Entry, NoulAnswer, ChoiceAnswer } from "./judge";
 import { choice, noul } from "./judge";
-import type { Settings } from "@/lib/config/registry";
+import type { CUT_JUDGE } from "./chatRuntime";
 
 // The quality gate: a turn built on footage, judged before it is allowed to
 // close. One typed judgment reads the ask, what the turn watched and wrote
 // down, what it ran, and the line it is about to sign off with; code composes
-// the verdict under the `cutJudge` thresholds and hands the turn its next
+// the verdict under the CUT_JUDGE thresholds and hands the turn its next
 // step. A turn that watched a slice of a source and is about to describe the
 // whole of it, or that read a reference and left the cut it promised
 // unbuilt, goes back to work before it replies.
@@ -16,9 +16,9 @@ import type { Settings } from "@/lib/config/registry";
 //
 // The judgment reads the record in fields, never the user's words for intent
 // — the request is state to judge against, and every threshold and cap lives
-// in the settings registry.
+// in CUT_JUDGE.
 
-export type CutJudgeSettings = Settings["cutJudge"];
+export type CutJudgeSettings = typeof CUT_JUDGE;
 
 /** What one source has given up so far, harvested off this turn's own watch
  * and note results. */

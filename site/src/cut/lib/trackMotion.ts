@@ -12,7 +12,7 @@
  */
 
 import { MASK_FEATHER_MAX, poseAt, retimeOf, type MaskPoint } from "@donkeycut/effects-kit";
-import { cutTracking } from "./chatRuntime";
+import { CUT_TRACKING } from "./chatRuntime";
 import { clipLen, useEditor } from "./store";
 import { trackFootage } from "./tracking";
 import {
@@ -72,7 +72,7 @@ export async function trackMotion(req: TrackRequest) {
   const b = Math.min(span.end, srcEnd, req.to ?? Infinity);
   if (b - a < MIN_TRACK_SECONDS)
     throw new Error(`The item and the source clip share no stretch to track (${round2(source.start)}–${round2(srcEnd)}s holds the footage).`);
-  const tune = cutTracking();
+  const tune = CUT_TRACKING;
   const fps = Math.min(tune.sampleFps, tune.maxFrames / (b - a));
   const n = Math.max(2, Math.floor((b - a) * fps) + 1);
   const last = b - 1 / (2 * tune.sampleFps);

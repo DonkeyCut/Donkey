@@ -10,7 +10,7 @@
  * (the headless runner, tests) builds inline, and a caller that needs the
  * exact picture now (an export) asks for it inline in the tab too.
  *
- * Sizes come from the color setting: the standard cube for Rec.709 and sRGB
+ * Sizes come from CUT_COLOR: the standard cube for Rec.709 and sRGB
  * sources, the wide cube for log and HDR, and a draft cube while a slider is
  * moving — the full cube follows when the drag settles. The built LUTs are a
  * cache bounded in bytes through the memory budget.
@@ -26,7 +26,7 @@ import {
   type ParsedLut,
   type SourceProfile,
 } from "@donkeycut/effects-kit";
-import { cutColor } from "./colorSettings";
+import { CUT_COLOR } from "./colorSettings";
 import { cachedLut, loadLibraryLut, lutIdOf } from "./linkedLibrary/luts";
 import { allowance, holdMemory } from "./memoryBudget";
 import { colorRead, type ReadFile } from "./sourceColor";
@@ -70,7 +70,7 @@ const isSdrSource = (profile: SourceProfile) => profile === "rec709" || profile 
 
 /** Lattice nodes per axis for a source, at draft or full quality. */
 export function lutSizeFor(profile: SourceProfile, draft = false): number {
-  const c = cutColor();
+  const c = CUT_COLOR;
   return draft ? c.draftLutSize : isSdrSource(profile) ? c.lutSize : c.lutSizeWide;
 }
 

@@ -1,4 +1,4 @@
-import type { Settings } from "@/lib/config/registry";
+import type { CHATGPT_POLLING } from "./chatRuntime";
 import type { CommandJobSpec } from "@/cut/lib/commandBatch";
 
 type Claimed = { id: string; spec: CommandJobSpec };
@@ -7,7 +7,7 @@ type Claimed = { id: string; spec: CommandJobSpec };
 export function hostCommandPoller(options: {
   claim: () => Promise<Response>;
   run: (job: Claimed) => Promise<void>;
-  settings: () => Settings["chatgptPolling"];
+  settings: () => typeof CHATGPT_POLLING;
   hidden: () => boolean;
 }) {
   let backoff = 0;

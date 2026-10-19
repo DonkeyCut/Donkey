@@ -54,7 +54,6 @@ import {
 import { CUT_MEDIA_ORIGIN } from "./hosts";
 import { allowance, holdMemory } from "./memoryBudget";
 import { observeOperationResponse } from "./operationFailure";
-import { SETTINGS, type Settings } from "@/lib/config/registry";
 
 export const CHUNK_SIZE = 2 * 1024 * 1024;
 /** Longest single ranged request, in chunks, when a read needs a missing run. */
@@ -787,14 +786,7 @@ let lastEstimate: { at: number; usage: number; quota: number } | null = null;
 // The browser grants an origin most of the disk, so the quota alone would let
 // cached media fill the Mac. The cache keeps to its own ceiling, counted over
 // the chunks here and the whole-file copies mediaSync reports.
-let cacheSetting: Settings["cutMediaCache"] = SETTINGS.cutMediaCache.default;
-export function bindCutMediaCache(value: unknown): void {
-  const parsed = SETTINGS.cutMediaCache.schema.safeParse(value);
-  if (parsed.success) cacheSetting = parsed.data;
-}
-export function cutMediaCache(): Settings["cutMediaCache"] {
-  return cacheSetting;
-}
+export const CUT_MEDIA_CACHE = { maxBytes: 10 * 1024 ** 3 };
 
 let tally: { at: number; bytes: number } | null = null;
 let copyBytes = 0;
@@ -832,7 +824,7 @@ async function roomFor(bytes: number, keepKeyHash: string): Promise<boolean> {
   const stored = await chunkStoreBytes();
   let deficit = Math.max(
     lastEstimate.usage + bytes + margin - lastEstimate.quota,
-    stored + copyBytes + bytes - cacheSetting.maxBytes,
+    stored + copyBytes + bytes - CUT_MEDIA_CACHE.maxBytes,
   );
   if (deficit > 0) {
     const freed = await evictChunkBytes(deficit, keepKeyHash);

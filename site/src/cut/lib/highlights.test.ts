@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 
-import { SETTINGS } from "@/lib/config/registry";
+import { CUT_CLIP } from "./chatRuntime";
 import { highlightCandidates, rankOf, sentences } from "./highlights";
 
-const settings = SETTINGS.cutClip.default;
+const settings = CUT_CLIP;
 const seg = (start: number, end: number, text: string) => ({ start, end, text });
 
 describe("sentences", () => {

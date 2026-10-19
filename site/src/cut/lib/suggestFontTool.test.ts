@@ -3,7 +3,7 @@ import { Canvas, FontLibrary } from "skia-canvas";
 
 /** skia's font registry, under a name the hook lint leaves alone. */
 const fontLibrary = FontLibrary;
-import { SETTINGS } from "@/lib/config/registry";
+import { CUT_FONT_MATCH } from "./fontMatchSettings";
 import { stubModule } from "@/lib/testing/stubModule";
 import { setRasterFactory, type RasterFactory, type RasterSurface } from "./raster";
 import { registerFonts } from "./types";
@@ -99,7 +99,7 @@ test("type in a face Donkey does not bundle is reported as that", async () => {
   shows = { text: "Travel Destination", css: '400 110px "Great Vibes"' };
   const out = (await runAiTool("suggest_font", { asset_id: "ref", t: 3, region: REGION, text: "Travel Destination" })) as Out;
   expect(out.verdict).toBe("no_match");
-  expect(out.matches[0].score).toBeLessThan(SETTINGS.cutFontMatch.default.goodScore);
+  expect(out.matches[0].score).toBeLessThan(CUT_FONT_MATCH.goodScore);
   expect(out.note).toContain("does not bundle");
 });
 

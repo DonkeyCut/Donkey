@@ -46,7 +46,7 @@ import { useExports } from "@/cut/lib/exportStore";
 import { projectDuration, useEditor } from "@/cut/lib/store";
 import { subtitleFiles } from "@/cut/lib/subtitleFile";
 import { formatTime } from "@/cut/lib/time";
-import { cutLoudness, LOUDNESS_CHOICES, loudnessLabel, loudnessSettings, type LoudnessId } from "@/cut/lib/loudnessSettings";
+import { CUT_LOUDNESS, LOUDNESS_CHOICES, loudnessLabel, loudnessSettings, type LoudnessId } from "@/cut/lib/loudnessSettings";
 import { planStems } from "@/cut/lib/stems";
 import { cn } from "@/lib/utils";
 
@@ -109,7 +109,7 @@ export function ExportDialog() {
   // A captions file beside the video.
   const [withCaptions, setWithCaptions] = useState(false);
   // The loudness the mix is mastered to, starting on the account's default.
-  const [loudness, setLoudness] = useState<LoudnessId>(() => cutLoudness().defaultTarget);
+  const [loudness, setLoudness] = useState<LoudnessId>(() => CUT_LOUDNESS.defaultTarget);
   // A zip of one WAV per lane beside the video.
   const [withStems, setWithStems] = useState(false);
   const canStem = useMemo(() => planStems({ clips, audioClips, assets }).length > 0, [clips, audioClips, assets]);
@@ -413,7 +413,7 @@ export function ExportDialog() {
               hint={
                 loudness === "off"
                   ? undefined
-                  : `Sets the whole mix to its target and holds true peaks under ${String(cutLoudness().truePeakCeiling).replace("-", "−")} dBTP.`
+                  : `Sets the whole mix to its target and holds true peaks under ${String(CUT_LOUDNESS.truePeakCeiling).replace("-", "−")} dBTP.`
               }
             >
               <Select value={loudness} onValueChange={(v) => setLoudness(v as LoudnessId)}>

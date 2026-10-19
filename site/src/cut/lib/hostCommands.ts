@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { chatgptPolling } from "@/cut/lib/chatRuntime";
+import { CHATGPT_POLLING } from "@/cut/lib/chatRuntime";
 import { hostCommandPoller } from "@/cut/lib/hostCommandPolling";
 import { runAiTool } from "./aiTools";
 import { apiFetch } from "./backend";
@@ -117,7 +117,7 @@ export function useHostCommands(projectId: string, enabled: boolean): void {
     const poll = hostCommandPoller({
       claim: () => apiFetch(`/api/cut/projects/${projectId}/commands/claim`, { method: "POST", signal }),
       run: (job) => runClaimed(projectId, job.id, job.spec, signal),
-      settings: chatgptPolling,
+      settings: () => CHATGPT_POLLING,
       hidden: () => document.hidden,
     });
     const tick = async () => {

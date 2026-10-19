@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SETTINGS } from "@/lib/config/registry";
+import { CUT_JUDGE } from "./chatRuntime";
 import {
   QUALITY_QUESTIONS,
   QUALITY_STEER_PREFIX,
@@ -11,7 +11,7 @@ import {
   type WatchedSource,
 } from "./turnQuality";
 
-const settings = SETTINGS.cutJudge.default;
+const settings = CUT_JUDGE;
 
 const source = (over: Partial<WatchedSource> = {}): WatchedSource => ({
   name: "reference.mp4",

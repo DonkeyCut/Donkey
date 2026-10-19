@@ -26,7 +26,7 @@ import {
   type CutNoteFolder,
 } from "@/cut/lib/notes";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
-import { cutNotes } from "@/cut/lib/chatRuntime";
+import { CUT_NOTES } from "@/cut/lib/chatRuntime";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
@@ -416,7 +416,7 @@ export function NotesView({ library, ref }: Props = {}) {
     autosave.current = setTimeout(() => {
       autosave.current = null;
       if (buffer.current) void save(buffer.current);
-    }, cutNotes().autosaveMs);
+    }, CUT_NOTES.autosaveMs);
   };
 
   /** Save whatever the composer holds one last time and let go of it. */

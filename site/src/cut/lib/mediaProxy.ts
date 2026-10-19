@@ -38,7 +38,7 @@ import { resolveRegisteredBlob } from "./backend/browser/registry";
 import { pollCloudJob } from "./cloudJob";
 import { compatInTheCloud } from "./cloudLibraryUpload";
 import { compatNeedOf } from "./codecSupport";
-import { cutColor } from "./colorSettings";
+import { CUT_COLOR } from "./colorSettings";
 import { enrichAsset, uploadProjectMediaTo } from "./media";
 import { frameSinkIsCustom, hasUndecodableVideo, probeMediaFile, setStreamCovers, withMedia } from "./mediaRead";
 import { forgetLocalMediaUrl, storedMediaUrl } from "./mediaSync";
@@ -331,7 +331,7 @@ async function buildCompat(
   ask: Extract<ProxyAsk, { kind: "compat" }>,
   onProgress: (p: number) => void
 ): Promise<Landed | null> {
-  const { proxyMaxHeight, proxyCrf } = cutColor();
+  const { proxyMaxHeight, proxyCrf } = CUT_COLOR;
   if (backend.kind === "local" && ask.cover === "audio") {
     if (!(await engineFeatures()).has("media.compat")) return null;
     return requestProxy(projectId, backend, { file: asset.fileName, maxHeight: proxyMaxHeight, crf: proxyCrf, compat: ask.cover }, onProgress);
@@ -353,7 +353,7 @@ async function buildProxy(
   backend: CutBackend,
   onProgress: (p: number) => void
 ): Promise<Landed | null> {
-  const { proxyMaxHeight, proxyCrf } = cutColor();
+  const { proxyMaxHeight, proxyCrf } = CUT_COLOR;
   if (backend.kind === "local") {
     if (!(await engineFeatures()).has("media.proxy")) return null;
     return requestProxy(projectId, backend, { file: asset.fileName, maxHeight: proxyMaxHeight, crf: proxyCrf }, onProgress);

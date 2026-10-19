@@ -1,6 +1,6 @@
 "use client";
 
-import { chatRuntime } from "./chatRuntime";
+import { CHAT_RUNTIME } from "./chatRuntime";
 import { create } from "zustand";
 import { apiFetch, apiJson } from "./backend";
 import { useGenerate } from "./generate";
@@ -592,7 +592,7 @@ function failed(projectId: string, orch: SceneOrchestrator): (e: unknown) => voi
         const s = useEditor.getState();
         if (s.projectId === projectId && s.loaded && s.genvideo && !s.readOnly && !orchestrators.has(projectId))
           useGenScene.getState().hydrate(projectId, s.genvideo);
-      }, chatRuntime().syncIntervalMs);
+      }, CHAT_RUNTIME.syncIntervalMs);
       return;
     }
     if (orchestrators.get(projectId) === orch && !orch.isAborted) {

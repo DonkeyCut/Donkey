@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getGlobalSetting } from "@/lib/config/effective";
+import { CHAT_RUNTIME } from "../../lib/chatRuntime";
 
 export const sceneLeaseSchema = z.object({ owner: z.string().uuid(), release: z.boolean().optional() });
 
@@ -9,7 +9,7 @@ export async function cloudSceneLease(userId: string, projectId: string, req: Re
   const parsed = sceneLeaseSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return new Response(null, { status: 400 });
   const { owner, release } = parsed.data;
-  const { sceneLeaseMs } = await getGlobalSetting("chatRuntime");
+  const { sceneLeaseMs } = CHAT_RUNTIME;
   const id = `scene-lease-${projectId}`;
   if (release) {
     await prisma.cutRenderJob.deleteMany({ where: { id, userId, outName: owner, state: "held" } });

@@ -7,7 +7,7 @@
  */
 
 import { syncSourceSound } from "./media";
-import { cutSound } from "./soundSettings";
+import { CUT_SOUND } from "./soundSettings";
 import { useEditor } from "./store";
 import { assetIsSilent, type MediaAsset } from "./types";
 import { queueWatchSweep } from "./watch/sweep";
@@ -45,7 +45,7 @@ export async function bindRecording(
   if (assetIsSilent(video))
     throw new Error(`"${video.name}" has no sound of its own to line the recording up against.`);
   if (!(video.duration > 0) || !(rec.duration > 0)) throw new Error("Both files must finish importing first.");
-  const { syncProbeSeconds, syncMaxSeconds, syncMinConfidence } = cutSound();
+  const { syncProbeSeconds, syncMaxSeconds, syncMinConfidence } = CUT_SOUND;
   const [cameraFrom, cameraTo] = probeWindow(video, syncProbeSeconds, near);
   const answer = await syncSourceSound(video.url, rec.url, {
     cameraFrom,

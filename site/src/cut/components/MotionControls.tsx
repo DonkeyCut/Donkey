@@ -27,7 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { groupCameraOf, groupCameraPoseAt } from "@/cut/lib/groupCamera";
 import { sharedNumber, sharedValue } from "@/cut/lib/groupEdit";
-import { cutMotion } from "@/cut/lib/motionSettings";
+import { CUT_MOTION } from "@/cut/lib/motionSettings";
 import { usePreviewTime } from "@/cut/lib/playhead";
 import { useEditor } from "@/cut/lib/store";
 import { clipPoseAt, isEffectOverlay, type Overlay, type VideoClip } from "@/cut/lib/types";
@@ -81,7 +81,7 @@ function MotionBlurRows({
         {shutter?.mixed && <Value className="text-muted-foreground italic">Mixed</Value>}
         <Switch
           checked={!!shutter && !shutter.mixed}
-          onCheckedChange={(on) => onChange(on ? cutMotion().motionBlur : undefined, "once")}
+          onCheckedChange={(on) => onChange(on ? CUT_MOTION.motionBlur : undefined, "once")}
           aria-label="Motion blur"
         />
       </Row>

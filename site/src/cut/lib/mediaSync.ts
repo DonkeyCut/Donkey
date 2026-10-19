@@ -46,7 +46,7 @@ import {
 import { getBackend, type CutBackend } from "./backend";
 import {
   chunkStoreBytes,
-  cutMediaCache,
+  CUT_MEDIA_CACHE,
   dropChunksMatching,
   evictChunkBytes,
   noteCachedCopyBytes,
@@ -361,7 +361,7 @@ const QUOTA_MARGIN = 512 * 1024 * 1024;
 
 /** Make room for `bytes` of new media, evicting least-recently-opened cloud
  * projects' cached copies until the write fits under quota and the cache
- * under its ceiling (cutMediaCache). Pinned files and browser-resident
+ * under its ceiling (CUT_MEDIA_CACHE). Pinned files and browser-resident
  * projects are exempt; `keepId` (the project being written) is never a
  * candidate. A pinned write (`cached` false) needs quota room only; it is no
  * cache. */
@@ -387,7 +387,7 @@ async function makeRoom(keepId: string, bytes: number, cached = true): Promise<v
     if (id !== keepId) candidates.push({ id, openedAt: idx.opens[id] ?? 0 });
   }
   noteCachedCopyBytes(copies);
-  let deficit = Math.max(quotaDeficit, (await chunkStoreBytes()) + copies + (cached ? bytes : 0) - cutMediaCache().maxBytes);
+  let deficit = Math.max(quotaDeficit, (await chunkStoreBytes()) + copies + (cached ? bytes : 0) - CUT_MEDIA_CACHE.maxBytes);
   if (deficit <= 0) return;
   // The chunk cache is the cheapest byte to lose — losing one costs a ranged
   // re-fetch, where losing a whole-file copy costs the file — so it goes first.

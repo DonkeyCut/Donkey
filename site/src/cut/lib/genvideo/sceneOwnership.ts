@@ -1,5 +1,5 @@
 import { flushEditorSave } from "../editorWork";
-import { chatRuntime } from "../chatRuntime";
+import { CHAT_RUNTIME } from "../chatRuntime";
 import { projectBackend } from "../residency";
 import { useEditor } from "../store";
 import { projectRevision } from "../projectRevision";
@@ -19,9 +19,9 @@ export function ownScene(projectId: string, scene: VideoOrchestrator, fresh = fa
       const backend = await projectBackend(projectId);
       const owner = crypto.randomUUID();
       const route = `/api/cut/projects/${encodeURIComponent(projectId)}/scene-lease`;
-      let leaseMs = chatRuntime().sceneLeaseMs;
+      let leaseMs = CHAT_RUNTIME.sceneLeaseMs;
       const lease = async (release = false) => {
-        const res = await backend.fetch(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ owner, release, leaseMs: chatRuntime().sceneLeaseMs }) });
+        const res = await backend.fetch(route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ owner, release, leaseMs: CHAT_RUNTIME.sceneLeaseMs }) });
         if (!res.ok) throw new Error("Could not reserve the video run.");
         const result = await res.json() as { acquired: boolean; leaseMs?: number };
         if (result.leaseMs) leaseMs = result.leaseMs;

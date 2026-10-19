@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { UIMessage } from "ai";
-import { SETTINGS } from "@/lib/config/registry";
+import { CUT_JUDGE } from "../chatRuntime";
 import { TOOL_AREA_NAMES } from "@/cut/server/ai/catalog";
 import type { CutAgentDeps } from "./cutAgent";
 import { EngineGate, engineInstant, handledSince, judgeEngineTurn } from "./engineTurn";
@@ -67,7 +67,7 @@ function deps(
         headers: { "Content-Type": "application/json" },
       });
     },
-    judgeSettings: { ...SETTINGS.cutJudge.default, instantAction: false, judgeWaitMs: 500, ...opts.settings },
+    judgeSettings: { ...CUT_JUDGE, instantAction: false, judgeWaitMs: 500, ...opts.settings },
     execTool: async () => ({ ok: true }),
     models: { simple: "chatSimple", complex: "chat" },
     buildContext: () => ({ project: { aspect: "9:16" }, videoTrack: [], media: [] }),

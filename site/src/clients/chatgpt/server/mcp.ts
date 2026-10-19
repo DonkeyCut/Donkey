@@ -18,8 +18,7 @@ import {
 } from "@/clients/chatgpt/server/catalog";
 import { MAX_COMMANDS_PER_BATCH } from "@/cut/server/cloud/commands";
 import { DOC_EXPORT_PRESETS } from "@/cut/lib/exportPresets";
-import { bindCutLoudness, cutLoudness, LOUDNESS_CHOICES, LOUDNESS_IDS } from "@/cut/lib/loudnessSettings";
-import { getGlobalSetting } from "@/lib/config/effective";
+import { CUT_LOUDNESS, LOUDNESS_CHOICES, LOUDNESS_IDS } from "@/cut/lib/loudnessSettings";
 import { formatCredits } from "@/lib/credits/format-credits";
 import {
   chatgptConfig,
@@ -430,7 +429,7 @@ export function createChatgptServer(
     {
       title: "Export a project",
       description:
-        `Render the saved project to an MP4 the user downloads from the Donkey Cut card. preset: ${DOC_EXPORT_PRESETS.join(" | ")} (original matches the footage; tiktok is best quality 1080p; fast is a smaller 1080p; light is a 720p draft). loudness masters the mix to an integrated target under a true-peak ceiling: ${LOUDNESS_CHOICES.map((c) => (c.id === "off" ? "off (the mix as it plays)" : `${c.id} ${cutLoudness().targets[c.id]} LUFS (${c.detail})`)).join(", ")}; the true-peak ceiling is ${cutLoudness().truePeakCeiling} dBTP; omitted masters to ${cutLoudness().defaultTarget}. stems: true also writes one 24-bit WAV per lane (dialogue from the video clips, then each soundtrack lane), full length and unmastered, zipped as "<name> stems.zip" beside the video in the project's exports. Free; the files count against the account's cloud storage and are listed in the project's exports. A render can outlast this call — finish it with get_export_status.`,
+        `Render the saved project to an MP4 the user downloads from the Donkey Cut card. preset: ${DOC_EXPORT_PRESETS.join(" | ")} (original matches the footage; tiktok is best quality 1080p; fast is a smaller 1080p; light is a 720p draft). loudness masters the mix to an integrated target under a true-peak ceiling: ${LOUDNESS_CHOICES.map((c) => (c.id === "off" ? "off (the mix as it plays)" : `${c.id} ${CUT_LOUDNESS.targets[c.id]} LUFS (${c.detail})`)).join(", ")}; the true-peak ceiling is ${CUT_LOUDNESS.truePeakCeiling} dBTP; omitted masters to ${CUT_LOUDNESS.defaultTarget}. stems: true also writes one 24-bit WAV per lane (dialogue from the video clips, then each soundtrack lane), full length and unmastered, zipped as "<name> stems.zip" beside the video in the project's exports. Free; the files count against the account's cloud storage and are listed in the project's exports. A render can outlast this call — finish it with get_export_status.`,
       inputSchema: z.object({
         projectId: idSchema,
         preset: z.enum(DOC_EXPORT_PRESETS).optional(),
@@ -611,8 +610,6 @@ export async function mcpEndpoint(request: Request) {
     return rateLimitResponse(rateLimit.retryAfterSeconds);
   }
 
-  // export_video teaches the loudness targets the worker will master to.
-  bindCutLoudness(await getGlobalSetting("cutLoudness"));
   const handler = chatgptHttpHandler(identity, config);
   try {
     const response = await handler.fetch(request);

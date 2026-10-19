@@ -1,6 +1,6 @@
 "use client";
 
-import { chatRuntime } from "@/cut/lib/chatRuntime";
+import { CHAT_RUNTIME } from "@/cut/lib/chatRuntime";
 import { useHostBridge, useHostReady } from "@/cut/lib/hostBridge";
 import { useCutMode } from "@/cut/lib/backend/hooks";
 import { usePhoneInbox } from "@/cut/hooks/usePhoneInbox";
@@ -355,7 +355,7 @@ export function Editor({
     const tick = async () => {
       if (stopped || polling) return;
       polling = true;
-      let nextIn = document.hidden ? VIEWER_POLL_MAX_MS : (viewer ? VIEWER_POLL_MIN_MS : chatRuntime().syncIntervalMs);
+      let nextIn = document.hidden ? VIEWER_POLL_MAX_MS : (viewer ? VIEWER_POLL_MIN_MS : CHAT_RUNTIME.syncIntervalMs);
       try {
         const current = useEditor.getState();
         if (!document.hidden && current.projectId === projectId && current.loaded &&
@@ -400,7 +400,7 @@ export function Editor({
     };
     document.addEventListener("visibilitychange", focus);
     window.addEventListener("focus", focus);
-    timer = setTimeout(() => void tick(), viewer ? VIEWER_POLL_MIN_MS : chatRuntime().syncIntervalMs);
+    timer = setTimeout(() => void tick(), viewer ? VIEWER_POLL_MIN_MS : CHAT_RUNTIME.syncIntervalMs);
     return () => {
       stopped = true;
       document.removeEventListener("visibilitychange", focus);

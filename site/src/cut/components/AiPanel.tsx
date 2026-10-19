@@ -4,7 +4,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { notesKey } from "@/cut/lib/queries";
 import { ChatStatusBadge, type ChatStatus } from "./ChatStatusBadge";
 
-import { chatRuntime, cutJudge } from "@/cut/lib/chatRuntime";
+import { CHAT_RUNTIME, CUT_JUDGE } from "@/cut/lib/chatRuntime";
 import { ChatRequests } from "@/cut/lib/chatRequests";
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Chat, useChat } from "@ai-sdk/react";
@@ -610,9 +610,9 @@ export function AiPanel({
     const refresh = async () => {
       if (!document.hidden && useEditor.getState().projectId === projectId)
         await ensureCloudThreads(projectId, true);
-      if (!stopped) timer = setTimeout(() => void refresh(), chatRuntime().syncIntervalMs);
+      if (!stopped) timer = setTimeout(() => void refresh(), CHAT_RUNTIME.syncIntervalMs);
     };
-    timer = setTimeout(() => void refresh(), chatRuntime().syncIntervalMs);
+    timer = setTimeout(() => void refresh(), CHAT_RUNTIME.syncIntervalMs);
     return () => { stopped = true; clearTimeout(timer); };
   }, [projectId]);
 
@@ -1213,7 +1213,7 @@ function ChatSession({
             api: localBackend.url("/api/cut/ai/chat"),
             body: {
               threadId,
-              runtime: chatRuntime(),
+              runtime: CHAT_RUNTIME,
               messages,
               model: currentModel(),
               context,
@@ -1762,7 +1762,7 @@ function ChatSession({
   // second; the cadence and the in-flight count keep it to one call at a time.
   useEffect(() => {
     if (!busy || queuePaused || readOnly) return;
-    const { queueRetriageMs } = cutJudge();
+    const { queueRetriageMs } = CUT_JUDGE;
     if (queueRetriageMs <= 0) return;
     const rows = () => queueRef.current.filter((m) => m.status === "queued" && m.id !== queueEditingRef.current);
     let timer: ReturnType<typeof setTimeout>;

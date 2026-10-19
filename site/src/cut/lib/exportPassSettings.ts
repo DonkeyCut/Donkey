@@ -1,16 +1,10 @@
-import { SETTINGS, type Settings } from "@/lib/config/registry";
-
-// The export pass budget — the memory one ffmpeg pass may hold and the pieces
-// it opens — bound once at session start from account config (the tab) or the
-// global setting (a worker job), and sent with every export spec.
-
-let passes: Settings["cutExportPasses"] = SETTINGS.cutExportPasses.default;
-
-export function bindCutExportPasses(value: unknown): void {
-  const parsed = SETTINGS.cutExportPasses.schema.safeParse(value);
-  if (parsed.success) passes = parsed.data;
-}
-
-export function cutExportPasses(): Settings["cutExportPasses"] {
-  return passes;
-}
+// The export pass budget, sent with every export spec.
+export const CUT_EXPORT_PASSES = {
+  // The frames one ffmpeg pass may hold, MB. A long timeline renders in
+  // passes held under it; a larger budget means fewer passes, each decoding
+  // the stretch of file its cuts span.
+  holdMB: 2048,
+  // The most pieces one pass opens, whatever their size: each brings a
+  // decoder and its threads.
+  pieces: 48,
+};

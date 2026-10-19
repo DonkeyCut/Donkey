@@ -5,7 +5,7 @@ import { Canvas, FontLibrary, loadImage } from "skia-canvas";
 
 /** skia's font registry, under a name the hook lint leaves alone. */
 const fontLibrary = FontLibrary;
-import { SETTINGS } from "@/lib/config/registry";
+import { CUT_FONT_MATCH } from "./fontMatchSettings";
 import { setRasterFactory, type RasterFactory, type RasterSurface } from "./raster";
 import { GOOGLE_FONTS } from "./fontCatalog";
 import { bundledFaces, inkMaskOf, rankFaces, type TitleFace } from "./fontMatch";
@@ -72,7 +72,7 @@ function reference(text: string, css: string, opts: { tracking?: number; ink?: s
   return inkMaskOf(data.data, data.width, data.height);
 }
 
-const good = SETTINGS.cutFontMatch.default.goodScore;
+const good = CUT_FONT_MATCH.goodScore;
 
 describe("font suggestions", () => {
   test("the face the words are set in ranks first, with its tracking", async () => {

@@ -1,4 +1,4 @@
-import { chatRuntime } from "../../lib/chatRuntime";
+import { CHAT_RUNTIME } from "../../lib/chatRuntime";
 import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -28,7 +28,7 @@ export async function startTurnStream(
   source: (signal: AbortSignal) => ReadableStream<UIMessageChunk>,
   attached: () => void,
   detached: () => void,
-  journalBytes = chatRuntime().journalBytes,
+  journalBytes = CHAT_RUNTIME.journalBytes,
   readerSignal?: AbortSignal,
 ): Promise<Response> {
   const key = keyFor(projectId, threadId);
@@ -122,7 +122,7 @@ export async function followTurnStream(projectId: string, threadId: string, sign
           }
           if (!turn || turn.finished) { await close(); controller.close(); return; }
           // A heartbeat also lets the HTTP adapter observe a vanished reader while a tool waits.
-          if (Date.now() - lastWrite >= chatRuntime().syncIntervalMs) {
+          if (Date.now() - lastWrite >= CHAT_RUNTIME.syncIntervalMs) {
             lastWrite = Date.now();
             controller.enqueue(new TextEncoder().encode(": keepalive\n\n"));
             return;

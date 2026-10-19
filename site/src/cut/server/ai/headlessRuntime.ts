@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { chatRuntime } from "../../lib/chatRuntime";
+import { CHAT_RUNTIME } from "../../lib/chatRuntime";
 
 type ToolResult = { output?: unknown; errorText?: string };
 let idle: Promise<unknown> = Promise.resolve();
@@ -19,7 +19,7 @@ export function callDetachedTool(projectId: string, toolName: string, input: unk
     if (!channel || !("on" in channel)) { child.kill(); reject(new Error("Could not open the editor tool channel.")); return; }
     channel.on("data", (data: Buffer) => {
       bytes += data.length;
-      if (bytes > chatRuntime().journalBytes) { child.kill(); reject(new Error("The editor tool result is too large.")); return; }
+      if (bytes > CHAT_RUNTIME.journalBytes) { child.kill(); reject(new Error("The editor tool result is too large.")); return; }
       output.push(data);
     });
     child.on("error", reject);

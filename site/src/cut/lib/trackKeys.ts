@@ -15,7 +15,7 @@
  */
 
 import { evalOverlayFrame, type Mask, type MaskKey, type MaskPoint, type OverlayKey, type OverlayPose } from "@donkeycut/effects-kit";
-import type { Settings } from "@/lib/config/registry";
+import type { CUT_TRACKING } from "./chatRuntime";
 import { clipCovers, clipZoom, contentRect, frameOf, rectOf, type Aspect, type Overlay, type VideoClip } from "./types";
 
 /** One moment of a target: its outline, its center, and two points along
@@ -26,7 +26,7 @@ export interface TrackSample {
   axis: [MaskPoint, MaskPoint];
 }
 
-type TrackTuning = Pick<Settings["cutTracking"], "smoothCutoff" | "smoothBeta" | "bridgeSeconds">;
+type TrackTuning = Pick<typeof CUT_TRACKING, "smoothCutoff" | "smoothBeta" | "bridgeSeconds">;
 
 /** The derivative's own smoothing cutoff, Hz — the one-euro default. */
 const DERIVATIVE_CUTOFF = 1;

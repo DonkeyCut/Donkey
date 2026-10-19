@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Prisma } from "@/generated/prisma/client";
-import { getGlobalSetting } from "@/lib/config/effective";
+import { CUT_COLOR } from "@/cut/lib/colorSettings";
 import type { RenderHandle } from "../server/exportPipeline";
 import { makeCompatProxy, makeProxy, proxyNameFor } from "../server/proxy";
 import { compatCoverIn, compatCovers, compatProxyNameFor } from "../lib/proxyNames";
@@ -35,7 +35,7 @@ const defaultIO: LibraryProxyIO = {
   make: makeProxy,
   makeCompat: makeCompatProxy,
   duration: probeDuration,
-  settings: () => getGlobalSetting("cutColor"),
+  settings: async () => CUT_COLOR,
   transact: storageTransaction,
   register: registerObjectIn,
 };

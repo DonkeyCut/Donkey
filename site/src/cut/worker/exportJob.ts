@@ -11,12 +11,7 @@ import { overlayKey } from "../server/cloud/r2";
 import { STORAGE_FULL } from "../lib/operationFailure";
 import { isTabExport, specMediaFiles, STEMS_MIME, stemsArchiveName } from "../lib/exportDelivery";
 import { runnerSession } from "./session";
-import { bindCutColor } from "../lib/colorSettings";
-import { bindCutExportPasses } from "../lib/exportPassSettings";
-import { bindCutSound } from "../lib/soundSettings";
-import { bindCutLoudness } from "../lib/loudnessSettings";
 import type { DocExportAudio } from "../lib/exportPresets";
-import { getGlobalSetting } from "@/lib/config/effective";
 
 /** The stored spec of an export/preview CutRenderJob: the engine export spec
  * plus the R2 keys of the browser-rendered overlay PNGs (title/caption stills
@@ -144,14 +139,6 @@ export async function runExportJob(
     // own straight into it, so it exists before the spec does.
     handle.tmpDir = path.join(work, "overlays");
     await mkdir(handle.tmpDir, { recursive: true });
-    // A doc-built spec sizes its LUTs from the same setting the tab binds.
-    if (stored.fromDoc) {
-      bindCutColor(await getGlobalSetting("cutColor"));
-      bindCutSound(await getGlobalSetting("cutSound"));
-      // Its loudness target and ceiling come from the setting the tab binds.
-      bindCutLoudness(await getGlobalSetting("cutLoudness"));
-      bindCutExportPasses(await getGlobalSetting("cutExportPasses"));
-    }
     const body: ExportJobSpec = stored.fromDoc
       ? {
           ...stored,

@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { SETTINGS } from "@/lib/config/registry";
+import { CUT_JUDGE } from "./chatRuntime";
 import { AI_SKILL_INDEX, TOOL_AREA_NAMES } from "@/cut/server/ai/catalog";
 import { judgeTurnState, pickSkill, routeTurn, TURN_JUDGE_QUESTIONS, type TurnJudgeAnswers } from "./turnJudge";
 
-const settings = SETTINGS.cutJudge.default;
+const settings = CUT_JUDGE;
 
 function answers(over: {
   intent?: { chat: number; simple: number; complex: number };

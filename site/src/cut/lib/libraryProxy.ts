@@ -18,7 +18,7 @@ import { engineFeatures } from "./api";
 import { apiJson } from "./backend";
 import { pollCloudJob } from "./cloudJob";
 import { browserCodecs } from "./codecSupport";
-import { cutColor } from "./colorSettings";
+import { CUT_COLOR } from "./colorSettings";
 import { compatCovers } from "./proxyNames";
 import type { LibraryAsset, LibraryData } from "./library";
 import { useLightbox, lightboxItemFromLibrary } from "./lightbox";
@@ -81,7 +81,7 @@ export async function ensureLibraryProxy(
       throw new Error("Update the Donkey app to play this video here.");
     }
     const backend = backendFor(a.residency);
-    const { proxyMaxHeight, proxyCrf } = cutColor();
+    const { proxyMaxHeight, proxyCrf } = CUT_COLOR;
     const res = await backend.fetch(`/api/cut/library/${encodeURIComponent(a.id)}/proxy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

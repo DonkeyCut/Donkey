@@ -6,7 +6,7 @@
  *
  * Every case is judged once and the composition is replayed under a grid of
  * floors in code, so the sweep costs no extra calls. The report names the
- * best set; the `cutJudge` registry defaults are set from it.
+ * best set; the CUT_JUDGE floors are set from it.
  *
  * Two kinds of mistake, and they do not cost the same. A WRONG call edits
  * the project without asking, so it is the one to drive to zero; a MISS
@@ -23,7 +23,7 @@
  * dev-server-only and spend no credits.
  */
 
-import { SETTINGS } from "../src/lib/config/registry";
+import { CUT_JUDGE } from "../src/cut/lib/chatRuntime";
 import {
   availableActions,
   instantAction,
@@ -45,7 +45,7 @@ const BASE = argValue("--base") ?? "http://localhost:3000";
 const ONLY = argValue("--only");
 const SWEEP = !args.includes("--no-sweep");
 
-const defaults = SETTINGS.cutJudge.default;
+const defaults = CUT_JUDGE;
 type Settings = typeof defaults;
 
 async function judge(state: unknown, questions: Record<string, unknown>) {

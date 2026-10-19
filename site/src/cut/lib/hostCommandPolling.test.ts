@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { hostCommandPoller } from "./hostCommandPolling";
-import { SETTINGS } from "@/lib/config/registry";
+import { CHATGPT_POLLING } from "./chatRuntime";
 
-const settings = () => SETTINGS.chatgptPolling.default;
+const settings = () => CHATGPT_POLLING;
 
 test("failed polls back off, remain bounded, and reset after recovery", async () => {
   let status = 500;

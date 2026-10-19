@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { UIMessage } from "ai";
-import { SETTINGS } from "@/lib/config/registry";
+import { CUT_JUDGE } from "../chatRuntime";
 import { TOOL_AREA_NAMES } from "@/cut/server/ai/catalog";
 import { QUALITY_STEER_PREFIX } from "../turnQuality";
 import { dropPiSession, readPiSession, streamCutChat, type CutAgentDeps } from "./cutAgent";
@@ -114,7 +114,7 @@ function harness(opts: { gateVerdicts: number[]; call?: { name: string; args: Re
         headers: { "Content-Type": "application/json" },
       });
     },
-    judgeSettings: { ...SETTINGS.cutJudge.default, instantAction: false, judgeWaitMs: 2000 },
+    judgeSettings: { ...CUT_JUDGE, instantAction: false, judgeWaitMs: 2000 },
     execTool: async () => WATCH_RESULT,
     models: { simple: "chatSimple", complex: "chat" },
     buildContext: () => ({ project: { aspect: "9:16" }, videoTrack: [], media: [] }),
@@ -200,7 +200,7 @@ describe("the quality gate in the turn loop", () => {
     const threadId = "gate-off";
     dropPiSession(threadId);
     const h = harness({ gateVerdicts: [0.01] });
-    h.deps.judgeSettings = { ...SETTINGS.cutJudge.default, instantAction: false, qualityGate: false };
+    h.deps.judgeSettings = { ...CUT_JUDGE, instantAction: false, qualityGate: false };
     await drain(
       streamCutChat({ threadId, model: "chat", messages: ask("what happens in this video?"), deps: h.deps })
     );

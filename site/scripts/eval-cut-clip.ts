@@ -11,7 +11,7 @@
  * transcript whose good and flat stretches are known.
  *
  * The questions come from the tool's own module, so what is measured is what
- * ships. Thresholds come from the settings registry for the same reason.
+ * ships. Thresholds come from CUT_CLIP for the same reason.
  *
  * Runs against the judge adapter straight from the environment, so it needs
  * no server and spends no credits:
@@ -22,7 +22,7 @@
  * server up with DONKEY_DEV_AUTH_BYPASS=1 (scripts only — never the app).
  */
 
-import { SETTINGS } from "../src/lib/config/registry";
+import { CUT_CLIP } from "../src/cut/lib/chatRuntime";
 import { typesafeJudge } from "../src/lib/inference/adapters/typesafe";
 import type { Entry, JudgeQuestion } from "../src/lib/inference/judge";
 import { CLIP_QUESTIONS, findHighlights, type SpeechSegment } from "../src/cut/lib/highlights";
@@ -34,7 +34,7 @@ const argValue = (flag: string) => {
 };
 const BASE = argValue("--base");
 const ONLY = argValue("--only");
-const settings = SETTINGS.cutClip.default;
+const settings = CUT_CLIP;
 
 const judge = typesafeJudge();
 if (!BASE && !judge.configured) {

@@ -1,10 +1,4 @@
 import type { UIMessage } from "ai";
-import { getGlobalSetting } from "@/lib/config/effective";
-import { bindCutClip, bindCutJudge } from "@/cut/lib/chatRuntime";
-import { bindCutColor } from "@/cut/lib/colorSettings";
-import { bindCutSound } from "@/cut/lib/soundSettings";
-import { bindCutMotion } from "@/cut/lib/motionSettings";
-import { bindCutFontMatch } from "@/cut/lib/fontMatchSettings";
 import { geminiModelRoleNames } from "@/lib/inference/gemini-models";
 import { openCloudProject, pushCloudProject } from "../lib/headless/docSession";
 import { dropPiSession, streamCutChat } from "../lib/pi/cutAgent";
@@ -108,16 +102,6 @@ export async function runTurnJob(
   const doc = await openCloudProject(session, job.projectId);
 
   const deps = headlessDeps(session);
-  // The same thresholds the tab binds from account config, so a judged tool
-  // behaves the same way in a job.
-  const judgeSettings = await getGlobalSetting("cutJudge");
-  bindCutJudge(judgeSettings);
-  bindCutClip(await getGlobalSetting("cutClip"));
-  bindCutColor(await getGlobalSetting("cutColor"));
-  bindCutSound(await getGlobalSetting("cutSound"));
-  bindCutMotion(await getGlobalSetting("cutMotion"));
-  bindCutFontMatch(await getGlobalSetting("cutFontMatch"));
-  deps.judgeSettings = judgeSettings;
   const toolCalls: string[] = [];
   const exec = deps.execTool;
   deps.execTool = async (name, args) => {

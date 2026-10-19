@@ -14,7 +14,7 @@
  */
 
 import type { FaceLandmarker, HandLandmarker, NormalizedLandmark, PoseLandmarker } from "@mediapipe/tasks-vision";
-import { cutTracking } from "./chatRuntime";
+import { CUT_TRACKING } from "./chatRuntime";
 import { framesAt } from "./mediaRead";
 import { visionFileset, withQuietWasmLogs } from "./mediapipe";
 import { trackTargetOf, type TrackTarget } from "./trackTargets";
@@ -58,7 +58,7 @@ export async function trackFootage(
   times: number[],
   onFrame?: (done: number, total: number) => void
 ): Promise<(TrackSample | null)[]> {
-  const settings = cutTracking();
+  const settings = CUT_TRACKING;
 
   // Decode at the configured long side, keeping the picture's own aspect.
   const long = Math.max(size.width, size.height);

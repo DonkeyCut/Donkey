@@ -22,7 +22,7 @@ import { getBackend, type CutBackend } from "./backend";
 import { resolveRegisteredBlob } from "./backend/browser/registry";
 import type { PendingImport } from "./media";
 import { storedMediaUrl } from "./mediaSync";
-import { cutUploads } from "./chatRuntime";
+import { CUT_UPLOADS } from "./chatRuntime";
 import { connectionLost, isOffline, onReconnect } from "./network";
 import { useEditor } from "./store";
 
@@ -65,7 +65,7 @@ type Job = {
 const jobs = new Map<string, Job>();
 
 // An upload the connection dropped, the way a phone hotspot does, picks back
-// up by itself: after each pause the cutUploads setting lists, and the moment
+// up by itself: after each pause CUT_UPLOADS lists, and the moment
 // the browser reports the connection back, which also restarts the pauses. A
 // refusal from the server waits for the user's retry.
 const resumes = new Map<string, { attempt: number; timer: ReturnType<typeof setTimeout> | null }>();
@@ -104,7 +104,7 @@ export function retryFailedUploads() {
  * waits per asset: a later failure replaces the booked one. */
 function scheduleResume(job: Job) {
   const id = job.pending.asset.id;
-  const delays = cutUploads().resumeDelaysMs;
+  const delays = CUT_UPLOADS.resumeDelaysMs;
   const prior = resumes.get(id);
   if (prior?.timer) {
     clearTimeout(prior.timer);

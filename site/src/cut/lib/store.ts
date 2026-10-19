@@ -102,7 +102,7 @@ import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, CLIP_MIN_SECONDS,
 import { clampBand, clampFeather, takesBand, takesFeather } from "./transitionShape";
 import { liftMoveTracks } from "./textMotion";
 import { OWN_SOUND, soundRoom, soundSourceOf, soundWindow, SPLIT_EDIT_MAX_S } from "./soundSource";
-import { cutSound } from "./soundSettings";
+import { CUT_SOUND } from "./soundSettings";
 import { readTextStyle } from "./textStyle";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
@@ -6292,7 +6292,7 @@ function buildClipSpans(clips: VideoClip[], assets: MediaAsset[], track: number)
       soundAhead: Math.max(tail, handleSeconds(soundOut, room.tail, clip, "tail")),
       soundBack: Math.max(lead, handleSeconds(prevSound, room.head, clip, "head")),
       ...(lead > 0 || tail > 0
-        ? { soundLead: lead, soundTail: tail, splitFade: cutSound().splitFadeSeconds }
+        ? { soundLead: lead, soundTail: tail, splitFade: CUT_SOUND.splitFadeSeconds }
         : {}),
       ...(src.bound ? { sound: { asset: src.asset, offset: src.offset, limit: src.limit } } : {}),
     });

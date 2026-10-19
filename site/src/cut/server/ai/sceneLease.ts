@@ -1,10 +1,10 @@
-import { SETTINGS } from "@/lib/config/registry";
+import { chatRuntimeSchema } from "../../lib/chatRuntime";
 import { z } from "zod";
 import { projectFileRevision } from "../projects";
 
 const globalLeases = globalThis as unknown as { __cutSceneLeases?: Map<string, { owner: string; until: number }> };
 const leases = (globalLeases.__cutSceneLeases ??= new Map<string, { owner: string; until: number }>());
-const schema = z.object({ owner: z.string().uuid(), release: z.boolean().optional(), leaseMs: SETTINGS.chatRuntime.schema.shape.sceneLeaseMs });
+const schema = z.object({ owner: z.string().uuid(), release: z.boolean().optional(), leaseMs: chatRuntimeSchema.shape.sceneLeaseMs });
 
 export async function localSceneLease(projectId: string, req: Request): Promise<Response> {
   if (!(await projectFileRevision(projectId))) return new Response(null, { status: 404 });

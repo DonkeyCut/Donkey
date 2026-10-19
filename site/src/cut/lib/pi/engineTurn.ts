@@ -1,6 +1,6 @@
 import type { UIMessage, UIMessageChunk } from "ai";
 import type { EngineRoute, HandledAsk } from "@/cut/server/ai/turnCatalog";
-import { cutJudge } from "../chatRuntime";
+import { CUT_JUDGE } from "../chatRuntime";
 import type { ResolvedAction } from "../instantAction";
 import { messageText } from "../messageText";
 import { judgeTurnAndAction, playInstant, type CutAgentDeps } from "./cutAgent";
@@ -30,7 +30,7 @@ export async function judgeEngineTurn(
   deps: CutAgentDeps,
   signal?: AbortSignal
 ): Promise<EngineDecision | null> {
-  const settings = deps.judgeSettings ?? cutJudge();
+  const settings = deps.judgeSettings ?? CUT_JUDGE;
   const decision = judgeTurnAndAction(messages, deps.buildContext(), deps, signal);
   const landed = await Promise.race([decision, sleep(settings.judgeWaitMs).then(() => null)]);
   if (!landed) {
@@ -125,7 +125,7 @@ export class EngineGate {
     }
     this.answered.add(gateId);
 
-    const verdict = await this.gate.hold(reply, deps, deps.judgeSettings ?? cutJudge(), signal);
+    const verdict = await this.gate.hold(reply, deps, deps.judgeSettings ?? CUT_JUDGE, signal);
     return verdict?.steer ?? null;
   }
 }

@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai";
-import type { Settings } from "@/lib/config/registry";
+import type { CUT_JUDGE } from "./chatRuntime";
 import {
   AI_SKILL_AREAS,
   AI_SKILL_BLURBS,
@@ -16,7 +16,7 @@ import { messageText } from "./messageText";
 // editor answers three things at once — how big the ask is (chat / simple /
 // complex), which skill document the model should read first, and which tool
 // areas the turn needs — and the harness routes deterministically on the
-// probabilities under the thresholds in the `cutJudge` setting. A "chat" turn
+// probabilities under the CUT_JUDGE thresholds. A "chat" turn
 // runs with no tool declarations at all, so unsolicited edits are impossible
 // by construction; a "simple" turn keeps the light chat model; a "complex"
 // turn runs on the full model. The route is composed here, in code, from the
@@ -32,7 +32,7 @@ export interface TurnRoute {
   areas: string[];
 }
 
-export type CutJudgeSettings = Settings["cutJudge"];
+export type CutJudgeSettings = typeof CUT_JUDGE;
 
 /** The judge's questions, built once: the roster of skills and areas is the
  * catalog's, so a new skill or tool module joins the judgment on its own. */

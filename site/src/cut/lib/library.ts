@@ -3,7 +3,7 @@
 import { uploadCloudLibraryMedia, withCloudPreparedMedia } from "@/cut/lib/cloudLibraryUpload";
 import type { LibraryUploadStage, LibraryUploadState } from "@/cut/lib/libraryUpload";
 import { assetTypeOf } from "@/cut/lib/media";
-import { cutColor } from "@/cut/lib/colorSettings";
+import { CUT_COLOR } from "@/cut/lib/colorSettings";
 import { lutFacts, parseLutFile } from "@donkeycut/effects-kit";
 import { apiJson, getBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
@@ -644,7 +644,7 @@ async function checkFont(
 async function checkLut(
   file: File,
 ): Promise<{ label: string; meta: LinkedUploadMeta }> {
-  const maxBytes = cutColor().lutFileMaxBytes;
+  const maxBytes = CUT_COLOR.lutFileMaxBytes;
   if (file.size > maxBytes) {
     throw new Error(
       `LUT files are limited to ${Math.round(maxBytes / 1024 ** 2)}MB.`,

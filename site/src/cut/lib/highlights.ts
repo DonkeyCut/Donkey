@@ -1,9 +1,9 @@
 import { askJudgeChunked, noul, score } from "./judge";
 import type { Entry, NoulAnswer, ScoreAnswer } from "./judge";
 import type { PostFn } from "./pi/donkeyStream";
-import type { Settings } from "@/lib/config/registry";
+import type { CUT_CLIP } from "./chatRuntime";
 
-export type CutClipSettings = Settings["cutClip"];
+export type CutClipSettings = typeof CUT_CLIP;
 
 /** Finding the moments in a long source worth cutting a short from.
  *
@@ -18,7 +18,7 @@ export type CutClipSettings = Settings["cutClip"];
  * then the shortlist earns the expensive questions (does it stand alone, does
  * the opening hold, does it land) and a few boundary variants each. Code
  * composes the weights and picks the non-overlapping winners, so changing what
- * "best" means is a settings change, not another round of inference.
+ * "best" means is a change to CUT_CLIP, not another round of inference.
  *
  * A clip does not have to be one stretch. Two moments that belong together
  * cut together, and the judge says which pairs those are; the spans come back
@@ -335,7 +335,7 @@ async function judgeVariants(
   }));
 }
 
-/** The composite. Weights live in settings, so what "best" means is tuned
+/** The composite. Weights live in CUT_CLIP, so what "best" means is tuned
  * without asking anything again. */
 export function rankOf(h: Omit<ScoredHighlight, "rank">, settings: CutClipSettings): number {
   const w = settings.standaloneWeight + settings.hookWeight + settings.payoffWeight;

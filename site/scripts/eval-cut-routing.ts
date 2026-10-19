@@ -2,7 +2,7 @@
 /**
  * The Cut routing eval: what the turn judge decides for a labelled set of
  * asks — the skill it attaches, the tool areas it declares, the gate side —
- * and how the thresholds in the `cutJudge` setting trade suggestion
+ * and how the CUT_JUDGE thresholds trade suggestion
  * accuracy against declared tool count.
  *
  * Every case is judged once (the answers are cached for the run), then the
@@ -21,7 +21,7 @@
  * dev-server-only and spend no credits.
  */
 
-import { SETTINGS } from "../src/lib/config/registry";
+import { CUT_JUDGE } from "../src/cut/lib/chatRuntime";
 import { noul } from "../src/lib/inference/judge";
 import { AI_SKILL_INDEX, areaTools, CORE_TOOLS, TOOL_AREA_NAMES } from "../src/cut/server/ai/catalog";
 import { judgeTurnState, pickSkill, routeTurn, TURN_JUDGE_QUESTIONS, type TurnJudgeAnswers } from "../src/cut/lib/turnJudge";
@@ -73,7 +73,7 @@ interface Summary {
   meanTools: number;
 }
 
-function summarize(judged: Judged[], settings: typeof SETTINGS.cutJudge.default): Summary {
+function summarize(judged: Judged[], settings: typeof CUT_JUDGE): Summary {
   let skillWrong = 0;
   let skillNeedless = 0;
   let skillMissed = 0;
@@ -109,7 +109,7 @@ const pct = (n: number, d: number) => `${Math.round((100 * n) / Math.max(1, d))}
 async function main() {
   const selected = routingCases.filter((c) => !ONLY || c.request.includes(ONLY));
   if (selected.length === 0) throw new Error(`No case matching "${ONLY}".`);
-  const defaults = SETTINGS.cutJudge.default;
+  const defaults = CUT_JUDGE;
   console.log(`== routing  cases=${selected.length}  skills=${AI_SKILL_INDEX.length}  areas=${TOOL_AREA_NAMES.length}`);
 
   const judged: Judged[] = [];

@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { getGlobalSetting } from "@/lib/config/effective";
+import { CUT_COLOR } from "../lib/colorSettings";
 import type { RenderHandle } from "../server/exportPipeline";
 import { makeCompatProxy, makeProxy, proxyNameFor } from "../server/proxy";
 import { compatCoverIn, compatProxyNameFor, lightProxyNameFor, PROXY_SOURCE_FAULT } from "../lib/proxyNames";
@@ -47,8 +48,8 @@ const defaultIO: ProxyJobIO = {
   makeCompat: makeCompatProxy,
   duration: probeDuration,
   settings: async () => {
-    const [color, proxy] = await Promise.all([getGlobalSetting("cutColor"), getGlobalSetting("cutProxy")]);
-    return { ...color, lightKbps: proxy.lightKbps };
+    const proxy = await getGlobalSetting("cutProxy");
+    return { ...CUT_COLOR, lightKbps: proxy.lightKbps };
   },
 };
 

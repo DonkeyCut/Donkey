@@ -1,7 +1,7 @@
 import { spawn, execFile } from "node:child_process";
 import os from "node:os";
 import { z } from "zod";
-import { SETTINGS } from "@/lib/config/registry";
+import { chatRuntimeSchema } from "../../lib/chatRuntime";
 import { startTurnStream, followTurnStream, cancelTurnStream, peekTurnStream } from "../ai/turnStreams";
 import { foldIntoTurn, openFoldInbox, type Fold, type FoldInbox } from "../ai/turnFolds";
 import path from "node:path";
@@ -596,7 +596,7 @@ export const aiApi = {
       threadId: z.string().min(1).max(200),
       model: z.string().min(1).max(200),
       messages: z.array(z.object({ id: z.string(), role: z.enum(["user", "assistant", "system"]), parts: z.array(z.object({ type: z.string() })) })),
-      runtime: SETTINGS.chatRuntime.schema,
+      runtime: chatRuntimeSchema,
       context: z.object({ project: z.object({ id: z.string().min(1).max(200) }) }),
       route: routeSchema.optional(),
       handled: handledSchema.optional(),

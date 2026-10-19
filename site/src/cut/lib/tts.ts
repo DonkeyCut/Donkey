@@ -5,7 +5,7 @@ import { bytesFromBase64 } from "./bytes";
 import { wavHeader } from "./wav";
 import { readHostedError } from "./hostedError";
 import { hostedPost } from "./hosted";
-import { cutJudge } from "./chatRuntime";
+import { CUT_JUDGE } from "./chatRuntime";
 import { askJudge, choice } from "./judge";
 import { importFileToProject } from "./media";
 import { mediaSlug, type MediaAsset } from "./types";
@@ -48,7 +48,7 @@ export async function resolveVoiceAsk(wanted?: string): Promise<string> {
     // twenty voices every plausible match takes a share, so a correct pick
     // reads as low confidence.
     const p = pick.probabilities[pick.choice] ?? 0;
-    return p >= cutJudge().voicePick && SPEECH_VOICES.some((v) => v.id === pick.choice)
+    return p >= CUT_JUDGE.voicePick && SPEECH_VOICES.some((v) => v.id === pick.choice)
       ? pick.choice
       : DEFAULT_VOICE;
   } catch {

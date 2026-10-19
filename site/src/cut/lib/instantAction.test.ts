@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { JUDGE_MAX_QUESTIONS } from "@/lib/inference/judge";
-import { SETTINGS } from "@/lib/config/registry";
+import { CUT_JUDGE } from "./chatRuntime";
 import {
   availableActions,
   instantAction,
@@ -12,7 +12,7 @@ import {
   type TargetKind,
 } from "./instantAction";
 
-const settings = SETTINGS.cutJudge.default;
+const settings = CUT_JUDGE;
 
 /** An editor snapshot in the shape buildAiContext returns, with enough on it
  * for every tier of the registry to be offered. */

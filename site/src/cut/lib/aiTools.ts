@@ -138,7 +138,7 @@ import type { GroupPanelToolName } from "@/cut/components/GroupPanel.tools";
 import { CAMERA_SCALE_MAX, CAMERA_SCALE_MIN, CAMERA_WORLD_MAX, CAMERA_WORLD_MIN, ELEMENT_BLUR_MAX, SHUTTER_MAX, SHUTTER_MIN, TILT_MAX, isEaseId, upsertKey as upsertCameraKey, type CameraKey } from "@donkeycut/effects-kit";
 import { cleanInks, LETTER_SPACING_MAX, LETTER_SPACING_MIN, PATTERN_KINDS, SHADOW_BLUR_MAX, SHADOW_OFFSET_MAX, STRIPE_GAP_MAX, STRIPE_LINE_MAX, STRIPE_LINE_MIN, STRIPES_DEFAULT, type PatternSpec, type ShadowSpec } from "@donkeycut/effects-kit";
 import { groupCameraOf, groupCameraPoseAt } from "@/cut/lib/groupCamera";
-import { cutMotion } from "@/cut/lib/motionSettings";
+import { CUT_MOTION } from "@/cut/lib/motionSettings";
 import type { LibraryToolName } from "@/cut/components/LibraryView.tools";
 import type { PreviewToolName } from "@/cut/components/Preview.tools";
 import type { RemovalToolName } from "@/cut/components/RemovalPanel.tools";
@@ -239,7 +239,7 @@ import { renderMix } from "./audioMix";
 import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./loudness";
 import { frameAt, framesAt, readMediaFileSize } from "./mediaRead";
 import { bundledFaces, inkMaskOf, rankFaces } from "./fontMatch";
-import { cutFontMatch } from "./fontMatchSettings";
+import { CUT_FONT_MATCH } from "./fontMatchSettings";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
 import { compareMoments, sweepSource } from "./sourceCompare";
 import { findPicture, sampleColors, scanCuts, trackElement, type FrameBox } from "./measure/sourceMeasure";
@@ -295,7 +295,7 @@ import { readHostedError } from "./hostedError";
 import { creditPriceQuote, type CreditPriceSheet } from "@/lib/credits/price-sheet";
 import { creditsFromDollars } from "@/lib/credits/format-credits";
 import { BLOCK_MAX_SECONDS, BLOCK_MIN_SECONDS, BLOCKOUT_MAX, blockAsset } from "./blockSource";
-import { cutClip, cutJudge } from "./chatRuntime";
+import { CUT_CLIP, CUT_JUDGE } from "./chatRuntime";
 import { FOLLOW_MODES } from "./trackKeys";
 import { trackMotion } from "./trackMotion";
 import { TRACK_TARGET_IDS, TRACK_USES } from "./trackTargets";
@@ -2093,7 +2093,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       } catch (e) {
         throw new ToolError(`Filler detection is unavailable: ${e instanceof Error ? e.message : String(e)}`);
       }
-      const floor = cutJudge().fillerCut;
+      const floor = CUT_JUDGE.fillerCut;
       const toSource = clip ? (t: number) => roundT(retimeOf(clip).srcAt(clamp(t - clip.start, 0, Infinity))) : null;
       // Neighbouring filler words are one span: "you know" is a single cut,
       // and every span the caller gets is a cut it can make in one call.
@@ -2205,7 +2205,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         size: m.typePx > 0 ? Math.round((m.typePx / k / Math.min(fw * area.w, fh * area.h)) * DESIGN_SHORT_SIDE) : null,
         tracking: m.tracking,
       }));
-      const good = cutFontMatch().goodScore;
+      const good = CUT_FONT_MATCH.goodScore;
       const best = matches[0];
       const round3 = (v: number) => Math.round(v * 1000) / 1000;
       return {
@@ -2477,7 +2477,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
     const hits = sweepPicks(
       answers as Record<string, { type: "noul"; noul: number } | undefined>,
       items,
-      cutJudge().sweepFit
+      CUT_JUDGE.sweepFit
     ).sort((a, b) => b.fit - a.fit);
     const kept = isNum(input.limit) ? hits.slice(0, Math.max(1, Math.floor(input.limit))) : hits;
     return {
@@ -2710,10 +2710,10 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const count = isNum(input.count) ? clamp(Math.round(input.count), 1, 20) : 5;
       const post = (payload: Record<string, unknown>, signal?: AbortSignal) =>
         hostedPost("/api/inference/judge", payload, signal);
-      const clips = await findHighlights(post, said, cutClip(), count).catch((e) => {
+      const clips = await findHighlights(post, said, CUT_CLIP, count).catch((e) => {
         throw new ToolError(`Finding the moments is unavailable: ${e instanceof Error ? e.message : String(e)}`);
       });
-      const settings = cutClip();
+      const settings = CUT_CLIP;
       return {
         source: sourceRef(asset),
         searched: { from: roundT(from), to: roundT(to ?? asset.duration) },
@@ -6243,7 +6243,7 @@ async function rankStock<T extends { id: string; kind: string; category: string;
   } catch (e) {
     throw new ToolError(`Stock search is unavailable: ${e instanceof Error ? e.message : String(e)}`);
   }
-  const floor = cutJudge().stockFit;
+  const floor = CUT_JUDGE.stockFit;
   return candidates
     .map((c, i) => ({ c, p: answers[`fit::${i}`]?.noul ?? 0 }))
     .filter((x) => x.p >= floor)
@@ -7765,7 +7765,7 @@ async function launchVideoJob(
  * neither keeps `current`. */
 function shutterInput(input: Record<string, unknown>, current: number | undefined): number | undefined {
   if (isNum(input.shutter)) return input.shutter > 0 ? clamp(input.shutter, SHUTTER_MIN, SHUTTER_MAX) : undefined;
-  if (input.motion_blur === true) return current ?? cutMotion().motionBlur;
+  if (input.motion_blur === true) return current ?? CUT_MOTION.motionBlur;
   if (input.motion_blur === false) return undefined;
   return current;
 }

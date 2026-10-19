@@ -9,8 +9,8 @@ import { projectOperation } from "./projectOperation";
 import { apiFetch, apiJson, getBackend, type CutBackend } from "./backend";
 import { engineFeatures } from "./api";
 import type { EngineFeature } from "./engineFeatures";
-import { cutColor } from "./colorSettings";
-import { cutExportPasses } from "./exportPassSettings";
+import { CUT_COLOR } from "./colorSettings";
+import { CUT_EXPORT_PASSES } from "./exportPassSettings";
 import { loadLibraryLutFile, lutIdOf } from "./linkedLibrary/luts";
 import {
   removeBrowserExportJob,
@@ -1522,9 +1522,9 @@ export async function buildExportPayload(
       // The hover proxy, the share card and the streaming ladder are SDR web
       // pictures whatever the project delivers.
       colorSpace: target === "export" ? doc.colorSpace ?? "sdr" : "sdr",
-      lutSize: cutColor().lutSize,
-      lutSizeWide: cutColor().lutSizeWide,
-      passes: cutExportPasses(),
+      lutSize: CUT_COLOR.lutSize,
+      lutSizeWide: CUT_COLOR.lutSizeWide,
+      passes: CUT_EXPORT_PASSES,
       duration,
       background: projectBackground(doc.background),
       clips,

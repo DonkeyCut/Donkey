@@ -7,7 +7,7 @@ export type { SpecClipColor };
 import { readFile, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { atempoChain, audioChannels, hasStream, mediaDuration, num, videoDecodeCost, videoDimensions, videoPicture } from "./util";
-import { SETTINGS, type Settings } from "@/lib/config/registry";
+import { CUT_EXPORT_PASSES } from "../lib/exportPassSettings";
 import { xfadeTransition } from "./transitionExpr";
 import { assertGraphSafe, fanOutInputs, fexpr } from "./filterGraph";
 import { bakeRetimedAudio, setptsExpr, type BakedAudio } from "./retimeAudio";
@@ -86,7 +86,7 @@ export interface ExportSpec {
   lutSizeWide?: number;
   /** The memory one encode pass may hold and the most pieces it opens;
    * absent = the setting's default. */
-  passes?: Settings["cutExportPasses"];
+  passes?: typeof CUT_EXPORT_PASSES;
   /** Where the render lands instead of a stamped file in exports/: "hls" is the
    * share's streaming ladder, "preview"
    * writes the project's low-res hover proxy, "card" the opening seconds the
@@ -785,7 +785,7 @@ function clipReach(spec: ExportSpec): { before: number; after: number }[] {
  * graph opens and its chain keeps frames through the encode, about this many
  * of its source's size or the delivery's, whichever is larger. Cuts played
  * out of file order add the frames their decoder holds until their turn. The
- * pass budget (the cutExportPasses setting) caps their sum and the count.
+ * pass budget (CUT_EXPORT_PASSES) caps their sum and the count.
  */
 const PIECE_FRAMES = 16;
 
@@ -827,7 +827,7 @@ function heldSeconds(cuts: PassSpan[]): number {
  * are the delivery.
  */
 export function passWindows(spec: ExportSpec, sourceOf: (file: string) => SourcePicture): ExportRange[] {
-  const budget = spec.passes ?? SETTINGS.cutExportPasses.default;
+  const budget = spec.passes ?? CUT_EXPORT_PASSES;
   const from = Math.max(0, spec.range?.start ?? 0);
   const to = Math.min(spec.duration, spec.range?.end ?? spec.duration);
   const frameBytes = (file: string) => 1.5 * Math.max(sourceOf(file).pixels, spec.width * spec.height);

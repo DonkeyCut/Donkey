@@ -19,7 +19,7 @@ import {
   STEP_BUDGET,
   turnClose,
 } from "../turnBudget";
-import { cutJudge } from "../chatRuntime";
+import { CUT_JUDGE } from "../chatRuntime";
 import {
   instantAction,
   instantQuestions,
@@ -76,9 +76,7 @@ export interface CutAgentDeps {
   /** The judge route: typed questions over a state, answered as
    * probabilities. Routes the turn and triages the queue. */
   judge: PostFn;
-  /** The judgment thresholds. The page binds them from the account config;
-   * the worker reads them from the global settings; unset falls back to the
-   * bound value (the registry default when nothing bound one). */
+  /** The judgment thresholds; unset reads CUT_JUDGE. */
   judgeSettings?: CutJudgeSettings;
   execTool: ExecTool;
   models: { simple: string; complex: string };
@@ -519,7 +517,7 @@ export async function judgeTurnAndAction(
   deps: CutAgentDeps,
   abortSignal?: AbortSignal
 ): Promise<{ verdict: TurnVerdict; instant: ResolvedAction | null }> {
-  const settings = deps.judgeSettings ?? cutJudge();
+  const settings = deps.judgeSettings ?? CUT_JUDGE;
   const lastUser = messages.findLast((m) => m.role === "user");
   const onSight = complexOnSight(lastUser);
   if (onSight && !settings.skillSuggestion && !settings.toolRouting)
@@ -699,7 +697,7 @@ export function streamCutChat({
         const askText = lastUser ? messageText(lastUser) : "";
         const context = deps.buildContext();
         const promptPromise = buildPrompt(lastUser, deps, context);
-        const settings = deps.judgeSettings ?? cutJudge();
+        const settings = deps.judgeSettings ?? CUT_JUDGE;
         // One judgment settles both: how the turn is routed, and whether it
         // is a single known action the editor can carry out on its own.
         const decision = judgeTurnAndAction(messages, context, deps, abortSignal);

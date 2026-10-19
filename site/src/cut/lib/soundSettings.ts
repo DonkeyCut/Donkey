@@ -1,17 +1,13 @@
-import { SETTINGS, type Settings } from "@/lib/config/registry";
-
-// The sound editing tunables — the split edit's ramp and how a separate
-// recording is lined up — bound once at session start from account config (the
-// tab) or the global setting (a worker job), and read where a clip's sound is
-// laid out.
-
-let sound: Settings["cutSound"] = SETTINGS.cutSound.default;
-
-export function bindCutSound(value: unknown): void {
-  const parsed = SETTINGS.cutSound.schema.safeParse(value);
-  if (parsed.success) sound = parsed.data;
-}
-
-export function cutSound(): Settings["cutSound"] {
-  return sound;
-}
+// The sound editing constants, read where a clip's sound is laid out.
+export const CUT_SOUND = {
+  // The ramp at the outer end of a split edit's sound, so the sound that
+  // leads or trails the picture never starts or stops on a click.
+  splitFadeSeconds: 0.03,
+  // How much clearer the best alignment of a separate recording has to be
+  // than the runner-up before it is bound.
+  syncMinConfidence: 1.4,
+  // How much of the camera's own sound the alignment listens to.
+  syncProbeSeconds: 90,
+  // The longest recording searched end to end.
+  syncMaxSeconds: 2 * 3600,
+};
