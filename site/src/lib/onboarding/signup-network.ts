@@ -1,12 +1,9 @@
 import { createHmac } from "node:crypto";
 
-import { isValidIP, normalizeIP } from "@better-auth/core/utils/ip";
+import { normalizeIP } from "@better-auth/core/utils/ip";
 
+import { clientIp } from "@/lib/client-ip";
 import { prisma } from "@/lib/prisma";
-
-// The header the host puts the caller's address in, first entry first. Vercel
-// sets it on every request, and better-auth reads the same one.
-const FORWARDED_FOR = "x-forwarded-for";
 
 // The block of IPv6 addresses one household or device is handed. Cycling
 // addresses inside it still counts as one network.
@@ -21,8 +18,8 @@ type NetworkLimit = { limit: number; windowDays: number };
  * address. Null when the request carries no readable address.
  */
 export function signupNetworkKey(headers: Headers): string | null {
-  const ip = headers.get(FORWARDED_FOR)?.split(",")[0]?.trim();
-  if (!ip || !isValidIP(ip)) {
+  const ip = clientIp(headers);
+  if (!ip) {
     return null;
   }
 
