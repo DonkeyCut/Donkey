@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { introCouponId } from "@/lib/billing/intro-offer";
+import { introCoupon, readIntroOffer } from "@/lib/billing/intro-offer-server";
 import { proPriceId } from "@/lib/billing/pro-subscription";
 import { ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
+import { contextFromRequest } from "@/lib/config/effective";
 import { verifyCreditOfferToken } from "@/lib/credits/offers";
 import { openOfferForSubscribing, SUBSCRIBE_BONUS_METADATA_KEY } from "@/lib/credits/subscribe-bonus-claim";
 import {
@@ -46,10 +49,16 @@ export const POST = withDonkeyAuth(async (request) => {
   // A checkout started while an offer for subscribing is open carries the
   // offer, so the webhook lands the credit on the subscription it creates.
   const offer = await openOfferForSubscribing(session.user.id, namedOfferId);
+  // An account inside its intro window checks out with the discount already
+  // on. Stripe takes either a discount or a promotion code field, never both.
+  const intro = await readIntroOffer(await contextFromRequest(request));
+  const pricing = intro
+    ? { discounts: [{ coupon: await introCoupon(intro) }] }
+    : { allow_promotion_codes: true };
   const stripe = getStripe();
   const origin = request.nextUrl.origin;
   const checkout = await stripe.checkout.sessions.create({
-    allow_promotion_codes: true,
+    ...pricing,
     cancel_url: `${origin}/app/settings?checkout=cancelled`,
     client_reference_id: session.user.id,
     customer: customerId,
@@ -59,6 +68,7 @@ export const POST = withDonkeyAuth(async (request) => {
       metadata: {
         userId: session.user.id,
         ...(offer ? { [SUBSCRIBE_BONUS_METADATA_KEY]: offer.id } : {}),
+        ...(intro ? { introOffer: introCouponId(intro) } : {}),
       },
     },
     success_url: `${origin}/app/settings?checkout=success`,

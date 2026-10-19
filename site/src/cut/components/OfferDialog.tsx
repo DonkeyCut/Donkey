@@ -73,8 +73,8 @@ export function countdownLabel(closesAt: string, now: number): string {
   return `${hours}h ${two(minutes)}m ${two(seconds)}s`;
 }
 
-/** The clock the countdown reads; one tick a second while the card is open. */
-function useNow(): number {
+/** The clock a countdown reads; one tick a second while it is on screen. */
+export function useNow(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);

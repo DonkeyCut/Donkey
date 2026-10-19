@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useIntroOffer,
   useOpenBillingPortal,
   useProSubscription,
   useStartCheckout,
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { activeProPromotion, CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
+import { introTerms } from "@/cut/components/IntroOffer";
 import { creditLifeClause, formatDeadline, minutesLeft } from "@/cut/components/SubscribeBonusPill";
 import { track } from "@/lib/analytics";
 import { creditCountLabel, creditsFromDollars, creditsPerDollar, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
@@ -44,6 +46,7 @@ export function ProCard() {
   const bonus = useSubscribeBonus();
   const config = useAccountConfig({ enabled: true });
   const promotion = config.data ? activeProPromotion(config.data.settings.proAllowancePromotion) : null;
+  const intro = useIntroOffer({ enabled: pro.data?.isActive === false });
 
   if (pro.isLoading) {
     return (
@@ -131,6 +134,11 @@ export function ProCard() {
         <CardContent className="text-sm text-foreground">
           Subscribe for {CUT_PRO.price} by {formatDeadline(offer.closesAt)} and get a one-time{" "}
           {formatCredits(offer.dollars)}.{creditLifeClause(offer)}
+        </CardContent>
+      ) : null}
+      {intro.data && !isActive ? (
+        <CardContent className="text-sm text-foreground">
+          {introTerms(intro.data)} Subscribe by {formatDeadline(intro.data.endsAt)}.
         </CardContent>
       ) : null}
       <CardFooter className="gap-3">

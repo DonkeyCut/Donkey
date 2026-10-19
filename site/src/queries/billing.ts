@@ -6,6 +6,7 @@ import { apiFetch } from "@/queries/apiClient";
 
 export const usageQueryKey = ["billing", "usage"] as const;
 export const proSubscriptionQueryKey = ["billing", "pro"] as const;
+export const introOfferQueryKey = ["billing", "intro-offer"] as const;
 
 export type ProSubscription = {
   isActive: boolean;
@@ -20,10 +21,33 @@ export type ProSubscription = {
   allowanceRemaining: string;
 };
 
+export const fetchProSubscription = () => apiFetch<ProSubscription>("/api/billing/pro");
+
 export function useProSubscription() {
   return useQuery({
-    queryFn: () => apiFetch<ProSubscription>("/api/billing/pro"),
+    queryFn: fetchProSubscription,
     queryKey: proSubscriptionQueryKey,
+  });
+}
+
+export type IntroOffer = {
+  percentOff: number;
+  months: number;
+  // When the offer closes.
+  endsAt: string;
+  // The Pro price and what the discounted months cost.
+  priceCents: number;
+  introCents: number;
+};
+
+// The discount an account inside its intro window gets on Pro. Checkout
+// applies it on its own; this read is for the surfaces that show it.
+export function useIntroOffer({ enabled = true }: { enabled?: boolean } = {}) {
+  return useQuery({
+    enabled,
+    queryFn: async () => (await apiFetch<{ offer: IntroOffer | null }>("/api/billing/intro-offer")).offer,
+    queryKey: introOfferQueryKey,
+    staleTime: 5 * 60_000,
   });
 }
 

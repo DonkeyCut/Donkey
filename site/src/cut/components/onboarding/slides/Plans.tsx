@@ -5,7 +5,10 @@ import { Check } from "lucide-react";
 import { TapedCard } from "@/app/_components/landing/LandingPrimitives";
 import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
 import { Button } from "@/components/ui/button";
+import { priceLabel } from "@/cut/components/IntroOffer";
+import { countdownLabel, useNow } from "@/cut/components/OfferDialog";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
+import { useIntroOffer, type IntroOffer } from "@/queries/billing";
 
 import "../onboarding.css";
 
@@ -13,9 +16,11 @@ import "../onboarding.css";
 // benefits sit in the card so nobody has to take the price on faith. It's the
 // landing's own Pro card — same taped coral frame, same ringed check bullets —
 // so the offer looks the same wherever it's met. Checkout is the one the
-// storage wall and the billing page start.
+// storage wall and the billing page start. While the intro offer is open the
+// card prices the discount and counts down to its end.
 export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
   const pro = useUpgradeToPro();
+  const offer = useIntroOffer().data ?? null;
 
   return (
     <div className="mx-auto w-full max-w-[520px]">
@@ -35,12 +40,18 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
         >
           <div className="p-7 md:p-9">
             <div className="text-[22px] font-semibold">Pro</div>
-            <div className="mt-4 text-[clamp(34px,4.4vw,48px)] leading-[0.95] font-semibold">
-              {CUT_PRO.price}
-            </div>
-            <div className="mt-2.5 text-[13px] font-semibold text-[#201715]">
-              For individuals
-            </div>
+            {offer ? (
+              <IntroPrice offer={offer} />
+            ) : (
+              <>
+                <div className="mt-4 text-[clamp(34px,4.4vw,48px)] leading-[0.95] font-semibold">
+                  {CUT_PRO.price}
+                </div>
+                <div className="mt-2.5 text-[13px] font-semibold text-[#201715]">
+                  For individuals
+                </div>
+              </>
+            )}
             <p className="mt-5 text-[15px] leading-[1.55] text-[#1a1a1a]">
               {CUT_PRO.body}
             </p>
@@ -64,7 +75,7 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
               disabled={pro.isPending}
               className="mt-7 h-11 rounded-full bg-ink px-6 text-[15px] text-white hover:bg-ink/90"
             >
-              Get Pro
+              {offer ? `Get ${offer.percentOff}% off Pro` : "Get Pro"}
             </Button>
           </div>
         </TapedCard>
@@ -80,5 +91,31 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
         </button>
       </div>
     </div>
+  );
+}
+
+// The discounted price beside the struck-through one, what it covers, and
+// the time left to take it.
+function IntroPrice({ offer }: { offer: IntroOffer }) {
+  const now = useNow();
+  const covers = offer.months === 1 ? "For your first month" : `Per month for your first ${offer.months} months`;
+
+  return (
+    <>
+      <div className="mt-4 flex items-baseline gap-3">
+        <span className="text-[clamp(34px,4.4vw,48px)] leading-[0.95] font-semibold">
+          {priceLabel(offer.introCents)}
+        </span>
+        <span className="text-[22px] font-semibold text-[#201715]/40 line-through decoration-2">
+          {priceLabel(offer.priceCents)}
+        </span>
+      </div>
+      <div className="mt-2.5 text-[13px] font-semibold text-[#201715]">
+        {covers}, then {priceLabel(offer.priceCents)}/month
+      </div>
+      <div className="mt-4 inline-flex rounded-full bg-ink px-3 py-1 text-[12px] font-semibold text-white tabular-nums">
+        {offer.percentOff}% off ends in {countdownLabel(offer.endsAt, now)}
+      </div>
+    </>
   );
 }

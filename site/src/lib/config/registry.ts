@@ -571,6 +571,49 @@ export const SETTINGS = defineSettings({
     description:
       "How many days before a cancelled Pro plan ends the editor starts showing the days left. Until then a plan set to cancel looks like one that renews.",
   },
+  introOffer: {
+    schema: z
+      .object({
+        // Percent off the Pro price; 0 makes no offer.
+        percentOff: z.number().int().min(0).max(90),
+        // Billing months the discount covers.
+        months: z.number().int().min(1).max(12),
+        // Hours after signup the offer stays open.
+        windowHours: z.number().int().min(1).max(24 * 30),
+      })
+      .strict(),
+    default: { percentOff: 0, months: 1, windowHours: 24 },
+    public: true,
+    title: "Intro offer",
+    description:
+      "A discount on the first months of Pro for an account that subscribes within this many hours of signing up and has never held Pro. Checkout applies it on its own.",
+  },
+  freeProjectLimit: {
+    schema: z
+      .object({
+        // Projects a free account may hold besides its starter; null is no limit.
+        projects: z.number().int().min(0).max(1000).nullable(),
+      })
+      .strict(),
+    default: { projects: null },
+    public: true,
+    title: "Free project limit",
+    description:
+      "How many projects a free account may hold besides its starter project. Creating one more opens the upgrade dialog.",
+  },
+  outOfCreditsUpsell: {
+    schema: z
+      .object({
+        // "dialog" opens the upgrade dialog when a request runs out of credits.
+        mode: z.enum(["off", "dialog"]),
+      })
+      .strict(),
+    default: { mode: "off" },
+    public: true,
+    title: "Out of credits upsell",
+    description:
+      "What happens when an AI request runs out of credits. Off leaves the inline notice; dialog also opens the upgrade dialog, which sells Pro to a free account and credits to a Pro one.",
+  },
 });
 
 export type SettingKey = keyof typeof SETTINGS;

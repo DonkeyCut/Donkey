@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { introTerms, wallBanner } from "./IntroOffer";
 import { OfferButton, OfferDialog, OfferDismiss } from "./OfferDialog";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import {
@@ -23,7 +24,7 @@ import {
 } from "@/cut/lib/storageQuota";
 import { daysUntil } from "@/cut/lib/time";
 import { track } from "@/lib/analytics";
-import { useProSubscription } from "@/queries/billing";
+import { useIntroOffer, useProSubscription } from "@/queries/billing";
 import { useCloudUsage } from "@/cut/lib/backend/hooks";
 import { onOperationFailure } from "@/cut/lib/operationFailure";
 import { formatBytes } from "@/lib/bytes";
@@ -59,6 +60,7 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
   const pro = useProSubscription();
   const upgrade = useUpgradeToPro();
   const isPro = pro.data?.isActive === true;
+  const intro = useIntroOffer({ enabled: pro.data?.isActive === false });
   // A wall raised by a queued render carries no numbers — it failed in the
   // worker, hours from the request. The account's own meter fills them in, so
   // every wall says how full the account is.
@@ -107,16 +109,11 @@ function OpenDialog({ detail, onClose }: { detail: StorageQuotaDetail; onClose: 
     <OfferDialog
       open
       onOpenChange={(open) => !open && onClose()}
-      // Neutral, and half the height of a credit offer's picture: this card is
-      // a wall, not a promotion.
-      banner={
-        <div className="flex aspect-[16/3] w-full items-center bg-neutral-800 px-6 dark:bg-neutral-700">
-          <HardDrive className="size-7 text-white" strokeWidth={1.5} />
-        </div>
-      }
+      banner={wallBanner(HardDrive, intro.data)}
+      closesAt={intro.data?.endsAt}
       title={title}
       body={`${used ? `${used} ` : ""}Pro includes 100 GB of cloud storage.`}
-      terms="Or free up space by deleting projects and media you no longer need."
+      terms={intro.data ? introTerms(intro.data) : "Or free up space by deleting projects and media you no longer need."}
       error={grace}
       cta={
         <OfferButton disabled={upgrade.isPending} onClick={upgrade.start}>
