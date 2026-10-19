@@ -230,7 +230,7 @@ export const SETTINGS = defineSettings({
     public: true,
     title: "Out of credits upsell",
     description:
-      "What happens when an AI request runs out of credits. Off leaves the inline notice; dialog also opens the upgrade dialog, which sells Pro to a free account and credits to a Pro one.",
+      "What happens when the server refuses a request for credits. Off leaves the inline notice; dialog also opens the upgrade dialog, which sells Pro to a free account and credits to a Pro one. A Generate button the balance can't cover opens the dialog either way.",
   },
 });
 

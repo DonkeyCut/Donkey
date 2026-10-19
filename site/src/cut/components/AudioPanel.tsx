@@ -48,7 +48,7 @@ import { STOCK_MUSIC } from "@/cut/lib/stockMusicManifest";
 import { stockAssetInDoc } from "@/cut/lib/genvideo/docWriter";
 import { signInUrl, useSignedIn } from "@/cut/lib/generate";
 import { HostedErrorText } from "./hostedError";
-import { CostTag, generateButton, NOT_ENOUGH_CREDITS, useGenerateCost } from "./GenerateCost";
+import { generateButton, useGenerateCost } from "./GenerateCost";
 import { musicMicros } from "@/lib/credits/price-sheet";
 import { genPulseOverlay, useActiveWork, useGenNotify } from "@/cut/lib/genNotify";
 import { enrichAsset } from "@/cut/lib/media";
@@ -312,13 +312,12 @@ function MusicGenerator({ projectId }: { projectId: string }) {
         </div>
         <Button
           className="music-generate w-full"
-          disabled={!prompt.trim() || signedOut || button.blocked}
+          disabled={!prompt.trim() || signedOut}
           title={!prompt.trim() ? "Describe the music above to generate" : undefined}
           onClick={button.onClick}
         >
           <Music data-icon="inline-start" />
-          {cost.short ? NOT_ENOUGH_CREDITS : "Generate music"}
-          <CostTag cost={cost} />
+          Generate music
         </Button>
         {pending > 0 && (
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
