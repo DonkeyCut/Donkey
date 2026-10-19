@@ -126,7 +126,7 @@ export function OfferDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="gap-0 overflow-hidden rounded-lg bg-background p-0 sm:max-w-sm"
+        className="gap-0 overflow-hidden rounded-lg bg-background p-0 sm:max-w-[28.8rem]"
       >
         <div className="relative">
           {isOfferBanner(banner) ? (
@@ -152,7 +152,8 @@ export function OfferDialog({
             <p className="min-h-[1lh] text-base leading-relaxed text-muted-foreground">{terms}</p>
           </DialogHeader>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <div className="mt-5 flex flex-col gap-2">
+          {/* The buttons keep the 21rem column of the narrower card. */}
+          <div className="mx-auto mt-5 flex w-full max-w-84 flex-col gap-2">
             {cta}
             <div className="min-h-8">{secondary}</div>
           </div>
