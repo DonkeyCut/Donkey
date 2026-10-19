@@ -23,6 +23,7 @@ import { NewProjectButton } from "@/cut/components/NewProjectButton";
 import { NavUser } from "@/cut/components/NavUser";
 import { homeHref, projectHref, tabForPath, useCutBase, type CutTab } from "@/cut/lib/nav";
 import type { ProjectSummary } from "@/cut/lib/types";
+import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { cn } from "@/lib/utils";
 
 const NAV: { tab: CutTab; label: string; icon: typeof Clapperboard }[] = [
@@ -51,6 +52,10 @@ export function AppSidebar() {
   const create = async (r: Residency) => {
     setBusy(true);
     try {
+      if (!(await newProjectAllowed(client))) {
+        setCreateIn(null);
+        return;
+      }
       const res = await backendFor(r).fetch("/api/cut/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

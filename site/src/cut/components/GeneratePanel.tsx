@@ -40,7 +40,7 @@ import { CopyHandlePill, MentionTextarea, RefChips } from "./AssetRefs";
 import { DictationControl } from "./MicDictation";
 import { GeneratedAssetMenu } from "./GeneratedAssetMenu";
 import { HostedErrorText } from "./hostedError";
-import { CostTag, NOT_ENOUGH_CREDITS, useGenerateCost } from "./GenerateCost";
+import { CostTag, generateButton, NOT_ENOUGH_CREDITS, useGenerateCost } from "./GenerateCost";
 import { cardIconButton } from "./iconButton";
 import { PillSelect } from "./PillSelect";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -134,6 +134,8 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
     }).settled;
     useVideoGen.getState().openWith("");
   };
+
+  const button = generateButton(cost, go);
 
   return (
     <>
@@ -270,8 +272,8 @@ export function GenerateVideoPanel({ projectId }: { projectId: string }) {
 
         <Button
           className="gen-go w-full shrink-0"
-          disabled={!prompt.trim() || signedIn === false || cost.short}
-          onClick={go}
+          disabled={!prompt.trim() || signedIn === false || button.blocked}
+          onClick={button.onClick}
         >
           <Sparkles data-icon="inline-start" />
           {cost.short ? NOT_ENOUGH_CREDITS : "Generate video"}

@@ -84,6 +84,7 @@ import { SidePanel } from "./SidePanel";
 import { SpeedCurveStrip } from "./SpeedCurveStrip";
 import { Timeline } from "./Timeline";
 import { StorageUpgradeDialog } from "./StorageUpgradeDialog";
+import { UpgradeDialog } from "./UpgradeDialog";
 import { TopBar } from "./TopBar";
 import { ViewerTopBar } from "./ViewerTopBar";
 
@@ -1304,6 +1305,7 @@ export function Editor({
         </div>
       )}
       {!chatgpt && <StorageUpgradeDialog />}
+      {!chatgpt && <UpgradeDialog />}
       <Lightbox />
     </div>
   );

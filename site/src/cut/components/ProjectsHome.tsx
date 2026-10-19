@@ -74,6 +74,7 @@ import { useGenScene } from "@/cut/lib/genScene";
 import { createProjectFromFile, isMediaFile } from "@/cut/lib/media";
 import { dropLocalProjectCopy, localMediaUrl } from "@/cut/lib/mediaSync";
 import { copyProjectAcross } from "@/cut/lib/projectCopy";
+import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { homeHref, projectHref, useCutBase } from "@/cut/lib/nav";
 import { daysUntil, formatDate, formatTime } from "@/cut/lib/time";
 import {
@@ -480,6 +481,10 @@ export function ProjectsHome() {
   // for a document we can describe in full.
   const openNewProject = async (r: Residency, pname: string, folderId: string | null) => {
     if (!live(r)) return;
+    if (!(await newProjectAllowed(client))) {
+      setCreateIn(null);
+      return;
+    }
     // The frame the editor would open this project at is written into the doc
     // at creation, so the card shows that shape before the editor's first save.
     const aspect = lastChosenAspect() ?? undefined;
@@ -522,7 +527,11 @@ export function ProjectsHome() {
       const media = Array.from(files).filter(isMediaFile);
       if (media.length === 0) return;
       setImporting((n) => n + media.length);
-      for (const file of media) {
+      for (const [i, file] of media.entries()) {
+        if (!(await newProjectAllowed(client))) {
+          setImporting((n) => n - (media.length - i));
+          break;
+        }
         try {
           await createProjectFromFile(file, folderId);
           track("project_created", { source: "file_import" });
@@ -534,7 +543,7 @@ export function ProjectsHome() {
         await refresh(homeMode);
       }
     },
-    [refresh, homeMode]
+    [refresh, homeMode, client]
   );
 
   const rename = async () => {
@@ -558,6 +567,7 @@ export function ProjectsHome() {
 
   const duplicate = async (r: Residency, p: ProjectSummary) => {
     if (!live(r)) return;
+    if (!(await newProjectAllowed(client))) return;
     setBusy(true);
     setDupError(null);
     try {

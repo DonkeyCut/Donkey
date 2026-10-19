@@ -151,6 +151,27 @@ export function useProjectsSection(r: Residency, { list, live }: { list: boolean
   });
 }
 
+/** The ids of every project the account holds on the shelves this browser
+ * knows, read from the listings the home already holds where it has them. A
+ * shelf it can only remember counts what it last listed; one that can't
+ * answer counts nothing. */
+export async function listedProjectIds(client: QueryClient): Promise<string[]> {
+  const live = availableResidencies();
+  const sections = await Promise.all(
+    listedResidencies().map(async (r) => {
+      if (live.includes(r)) {
+        return client.ensureQueryData({ queryKey: projectsKey(r), queryFn: () => fetchProjectsSection(r) }).catch(() => null);
+      }
+      const cached = client.getQueryData<ProjectsSection>(projectsKey(r));
+      if (cached) {
+        return cached;
+      }
+      return (await readSnapshot<ProjectsSection>(projectsSnapshotKey(r)))?.value ?? null;
+    })
+  );
+  return sections.flatMap((s) => s?.projects.map((p) => p.id) ?? []);
+}
+
 /** How often a live library listing re-reads. Long enough that an open tab is
  * cheap, short enough that a clip finishing its upload from the phone lands on
  * screen while the user is still looking at the page. */

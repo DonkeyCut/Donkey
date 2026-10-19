@@ -29,10 +29,12 @@ function parseAccountConfig(raw: unknown): AccountConfig {
 // Fetched once per page load from the session gate. It never refetches on
 // focus: a variant switching under someone mid-session is the one thing an
 // experiment must not do.
+export const fetchAccountConfig = async () => parseAccountConfig(await apiFetch<unknown>("/api/account/config"));
+
 export function useAccountConfig({ enabled }: { enabled: boolean }) {
   return useQuery({
     enabled,
-    queryFn: async () => parseAccountConfig(await apiFetch<unknown>("/api/account/config")),
+    queryFn: fetchAccountConfig,
     queryKey: accountConfigQueryKey,
     refetchOnWindowFocus: false,
     retry: false,

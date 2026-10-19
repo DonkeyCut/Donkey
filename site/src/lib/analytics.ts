@@ -32,6 +32,9 @@ export type AnalyticsEvents = {
   // The top bar's credits pill.
   cut_credits_pill_clicked: { credits: number; dollars: number };
   cut_storage_upgrade_shown: { source: "quota-413" | "render" | "pill" };
+  // The upgrade wall at a free limit; intro is the open discount's percent, 0 for none.
+  upgrade_dialog_shown: { reason: "projects" | "credits"; pro: boolean; intro: number };
+  project_limit_hit: { limit: number };
   cut_grace_banner_shown: void;
   // First exposure to an experiment variant; the same value rides every
   // later event as a super property ($feature/<experiment>).

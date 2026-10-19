@@ -43,14 +43,20 @@ export function countryFromHeaders(headers: Headers): string | null {
   return raw && /^[A-Z]{2}$/.test(raw) ? raw : null;
 }
 
-export async function contextFromRequest(request: DonkeyAuthenticatedRequest): Promise<ConfigContext> {
+export function contextFromRequest(request: DonkeyAuthenticatedRequest): Promise<ConfigContext> {
+  return contextForUser(request.donkey.userId, countryFromHeaders(request.headers));
+}
+
+/** The context for an account acting outside a page request, such as a
+ * ChatGPT tool call. */
+export async function contextForUser(userId: string, country: string | null): Promise<ConfigContext> {
   const user = await prisma.user.findUnique({
-    where: { id: request.donkey.userId },
+    where: { id: userId },
     select: { createdAt: true },
   });
   return {
-    userId: request.donkey.userId,
-    country: countryFromHeaders(request.headers),
+    userId,
+    country,
     createdAt: user?.createdAt ?? new Date(0),
     hasAccount: user !== null,
   };

@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { cloudBackend } from "@/cut/lib/backend/cloud";
 import { seedNewProjectDoc } from "@/cut/lib/docCache";
 import { framedHref } from "@/cut/lib/hostBridge";
 import { projectHref, useCutBase } from "@/cut/lib/nav";
+import { newProjectAllowed } from "@/cut/lib/projectLimit";
 import { lastChosenAspect } from "@/cut/lib/store";
 import type { ProjectSummary } from "@/cut/lib/types";
 import { track } from "@/lib/analytics";
@@ -18,6 +20,7 @@ import { track } from "@/lib/analytics";
 export function EmbeddedNewProject() {
   const router = useRouter();
   const base = useCutBase();
+  const client = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,6 +28,10 @@ export function EmbeddedNewProject() {
     setBusy(true);
     setError(null);
     try {
+      // The card carries no upgrade wall, so the limit is said here.
+      if (!(await newProjectAllowed(client))) {
+        throw new Error("This account is at its free project limit. Upgrade to Pro in Donkey Cut to make more.");
+      }
       const aspect = lastChosenAspect() ?? undefined;
       const res = await cloudBackend.fetch("/api/cut/projects", {
         method: "POST",

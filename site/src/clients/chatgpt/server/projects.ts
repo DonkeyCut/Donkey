@@ -2,6 +2,7 @@ import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCreditBalance } from "@/lib/credits/inference";
 import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
+import { cloudProjectsFull } from "@/lib/billing/project-limit-server";
 import { isDonkeySuperUser } from "@/lib/super-user";
 import { normalizeAspect, type ProjectDoc } from "@/cut/lib/types";
 import { ADOPT_COMMAND, type AdoptedAsset } from "@/cut/lib/commandBatch";
@@ -431,6 +432,9 @@ export function projectTools(
       requireEdit();
       const frame = aspect ? normalizeAspect(aspect) : null;
       if (aspect && !frame) throw new ProjectToolError('aspect must be "W:H", like "9:16" or "16:9".');
+      if (await cloudProjectsFull(identity.userId)) {
+        throw new ProjectToolError("This account is at its free project limit. Upgrade to Pro in Donkey Cut to make more projects.");
+      }
       const now = Date.now();
       const doc: ProjectDoc = {
         version: 1,

@@ -31,7 +31,7 @@ import { cardIconButton } from "./iconButton";
 import { PillSelect } from "./PillSelect";
 import { GeneratedAssetMenu } from "./GeneratedAssetMenu";
 import { HostedErrorText } from "./hostedError";
-import { CostTag, NOT_ENOUGH_CREDITS, useGenerateCost } from "./GenerateCost";
+import { CostTag, generateButton, NOT_ENOUGH_CREDITS, useGenerateCost } from "./GenerateCost";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 // The generate-image panel: an always-on column in the Image tab, sitting left
@@ -106,6 +106,8 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
     if (!text) return;
     void useGenerate.getState().generateImage(projectId, text, { refs: all, aspect, resolution });
   };
+
+  const button = generateButton(cost, go);
 
   return (
     <div ref={attachTarget} {...targetProps} className="relative flex min-h-0 flex-1 flex-col">
@@ -183,8 +185,8 @@ export function ImageGenPanel({ projectId }: { projectId: string }) {
 
         <Button
           className="w-full shrink-0"
-          disabled={!prompt.trim() || signedIn === false || cost.short}
-          onClick={go}
+          disabled={!prompt.trim() || signedIn === false || button.blocked}
+          onClick={button.onClick}
         >
           <Sparkles data-icon="inline-start" />
           {cost.short ? NOT_ENOUGH_CREDITS : "Generate image"}
