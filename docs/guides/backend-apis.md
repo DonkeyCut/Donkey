@@ -55,9 +55,8 @@ challenge. OAuth tokens authorize only the tools exposed by that adapter.
   module reads files from the public folder, keep those bytes out of every other
   function with `outputFileTracingExcludes` in the Next config.
 - `process.env` holds secrets only: API keys, credentials, and other sensitive
-  deploy values. Configuration is code: a constant where one value fits every
-  install, or a settings registry entry with a default and a schema when
-  operators tune it at runtime (see the configuration guide). An env-var
+  deploy values. Configuration is code: a constant, or a settings registry
+  entry for a lever su runs. An env-var
   fallback like `process.env.SOME_MODEL ?? "default"` ships the feature dormant
   and hides the real value from readers.
 
