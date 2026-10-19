@@ -17,7 +17,7 @@ import { onUpgrade, openUpgrade, type UpgradeReason } from "@/cut/lib/upgrade";
 import { track } from "@/lib/analytics";
 import { creditCountLabel, creditsPerDollar } from "@/lib/credits/format-credits";
 import { useAccountConfig } from "@/queries/accountConfig";
-import { useIntroOffer, useProSubscription } from "@/queries/billing";
+import { useIntroOffer, useProSubscription, type IntroOffer } from "@/queries/billing";
 
 export function UpgradeDialog() {
   const [reason, setReason] = useState<UpgradeReason | null>(null);
@@ -122,7 +122,12 @@ function OpenDialog({
   const wall =
     reason === "projects"
       ? { icon: FolderPlus, title: "Upgrade to make more projects", body: projectsBody(projectLimit) }
-      : { icon: Zap, title: "You're out of credits", body: `Pro comes with ${credits} every month and 100 GB of cloud storage.` };
+      : {
+          icon: Zap,
+          title: "You're out of credits",
+          // An open offer prices Pro on its terms line.
+          body: `Upgrade to Pro and get ${credits} every month and 100 GB of cloud storage${offer ? "" : ` for ${CUT_PRO.price}`}.`,
+        };
 
   return (
     <OfferDialog
@@ -132,7 +137,7 @@ function OpenDialog({
       closesAt={offer?.endsAt}
       title={wall.title}
       body={wall.body}
-      terms={offer ? introTerms(offer) : `Pro is ${CUT_PRO.price}.`}
+      terms={wallTerms(reason, offer)}
       cta={
         <OfferButton disabled={upgrade.isPending} onClick={upgrade.start}>
           {upgrade.isPending && <Loader2 className="animate-spin" data-icon="inline-start" />}
@@ -142,6 +147,18 @@ function OpenDialog({
       secondary={<OfferDismiss onClick={onClose}>Not now</OfferDismiss>}
     />
   );
+}
+
+/** The terms line: an open offer's terms, else the price on the projects
+ * wall. The credits wall names the price in its message, so it has none. */
+function wallTerms(reason: UpgradeReason, offer: IntroOffer | null): string | undefined {
+  if (offer) {
+    return introTerms(offer);
+  }
+  if (reason === "projects") {
+    return `Pro is ${CUT_PRO.price}.`;
+  }
+  return undefined;
 }
 
 /** What the free plan holds, as the projects wall says it. */

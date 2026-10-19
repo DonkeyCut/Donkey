@@ -152,7 +152,8 @@ export function OfferDialog({
   closesAt?: string | null;
   title: React.ReactNode;
   body: React.ReactNode;
-  // The fine print under the message, on its own line.
+  // The fine print under the message, on its own line. Null holds the line
+  // empty while the terms load; left out, the card has no such line.
   terms?: React.ReactNode;
   // The one thing to do, full width.
   cta: React.ReactNode;
@@ -189,7 +190,9 @@ export function OfferDialog({
             <DialogDescription className="min-h-12 text-base leading-relaxed text-muted-foreground">
               {body}
             </DialogDescription>
-            <p className="min-h-[1lh] text-base leading-relaxed text-muted-foreground">{terms}</p>
+            {terms === undefined ? null : (
+              <p className="min-h-[1lh] text-base leading-relaxed text-muted-foreground">{terms}</p>
+            )}
           </DialogHeader>
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
           {/* The buttons keep the 21rem column of the narrower card. */}
