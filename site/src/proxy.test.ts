@@ -44,3 +44,21 @@ test("www canonicalizes to the product host", async () => {
   expect(res.status).toBe(308);
   expect(res.headers.get("location")).toBe("https://donkeycut.com/app/p/example");
 });
+
+test("a landing from an ad gets Meta's ids as first-party cookies", async () => {
+  const res = await proxy(request("https://donkeycut.com/?fbclid=abc"));
+  const set = res.headers.getSetCookie().join("\n");
+  expect(set).toMatch(/_fbp=fb\.1\.\d+\.\d{10};.*HttpOnly/);
+  expect(set).toMatch(/_fbc=fb\.1\.\d+\.abc;.*HttpOnly/);
+});
+
+test("API calls set no Meta cookies", async () => {
+  const res = await proxy(request("https://donkeycut.com/api/credits/balance"));
+  expect(res.headers.getSetCookie()).toEqual([]);
+});
+
+test("the page view beacon passes through", async () => {
+  const res = await proxy(request("https://donkeycut.com/p"));
+  expect(res.headers.get("x-middleware-next")).toBe("1");
+  expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+});

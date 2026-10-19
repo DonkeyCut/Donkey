@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
 import { DONKEYCUT_CANONICAL, isDonkeycutHost } from "@/cut/lib/hosts";
+import { META_COOKIE_MAX_AGE_S, metaCookies } from "@/lib/meta/identity";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
 // site app: the marketing landing at /cut and the app under /cut/app. The
@@ -61,6 +62,8 @@ const PASSTHROUGH = [
   "/sign-up",
   // Email-footer unsubscribe page; the back office's emails link here.
   "/unsubscribe",
+  // The first-party page view beacon (app/p/route.ts).
+  "/p",
 ];
 
 // Whole-segment prefix match, so "/cut" covers "/cut/…" but not "/cut-app".
@@ -69,6 +72,21 @@ const underPath = (pathname: string, prefix: string) =>
 
 const passesThrough = (pathname: string) =>
   PASSTHROUGH.some((p) => underPath(pathname, p));
+
+// Every page response gives the browser Meta's ids as first-party cookies the
+// server wrote (see lib/meta/identity.ts). Only the server reads them.
+function withMetaCookies(req: NextRequest, res: NextResponse): NextResponse {
+  for (const { name, value } of metaCookies(req.nextUrl, req.cookies, Date.now())) {
+    res.cookies.set(name, value, {
+      httpOnly: true,
+      maxAge: META_COOKIE_MAX_AGE_S,
+      path: "/",
+      sameSite: "lax",
+      secure: req.nextUrl.protocol === "https:",
+    });
+  }
+  return res;
+}
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -94,14 +112,16 @@ export function proxy(req: NextRequest) {
   }
 
   if (underPath(pathname, "/api")) return NextResponse.next();
-  if (passesThrough(pathname)) return NextResponse.next();
+  if (passesThrough(pathname)) {
+    return withMetaCookies(req, NextResponse.next());
+  }
 
   const url = new URL(req.url);
   url.pathname =
     pathname === "/sitemap.xml"
       ? "/cut/sitemap.xml"
       : `/cut${pathname === "/" ? "" : pathname}`;
-  return NextResponse.rewrite(url);
+  return withMetaCookies(req, NextResponse.rewrite(url));
 }
 
 export const config = {

@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 import { QueryProvider } from "@/queries/QueryProvider";
+import { MetaPageView } from "./_components/MetaPageView";
 import { PostHogProvider } from "./_components/PostHogProvider";
 
 export const metadata: Metadata = {
@@ -44,6 +46,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <PostHogProvider>
           <QueryProvider>{children}</QueryProvider>
+          <Suspense fallback={null}>
+            <MetaPageView />
+          </Suspense>
         </PostHogProvider>
       </body>
     </html>
