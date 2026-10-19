@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { auth } from "@/lib/auth";
+import { metaCheckoutMetadata, trackCheckoutStarted } from "@/lib/billing/meta-checkout";
 import { ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
 import { creditCountLabel, creditsPerDollar } from "@/lib/credits/format-credits";
 import {
@@ -74,7 +75,7 @@ export const POST = withDonkeyAuth(async (request) => {
         quantity: 1,
       },
     ],
-    metadata,
+    metadata: { ...metadata, ...metaCheckoutMetadata(request.headers) },
     mode: "payment",
     payment_intent_data: { metadata, setup_future_usage: "off_session" },
     success_url: `${origin}/app/settings?topup=success`,
@@ -87,5 +88,6 @@ export const POST = withDonkeyAuth(async (request) => {
     );
   }
 
+  trackCheckoutStarted(checkout.id, "Credits", request.headers, session.user);
   return NextResponse.json({ url: checkout.url });
 });

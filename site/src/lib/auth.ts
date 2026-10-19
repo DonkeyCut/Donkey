@@ -4,6 +4,7 @@ import { nextCookies } from "better-auth/next-js";
 import { bearer } from "better-auth/plugins";
 
 import { AUTH_COOKIE_DOMAIN, AUTH_SUBDOMAINS, DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import { trackSignup } from "@/lib/meta/signup";
 import { provisionSignupGrants } from "@/lib/onboarding/signup-grants";
 import { prisma } from "@/lib/prisma";
 import { emailPasswordDisabledPaths, emailPasswordGuard, emailPasswordOptions } from "@/lib/email-password-auth";
@@ -67,13 +68,15 @@ export const auth = betterAuth({
         // creation. The request's headers carry the network the signup came
         // from.
         after: async (user, context) => {
+          const headers = context?.headers ?? context?.request?.headers;
           await provisionSignupGrants(
             {
               email: user.email,
               id: user.id,
             },
-            context?.headers ?? context?.request?.headers,
+            headers,
           );
+          trackSignup(user, headers);
         },
       },
     },

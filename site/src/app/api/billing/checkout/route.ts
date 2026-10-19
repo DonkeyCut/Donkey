@@ -4,6 +4,7 @@ import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { introCouponId } from "@/lib/billing/intro-offer";
 import { introCoupon, readIntroOffer } from "@/lib/billing/intro-offer-server";
+import { metaCheckoutMetadata, trackCheckoutStarted } from "@/lib/billing/meta-checkout";
 import { proPriceId } from "@/lib/billing/pro-subscription";
 import { ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
 import { contextFromRequest } from "@/lib/config/effective";
@@ -63,6 +64,7 @@ export const POST = withDonkeyAuth(async (request) => {
     client_reference_id: session.user.id,
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
+    metadata: metaCheckoutMetadata(request.headers),
     mode: "subscription",
     subscription_data: {
       metadata: {
@@ -81,5 +83,6 @@ export const POST = withDonkeyAuth(async (request) => {
     );
   }
 
+  trackCheckoutStarted(checkout.id, "Pro", request.headers, session.user);
   return NextResponse.json({ url: checkout.url });
 });

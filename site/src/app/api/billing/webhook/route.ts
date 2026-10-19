@@ -7,6 +7,7 @@ import {
   handleCreditTopUpCheckout,
   handleCreditTopUpPaymentSucceeded,
 } from "@/lib/billing/credit-purchases";
+import { trackCheckoutPurchase } from "@/lib/billing/meta-checkout";
 import {
   subscriptionIsPro,
   syncProSubscription,
@@ -64,6 +65,13 @@ export async function POST(request: Request) {
         // A one-time credit top-up (mode=payment) has no subscription.
         await handleCreditTopUpCheckout(stripe, checkoutSession);
       }
+      trackCheckoutPurchase(checkoutSession);
+      break;
+    }
+    case "checkout.session.async_payment_succeeded": {
+      // A delayed payment method settled; the credits land through
+      // payment_intent.succeeded, and the purchase is reported here.
+      trackCheckoutPurchase(event.data.object);
       break;
     }
     case "payment_intent.succeeded": {
