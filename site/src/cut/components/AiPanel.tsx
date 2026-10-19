@@ -100,7 +100,6 @@ import {
   type AssetRef,
 } from "@/cut/lib/assetRef";
 import {
-  creditsUrl,
   useGenerate,
   useSignedIn,
 } from "@/cut/lib/generate";
@@ -148,7 +147,7 @@ import { ComposerQueue, type QueuedMessage } from "./ComposerQueue";
 import { DictationBody } from "./MicDictation";
 import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
 import { attachedRefKeys, cardIsAttached } from "@/cut/lib/chatCards";
-import { HostedErrorText } from "./hostedError";
+import { HostedErrorText, openCreditsWall } from "./hostedError";
 import { useMicTranscription } from "@/cut/lib/micTranscribe";
 
 // Chat attachments are asset refs — anything in the project, the library, or
@@ -2176,23 +2175,22 @@ function ChatSession({
             className="pointer-events-none absolute inset-x-0 bottom-full z-10 -mb-1 flex flex-col"
           >
             {outOfCredits && (
-              <a
+              <button
+                type="button"
                 className={cn(
-                  "ai-credits-tab pointer-events-auto mx-1.5 flex items-center gap-1.5 rounded-t-lg border border-b-0 border-amber-500/30 bg-amber-50 px-3 pt-1.5 pb-2.5 text-[11px] text-amber-800",
+                  "ai-credits-tab pointer-events-auto mx-1.5 flex cursor-pointer items-center gap-1.5 rounded-t-lg border border-b-0 border-amber-500/30 bg-amber-50 px-3 pt-1.5 pb-2.5 text-[11px] text-amber-800",
                   // With the tray below, the tab tucks under it the same way
                   // the stack tucks under the composer.
                   trayVisible && "-mb-1",
                 )}
-                href={creditsUrl()}
-                target="_blank"
-                rel="noreferrer"
+                onClick={openCreditsWall}
               >
                 <TriangleAlert className="size-3 shrink-0" />
                 <span>
                   Insufficient credits —{" "}
                   <span className="font-medium underline">reload credits</span>
                 </span>
-              </a>
+              </button>
             )}
             {!outOfCredits && notice && (
               // The credits tab's folder shape, borrowed for transient
