@@ -23,6 +23,44 @@ export type OfferBanner = keyof typeof OFFER_BANNERS;
 const isOfferBanner = (value: unknown): value is OfferBanner =>
   typeof value === "string" && value in OFFER_BANNERS;
 
+// Each picture decodes once per page; the card waits on it, so it never opens
+// with an empty banner that fills in a beat later. A picture that fails to
+// load still lets the card open.
+const bannerLoads = new Map<OfferBanner, Promise<void>>();
+
+/** Fetches and decodes an offer picture ahead of the card that shows it. */
+export function preloadBanner(banner: OfferBanner): Promise<void> {
+  let load = bannerLoads.get(banner);
+  if (!load) {
+    const img = document.createElement("img");
+    img.src = OFFER_BANNERS[banner];
+    load = img.decode().catch(() => undefined);
+    bannerLoads.set(banner, load);
+  }
+  return load;
+}
+
+/** Whether the card's picture is ready to paint; a banner of the caller's
+ * own is always ready. */
+function useBannerReady(banner: OfferBanner | null): boolean {
+  const [loaded, setLoaded] = useState<OfferBanner | null>(null);
+  useEffect(() => {
+    if (!banner) {
+      return;
+    }
+    let live = true;
+    void preloadBanner(banner).then(() => {
+      if (live) {
+        setLoaded(banner);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [banner]);
+  return banner === null || loaded === banner;
+}
+
 /** A day as the card names it: "September 30". */
 export function offerDay(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "long" });
@@ -122,8 +160,9 @@ export function OfferDialog({
   secondary?: React.ReactNode;
   error?: React.ReactNode;
 }) {
+  const ready = useBannerReady(isOfferBanner(banner) ? banner : null);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open && ready} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
         className="gap-0 overflow-hidden rounded-lg bg-background p-0 sm:max-w-[28.8rem]"
@@ -136,6 +175,7 @@ export function OfferDialog({
               className="aspect-[8/3] w-full object-cover"
               width={1584}
               height={672}
+              unoptimized
               priority
             />
           ) : (

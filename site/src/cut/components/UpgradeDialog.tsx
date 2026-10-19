@@ -9,7 +9,7 @@ import { FolderPlus, Loader2, Zap } from "lucide-react";
 
 import { CUT_PRO } from "@/app/cut/_components/landing/cutPricingPlans";
 import { introTerms, wallBanner } from "@/cut/components/IntroOffer";
-import { OfferButton, OfferDialog, OfferDismiss } from "@/cut/components/OfferDialog";
+import { OfferButton, OfferDialog, OfferDismiss, preloadBanner } from "@/cut/components/OfferDialog";
 import { useCutBase } from "@/cut/lib/nav";
 import { onOperationFailure } from "@/cut/lib/operationFailure";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
@@ -68,6 +68,13 @@ function OpenDialog({
   const base = useCutBase();
   const router = useRouter();
   const ready = pro.isSuccess && (isPro || !intro.isPending);
+
+  // Either picture may head the card: credits for a Pro account, the offer's
+  // while an intro discount is open. Both load beside the billing reads.
+  useEffect(() => {
+    void preloadBanner("credits");
+    void preloadBanner("subscribe");
+  }, []);
 
   useEffect(() => {
     if (!ready) {
