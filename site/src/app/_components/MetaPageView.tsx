@@ -3,10 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 
-import { UNTRACKED_PAGES } from "@/lib/meta/identity";
-
-// The first-party route that reports a page view to Meta (app/p/route.ts).
-const BEACON_PATH = "/p";
+import { BEACON_PATH, UNTRACKED_PAGES } from "@/lib/meta/identity";
 
 // Reports each page the browser shows to Meta through this site's own server.
 // Production builds only, like the rest of analytics.

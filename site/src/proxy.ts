@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
 import { DONKEYCUT_CANONICAL, isDonkeycutHost } from "@/cut/lib/hosts";
-import { META_COOKIE_MAX_AGE_S, metaCookies } from "@/lib/meta/identity";
+import { BEACON_PATH, META_COOKIE_MAX_AGE_S, metaCookies } from "@/lib/meta/identity";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
 // site app: the marketing landing at /cut and the app under /cut/app. The
@@ -63,7 +63,7 @@ const PASSTHROUGH = [
   // Email-footer unsubscribe page; the back office's emails link here.
   "/unsubscribe",
   // The first-party page view beacon (app/p/route.ts).
-  "/p",
+  BEACON_PATH,
 ];
 
 // Whole-segment prefix match, so "/cut" covers "/cut/…" but not "/cut-app".
@@ -74,9 +74,11 @@ const passesThrough = (pathname: string) =>
   PASSTHROUGH.some((p) => underPath(pathname, p));
 
 // Every page response gives the browser Meta's ids as first-party cookies the
-// server wrote (see lib/meta/identity.ts). Only the server reads them.
+// server wrote (see lib/meta/identity.ts). Only the server reads them. Each
+// page view's beacon renews them, so they last 90 days past the last visit.
 function withMetaCookies(req: NextRequest, res: NextResponse): NextResponse {
-  for (const { name, value } of metaCookies(req.nextUrl, req.cookies, Date.now())) {
+  const scope = req.nextUrl.pathname === BEACON_PATH ? "renew" : "new";
+  for (const { name, value } of metaCookies(req.nextUrl, req.cookies, Date.now(), scope)) {
     res.cookies.set(name, value, {
       httpOnly: true,
       maxAge: META_COOKIE_MAX_AGE_S,

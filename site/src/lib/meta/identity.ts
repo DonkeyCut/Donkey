@@ -19,8 +19,11 @@ const CLICK_ID = /^[A-Za-z0-9_-]{1,500}$/;
 // For example fb.1.1760000000000.1234567890.
 const ID_PREFIX = "fb.1";
 
-// Meta keeps the ids for 90 days.
+// Meta keeps the ids for 90 days after a browser's last page view.
 export const META_COOKIE_MAX_AGE_S = 90 * 24 * 60 * 60;
+
+// The first-party route every page view reports through (app/p/route.ts).
+export const BEACON_PATH = "/p";
 
 // The pages that never report a page view: the editor, the shared player, and
 // the unsubscribe page, whose addresses carry project ids and tokens.
@@ -30,16 +33,24 @@ type CookieValue = { name: string; value: string };
 
 type CookieReader = { get(name: string): { value: string } | undefined };
 
+// "new" writes only the ids a browser lacks. "renew" also writes back the ids
+// it holds, so their 90 days restart; the page view beacon renews, page loads
+// stay free of cookie headers for a returning browser.
+export type MetaCookieScope = "new" | "renew";
+
 /**
- * The id cookies a page response sets: a browser id the first time a browser
+ * The id cookies a response sets: a browser id the first time a browser
  * arrives, and a click id whenever it lands from an ad with a click it has not
- * seen. A browser that already holds both gets none.
+ * seen, plus the held ids when the scope renews them.
  */
-export function metaCookies(url: URL, cookies: CookieReader, now: number): CookieValue[] {
+export function metaCookies(url: URL, cookies: CookieReader, now: number, scope: MetaCookieScope): CookieValue[] {
   const set: CookieValue[] = [];
 
-  if (!cookies.get(BROWSER_ID_COOKIE)) {
+  const browserId = cookies.get(BROWSER_ID_COOKIE)?.value;
+  if (!browserId) {
     set.push({ name: BROWSER_ID_COOKIE, value: `${ID_PREFIX}.${now}.${randomDigits()}` });
+  } else if (scope === "renew") {
+    set.push({ name: BROWSER_ID_COOKIE, value: browserId });
   }
 
   // A new ad click replaces the old one; the same click reloaded keeps its
@@ -48,6 +59,8 @@ export function metaCookies(url: URL, cookies: CookieReader, now: number): Cooki
   const held = cookies.get(CLICK_ID_COOKIE)?.value;
   if (click && CLICK_ID.test(click) && !held?.endsWith(`.${click}`)) {
     set.push({ name: CLICK_ID_COOKIE, value: `${ID_PREFIX}.${now}.${click}` });
+  } else if (held && scope === "renew") {
+    set.push({ name: CLICK_ID_COOKIE, value: held });
   }
 
   return set;

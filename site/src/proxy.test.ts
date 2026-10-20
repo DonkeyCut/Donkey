@@ -4,8 +4,8 @@ import nextConfig from "../next.config";
 import { proxy } from "./proxy";
 
 // skipProxyUrlNormalize supplies the original URL to the proxy at runtime.
-function request(url: string) {
-  const req = new NextRequest(url, { headers: { host: new URL(url).host } });
+function request(url: string, cookie = "") {
+  const req = new NextRequest(url, { headers: { cookie, host: new URL(url).host } });
   Object.defineProperty(req, "url", { value: url });
   return req;
 }
@@ -61,4 +61,16 @@ test("the page view beacon passes through", async () => {
   const res = await proxy(request("https://donkeycut.com/p"));
   expect(res.headers.get("x-middleware-next")).toBe("1");
   expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+});
+
+test("the page view beacon restarts the ids' 90 days", async () => {
+  const res = await proxy(request("https://donkeycut.com/p", "_fbp=fb.1.1.1234567890; _fbc=fb.1.2.abc"));
+  const set = res.headers.getSetCookie().join("\n");
+  expect(set).toMatch(/_fbp=fb\.1\.1\.1234567890;.*Max-Age=7776000/);
+  expect(set).toMatch(/_fbc=fb\.1\.2\.abc;.*Max-Age=7776000/);
+});
+
+test("a page a returning browser opens leaves its ids alone", async () => {
+  const res = await proxy(request("https://donkeycut.com/", "_fbp=fb.1.1.1234567890"));
+  expect(res.headers.getSetCookie()).toEqual([]);
 });
