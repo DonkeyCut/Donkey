@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ChevronRight, Maximize2, Search } from "lucide-react";
 import { clearRefDrag, refFromStockVideo, setRefDragData } from "@/cut/lib/assetRef";
 import { useRefCopy } from "@/cut/lib/refCopy";
+import { useHoverPlay } from "@/cut/hooks/useHoverPlay";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
 import { useLightbox } from "@/cut/lib/lightbox";
 import { useRevealEffect, useRevealFlash } from "@/cut/lib/refReveal";
@@ -211,7 +212,7 @@ function Grid({ items }: { items: StockVideo[] }) {
  * (footage as an editable prompt, a character as character mode), and it drags
  * as a video ref (chat attachment, generation start frame, timeline drop). */
 function StockTile({ item }: { item: StockVideo }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const { ref: videoRef, handlers: hoverPlay } = useHoverPlay(0);
   const { flash, attachReveal } = useRevealFlash("stock", item.id);
   const copyRef = useRefCopy(() => [refFromStockVideo(item)]);
   return (
@@ -224,25 +225,7 @@ function StockTile({ item }: { item: StockVideo }) {
         "group relative overflow-hidden rounded-lg",
         flash && PICKED_RING
       )}
-      onMouseEnter={() => {
-        const v = videoRef.current;
-        if (!v) return;
-        // Preview with sound; if the browser blocks unmuted autoplay, fall
-        // back to a silent preview.
-        v.muted = false;
-        void v.play().catch(() => {
-          v.muted = true;
-          void v.play().catch(() => {});
-        });
-      }}
-      onMouseLeave={() => {
-        const v = videoRef.current;
-        if (v) {
-          v.pause();
-          v.currentTime = 0;
-          v.muted = true;
-        }
-      }}
+      {...hoverPlay}
     >
       <button
         className={cn("block w-full", FOCUS_RING)}

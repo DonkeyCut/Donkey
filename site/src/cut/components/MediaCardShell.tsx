@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, type ReactNode, type RefObject } from "react";
+import { type ReactNode, type RefObject } from "react";
 import type { AssetRef, AssetRefScope } from "@/cut/lib/assetRef";
 import { clearAssetDrag } from "@/cut/lib/assetDrag";
 import { useLightbox, type LightboxItem } from "@/cut/lib/lightbox";
 import { useRevealFlash } from "@/cut/lib/refReveal";
 import { useRefCopy } from "@/cut/lib/refCopy";
+import { useHoverPlay } from "@/cut/hooks/useHoverPlay";
 
 /** The card behind every media tile: a Project Files card and a Library card
  * draw their own faces inside it, and this is the one place that says what a
@@ -51,7 +52,7 @@ export function MediaCardShell({
   }) => ReactNode;
 }) {
   const { flash, attachReveal } = useRevealFlash(scope, id);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const { ref: videoRef, handlers: hoverPlay } = useHoverPlay(restTime, "silent");
   const copyRef = useRefCopy(refs);
   return (
     <div
@@ -81,17 +82,8 @@ export function MediaCardShell({
       }
       onDragStart={onDragStart}
       onDragEnd={clearAssetDrag}
-      onMouseEnter={() => {
-        onHover?.();
-        void videoRef.current?.play().catch(() => {});
-      }}
-      onMouseLeave={() => {
-        const v = videoRef.current;
-        if (v) {
-          v.pause();
-          v.currentTime = restTime;
-        }
-      }}
+      onMouseEnter={onHover}
+      {...hoverPlay}
     >
       {children({ flash, videoRef })}
     </div>

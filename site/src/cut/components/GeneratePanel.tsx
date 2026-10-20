@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Copy, Film, Loader2, Maximize2, Plus, RotateCw, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { useHoverPlay } from "@/cut/hooks/useHoverPlay";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { clearAssetDrag, setAssetDragData } from "@/cut/lib/assetDrag";
 import { FOCUS_RING, PICKED_RING, useAssetPick } from "@/cut/lib/assetPick";
@@ -322,7 +323,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
   const pulse = useGenPulse("video", job.assetId);
   const elapsed = useElapsed(job.status === "running" ? job.startedAt : null);
   const tileRef = useRef<HTMLDivElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const { ref: videoRef, handlers: hoverPlay } = useHoverPlay();
   const { picked, pick } = useAssetPick(job.assetId ?? "");
   // Render history keeps every settled job; a preview loads only on screen.
   const [inViewRef, seen] = useInView<HTMLButtonElement>();
@@ -386,25 +387,7 @@ function JobRow({ job, handle }: { job: GenerateJob; handle?: string }) {
       ref={tileRef}
       data-pick-id={job.assetId ?? undefined}
       className={cn("gen-job group relative overflow-hidden rounded-lg", picked && PICKED_RING)}
-      onMouseEnter={() => {
-        const v = videoRef.current;
-        if (!v) return;
-        // Preview with sound; if the browser blocks unmuted autoplay, fall
-        // back to a silent preview.
-        v.muted = false;
-        void v.play().catch(() => {
-          v.muted = true;
-          void v.play().catch(() => {});
-        });
-      }}
-      onMouseLeave={() => {
-        const v = videoRef.current;
-        if (v) {
-          v.pause();
-          v.currentTime = 0.1;
-          v.muted = true;
-        }
-      }}
+      {...hoverPlay}
     >
       <button
         ref={inViewRef}

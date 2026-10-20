@@ -62,6 +62,7 @@ import {
   type Residency,
 } from "@/cut/lib/queries";
 import { useDeleteKey } from "@/cut/hooks/useDeleteKey";
+import { useHoverPlay } from "@/cut/hooks/useHoverPlay";
 import { useInView } from "@/cut/hooks/useInView";
 import { useTabTitle } from "@/cut/hooks/useTabTitle";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
@@ -1290,7 +1291,10 @@ function CardPreview({
   residency: Residency;
   offline?: boolean;
 }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  // The proxy starts at the edit's first frame; the source starts at the clip's
+  // trim-in, so both posters show what actually plays first.
+  const posterT = p.hasPreview ? 0 : p.previewStart ?? 0.1;
+  const { ref: videoRef, handlers: hoverPlay } = useHoverPlay(posterT, "silent");
   const [tileRef, seen] = useInView<HTMLDivElement>();
   // The frame this card drew last time, so coming back from a project shows the
   // picture at once instead of a grey rectangle while the media loads.
@@ -1355,10 +1359,6 @@ function CardPreview({
     );
   }
 
-  // The proxy starts at the edit's first frame; the source starts at the clip's
-  // trim-in, so both posters show what actually plays first.
-  const posterT = p.hasPreview ? 0 : p.previewStart ?? 0.1;
-
   // A still-image project with no rendered proxy posters as the image itself.
   if (!p.hasPreview && p.previewIsImage) {
     return (
@@ -1381,14 +1381,7 @@ function CardPreview({
     <div
       ref={tileRef}
       className="absolute inset-0"
-      onMouseEnter={() => void videoRef.current?.play().catch(() => {})}
-      onMouseLeave={() => {
-        const v = videoRef.current;
-        if (v) {
-          v.pause();
-          v.currentTime = posterT;
-        }
-      }}
+      {...hoverPlay}
     >
       {seen && (
         <video
