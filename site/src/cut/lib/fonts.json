@@ -48,6 +48,12 @@
     "note": "Black only: the heavy geometric face of a reference's font cycle."
   },
   {
+    "id": "antonio",
+    "family": "Antonio",
+    "weights": [700],
+    "note": "Bold only: the tall condensed face of a lyric template's big words."
+  },
+  {
     "family": "Roboto",
     "weights": [400, 500, 600, 700],
     "aliases": [

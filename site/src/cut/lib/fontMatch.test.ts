@@ -181,4 +181,14 @@ describe("faces off a reference frame", () => {
     expect(ranked[0].score).toBeGreaterThanOrEqual(good);
     expect(ranked.find((m) => m.font !== "prompt")!.score).toBeLessThan(good);
   });
+
+  test("a lyric template's tall condensed word matches Antonio Bold", async () => {
+    // "ALIVE" in red over pink, 280 px of a 720 px frame. Before Antonio was
+    // bundled the closest face was Anton at 0.716, and only at a tracking
+    // tight enough to run its letters into each other.
+    const ranked = await rankFaces(await frameInk("condensed-bold-alive.webp"), "ALIVE", catalog, fontStack);
+    expect(ranked[0]).toMatchObject({ font: "antonio", weight: 700 });
+    expect(ranked[0].score).toBeGreaterThanOrEqual(good);
+    expect(ranked.find((m) => m.font === "anton")!.score).toBeLessThan(ranked[0].score);
+  });
 });
