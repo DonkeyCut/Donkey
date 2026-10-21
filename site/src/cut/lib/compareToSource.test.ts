@@ -397,3 +397,21 @@ test("a moment no decoder reads names the second and the decoder's own words", a
   expect(error).toContain("3s");
   expect(error).toContain("Decoding error.");
 });
+
+test("a silent cut held up to a reference with sound says so", async () => {
+  // A blocked-out replica built from titles and shapes plays nothing; the
+  // reference's sound is what its cuts were timed to.
+  useEditor.getState().updateAsset("ref", { watch: { heard: [{ from: 0, to: 33 }] } as never });
+  const out = (await runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 1, step: 0.5 })) as { note: string };
+  expect(out.note).toContain("plays no sound");
+  expect(out.note).toContain("detach_audio");
+  // A reference kept off the timelines still lends its sound.
+  expect(out.note).toContain("its picture stays off every timeline");
+  const look = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1] })) as { note: string };
+  expect(look.note).toContain("plays no sound");
+
+  // With the reference's track on the soundtrack, nothing is said.
+  useEditor.setState({ audioClips: [{ id: "a1", assetId: "ref", start: 0, in: 0, out: 33.17, volume: 1, lane: 0 }] as never });
+  const heard = (await runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 1, step: 0.5 })) as { note: string };
+  expect(heard.note).not.toContain("plays no sound");
+});

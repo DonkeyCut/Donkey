@@ -7,6 +7,8 @@
 export const DETECT_CUTS_SPAN_MAX = 120;
 /** detect_cuts: cuts reported per call. */
 export const DETECT_CUTS_MAX = 80;
+/** detect_cuts: changes inside shots reported per call. */
+export const DETECT_CHANGES_MAX = 120;
 /** sample_color: regions read per call. */
 export const SAMPLE_COLOR_MAX = 24;
 /** sample_color: dominant colours per region. */

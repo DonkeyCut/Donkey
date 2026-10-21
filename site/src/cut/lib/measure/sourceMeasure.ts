@@ -9,7 +9,7 @@ import { openMedia, UnreadableMediaError, videoTrackOf, type FrameSize } from ".
 import { createRasterCanvas, decodeRasterImageUrl } from "../raster";
 import type { WrappedCanvas } from "mediabunny";
 import { hexOf, regionColor, parseHex, type PixelRect, type Pixels, type Rgb } from "./color";
-import { changePct, gridMeans, pickCuts } from "./cuts";
+import { frameStep, gridsOf, pickShotEdges, type FrameGrids, type FrameStep, type ShotChange } from "./cuts";
 import { fitMoves, type Move } from "./easeFit";
 import { FULL_FRAME, areaOf, findPictureBox, intoArea, type PictureFind } from "./picture";
 import { inkBox, shapeBox } from "./track";
@@ -22,9 +22,9 @@ export interface FrameBox {
   h: number;
 }
 
-/** Every frame of a cut scan is this small: a cut changes the whole picture,
- * and 64² holds the 16-grid the scorer reads at four pixels a cell. */
-const SCAN_SIZE: FrameSize = { width: 64, height: 64, fit: "fill" };
+/** Every frame of a cut scan is this small: 128² holds the 32-grid a word
+ * appearing is read on at four pixels a cell, and the 16-grid a cut is. */
+const SCAN_SIZE: FrameSize = { width: 128, height: 128, fit: "fill" };
 /** Long side colours are read at: a 1080p source's own pixels. */
 const COLOR_LONG_SIDE = 1920;
 /** Long side elements are tracked at: a pixel is 0.14% of the frame. */
@@ -151,6 +151,9 @@ export interface CutScan {
   fps: number;
   frames: number;
   cuts: { t: number; frame: number; change: number }[];
+  /** Changes inside the shots: a word or a shape coming, going or swapping
+   * style over a picture that stays. */
+  changes: (Omit<ShotChange, "frame"> & { t: number; frame: number })[];
   coveredTo: number;
   truncated: boolean;
 }
@@ -160,7 +163,7 @@ export interface CutScan {
  * budget, and `coveredTo` says where the next pass picks up. */
 export async function scanCuts(
   url: string,
-  opts: { from: number; to: number; maxCuts: number; budgetMs: number; area?: FrameBox }
+  opts: { from: number; to: number; maxCuts: number; maxChanges: number; budgetMs: number; area?: FrameBox }
 ): Promise<CutScan> {
   return withSourceVideo(url, async (v) => {
     // Inside a picture box, the frame is read big enough that the box alone
@@ -174,16 +177,16 @@ export async function scanCuts(
     const deadline = Date.now() + opts.budgetMs;
     const times: number[] = [];
     const durations: number[] = [];
-    const scores: number[] = [];
-    let prev: Float32Array | null = null;
+    const steps: FrameStep[] = [];
+    let prev: FrameGrids | null = null;
     let outOfTime = false;
     for await (const f of v.frames(Math.max(0, opts.from - LEAD_S), opts.to, size)) {
       if (Date.now() > deadline) {
         outOfTime = true;
         break;
       }
-      const grid = gridMeans(opts.area ? cropPixels(f, toPixels(f, area)) : f);
-      scores.push(prev ? changePct(prev, grid) : NaN);
+      const grid = gridsOf(opts.area ? cropPixels(f, toPixels(f, area)) : f);
+      steps.push(prev ? frameStep(prev, grid) : { pct: NaN, faint: NaN, fine: NaN, box: null });
       times.push(f.t);
       durations.push(f.duration);
       prev = grid;
@@ -191,20 +194,30 @@ export async function scanCuts(
     if (times.length === 0) throw new Error("Could not read any frames in that span.");
 
     const fps = rateOf(times, durations);
-    const picked = pickCuts(scores);
-    const kept = picked.slice(0, opts.maxCuts);
-    const capped = picked.length > kept.length;
-    // A capped pass ends on the frame before the first cut it leaves out, so
-    // the next pass scores that cut against it.
-    const coveredTo = capped ? times[picked[kept.length] - 1] : outOfTime ? times[times.length - 1] : opts.to;
+    const { cuts: picked, changes: found } = pickShotEdges(steps);
+
+    // A capped pass ends on the frame before the first cut or change it
+    // leaves out, so the next pass scores that one against it.
+    const firstLeftOut = Math.min(
+      picked.length > opts.maxCuts ? picked[opts.maxCuts] : Infinity,
+      found.length > opts.maxChanges ? found[opts.maxChanges].frame : Infinity
+    );
+    const capped = Number.isFinite(firstLeftOut);
+    const coveredTo = capped ? times[firstLeftOut - 1] : outOfTime ? times[times.length - 1] : opts.to;
+    const frameOf = (i: number) => (fps > 0 ? Math.round((times[i] - v.first) * fps) : i);
     return {
       fps,
       frames: times.length,
-      cuts: kept.map((i) => ({
-        t: times[i],
-        frame: fps > 0 ? Math.round((times[i] - v.first) * fps) : i,
-        change: Math.round(scores[i]),
-      })),
+      cuts: picked
+        .filter((i) => i < firstLeftOut)
+        .map((i) => ({
+          t: times[i],
+          frame: frameOf(i),
+          change: Math.round(steps[i].pct),
+        })),
+      changes: found
+        .filter((c) => c.frame < firstLeftOut)
+        .map((c) => ({ ...c, t: times[c.frame], frame: frameOf(c.frame), change: Math.round(c.change * 10) / 10 })),
       coveredTo,
       truncated: capped || outOfTime,
     };

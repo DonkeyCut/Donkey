@@ -17,6 +17,16 @@ export const CUT_TUNING = {
   SPIKE: 3,
   /** Frames either side a cut is judged against. */
   NEIGHBOURS: 3,
+  /** Per-channel step a flat fill takes when it cuts to a near colour (a dark
+   * green to a slightly lighter one): under CELL_TOL, over grain. */
+  FAINT_TOL: 6,
+  /** % of cells that must take that faint step together to make a cut. */
+  FAINT_ALL: 90,
+  /** Cells per side of the finer grid changes inside a shot are read on: a
+   * word or a small shape covers a few of its cells. */
+  FINE_GRID: 32,
+  /** % of the fine grid a change inside a shot covers at least. */
+  CHANGE_MIN: 0.3,
 };
 
 /** Per-cell channel means of an RGBA frame on a GRID×GRID grid. */
@@ -52,26 +62,172 @@ export const changePct = (a: Float32Array, b: Float32Array): number => diffCellP
  * the same large change every frame — is not one, and a one-frame shot keeps
  * both of its cuts because one high neighbour never moves the median. */
 export function pickCuts(scores: number[]): number[] {
-  const { MIN_CHANGE, SPIKE, NEIGHBOURS } = CUT_TUNING;
+  const { MIN_CHANGE, SPIKE } = CUT_TUNING;
   const cuts: number[] = [];
   for (let i = 0; i < scores.length; i++) {
     const s = scores[i];
     if (!(s >= MIN_CHANGE)) {
       continue;
     }
-
-    // The neighbours on both sides that have a score of their own.
-    const around: number[] = [];
-    for (let j = Math.max(0, i - NEIGHBOURS); j <= Math.min(scores.length - 1, i + NEIGHBOURS); j++) {
-      if (j !== i && Number.isFinite(scores[j])) {
-        around.push(scores[j]);
-      }
-    }
-    around.sort((a, b) => a - b);
-    const median = around.length === 0 ? 0 : around[Math.floor((around.length - 1) / 2)];
-    if (s >= SPIKE * median) {
+    if (s >= SPIKE * neighbourMedian(scores, i)) {
       cuts.push(i);
     }
   }
   return cuts;
+}
+
+/** A box as centre and size, fractions of the scanned picture. */
+export interface ChangeBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** One frame reduced for scoring: the cut grid and the finer change grid. */
+export interface FrameGrids {
+  coarse: Float32Array;
+  fine: Float32Array;
+}
+
+/** What a frame changed from the one before: `pct` of the cut grid past the
+ * hard tolerance, `faint` of it past the faint one, `fine` of the fine grid
+ * past the hard tolerance, and the box around those fine cells. */
+export interface FrameStep {
+  pct: number;
+  faint: number;
+  fine: number;
+  box: ChangeBox | null;
+}
+
+/** A change inside a shot: from frame `frame` for `frames` frames, the most
+ * of the picture it changed in one frame (`change`, %) and where. */
+export interface ShotChange {
+  frame: number;
+  frames: number;
+  change: number;
+  box: ChangeBox;
+}
+
+export const gridsOf = (px: Pixels): FrameGrids => ({
+  coarse: gridMeans(px),
+  fine: gridMeans(px, CUT_TUNING.FINE_GRID),
+});
+
+/** The fine cells that changed between two frames, and the box around them. */
+function fineChange(a: Float32Array, b: Float32Array): { pct: number; box: ChangeBox | null } {
+  const grid = CUT_TUNING.FINE_GRID;
+  let n = 0;
+  let x0 = grid;
+  let x1 = -1;
+  let y0 = grid;
+  let y1 = -1;
+  for (let c = 0; c < grid * grid; c++) {
+    const i = c * 3;
+    const d = Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2]));
+    if (d <= CUT_TUNING.CELL_TOL) {
+      continue;
+    }
+    n++;
+    const gx = c % grid;
+    const gy = Math.floor(c / grid);
+    x0 = Math.min(x0, gx);
+    x1 = Math.max(x1, gx);
+    y0 = Math.min(y0, gy);
+    y1 = Math.max(y1, gy);
+  }
+  if (n === 0) {
+    return { pct: 0, box: null };
+  }
+  const box = { x: (x0 + x1 + 1) / 2 / grid, y: (y0 + y1 + 1) / 2 / grid, w: (x1 - x0 + 1) / grid, h: (y1 - y0 + 1) / grid };
+  return { pct: (100 * n) / (grid * grid), box };
+}
+
+/** How `next` differs from `prev` on both grids. */
+export function frameStep(prev: FrameGrids, next: FrameGrids): FrameStep {
+  const fine = fineChange(prev.fine, next.fine);
+  return {
+    pct: changePct(prev.coarse, next.coarse),
+    faint: diffCellPct(prev.coarse, next.coarse, CUT_TUNING.FAINT_TOL),
+    fine: fine.pct,
+    box: fine.box,
+  };
+}
+
+/** The median of the scores within NEIGHBOURS of `i`, skipping `i`, frames
+ * with no score, and any index `skip` holds. */
+function neighbourMedian(scores: number[], i: number, skip?: Set<number>): number {
+  const around: number[] = [];
+  for (let j = Math.max(0, i - CUT_TUNING.NEIGHBOURS); j <= Math.min(scores.length - 1, i + CUT_TUNING.NEIGHBOURS); j++) {
+    if (j !== i && Number.isFinite(scores[j]) && !skip?.has(j)) {
+      around.push(scores[j]);
+    }
+  }
+  around.sort((a, b) => a - b);
+  return around.length === 0 ? 0 : around[Math.floor((around.length - 1) / 2)];
+}
+
+/** The frames that open a shot and the changes inside shots, from each
+ * frame's step (index 0 has none: NaN fields).
+ * A cut is a hard spike (pickCuts) or a faint step taken by the whole
+ * picture at once over still frames — a flat card cut to a near colour. A
+ * crossfade takes that step every frame, so its neighbours rule it out.
+ * A change is a spike on the fine grid in a frame that is no cut — a word
+ * appearing, a word swapping fill for outline, a small shape popping in.
+ * Changes on consecutive frames are one change that runs those frames: a
+ * fade-in over three frames reads as one change of three. */
+export function pickShotEdges(steps: FrameStep[]): { cuts: number[]; changes: ShotChange[] } {
+  const { FAINT_ALL, SPIKE, CHANGE_MIN } = CUT_TUNING;
+  const hard = pickCuts(steps.map((s) => s.pct));
+  const faintScores = steps.map((s) => s.faint);
+
+  // The faint cuts, beside the hard ones.
+  const cutSet = new Set(hard);
+  for (let i = 0; i < steps.length; i++) {
+    if (cutSet.has(i) || !(faintScores[i] >= FAINT_ALL)) {
+      continue;
+    }
+    if (neighbourMedian(faintScores, i) * SPIKE <= FAINT_ALL) {
+      cutSet.add(i);
+    }
+  }
+  const cuts = [...cutSet].sort((a, b) => a - b);
+
+  // The changes: fine spikes away from the cuts, runs merged.
+  const fineScores = steps.map((s) => s.fine);
+  const changes: ShotChange[] = [];
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (cutSet.has(i) || !(s.fine >= CHANGE_MIN) || !s.box) {
+      continue;
+    }
+    if (s.fine < SPIKE * neighbourMedian(fineScores, i, cutSet)) {
+      continue;
+    }
+    const last = changes[changes.length - 1];
+    if (last && last.frame + last.frames === i) {
+      last.frames++;
+      last.change = Math.max(last.change, s.fine);
+      last.box = unionBox(last.box, s.box);
+      continue;
+    }
+    changes.push({ frame: i, frames: 1, change: s.fine, box: s.box });
+  }
+  return { cuts, changes };
+}
+
+/** The box around two boxes. */
+function unionBox(a: ChangeBox, b: ChangeBox): ChangeBox {
+  const l = Math.min(a.x - a.w / 2, b.x - b.w / 2);
+  const r = Math.max(a.x + a.w / 2, b.x + b.w / 2);
+  const t = Math.min(a.y - a.h / 2, b.y - b.h / 2);
+  const btm = Math.max(a.y + a.h / 2, b.y + b.h / 2);
+  return { x: (l + r) / 2, y: (t + btm) / 2, w: r - l, h: btm - t };
+}
+
+/** Cuts and changes over a run of frames held in memory. */
+export function scoreFrames(frames: Pixels[]): { cuts: number[]; changes: ShotChange[] } {
+  const grids = frames.map(gridsOf);
+  const none: FrameStep = { pct: NaN, faint: NaN, fine: NaN, box: null };
+  return pickShotEdges(grids.map((g, i) => (i === 0 ? none : frameStep(grids[i - 1], g))));
 }

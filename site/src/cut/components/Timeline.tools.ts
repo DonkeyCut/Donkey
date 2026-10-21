@@ -25,6 +25,35 @@ import { BLOCKOUT_MAX } from "@/cut/lib/blockSource";
 export const TEXT_SIZE_MIN = 16;
 export const TEXT_SIZE_MAX = 1600;
 
+/** The fields one title takes, alone or as an item of `titles`. */
+const TITLE_FIELDS = {
+  text: str("The title text (\\n for line breaks)"),
+  start: num("Start time s (default: playhead)"),
+  end: num("End time s (default: start+3)"),
+  x: num("Center x 0..1 (default 0.5)"),
+  y: num("Center y 0..1 (default 0.42)"),
+  size: num(`Font size px at 1080w, ${TEXT_SIZE_MIN}..${TEXT_SIZE_MAX} (default 88); a capital is about 0.7 of the size tall, so one letter filling a third of a 1080 frame is about 500`),
+  color: str("CSS color (default #FFFFFF)"),
+  font: str("Font id (see the graphics skill; default sf)"),
+  weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Font weight: 400 regular, 500 medium, 600 semibold, 700 bold, 800 extra bold, 900 black" },
+  italic: bool("Italic"),
+  align: { type: "string", enum: ["left", "center", "right"], description: "Multi-line alignment (default center)" },
+  letter_spacing: num(`Tracking in em, ${LETTER_SPACING_MIN}..${LETTER_SPACING_MAX} (0 = normal, 0.1 = airy, negative = tight)`),
+  line_height: num("Line height multiplier (default 1.25)"),
+  stroke_color: str("Text outline color"),
+  stroke_width: num("Text outline width in em (0..0.15; 0 removes it)"),
+  shadow: bool("Drop shadow (default true)"),
+  plate: bool("Translucent plate behind text (default false)"),
+  texture: {
+    type: "string",
+    enum: [...TEXT_TEXTURES, "none"],
+    description: 'Grain inside the letters: "stipple" breaks each letter into spray-paint specks along its left edge, solid by its middle (the gritty teaser title); "none" makes the type solid again',
+  },
+  rotation: num("Degrees clockwise, -180..180, to a tenth (0.4 matches a slight lean)"),
+  opacity: num("Whole-element opacity 0..1"),
+  lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape. Use as few rows as the stacking needs: an element shares a row with anything it never overlaps in time."),
+};
+
 export const TIMELINE_TOOLS = [
   {
     name: "select",
@@ -150,8 +179,16 @@ export const TIMELINE_TOOLS = [
   {
     name: "rename_item",
     description:
-      "Name any timeline item — a video or image clip on any track, a soundtrack clip, or a title/shape/sticker/effect element — by id. The name shows on its timeline bar, in the inspector and in editor_state, so a cut full of look-alike items stays legible. An empty name clears it, back to the file's name or what the element is.",
-    inputSchema: obj({ id: str("Clip, soundtrack clip, or element id"), name: str("The name, up to 60 characters; empty clears") }, ["id", "name"]),
+      "Name any timeline item — a video or image clip on any track, a soundtrack clip, or a title/shape/sticker/effect element — by id. The name shows on its timeline bar, in the inspector and in editor_state, so a cut full of look-alike items stays legible. An empty name clears it, back to the file's name or what the element is. Pass `names` to name a whole cut in one call.",
+    inputSchema: obj({
+      id: str("Clip, soundtrack clip, or element id"),
+      name: str("The name, up to 60 characters; empty clears"),
+      names: {
+        type: "array",
+        description: "Several items at once, each {id, name}",
+        items: obj({ id: str("Item id"), name: str("Its name") }, ["id", "name"]),
+      },
+    }),
   },
   {
     name: "set_clip_hidden",
@@ -258,34 +295,11 @@ export const TIMELINE_TOOLS = [
   {
     name: "add_title",
     description:
-      "Add a text title overlay. Position is the text center as a fraction of the frame (x,y in 0..1; y=0.42 is the default band). Size is px at 1080-wide. Font ids come from the graphics skill (system set + the bundled Google families). A line wider than the room its anchor leaves is broken onto more lines when it draws, so a title always sits inside the frame — write the words and pick the size the design wants.",
+      "Add a text title overlay. Position is the text center as a fraction of the frame (x,y in 0..1; y=0.42 is the default band). Size is px at 1080-wide. Font ids come from the graphics skill (system set + the bundled Google families). A line wider than the room its anchor leaves is broken onto more lines when it draws, so a title always sits inside the frame — write the words and pick the size the design wants. Pass `titles` to place a stretch's titles in one call.",
     inputSchema: obj({
-      text: str("The title text (\\n for line breaks)"),
-      start: num("Start time s (default: playhead)"),
-      end: num("End time s (default: start+3)"),
-      x: num("Center x 0..1 (default 0.5)"),
-      y: num("Center y 0..1 (default 0.42)"),
-      size: num(`Font size px at 1080w, ${TEXT_SIZE_MIN}..${TEXT_SIZE_MAX} (default 88); a capital is about 0.7 of the size tall, so one letter filling a third of a 1080 frame is about 500`),
-      color: str("CSS color (default #FFFFFF)"),
-      font: str("Font id (see the graphics skill; default sf)"),
-      weight: { type: "number", enum: [...TEXT_WEIGHTS], description: "Font weight: 400 regular, 500 medium, 600 semibold, 700 bold, 800 extra bold, 900 black" },
-      italic: bool("Italic"),
-      align: { type: "string", enum: ["left", "center", "right"], description: "Multi-line alignment (default center)" },
-      letter_spacing: num(`Tracking in em, ${LETTER_SPACING_MIN}..${LETTER_SPACING_MAX} (0 = normal, 0.1 = airy, negative = tight)`),
-      line_height: num("Line height multiplier (default 1.25)"),
-      stroke_color: str("Text outline color"),
-      stroke_width: num("Text outline width in em (0..0.15; 0 removes it)"),
-      shadow: bool("Drop shadow (default true)"),
-      plate: bool("Translucent plate behind text (default false)"),
-      texture: {
-        type: "string",
-        enum: [...TEXT_TEXTURES, "none"],
-        description: 'Grain inside the letters: "stipple" breaks each letter into spray-paint specks along its left edge, solid by its middle (the gritty teaser title); "none" makes the type solid again',
-      },
-      rotation: num("Degrees clockwise, -180..180, to a tenth (0.4 matches a slight lean)"),
-      opacity: num("Whole-element opacity 0..1"),
-      lane: num("Element row (0 = the front row, drawn over every higher row). Elements on one row never overlap — a title over a shape needs a lower row than the shape. Use as few rows as the stacking needs: an element shares a row with anything it never overlaps in time."),
-    }, ["text"]),
+      ...TITLE_FIELDS,
+      titles: { type: "array", description: "Several titles at once, each the fields one title takes", items: obj(TITLE_FIELDS, ["text"]) },
+    }),
   },
   {
     name: "add_text_sequence",

@@ -150,6 +150,19 @@ test("detect_cuts finds the picture first, then a card that changes a small shar
   expect(whole.picture).toBeUndefined();
 });
 
+test("detect_cuts reports a card landing inside a shot as a change, with its box", async () => {
+  // Over the whole recorded frame the card is no cut; it is still the moment
+  // a card lands, and where it sits.
+  const whole = (await runAiTool("detect_cuts", { asset_id: "ref", picture: "full" })) as {
+    changes: { frame: number; frames: number; box: Box }[];
+  };
+  expect(whole.changes.map((c) => c.frame)).toEqual([90]);
+  expect(whole.changes[0].frames).toBe(1);
+  expect(whole.changes[0].box.x).toBeCloseTo(0.5, 1);
+  expect(whole.changes[0].box.y).toBeCloseTo(0.5, 1);
+  expect(whole.changes[0].box.w).toBeCloseTo(CARD.x1 - CARD.x0, 1);
+});
+
 test("sample_color reads in the picture's fractions once a picture is stored", async () => {
   await runAiTool("find_picture", { asset_id: "ref" });
   const out = (await runAiTool("sample_color", {

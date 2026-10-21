@@ -76,6 +76,21 @@ test("a source's own lines aim the candidates", async () => {
   expect(result.candidates).toBe(8);
 });
 
+test("every shot detect_cuts measured gets a decode of its own, however short", async () => {
+  // A strobe of flat cards a few frames each: the moments sit closer together
+  // than two speech lines may, and each one is a card nothing else shows. A
+  // floor sample that would crowd one of them gives way to it.
+  const run = fixture();
+  const shots = [1.5, 1.583, 1.633, 1.7, 1.767, 2.41];
+  await sampleWatchFrames("fixture.mp4", {
+    from: 0, to: 4, interval: 0.5, metadataOnly: true, shots,
+  });
+  const asked = run.asked();
+  for (const t of shots) expect(asked.includes(Math.round(t * 100) / 100)).toBe(true);
+  expect(asked.includes(2.5)).toBe(false);
+  expect(asked.includes(3)).toBe(true);
+});
+
 test("a densely spoken source is aimed end to end", async () => {
   // More lines than the budget allows: they thin across the whole span. Taking
   // the first of them would aim the head and leave the tail sampled thinner

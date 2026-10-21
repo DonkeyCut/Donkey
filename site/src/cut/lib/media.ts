@@ -1461,27 +1461,46 @@ function candidateTimes(
   from: number,
   to: number,
   interval: number,
-  at: number[]
+  at: number[],
+  shots: number[]
 ): number[] {
-  const inRange = at.filter((t) => t >= from && t < to).sort((a, b) => a - b);
+  const cap = Math.floor(CANDIDATE_CAP * AIMED_SHARE);
+
+  // Measured shots first, each its own decode: a flash card two frames long
+  // sits closer to the next than MERGE_EPS, and nothing else would show it.
+  const measured = [...new Set(thinAcross(shots.filter((t) => t >= from && t < to), cap).map(round2))];
+
   // More lines than the share allows are thinned across the whole span. Taking
   // the first of them would aim the head of a densely spoken stretch and leave
   // its tail sampled thinner than the floor alone would have.
-  const cap = Math.floor(CANDIDATE_CAP * AIMED_SHARE);
-  const every = Math.max(1, Math.ceil(inRange.length / cap));
+  const lines = thinAcross(at.filter((t) => t >= from && t < to), Math.max(0, cap - measured.length));
   const aimed: number[] = [];
-  for (let i = 0; i < inRange.length; i += every) {
-    const t = inRange[i];
-    if (aimed.length === 0 || t - aimed[aimed.length - 1] >= MERGE_EPS) aimed.push(round2(t));
+  for (const t of lines) {
+    if (aimed.length === 0 || t - aimed[aimed.length - 1] >= MERGE_EPS) {
+      aimed.push(round2(t));
+    }
   }
-  const room = Math.max(1, CANDIDATE_CAP - aimed.length);
+  const room = Math.max(1, CANDIDATE_CAP - aimed.length - measured.length);
   const step = Math.max(interval, (to - from) / room);
   const floor: number[] = [];
   for (let t = from; t < to && floor.length < room; t += step) floor.push(round2(t));
+
+  // A line or a floor sample crowding a measured shot gives way to it.
+  const crowds = (t: number) => measured.some((m) => Math.abs(m - t) < MERGE_EPS);
   const times: number[] = [];
-  for (const t of [...aimed, ...floor].sort((a, b) => a - b))
+  for (const t of [...aimed, ...floor].filter((t) => !crowds(t)).sort((a, b) => a - b))
     if (times.length === 0 || t - times[times.length - 1] >= MERGE_EPS) times.push(t);
-  return times;
+  return [...times, ...measured].sort((a, b) => a - b);
+}
+
+/** At most `cap` of the ascending times, spread across all of them. */
+function thinAcross(times: number[], cap: number): number[] {
+  const sorted = [...times].sort((a, b) => a - b);
+  if (cap <= 0) {
+    return [];
+  }
+  const every = Math.max(1, Math.ceil(sorted.length / cap));
+  return sorted.filter((_, i) => i % every === 0);
 }
 
 /** How much of each kept frame reaches the model, from the tiled thumbnails
@@ -1609,6 +1628,10 @@ export async function sampleWatchFrames(
      * hits — so a source whose audio has already been read is sampled on its
      * own clock instead of hoping an even sweep lands on each state. */
     at?: number[];
+    /** Moments a frame-by-frame read measured — the middle of each shot
+     * detect_cuts found and the frame each change inside a shot settles on.
+     * Each gets a decode of its own, however close to the next. */
+    shots?: number[];
   }
 ): Promise<WatchFrames> {
   const input = openMedia(sourceUrl);
@@ -1623,7 +1646,7 @@ export async function sampleWatchFrames(
     if (!(wanted > from)) throw new Error("from/to describe an empty range.");
     const to = Math.min(wanted, from + 600); // bound the work per call; callers resume from coveredTo
     const interval = clamp(opts.interval ?? 1, 0.5, 30);
-    const times = candidateTimes(from, to, interval, opts.at ?? []);
+    const times = candidateTimes(from, to, interval, opts.at ?? [], opts.shots ?? []);
 
     const geom = watchGeometry(opts.detail);
     const srcW = await track.getDisplayWidth();

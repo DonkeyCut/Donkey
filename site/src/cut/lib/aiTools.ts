@@ -244,7 +244,7 @@ import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
 import { compareMoments, sweepSource } from "./sourceCompare";
 import { findPicture, sampleColors, scanCuts, trackElement, type FrameBox } from "./measure/sourceMeasure";
 import { FULL_FRAME, isFullFrame } from "./measure/picture";
-import { DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
+import { DETECT_CHANGES_MAX, DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeCameraCard, describeDoc, describeParkedTimeline, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
@@ -772,6 +772,103 @@ function refuseCardFraming(clip: VideoClip, input: Record<string, unknown>, fiel
 const aimedLane = (input: Record<string, unknown>): { lane?: number } | undefined =>
   isNum(input.lane) ? { lane: Math.max(0, Math.round(input.lane)) } : undefined;
 
+/** One placed element as add_title and add_shape report it. */
+type Placed = { id: string } & Record<string, unknown>;
+
+/** Run a placing tool over its list (`titles`, `shapes`) or over the call as
+ * one item. Every item is checked before the first is placed, so a bad one
+ * refuses the whole call and leaves nothing behind; the call is already one
+ * undo step. Example: { titles: [{ text: "A" }, { text: "B" }] } →
+ * { ids: [a, b], titles: [{ id: a, … }, { id: b, … }] }. */
+function placeEach(
+  input: Record<string, unknown>,
+  key: "titles" | "shapes",
+  check: (item: Record<string, unknown>) => void,
+  place: (item: Record<string, unknown>) => Placed
+): unknown {
+  // A one-item call keeps the result it always had.
+  const list = input[key];
+  if (list === undefined) {
+    check(input);
+    return place(input);
+  }
+
+  // The list holds at least one item and stands alone: fields beside it
+  // would be dropped unread.
+  if (!Array.isArray(list) || list.length === 0) {
+    throw new ToolError(`${key} is a list of one or more items.`);
+  }
+  const beside = Object.keys(input).filter((k) => k !== key);
+  if (beside.length > 0) {
+    throw new ToolError(`Pass ${beside.join(", ")} inside each of ${key}; nothing was placed.`);
+  }
+
+  // Every item is checked before any is placed, naming the one refused.
+  const items = list.map((raw: unknown, i) => {
+    const item = (raw !== null && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    try {
+      check(item);
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      throw new ToolError(`${key}[${i}]: ${why} Nothing was placed.`, { cause: e });
+    }
+    return item;
+  });
+
+  // Placed in order, so the ids line up with the items.
+  const placed = items.map(place);
+  return { ids: placed.map((p) => p.id), [key]: placed };
+}
+
+/** add_title's refusals, run before the title exists. */
+function checkTitle(input: Record<string, unknown>): void {
+  if (typeof input.text !== "string" || !input.text.trim()) {
+    throw new ToolError("text is required.");
+  }
+  overlayPatch(input, "text");
+}
+
+/** Place one checked title. */
+function placeTitle(input: Record<string, unknown>): Placed {
+  const s = useEditor.getState();
+  if (isNum(input.start)) {
+    s.seek(input.start);
+  }
+  s.addOverlay({ ...aimedLane(input), seed: "defaults" });
+  const sel = useEditor.getState().selection;
+  if (sel?.kind !== "overlay") {
+    throw new ToolError("Could not create the title.");
+  }
+  applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "text"));
+  const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+  return { id: o.id, ...(isTextOverlay(o) ? { text: o.text } : {}), start: o.start, end: o.end };
+}
+
+/** add_shape's refusals, run before the shape exists. */
+function checkShape(input: Record<string, unknown>): void {
+  if (!(String(input.shape) in SHAPE_LABELS)) {
+    throw new ToolError(`shape must be one of ${SHAPE_KINDS.join(", ")}.`);
+  }
+  overlayPatch(input, "shape");
+}
+
+/** Place one checked shape. */
+function placeShape(input: Record<string, unknown>): Placed {
+  const s = useEditor.getState();
+  const shape = String(input.shape) as ShapeKind;
+  if (isNum(input.start)) {
+    s.seek(input.start);
+  }
+  s.addShape(shape, aimedLane(input));
+  const sel = useEditor.getState().selection;
+  if (sel?.kind !== "overlay") {
+    throw new ToolError("Could not create the shape.");
+  }
+  applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "shape"));
+  const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
+  return { id: o.id, shape, start: roundT(o.start), end: roundT(o.end) };
+}
+
 /** Every tool that runs in the browser: the full catalog minus the
  * `server: true` skills tools the engine answers itself. */
 type BrowserToolName = Exclude<
@@ -808,18 +905,7 @@ type ToolRun = (s: Editor, input: Record<string, unknown>, operation?: ProjectOp
  * modules beside the components export, so a tool added, removed, or renamed
  * there refuses to compile until this map matches. */
 const toolRuns: Record<BrowserToolName, ToolRun> = {
-  add_shape: (s, input) => {
-    const shape = String(input.shape) as ShapeKind;
-    if (!(shape in SHAPE_LABELS))
-      throw new ToolError(`shape must be one of ${SHAPE_KINDS.join(", ")}.`);
-    if (isNum(input.start)) s.seek(input.start);
-    s.addShape(shape, aimedLane(input));
-    const sel = useEditor.getState().selection;
-    if (sel?.kind !== "overlay") throw new ToolError("Could not create the shape.");
-    applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "shape"));
-    const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-    return { id: o.id, shape, start: roundT(o.start), end: roundT(o.end) };
-  },
+  add_shape: (_s, input) => placeEach(input, "shapes", checkShape, placeShape),
 
   add_sticker: async (s, input) => {
     const svg = typeof input.svg === "string" && input.svg.trim() ? input.svg : undefined;
@@ -1506,6 +1592,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             (sweep.lost
               ? `Source frames at ${sweep.lost.map((l) => `${l.source}s`).join(", ")} did not decode (${sweep.lost[0].error}) and are left out of the scores. `
               : "") +
+            silenceNote(s, asset) +
             SWEEP_NOTE,
         };
       }
@@ -1531,7 +1618,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         // The same shape every look returns, so a record opened by a
         // comparison knows what the other senses may ask of this source.
         source: sourceRef(asset),
-        note: COMPARE_NOTE,
+        note: silenceNote(s, asset) + COMPARE_NOTE,
       };
   },
 
@@ -1598,6 +1685,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           from,
           to,
           maxCuts: DETECT_CUTS_MAX,
+          maxChanges: DETECT_CHANGES_MAX,
           budgetMs: MEASURE_BUDGET_MS,
           ...(isFullFrame(area) ? {} : { area }),
         })
@@ -1613,6 +1701,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         to: roundT(end),
         frames: Math.round((end - edges[i]) * scan.fps),
       }));
+      // Every shot's middle and the frame each change settles on: watch_video
+      // lands a frame on each, so a card shorter than its step is still read.
+      const settled = scan.changes.map((c) => c.t + c.frames / scan.fps);
+      shotMoments.set(asset.id, [
+        ...(shotMoments.get(asset.id) ?? []).filter((t) => t < from || t >= scan.coveredTo),
+        ...shots.map((sh) => (sh.from + sh.to) / 2),
+        ...settled.filter((t) => t < scan.coveredTo),
+      ]);
+
       // The span bound ends a pass the caller asked to run further.
       const truncated = scan.truncated || to < asked;
       const more = truncated || to < asset.duration - 0.001;
@@ -1624,6 +1721,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         truncated,
         cuts: scan.cuts.map((c) => ({ t: roundT(c.t), frame: c.frame, change: c.change })),
         shots,
+        changes: scan.changes.map((c) => ({
+          t: roundT(c.t),
+          frame: c.frame,
+          frames: c.frames,
+          change: c.change,
+          box: { x: roundT(c.box.x), y: roundT(c.box.y), w: roundT(c.box.w), h: roundT(c.box.h) },
+        })),
         ...pictureReport(area),
         ...(keepsPicture ? { pictureKept: true as const } : {}),
         source: sourceRef(asset),
@@ -1783,6 +1887,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...(isNum(input.interval_seconds) ? { interval: input.interval_seconds } : {}),
           detail,
           at: aimed,
+          shots: shotMoments.get(asset.id) ?? [],
           budgetMs: 90_000,
         })
       ).catch((e) => {
@@ -2958,13 +3063,28 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   rename_item: (s, input) => {
-      const name = String(input.name ?? "").trim().slice(0, 60) || undefined;
-      const id = String(input.id ?? "");
-      if (s.clips.some((c) => c.id === id)) s.updateClip(id, { name });
-      else if (s.audioClips.some((a) => a.id === id)) s.updateAudio(id, { name });
-      else if (s.overlays.some((o) => o.id === id)) s.updateOverlay(id, { name });
-      else throw new ToolError(`No clip, soundtrack clip, or element with id ${id}.`);
-      return { id, name: name ?? null };
+      // One pair, or `names` for a whole cut's worth in one call.
+      const pairs = (Array.isArray(input.names) ? input.names : [input]).map((p: unknown) => {
+        const rec = (p ?? {}) as Record<string, unknown>;
+        return { id: String(rec.id ?? ""), name: String(rec.name ?? "").trim().slice(0, 60) || undefined };
+      });
+
+      // Every id is found before any name is written.
+      const writers = pairs.map(({ id }) => {
+        if (s.clips.some((c) => c.id === id)) {
+          return (name: string | undefined) => s.updateClip(id, { name });
+        }
+        if (s.audioClips.some((a) => a.id === id)) {
+          return (name: string | undefined) => s.updateAudio(id, { name });
+        }
+        if (s.overlays.some((o) => o.id === id)) {
+          return (name: string | undefined) => s.updateOverlay(id, { name });
+        }
+        throw new ToolError(`No clip, soundtrack clip, or element with id ${id}; nothing was renamed.`);
+      });
+      pairs.forEach(({ name }, i) => writers[i](name));
+      const named = pairs.map(({ id, name }) => ({ id, name: name ?? null }));
+      return named.length === 1 ? named[0] : { named };
   },
 
   set_clip_hidden: (s, input) => {
@@ -3176,21 +3296,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { closed: { track, ...gap }, ...tracksAfter() };
   },
 
-  add_title: (s, input) => {
-      if (typeof input.text !== "string" || !input.text.trim())
-        throw new ToolError("text is required.");
-      // Refused before the title exists, so a bad font leaves nothing behind.
-      if (input.font !== undefined) {
-        knownFont(input.font);
-      }
-      if (isNum(input.start)) s.seek(input.start);
-      s.addOverlay({ ...aimedLane(input), seed: "defaults" });
-      const sel = useEditor.getState().selection;
-      if (sel?.kind !== "overlay") throw new ToolError("Could not create the title.");
-      applyOverlayPatchSettled(sel.id, overlayPatch({ ...input, id: sel.id }, "text"));
-      const o = useEditor.getState().overlays.find((x) => x.id === sel.id)!;
-      return { id: o.id, ...(isTextOverlay(o) ? { text: o.text } : {}), start: o.start, end: o.end };
-  },
+  add_title: (_s, input) => placeEach(input, "titles", checkTitle, placeTitle),
 
   add_text_sequence: (s, input) => {
       const look = requireTextLook(input.look);
@@ -6649,6 +6755,10 @@ function textSequenceLines(
  * same source asks for the first look's reading before it spends a call. */
 const unwritten = new Map<string, { from: number; to: number }>();
 
+/** The moments detect_cuts measured in each source, by asset id: the middle
+ * of every shot and the frame every change inside one settles on. */
+const shotMoments = new Map<string, number[]>();
+
 /** A span counts as written down once notes describe all but a sliver of it. */
 function spanIsNoted(watch: AssetWatch | undefined, span: { from: number; to: number }): boolean {
   let cursor = span.from;
@@ -6768,6 +6878,22 @@ function soundOf(asset: MediaAsset): "yes" | "none" | "unknown" {
   if (asset.watch?.heard?.length) return "yes";
   if (asset.speech) return asset.speech.noSpeech ? "none" : "yes";
   return "unknown";
+}
+
+/** What a comparison says when the cut plays nothing and the reference may
+ * have sound: the frames can match while the cut is still mute. */
+function silenceNote(s: Editor, asset: MediaAsset): string {
+  const sound = soundOf(asset);
+  if (sound === "none" || s.audioClips.length > 0) {
+    return "";
+  }
+  const voiced = s.clips.some((c) => !c.muted && s.assets.find((a) => a.id === c.assetId)?.type === "video");
+  if (voiced) {
+    return "";
+  }
+  return sound === "yes"
+    ? `The cut plays no sound and "${asset.name}" has a soundtrack: detach_audio with its assetId lays that track on the soundtrack from 0, lined up with its picture, and its picture stays off every timeline. `
+    : `The cut plays no sound. listen_audio on "${asset.name}" says whether it has a soundtrack to lay down with detach_audio. `;
 }
 
 /** How every source-reading tool names the source it read. `type` and `sound`
