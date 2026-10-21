@@ -16,6 +16,7 @@ import { assetIsSilent, CLIP_MIN_SECONDS, clipCovers, rectOf } from "@/cut/lib/t
 import type { AudioClip, ClipSpan, MediaAsset, VideoClip } from "@/cut/lib/types";
 import { OWN_SOUND, soundSourceOf, soundWindow } from "@/cut/lib/soundSource";
 import { SubjectMaskCompositor } from "@/cut/lib/behindPass";
+import { stageTimeAt } from "@/cut/lib/overlayLive";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { hdrCanvasSupport } from "@/cut/lib/hdrCanvas";
 import { displayIsHdr, HdrPresenter, onDisplayRangeChange, setHdrPreviewState } from "@/cut/lib/hdrPresent";
@@ -953,7 +954,6 @@ class Engine {
     // background. Playing, that was the last frame before the stop, a single
     // dark frame the paused redraw painted over; paused, it is a skim off the
     // right edge of the cut. Both hold the last frame.
-    const end = Math.max(0, total - 0.001);
     let t: number;
     if (playing) {
       const head = playheadAt();
@@ -961,9 +961,9 @@ class Engine {
         this.mixer.start(Math.min(head, total));
         this.written = head;
       }
-      t = Math.max(0, Math.min(this.mixer.now(), end));
+      t = stageTimeAt(this.mixer.now(), total);
     } else {
-      t = Math.max(0, Math.min(previewAt(), end));
+      t = stageTimeAt(previewAt(), total);
       if (this.mixer.running) {
         this.mixer.stop();
         flushMeter();

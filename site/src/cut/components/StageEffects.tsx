@@ -12,7 +12,8 @@ import {
   washBackground,
 } from "@donkeycut/effects-kit";
 import { previewAt, subscribePlayhead, usePreviewTime } from "@/cut/lib/playhead";
-import { useEditor } from "@/cut/lib/store";
+import { projectDuration, useEditor } from "@/cut/lib/store";
+import { stageTimeAt } from "@/cut/lib/overlayLive";
 import { isEffectOverlay, laneOf } from "@/cut/lib/types";
 import {
   hasEffects,
@@ -52,7 +53,11 @@ export { stageEffectTransform, stageSliceStructure, type LiveEffect, type StageS
 export function useLiveEffects(): LiveEffect[] {
   const overlays = useEditor((s) => s.overlays);
   const t = usePreviewTime();
-  return useMemo(() => liveEffectsAt(overlays, t), [overlays, t]);
+  const total = useEditor(projectDuration);
+
+  // Graded at the canvas's moment, which holds the last frame on the cut's end.
+  const at = stageTimeAt(t, total);
+  return useMemo(() => liveEffectsAt(overlays, at), [overlays, at]);
 }
 
 /**
@@ -105,7 +110,9 @@ export function StagePictureFx({ children }: { children: React.ReactNode }) {
       return;
     }
     const apply = () => {
-      const states = liveEffectsAt(overlays, previewAt()).map((e) => e.state);
+      // The canvas's moment: the last frame's, with the playhead on the end.
+      const at = stageTimeAt(previewAt(), projectDuration(useEditor.getState()));
+      const states = liveEffectsAt(overlays, at).map((e) => e.state);
       const box = ref.current;
       const split = box ? rgbSplitFilter(states, box.clientWidth, box.clientHeight) : "";
       write([stageEffectFilter(states), split].filter(Boolean).join(" "), stageEffectTransform(states) ?? "");

@@ -37,6 +37,7 @@ import {
 import { ElementFx, elementLook } from "@donkeycut/effects-kit";
 import { personSegmenter, segmentSubjectAlpha } from "./cutout";
 import { allowance, holdMemory } from "./memoryBudget";
+import { overlayLiveAt } from "./overlayLive";
 import { createRasterCanvas, snapshotRaster } from "./raster";
 import { cutRenderEnv } from "./textRender";
 import {
@@ -160,7 +161,7 @@ function drawable(o: Overlay): boolean {
 /** The behind-the-speaker elements live at `t` (any drawable kind). */
 export function behindOverlaysAt(overlays: Overlay[], t: number): Overlay[] {
   return overlays.filter(
-    (o) => behindSubjectOverlay(o) && drawable(o) && t >= o.start && t <= o.end
+    (o) => behindSubjectOverlay(o) && drawable(o) && overlayLiveAt(o, t)
   );
 }
 
@@ -486,7 +487,7 @@ export class SubjectMaskCompositor {
    * before the frame is, so no frame of a render shows a stale one. */
   async ready(overlays: Overlay[], w: number, h: number, assets: MediaAsset[], t: number): Promise<void> {
     for (const o of overlays) {
-      if (!behindSubjectOverlay(o) || !drawable(o) || t < o.start || t > o.end) continue;
+      if (!behindSubjectOverlay(o) || !drawable(o) || !overlayLiveAt(o, t)) continue;
       const tLocal = Math.max(0, t - o.start);
       const look = lookAt(o, tLocal, evalOverlayFrame(o, tLocal, w / h));
       if (this.entryFor(o).byWord.has(look.key)) continue;
@@ -699,7 +700,7 @@ export class SubjectMaskCompositor {
     this.sweepRasters();
     const active = behindOverlaysAt(overlays, t);
     const wantsMatte = overlays.some(
-      (o) => frontSubjectOverlay(o) && drawable(o) && t >= o.start && t <= o.end
+      (o) => frontSubjectOverlay(o) && drawable(o) && overlayLiveAt(o, t)
     );
     if (active.length === 0 && !wantsMatte) return;
     const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;

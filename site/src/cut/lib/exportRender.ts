@@ -52,6 +52,7 @@ import { ElementFx, elementLook, paintElementCrop } from "@donkeycut/effects-kit
 import { applyEffectToCanvas, effectRecipe, diveView, divesAt, evalOverlayFrame, measureDiveFocus, retimeOf, grainTile, smoothsAt, isAudioEffect, isMaskAnimated, isOverlayAnimated, maskFrameAt, planAnimatedLayers, type DiveFocus, type LottieHandle, type OverlayAnim, type PaintPhase } from "@donkeycut/effects-kit";
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
+import { overlayLiveAt } from "./overlayLive";
 import { MatteAlpha, matteStamp } from "./matteAlpha";
 import { createRasterCanvas, snapshotRaster, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
@@ -603,7 +604,7 @@ function liveEffectsAt(overlays: Overlay[], t: number): EffectOverlay[] {
   return overlays
     .filter(isEffectOverlay)
     .filter((o) => !isAudioEffect(o.effect))
-    .filter((o) => !o.hidden && t >= o.start && t < o.end)
+    .filter((o) => !o.hidden && overlayLiveAt(o, t))
     .sort((a, b) => laneOf(b) - laneOf(a));
 }
 
@@ -1324,7 +1325,7 @@ async function drawStamps(
     | null;
   if (!ctx) return;
   for (const layer of layers) {
-    if (t < layer.start || t >= layer.end) continue;
+    if (!overlayLiveAt(layer, t)) continue;
     if (layer.lottie) {
       // Nothing to cache: the animation's own canvas is sought per frame and
       // drawn at the sticker's rect under the same delta transform.

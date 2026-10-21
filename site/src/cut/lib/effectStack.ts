@@ -18,6 +18,7 @@ import {
   washBackground,
   type EffectPreviewState,
 } from "@donkeycut/effects-kit";
+import { overlayLiveAt } from "./overlayLive";
 import { isEffectOverlay, laneOf, type Overlay } from "./types";
 
 /** One effect live at a moment, with the lane that places it in the stack. */
@@ -31,7 +32,7 @@ export function liveEffectsAt(overlays: Overlay[], t: number): LiveEffect[] {
   const live: LiveEffect[] = [];
   for (const o of overlays) {
     if (!isEffectOverlay(o) || isAudioEffect(o.effect)) continue;
-    if (o.hidden || t < o.start || t > o.end) continue;
+    if (o.hidden || !overlayLiveAt(o, t)) continue;
     live.push({
       lane: laneOf(o),
       state: effectPreviewState(effectRecipe(o), o.amount, t - o.start, o.focus, o.ramp, o.end - o.start, o),

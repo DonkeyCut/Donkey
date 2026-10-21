@@ -8,7 +8,8 @@ import { startDrag } from "@/cut/lib/drag";
 import { startSelectionDrag, togglePreviewSelection } from "@/cut/components/previewSelectionDrag";
 import { pictureGroupSelected } from "@/cut/lib/previewSelection";
 import { useSkim, usePreviewTime } from "@/cut/lib/playhead";
-import { useEditor } from "@/cut/lib/store";
+import { projectDuration, useEditor } from "@/cut/lib/store";
+import { overlayLiveAt, stageTimeAt } from "@/cut/lib/overlayLive";
 import {
   captionStyle,
   cueAt,
@@ -212,6 +213,10 @@ export function OverlayLayer({
   // Titles preview under the skimmer too (paused only), matching the canvas.
   const t = usePreviewTime();
   const skimTime = useSkim();
+  const total = useEditor(projectDuration);
+  // The moment the elements are on screen for: the canvas's own, which holds
+  // the last frame with the playhead on the cut's end.
+  const at = stageTimeAt(t, total);
   const live = useLiveEffects();
   // The grade and frame motion of every effect above this slice.
   const graded = useMemo(
@@ -350,7 +355,7 @@ export function OverlayLayer({
         // handles or drag. The timeline bar is the thing you grab.
         if (o.kind === "effect") return null;
         const selected = selectedIds.has(o.id) || sel?.id === o.id;
-        const inRange = t >= o.start && t <= o.end;
+        const inRange = overlayLiveAt(o, at);
         // While hover-scrubbing (paused, skimmer active) the preview must show the
         // exact frame under the skimmer — a selected but out-of-frame title can't
         // leak into a frame it isn't part of. Off the skimmer, a selected title
@@ -411,7 +416,7 @@ export function OverlayLayer({
         style={{ filter, opacity: ghostAlpha }}
       >
         {overlays.map((o) => {
-          if (o.hidden || o.kind === "effect" || t < o.start || t > o.end) return null;
+          if (o.hidden || o.kind === "effect" || !overlayLiveAt(o, at)) return null;
           return (
             <OverlayItem
               key={o.id}
@@ -582,9 +587,12 @@ function SubtitleCaption({
   const multiSelection = useEditor((s) => s.multiSelection);
   const stagePress = useContext(StagePress);
   const t = usePreviewTime();
+  const total = useEditor(projectDuration);
 
+  // The cue on screen, with the last one held when the playhead sits on the
+  // cut's end, the way the canvas holds the last frame.
   const cues = laneCues(subtitles, lane);
-  const cue = cueAt(cues, t);
+  const cue = cueAt(cues, stageTimeAt(t, total));
   if (!cue || !cue.text.trim()) return null;
   // The caption moves its whole track, so it takes the same rule the elements
   // take: the cue on screen has to be the selection before a drag moves it.
