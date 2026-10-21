@@ -50,6 +50,11 @@ export async function importEach<T>(
   const deadline = Date.now() + (opts.budgetMs ?? URL_BATCH_BUDGET_MS);
   const rows: (UrlRow<T> | undefined)[] = new Array(list.length);
   let answered = false;
+  // Links between asks, and those the batch answered for while they waited:
+  // a late timer can carry a wait past the deadline, and such a link never
+  // started.
+  const waiting = new Set<string>();
+  const dropped = new Set<string>();
   // A link turned away as busy (a download started elsewhere holds a slot)
   // waits and asks again, until the budget runs out. One whose ask was in
   // flight when the batch answered was reported as still downloading, so it
@@ -61,7 +66,10 @@ export async function importEach<T>(
       } catch (e) {
         if (messageOf(e) !== URL_BUSY_MESSAGE) throw e;
         if (!answered && Date.now() + wait >= deadline) throw OUT_OF_TIME;
+        waiting.add(url);
         await new Promise((r) => setTimeout(r, wait));
+        waiting.delete(url);
+        if (dropped.has(url)) throw OUT_OF_TIME;
       }
     }
   };
@@ -83,7 +91,10 @@ export async function importEach<T>(
   await Promise.race([lanes, outOfTime]);
   clearTimeout(timer);
   answered = true;
-  // A link a lane took up is still downloading; one no lane reached never
-  // started.
-  return list.map((url, i) => rows[i] ?? (i < next ? { url, pending: true as const } : { url, notStarted: true as const }));
+  for (const url of waiting) dropped.add(url);
+  // A link a lane took up is still downloading, unless it was waiting for a
+  // slot; one no lane reached never started.
+  return list.map(
+    (url, i) => rows[i] ?? (i < next && !dropped.has(url) ? { url, pending: true as const } : { url, notStarted: true as const })
+  );
 }
