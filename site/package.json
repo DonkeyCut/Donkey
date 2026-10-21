@@ -34,7 +34,7 @@
     "eval:cut-routing": "bun run scripts/eval-cut-routing.ts",
     "eval:chatgpt-workflow": "bun run scripts/eval-chatgpt-workflow.ts",
     "eval:cut-headless": "bun run scripts/eval-cut-headless.ts",
-    "test": "bun test src packages/effects-kit/src packages/abexp/src scripts/lib/cut-eval",
+    "test": "bun test --isolate src packages/effects-kit/src packages/abexp/src scripts/lib/cut-eval",
     "analytics:summary-fixture": "bun run scripts/analytics-summary-fixture.ts",
     "test:genvideo": "bun run scripts/genvideo-selftest.ts",
     "eval:genvideo": "bun run scripts/genvideo-eval.ts",
