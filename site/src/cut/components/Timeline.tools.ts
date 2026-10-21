@@ -415,11 +415,12 @@ export const TIMELINE_TOOLS = [
   {
     name: "copy_from_timeline",
     description:
-      "Copy items another timeline holds onto the open one, exactly as that timeline has them: a soundtrack clip keeps its in/out, volume, fades, speed and sound treatment; clips, elements, captions and transitions keep every property, and several items keep their spacing. This is how \"Main's music\" or \"the same title as on Main\" lands on this timeline. A parked timeline's soundtrack is in editor_state project.timelines; get_state with `timeline` lists all of its items. The source timeline is left as it was.",
+      "Copy items another timeline holds onto the open one, exactly as that timeline has them: a soundtrack clip keeps its in/out, volume, fades, speed and sound treatment; clips, elements, captions and transitions keep every property, and several items keep their spacing. This is how \"Main's music\" or \"the same title as on Main\" lands on this timeline. A parked timeline's soundtrack is in editor_state project.timelines; get_state with `timeline` lists all of its items. The source timeline is left as it was. A copy that would overlap an item on its row slides right past it, and the result gives that copy's askedStart and why.",
     inputSchema: obj({
       timeline: { type: "string", enum: [...TIMELINE_IDS], description: "The timeline to copy from" },
       ids: { type: "array", items: { type: "string" }, description: "Ids of the items on that timeline" },
       at: num("Where the earliest copy starts on the open timeline, seconds; omit to keep the source's times"),
+      lane: { type: "integer", minimum: 0, description: "Soundtrack lane or element row for the copies (the lowest one when they span several); omit to keep the source's. Video clips keep their tracks." },
     }, ["timeline", "ids"]),
   },
   {

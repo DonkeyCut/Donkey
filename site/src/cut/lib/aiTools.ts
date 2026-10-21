@@ -14,9 +14,9 @@ import { projectOperation, type ProjectOperation } from "./projectOperation";
 import { captureRenderSnapshot, renderDoc } from "./renderSnapshot";
 import { submitPreviewSnapshot } from "./exportClient";
 
-import { ITEM_KIND_IDS, ITEM_KINDS, ROW_ITEM_KINDS, type ItemKind } from "./itemKinds";
+import { ITEM_KIND_IDS, ITEM_KINDS, ROW_ITEM_KINDS, type ItemKind, type TimelineClipboardItem } from "./itemKinds";
 import { insertItemRow, packRows } from "./laneTracks";
-import { timelineCopies, timelineItem } from "./timelineItems";
+import { timelineBlocker, timelineCopies, timelineItem } from "./timelineItems";
 import { movePreviewSelection, previewSelectionSnapshot } from "@/cut/lib/previewSelection";
 
 import { libraryShareTargetSchema, shareSettingsSchema, librarySharePath } from "@/cut/lib/librarySharing";
@@ -321,6 +321,7 @@ import {
   IMAGE_CLIP_SECONDS,
   isEffectOverlay,
   isTextOverlay,
+  laneOf,
   LAYOUTS,
   MAX_SUBTITLE_LANES,
   nearestAspect,
@@ -5841,16 +5842,37 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const missing = ids.filter((_, i) => !found[i]);
       if (missing.length > 0)
         throw new ToolError(`${TIMELINE_LABELS[input.timeline]} has no item ${missing.join(", ")}; get_state with timeline "${input.timeline}" lists its items.`);
-      const items = timelineCopies(source, found);
+      if (input.lane !== undefined && (!isNum(input.lane) || !Number.isInteger(input.lane) || input.lane < 0)) {
+        throw new ToolError("lane must be a non-negative integer.");
+      }
+      const copies = timelineCopies(source, found);
+      const items = isNum(input.lane) ? copiesOnLane(copies, input.lane) : copies;
       const at = isNum(input.at) ? Math.max(0, input.at) : Math.min(...items.map((cb) => cb.item.start));
+
+      // What holds each copy's row at the asked time, read before the paste
+      // slides the copies past it.
+      const asked = at - Math.min(...items.map((cb) => cb.item.start));
+      const blockers = items.map((cb) => timelineBlocker(s, cb, asked));
+
       const landed = s.pasteCopies(items, at);
       if (!landed) throw new ToolError("Nothing could be copied onto this timeline.");
       const now = useEditor.getState();
       return {
         timeline: now.timeline,
-        copied: landed.map((sel) => {
+        copied: landed.map((sel, i) => {
           const item = timelineItem(now, sel)!;
-          return { kind: sel.kind, id: sel.id, start: roundT(item.start) };
+          const start = roundT(item.start);
+          const askedStart = roundT(items[i].item.start + asked);
+          if (start === askedStart) {
+            return { kind: sel.kind, id: sel.id, start };
+          }
+
+          // A slid copy names what took its spot, or the copy it kept its spacing with.
+          const blocker = blockers[i];
+          const why = blocker
+            ? `${blocker.kind} ${blocker.id} holds lane ${blocker.lane} from ${roundT(blocker.start)} to ${roundT(blocker.end)} s`
+            : "kept its spacing with a copy that slid past a taken spot";
+          return { kind: sel.kind, id: sel.id, start, askedStart, why };
         }),
       };
   },
@@ -7621,6 +7643,26 @@ function audioPackHint(id: string): { freeLane?: number; note?: string } {
     freeLane: free,
     note: `Lane ${free} is free for this sound's whole span. Keep the soundtrack packed: move it there with update_audio lane ${free} unless it is stacked on purpose.`,
   };
+}
+
+/** Soundtrack and element copies moved onto `lane`, each kind keeping its rows'
+ * order: copies from lanes 2 and 3 asked onto lane 0 land on 0 and 1. Video
+ * clips keep their tracks. */
+function copiesOnLane(items: TimelineClipboardItem[], lane: number): TimelineClipboardItem[] {
+  const lowest = { audio: Infinity, overlay: Infinity };
+  for (const cb of items) {
+    if (cb.kind === "audio" || cb.kind === "overlay") {
+      lowest[cb.kind] = Math.min(lowest[cb.kind], laneOf(cb.item));
+    }
+  }
+
+  // Each copy moves by the distance from its kind's lowest row to `lane`.
+  return items.map((cb) => {
+    if (cb.kind !== "audio" && cb.kind !== "overlay") {
+      return cb;
+    }
+    return { ...cb, item: { ...cb.item, lane: lane + laneOf(cb.item) - lowest[cb.kind] } } as TimelineClipboardItem;
+  });
 }
 
 function audioLaneInput(value: unknown): number {

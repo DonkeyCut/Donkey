@@ -56,3 +56,37 @@ test("copy_from_timeline names the ids it could not find", async () => {
   const error = await runAiTool("copy_from_timeline", { timeline: "main", ids: ["nope"] }).catch((e: unknown) => e);
   expect(error instanceof Error && error.message.includes("nope")).toBe(true);
 });
+
+// Asked for Main's music at 5.5 s on lane 1 beside a click on lane 0, the copy
+// took the source's lane 0, slid past the click to 6.117 s, and the result
+// read as if it landed where asked.
+
+const clickAsset: MediaAsset = { id: "click-file", fileName: "click.wav", name: "Click", type: "audio", duration: 0.9, url: "" };
+const click: AudioClip = { id: "click", assetId: "click-file", start: 5.217, in: 0, out: 0.9, volume: 1, fadeIn: 0, fadeOut: 0 };
+
+// Second holds the click on lane 0 before each copy.
+function seedClick() {
+  useEditor.setState((s) => ({ assets: [...s.assets, clickAsset], audioClips: [click] }));
+}
+
+test("copy_from_timeline lands on the asked lane at the asked time", async () => {
+  seedClick();
+  const result = (await runAiTool("copy_from_timeline", { timeline: "main", ids: ["bed"], at: 5.5, lane: 1 })) as {
+    copied: { start: number; askedStart?: number }[];
+  };
+  const copy = useEditor.getState().audioClips.find((a) => a.assetId === "music")!;
+  expect(copy).toMatchObject({ start: 5.5, lane: 1 });
+  expect(result.copied[0].start).toBe(5.5);
+  expect(result.copied[0].askedStart).toBeUndefined();
+});
+
+test("copy_from_timeline says when a copy slid past a taken spot", async () => {
+  seedClick();
+  const result = (await runAiTool("copy_from_timeline", { timeline: "main", ids: ["bed"], at: 5.5 })) as {
+    copied: { start: number; askedStart?: number; why?: string }[];
+  };
+  const [item] = result.copied;
+  expect(item.start).toBe(6.117);
+  expect(item.askedStart).toBe(5.5);
+  expect(item.why).toContain("click");
+});

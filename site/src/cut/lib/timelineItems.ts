@@ -87,6 +87,24 @@ export function timelinePlacementDelta(s: ItemLists, items: TimelineClipboardIte
   return delta;
 }
 
+/** The item already on a copy's row where the copy, shifted by `delta`, would land. */
+export function timelineBlocker(s: ItemLists, cb: TimelineClipboardItem, delta: number) {
+  const def = definition(cb.kind);
+  const copy = timelineFootprint(cb);
+
+  // Only the copy's own row can block it, and only where the spans overlap.
+  for (const item of def.list(s)) {
+    const held = timelineFootprint({ kind: cb.kind, item } as TimelineClipboardItem);
+    if (held.row !== copy.row) {
+      continue;
+    }
+    if (copy.start + delta < held.end - 1e-6 && copy.end + delta > held.start + 1e-6) {
+      return { kind: cb.kind, id: item.id, lane: def.lane(item), start: held.start, end: held.end };
+    }
+  }
+  return null;
+}
+
 export function shiftedTimelineItems(s: ItemLists, items: TimelineClipboardItem[], delta: number): ItemLists {
   return mapTimelineItems(s, items.map((cb) => ({ kind: cb.kind, id: cb.item.id })), (cb) => ({
     kind: cb.kind, item: definition(cb.kind).at(cb.item, cb.item.start + delta),
