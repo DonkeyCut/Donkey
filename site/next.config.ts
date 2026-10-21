@@ -74,6 +74,15 @@ const nextConfig: NextConfig = {
       source: "/_next/static/:path*",
       headers: [{ key: "X-Robots-Tag", value: "noindex" }],
     },
+    {
+      // The editor's font faces (scripts/stage-cut-fonts.mjs). Their names
+      // carry no hash, so they cache for a day.
+      source: "/cut-fonts/:path*",
+      headers: [
+        { key: "Cache-Control", value: "public, max-age=86400" },
+        { key: "X-Robots-Tag", value: "noindex" },
+      ],
+    },
   ],
   // Cut is local-only: /api/cut/* 404s on a hosted deploy and never runs the
   // engine. But Turbopack's file tracer still follows the route's import of the

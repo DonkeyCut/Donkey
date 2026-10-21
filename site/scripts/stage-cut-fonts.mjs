@@ -1,17 +1,18 @@
-// Stage the Cut font files into public/ so a headless render draws text with
-// the same faces the editor shows. The page declares these families from the
-// @fontsource stylesheets (googleFonts.ts); a render worker hands skia a file
-// path instead, so the latin face of each weight is copied here from the same
-// packages under stable names, with a manifest the headless bootstrap reads.
+// Stage the Cut font files into public/ for the page and a headless render.
+// The families are listed once, in src/cut/lib/fonts.json. Every subset of
+// each weight is copied here from its @fontsource package, and the manifest
+// records each face's subset and unicode-range: the page adds one lazy
+// FontFace per face (googleFonts.ts), and a render worker hands skia the latin
+// files (lib/headless/nodeFonts.ts).
 //
-// The alias-only families at the bottom cover the base system set (SF Pro,
-// New York, Impact…). Those live on a Mac and nowhere else, so a Linux
-// container would draw tofu for the default font; the aliases register a
-// close stand-in under each name the CSS stacks ask for.
+// The alias-only families cover the base system set (SF Pro, New York,
+// Impact…). Those live on a Mac and nowhere else, so a Linux container would
+// draw tofu for the default font; the aliases register a close stand-in under
+// each name the CSS stacks ask for.
 //
 // Runs from postinstall and reads only node_modules, so it needs no network.
 // A missing face fails the install: the package versions pin the files.
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,116 +20,67 @@ import { fileURLToPath } from "node:url";
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dest = path.join(root, "public", "cut-fonts");
 const require = createRequire(import.meta.url);
+const FAMILIES = JSON.parse(readFileSync(path.join(root, "src", "cut", "lib", "fonts.json"), "utf8"));
 
-/** Keep in step with googleFonts.ts, which declares the same families for
- * the page. An id here is a Cut font id; a family with no id is a stand-in. */
-const FAMILIES = [
-  { id: "inter", label: "Inter", family: "Inter", weights: [400, 500, 600, 700] },
-  { id: "montserrat", label: "Montserrat", family: "Montserrat", weights: [400, 500, 600, 700, 800, 900] },
-  { id: "poppins", label: "Poppins", family: "Poppins", weights: [400, 500, 600, 700, 800, 900] },
-  { id: "oswald", label: "Oswald", family: "Oswald", weights: [400, 500, 600, 700] },
-  { id: "space-grotesk", label: "Space Grotesk", family: "Space Grotesk", weights: [400, 500, 600, 700] },
-  {
-    id: "playfair",
-    label: "Playfair Display",
-    family: "Playfair Display",
-    weights: [400, 500, 600, 700, 900],
-    italics: [400, 700, 900],
-  },
-  { id: "caveat", label: "Caveat", family: "Caveat", weights: [400, 500, 600, 700] },
-  { id: "bebas", label: "Bebas Neue", family: "Bebas Neue", weights: [400] },
-  {
-    id: "anton",
-    label: "Anton",
-    family: "Anton",
-    weights: [400],
-    aliases: ["Impact", "Arial Black"],
-  },
-  { id: "archivo-black", label: "Archivo Black", family: "Archivo Black", weights: [400] },
-  { id: "bangers", label: "Bangers", family: "Bangers", weights: [400] },
-  { id: "lobster", label: "Lobster", family: "Lobster", weights: [400] },
-  { id: "pacifico", label: "Pacifico", family: "Pacifico", weights: [400] },
-  { id: "permanent-marker", label: "Permanent Marker", family: "Permanent Marker", weights: [400] },
-  { id: "dm-serif", label: "DM Serif Display", family: "DM Serif Display", weights: [400] },
-  { id: "amatic", label: "Amatic SC", family: "Amatic SC", weights: [400, 700] },
-  // Light and Bold only: font matching draws a 400 title in the Light face,
-  // the thin LCD look, and 700–900 in Bold.
-  {
-    id: "dseg14",
-    label: "DSEG14 Classic",
-    family: "DSEG14 Classic",
-    weights: [300, 700],
-    italics: [300, 700],
-  },
-  { id: "outfit", label: "Outfit", family: "Outfit", weights: [400, 500, 600, 700] },
-  { id: "cinzel", label: "Cinzel", family: "Cinzel", weights: [400, 700] },
-  { id: "freckle-face", label: "Freckle Face", family: "Freckle Face", weights: [400] },
-  { id: "orbitron", label: "Orbitron", family: "Orbitron", weights: [400, 900] },
-  { id: "chewy", label: "Chewy", family: "Chewy", weights: [400] },
-  { id: "great-vibes", label: "Great Vibes", family: "Great Vibes", weights: [400] },
-  { id: "rubik-dirt", label: "Rubik Dirt", family: "Rubik Dirt", weights: [400] },
-  { id: "fredoka", label: "Fredoka", family: "Fredoka", weights: [500, 600, 700] },
-  { id: "oranienbaum", label: "Oranienbaum", family: "Oranienbaum", weights: [400] },
-  { id: "kaushan", label: "Kaushan Script", family: "Kaushan Script", weights: [400] },
-  { id: "rubik", label: "Rubik", family: "Rubik", weights: [400, 500, 700, 900] },
-  { id: "jost", label: "Jost", family: "Jost", weights: [400, 500, 600, 700] },
-  { id: "gloria-hallelujah", label: "Gloria Hallelujah", family: "Gloria Hallelujah", weights: [400] },
-  { id: "prompt", label: "Prompt", family: "Prompt", weights: [900] },
-  {
-    family: "Roboto",
-    weights: [400, 500, 600, 700],
-    aliases: [
-      "-apple-system",
-      "system-ui",
-      "SF Pro Display",
-      "SF Pro Text",
-      "Helvetica Neue",
-      "Helvetica",
-      "Arial",
-      "sans-serif",
-    ],
-  },
-  {
-    family: "Noto Serif",
-    weights: [400, 500, 600, 700],
-    aliases: ["New York", "ui-serif", "Georgia", "Times New Roman", "serif"],
-  },
-  {
-    family: "Nunito",
-    weights: [400, 500, 600, 700],
-    aliases: ["ui-rounded", "SF Pro Rounded", "Arial Rounded MT Bold"],
-  },
-  {
-    family: "Roboto Mono",
-    weights: [400, 500, 600, 700],
-    aliases: ["ui-monospace", "SF Mono", "Menlo", "Courier New", "monospace"],
-  },
-];
+/** The subset skia draws from; the others only serve the page. */
+const SKIA_SUBSET = "latin";
 
 const slug = (family) => family.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+/** The faces one @fontsource stylesheet declares, one per subset:
+ * "inter-cyrillic-400-normal" → { file, subset: "cyrillic", range }. A
+ * single-subset family declares no unicode-range, so its face covers all. */
+function readFaces(pkgDir, pkg, weight, style) {
+  const css = readFileSync(path.join(pkgDir, `${weight}${style === "italic" ? "-italic" : ""}.css`), "utf8");
+  const faces = [];
+  for (const [, body] of css.matchAll(/@font-face\s*{([^}]*)}/g)) {
+    const file = body.match(/url\(\.\/files\/([^)]+\.woff2)\)/)?.[1];
+    if (!file) {
+      throw new Error(`${pkg} ${weight} ${style}: a face with no woff2`);
+    }
+    const subset = file.slice(pkg.length + 1, -`-${weight}-${style}.woff2`.length);
+    const range = body.match(/unicode-range:\s*([^;]+);/)?.[1].trim();
+    faces.push({ file, subset, ...(range ? { range } : {}) });
+  }
+  if (!faces.some((f) => f.subset === SKIA_SUBSET)) {
+    throw new Error(`${pkg} ${weight} ${style}: no ${SKIA_SUBSET} face`);
+  }
+  return faces;
+}
 
 rmSync(dest, { recursive: true, force: true });
 mkdirSync(dest, { recursive: true });
 const manifest = [];
 for (const entry of FAMILIES) {
   const pkg = slug(entry.family);
-  const files = path.join(path.dirname(require.resolve(`@fontsource/${pkg}/package.json`)), "files");
-  const staged = entry.weights.map((weight) => {
-    const name = `${pkg}-${weight}.woff2`;
-    copyFileSync(path.join(files, `${pkg}-latin-${weight}-normal.woff2`), path.join(dest, name));
-    return name;
-  });
-  // Italic faces join the same family; skia reads the slant off the file.
-  for (const weight of entry.italics ?? []) {
-    const name = `${pkg}-${weight}-italic.woff2`;
-    copyFileSync(path.join(files, `${pkg}-latin-${weight}-italic.woff2`), path.join(dest, name));
-    staged.push(name);
+  const pkgDir = path.dirname(require.resolve(`@fontsource/${pkg}/package.json`));
+  const styled = [
+    ...entry.weights.map((weight) => ({ weight, style: "normal" })),
+    ...(entry.italics ?? []).map((weight) => ({ weight, style: "italic" })),
+  ];
+
+  // Copy every subset's file; a subset's range is the same at every weight,
+  // so the manifest keeps it once per family.
+  const faces = [];
+  const ranges = {};
+  for (const { weight, style } of styled) {
+    for (const { file, subset, range } of readFaces(pkgDir, pkg, weight, style)) {
+      copyFileSync(path.join(pkgDir, "files", file), path.join(dest, file));
+      faces.push({ file, weight, style, subset });
+      if (range) {
+        ranges[subset] = range;
+      }
+    }
   }
+
   manifest.push({
-    ...(entry.id ? { id: entry.id, label: entry.label } : {}),
+    ...(entry.id ? { id: entry.id } : {}),
     family: entry.family,
     ...(entry.aliases ? { aliases: entry.aliases } : {}),
-    files: staged,
+    // Skia reads weight and slant off each file.
+    files: faces.filter((f) => f.subset === SKIA_SUBSET).map((f) => f.file),
+    faces,
+    ranges,
   });
 }
-writeFileSync(path.join(dest, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+writeFileSync(path.join(dest, "manifest.json"), `${JSON.stringify(manifest)}\n`);

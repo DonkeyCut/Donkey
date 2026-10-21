@@ -27,7 +27,7 @@ The code that stalls is rarely slow on its own. It is whatever happens to be hol
 thread when a frame was due. So the questions to ask of any change are the same two: how
 long does this hold the thread at once, and how often.
 
-The model for this section, and for the split, batch, defer and move techniques below, is
+The model for this section and the techniques below is
 [The Expensive Main Thread](https://kciter.so/posts/the-expensive-main-thread/en/).
 
 ## Techniques
@@ -86,6 +86,9 @@ the box—the preview stays in sync with the source.
    reader cache. Sound, filmstrip and preview all join that same open file.
 7. **Measure before you ship.** A change to the preview, the timeline, or the frame loop
    runs the perf evals, and the summary says what moved.
+8. **Load weight on demand.** A new font is one entry in `site/src/cut/lib/fonts.json`
+   plus its @fontsource package; its CSS is never imported. Heavy effect code loads by
+   `import()` behind an awaited prepare step, as `packages/effects-kit/src/lottie.ts` does.
 
 ## Memory
 
@@ -132,11 +135,4 @@ A nightly run gates the scrub cases on a CI machine profile.
 Every editor session also meters its own main thread. A frame over a second, or a half
 minute mostly blocked, marks the session as trouble and the frames leading up to it are
 sent to analytics with the script that held the thread and the control that was pressed.
-A small random share of sessions send regardless, as the baseline trouble is measured
-against.
-
-## Where it lives
-
-The frame loop and decoders live in the preview's frame source and playback hook, the
-memory budget in its own module beside them, the trace and meter in the perf trace and
-perf log modules, and the evals in the site's scripts folder.
+A small random share of sessions send regardless, as a baseline.
