@@ -239,6 +239,7 @@ import { renderMix } from "./audioMix";
 import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./loudness";
 import { frameAt, framesAt, readMediaFileSize } from "./mediaRead";
 import { bundledFaces, inkMaskOf, rankFaces } from "./fontMatch";
+import { fontKind, fontLook } from "./fontCatalog";
 import { CUT_FONT_MATCH } from "./fontMatchSettings";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
 import { compareMoments, sweepSource } from "./sourceCompare";
@@ -742,6 +743,10 @@ const FONT_SUGGESTIONS_MAX = 10;
 /** The longest side a suggest_font crop is read at, px: type this tall is
  * already far finer than the grid it is scored on. */
 const FONT_CROP_MAX = 1600;
+/** Ink a line of type runs tall in the source, px, under which its glyphs
+ * blur into their proportions: a serif and a condensed sans of the same
+ * shape score alike, so the ranking no longer names the face. */
+const FONT_SMALL_INK_PX = 24;
 /** Design px on a frame's short side, the unit a title's size is in. */
 const DESIGN_SHORT_SIDE = 1080;
 
@@ -2291,15 +2296,58 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const ctx = crop.getContext("2d") as CanvasRenderingContext2D | null;
       if (!ctx) throw new ToolError("No 2D context to read the frame on.");
       ctx.drawImage(source, x0, y0, sw, sh, 0, 0, cw, ch);
-      const ref = inkMaskOf(ctx.getImageData(0, 0, cw, ch).data, cw, ch);
-      crop.width = 0;
-      if (!ref.box)
-        throw new ToolError("No type stands out from its ground in that region. Check where the words sit with watch_video at detail original, then pass a region around them.");
 
-      // Every face ranked; the size each would need to fill the ink's height.
-      const ranked = await rankFaces(ref, text, bundledFaces(), fontStack).catch((e) => {
-        throw new ToolError(e instanceof Error ? e.message : "Could not set the faces.", { cause: e });
-      });
+      // Type set at an angle is read upright: the crop turned back by the
+      // title's rotation. One line of words in a region taller than wide is
+      // a column word, read both ways round when no rotation is given.
+      const lines = text.split("\n").filter((l) => l.trim()).length;
+      const rotations = isNum(input.rotation)
+        ? [input.rotation]
+        : lines === 1 && text.trim().length > 1 && ch > cw * 1.3
+          ? [-90, 90]
+          : [0];
+      const reads = [];
+      for (const rotation of rotations) {
+        const a = (rotation * Math.PI) / 180;
+        const [cos, sin] = [Math.abs(Math.cos(a)), Math.abs(Math.sin(a))];
+        const uw = Math.max(1, Math.round(cw * cos + ch * sin));
+        const uh = Math.max(1, Math.round(cw * sin + ch * cos));
+        const upright = rotation === 0 ? crop : createRasterCanvas(uw, uh);
+        const uctx = upright.getContext("2d") as CanvasRenderingContext2D | null;
+        if (!uctx) throw new ToolError("No 2D context to read the frame on.");
+        if (upright !== crop) {
+          uctx.translate(uw / 2, uh / 2);
+          uctx.rotate(-a);
+          uctx.drawImage(crop as CanvasImageSource, -cw / 2, -ch / 2);
+        }
+        const ref = inkMaskOf(uctx.getImageData(0, 0, upright.width, upright.height).data, upright.width, upright.height);
+        const size = { w: upright.width, h: upright.height };
+        if (upright !== crop) upright.width = 0;
+        if (!ref.box) continue;
+        // Every face ranked; the size each would need to fill the ink's height.
+        const ranked = await rankFaces(ref, text, bundledFaces(), fontStack).then(
+          (r) => r,
+          (e) => {
+            // A guess at the angle that reads wrong is one of the guesses.
+            if (rotations.length > 1) return null;
+            throw new ToolError(e instanceof Error ? e.message : "Could not set the faces.", { cause: e });
+          }
+        );
+        if (ranked) reads.push({ rotation, ref, ranked, size });
+      }
+      crop.width = 0;
+      if (reads.length === 0)
+        throw new ToolError("No type stands out from its ground in that region. Check where the words sit with watch_video at detail original, then pass a region around them.");
+      const { rotation, ref, ranked, size: upSize } = reads.reduce((a, b) => ((b.ranked[0]?.score ?? 0) > (a.ranked[0]?.score ?? 0) ? b : a));
+      const inkBox = ref.box!;
+      // The ink's box, turned back onto the crop: its centre, and the frame-
+      // aligned box it fills there.
+      const a = (rotation * Math.PI) / 180;
+      const [ux, uy] = [inkBox.x + inkBox.w / 2 - upSize.w / 2, inkBox.y + inkBox.h / 2 - upSize.h / 2];
+      const inkCx = ux * Math.cos(a) - uy * Math.sin(a) + cw / 2;
+      const inkCy = ux * Math.sin(a) + uy * Math.cos(a) + ch / 2;
+      const inkW = Math.abs(inkBox.w * Math.cos(a)) + Math.abs(inkBox.h * Math.sin(a));
+      const inkH = Math.abs(inkBox.w * Math.sin(a)) + Math.abs(inkBox.h * Math.cos(a));
       const count = Math.round(clamp(isNum(input.count) ? input.count : FONT_SUGGESTIONS, 1, FONT_SUGGESTIONS_MAX));
       const labels = new Map(allFonts().map((f) => [f.id, f.label]));
       const matches = ranked.slice(0, count).map((m) => ({
@@ -2314,22 +2362,35 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const good = CUT_FONT_MATCH.goodScore;
       const best = matches[0];
       const round3 = (v: number) => Math.round(v * 1000) / 1000;
+      // How tall a line of the ink runs in the source's own pixels.
+      const inkPx = Math.round(inkBox.h / k / lines);
+      const small = inkPx < FONT_SMALL_INK_PX;
+      const kinds: Record<string, string[]> = {};
+      for (const f of allFonts()) {
+        const kind = fontKind(f.id);
+        if (kind) (kinds[kind] ??= []).push(`${f.id} — ${fontLook(f.id)}`);
+      }
       return {
         t: round2(t),
         text,
         ink: {
-          x: round3(((x0 + (ref.box.x + ref.box.w / 2) / k) / fw - left) / area.w),
-          y: round3(((y0 + (ref.box.y + ref.box.h / 2) / k) / fh - top) / area.h),
-          w: round3(ref.box.w / k / fw / area.w),
-          h: round3(ref.box.h / k / fh / area.h),
+          x: round3(((x0 + inkCx / k) / fw - left) / area.w),
+          y: round3(((y0 + inkCy / k) / fh - top) / area.h),
+          w: round3(inkW / k / fw / area.w),
+          h: round3(inkH / k / fh / area.h),
         },
+        ...(rotation !== 0 ? { rotation } : {}),
         ...pictureReport(area),
-        verdict: best && best.score >= good ? "match" : "no_match",
+        verdict: best && best.score >= good && !small ? "match" : "no_match",
         matches,
-        note:
-          best && best.score >= good
-            ? `${best.label} ${best.weight}${best.italic ? " italic" : ""} matches (a match scores ${good}+). Set it with its weight, size (px at the 1080 short side, for the same ink height) and tracking (em); faces scoring near it are close cuts worth a look with compare_to_source.`
-            : `Nothing bundled matches closely (best ${best?.score ?? 0}; a match scores ${good}+), so the reference is likely set in a face Donkey does not bundle. Tell the user so, name the closest face here as the stand-in you use, and say the Library takes their own font files.`,
+        inkPx,
+        ...(small ? { small: true } : {}),
+        ...(small || !(best && best.score >= good) ? { kinds } : {}),
+        note: small
+          ? `The type is ${inkPx}px a line in the source, too small for its glyphs to tell faces apart: the ranking above follows its proportions, not its face, and can put a condensed sans over a serif. Name the face from the frame at detail original — serif or sans, its weight, how narrow — and set the closest face of that kind from \`kinds\`, at the size above.`
+          : best && best.score >= good
+            ? `${best.label} ${best.weight}${best.italic ? " italic" : ""} matches (a match scores ${good}+). Set it with its weight, size (px at the 1080 short side, for the same ink height) and tracking (em)${rotation !== 0 ? `, at rotation ${rotation} as the type stands` : ""}; faces scoring near it are close cuts worth a look with compare_to_source.`
+            : `Nothing bundled matches closely (best ${best?.score ?? 0}; a match scores ${good}+), so the reference is likely set in a face Donkey does not bundle. Tell the user so, name the closest face of its kind (\`kinds\`) as the stand-in you use, and say the Library takes their own font files.`,
       };
   },
 

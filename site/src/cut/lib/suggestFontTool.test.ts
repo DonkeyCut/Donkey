@@ -17,7 +17,7 @@ fontLibrary.use("Anton", [`${FILES}anton/files/anton-latin-400-normal.woff2`]);
 fontLibrary.use("Great Vibes", [`${FILES}great-vibes/files/great-vibes-latin-400-normal.woff2`]);
 
 /** What the reference shows: a 1920×1080 frame with one line of type. */
-let shows = { text: "TRAVEL DESTINATION", css: '700 72px "Oswald"' };
+let shows: { text: string; css: string; rotate?: number; at?: [number, number] } = { text: "TRAVEL DESTINATION", css: '700 72px "Oswald"' };
 const reads: number[] = [];
 async function frameAt(_src: string | Blob, time: number) {
   reads.push(time);
@@ -29,7 +29,10 @@ async function frameAt(_src: string | Blob, time: number) {
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(shows.text, 960, 540);
+  const [ax, ay] = shows.at ?? [960, 540];
+  ctx.translate(ax, ay);
+  ctx.rotate(((shows.rotate ?? 0) * Math.PI) / 180);
+  ctx.fillText(shows.text, 0, 0);
   return { canvas: c, timestamp: time, duration: 1 / 30 } as never;
 }
 await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, { frameAt });
@@ -124,4 +127,43 @@ test("inside a picture box, the region, the ink and the size are the box's", asy
   expect(Math.abs(out.matches[0].size - 144)).toBeLessThanOrEqual(6);
   expect(Math.abs(out.ink.y - 0.5)).toBeLessThan(0.02);
   expect(out.picture).toBeDefined();
+});
+
+test("a word set sideways is read upright, and the rotation that sets it comes back", async () => {
+  // A column word reading bottom to top: a title at rotation -90.
+  shows = { text: "PLEASE", css: '700 120px "Oswald"', rotate: -90, at: [192, 540] };
+  const column = { x: 0.1, y: 0.5, w: 0.12, h: 0.7 };
+  const out = (await runAiTool("suggest_font", { asset_id: "ref", t: 3, region: column, text: "PLEASE" })) as Out & { rotation: number };
+  expect(out.rotation).toBe(-90);
+  expect(out.matches[0]).toMatchObject({ font: "oswald", weight: 700 });
+  expect(Math.abs(out.matches[0].size - 120)).toBeLessThanOrEqual(5);
+  expect(Math.abs(out.ink.x - 0.1)).toBeLessThan(0.01);
+  expect(Math.abs(out.ink.y - 0.5)).toBeLessThan(0.02);
+  // Read upright the word is long; on the frame it stands tall.
+  expect(out.ink.h).toBeGreaterThan(out.ink.w);
+  // Told the rotation, it reads the same.
+  const told = (await runAiTool("suggest_font", { asset_id: "ref", t: 3, region: column, text: "PLEASE", rotation: -90 })) as Out & { rotation: number };
+  expect(told.rotation).toBe(-90);
+  expect(told.matches[0]).toMatchObject({ font: "oswald", weight: 700 });
+});
+
+test("type too small to tell faces apart says so and lists the faces by kind", async () => {
+  // 18px on a 1080 frame: a few pixels of x-height, where glyph overlap
+  // sees proportions and not the face.
+  shows = { text: "of my life", css: '400 18px "Oswald"' };
+  const out = (await runAiTool("suggest_font", { asset_id: "ref", t: 3, region: { x: 0.5, y: 0.5, w: 0.2, h: 0.08 }, text: "of my life" })) as Out & {
+    small?: boolean;
+    inkPx: number;
+    kinds?: Record<string, string[]>;
+  };
+  expect(out.small).toBe(true);
+  expect(out.inkPx).toBeLessThan(24);
+  expect(out.note).toContain("too small");
+  // Each face by its id and how it looks, to pick a stand-in by eye.
+  expect(out.kinds?.serif).toContain("serif — book serif (New York)");
+  expect(out.kinds?.sans).toContain("oswald — condensed grotesque");
+  // Type big enough to read is not flagged.
+  shows = { text: "TRAVEL DESTINATION", css: '700 72px "Oswald"' };
+  const big = (await runAiTool("suggest_font", { asset_id: "ref", t: 3, region: REGION, text: "TRAVEL DESTINATION" })) as Out & { small?: boolean };
+  expect(big.small).toBeUndefined();
 });
