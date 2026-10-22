@@ -960,6 +960,7 @@ function describeOverlay(o: Overlay) {
       ...(o.effect === "glitch" && o.glitch ? { glitch: o.glitch } : {}),
       ...(o.effect === "flash" && o.tone ? { tone: o.tone } : {}),
       ...(o.effect === "flash" && o.rate ? { rate: r(o.rate), rhythm: o.rhythm ?? "strobe" } : {}),
+      ...(o.effect === "negative" && o.rate ? { rate: r(o.rate) } : {}),
       ...(o.effect === "flash" && o.fade ? { fade: o.fade } : {}),
     };
   }

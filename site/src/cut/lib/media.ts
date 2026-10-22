@@ -1632,6 +1632,11 @@ export async function sampleWatchFrames(
      * detect_cuts found and the frame each change inside a shot settles on.
      * Each gets a decode of its own, however close to the next. */
     shots?: number[];
+    /** The part of the frame that is the source's picture (a screen
+     * recording's player, a letterboxed film), centre and size as frame
+     * fractions: frames are judged and returned inside it, so a shot changing
+     * in a phone's player is not outvoted by the app around it. */
+    picture?: { x: number; y: number; w: number; h: number };
   }
 ): Promise<WatchFrames> {
   const input = openMedia(sourceUrl);
@@ -1649,14 +1654,26 @@ export async function sampleWatchFrames(
     const times = candidateTimes(from, to, interval, opts.at ?? [], opts.shots ?? []);
 
     const geom = watchGeometry(opts.detail);
-    const srcW = await track.getDisplayWidth();
-    const srcH = await track.getDisplayHeight();
+    const fullW = await track.getDisplayWidth();
+    const fullH = await track.getDisplayHeight();
+    const area = opts.picture && (opts.picture.w < 0.999 || opts.picture.h < 0.999) ? opts.picture : null;
+    // Cells are sized to the picture; frames decode at whatever size gives
+    // the picture those pixels, and `blit` cuts the picture out of each.
+    const srcW = area ? fullW * area.w : fullW;
+    const srcH = area ? fullH * area.h : fullH;
+    const decodeSize = (w: number, h: number) =>
+      area ? { width: Math.round(w / area.w), height: Math.round(h / area.h), fit: "fill" as const } : { width: w, height: h, fit: "fill" as const };
+    const blit = (ctx: CanvasRenderingContext2D, src: CanvasImageSource & { width: number; height: number }, w: number, h: number) => {
+      if (!area) return ctx.drawImage(src, 0, 0, w, h);
+      ctx.drawImage(src, (area.x - area.w / 2) * src.width, (area.y - area.h / 2) * src.height, area.w * src.width, area.h * src.height, 0, 0, w, h);
+    };
     const twoPass = !opts.metadataOnly && geom.rewalk;
     // Selection reads a 192² signature whatever the detail, so a pass that
     // returns no pictures — or that walks the kept times again for big ones —
     // decodes candidates at the cheap size.
     const selectOnly = opts.metadataOnly || twoPass;
     const [cw, ch] = cellDims(srcW, srcH, selectOnly ? SELECT_CELL : geom.cell);
+    const cellSize = decodeSize(cw, ch);
     const maxFrames = geom.maxFrames;
     // Cell canvases are held only until the selector rules on them (decisions
     // run one frame behind), so memory stays near the kept set, never the
@@ -1680,20 +1697,20 @@ export async function sampleWatchFrames(
     if (!sigCtx) throw new Error("Could not sample the video.");
     const deadline = Date.now() + (opts.budgetMs ?? Infinity);
     const outOfTime = () => Date.now() > deadline;
-    const sigG16Of = (canvas: CanvasImageSource): Float32Array => {
+    const sigG16Of = (canvas: CanvasImageSource & { width: number; height: number }): Float32Array => {
       sigCtx.imageSmoothingQuality = "high";
-      sigCtx.drawImage(canvas, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
+      blit(sigCtx, canvas, SIGNATURE_SIZE, SIGNATURE_SIZE);
       const data = sigCtx.getImageData(0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE).data;
       return frameSig({ width: SIGNATURE_SIZE, height: SIGNATURE_SIZE, channels: 4, data }).g16;
     };
     // The timestamp of the first frame in (lo, hi] that differs from `pre`,
     // decoded in order; null when the walk finds none.
     const firstNewFrame = async (lo: number, hi: number, pre: Float32Array): Promise<number | null> => {
-      const walk = baseFrameSink(track, { width: cw, height: ch, fit: "fill" }, reading).canvases(lo, hi + CUT_WALK_EPS);
+      const walk = baseFrameSink(track, cellSize, reading).canvases(lo, hi + CUT_WALK_EPS);
       try {
         for await (const frame of walk) {
           if (frame.timestamp <= lo - CUT_WALK_EPS) continue;
-          const g = sigG16Of(frame.canvas as CanvasImageSource);
+          const g = sigG16Of(frame.canvas);
           if (diffCellPct(g, pre, DEDUP_TUNING.GLOBAL_TOL) > DEDUP_TUNING.THRESHOLD) return frame.timestamp;
         }
       } finally {
@@ -1702,12 +1719,12 @@ export async function sampleWatchFrames(
       return null;
     };
     const sigG16At = async (t: number): Promise<Float32Array | null> => {
-      const one = await baseFrameSink(track, { width: cw, height: ch, fit: "fill" }, reading).getCanvas(t);
-      return one ? sigG16Of(one.canvas as CanvasImageSource) : null;
+      const one = await baseFrameSink(track, cellSize, reading).getCanvas(t);
+      return one ? sigG16Of(one.canvas) : null;
     };
 
     // The times are ascending, so the whole span decodes once, in order.
-    const cells = baseFrameSink(track, { width: cw, height: ch, fit: "fill" }, reading).canvasesAtTimestamps(times);
+    const cells = baseFrameSink(track, cellSize, reading).canvasesAtTimestamps(times);
     let paused = false;
     let capped = false;
     try {
@@ -1728,12 +1745,12 @@ export async function sampleWatchFrames(
           const copy = createRasterCanvas(cw, ch);
           const cctx = copy.getContext("2d") as CanvasRenderingContext2D | null;
           if (!cctx) throw new Error("Could not sample the video.");
-          cctx.drawImage(next.value.canvas as CanvasImageSource, 0, 0, cw, ch);
+          blit(cctx, next.value.canvas, cw, ch);
           held.set(candTimes.length, copy);
         }
         candTimes.push(times[i]);
         sigCtx.imageSmoothingQuality = "high";
-        sigCtx.drawImage(next.value.canvas as CanvasImageSource, 0, 0, SIGNATURE_SIZE, SIGNATURE_SIZE);
+        blit(sigCtx, next.value.canvas, SIGNATURE_SIZE, SIGNATURE_SIZE);
         const rgb = {
           width: SIGNATURE_SIZE,
           height: SIGNATURE_SIZE,
@@ -1767,7 +1784,7 @@ export async function sampleWatchFrames(
       const shot = createRasterCanvas(nw, nh);
       const shotCtx = shot.getContext("2d") as CanvasRenderingContext2D | null;
       if (!shotCtx) throw new Error("Could not sample the video.");
-      const walk = baseFrameSink(track, { width: nw, height: nh, fit: "fill" }, reading).canvasesAtTimestamps(
+      const walk = baseFrameSink(track, decodeSize(nw, nh), reading).canvasesAtTimestamps(
         keptAll.map((i) => candTimes[i])
       );
       try {
@@ -1776,7 +1793,7 @@ export async function sampleWatchFrames(
           const frame = await walk.next();
           if (frame.done) break;
           if (!frame.value) continue;
-          shotCtx.drawImage(frame.value.canvas as CanvasImageSource, 0, 0, nw, nh);
+          blit(shotCtx, frame.value.canvas, nw, nh);
           encoded.set(idx, await rasterCanvasToDataUrl(shot, "image/jpeg", geom.quality));
         }
       } finally {

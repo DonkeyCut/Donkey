@@ -243,9 +243,9 @@ import { fontKind, fontLook } from "./fontCatalog";
 import { CUT_FONT_MATCH } from "./fontMatchSettings";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
 import { compareMoments, sweepSource } from "./sourceCompare";
-import { findPicture, sampleColors, scanCuts, trackElement, type FrameBox } from "./measure/sourceMeasure";
+import { findPicture, sampleColors, scanCuts, sourcePictureAt, trackCamera, trackElement, type FrameBox } from "./measure/sourceMeasure";
 import { FULL_FRAME, isFullFrame } from "./measure/picture";
-import { DETECT_CHANGES_MAX, DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
+import { DETECT_CHANGES_MAX, DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, CAMERA_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
 import { buildAiContext, describeCameraCard, describeDoc, describeParkedTimeline, hiddenFromChat, OTHER_CHATS_MEDIA_NOTE, roundT } from "./aiContext";
@@ -573,7 +573,7 @@ async function readGradeOf(clip: VideoClip): Promise<ReadGrade | undefined> {
 
 async function colorStatsForRef(
   s: ReturnType<typeof useEditor.getState>,
-  ref: { clipId?: string; assetId?: string; graded?: boolean }
+  ref: { clipId?: string; assetId?: string; at?: number; graded?: boolean }
 ): Promise<ColorStats> {
   if (ref.clipId) {
     const clip = requireItem(s.clips, ref.clipId, "video clip");
@@ -586,10 +586,21 @@ async function colorStatsForRef(
   }
   if (ref.assetId) {
     const asset = requireItem(s.assets, ref.assetId, "project asset");
+    if (asset.type === "video") {
+      // A reference video reads at a second, inside the picture its measuring
+      // tools found, so a screen recording's grade is the shot's, not the app's.
+      if (!isNum(ref.at))
+        throw new ToolError("A video reference needs ref_at, the second of it to match (a moment inside the shot).");
+      const at = clamp(ref.at, 0, Math.max(0, asset.duration - 0.001));
+      const px = await withSweepPaused(() => sourcePictureAt(asset.url, at, asset.picture ?? FULL_FRAME)).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+      });
+      const stats = colorStatsFromImageData(px.data);
+      if (!stats) throw new ToolError(`Could not read pixels off "${asset.name}" at ${roundT(at)}s.`);
+      return stats;
+    }
     if (asset.type !== "image")
-      throw new ToolError(
-        "Color stats read images and clip frames — for a video asset, place it on the timeline and pass its clip id."
-      );
+      throw new ToolError("Color stats read images, video frames and clip frames — that asset has no picture.");
     const img = await decodeRasterImageUrl(asset.url);
     if (!img || !img.width) throw new ToolError("Could not decode that image.");
     const w = 192;
@@ -1845,6 +1856,57 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
   },
 
+  track_camera: async (s, input) => {
+      const asset = measuredSource(s, input, "video");
+      const end = Math.max(0, asset.duration - 0.001);
+      const from = clamp(isNum(input.from) ? input.from : 0, 0, end);
+      if (!isNum(input.to) || input.to <= from) throw new ToolError("Pass to, the source second the stretch ends, after from.");
+      const to = clamp(input.to, 0, asset.duration);
+      const area = pictureArea(asset, input);
+      const run = await withSweepPaused(() => trackCamera(asset.url, { from, to, area, maxFrames: CAMERA_FRAMES_MAX })).catch((e) => {
+        throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+      });
+      if (run.path.length < 2) throw new ToolError(`Only ${run.path.length} frame between ${from}s and ${to}s — give a longer stretch.`);
+      const r3 = (v: number) => Math.round(v * 1000) / 1000;
+      return {
+        ...(run.fps > 0 ? { fps: Math.round(run.fps * 100) / 100 } : {}),
+        framesRead: run.path.length,
+        still: run.still,
+        path: run.path.map((p) => ({
+          t: roundT(p.t),
+          scale: r3(p.scale),
+          dx: r3(p.dx),
+          dy: r3(p.dy),
+          rotation: Math.round(p.rotation * 10) / 10,
+          residual: Number.isFinite(p.residual) ? Math.round(p.residual * 10) / 10 : null,
+          ...(p.second
+            ? {
+                second: {
+                  scale: r3(p.second.scale),
+                  dx: r3(p.second.dx),
+                  dy: r3(p.second.dy),
+                  rotation: Math.round(p.second.rotation * 10) / 10,
+                  share: Math.round(p.second.share * 100) / 100,
+                },
+              }
+            : {}),
+        })),
+        moves: run.moves.map((m) => ({
+          prop: m.prop,
+          from: roundT(m.from),
+          to: roundT(m.to),
+          start: m.prop === "rotation" ? Math.round(m.start * 10) / 10 : r3(m.start),
+          end: m.prop === "rotation" ? Math.round(m.end * 10) / 10 : r3(m.end),
+          ease: m.ease,
+          error: Math.round(m.error * 1000) / 1000,
+        })),
+        coveredTo: roundT(run.coveredTo),
+        truncated: run.truncated,
+        ...pictureReport(area),
+        source: sourceRef(asset),
+      };
+  },
+
   watch_video: async (s, input) => {
       // A look at a reference project's footage decides a mapping and writes
       // nothing: no note owed, no frame map kept, no sweep started.
@@ -1895,6 +1957,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           detail,
           at: aimed,
           shots: shotMoments.get(asset.id) ?? [],
+          // A screen recording is watched inside its picture, as it is measured.
+          ...(asset.picture ? { picture: asset.picture } : {}),
           budgetMs: 90_000,
         })
       ).catch((e) => {
@@ -3883,13 +3947,15 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       if (!Array.isArray(input.effects)) throw new ToolError("effects must be a list; [] removes them all.");
 
       // Each entry names a clip effect once, with an optional amount in range;
-      // a flash also takes its tone, strobe rate and rhythm.
+      // a flash also takes its tone, strobe rate and rhythm, a negative its
+      // strobe rate.
       const effects: ClipEffect[] = [];
       for (const e of input.effects as { effect?: unknown; amount?: unknown; tone?: unknown; rate?: unknown; rhythm?: unknown }[]) {
         const effect = CLIP_EFFECT_IDS.find((id) => id === e?.effect);
         if (!effect) throw new ToolError(`effect must be one of ${CLIP_EFFECT_IDS.join(", ")}.`);
         if (effects.some((x) => x.effect === effect)) throw new ToolError(`${effect} is listed twice; a clip wears an effect once.`);
         const entry: ClipEffect = isNum(e.amount) ? { effect, amount: Math.max(0.05, Math.min(1, e.amount)) } : { effect };
+        if (effect === "negative" && isNum(e.rate) && e.rate > 0) entry.rate = clamp(e.rate, FLASH_RATE_MIN, FLASH_RATE_MAX);
         if (effect === "flash") {
           if (e.tone !== undefined && !(FLASH_TONES as readonly unknown[]).includes(e.tone)) {
             throw new ToolError(`tone is one of ${FLASH_TONES.join(", ")}.`);
@@ -6309,6 +6375,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const reference = await colorStatsForRef(s, {
         clipId: typeof input.ref_clip_id === "string" ? input.ref_clip_id : undefined,
         assetId: typeof input.ref_asset_id === "string" ? input.ref_asset_id : undefined,
+        at: isNum(input.ref_at) ? input.ref_at : undefined,
         graded: true,
       });
       const raw = await clipRawFrame(s, clip, 192, 108);
@@ -6478,6 +6545,7 @@ export const MEDIA_RUNTIME_TOOLS: ReadonlySet<string> = new Set([
   "detect_cuts",
   "sample_color",
   "track_element",
+  "track_camera",
   "suggest_font",
   "render_preview",
   "freeze_frame",
@@ -8125,6 +8193,8 @@ function effectSettings(effect: EffectId, input: Record<string, unknown>): Parti
     }
     patch.glitch = input.glitch as GlitchKind;
   }
+  // A negative strobes at a rate; none flips the whole element.
+  if (effect === "negative" && isNum(input.rate)) patch.rate = input.rate > 0 ? clamp(input.rate, FLASH_RATE_MIN, FLASH_RATE_MAX) : undefined;
   if (effect !== "flash") return patch;
   // A flash's tone and strobe: white and a single pop store as absence.
   if (input.tone !== undefined) {

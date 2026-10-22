@@ -55,6 +55,15 @@ describe("effect recipes", () => {
     expect(effectPreviewState("negative", 1, 0).cssFilter).toBe("invert(1)");
   });
 
+  test("a negative with a rate strobes: flipped for the first half of each pulse", () => {
+    // Rate 15 at 30 fps: every other frame flipped, the picture between.
+    const at = (frame: number) => effectPreviewState("negative", 0.5, frame / 30, undefined, undefined, 2, { rate: 15 }).cssFilter;
+    expect([0, 1, 2, 3, 4].map(at)).toEqual(["invert(1)", "", "invert(1)", "", "invert(1)"]);
+    // The export gates its flip by the same pulse.
+    const lines = effectFilterLines("in", "out", "negative", 0.5, 1, 2, 540, 960, "t", undefined, undefined, undefined, { rate: 15 })!;
+    expect(lines.join(";")).toMatch(/enable='[^']*lt\(mod\(\(t-1\)\*15\+/);
+  });
+
   test("a color cycle turns the hue at the amount's pace, from its own start", () => {
     // Amount 0.5 is 0.8 turns a second: a quarter second in is 72 degrees.
     expect(effectPreviewState("huecycle", 0.5, 0).cssFilter).toBe("hue-rotate(0deg)");

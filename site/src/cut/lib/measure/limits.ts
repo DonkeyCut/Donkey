@@ -21,3 +21,6 @@ export const TRACK_TOLERANCE_DEFAULT = 40;
 export const TRACK_MATCHES = ["shape", "ink"] as const;
 /** track_element: path entries listed per call; a longer path is thinned. */
 export const TRACK_PATH_MAX = 60;
+/** track_camera: frames read per call — four seconds at 30 fps, every one
+ * listed, so a beat zoom's peaks are all there. */
+export const CAMERA_FRAMES_MAX = 120;

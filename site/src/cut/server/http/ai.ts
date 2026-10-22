@@ -44,6 +44,10 @@ import { codexCommand } from "../tool-path";
 import { codexAccountModels, createCodexCatalog } from "../ai/codexModels";
 import { errorMessage } from "../util";
 
+/** The one place a Claude chat's WebFetch may go: Pexels' pages, where stock
+ * footage is searched by its own search URLs. Every other host is refused. */
+const PEXELS_FETCH = ["WebFetch(domain:www.pexels.com)", "WebFetch(domain:pexels.com)"];
+
 interface ChatBody {
   threadId: string;
   messages: UIMessage[];
@@ -152,7 +156,11 @@ async function runClaude(
           ? { pathToClaudeCodeExecutable: process.env.DONKEY_CUT_CLAUDE }
           : {}),
         systemPrompt: systemPrompt(),
-        tools: [], // no built-in tools — the editor MCP server is the whole surface
+        // The editor MCP server is the whole surface, but for one built-in:
+        // WebFetch, held to Pexels, where a replication's stock footage is
+        // searched. Pexels answers a server's own fetch with a challenge, and
+        // the fetch tool reads its search pages; import_url brings a video in.
+        tools: ["WebFetch"],
         mcpServers: {
           cut: {
             type: "stdio",
@@ -160,7 +168,7 @@ async function runClaude(
             alwaysLoad: true,
           },
         },
-        allowedTools: ["mcp__cut"],
+        allowedTools: ["mcp__cut", ...PEXELS_FETCH],
         permissionMode: "dontAsk",
         settingSources: [], // don't drag the user's CLAUDE.md/settings into app chats
         // The editor MCP is the whole tool surface. settingSources:[] only drops

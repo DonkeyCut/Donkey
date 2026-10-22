@@ -1156,9 +1156,12 @@ export function effectPreviewState(
         zoom: 1 + (amp * 2) / 1080,
       };
     }
-    case "negative":
+    case "negative": {
       // Every color flipped to its opposite: black to white, skin to cyan.
-      return { cssFilter: "invert(1)" };
+      // With a rate it strobes, flipped for the first half of each pulse.
+      const rate = flashRate(pulse);
+      return { cssFilter: !rate || flashOn(tLocal, rate) ? "invert(1)" : "" };
+    }
     case "huecycle": {
       // The hue wheel turns at the amount's pace from the element's start.
       const deg = (360 * hueTurns(k) * Math.max(0, tLocal)) % 360;
@@ -1900,12 +1903,18 @@ export function effectFilterLines(
         `[efb${tag}][efc${tag}]overlay=0:0:${en}:eof_action=pass${chroma.overlay}[${outLabel}]`,
       ];
     }
-    case "negative":
+    case "negative": {
       // Each plane flips about its own legal range, so black and white swap
       // exactly in a limited-range chain and the chroma mirrors about grey.
+      // A strobe's flip is gated to the first half of each pulse.
+      const rate = flashRate(pulse);
+      const on = rate
+        ? `enable='gte(t,${edge(start)})*lt(t,${edge(end)})*lt(mod((t-${fmt(start)})*${fmt(rate)}+${PULSE_NUDGE},1),0.5)'`
+        : en;
       return [
-        `[${inLabel}]lutyuv=y='minval+maxval-val':u='minval+maxval-val':v='minval+maxval-val':${en}[${outLabel}]`,
+        `[${inLabel}]lutyuv=y='minval+maxval-val':u='minval+maxval-val':v='minval+maxval-val':${on}[${outLabel}]`,
       ];
+    }
     case "huecycle":
       // The canvas recipe's turning wheel, in radians on the frame's clock.
       return [`[${inLabel}]hue=H='2*PI*${fmt(hueTurns(k))}*(t-${fmt(start)})':${en}[${outLabel}]`];

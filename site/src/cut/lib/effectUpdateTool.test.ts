@@ -50,6 +50,16 @@ describe("update_overlay on an effect", () => {
     expect(overlay(glitch)).toMatchObject({ glitch: "rgb" });
   });
 
+  test("a negative strobes at a rate, on the timeline and on a clip", async () => {
+    const { id } = (await runAiTool("add_effect", { effect: "negative", start: 4.9, end: 5.43, rate: 15 })) as { id: string };
+    expect(overlay(id)).toMatchObject({ effect: "negative", rate: 15 });
+    await runAiTool("update_overlay", { id, rate: 0 });
+    expect((overlay(id) as { rate?: number }).rate).toBeUndefined();
+    useEditor.setState({ clips: [{ id: "c1", assetId: "a", start: 0, in: 0, out: 2, speed: 1 } as never] });
+    await runAiTool("set_clip_effects", { clipId: "c1", effects: [{ effect: "negative", rate: 15 }] });
+    expect(useEditor.getState().clips[0].effects).toEqual([{ effect: "negative", rate: 15 }]);
+  });
+
   test("a flash's fade comes off again with none, back to the pop", async () => {
     const { id } = (await runAiTool("add_effect", { effect: "flash", start: 2, end: 3, fade: "to" })) as { id: string };
     expect(overlay(id)).toMatchObject({ fade: "to" });

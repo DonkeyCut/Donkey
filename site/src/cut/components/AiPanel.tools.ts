@@ -21,6 +21,7 @@ import {
   SAMPLE_COLOR_MAX,
   SAMPLE_COLORS_K_MAX,
   TRACK_FRAMES_MAX,
+  CAMERA_FRAMES_MAX,
   TRACK_MATCHES,
   TRACK_TOLERANCE_DEFAULT,
 } from "@/cut/lib/measure/limits";
@@ -302,6 +303,20 @@ export const AI_PANEL_TOOLS = [
     ),
   },
   {
+    name: "track_camera",
+    description:
+      `Measure how the camera moves over a stretch of a video, inside its picture: each frame's zoom, shift and turn against the frame on \`from\`, so a punch-in, a push, a beat zoom pulse or a shake is keyed with set_clip_keyframes to the reference's own numbers. Give one shot's stretch (SOURCE seconds; a cut inside it breaks the read). \`path\` lists every frame: t, scale (1.08 is 8% closer), dx/dy (how far the picture's centre moved, fractions of the frame, + is right and down), rotation (degrees clockwise) and residual (what the move leaves unexplained, 0..255 a pixel; null on a frame too blurred to read). A frame whose picture moves in two layers — a cutout held still over a background that shakes, or pulsing over a still one — also has \`second\`, the other layer's pose and the \`share\` of the picture it holds: build it as two tracks, the footage keyed with one pose and its cutout (set_removal) above it keyed with the other. The keys copy it straight across: a clip key at the same moment with scale, rotation, and x = 0.5 + dx, y = 0.5 + dy — relative to the first frame, so start the clip's own pose there. \`moves\` lists each move of each number with from/to, start/end, the ease that fits it (${EASE_IDS.join(", ")}) and \`error\`; a pulse is a move out and a move back. \`still\` true means one picture holds under the whole move — residual under 6 throughout: the reference froze that frame and moved it, so freeze_frame the shot's clip at \`from\` and key the moves on the freeze. A live shot with a moving camera leaves a higher residual: its numbers are still the move. Up to ${CAMERA_FRAMES_MAX} frames a call; when \`truncated\`, continue from \`coveredTo\`.`,
+    inputSchema: obj(
+      {
+        asset_id: str("Project asset id (video)"),
+        from: num("Source second the stretch starts: the frame every other is measured against"),
+        to: num("Source second it ends, inside the same shot"),
+        picture: pictureArg,
+      },
+      ["asset_id", "from", "to"]
+    ),
+  },
+  {
     name: "suggest_font",
     description:
       "Name the face a reference's type is set in: reads the source's frame at t, lifts the ink inside region off its ground, and ranks every face Donkey can set a title in — each bundled family at each bundled weight, the system set and the account's own fonts — by how closely its glyphs for the same words match, tracking solved so each runs as wide as the reference. Call it for each distinct face while rebuilding a reference's titles, so the font, weight, size and tracking come from the frame. Pass the words exactly as they read, case and line breaks included, and a region close around them read off watch_video at detail original. Returns the best faces with score (0..1), size (px at the 1080 short side, for the same ink height) and tracking (em), and x/y, where that face's title sits (add_title's x/y) for its ink to land on the reference's — a title is set from the middle of its line, so its ink centre is off it. `ink` is the ink's own box, centre and size in frame fractions. Cards in one face share its weight, size and tracking, but each sits its own way in its space, so read each card for its own x/y rather than setting the rest from the first one's place. Type set at an angle — a column word reading bottom to top — is read upright: pass `rotation`, the angle add_title would set it at (-90 reads bottom to top, 90 top to bottom), with a region around the word as it stands; one line of words in a region taller than wide is tried both ways round without it, and `rotation` comes back with the result to set on the title. verdict no_match means nothing bundled is close: the reference uses a face Donkey does not bundle, so say so and name the stand-in you use, of its kind — `kinds` lists every face by kind (serif, sans, script, display, mono), each as its id and a few words on its look. `inkPx` is how tall a line of the ink runs in the source; under 24 the result is `small`: the glyphs have blurred into their proportions, the ranking cannot tell a serif from a condensed sans, so name the face by eye at detail original and take the closest of its kind from `kinds`.",
@@ -359,7 +374,7 @@ export const AI_PANEL_TOOLS = [
   {
     name: "import_url",
     description:
-      "Read a web or media URL. For Donkey folder links use read_folder; for Donkey project links use read_project. Supports TikTok, YouTube, Instagram Reels, an X/Twitter post or Article, an ordinary web page, or a direct video/audio/image link — with the bundled downloader and import what it holds into the project. Free and local. A web page comes back as its article text plus the pictures on it; a post as its video or photos; and the source's own words (returned as sourceText) are quoted for the user beside the media automatically — don't retype them in your reply. A source that is only words returns sourceText with no assets, which is a success: read it and answer from it. This is how you look something up: point it at the page and read what comes back. When the user wants only the sound — a song, a soundtrack, a podcast — pass audio_only and the source's audio track lands as an audio asset. Media lands on a card in this chat and the user drags it to the timeline, Media, or the Library; place it yourself (add_clip) only when they asked for it in the cut. A short clip downloads in seconds; a long video can take a couple of minutes.",
+      "Read a web or media URL. For Donkey folder links use read_folder; for Donkey project links use read_project. Supports TikTok, YouTube, Instagram Reels, an X/Twitter post or Article, an ordinary web page, a Pexels video page (pexels.com/video/<slug>-<id>/ — it comes down as its 1080p file, named with its Pexels id) or one of its files (videos.pexels.com/video-files/<id>/…), or a direct video/audio/image link — with the bundled downloader and import what it holds into the project. Free and local. A web page comes back as its article text plus the pictures on it; a post as its video or photos; and the source's own words (returned as sourceText) are quoted for the user beside the media automatically — don't retype them in your reply. A source that is only words returns sourceText with no assets, which is a success: read it and answer from it. This is how you look something up: point it at the page and read what comes back. When the user wants only the sound — a song, a soundtrack, a podcast — pass audio_only and the source's audio track lands as an audio asset. Media lands on a card in this chat and the user drags it to the timeline, Media, or the Library; place it yourself (add_clip) only when they asked for it in the cut. A short clip downloads in seconds; a long video can take a couple of minutes.",
     inputSchema: obj(
       {
         url: str("The page or media URL to download"),

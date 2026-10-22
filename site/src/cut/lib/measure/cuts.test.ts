@@ -136,3 +136,17 @@ test("a slow pan over a gradient reports no changes", () => {
   expect(cuts).toEqual([]);
   expect(changes).toEqual([]);
 });
+
+test("a flash frame inside fast streaking footage keeps both of its cuts", () => {
+  // Dark footage whose streaks change most of the picture every frame, then
+  // one white flash frame and a bright shot: the flash's change rides no
+  // higher than its busy neighbours, but the whole picture leaps to white.
+  const streak = (k: number) => card(64, 64, [20, 30, 45], [60, 200, 210], [(k * 13) % 48, ((k * 13) % 48) + 16, 0, 64]);
+  const frames = [
+    ...Array.from({ length: 6 }, (_, k) => streak(k)),
+    solid(64, 64, [240, 240, 230]),
+    ...Array(4).fill(solid(64, 64, [90, 160, 200])),
+  ];
+  const { cuts } = scoreFrames(frames);
+  expect([6, 7].filter((i) => cuts.includes(i))).toEqual([6, 7]);
+});

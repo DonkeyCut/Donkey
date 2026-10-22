@@ -43,6 +43,7 @@ const PAGE_MEDIA_TOOLS: ReadonlySet<string> = new Set([
   "detect_cuts",
   "sample_color",
   "track_element",
+  "track_camera",
   "suggest_font",
   "render_preview",
   "create_sticker",

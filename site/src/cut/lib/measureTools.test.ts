@@ -176,6 +176,22 @@ test("track_element follows a growing bar and names its ease", async () => {
   expect(out.moves.find((m) => m.prop === "x")).toBeUndefined();
 });
 
+test("track_camera reads a held shot as one picture that never moves", async () => {
+  const out = (await runAiTool("track_camera", { asset_id: "ref", from: 1.1, to: 1.4 })) as {
+    still: boolean;
+    path: { t: number; scale: number; dx: number; dy: number; rotation: number }[];
+    moves: unknown[];
+  };
+  expect(out.still).toBe(true);
+  expect(out.path.length).toBeGreaterThan(10);
+  for (const p of out.path) expect([p.scale, p.dx, p.dy, p.rotation]).toEqual([1, 0, 0, 0]);
+  expect(out.moves).toEqual([]);
+});
+
+test("track_camera needs the stretch's end", async () => {
+  expect(await message(runAiTool("track_camera", { asset_id: "ref", from: 1.1 }))).toContain("to");
+});
+
 test("track_element's ink box measures a title at one moment", async () => {
   const out = (await runAiTool("track_element", {
     asset_id: "ref",

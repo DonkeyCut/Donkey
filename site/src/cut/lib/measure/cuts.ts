@@ -17,6 +17,10 @@ export const CUT_TUNING = {
   SPIKE: 3,
   /** Frames either side a cut is judged against. */
   NEIGHBOURS: 3,
+  /** Mean-luma step (0..255) of a frame that flashes or blacks out the whole
+   * picture at once: a cut however busy the frames around it are, since
+   * motion moves things around the frame and leaves its brightness be. */
+  FLASH_LUMA: 60,
   /** Per-channel step a flat fill takes when it cuts to a near colour (a dark
    * green to a slightly lighter one): under CELL_TOL, over grain. */
   FAINT_TOL: 6,
@@ -105,6 +109,8 @@ export interface FrameStep {
   faint: number;
   fine: number;
   box: ChangeBox | null;
+  /** How far the whole picture's mean luma moved, 0..255. */
+  luma?: number;
 }
 
 /** A change inside a shot: from frame `frame` for `frames` frames, the most
@@ -150,6 +156,13 @@ function fineChange(a: Float32Array, b: Float32Array): { pct: number; box: Chang
   return { pct: (100 * n) / (grid * grid), box };
 }
 
+/** A grid's mean luma (Rec. 709 weights), 0..255. */
+function meanLuma(g: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < g.length; i += 3) sum += 0.2126 * g[i] + 0.7152 * g[i + 1] + 0.0722 * g[i + 2];
+  return sum / Math.max(1, g.length / 3);
+}
+
 /** How `next` differs from `prev` on both grids. */
 export function frameStep(prev: FrameGrids, next: FrameGrids): FrameStep {
   const fine = fineChange(prev.fine, next.fine);
@@ -158,6 +171,7 @@ export function frameStep(prev: FrameGrids, next: FrameGrids): FrameStep {
     faint: diffCellPct(prev.coarse, next.coarse, CUT_TUNING.FAINT_TOL),
     fine: fine.pct,
     box: fine.box,
+    luma: Math.abs(meanLuma(next.coarse) - meanLuma(prev.coarse)),
   };
 }
 
@@ -185,12 +199,15 @@ function neighbourMedian(scores: number[], i: number, skip?: Set<number>): numbe
  * Changes on consecutive frames are one change that runs those frames: a
  * fade-in over three frames reads as one change of three. */
 export function pickShotEdges(steps: FrameStep[], fines?: ArrayLike<number>[]): { cuts: number[]; changes: ShotChange[] } {
-  const { FAINT_ALL, SPIKE, CHANGE_MIN } = CUT_TUNING;
+  const { FAINT_ALL, SPIKE, CHANGE_MIN, MIN_CHANGE, FLASH_LUMA } = CUT_TUNING;
   const hard = pickCuts(steps.map((s) => s.pct));
   const faintScores = steps.map((s) => s.faint);
 
-  // The faint cuts, beside the hard ones.
+  // The faint cuts and the flashes, beside the hard ones.
   const cutSet = new Set(hard);
+  steps.forEach((s, i) => {
+    if (s.pct >= MIN_CHANGE && (s.luma ?? 0) >= FLASH_LUMA) cutSet.add(i);
+  });
   for (let i = 0; i < steps.length; i++) {
     if (cutSet.has(i) || !(faintScores[i] >= FAINT_ALL)) {
       continue;

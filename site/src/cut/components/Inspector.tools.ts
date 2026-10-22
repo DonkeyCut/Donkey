@@ -412,7 +412,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_clip_effects",
     description:
-      `Set the effects a video clip wears over its own picture (${CLIP_EFFECT_IDS.join(", ")}). They treat that clip alone — inside its mask, under its pose — for its whole length, on the clip's own clock: a masked copy over the shot wearing negative and huecycle shows a color-cycling negative window while the shot around it plays untouched. add_effect places an element that treats the whole frame under its window. Pass the full list in order; [] removes them all. amount 0.05..1 (default 0.5) is the strength; for huecycle it is how fast the hue turns (0.5 is a turn every 1.25s); negative has none. A flash takes add_effect's tone, rate and rhythm on the clip's own clock: a white flicker at rate 12–15, amount 0.15–0.25, pops a masked shot's exposure unevenly while the black around the mask stays black.`,
+      `Set the effects a video clip wears over its own picture (${CLIP_EFFECT_IDS.join(", ")}). They treat that clip alone — inside its mask, under its pose — for its whole length, on the clip's own clock: a masked copy over the shot wearing negative and huecycle shows a color-cycling negative window while the shot around it plays untouched. add_effect places an element that treats the whole frame under its window. Pass the full list in order; [] removes them all. amount 0.05..1 (default 0.5) is the strength; for huecycle it is how fast the hue turns (0.5 is a turn every 1.25s); negative has none, but takes a strobe rate: a cutout copy wearing negative at rate ${FLASH_RATE_MAX} flashes between negative and normal every frame. A flash takes add_effect's tone, rate and rhythm on the clip's own clock: a white flicker at rate 12–15, amount 0.15–0.25, pops a masked shot's exposure unevenly while the black around the mask stays black.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
       effects: {
@@ -422,7 +422,7 @@ export const INSPECTOR_TOOLS = [
           effect: { type: "string", enum: [...CLIP_EFFECT_IDS], description: "Effect id" },
           amount: num("Strength 0.05..1 (default 0.5)"),
           tone: { type: "string", enum: [...FLASH_TONES], description: 'flash only: "white" (default) or "black"' },
-          rate: num(`flash only: strobe pulses a second, ${FLASH_RATE_MIN}..${FLASH_RATE_MAX}; omit for one pop at the clip's start`),
+          rate: num(`flash and negative: strobe pulses a second, ${FLASH_RATE_MIN}..${FLASH_RATE_MAX}, each held for its first half (${FLASH_RATE_MAX} at 30 fps flips every other frame); omit for one pop at the clip's start, or a negative flipped throughout`),
           rhythm: { type: "string", enum: [...FLASH_RHYTHMS], description: 'flash with a rate only: "strobe" (default) or "flicker", each pulse its own strength, some skipped' },
         }, ["effect"]),
       },
@@ -600,10 +600,11 @@ export const INSPECTOR_TOOLS = [
   {
     name: "match_color_grade",
     description:
-      "Match a video clip's color to a reference, computed from the pixels: the grade sliders for tone, the ends of the range, white balance and saturation are fitted so the clip's frame, rendered through its real color pipeline, lands on the reference's lightness distribution and per-band color in CIELAB. The fitted sliders carry the whole look, so the match replaces the clip's entire grade, preset and LUT included. The reference is ref_asset_id (an attached or imported image) or ref_clip_id (another clip's frame). Use when the user shares a look to copy or asks to match two shots; refine afterward with the other grading tools, checking read_color_stats.",
+      "Match a video clip's color to a reference, computed from the pixels: the grade sliders for tone, the ends of the range, white balance and saturation are fitted so the clip's frame, rendered through its real color pipeline, lands on the reference's lightness distribution and per-band color in CIELAB. The fitted sliders carry the whole look, so the match replaces the clip's entire grade, preset and LUT included. The reference is ref_asset_id (an attached or imported image, or a video with ref_at, the second of it to match) or ref_clip_id (another clip's frame). A video reference reads inside the picture its measuring tools found, so a replication grades each shot's footage to the reference's own frame of that shot — ref_at a moment inside the shot, away from flashes and overlays. Use when the user shares a look to copy or asks to match two shots; refine afterward with the other grading tools, checking read_color_stats.",
     inputSchema: obj({
       clipId: str("Video clip to grade"),
-      ref_asset_id: str("Reference image asset id"),
+      ref_asset_id: str("Reference asset id: an image, or a video read at ref_at"),
+      ref_at: num("Source second of a video ref_asset_id to match — a moment inside the shot the clip stands in for"),
       strength: num(
         "0..1, default 1: how far to take the match. Lower it when the reference shows other content than the clip (a bright window for a dark room, a black foreground the clip lacks) and the full match lifts or crushes tones the reference never had"
       ),

@@ -60,6 +60,7 @@ export const READ_COMMANDS = new Set([
   "compare_to_source",
   "sample_color",
   "track_element",
+  "track_camera",
   "suggest_font",
   "listen_audio",
   "detect_silence",

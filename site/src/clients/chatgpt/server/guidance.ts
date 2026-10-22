@@ -1,9 +1,14 @@
 import { AI_SKILLS } from "@/cut/server/ai/catalog";
 import { DOC_EXPORT_PRESETS } from "@/cut/lib/exportPresets";
 
-/** Translate the shared catalog's state-read reference for this client. */
+/** Translate the shared catalog's references for this client: its state
+ * read, its import, and the editor chat's Pexels-only web fetch, which
+ * ChatGPT's own browsing stands in for. */
 export function chatgptDescription(text: string): string {
-  return text.replace(/\bget_state\b/g, "inspect_project");
+  return text
+    .replace(/\bget_state\b/g, "inspect_project")
+    .replace(/\bimport_url\b/g, "import_media")
+    .replace(/Search it with WebFetch — the one web tool you have, and it reaches only Pexels:/g, "Search it on the web:");
 }
 
 // These guides describe editing operations shared by every client. Additions

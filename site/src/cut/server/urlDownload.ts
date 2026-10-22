@@ -7,12 +7,13 @@ import { Defuddle } from "defuddle/node";
 import { parseHTML } from "linkedom";
 import { convertToMp4, fitsAlready, streamCodecs } from "./convert";
 import type { LibrarySource } from "./library";
+import { pexelsFileUrl, pexelsVideo } from "./pexels";
 
 // Bring back whatever a URL points at. yt-dlp, resolved from PATH, pulls
 // anything with a video or audio stream (TikTok, YouTube, Instagram, …); X's
 // auth-free syndication endpoint covers the posts it can't touch — photos, an
-// Article, a post that is only words; and any other page falls back to its
-// readable text. Shared by the local engine's import routes (urlImport.ts) and
+// Article, a post that is only words; a Pexels video page brings its file
+// from the CDN; and any other page falls back to its readable text. Shared by the local engine's import routes (urlImport.ts) and
 // the cloud render worker's import_url jobs.
 
 const MEDIA_EXT = /\.(mp4|mov|m4v|webm|mkv|mp3|m4a|aac|wav|ogg|flac)$/i;
@@ -85,6 +86,8 @@ export async function download(
   opts: DownloadOptions = {}
 ): Promise<Downloaded> {
   if (IMAGE_URL_RE.test(url)) return downloadDirectImage(url, tmp);
+  const pexels = pexelsVideo(url);
+  if (pexels) return downloadPexels(pexels, url, tmp, opts);
   const rungs: (() => Promise<Downloaded | null>)[] = [];
   const postId = X_STATUS_RE.exec(url)?.[1];
   // An X post's lower rungs are the post itself — its stills, its words — so a
@@ -118,6 +121,31 @@ export async function download(
   }
   const first = failures[0];
   throw first instanceof Error ? first : new Error("Nothing could be imported from that URL.");
+}
+
+/** A Pexels video by its page link: the page refuses a server, so its best
+ * rendition comes straight off the CDN, titled from the page's slug and kept
+ * against the page, so the asset says which Pexels video it is. */
+async function downloadPexels(
+  video: { id: string; title: string; file?: string },
+  pageUrl: string,
+  tmp: string,
+  opts: DownloadOptions
+): Promise<Downloaded> {
+  const file = video.file ?? (await pexelsFileUrl(video.id));
+  // Newer videos name their files by a second id only the page shows.
+  if (!file)
+    throw new Error(
+      `Pexels video ${video.id} keeps its files under names only its page shows: read the page for its videos.pexels.com/video-files/${video.id}/… link (the 1920 or 1080 wide one) and import that link.`
+    );
+  const got = await downloadMedia(file, tmp, opts);
+  const title = (video.file ? video.title : `${video.title} (Pexels ${video.id})`).slice(0, 120);
+  return {
+    ...got,
+    files: got.files.slice(0, 1).map((f) => ({ ...f, title })),
+    source: { url: video.file ? `https://www.pexels.com/video/${video.id}/` : pageUrl, title, uploader: "Pexels" },
+    text: undefined,
+  };
 }
 
 /** yt-dlp knows this site as a video host and still could not bring the video

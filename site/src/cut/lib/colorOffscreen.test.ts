@@ -23,11 +23,23 @@ await stubModule<typeof import("./baseFrame")>("./baseFrame", import.meta.url, {
   },
 });
 
+// A reference video answers its picture at a second: mid grey (120 and 160).
+const pictured: { url: string; t: number; area: unknown }[] = [];
+await stubModule<typeof import("./measure/sourceMeasure")>("./measure/sourceMeasure", import.meta.url, {
+  sourcePictureAt: async (url, t, area) => {
+    pictured.push({ url, t, area });
+    const data = new Uint8ClampedArray(16 * 9 * 4);
+    for (let j = 0; j < 16 * 9; j++) data.fill(120 + (j % 2) * 40, j * 4, j * 4 + 3), (data[j * 4 + 3] = 255);
+    return { data, width: 16, height: 9 };
+  },
+});
+
 const { runAiTool } = await import("./aiTools");
 const { useEditor } = await import("./store");
 
 beforeEach(async () => {
   decoded.length = 0;
+  pictured.length = 0;
   useEditor.setState({
     projectId: "p1",
     clips: [],
@@ -82,4 +94,27 @@ test("strength 0 says it took none of the match", async () => {
   const clip = useEditor.getState().clips[0];
   const out = (await runAiTool("match_color_grade", { clipId: clip.id, ref_clip_id: clip.id, strength: 0 })) as { note?: string };
   expect(out.note).toContain("strength 0");
+});
+
+test("match_color_grade reads a reference video at a second, inside its picture", async () => {
+  const picture = { x: 0.5, y: 0.31, w: 1, h: 0.32 };
+  useEditor.setState({
+    assets: [
+      ...useEditor.getState().assets,
+      { id: "ref", fileName: "ref.mp4", name: "Ref", type: "video", duration: 13, url: "blob:ref", picture },
+    ],
+  });
+  const [clip] = useEditor.getState().clips;
+  await runAiTool("match_color_grade", { clipId: clip.id, ref_asset_id: "ref", ref_at: 4.2 });
+  expect(pictured).toEqual([{ url: "blob:ref", t: 4.2, area: picture }]);
+  // The dark clip lifts toward the grey reference.
+  expect(useEditor.getState().clips[0].grade?.exposure).toBeGreaterThan(10);
+});
+
+test("a reference video needs the second to read", async () => {
+  useEditor.setState({
+    assets: [...useEditor.getState().assets, { id: "ref", fileName: "ref.mp4", name: "Ref", type: "video", duration: 13, url: "blob:ref" }],
+  });
+  const [clip] = useEditor.getState().clips;
+  await expect(runAiTool("match_color_grade", { clipId: clip.id, ref_asset_id: "ref" })).rejects.toThrow(/ref_at/);
 });

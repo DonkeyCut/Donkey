@@ -8,6 +8,7 @@ import { baseFrameSink, colorReadAt } from "../baseFrame";
 import { openMedia, UnreadableMediaError, videoTrackOf, type FrameSize } from "../mediaRead";
 import { createRasterCanvas, decodeRasterImageUrl } from "../raster";
 import type { WrappedCanvas } from "mediabunny";
+import { CAMERA_LONG_SIDE, cameraPath, grayOf, holdsStill, type CameraPose, type Gray } from "./camera";
 import { hexOf, regionColor, parseHex, type PixelRect, type Pixels, type Rgb } from "./color";
 import { frameStep, gridsOf, pickShotEdges, type FrameGrids, type FrameStep, type ShotChange } from "./cuts";
 import { fitMoves, type Move } from "./easeFit";
@@ -228,6 +229,19 @@ export async function scanCuts(
   });
 }
 
+/** A source's picture at second `t`: the frame inside `area`, read at about
+ * `longSide` on that area's long side, as the preview shows it — what a grade
+ * is matched to. */
+export async function sourcePictureAt(url: string, t: number, area: FrameBox = FULL_FRAME, longSide = 192): Promise<Pixels> {
+  return withSourceVideo(url, async (v) => {
+    const size = sizeAt(v.width, v.height, longSide, area);
+    for await (const f of v.framesAt([t], size)) {
+      if (f) return cropPixels(f, toPixels(f, area));
+    }
+    throw new Error(`Could not read the frame at ${t}s.`);
+  });
+}
+
 export interface ColorSample {
   t: number;
   box: FrameBox;
@@ -366,6 +380,68 @@ export async function trackElement(
     fps: rateOf(times, durations),
     boxes,
     moves,
+    coveredTo,
+    truncated,
+  };
+}
+
+export interface CameraRun {
+  fps: number;
+  /** Per frame read: its time and how the picture sits against the first. */
+  path: ({ t: number } & CameraPose)[];
+  moves: (Move & { prop: "scale" | "dx" | "dy" | "rotation" })[];
+  /** Whether one picture holds under the whole move — a freeze frame — or
+   * null when the camera never comes back to a pose to tell by. */
+  still: boolean | null;
+  coveredTo: number;
+  truncated: boolean;
+}
+
+/** How the camera moves over [from, to) of a video, inside its picture box:
+ * each frame's zoom, shift and turn against the frame on `from`, and the
+ * moves of each fitted with an ease. */
+export async function trackCamera(
+  url: string,
+  opts: { from: number; to: number; maxFrames: number; area?: FrameBox }
+): Promise<CameraRun> {
+  const area = opts.area ?? FULL_FRAME;
+  let truncated = false;
+  let coveredTo = opts.to;
+  const times: number[] = [];
+  const durations: number[] = [];
+  const frames: Gray[] = [];
+  await withSourceVideo(url, async (v) => {
+    const at = sizeAt(v.width, v.height, CAMERA_LONG_SIDE, area);
+    for await (const f of v.frames(Math.max(0, opts.from - LEAD_S), opts.to, at)) {
+      if (frames.length >= opts.maxFrames) {
+        truncated = true;
+        coveredTo = times[times.length - 1];
+        break;
+      }
+      times.push(f.t);
+      durations.push(f.duration);
+      frames.push(grayOf(cropPixels(f, toPixels(f, area))));
+    }
+  });
+  const poses = cameraPath(frames);
+  const path = poses.map((p, i) => ({ t: times[i], ...p }));
+  // A measurement step per number: a fifth of a read pixel, or the zoom or
+  // turn that moves the frame's edge that far.
+  const moves: CameraRun["moves"] = [];
+  if (path.length > 2) {
+    const w = frames[0].width;
+    const h = frames[0].height;
+    const steps = { scale: 0.4 / Math.max(w, h), dx: 0.2 / w, dy: 0.2 / h, rotation: 0.2 };
+    for (const prop of ["scale", "dx", "dy", "rotation"] as const) {
+      for (const m of fitMoves(times, path.map((p) => p[prop]), steps[prop])) moves.push({ ...m, prop });
+    }
+    moves.sort((a, b) => a.from - b.from);
+  }
+  return {
+    fps: rateOf(times, durations),
+    path,
+    moves,
+    still: holdsStill(frames, poses),
     coveredTo,
     truncated,
   };
