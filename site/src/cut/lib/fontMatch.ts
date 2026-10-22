@@ -11,7 +11,7 @@
  * rank alike.
  */
 
-import { ensureFontLoaded, LETTER_SPACING_MAX, LETTER_SPACING_MIN, TEXT_WEIGHTS, type TextWeight } from "@donkeycut/effects-kit";
+import { ensureFontLoaded, LETTER_SPACING_MAX, LETTER_SPACING_MIN, LINE_HEIGHT, TEXT_WEIGHTS, type TextWeight } from "@donkeycut/effects-kit";
 import { GOOGLE_FONTS } from "./fontCatalog";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { allFonts, FONTS, hasFont } from "./types";
@@ -162,6 +162,44 @@ export async function rankFaces(
     probe.close();
   }
   return ranked.sort((a, b) => b.score - a.score);
+}
+
+/** How far a title's ink centre sits from the point it is set at, px, the
+ * type upright: each line centred on x and stacked about y on the middle
+ * baseline, as the kit draws it. Caps stand above that baseline, and a
+ * browser counts tracking after the last letter, so the ink is off the
+ * point; a title set at the reference ink's centre less this lands on it. */
+export async function inkOffset(
+  face: TitleFace,
+  px: number,
+  tracking: number,
+  text: string,
+  fontStack: (font: string) => string
+): Promise<{ dx: number; dy: number } | null> {
+  const lines = text.split("\n");
+  const css = `${face.italic ? "italic " : ""}${face.weight} ${px}px ${fontStack(face.font)}`;
+  await ensureFontLoaded(css, text);
+  const lineH = px * LINE_HEIGHT;
+  const w = Math.ceil(px * (Math.max(...lines.map((l) => [...l].length)) * (1.4 + Math.max(0, tracking)) + 2));
+  const h = Math.ceil(lineH * lines.length + px * 2);
+  const canvas = createRasterCanvas(w, h);
+  try {
+    const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!ctx) return null;
+    ctx.font = css;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = `${tracking * px}px`;
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    lines.forEach((line, i) => ctx.fillText(line, w / 2, h / 2 - (lineH * lines.length) / 2 + lineH * (i + 0.5)));
+    const data = ctx.getImageData(0, 0, w, h).data;
+    const ink = new Uint8Array(w * h);
+    for (let i = 0; i < ink.length; i++) ink[i] = data[i * 4 + 3] > 127 ? 1 : 0;
+    const box = inkBoxOf(ink, w, h, { x: 0, y: 0, w, h });
+    return box ? { dx: box.x + box.w / 2 - w / 2, dy: box.y + box.h / 2 - h / 2 } : null;
+  } finally {
+    canvas.width = 0;
+  }
 }
 
 /** One line set in one face against one reference line: tracking solved

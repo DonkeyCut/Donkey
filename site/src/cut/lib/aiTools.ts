@@ -238,7 +238,7 @@ import { mixSpecFor, renderProjectFrame } from "./exportRender";
 import { renderMix } from "./audioMix";
 import { measureLoudnessSliced, roundedLoudness, type LoudnessMeasure } from "./loudness";
 import { frameAt, framesAt, readMediaFileSize } from "./mediaRead";
-import { bundledFaces, inkMaskOf, rankFaces } from "./fontMatch";
+import { bundledFaces, inkMaskOf, inkOffset, rankFaces } from "./fontMatch";
 import { fontKind, fontLook } from "./fontCatalog";
 import { CUT_FONT_MATCH } from "./fontMatchSettings";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
@@ -2350,18 +2350,35 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const inkH = Math.abs(inkBox.w * Math.sin(a)) + Math.abs(inkBox.h * Math.cos(a));
       const count = Math.round(clamp(isNum(input.count) ? input.count : FONT_SUGGESTIONS, 1, FONT_SUGGESTIONS_MAX));
       const labels = new Map(allFonts().map((f) => [f.id, f.label]));
-      const matches = ranked.slice(0, count).map((m) => ({
-        font: m.font,
-        label: labels.get(m.font) ?? m.font,
-        weight: m.weight,
-        ...(m.italic ? { italic: true } : {}),
-        score: m.score,
-        size: m.typePx > 0 ? Math.round((m.typePx / k / Math.min(fw * area.w, fh * area.h)) * DESIGN_SHORT_SIDE) : null,
-        tracking: m.tracking,
-      }));
+      const round3 = (v: number) => Math.round(v * 1000) / 1000;
+      const ink = {
+        x: ((x0 + inkCx / k) / fw - left) / area.w,
+        y: ((y0 + inkCy / k) / fh - top) / area.h,
+      };
+      // A title is set from the middle of its line, not of its ink, so each
+      // face says where its title sits for its ink to land on the reference's:
+      // the ink's centre less that face's offset, turned as the title is.
+      const frame = frameOf(s.aspect);
+      const matches = await Promise.all(
+        ranked.slice(0, count).map(async (m) => {
+          const size = m.typePx > 0 ? Math.round((m.typePx / k / Math.min(fw * area.w, fh * area.h)) * DESIGN_SHORT_SIDE) : null;
+          const off = size ? await inkOffset(m, size, m.tracking, text, fontStack) : null;
+          const [ox, oy] = off ? [off.dx * Math.cos(a) - off.dy * Math.sin(a), off.dx * Math.sin(a) + off.dy * Math.cos(a)] : [0, 0];
+          return {
+            font: m.font,
+            label: labels.get(m.font) ?? m.font,
+            weight: m.weight,
+            ...(m.italic ? { italic: true } : {}),
+            score: m.score,
+            size,
+            tracking: m.tracking,
+            x: round3(ink.x - ox / frame.w),
+            y: round3(ink.y - oy / frame.h),
+          };
+        })
+      );
       const good = CUT_FONT_MATCH.goodScore;
       const best = matches[0];
-      const round3 = (v: number) => Math.round(v * 1000) / 1000;
       // How tall a line of the ink runs in the source's own pixels.
       const inkPx = Math.round(inkBox.h / k / lines);
       const small = inkPx < FONT_SMALL_INK_PX;
@@ -2374,8 +2391,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         t: round2(t),
         text,
         ink: {
-          x: round3(((x0 + inkCx / k) / fw - left) / area.w),
-          y: round3(((y0 + inkCy / k) / fh - top) / area.h),
+          x: round3(ink.x),
+          y: round3(ink.y),
           w: round3(inkW / k / fw / area.w),
           h: round3(inkH / k / fh / area.h),
         },

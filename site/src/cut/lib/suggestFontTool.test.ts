@@ -147,6 +147,22 @@ test("a word set sideways is read upright, and the rotation that sets it comes b
   expect(told.matches[0]).toMatchObject({ font: "oswald", weight: 700 });
 });
 
+test("each face says where its title sits so its ink lands on the reference's", async () => {
+  // A title's x/y is where it is set from, the middle of its line, not the
+  // middle of its ink: caps stand above it, and turned they stand beside it.
+  type Placed = Out & { matches: { x: number; y: number }[] };
+  shows = { text: "PLEASE", css: '700 120px "Oswald"', rotate: -90, at: [192, 540] };
+  const turned = (await runAiTool("suggest_font", { asset_id: "ref", t: 3, region: { x: 0.1, y: 0.5, w: 0.12, h: 0.7 }, text: "PLEASE" })) as Placed;
+  expect(Math.abs(turned.ink.x - 0.1)).toBeGreaterThan(0.002);
+  expect(Math.abs(turned.matches[0].x - 0.1)).toBeLessThan(0.002);
+  expect(Math.abs(turned.matches[0].y - 0.5)).toBeLessThan(0.003);
+
+  shows = { text: "TRAVEL DESTINATION", css: '700 72px "Oswald"', at: [800, 300] };
+  const upright = (await runAiTool("suggest_font", { asset_id: "ref", t: 3, region: { x: 0.42, y: 0.28, w: 0.6, h: 0.2 }, text: "TRAVEL DESTINATION" })) as Placed;
+  expect(Math.abs(upright.matches[0].x - 800 / 1920)).toBeLessThan(0.002);
+  expect(Math.abs(upright.matches[0].y - 300 / 1080)).toBeLessThan(0.003);
+});
+
 test("type too small to tell faces apart says so and lists the faces by kind", async () => {
   // 18px on a 1080 frame: a few pixels of x-height, where glyph overlap
   // sees proportions and not the face.
