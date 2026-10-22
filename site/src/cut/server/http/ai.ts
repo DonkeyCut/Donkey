@@ -679,9 +679,13 @@ export const aiApi = {
   },
 
   async claimTool(req: Request) {
-    const body = z.object({ sessionKey: z.string().min(1).max(200), toolCallId: z.string().min(1).max(200) }).safeParse(await req.json().catch(() => null));
+    const body = z.object({
+      sessionKey: z.string().min(1).max(200),
+      toolCallId: z.string().min(1).max(200),
+      page: z.string().min(1).max(200).optional(),
+    }).safeParse(await req.json().catch(() => null));
     if (!body.success) return Response.json({ error: "A chat session and tool call are required." }, { status: 400 });
-    return Response.json({ claimed: claimBrowserTool(body.data.sessionKey, body.data.toolCallId) });
+    return Response.json({ claimed: await claimBrowserTool(body.data.sessionKey, body.data.toolCallId, body.data.page) });
   },
 
   async models() {

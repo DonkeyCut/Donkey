@@ -2,10 +2,15 @@ import type { UIMessage } from "ai";
 import { localBackend } from "./backend/local";
 import { pendingAsk, type JournalMark } from "./chatResume";
 
+/** This page among the tabs following a turn: the engine keeps a turn's tool
+ * calls in the page that claimed its first one, whose project copy holds
+ * what those calls made. */
+const PAGE_ID = crypto.randomUUID();
+
 export async function claimEngineTool(sessionKey: string | null, toolCallId: string): Promise<boolean> {
   const response = await localBackend.fetch("/api/cut/ai/tool-claim", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionKey, toolCallId }),
+    body: JSON.stringify({ sessionKey, toolCallId, page: PAGE_ID }),
   });
   if (!response.ok) throw new Error("The Mac app could not attach this editor to the chat. Update the app and reconnect.");
   return (await response.json() as { claimed: boolean }).claimed;

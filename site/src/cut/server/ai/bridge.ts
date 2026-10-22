@@ -15,6 +15,9 @@ interface Waiter {
   resolve: (r: { output?: unknown; errorText?: string }) => void;
   timer: ReturnType<typeof setTimeout>;
   claimed: boolean;
+  /** Settles once a page claims the call or it ends unclaimed. */
+  taken: Promise<void>;
+  take: () => void;
   toolName: string;
   input: unknown;
 }
@@ -25,6 +28,8 @@ interface Session {
   /** Quality-gate asks the page has not answered yet, by gate id. */
   gates: Map<string, (steer: string | null) => void>;
   attached: boolean;
+  /** The page running this turn's tools: the first to claim one. */
+  owner?: string;
 }
 
 // Survives dev-server module reloads.
@@ -53,6 +58,7 @@ export function detachSession(key: string): void {
   session.attached = false;
   for (const waiter of session.waiters.values()) {
     clearTimeout(waiter.timer);
+    waiter.take();
     const projectId = sessionProjects.get(key);
     if (!waiter.claimed && projectId)
       void detachedTool(projectId, waiter.toolName, waiter.input).then(waiter.resolve);
@@ -67,6 +73,7 @@ export function unregisterSession(key: string) {
   if (s) {
     for (const w of s.waiters.values()) {
       clearTimeout(w.timer);
+      w.take();
       w.resolve({ errorText: "The chat request ended before the tool finished." });
     }
     settleGates(s);
@@ -139,9 +146,12 @@ export function callBrowserTool(
   }
   const toolCallId = crypto.randomUUID().slice(0, 12);
   session.writer.write({ type: "tool-input-available", toolCallId, toolName, input });
+  let take!: () => void;
+  const taken = new Promise<void>((settle) => { take = settle; });
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       session.waiters.delete(toolCallId);
+      take();
       const errorText = `The editor did not answer the ${toolName} call in time.`;
       console.warn(`[cut-ai] ${toolName}: editor tab did not answer within ${TOOL_TIMEOUT_MS}ms (session ${sessionKey})`);
       session.writer.write({ type: "tool-output-error", toolCallId, errorText });
@@ -150,6 +160,8 @@ export function callBrowserTool(
     session.waiters.set(toolCallId, {
       timer,
       claimed: false,
+      taken,
+      take,
       toolName,
       input,
       resolve: (r) => {
@@ -164,10 +176,32 @@ export function callBrowserTool(
   });
 }
 
-export function claimBrowserTool(sessionKey: string, toolCallId: string): boolean {
-  const waiter = sessions.get(sessionKey)?.waiters.get(toolCallId);
-  if (!waiter || waiter.claimed) return false;
+// How long a call waits for the page running its turn before another page
+// may take it. That page claims within moments of the call; one that lets
+// this pass has closed or left the project.
+const OWNER_GRACE_MS = 2_000;
+
+/**
+ * Give a tool call to the page that asks for it. Every tab following a turn
+ * asks, and each edits its own copy of the project, so a turn's calls stay in
+ * the page that claimed its first one: a call landing in another tab would
+ * miss what the earlier calls made there. The turn moves only when that page
+ * lets a call go unclaimed. A page that names none (older editors) claims
+ * call by call.
+ */
+export async function claimBrowserTool(sessionKey: string, toolCallId: string, page?: string): Promise<boolean> {
+  const session = sessions.get(sessionKey);
+  const waiter = session?.waiters.get(toolCallId);
+  if (!session || !waiter || waiter.claimed) return false;
+  if (page && session.owner && session.owner !== page) {
+    let grace: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([waiter.taken, new Promise((resolve) => { grace = setTimeout(resolve, OWNER_GRACE_MS); })]);
+    clearTimeout(grace);
+    if (waiter.claimed || session.waiters.get(toolCallId) !== waiter) return false;
+  }
   waiter.claimed = true;
+  waiter.take();
+  if (page) session.owner = page;
   return true;
 }
 
@@ -182,6 +216,7 @@ export function resolveBrowserTool(
   if (!session || !waiter) return false;
   session.waiters.delete(toolCallId);
   clearTimeout(waiter.timer);
+  waiter.take();
   waiter.resolve(result);
   return true;
 }

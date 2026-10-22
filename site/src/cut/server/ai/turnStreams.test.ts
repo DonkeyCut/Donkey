@@ -91,12 +91,43 @@ test("only one tab can claim a tool, and detached calls are not replayed", async
   registerSession("session", { write: (chunk) => chunks.push(chunk) });
   const pending = callBrowserTool("session", "get_state", {});
   const id = String(chunks[0].toolCallId);
-  expect(claimBrowserTool("session", id)).toBe(true);
-  expect(claimBrowserTool("session", id)).toBe(false);
+  expect(await claimBrowserTool("session", id)).toBe(true);
+  expect(await claimBrowserTool("session", id)).toBe(false);
   detachSession("session");
   expect((await pending).errorText).toContain("disconnected");
-  expect(claimBrowserTool("session", id)).toBe(false);
+  expect(await claimBrowserTool("session", id)).toBe(false);
   unregisterSession("session");
+});
+
+test("a turn's tools all run in the page that claimed its first one", async () => {
+  // Two tabs follow the same turn; each edits its own copy of the project,
+  // so a call landing in the other tab would miss what the first one made.
+  const chunks: Record<string, unknown>[] = [];
+  registerSession("pinned", { write: (chunk) => chunks.push(chunk) });
+  void callBrowserTool("pinned", "import_url", {});
+  const first = String(chunks[0].toolCallId);
+  expect(await claimBrowserTool("pinned", first, "page-a")).toBe(true);
+  expect(await claimBrowserTool("pinned", first, "page-b")).toBe(false);
+  void callBrowserTool("pinned", "detect_silence", {});
+  const next = String(chunks[1].toolCallId);
+  // The other tab asks first; the call still waits for the tab that runs the turn.
+  const other = claimBrowserTool("pinned", next, "page-b");
+  expect(await claimBrowserTool("pinned", next, "page-a")).toBe(true);
+  expect(await other).toBe(false);
+  unregisterSession("pinned");
+});
+
+test("a turn's tools move to another tab when the claiming one stops answering", async () => {
+  const chunks: Record<string, unknown>[] = [];
+  registerSession("moved", { write: (chunk) => chunks.push(chunk) });
+  void callBrowserTool("moved", "get_state", {});
+  expect(await claimBrowserTool("moved", String(chunks[0].toolCallId), "page-a")).toBe(true);
+  void callBrowserTool("moved", "get_state", {});
+  void callBrowserTool("moved", "find_media", {});
+  // page-a closed: page-b takes the call once it has waited, and the turn with it.
+  expect(await claimBrowserTool("moved", String(chunks[1].toolCallId), "page-b")).toBe(true);
+  expect(await claimBrowserTool("moved", String(chunks[2].toolCallId), "page-b")).toBe(true);
+  unregisterSession("moved");
 });
 
 test("the page answers the quality gate, and a detached page lets the turn close", async () => {
@@ -143,7 +174,7 @@ test("an unclaimed tool transfers to the engine when the tab disconnects", async
   const result = callBrowserTool("unclaimed", "set_project_name", { name: "Transferred" });
   const id = String(chunks[0].toolCallId);
   detachSession("unclaimed");
-  expect(claimBrowserTool("unclaimed", id)).toBe(false);
+  expect(await claimBrowserTool("unclaimed", id)).toBe(false);
   expect((await result).errorText).toBe(undefined);
   expect((await readProject(project.id))?.name).toBe("Transferred");
   expect(chunks.filter((chunk) => chunk.toolCallId === id).map((chunk) => chunk.type)).toEqual(["tool-input-available", "tool-output-available"]);
