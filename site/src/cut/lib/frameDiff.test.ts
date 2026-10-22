@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bestShift, diffPixels, meanDiff, runShift, sweepStats, worstStretches } from "./frameDiff";
+import { bestShift, diffPixels, edgeBand, meanDiff, runShift, sweepStats, worstStretches } from "./frameDiff";
 
 // The numbers a replica is judged by. A score is only useful to the model if
 // it means the same thing every call: 0 for identical frames, 255 for black
@@ -119,4 +119,24 @@ test("a run of sweep samples that each match the source a step later reads as on
   // at all there is nothing to say.
   expect(runShift(near, 1, 1, 1, 0.5)?.shift).toBe(0.5);
   expect(runShift(new Float32Array([NaN, 9, NaN]), 1, 0, 0, 0.5)).toBeUndefined();
+});
+
+test("a difference along a whole edge while the middle matches is a band, under target too", () => {
+  // Thin black bars over a colour: the top and bottom rows of the grid run
+  // warm end to end, the middle is quiet, and the frame's mean stays low.
+  const bars = [
+    [7, 7, 8, 7],
+    [1, 0, 1, 1],
+    [1, 1, 0, 1],
+    [6, 7, 7, 7],
+  ];
+  expect(edgeBand(bars, 5)).toEqual({ edges: ["top", "bottom"], diff: 7 });
+  const pillars = bars[0].map((_, c) => bars.map((row) => row[c]));
+  expect(edgeBand(pillars, 5)?.edges).toEqual(["left", "right"]);
+  // A title near the top warms part of that row, not all of it.
+  expect(edgeBand([[9, 9, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]], 5)).toBeNull();
+  // A frame off everywhere is off everywhere, not at its edges.
+  expect(edgeBand([[9, 9, 9, 9], [9, 9, 9, 9], [9, 9, 9, 9], [9, 9, 9, 9]], 5)).toBeNull();
+  // A faint edge is noise.
+  expect(edgeBand([[3, 3, 3, 3], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], 5)).toBeNull();
 });

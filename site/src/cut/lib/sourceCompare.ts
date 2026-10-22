@@ -1,7 +1,7 @@
 import { renderProjectFrames } from "./exportRender";
 import { FULL_FRAME, isFullFrame } from "./measure/picture";
 import type { FrameBox } from "./measure/sourceMeasure";
-import { bestShift, diffPixels, meanDiff, runShift, SCORE_LONG_SIDE, SWEEP_TARGET, sweepStats, worstStretches } from "./frameDiff";
+import { bestShift, diffPixels, edgeBand, meanDiff, runShift, SCORE_LONG_SIDE, SWEEP_TARGET, sweepStats, worstStretches, type Edge } from "./frameDiff";
 import { composeComparison, makeStillFrame } from "./media";
 import type { WrappedCanvas } from "mediabunny";
 import { framesAt, type FrameSize } from "./mediaRead";
@@ -398,6 +398,9 @@ export type SweepResult = {
   max: number;
   target: number;
   worst: Stretch[];
+  /** Stretches whose difference runs along whole edges of the frame while
+   * the middle matches — a border or band one side lacks — under target too. */
+  edges?: (Omit<Stretch, "shift"> & { edges: Edge[] })[];
   timing?: { shift: number; diff: number };
   onBlocks?: number;
   frame?: string;
@@ -539,6 +542,28 @@ export async function sweepSource(
       ...(block ? { block } : {}),
     };
   });
+  // Thin bars barely move a frame's mean, so they are read off the grids.
+  const bands = scored.map((sc) => edgeBand(grids[sc.i], SWEEP_TARGET));
+  const edges = worstStretches(
+    scored.map((sc, k) => ({ at: sc.at, diff: bands[k]?.diff ?? 0 })),
+    step,
+    SWEEP_TARGET,
+    MAX_STRETCHES
+  ).map((w) => {
+    const peak = scored[w.peakIndex];
+    const block = blockAt(doc, peak.at);
+    return {
+      from: w.from,
+      to: round3(Math.min(w.to, to)),
+      diff: w.diff,
+      peak: w.peak,
+      at: peak.at,
+      source: samples[peak.i].source,
+      edges: bands[w.peakIndex]?.edges ?? [],
+      grid: grids[peak.i],
+      ...(block ? { block } : {}),
+    };
+  });
   const timing = still ? undefined : runShift(near, SHIFT_REACH, 0, diffs.length - 1, step);
   const onBlocks = scored.filter((s) => blockAt(doc, s.at)).length / scored.length;
   const frame = frameNote(doc, scorer.letterboxed, area);
@@ -554,6 +579,7 @@ export async function sweepSource(
     ...stats,
     target: SWEEP_TARGET,
     worst,
+    ...(edges.length > 0 ? { edges } : {}),
     ...(timing ? { timing } : {}),
     ...(onBlocks > 0 ? { onBlocks: Math.round(onBlocks * 100) / 100 } : {}),
     ...(frame ? { frame } : {}),

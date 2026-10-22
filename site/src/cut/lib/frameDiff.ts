@@ -221,3 +221,30 @@ export function worstStretches(
   });
   return stretches.sort((a, b) => b.weight - a.weight).slice(0, limit);
 }
+
+export type Edge = "top" | "bottom" | "left" | "right";
+
+/**
+ * The edges of a frame a difference runs the whole length of while its
+ * middle matches: a border, a band or a letterbox one picture has and the
+ * other lacks. Thin bars move a frame's mean little, so this reads the grid:
+ * every cell along the edge over the target, and the middle cells under a
+ * third of that edge's least. `diff` is the mean over those edges' cells.
+ */
+export function edgeBand(grid: number[][], target: number): { edges: Edge[]; diff: number } | null {
+  const n = grid.length;
+  if (n < 3 || grid.some((row) => row.length !== n)) return null;
+  const middle: number[] = [];
+  for (let r = 1; r < n - 1; r++) for (let c = 1; c < n - 1; c++) middle.push(grid[r][c]);
+  const calm = middle.reduce((a, b) => a + b, 0) / middle.length;
+  const lines: [Edge, number[]][] = [
+    ["top", grid[0]],
+    ["bottom", grid[n - 1]],
+    ["left", grid.map((row) => row[0])],
+    ["right", grid.map((row) => row[n - 1])],
+  ];
+  const hot = lines.filter(([, cells]) => Math.min(...cells) > target && calm * 3 <= Math.min(...cells));
+  if (hot.length === 0) return null;
+  const cells = hot.flatMap(([, c]) => c);
+  return { edges: hot.map(([e]) => e), diff: round1(cells.reduce((a, b) => a + b, 0) / cells.length) };
+}
