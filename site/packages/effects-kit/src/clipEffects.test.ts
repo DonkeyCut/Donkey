@@ -28,6 +28,21 @@ describe("a clip's effects over a transparent picture", () => {
   }
 });
 
+describe("a flash a cutout wears", () => {
+  test("fading from its tone lands the cutout as a solid silhouette and clears across the clip", () => {
+    // The next shot's subject cut out and flashed in: on the clip's first
+    // frame it is the tone alone, inside its own edges; by its end, itself.
+    const fade: ClipEffect[] = [{ effect: "flash", amount: 1, fade: "from" }];
+    const first = logo();
+    applyClipEffects(first, scratch(), fade, 0, noGrain, 0.2);
+    expect(pixel(first, S / 2, S / 2)).toEqual([255, 255, 255, 255]);
+    expect(pixel(first, 2, 2)[3]).toBe(0);
+    const last = logo();
+    applyClipEffects(last, scratch(), fade, 0.2, noGrain, 0.2);
+    expect(pixel(last, S / 2, S / 2)).toEqual([128, 128, 128, 255]);
+  });
+});
+
 describe("filter effects in a row", () => {
   test("draw as one joined filter with the result of drawing each in turn", () => {
     const list: ClipEffect[] = [{ effect: "negative" }, { effect: "huecycle", amount: 0.5 }];

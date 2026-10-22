@@ -25,6 +25,7 @@ import { applyDetailGpu } from "./detailGpu";
 import { applyLutGpu } from "./gradeGpu";
 import { clipRecipe, peekClipLut, requestClipLut, type ClipLut, type RecipeSource } from "./lutBuild";
 import { createRasterCanvas } from "./raster";
+import { clipLen } from "./timelineEnd";
 import {
   bandEdge,
   CLOCK_SWEEP,
@@ -471,7 +472,10 @@ export class FrameCompositor {
     ctx.globalCompositeOperation = "source-over";
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(picture, src.x, src.y, src.w, src.h, 0, 0, w, h);
-    applyClipEffects(canvas, scratch, clip.effects ?? [], at - clip.start + (clip.effectsFrom ?? 0), grainTile);
+    // The effects' clock starts where the unsplit clip did, so a fade runs
+    // across all of it, as the export's does.
+    const from = clip.effectsFrom ?? 0;
+    applyClipEffects(canvas, scratch, clip.effects ?? [], at - clip.start + from, grainTile, from + clipLen(clip));
     return canvas;
   }
 

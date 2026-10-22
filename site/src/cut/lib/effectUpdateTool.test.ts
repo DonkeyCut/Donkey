@@ -60,6 +60,13 @@ describe("update_overlay on an effect", () => {
     expect(useEditor.getState().clips[0].effects).toEqual([{ effect: "negative", rate: 15 }]);
   });
 
+  test("a cutout clip's flash fades from its tone, the silhouette it lands as", async () => {
+    useEditor.setState({ clips: [{ id: "c1", assetId: "a", start: 0, in: 0, out: 2, speed: 1 } as never] });
+    await runAiTool("set_clip_effects", { clipId: "c1", effects: [{ effect: "flash", amount: 1, fade: "from" }] });
+    expect(useEditor.getState().clips[0].effects).toEqual([{ effect: "flash", amount: 1, fade: "from" }]);
+    expect(await errorOf(() => runAiTool("set_clip_effects", { clipId: "c1", effects: [{ effect: "flash", fade: "out" }] }))).toContain("fade is one of");
+  });
+
   test("a flash's fade comes off again with none, back to the pop", async () => {
     const { id } = (await runAiTool("add_effect", { effect: "flash", start: 2, end: 3, fade: "to" })) as { id: string };
     expect(overlay(id)).toMatchObject({ fade: "to" });

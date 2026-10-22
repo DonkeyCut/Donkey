@@ -1523,7 +1523,9 @@ export function applyClipEffects(
   scratch: HTMLCanvasElement | OffscreenCanvas,
   effects: readonly ClipEffect[],
   tLocal: number,
-  grainTileFor: (tick: number) => CanvasImageSource | null
+  grainTileFor: (tick: number) => CanvasImageSource | null,
+  /** The clip's length on the same clock, which a flash's fade runs across. */
+  dur?: number
 ): void {
   let filters: string[] = [];
   const flush = () => {
@@ -1531,13 +1533,13 @@ export function applyClipEffects(
     filters = [];
   };
   for (const e of effects) {
-    const { cssFilter, ...passes } = effectPreviewState(e.effect, e.amount, tLocal, undefined, undefined, undefined, e);
+    const { cssFilter, ...passes } = effectPreviewState(e.effect, e.amount, tLocal, undefined, undefined, dur, e);
     if (Object.values(passes).every((v) => v === undefined)) {
       if (cssFilter) filters.push(cssFilter);
       continue;
     }
     flush();
-    applyEffectToCanvas(canvas, scratch, e.effect, e.amount, tLocal, grainTileFor, undefined, undefined, undefined, "keep", e);
+    applyEffectToCanvas(canvas, scratch, e.effect, e.amount, tLocal, grainTileFor, undefined, undefined, dur, "keep", e);
   }
   flush();
 }

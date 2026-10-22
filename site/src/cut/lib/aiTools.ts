@@ -112,6 +112,7 @@ import {
   FLASH_RATE_MAX,
   FLASH_RATE_MIN,
   FLASH_FADE_CHOICES,
+  FLASH_FADES,
   FLASH_FADE_NONE,
   FLASH_RHYTHMS,
   loopPeriod,
@@ -3950,7 +3951,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // a flash also takes its tone, strobe rate and rhythm, a negative its
       // strobe rate.
       const effects: ClipEffect[] = [];
-      for (const e of input.effects as { effect?: unknown; amount?: unknown; tone?: unknown; rate?: unknown; rhythm?: unknown }[]) {
+      for (const e of input.effects as { effect?: unknown; amount?: unknown; tone?: unknown; rate?: unknown; rhythm?: unknown; fade?: unknown }[]) {
         const effect = CLIP_EFFECT_IDS.find((id) => id === e?.effect);
         if (!effect) throw new ToolError(`effect must be one of ${CLIP_EFFECT_IDS.join(", ")}.`);
         if (effects.some((x) => x.effect === effect)) throw new ToolError(`${effect} is listed twice; a clip wears an effect once.`);
@@ -3969,6 +3970,11 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           const rhythm = e.rhythm === undefined ? undefined : flashRhythm(e.rhythm);
           if (rhythm) {
             entry.rhythm = rhythm;
+          }
+          // A fade runs across the clip: "from" lands it as the tone alone.
+          if (e.fade !== undefined && e.fade !== FLASH_FADE_NONE) {
+            if (!(FLASH_FADES as readonly unknown[]).includes(e.fade)) throw new ToolError(`fade is one of ${FLASH_FADE_CHOICES.join(", ")}.`);
+            entry.fade = e.fade as FlashFade;
           }
         }
         effects.push(entry);

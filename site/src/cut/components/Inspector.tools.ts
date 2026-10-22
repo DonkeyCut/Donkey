@@ -35,6 +35,7 @@ import {
   PEN_MIN_POINTS,
   CLIP_EFFECT_IDS,
   FLASH_RHYTHMS,
+  FLASH_FADES,
   FLASH_RATE_MAX,
   FLASH_RATE_MIN,
   FLASH_TONES,
@@ -412,7 +413,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "set_clip_effects",
     description:
-      `Set the effects a video clip wears over its own picture (${CLIP_EFFECT_IDS.join(", ")}). They treat that clip alone — inside its mask, under its pose — for its whole length, on the clip's own clock: a masked copy over the shot wearing negative and huecycle shows a color-cycling negative window while the shot around it plays untouched. add_effect places an element that treats the whole frame under its window. Pass the full list in order; [] removes them all. amount 0.05..1 (default 0.5) is the strength; for huecycle it is how fast the hue turns (0.5 is a turn every 1.25s); negative has none, but takes a strobe rate: a cutout copy wearing negative at rate ${FLASH_RATE_MAX} flashes between negative and normal every frame. A flash takes add_effect's tone, rate and rhythm on the clip's own clock: a white flicker at rate 12–15, amount 0.15–0.25, pops a masked shot's exposure unevenly while the black around the mask stays black.`,
+      `Set the effects a video clip wears over its own picture (${CLIP_EFFECT_IDS.join(", ")}). They treat that clip alone — inside its mask, under its pose — for its whole length, on the clip's own clock: a masked copy over the shot wearing negative and huecycle shows a color-cycling negative window while the shot around it plays untouched. add_effect places an element that treats the whole frame under its window. Pass the full list in order; [] removes them all. amount 0.05..1 (default 0.5) is the strength; for huecycle it is how fast the hue turns (0.5 is a turn every 1.25s); negative has none, but takes a strobe rate: a cutout copy wearing negative at rate ${FLASH_RATE_MAX} flashes between negative and normal every frame. A flash takes add_effect's tone, rate, rhythm and fade on the clip's own clock: a white flicker at rate 12–15, amount 0.15–0.25, pops a masked shot's exposure unevenly while the black around the mask stays black. A subject flashed in over a shot — the next shot's subject cut out (set_removal) on a track above, landing as a solid white silhouette, then itself, then blown out, then itself — is that cutout split into a clip per frame of the flicker: fade "from" at amount 1 for the silhouette, a pop at 0.6-0.9 for each blown-out frame, nothing for the frames that show it plain.`,
     inputSchema: obj({
       clipId: str("Video clip id"),
       effects: {
@@ -424,6 +425,7 @@ export const INSPECTOR_TOOLS = [
           tone: { type: "string", enum: [...FLASH_TONES], description: 'flash only: "white" (default) or "black"' },
           rate: num(`flash and negative: strobe pulses a second, ${FLASH_RATE_MIN}..${FLASH_RATE_MAX}, each held for its first half (${FLASH_RATE_MAX} at 30 fps flips every other frame); omit for one pop at the clip's start, or a negative flipped throughout`),
           rhythm: { type: "string", enum: [...FLASH_RHYTHMS], description: 'flash with a rate only: "strobe" (default) or "flicker", each pulse its own strength, some skipped' },
+          fade: { type: "string", enum: [...FLASH_FADES], description: 'flash only: ramp evenly across the clip — "from" starts as the tone alone and clears, "to" ends on it. At amount 1 a one-frame clip fading from white is a solid silhouette of what it shows' },
         }, ["effect"]),
       },
     }, ["clipId", "effects"]),
