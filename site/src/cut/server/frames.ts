@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { h264Encoder, vtQuality } from "./exportPipeline";
 import { mediaPath } from "./projects";
 import { assertGraphSafe, fexpr } from "./filterGraph";
 import { num, round } from "./util";
@@ -70,6 +71,9 @@ export interface FreezeFraming {
   flipV?: boolean;
 }
 
+/** A freeze's quality on VideoToolbox, as the crf libx264's default gives. */
+const FREEZE_CRF = 23;
+
 /**
  * Render a still-video clip from one frame of a project media file
  * (a freeze frame), written into the project's media folder.
@@ -119,6 +123,9 @@ export async function makeFreezeFrame(
           `,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black`;
     }
 
+    // The shipped LGPL ffmpeg has no libx264: the still encodes with what
+    // the build carries, as every other render here does.
+    const enc = await h264Encoder();
     await run("ffmpeg", [
       "-y",
       "-loop", "1",
@@ -126,8 +133,9 @@ export async function makeFreezeFrame(
       "-t", dur.toFixed(3),
       "-r", "30",
       ...(vf ? ["-vf", assertGraphSafe(vf)] : []),
-      "-c:v", "libx264",
-      "-preset", "veryfast",
+      ...(enc === "libx264"
+        ? ["-c:v", "libx264", "-preset", "veryfast"]
+        : ["-c:v", "h264_videotoolbox", "-q:v", String(vtQuality(FREEZE_CRF)), "-allow_sw", "1"]),
       "-pix_fmt", "yuv420p",
       mediaPath(projectId, fileName),
     ]);
