@@ -178,6 +178,9 @@ export async function scanCuts(
     const times: number[] = [];
     const durations: number[] = [];
     const steps: FrameStep[] = [];
+    // Each frame's fine grid, rounded to bytes, for the changes too gradual
+    // for one frame to show.
+    const fines: Uint8Array[] = [];
     let prev: FrameGrids | null = null;
     let outOfTime = false;
     for await (const f of v.frames(Math.max(0, opts.from - LEAD_S), opts.to, size)) {
@@ -187,6 +190,7 @@ export async function scanCuts(
       }
       const grid = gridsOf(opts.area ? cropPixels(f, toPixels(f, area)) : f);
       steps.push(prev ? frameStep(prev, grid) : { pct: NaN, faint: NaN, fine: NaN, box: null });
+      fines.push(Uint8Array.from(grid.fine, Math.round));
       times.push(f.t);
       durations.push(f.duration);
       prev = grid;
@@ -194,7 +198,7 @@ export async function scanCuts(
     if (times.length === 0) throw new Error("Could not read any frames in that span.");
 
     const fps = rateOf(times, durations);
-    const { cuts: picked, changes: found } = pickShotEdges(steps);
+    const { cuts: picked, changes: found } = pickShotEdges(steps, fines);
 
     // A capped pass ends on the frame before the first cut or change it
     // leaves out, so the next pass scores that one against it.

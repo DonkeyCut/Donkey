@@ -27,6 +27,13 @@ export const CUT_TUNING = {
   FINE_GRID: 32,
   /** % of the fine grid a change inside a shot covers at least. */
   CHANGE_MIN: 0.3,
+  /** Frames back a frame is held against to find a change too gradual for
+   * any one frame to show: a fade of faint type over half a second. */
+  SLOW_SPAN: 15,
+  /** The share of a gradual change's total move that marks its first frame,
+   * and the share that marks its last. */
+  SLOW_START: 0.05,
+  SLOW_END: 0.95,
 };
 
 /** Per-cell channel means of an RGBA frame on a GRID×GRID grid. */
@@ -168,7 +175,8 @@ function neighbourMedian(scores: number[], i: number, skip?: Set<number>): numbe
 }
 
 /** The frames that open a shot and the changes inside shots, from each
- * frame's step (index 0 has none: NaN fields).
+ * frame's step (index 0 has none: NaN fields), and each frame's fine grid
+ * when the gradual changes are wanted too (gradualChanges).
  * A cut is a hard spike (pickCuts) or a faint step taken by the whole
  * picture at once over still frames — a flat card cut to a near colour. A
  * crossfade takes that step every frame, so its neighbours rule it out.
@@ -176,7 +184,7 @@ function neighbourMedian(scores: number[], i: number, skip?: Set<number>): numbe
  * appearing, a word swapping fill for outline, a small shape popping in.
  * Changes on consecutive frames are one change that runs those frames: a
  * fade-in over three frames reads as one change of three. */
-export function pickShotEdges(steps: FrameStep[]): { cuts: number[]; changes: ShotChange[] } {
+export function pickShotEdges(steps: FrameStep[], fines?: ArrayLike<number>[]): { cuts: number[]; changes: ShotChange[] } {
   const { FAINT_ALL, SPIKE, CHANGE_MIN } = CUT_TUNING;
   const hard = pickCuts(steps.map((s) => s.pct));
   const faintScores = steps.map((s) => s.faint);
@@ -213,7 +221,104 @@ export function pickShotEdges(steps: FrameStep[]): { cuts: number[]; changes: Sh
     }
     changes.push({ frame: i, frames: 1, change: s.fine, box: s.box });
   }
-  return { cuts, changes };
+  if (!fines) {
+    return { cuts, changes };
+  }
+  const slow = gradualChanges(fines, cuts).filter(
+    (g) => !changes.some((c) => g.frame < c.frame + c.frames && c.frame < g.frame + g.frames)
+  );
+  return { cuts, changes: [...changes, ...slow].sort((a, b) => a.frame - b.frame) };
+}
+
+/** The fine cells that differ between two grids past the hard tolerance. */
+function cellsApart(a: ArrayLike<number>, b: ArrayLike<number>): number[] {
+  const out: number[] = [];
+  for (let c = 0; c < a.length / 3; c++) {
+    const i = c * 3;
+    if (Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])) > CUT_TUNING.CELL_TOL) {
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+/** The box around a set of fine cells. */
+function boxOfCells(cells: number[]): ChangeBox {
+  const grid = CUT_TUNING.FINE_GRID;
+  const xs = cells.map((c) => c % grid);
+  const ys = cells.map((c) => Math.floor(c / grid));
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  return { x: (x0 + x1 + 1) / 2 / grid, y: (y0 + y1 + 1) / 2 / grid, w: (x1 - x0 + 1) / grid, h: (y1 - y0 + 1) / grid };
+}
+
+/** Changes too gradual for any one frame to show — faint type fading in or
+ * out over many frames, each step under the hard tolerance. Each frame is
+ * held against the one SLOW_SPAN back inside its shot; frames that differ
+ * from it on a few cells, where the shot's typical frame differs on far
+ * fewer (footage that moves throughout differs everywhere), are a change.
+ * Its first and last frames are where the cells it moved are SLOW_START and
+ * SLOW_END of the way from where they were to where they settle. */
+export function gradualChanges(fines: ArrayLike<number>[], cuts: number[]): ShotChange[] {
+  const { SLOW_SPAN, CHANGE_MIN, SPIKE, SLOW_START, SLOW_END } = CUT_TUNING;
+  const cells = fines.length > 0 ? fines[0].length / 3 : 0;
+  const bounds = [0, ...cuts, fines.length];
+  const out: ShotChange[] = [];
+  for (let k = 0; k + 1 < bounds.length; k++) {
+    const [s, e] = [bounds[k], bounds[k + 1]];
+    if (e - s < 3) {
+      continue;
+    }
+    const back = (i: number) => Math.max(s, i - SLOW_SPAN);
+    const pct = new Map<number, number>();
+    for (let i = s + 1; i < e; i++) {
+      pct.set(i, (100 * cellsApart(fines[i], fines[back(i)]).length) / cells);
+    }
+    const sorted = [...pct.values()].sort((a, b) => a - b);
+    const floor = sorted[Math.floor((sorted.length - 1) / 4)];
+    const hit = (i: number) => (pct.get(i) ?? 0) >= Math.max(CHANGE_MIN, SPIKE * floor);
+    for (let i = s + 1; i < e; i++) {
+      if (!hit(i)) {
+        continue;
+      }
+      let r1 = i;
+      while (r1 + 1 < e && hit(r1 + 1)) {
+        r1++;
+      }
+      const pre = back(i);
+      const moved = cellsApart(fines[pre], fines[r1]);
+      i = r1;
+      if (moved.length === 0) {
+        continue;
+      }
+      // How far along the moved cells are, 0 at `pre` and 1 at `r1`.
+      const a = fines[pre];
+      const z = fines[r1];
+      let norm = 0;
+      for (const c of moved) for (let ch = 0; ch < 3; ch++) norm += (z[c * 3 + ch] - a[c * 3 + ch]) ** 2;
+      const along = (f: ArrayLike<number>) => {
+        let dot = 0;
+        for (const c of moved) for (let ch = 0; ch < 3; ch++) dot += (f[c * 3 + ch] - a[c * 3 + ch]) * (z[c * 3 + ch] - a[c * 3 + ch]);
+        return dot / norm;
+      };
+      let first = -1;
+      let last = r1;
+      for (let j = pre + 1; j <= r1; j++) {
+        const p = along(fines[j]);
+        if (first < 0 && p > SLOW_START) {
+          first = j;
+        }
+        if (first >= 0 && p >= SLOW_END) {
+          last = j;
+          break;
+        }
+      }
+      if (first < 0) {
+        continue;
+      }
+      out.push({ frame: first, frames: last - first + 1, change: (100 * moved.length) / cells, box: boxOfCells(moved) });
+    }
+  }
+  return out;
 }
 
 /** The box around two boxes. */
@@ -229,5 +334,8 @@ function unionBox(a: ChangeBox, b: ChangeBox): ChangeBox {
 export function scoreFrames(frames: Pixels[]): { cuts: number[]; changes: ShotChange[] } {
   const grids = frames.map(gridsOf);
   const none: FrameStep = { pct: NaN, faint: NaN, fine: NaN, box: null };
-  return pickShotEdges(grids.map((g, i) => (i === 0 ? none : frameStep(grids[i - 1], g))));
+  return pickShotEdges(
+    grids.map((g, i) => (i === 0 ? none : frameStep(grids[i - 1], g))),
+    grids.map((g) => g.fine)
+  );
 }

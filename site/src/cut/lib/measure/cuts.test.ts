@@ -94,3 +94,45 @@ test("a hard cut is not also reported as a change", () => {
   expect(cuts).toEqual([3]);
   expect(changes).toEqual([]);
 });
+
+test("a faint word fading in over many frames is one change that runs its fade", () => {
+  // White on maroon over 12 frames: no single frame moves a cell past the
+  // hard tolerance, the fade as a whole does.
+  const bg: [number, number, number] = [113, 8, 41];
+  const at = (a: number) => card(128, 128, bg, [Math.round(113 + a * 142), Math.round(8 + a * 247), Math.round(41 + a * 214)], [40, 88, 60, 68]);
+  const frames = [0, 0, 0, ...Array.from({ length: 12 }, (_, i) => (i + 1) / 12), ...Array(20).fill(1)].map(at);
+  const { cuts, changes } = scoreFrames(frames);
+  expect(cuts).toEqual([]);
+  expect(changes).toHaveLength(1);
+  expect(changes[0].frame).toBe(3);
+  expect(changes[0].frames).toBe(12);
+  expect(changes[0].box.x).toBeCloseTo(64 / 128, 1);
+  expect(changes[0].box.y).toBeCloseTo(64 / 128, 1);
+});
+
+test("a faint word fading out before a cut is timed inside its shot", () => {
+  const bg: [number, number, number] = [113, 8, 41];
+  const at = (a: number) => card(128, 128, bg, [Math.round(113 + a * 142), Math.round(8 + a * 247), Math.round(41 + a * 214)], [40, 88, 60, 68]);
+  const fadeOut = [...Array(20).fill(1), ...Array.from({ length: 10 }, (_, i) => 1 - (i + 1) / 10), 0, 0, 0].map(at);
+  const next = Array.from({ length: 10 }, () => solid(128, 128, [6, 196, 85]));
+  const { cuts, changes } = scoreFrames([...fadeOut, ...next]);
+  expect(cuts).toEqual([33]);
+  expect(changes).toHaveLength(1);
+  expect(changes[0].frame).toBe(20);
+  expect(changes[0].frames).toBe(10);
+});
+
+test("a slow pan over a gradient reports no changes", () => {
+  const pan = (shift: number) => {
+    const px = solid(128, 128, [0, 0, 0]);
+    for (let y = 0; y < 128; y++)
+      for (let x = 0; x < 128; x++) {
+        const v = Math.round(127 + 120 * Math.sin((x + shift) / 9));
+        px.data.set([v, v, 255 - v, 255], (y * 128 + x) * 4);
+      }
+    return px;
+  };
+  const { cuts, changes } = scoreFrames(Array.from({ length: 40 }, (_, i) => pan(i * 0.6)));
+  expect(cuts).toEqual([]);
+  expect(changes).toEqual([]);
+});
