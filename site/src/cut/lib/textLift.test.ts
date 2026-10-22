@@ -3,9 +3,10 @@ import { setRasterFactory, type RasterFactory } from "./raster";
 import { textLineLift } from "./textFit";
 
 // The preview sets a title's lines in CSS line boxes; the export's painter
-// sets them from textBaseline "middle". The two put the baseline in different
-// places under a line's middle, so a Jost title turned -90 in five columns
-// showed in the preview 12 px to the right of where the export drew it.
+// sets them from the face's em box, where Chrome draws textBaseline "middle".
+// The two put the baseline in different places under a line's middle, so a
+// Jost title turned -90 in five columns showed in the preview 12 px to the
+// right of where the export drew it.
 //
 // Chrome's own numbers for Jost 700 at 110 px, read off its canvas: the
 // face's line ascent and descent (what a CSS line box centres), and the
@@ -36,13 +37,19 @@ test("a title's lines sit where the painter sets them", () => {
   // A CSS line box centres the face's ascent and descent, which leaves the
   // baseline half their difference under the line's middle.
   const cssDrop = (JOST_110.ascent - JOST_110.descent) / 2;
-  // The painter's baseline sits under its middle by the gap between the two
-  // alignments' ascents.
-  const painterDrop = JOST_110.alphabetic - JOST_110.middle;
+  // The painter sets Jost from its em box, which is where Chrome's "middle"
+  // puts it: under its middle by the gap between the two alignments' ascents.
+  const chromeDrop = JOST_110.alphabetic - JOST_110.middle;
   const lift = textLineLift('700 110px "Jost"');
-  expect(cssDrop - lift).toBeCloseTo(painterDrop, 6);
+  expect(cssDrop - lift).toBeCloseTo(chromeDrop, 2);
   // The offset the turned columns showed on a 1920 frame.
   expect(lift).toBeCloseTo(12.05, 2);
+});
+
+test("a face with no staged em box is lifted by the canvas's own middle", () => {
+  // A system face in the page: the painter reads Chrome's "middle" for it.
+  const lift = textLineLift('700 110px -apple-system, "SF Pro Display", sans-serif');
+  expect((JOST_110.ascent - JOST_110.descent) / 2 - lift).toBeCloseTo(JOST_110.alphabetic - JOST_110.middle, 6);
 });
 
 test("a canvas that cannot read a face's line metrics lifts nothing", () => {

@@ -51,10 +51,10 @@
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.9,
-        "p95": 32.6,
-        "mean": 18.4,
-        "max": 32.8,
+        "p50": 15.3,
+        "p95": 31.8,
+        "mean": 17.99,
+        "max": 33.7,
         "n": 41
       },
       "longTasks": {
@@ -64,7 +64,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 56,
+      "liveSamples": 55,
       "machine": "desktop"
     },
     {
@@ -81,10 +81,10 @@
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.7,
-        "p95": 32.2,
-        "mean": 17.47,
-        "max": 32.6,
+        "p50": 15.9,
+        "p95": 32.5,
+        "mean": 17.68,
+        "max": 33,
         "n": 41
       },
       "longTasks": {
@@ -105,16 +105,16 @@
       "late": {
         "p50": 0,
         "p95": 0,
-        "mean": 0.05,
+        "mean": 0.02,
         "max": 1,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 14.2,
-        "p95": 18.7,
-        "mean": 13.39,
-        "max": 32.3,
+        "p50": 15.6,
+        "p95": 17.3,
+        "mean": 15.83,
+        "max": 30.9,
         "n": 41
       },
       "longTasks": {
@@ -124,7 +124,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 57,
+      "liveSamples": 56,
       "machine": "desktop"
     },
     {
@@ -135,16 +135,16 @@
       "late": {
         "p50": 0,
         "p95": 0,
-        "mean": 0.01,
+        "mean": 0.02,
         "max": 1,
         "n": 81
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.7,
-        "p95": 16.7,
-        "mean": 15.69,
-        "max": 32.3,
+        "p50": 15.4,
+        "p95": 17.3,
+        "mean": 15.73,
+        "max": 32.9,
         "n": 81
       },
       "longTasks": {
@@ -165,16 +165,16 @@
       "late": {
         "p50": 0,
         "p95": 1,
-        "mean": 0.17,
-        "max": 1,
+        "mean": 0.2,
+        "max": 2,
         "n": 41
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 15.7,
-        "p95": 32.5,
-        "mean": 18.43,
-        "max": 32.8,
+        "p50": 16,
+        "p95": 32.7,
+        "mean": 18.98,
+        "max": 52,
         "n": 41
       },
       "longTasks": {
@@ -184,7 +184,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 55,
+      "liveSamples": 46,
       "machine": "desktop"
     },
     {
@@ -202,9 +202,9 @@
       "frameMs": 16.7,
       "scrub": {
         "p50": 15.7,
-        "p95": 32.4,
-        "mean": 18.42,
-        "max": 32.5,
+        "p95": 32.9,
+        "mean": 18.45,
+        "max": 33.9,
         "n": 41
       },
       "longTasks": {
@@ -214,7 +214,7 @@
         "max": 0,
         "n": 0
       },
-      "liveSamples": 55,
+      "liveSamples": 44,
       "machine": "desktop"
     },
     {
@@ -231,10 +231,10 @@
       },
       "frameMs": 16.7,
       "scrub": {
-        "p50": 32.3,
-        "p95": 33,
-        "mean": 30.47,
-        "max": 33.2,
+        "p50": 31.9,
+        "p95": 33.7,
+        "mean": 30.29,
+        "max": 33.9,
         "n": 41
       },
       "longTasks": {
@@ -326,13 +326,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3243,
+      "presented": 3239,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 3243
+        "n": 3239
       },
       "stallShare": 0,
       "decay": {
@@ -437,13 +437,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3443,
+      "presented": 3444,
       "lag": {
         "p50": 0.01,
         "p95": 0.02,
         "mean": 0.01,
         "max": 0.02,
-        "n": 3443
+        "n": 3444
       },
       "stallShare": 0,
       "decay": {
@@ -474,13 +474,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3430,
+      "presented": 3444,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 3430
+        "n": 3444
       },
       "stallShare": 0,
       "decay": {
@@ -492,11 +492,11 @@
         "reported": 0.04
       },
       "longTasks": {
-        "p50": 190,
-        "p95": 190,
-        "mean": 134.5,
-        "max": 190,
-        "n": 2
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
       },
       "liveSamples": 10,
       "liveSources": 1,
@@ -511,13 +511,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 3446,
+      "presented": 3444,
       "lag": {
-        "p50": 0.02,
+        "p50": 0.01,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 3446
+        "n": 3444
       },
       "stallShare": 0,
       "decay": {
@@ -529,11 +529,11 @@
         "reported": 0.04
       },
       "longTasks": {
-        "p50": 53,
-        "p95": 53,
-        "mean": 53,
-        "max": 53,
-        "n": 1
+        "p50": 0,
+        "p95": 0,
+        "mean": 0,
+        "max": 0,
+        "n": 0
       },
       "liveSamples": 10,
       "liveSources": 1,
@@ -589,7 +589,7 @@
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
-        "mean": 0.01,
+        "mean": 0.02,
         "max": 0.03,
         "n": 3444
       },
@@ -622,13 +622,13 @@
       "pass": true,
       "notes": [],
       "drops": 0,
-      "presented": 1621,
+      "presented": 1620,
       "lag": {
         "p50": 0.02,
         "p95": 0.03,
         "mean": 0.02,
         "max": 0.03,
-        "n": 1621
+        "n": 1620
       },
       "stallShare": 0,
       "decay": {
@@ -691,10 +691,10 @@
       "bucket": "playback",
       "pass": true,
       "notes": [],
-      "drops": 2,
-      "presented": 1094,
+      "drops": 3,
+      "presented": 1095,
       "lag": {
-        "p50": 0.01,
+        "p50": 0.02,
         "p95": 0.03,
         "mean": 0.01,
         "max": 0.03,
@@ -702,7 +702,7 @@
       },
       "stallShare": 0,
       "decay": {
-        "first": 0.005,
+        "first": 0.008,
         "last": 0
       },
       "clock": {
@@ -710,10 +710,10 @@
         "reported": 0.04
       },
       "longTasks": {
-        "p50": 128,
-        "p95": 128,
-        "mean": 97.5,
-        "max": 128,
+        "p50": 153,
+        "p95": 153,
+        "mean": 113.5,
+        "max": 153,
         "n": 2
       },
       "liveSamples": 10,

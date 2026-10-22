@@ -3,6 +3,8 @@ import { Canvas, FontLibrary } from "skia-canvas";
 
 /** skia's font registry, under a name the hook lint leaves alone. */
 const fontLibrary = FontLibrary;
+import { baselineDrop } from "@donkeycut/effects-kit";
+import { faceEmAscent } from "./fontEm";
 import { CUT_FONT_MATCH } from "./fontMatchSettings";
 import { stubModule } from "@/lib/testing/stubModule";
 import { setRasterFactory, type RasterFactory, type RasterSurface } from "./raster";
@@ -28,11 +30,14 @@ async function frameAt(_src: string | Blob, time: number) {
   ctx.font = shows.css;
   ctx.fillStyle = "#ffffff";
   ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  // Set as a title is set at `at`: on the baseline its em box puts under the
+  // line's middle.
+  ctx.textBaseline = "alphabetic";
+  const drop = baselineDrop(ctx as unknown as CanvasRenderingContext2D, Number(/(\d+)px/.exec(shows.css)![1]), faceEmAscent(shows.css));
   const [ax, ay] = shows.at ?? [960, 540];
   ctx.translate(ax, ay);
   ctx.rotate(((shows.rotate ?? 0) * Math.PI) / 180);
-  ctx.fillText(shows.text, 0, 0);
+  ctx.fillText(shows.text, 0, drop);
   return { canvas: c, timestamp: time, duration: 1 / 30 } as never;
 }
 await stubModule<typeof import("./mediaRead")>("./mediaRead", import.meta.url, { frameAt });

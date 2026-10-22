@@ -1,6 +1,7 @@
 "use client";
 
-import { cycleFaceAt as faceShowingAt, forgetSettledFaces, overlayFontCycle, settleCycleFace, textWrapRoom, withFontCycle, wrapTextToRoom, LINE_HEIGHT, PLATE_PAD_X, PLATE_PAD_Y, type CycleFace } from "@donkeycut/effects-kit";
+import { baselineDrop, cycleFaceAt as faceShowingAt, forgetSettledFaces, overlayFontCycle, settleCycleFace, textWrapRoom, withFontCycle, wrapTextToRoom, LINE_HEIGHT, PLATE_PAD_X, PLATE_PAD_Y, type CycleFace } from "@donkeycut/effects-kit";
+import { faceEmAscent } from "./fontEm";
 import { createRasterCanvas } from "./raster";
 import { fontStack, type Overlay, type TextOverlay } from "./types";
 
@@ -99,12 +100,12 @@ export function measureLine(
  *
  * A CSS line box centres the face's ascent and descent in its height, so the
  * baseline sits half their difference under the line's middle. The painter
- * draws each line from textBaseline "middle", and how far its baseline sits
- * under that is the canvas's own reading of the face. On a face with a tall
- * ascent the two part by a tenth of an em: Jost at 110 px sits 12 px lower in
- * the DOM than the export draws it. The preview lifts its type by this much.
- * Both gaps are read off the canvas, so the lift is whatever this browser
- * draws; a canvas that cannot report the face's line metrics lifts nothing.
+ * sets each line's baseline under its middle by the face's em box
+ * (`baselineDrop`), the same on every canvas. On a face with a tall ascent the
+ * two part by a tenth of an em: Jost at 110 px sits 12 px lower in the DOM
+ * than the export draws it. The preview lifts its type by this much. The line
+ * box is read off this browser's canvas, the one the DOM's lines are set by;
+ * a canvas that cannot report the face's line metrics lifts nothing.
  */
 export function textLineLift(cssFont: string): number {
   const hit = lifts.get(cssFont);
@@ -116,11 +117,9 @@ export function textLineLift(cssFont: string): number {
     const was = ctx.textBaseline;
     ctx.textBaseline = "alphabetic";
     const line = ctx.measureText("Hg");
-    ctx.textBaseline = "middle";
-    const middle = ctx.measureText("Hg").actualBoundingBoxAscent;
-    ctx.textBaseline = was;
     const cssDrop = (line.fontBoundingBoxAscent - line.fontBoundingBoxDescent) / 2;
-    const painterDrop = line.actualBoundingBoxAscent - middle;
+    const painterDrop = baselineDrop(ctx, Number(/([\d.]+)px/.exec(cssFont)?.[1]), faceEmAscent(cssFont));
+    ctx.textBaseline = was;
     if (Number.isFinite(cssDrop) && Number.isFinite(painterDrop)) lift = cssDrop - painterDrop;
   }
   // Bounded: every stage size is a size of its own.

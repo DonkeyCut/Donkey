@@ -15,6 +15,7 @@ import {
   type WordDraw,
 } from "@donkeycut/effects-kit";
 import type { CSSProperties } from "react";
+import { faceEmAscent } from "./fontEm";
 import { allowance, holdMemory } from "./memoryBudget";
 import { createRasterCanvas, decodeRasterImage, rasterCanvasToPng } from "./raster";
 import { fontStack, type MediaAsset, type Overlay } from "./types";
@@ -148,12 +149,13 @@ async function decodeSticker(asset: MediaAsset): Promise<StickerImage | null> {
   }
 }
 
-/** The kit render env bound to this app: Cut's font stacks, and sticker
- * assets resolved from the given project media (their URLs already point at
- * the active backend — local engine or signed R2). */
+/** The kit render env bound to this app: Cut's font stacks and their em
+ * boxes, and sticker assets resolved from the given project media (their URLs
+ * already point at the active backend — local engine or signed R2). */
 export function cutRenderEnv(assets: MediaAsset[]): RenderEnv {
   return {
     fontStack,
+    emAscent: faceEmAscent,
     createCanvas: (w, h) => createRasterCanvas(w, h) as HTMLCanvasElement,
     canvasToPngBlob: (canvas) => rasterCanvasToPng(canvas),
     resolveLottie: (assetId) =>

@@ -137,6 +137,37 @@ export interface RenderEnv {
   /** Seekable player for a Lottie sticker asset id; null when the asset is
    * gone or isn't a Lottie document. */
   resolveLottie?(assetId: string): Promise<LottieHandle | null>;
+  /** The share of a face's em box above its baseline, read off the face's own
+   * tables, for a css font; undefined for a face the host cannot read. Lines
+   * are set from the em box's middle (`baselineDrop`), so a host that knows
+   * its faces sets them alike on every canvas. */
+  emAscent?(cssFont: string): number | undefined;
+}
+
+/**
+ * How far under a line's middle the line's baseline sits, px, for the font
+ * set on `ctx` at `px`.
+ *
+ * A line is set from the middle of its face's em box, as Chrome draws
+ * textBaseline "middle": its OS/2 typo ascent and descent, scaled to fill the
+ * em. Other canvases read "middle" off other boxes — skia off the line box a
+ * CSS line centres, which on Jost at 110 px is 12 px lower — so the painter
+ * draws from the alphabetic baseline and drops each line by this much itself.
+ * Given the face's `emAscent` the drop is the em box's own; a face nobody can
+ * read falls back on this canvas's "middle", read as the gap between the two
+ * alignments' ascents.
+ */
+export function baselineDrop(ctx: CanvasRenderingContext2D, px: number, emAscent?: number): number {
+  if (emAscent !== undefined && Number.isFinite(emAscent)) return px * (emAscent - 0.5);
+  const was = ctx.textBaseline;
+  ctx.textBaseline = "alphabetic";
+  const alphabetic = ctx.measureText("Hg").actualBoundingBoxAscent;
+  ctx.textBaseline = "middle";
+  const middle = ctx.measureText("Hg").actualBoundingBoxAscent;
+  ctx.textBaseline = was;
+  return Number.isFinite(alphabetic) && Number.isFinite(middle) && alphabetic > middle
+    ? alphabetic - middle
+    : px * WORD_BASELINE_DROP;
 }
 
 /** The frame geometry handed to painters. `scale` converts design px (1080
@@ -579,7 +610,9 @@ async function paintText(
     ctx.letterSpacing = `${(overlay.letterSpacing ?? 0) * fpx}px`;
   }
   ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
+  ctx.textBaseline = "alphabetic";
+  // Each line is drawn on its baseline, this far under the line's middle.
+  const drop = baselineDrop(ctx, fpx, env.emAscent?.(cssFont));
 
   // Words stay in the picture: a line wider than the room its anchor leaves
   // is broken here, measured on the very context that is about to draw it.
@@ -787,11 +820,6 @@ async function paintText(
   // as the preview's bar.
   const caretColor = phase?.caret ? (typeCaret(overlay.anim)?.color ?? overlay.color) : null;
   const alphaOf = ctx.globalAlpha;
-  // How far the type's top sits over a baseline, in the current font.
-  const ascentAt = (baseline: CanvasTextBaseline) => {
-    ctx.textBaseline = baseline;
-    return ctx.measureText("Hg").actualBoundingBoxAscent;
-  };
   // A bar after a typed letter hugs its ink: the tracking a browser counts
   // after a run's last letter (skia leaves it out) comes back off `right`.
   const drawCaret = (right: number, line = lines.length - 1, hug = false) => {
@@ -803,11 +831,8 @@ async function paintText(
       const track = (overlay.letterSpacing ?? 0) * fpx;
       right -= track - (ctx.measureText("II").width - 2 * ctx.measureText("I").width);
     }
-    const base = ascentAt("alphabetic");
     const xh = ctx.measureText("x").actualBoundingBoxAscent;
-    const mid = ascentAt("middle");
-    const off =
-      Number.isFinite(base) && Number.isFinite(mid) && Number.isFinite(xh) ? base - mid - xh / 2 : 0;
+    const off = Number.isFinite(xh) ? drop - xh / 2 : 0;
     ctx.shadowColor = "transparent";
     ctx.globalAlpha = alphaOf;
     ctx.fillStyle = caretColor;
@@ -859,8 +884,8 @@ async function paintText(
           }
           if (g.split) {
             const off = g.split * scale;
-            drawTinted(ch, -off, 0, SPLIT_RED);
-            drawTinted(ch, off, 0, SPLIT_CYAN);
+            drawTinted(ch, -off, drop, SPLIT_RED);
+            drawTinted(ch, off, drop, SPLIT_CYAN);
           }
           if (g.roll) {
             // A rolling reel shows through its own line band only; sideways
@@ -871,10 +896,10 @@ async function paintText(
             const a = ctx.globalAlpha;
             for (const r of slotReel(ch, gi - 1, g.roll, slotSeed(overlay.text))) {
               ctx.globalAlpha = a * r.alpha;
-              drawText(r.ch, 0, r.y * lineH);
+              drawText(r.ch, 0, r.y * lineH + drop);
             }
           } else {
-            drawText(ch, 0, 0);
+            drawText(ch, 0, drop);
           }
           if (texture) {
             cutTexture(ctx, texture, surface, -w / 2, -lineH / 2, w, lineH);
@@ -901,7 +926,7 @@ async function paintText(
       const chars = [...line];
       const n = shownIn(i);
       if (n >= chars.length) {
-        drawText(line, lineX(i), y);
+        drawText(line, lineX(i), y + drop);
         return;
       }
 
@@ -916,27 +941,16 @@ async function paintText(
         return;
       }
       ctx.textAlign = "left";
-      drawText(head, left, y);
+      drawText(head, left, y + drop);
       ctx.textAlign = "center";
     });
     drawCaret(caretRight, typingLine, shownIn(typingLine) > 0);
     return;
   }
-  // A word drawn at another size shares the baseline with the words beside it,
-  // so where that baseline sits under the middle this painter draws from has to
-  // be read off the face. Measuring the same string against both alignments
-  // gives the gap exactly, in whatever engine is drawing: the ascent is
-  // reported from the alignment point, so the difference between the two is the
-  // distance between them.
-  const alphabetic = ascentAt("alphabetic");
-  const middle = ascentAt("middle");
-  const drop =
-    Number.isFinite(alphabetic) && Number.isFinite(middle) && alphabetic > middle
-      ? alphabetic - middle
-      : fpx * WORD_BASELINE_DROP;
-  // A word in its own face sits on the line's baseline too, and that face
-  // puts its baseline its own distance below its middle: read once per face,
-  // at the line's size, and scaled with the word.
+  // A word drawn at another size or in its own face stands on the line's
+  // baseline, so its middle — where its marks and its turn are centred — sits
+  // its own face's drop above that baseline: read once per face, at the
+  // line's size, and scaled with the word.
   const drops = new Map<string, number>();
   const dropOf = (d: WordDraw) => {
     const face = faceKey(d);
@@ -944,15 +958,12 @@ async function paintText(
     let v = drops.get(face);
     if (v === undefined) {
       setSize(1, d);
-      const a = ascentAt("alphabetic");
-      const m = ascentAt("middle");
-      v = Number.isFinite(a) && Number.isFinite(m) && a > m ? a - m : drop;
+      v = baselineDrop(ctx, fpx, env.emAscent?.(fontFor(1, d)));
       drops.set(face, v);
       setSize(1);
     }
     return v;
   };
-  ctx.textBaseline = "middle";
   const alpha0 = ctx.globalAlpha;
   let k = 0;
   let caretRight = cx - (runs[typingLine]?.lineW ?? 0) / 2;
@@ -989,12 +1000,11 @@ async function paintText(
       // A word its effect has not brought in yet has no pixels; it still holds
       // its place, so the words beside it stay where they will be.
       if (alpha > 0.001 && shown) {
-        // Every word draws from its own middle; a resized one has that middle
-        // lifted or dropped by exactly as much as sharing the line's baseline
-        // asks for.
+        // Every word draws on the line's baseline; a resized one has its
+        // middle lifted or dropped by exactly as much as sharing it asks for.
         const size = fpx * mult;
-        const mid = y + drop - dropOf(d) * mult;
-        const drawY = mid;
+        const drawY = y + drop;
+        const mid = drawY - dropOf(d) * mult;
         // Everything below rides one saved state, so nothing set for this word
         // reaches the next.
         ctx.save();

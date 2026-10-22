@@ -11,8 +11,9 @@
  * rank alike.
  */
 
-import { ensureFontLoaded, LETTER_SPACING_MAX, LETTER_SPACING_MIN, LINE_HEIGHT, TEXT_WEIGHTS, type TextWeight } from "@donkeycut/effects-kit";
+import { baselineDrop, ensureFontLoaded, LETTER_SPACING_MAX, LETTER_SPACING_MIN, LINE_HEIGHT, TEXT_WEIGHTS, type TextWeight } from "@donkeycut/effects-kit";
 import { GOOGLE_FONTS } from "./fontCatalog";
+import { faceEmAscent } from "./fontEm";
 import { createRasterCanvas, type RasterSurface } from "./raster";
 import { allFonts, FONTS, hasFont } from "./types";
 
@@ -165,10 +166,11 @@ export async function rankFaces(
 }
 
 /** How far a title's ink centre sits from the point it is set at, px, the
- * type upright: each line centred on x and stacked about y on the middle
- * baseline, as the kit draws it. Caps stand above that baseline, and a
- * browser counts tracking after the last letter, so the ink is off the
- * point; a title set at the reference ink's centre less this lands on it. */
+ * type upright: each line centred on x and stacked about y, its baseline
+ * under the line's middle by the face's em box, as the kit draws it. Caps
+ * stand above that baseline, and a browser counts tracking after the last
+ * letter, so the ink is off the point; a title set at the reference ink's
+ * centre less this lands on it. */
 export async function inkOffset(
   face: TitleFace,
   px: number,
@@ -190,8 +192,9 @@ export async function inkOffset(
     if ("letterSpacing" in ctx) ctx.letterSpacing = `${tracking * px}px`;
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    lines.forEach((line, i) => ctx.fillText(line, w / 2, h / 2 - (lineH * lines.length) / 2 + lineH * (i + 0.5)));
+    ctx.textBaseline = "alphabetic";
+    const drop = baselineDrop(ctx, px, faceEmAscent(css));
+    lines.forEach((line, i) => ctx.fillText(line, w / 2, h / 2 - (lineH * lines.length) / 2 + lineH * (i + 0.5) + drop));
     const data = ctx.getImageData(0, 0, w, h).data;
     const ink = new Uint8Array(w * h);
     for (let i = 0; i < ink.length; i++) ink[i] = data[i * 4 + 3] > 127 ? 1 : 0;

@@ -1,4 +1,5 @@
 import { setFontInstaller } from "../fontAssets";
+import { aliasFaceEm } from "../fontEm";
 import { forgetTextWidths } from "../textFit";
 import { registerFonts } from "../types";
 
@@ -58,7 +59,10 @@ export async function installHeadlessFonts(): Promise<number> {
       const files = entry.files.map((f) => path.join(dir, f));
       try {
         skia.FontLibrary.use(entry.family, files);
-        for (const alias of entry.aliases ?? []) skia.FontLibrary.use(alias, files);
+        for (const alias of entry.aliases ?? []) {
+          skia.FontLibrary.use(alias, files);
+          aliasFaceEm(alias, entry.family);
+        }
       } catch {
         continue; // one unreadable face costs that font alone
       }
