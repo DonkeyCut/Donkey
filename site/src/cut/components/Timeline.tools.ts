@@ -118,7 +118,7 @@ export const TIMELINE_TOOLS = [
   {
     name: "add_clip",
     description:
-      `Put a project asset on the timeline, the same way the user dragging it in would: a video or image lands on video track 0 (at \`start\`, inserted at \`index\`, or appended at the end; a taken spot slides it right), audio lands on the soundtrack (at \`start\`, default the playhead). Asset ids come from \`media\` in editor_state — imports, attachments, and chat media alike. Call it only when the user asked for the media in the cut ("add my beach photo", "stitch these into a movie"); otherwise media stays on its card or panel for them to drag. Pass \`blocks\` instead of an asset to lay out a cut whose footage does not exist yet: one block per shot on track 0, each the length that shot runs, labelled with what belongs there. That is how a video you watched becomes a timeline — the cuts land at their real times, titles and sound go on top, and the person fills each block later. Blocks own no file and store nothing; footage dropped on one takes its place and its length, and replace_item does the same from here. A block runs one frame (1/60 s) or longer, so detect_cuts' \`shots\` go down as they are, flash cuts included; one call takes up to ${BLOCKOUT_MAX}, and a longer list goes in more calls with no start, each appending after the last block. Pass \`spans\` to cut one source into a run of clips — the moments of a talk worth keeping, with everything between them left out, or a video cut at its own shot boundaries when its picture is what plays. add_clip lays down the whole file; an item another timeline already has ("Main's music", "the same intro as Main") is copied with copy_from_timeline, which keeps its trim and mix.`,
+      `Put a project asset on the timeline, the same way the user dragging it in would: a video or image lands on video track 0 (at \`start\`, inserted at \`index\`, or appended at the end; a taken spot slides it right), audio lands on the soundtrack (at \`start\`, default the playhead). Asset ids come from \`media\` in editor_state — imports, attachments, and chat media alike. Call it only when the user asked for the media in the cut ("add my beach photo", "stitch these into a movie"); otherwise media stays on its card or panel for them to drag. Pass \`blocks\` instead of an asset to lay out a cut whose footage does not exist yet: one block per shot on track 0, each the length that shot runs, labelled with what belongs there. That is how a video you watched becomes a timeline — the cuts land at their real times, titles and sound go on top, and the person fills each block later. Blocks own no file and store nothing; footage dropped on one takes its place and its length, and replace_item does the same from here. A block runs one frame (1/60 s) or longer, so detect_cuts' \`shots\` go down as they are, flash cuts included — pass each as its \`from\` and \`to\`, which land every cut on its frame, where lengths summed from times written to the millisecond drift a frame late; one call takes up to ${BLOCKOUT_MAX}, and a longer list goes in more calls with no start, each appending after the last block. Pass \`spans\` to cut one source into a run of clips — the moments of a talk worth keeping, with everything between them left out, or a video cut at its own shot boundaries when its picture is what plays. add_clip lays down the whole file; an item another timeline already has ("Main's music", "the same intro as Main") is copied with copy_from_timeline, which keeps its trim and mix.`,
     inputSchema: obj({
       asset_id: str("Project asset id from `media` in editor_state"),
       blocks: {
@@ -126,11 +126,13 @@ export const TIMELINE_TOOLS = [
         description: "Shots with no footage yet, in order — one block each on track 0",
         items: obj(
           {
-            seconds: num("How long this shot runs on the timeline"),
+            from: num("The shot's first second, as detect_cuts' shots read it"),
+            to: num("The second the shot ends, as detect_cuts' shots read it; with from it sets the block's length exactly"),
+            seconds: num("How long this shot runs on the timeline, when there is no from/to"),
             label: str("What the person puts here. It names the slot on its timeline chip; the frame itself is the flat colour"),
             color: str("The shot's backdrop as #rrggbb, so the slot carries the look it sits in"),
           },
-          ["seconds"]
+          []
         ),
       },
       spans: {

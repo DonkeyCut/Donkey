@@ -210,3 +210,22 @@ test("a block under one frame is refused with what to do, and a long list says h
   expect(many).toContain("other 3");
   expect(useEditor.getState().clips).toHaveLength(0);
 });
+
+test("detect_cuts' shots go down as they read, each cut on its own frame", async () => {
+  // Shots read to the millisecond: lengths taken from them drift up to a
+  // millisecond each, past the snap, and the cut would show the shot before
+  // for a frame. Each block's from and to land on the frames they name.
+  const shots = [
+    { from: 11.8, to: 12.733 },
+    { from: 12.733, to: 13.667 },
+    { from: 13.667, to: 14.367 },
+    { from: 14.367, to: 15.333 },
+  ];
+  await runAiTool("add_clip", { blocks: shots.map((x) => ({ ...x, color: "#253b33" })), start: 11.8 });
+  const starts = useEditor
+    .getState()
+    .clips.filter((c) => c.track === 0)
+    .map((c) => c.start)
+    .sort((a, b) => a - b);
+  expect(starts.map((t) => Math.round(t * 30 * 1e6) / 1e6)).toEqual([354, 382, 410, 431]);
+});

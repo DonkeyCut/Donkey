@@ -7690,7 +7690,14 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
   const shots = raw
     .filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null)
     .map((x) => ({
-      seconds: isNum(x.seconds) ? Math.min(x.seconds, BLOCK_MAX_SECONDS) : 0,
+      // A shot as detect_cuts reads it, from and to each on the frame it
+      // names, runs exactly between them; a length taken from two times
+      // written to the millisecond can be a millisecond off, and a run of
+      // them drifts a cut onto the frame after.
+      seconds: Math.min(
+        isNum(x.from) && isNum(x.to) ? x.to - x.from : isNum(x.seconds) ? x.seconds : 0,
+        BLOCK_MAX_SECONDS
+      ),
       label: typeof x.label === "string" ? x.label.trim() : "",
       // The shot's own backdrop, so a cut waiting on its footage still shows
       // the look it is standing in for.
@@ -7698,7 +7705,7 @@ function placeBlocks(s: Editor, raw: unknown[], input: Record<string, unknown>) 
     }))
     .filter((x) => x.seconds > 0);
   if (shots.length === 0)
-    throw new ToolError("Pass blocks: [{seconds, label}] — one entry per shot, in order.");
+    throw new ToolError("Pass blocks: [{from, to, label}] (a shot as detect_cuts reads it) or [{seconds, label}] — one entry per shot, in order.");
   if (shots.length > BLOCKOUT_MAX)
     throw new ToolError(
       `That is ${shots.length} shots — ${BLOCKOUT_MAX} is the most one call lays down. Pass the first ${BLOCKOUT_MAX} now, then the other ${shots.length - BLOCKOUT_MAX} in a second call with no start: they append right after the last block.`
