@@ -260,11 +260,6 @@ function madeAPicture(work: TurnWork): boolean {
   return clips - empty > 0;
 }
 
-/** How far into a source the turn's notes reach. */
-function describedTo(src: WatchedSource): number {
-  return src.observed.reduce((n, note) => Math.max(n, note.to), 0);
-}
-
 /** What the turn has already put in the editor, named in the steer. A turn
  * sent back to look does not start the build over: told nothing, it lays the
  * same shots down again and the cut comes out as long as the number of passes
@@ -313,11 +308,21 @@ export function qualityVerdict(
     answers.honest.noul < settings.qualityHonest;
   if (!doubted) return null;
 
+  // An exact ask copies one source, the first the turn looked at: a replica
+  // opens its reference before it goes looking for footage. Everything else
+  // it watched is material — stock it judged for a shot, the person's own
+  // clips — cut from one stretch at a time, and holding those to every second
+  // seen, read and played sends the turn through them for words and sound
+  // nobody will rebuild.
+  const exact = answers.closeness.choice === "exact";
+  const copied = exact ? work.sources.find((src) => src.kind === "video" && src.observed.length > 0) : undefined;
+  const owed = copied ? [copied] : work.sources;
+
   // A doubt alone is not enough to spend another round on. The hold has to
   // point at something the record measures — source seconds nobody looked at,
   // or calls that did not land — because the editor cannot prove a build
   // unfinished, and a finished turn sent back does its work a second time.
-  const source = thinnest(work.sources);
+  const source = thinnest(owed);
   if (source) {
     const interval = intervalFor(answers.closeness.choice);
     const unnoted = source.unnoted
@@ -337,7 +342,7 @@ export function qualityVerdict(
   // An ask that turns on how a source SOUNDS has the same measure behind it:
   // seconds nobody played. The judge decides whether the ask leans on the
   // sound; the record decides whether there is anything left to hear.
-  const deaf = leastHeard(work.sources);
+  const deaf = leastHeard(owed);
   if (deaf && answers.hears.noul >= settings.qualityHears)
     return {
       step: "watch",
@@ -352,8 +357,8 @@ export function qualityVerdict(
   // A stretch surveyed at thumbnail size has been looked at and not read, so
   // the hold stands on seconds the record measures, the same as an unwatched
   // span does — and the instruction names the next span, so following it ends.
-  if (answers.closeness.choice === "exact") {
-    const coarse = leastRead(work.sources);
+  if (exact) {
+    const coarse = leastRead(owed);
     // Sometimes the frames say what the source says. A caption track carrying
     // its own narration has every one of its words in the transcript already,
     // and reading them back off the pixels second by second buys nothing the
@@ -390,15 +395,11 @@ export function qualityVerdict(
   // made a picture to hold up — so a comparison has something on both sides to
   // compare.
   //
-  // Only the source the cut was copied from is owed one, and that is the one
-  // the turn read furthest into: a turn also picks shots out of the user's own
-  // footage, and holding the cut up against that asks it to match material it
-  // already contains.
-  const copied = work.sources
-    .filter((src) => src.kind === "video" && src.observed.length > 0)
-    .sort((a, b) => describedTo(b) - describedTo(a))[0];
+  // Only the source the cut was copied from is owed one: a turn also picks
+  // shots out of stock and the user's own footage, and holding the cut up
+  // against that asks it to match material it already contains.
   const unchecked =
-    answers.closeness.choice === "exact" && work.mutated && madeAPicture(work) && copied?.compared === 0
+    exact && work.mutated && madeAPicture(work) && copied?.compared === 0
       ? copied
       : undefined;
   if (unchecked)

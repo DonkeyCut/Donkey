@@ -331,6 +331,24 @@ describe("qualityVerdict", () => {
     expect(qualityVerdict(answers({ finished: 0.2, closeness: "exact" }), both, settings)).toBeNull();
   });
 
+  test("footage a replica is cut from is never held to being watched or read through", () => {
+    // The reference is read end to end and checked. The stock clips the turn
+    // looked at for its shots are material: one stretch of each is used, and
+    // reading the rest frame by frame for words rebuilds nothing.
+    const reference = source({ duration: 13, coveredTo: 13, observed: [{ from: 0, to: 13, text: "every shot" }], unwatched: 0, unnoted: [], unread: 0, unreadFrom: null, compared: 2 });
+    const stock = (name: string, over: Partial<WatchedSource> = {}) =>
+      source({ name, duration: 27.9, coveredTo: 5, unwatched: 22.9, unnoted: [{ from: 5, to: 27.9 }], unread: 27.9, unreadFrom: 0, unheard: 27.9, unheardFrom: 0, observed: [{ from: 0, to: 5, text: "rider from behind" }], ...over });
+    const built = { clips: 12, overlayKinds: ["effect"] };
+    const exact = answers({ seen: 0.2, honest: 0.2, hears: 0.9, closeness: "exact" });
+    expect(qualityVerdict(exact, work({ sources: [reference, stock("Pexels 6947512")], editor: built }), settings)).toBeNull();
+    // A clip read further than the reference is still not the one copied.
+    const readThrough = stock("Pexels 6943040", { coveredTo: 27.9, unwatched: 0, unnoted: [], unread: 0, unreadFrom: null, observed: [{ from: 0, to: 27.9, text: "fisheye" }] });
+    expect(qualityVerdict(exact, work({ sources: [reference, readThrough], editor: built }), settings)).toBeNull();
+    // The reference itself is still owed every second.
+    const short = source({ ...reference, coveredTo: 8, unwatched: 5, unnoted: [{ from: 8, to: 13 }] });
+    expect(qualityVerdict(exact, work({ sources: [short, stock("Pexels 6947512")], editor: built }), settings)?.steer).toContain('"reference.mp4"');
+  });
+
   test("a shell of colour blocks has no picture to hold up against the source", () => {
     // Every shot is a slot waiting for the person's own footage, so every
     // difference from the reference is the footage they bring.
