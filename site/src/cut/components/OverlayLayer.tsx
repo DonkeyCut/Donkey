@@ -1,7 +1,7 @@
 "use client";
 
 import { guideSnapLines } from "@/cut/lib/guides";
-import { createContext, Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { releaseAnimRest, useAnimPreview } from "@/cut/lib/animPreview";
 import { startDrag } from "@/cut/lib/drag";
@@ -39,7 +39,7 @@ import {
   SHADOW,
   wordDrawCss,
 } from "@/cut/lib/textRender";
-import { cycleFaceAt, fitTextToFrame, textBoxSize } from "@/cut/lib/textFit";
+import { cycleFaceAt, fitTextToFrame, textBoxSize, textFontOf, textLineLift } from "@/cut/lib/textFit";
 import {
   behindSubjectOverlay,
   clampKeyPos,
@@ -443,6 +443,23 @@ export function OverlayLayer({
 /** The ghost copy's boxes stay out of the snap registry. */
 const ignoreBox = () => {};
 
+/** Re-read a face's metrics when the page finishes loading one. */
+const subscribeFaces = (changed: () => void) => {
+  const fonts = typeof document === "undefined" ? undefined : document.fonts;
+  fonts?.addEventListener?.("loadingdone", changed);
+  return () => fonts?.removeEventListener?.("loadingdone", changed);
+};
+
+/** A title's lines set where the export's painter sets them. A CSS line box
+ * centres the face's ascent and descent; the painter draws from the em box's
+ * middle, a tenth of an em higher on a tall-ascent face (`textLineLift`). The
+ * lift is relative, so the box, its plate and its chrome stay put and only the
+ * type moves. */
+function PainterLines({ font, children }: { font: string; children: React.ReactNode }) {
+  const lift = useSyncExternalStore(subscribeFaces, () => textLineLift(font), () => 0);
+  return <div style={lift ? { position: "relative", top: -lift } : undefined}>{children}</div>;
+}
+
 /** Text drawn word by word, each word wearing what the word engine resolved
  * for it. The words are walked exactly the way the canvas painter walks them
  * — line by line, single-spaced — so the word the preview lights is the word
@@ -669,7 +686,9 @@ function SubtitleCaption({
         borderRadius: ov.plate ? PLATE_RADIUS_EM : undefined,
       }}
     >
-      {ov.wordDraw ? <WordText text={ov.text} draws={ov.wordDraw} /> : ov.text}
+      <PainterLines font={textFontOf(ov, ov.size * scale)}>
+        {ov.wordDraw ? <WordText text={ov.text} draws={ov.wordDraw} /> : ov.text}
+      </PainterLines>
     </div>
   );
 }
@@ -1372,8 +1391,9 @@ function OverlayItem({
       <div style={contentStyle}>
         {behindHidden ? (
           <span className="opacity-0">{shownText}</span>
-        ) : isText ? (
-          editing ? (
+        ) : isTextOverlay(o) ? (
+          <PainterLines font={textFontOf(o, o.size * scale)}>
+          {editing ? (
             <div
               ref={editRef}
               className="min-w-2 whitespace-pre-wrap break-words outline-none select-text"
@@ -1421,7 +1441,8 @@ function OverlayItem({
               {shownText}
               {caretBar}
             </span>
-          )
+          )}
+          </PainterLines>
         ) : o.kind === "shape" && dealsMarks(o.shape) ? (
           <DoodleView shape={o} stageWidth={stageWidth} stageHeight={stageHeight} scale={scale} t={t} />
         ) : o.kind === "shape" ? (

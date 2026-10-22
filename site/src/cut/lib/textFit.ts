@@ -41,6 +41,11 @@ function facesReady(): boolean {
 }
 
 const widths = new Map<string, number>();
+/** Each face's lift (`textLineLift`), by css font. A face read while it was
+ * still loading was read as its fallback, so the page finishing a load drops
+ * the readings before anything reads them again. */
+const lifts = new Map<string, number>();
+if (typeof document !== "undefined") document.fonts?.addEventListener?.("loadingdone", () => lifts.clear());
 
 /**
  * Drop every measurement taken so far.
@@ -54,6 +59,7 @@ const widths = new Map<string, number>();
  */
 export function forgetTextWidths(): void {
   widths.clear();
+  lifts.clear();
   settled = new WeakMap();
   forgetSettledFaces();
 }
@@ -85,6 +91,42 @@ export function measureLine(
   if (widths.size > 4000) widths.clear();
   widths.set(key, w);
   return w;
+}
+
+/**
+ * How far above a CSS line the painter sets the same line's type, in pixels
+ * of `cssFont`'s own size.
+ *
+ * A CSS line box centres the face's ascent and descent in its height, so the
+ * baseline sits half their difference under the line's middle. The painter
+ * draws each line from textBaseline "middle", and how far its baseline sits
+ * under that is the canvas's own reading of the face. On a face with a tall
+ * ascent the two part by a tenth of an em: Jost at 110 px sits 12 px lower in
+ * the DOM than the export draws it. The preview lifts its type by this much.
+ * Both gaps are read off the canvas, so the lift is whatever this browser
+ * draws; a canvas that cannot report the face's line metrics lifts nothing.
+ */
+export function textLineLift(cssFont: string): number {
+  const hit = lifts.get(cssFont);
+  if (hit !== undefined) return hit;
+  const ctx = measureCtx();
+  let lift = 0;
+  if (ctx) {
+    ctx.font = cssFont;
+    const was = ctx.textBaseline;
+    ctx.textBaseline = "alphabetic";
+    const line = ctx.measureText("Hg");
+    ctx.textBaseline = "middle";
+    const middle = ctx.measureText("Hg").actualBoundingBoxAscent;
+    ctx.textBaseline = was;
+    const cssDrop = (line.fontBoundingBoxAscent - line.fontBoundingBoxDescent) / 2;
+    const painterDrop = line.actualBoundingBoxAscent - middle;
+    if (Number.isFinite(cssDrop) && Number.isFinite(painterDrop)) lift = cssDrop - painterDrop;
+  }
+  // Bounded: every stage size is a size of its own.
+  if (lifts.size > 500) lifts.clear();
+  lifts.set(cssFont, lift);
+  return lift;
 }
 
 /** The css font a text element draws in, at a given pixel size. Mirrors the
