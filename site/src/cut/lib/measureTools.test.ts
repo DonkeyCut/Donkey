@@ -188,6 +188,15 @@ test("track_camera reads a held shot as one picture that never moves", async () 
   expect(out.moves).toEqual([]);
 });
 
+test("track_camera from a cut detect_cuts gave starts on that shot's first frame", async () => {
+  // The cut lands on frame 65 (1.0833 s); detect_cuts hands it back to the
+  // millisecond, which can sit either side of the frame's own start.
+  for (const from of [1.083, 1.084]) {
+    const out = (await runAiTool("track_camera", { asset_id: "ref", from, to: 1.3 })) as { path: { t: number }[] };
+    expect(out.path[0].t).toBeCloseTo(65 / FPS, 3);
+  }
+});
+
 test("track_camera needs the stretch's end", async () => {
   expect(await message(runAiTool("track_camera", { asset_id: "ref", from: 1.1 }))).toContain("to");
 });

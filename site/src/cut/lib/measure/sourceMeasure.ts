@@ -32,6 +32,10 @@ const COLOR_LONG_SIDE = 1920;
 const TRACK_LONG_SIDE = 720;
 /** Reads a pass back off by this much so the frame on `from` is scored. */
 const LEAD_S = 0.001;
+/** A time handed back to the millisecond sits up to half of one either side
+ * of the frame start it names, so a frame ending that close past `from` is
+ * the one before it. */
+const HALF_MS = 0.0005;
 /** Long side the picture box is found at: a pixel is 0.16% of the frame. */
 const PICTURE_LONG_SIDE = 640;
 /** Frames sampled across a source to find its picture. */
@@ -413,6 +417,8 @@ export async function trackCamera(
   await withSourceVideo(url, async (v) => {
     const at = sizeAt(v.width, v.height, CAMERA_LONG_SIDE, area);
     for await (const f of v.frames(Math.max(0, opts.from - LEAD_S), opts.to, at)) {
+      // The shot before a cut would anchor every pose to the wrong picture.
+      if (f.t + f.duration <= opts.from + HALF_MS) continue;
       if (frames.length >= opts.maxFrames) {
         truncated = true;
         coveredTo = times[times.length - 1];
