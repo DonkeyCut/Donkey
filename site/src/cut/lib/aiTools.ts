@@ -734,7 +734,7 @@ const COMPARE_NOTE =
 const SWEEP_NOTE =
   "diff is the mean difference per pixel between your frame and the source's, 0 (the same) to 255; median is the typical frame, p95 the bad tail, max the worst. " +
   "worst lists the stretches most off, worst first, each with its peak frame (at on the cut, source on the source) and that frame's 4×4 grid, top row first. " +
-  "edges lists stretches whose difference runs along whole edges of the frame (top, bottom, left, right) while the middle matches: a border, band or letterbox one side has and the other lacks. Thin bars barely move the mean, so these come back under target too. " +
+  "edges lists stretches whose difference runs along whole edges of the frame (top, bottom, left, right) while the middle matches: a border, band or letterbox one side has and the other lacks. Thin bars barely move the mean, so these come back under target too. The picture box is already cut out of any app around it, so a band inside it is part of the picture, never the recording's: build it. " +
   "Look at them: compare_to_source with times [{at, source}] at those peaks, fix what differs, then sweep again, until the median is under target and each stretch in worst and edges is fixed or is a difference no edit removes. " +
   "shift on a stretch, or timing for the whole span, means the source matches better that many seconds away: positive, move it later by that much; negative, earlier. " +
   "onBlocks is the share of samples over blocks standing in for footage; those keep a difference no edit removes.";
