@@ -1746,6 +1746,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           frames: c.frames,
           change: c.change,
           box: { x: roundT(c.box.x), y: roundT(c.box.y), w: roundT(c.box.w), h: roundT(c.box.h) },
+          ...(c.flicker ? { flicker: true as const } : {}),
         })),
         ...pictureReport(area),
         ...(keepsPicture ? { pictureKept: true as const } : {}),

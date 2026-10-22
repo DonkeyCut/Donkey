@@ -134,6 +134,10 @@ export function pasteTimelineItems(s: ItemLists, items: TimelineClipboardItem[],
   return { next, selection };
 }
 
+/** The shortest piece a split leaves: under one frame at 60 fps, so a clip
+ * splits a frame at a time, never into a sliver no frame shows. */
+const SPLIT_MIN_PIECE = 0.01;
+
 /** Split selected items that cover the cut, in one document edit. */
 export function splitTimelineItems(s: ItemLists, selection: readonly Selection[], at: number, newId: () => string) {
   const keys = new Set(selection.flatMap((sel) => sel ? [itemKey(sel)] : []));
@@ -145,7 +149,7 @@ export function splitTimelineItems(s: ItemLists, selection: readonly Selection[]
     const split = def.split;
     if (!split) continue;
     const items = def.list(next).flatMap((item) => {
-      if (!keys.has(`${kind}:${item.id}`) || at <= item.start + 0.05 || at >= item.start + def.duration(item) - 0.05) return [item];
+      if (!keys.has(`${kind}:${item.id}`) || at <= item.start + SPLIT_MIN_PIECE || at >= item.start + def.duration(item) - SPLIT_MIN_PIECE) return [item];
       const [left, tail] = split(def.clone(item), at);
       const right = { ...tail, id: newId() };
       selected.push({ kind, id: right.id });

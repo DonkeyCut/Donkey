@@ -175,6 +175,14 @@ describe("split_at", () => {
     expect(useEditor.getState().clips.filter((c) => c.track === 0)).toHaveLength(2);
   });
 
+  test("a clip splits a single frame off its end, as a per-frame flash needs", async () => {
+    useEditor.setState({ clips: [...useEditor.getState().clips, clip("top", 5.167, 6.3, 6.6, { track: 1 })] });
+    await runAiTool("split_at", { t: 5.433, ids: ["top"] });
+    const tops = useEditor.getState().clips.filter((c) => c.track === 1).sort((x, y) => x.start - y.start);
+    expect(tops).toHaveLength(2);
+    expect(tops[1].out - tops[1].in).toBeCloseTo(1 / 30, 2);
+  });
+
   test("a time on a clip edge says how to reach another item", async () => {
     useEditor.setState({ clips: [...useEditor.getState().clips, clip("top", 2, 30, 34, { track: 1 })] });
     await expect(runAiTool("split_at", { t: 4 })).rejects.toThrow("ids");

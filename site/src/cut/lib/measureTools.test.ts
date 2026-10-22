@@ -23,10 +23,12 @@ const WHITE: Rgb = [255, 255, 255];
 /** The picture at frame f, as a colour at each frame fraction. Red until 1s,
  * a five-frame blue shot, then green. On the green, an orange bar centred at
  * (0.5, 0.3), 0.1 tall, grows linearly from 0.1 to 0.5 wide over 1.5–2.0s; a
- * white "title" block spans x 0.2–0.8, y 0.7–0.75. */
+ * white "title" block spans x 0.2–0.8, y 0.7–0.75. From frame 165 to 174 a
+ * corner square (x 0.8–0.95, y 0.05–0.2) strobes white and blue a frame each. */
 function colourAt(f: number, fx: number, fy: number): Rgb {
   if (f < 60) return RED;
   if (f < 65) return BLUE;
+  if (f >= 165 && f < 175 && fx >= 0.8 && fx < 0.95 && fy >= 0.05 && fy < 0.2) return f % 2 ? WHITE : BLUE;
   const t = f / FPS;
   const p = Math.max(0, Math.min(1, (t - 1.5) / 0.5));
   const bw = 0.1 + 0.4 * p;
@@ -186,6 +188,17 @@ test("track_camera reads a held shot as one picture that never moves", async () 
   expect(out.path.length).toBeGreaterThan(10);
   for (const p of out.path) expect([p.scale, p.dx, p.dy, p.rotation]).toEqual([1, 0, 0, 0]);
   expect(out.moves).toEqual([]);
+});
+
+test("detect_cuts marks a strobe as one flicker change", async () => {
+  const out = (await runAiTool("detect_cuts", { asset_id: "ref" })) as {
+    changes: { frame: number; frames: number; flicker?: true; box: { x: number; y: number } }[];
+  };
+  const flicker = out.changes.filter((c) => c.flicker);
+  expect(flicker).toHaveLength(1);
+  expect(flicker[0].frame).toBeGreaterThanOrEqual(165);
+  expect(flicker[0].frame + flicker[0].frames).toBeLessThanOrEqual(176);
+  expect(flicker[0].box.x).toBeCloseTo(0.875, 1);
 });
 
 test("track_camera from a cut detect_cuts gave starts on that shot's first frame", async () => {
