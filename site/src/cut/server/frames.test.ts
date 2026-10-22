@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { forgetFfmpegEncodersForTest } from "./exportPipeline";
 import { makeFreezeFrame } from "./frames";
 import { mediaDir } from "./projects";
 
@@ -22,6 +23,7 @@ beforeAll(async () => {
   pathBefore = process.env.PATH;
   process.env.DONKEY_CUT_DATA_DIR = data;
   process.env.PATH = `${VENDOR}:${pathBefore}`;
+  forgetFfmpegEncodersForTest();
   await mkdir(mediaDir(PROJECT), { recursive: true });
   const made = spawnSync("ffmpeg", ["-v", "error", "-f", "lavfi", "-i", "color=c=0x336699:s=64x36", "-frames:v", "1", path.join(mediaDir(PROJECT), "src.png")]);
   if (made.status !== 0) throw new Error(String(made.stderr));
@@ -29,6 +31,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   process.env.PATH = pathBefore;
+  forgetFfmpegEncodersForTest();
   if (dataBefore === undefined) delete process.env.DONKEY_CUT_DATA_DIR;
   else process.env.DONKEY_CUT_DATA_DIR = dataBefore;
   await rm(data, { recursive: true, force: true });

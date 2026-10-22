@@ -464,6 +464,11 @@ function ffmpegEncoders(): Promise<Set<string>> {
   }));
 }
 
+/** Drops the encoder list, for a test that points PATH at another ffmpeg. */
+export function forgetFfmpegEncodersForTest(): void {
+  encodersCache = null;
+}
+
 /** Whether this ffmpeg writes VP9: the worker's build does, the Mac's LGPL
  * build does not. */
 export async function hasVp9Encoder(): Promise<boolean> {

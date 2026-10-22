@@ -100,8 +100,11 @@ export const TIMELINE_TOOLS = [
   {
     name: "split_at",
     description:
-      `Split selected items and group members at a time, like pressing S. Supported kinds: ${ITEM_KIND_IDS.filter(canSplitItem).join(", ")}. Transitions remain whole. With no selection, split the video on track 0. Omit t for the playhead. Times stay fixed; the result includes the new selected ids.`,
-    inputSchema: obj({ t: num("Timeline seconds to cut at (optional)") }),
+      `Split items and their group members at a time, like pressing S: the items \`ids\` names, else the selection, else the video on track 0. Supported kinds: ${ITEM_KIND_IDS.filter(canSplitItem).join(", ")}. Transitions remain whole. Omit t for the playhead. Times stay fixed; the result includes the new selected ids.`,
+    inputSchema: obj({
+      t: num("Timeline seconds to cut at (optional)"),
+      ids: { type: "array", items: { type: "string" }, description: "Ids of the items to split, any track or kind (optional; default the selection)" },
+    }),
   },
   {
     name: "move_clip",

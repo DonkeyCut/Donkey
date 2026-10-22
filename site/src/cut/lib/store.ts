@@ -861,8 +861,9 @@ export interface EditorState {
   /** "Detach Audio": lift the selected clip's sound onto the
    * soundtrack track (and mute the clip) so it can be cut independently. */
   detachAudio: () => void;
-  /** Split at the given time, or the playhead when omitted. */
-  splitAtPlayhead: (at?: number) => void;
+  /** Split at the given time, or the playhead when omitted: the given items,
+   * else the selection, else the track-0 video there. */
+  splitAtPlayhead: (at?: number, items?: NonNullable<Selection>[]) => void;
   setPublish: (patch: Partial<{ caption: string; tags: string; soundTitle: string; handle: string }>) => void;
   setNotes: (patch: Partial<{ text: string; publishedAt: string; links: string[] }>) => void;
   /** Kick off (and poll) an on-device transcription of the current cut. */
@@ -4052,11 +4053,11 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       }));
     },
 
-    splitAtPlayhead: (at) => {
+    splitAtPlayhead: (at, items) => {
       const s = get();
       const t = at ?? playheadAt();
       if (s.readOnly || !Number.isFinite(t)) return;
-      const selected = s.multiSelection.length ? s.multiSelection : s.selection ? [s.selection] : s.clips
+      const selected = items?.length ? items : s.multiSelection.length ? s.multiSelection : s.selection ? [s.selection] : s.clips
         .filter((c) => c.track === 0 && t > c.start && t < c.start + clipLen(c))
         .map((c) => ({ kind: "clip" as const, id: c.id }));
       const result = splitTimelineItems(s, expandTimelineGroups(s, selected), t, uid);

@@ -164,3 +164,20 @@ describe("a recording bound to the video", () => {
     await expect(runAiTool("sync_audio", { clipId: "a", audio_asset_id: "cam" })).rejects.toThrow();
   });
 });
+
+describe("split_at", () => {
+  test("ids names what to split, an overlay clip included, with nothing selected", async () => {
+    useEditor.setState({ clips: [...useEditor.getState().clips, clip("top", 2, 30, 34, { track: 1 })] });
+    const result = await runAiTool("split_at", { t: 3, ids: ["top"] });
+    const tops = useEditor.getState().clips.filter((c) => c.track === 1).sort((x, y) => x.start - y.start);
+    expect(result).toMatchObject({ split: 1 });
+    expect(tops.map((c) => [c.start, c.in, c.out])).toEqual([[2, 30, 31], [3, 31, 34]]);
+    expect(useEditor.getState().clips.filter((c) => c.track === 0)).toHaveLength(2);
+  });
+
+  test("a time on a clip edge says how to reach another item", async () => {
+    useEditor.setState({ clips: [...useEditor.getState().clips, clip("top", 2, 30, 34, { track: 1 })] });
+    await expect(runAiTool("split_at", { t: 4 })).rejects.toThrow("ids");
+    await expect(runAiTool("split_at", { t: 7, ids: ["top"] })).rejects.toThrow("runs across");
+  });
+});

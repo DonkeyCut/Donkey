@@ -2771,11 +2771,25 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   },
 
   split_at: (s, input) => {
+      const ids = Array.isArray(input.ids) ? input.ids.filter((id): id is string => typeof id === "string") : [];
+      const items = ids.map((id) => {
+        const kind = ITEM_KIND_IDS.find((k) => ITEM_KINDS[k].list(s).some((item) => item.id === id));
+        if (!kind) throw new ToolError(`No timeline item ${id}.`);
+        return { kind, id };
+      });
       const before = ITEM_KIND_IDS.reduce((n, kind) => n + ITEM_KINDS[kind].list(s).length, 0);
-      s.splitAtPlayhead(isNum(input.t) ? input.t : undefined);
+      s.splitAtPlayhead(isNum(input.t) ? input.t : undefined, items);
       const after = useEditor.getState();
       const made = ITEM_KIND_IDS.reduce((n, kind) => n + ITEM_KINDS[kind].list(after).length, 0) - before;
-      if (made === 0) throw new ToolError("Nothing to split at that time.");
+      if (made === 0) {
+        // An item splits only strictly inside its span: on its edge it is cut already.
+        if (items.length) throw new ToolError("Nothing to split: none of those items runs across that time.");
+        if (s.multiSelection.length || s.selection)
+          throw new ToolError("Nothing to split: the selection doesn't run across that time. Name what to split with ids.");
+        throw new ToolError(
+          "Nothing to split: with nothing selected only the track-0 video splits, and none of it runs across that time (a clip edge is a cut already). Name an overlay clip, title or other item with ids."
+        );
+      }
       return { split: made, selection: after.multiSelection, ...tracksAfter() };
   },
 
