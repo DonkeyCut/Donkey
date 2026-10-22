@@ -99,10 +99,10 @@ export function textFontOf(
 /** The element's text with every over-long line broken to fit the room its
  * anchor leaves in the frame. Returns the text unchanged when it already fits,
  * so nothing re-renders for an element that was never in trouble. */
-export function fitTextToFrame(o: TextOverlay, frameW: number): string {
+export function fitTextToFrame(o: TextOverlay, frameW: number, frameH?: number): string {
   const size = o.size;
   const font = textFontOf(o, size);
-  const room = textWrapRoom(o, frameW);
+  const room = textWrapRoom(o, frameW, frameH);
   const width = (line: string) => measureLine(line, font, size, o.letterSpacing ?? 0);
   if (o.text.split("\n").every((line) => width(line) <= room)) return o.text;
   return wrapTextToRoom(o.text, room, width);
@@ -111,7 +111,7 @@ export function fitTextToFrame(o: TextOverlay, frameW: number): string {
 /** Each element's settled faces, one per face, frame width and font state,
  * so a playing preview resolves a cycling title without re-wrapping it on
  * every tick. Keyed by the element, so an edit starts afresh. */
-let settled = new WeakMap<Overlay, { face: CycleFace; frameW: number; ready: boolean; out: Overlay }[]>();
+let settled = new WeakMap<Overlay, { face: CycleFace; frameW: number; frameH?: number; ready: boolean; out: Overlay }[]>();
 /** Settled faces one element keeps: its faces at a few frame widths. */
 const SETTLED_PER_ELEMENT = 32;
 
@@ -119,7 +119,7 @@ const SETTLED_PER_ELEMENT = 32;
  * the title's own lines the way the kit's painters set it (`settleCycleFace`),
  * so the preview never reflows a title the export keeps on one line. One face
  * at one frame width hands back the same element every tick. */
-export function cycleFaceAt<T extends Overlay>(o: T, tLocal: number, frameW: number): T {
+export function cycleFaceAt<T extends Overlay>(o: T, tLocal: number, frameW: number, frameH?: number): T {
   const c = overlayFontCycle(o);
   const face = c ? faceShowingAt(c, tLocal) : null;
   if (!face) return o;
@@ -128,22 +128,22 @@ export function cycleFaceAt<T extends Overlay>(o: T, tLocal: number, frameW: num
   const ready = facesReady();
   const known = settled.get(o) ?? [];
   for (const k of known) {
-    if (k.face === face && k.frameW === frameW && k.ready === ready) return k.out as T;
+    if (k.face === face && k.frameW === frameW && k.frameH === frameH && k.ready === ready) return k.out as T;
   }
 
   const el = withFontCycle(o, tLocal);
-  const out = settleCycleFace(el, textWrapRoom(el as TextOverlay, frameW), (type, line) =>
+  const out = settleCycleFace(el, textWrapRoom(el as TextOverlay, frameW, frameH), (type, line) =>
     measureLine(line, textFontOf(type, type.size), type.size, type.letterSpacing ?? 0)
   );
   if (known.length >= SETTLED_PER_ELEMENT) known.shift();
-  known.push({ face, frameW, ready, out });
+  known.push({ face, frameW, frameH, ready, out });
   settled.set(o, known);
   return out;
 }
 
 /** Resting box in design pixels, measured once for resize gestures. */
-export function textBoxSize(o: TextOverlay, frameW: number): { width: number; height: number } {
-  const lines = fitTextToFrame(o, frameW).split("\n");
+export function textBoxSize(o: TextOverlay, frameW: number, frameH?: number): { width: number; height: number } {
+  const lines = fitTextToFrame(o, frameW, frameH).split("\n");
   const width = o.wrapWidth ? textWrapRoom(o, frameW) : Math.max(1, ...lines.map((line) => measureLine(line, textFontOf(o, o.size), o.size, o.letterSpacing ?? 0)));
   return { width: width + (o.plate ? 2 * PLATE_PAD_X * o.size : 0), height: (lines.length * (o.lineHeight ?? LINE_HEIGHT) + (o.plate ? 2 * PLATE_PAD_Y : 0)) * o.size };
 }

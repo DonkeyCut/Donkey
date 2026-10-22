@@ -367,7 +367,7 @@ export function OverlayLayer({
             // A font cycle sets the title in another face at this moment.
             // A selected title holds its own face while paused, since that is
             // the face its grips and the inspector edit.
-            overlay={inRange && (playing || !selected) ? cycleFaceAt(o, t - o.start, frame.w) : o}
+            overlay={inRange && (playing || !selected) ? cycleFaceAt(o, t - o.start, frame.w, frame.h) : o}
             // The skimmer paints the bare frame: the item still renders, its
             // selection chrome (outline, resize handle) does not.
             selected={selected && !scrubbing}
@@ -420,7 +420,7 @@ export function OverlayLayer({
           return (
             <OverlayItem
               key={o.id}
-              overlay={cycleFaceAt(o, t - o.start, frame.w)}
+              overlay={cycleFaceAt(o, t - o.start, frame.w, frame.h)}
               selected={false}
               armed={false}
               grouped={false}
@@ -723,7 +723,7 @@ function OverlayItem({
   // line is wider than the room the frame leaves it. The export's painter
   // breaks the same lines in the same places; editing shows the raw text, so
   // the box holds what the author typed.
-  const drawnText = !isTextOverlay(o) ? "" : editing ? o.text : fitTextToFrame(o, frame.w);
+  const drawnText = !isTextOverlay(o) ? "" : editing ? o.text : fitTextToFrame(o, frame.w, frame.h);
 
   // Publish this element's box so a sibling drag can align to it.
   useEffect(() => {
@@ -1082,7 +1082,7 @@ function OverlayItem({
       const w = worldPoint(cam, seen.x + mx, seen.y + my, aspect);
       return { x: w.x - self.x, y: w.y - self.y };
     };
-    const textSizes = new Map(members.filter(isTextOverlay).map((m) => [m.id, textBoxSize(m, frame.w)]));
+    const textSizes = new Map(members.filter(isTextOverlay).map((m) => [m.id, textBoxSize(m, frame.w, frame.h)]));
     const stickerSize = (v: number) => Math.min(1.5, Math.max(0.02, v));
     // A sticker's resting height as a frame fraction: the one it stores, or
     // the grabbed box laid out under the source's own aspect. A side grip
@@ -1132,7 +1132,7 @@ function OverlayItem({
       };
       if (isTextOverlay(self)) {
         const before = textSizes.get(self.id)!;
-        const after = textBoxSize({ ...self, size: p.size ?? self.size, wrapWidth: p.wrapWidth ?? self.wrapWidth }, frame.w);
+        const after = textBoxSize({ ...self, size: p.size ?? self.size, wrapWidth: p.wrapWidth ?? self.wrapWidth }, frame.w, frame.h);
         return { kx: after.width / before.width, ky: after.height / before.height };
       }
       if (self.kind === "shape")

@@ -385,9 +385,24 @@ export function textRoom(x: number, frameWidth: number): number {
   return Math.min(TEXT_SAFE_WIDTH, anchored) * frameWidth;
 }
 
-/** Explicit boxes wrap at their width; auto-width text stays within the frame. */
-export function textWrapRoom(o: Pick<TextOverlay, "x" | "wrapWidth">, frameWidth: number): number {
-  return o.wrapWidth && Number.isFinite(o.wrapWidth) ? Math.max(0.01, o.wrapWidth) * frameWidth : textRoom(o.x, frameWidth);
+/** Explicit boxes wrap at their width; auto-width text stays within the frame.
+ * A line turned by its rotation runs across the frame at that angle, so its
+ * room is the run along it from the anchor: a column word at -90 has the
+ * frame's height, measured from its y. Without the frame's height, or upright,
+ * the room is across. */
+export function textWrapRoom(
+  o: Pick<TextOverlay, "x" | "wrapWidth"> & { y?: number; rotation?: number },
+  frameWidth: number,
+  frameHeight?: number
+): number {
+  if (o.wrapWidth && Number.isFinite(o.wrapWidth)) return Math.max(0.01, o.wrapWidth) * frameWidth;
+  const across = textRoom(o.x, frameWidth);
+  const a = ((o.rotation ?? 0) * Math.PI) / 180;
+  if (!frameHeight || !a || !Number.isFinite(a)) return across;
+  const cos = Math.abs(Math.cos(a));
+  const sin = Math.abs(Math.sin(a));
+  const down = textRoom(o.y ?? 0.5, frameHeight);
+  return Math.min(cos > 1e-6 ? across / cos : Infinity, sin > 1e-6 ? down / sin : Infinity);
 }
 
 /**
@@ -525,7 +540,7 @@ async function settledFace(o: TextOverlay, frame: PaintFrame, env: RenderEnv): P
   const own = o.cycleOwn;
   if (!own) return o;
   const cssOf = (type: TextType) => textCssFont({ ...o, ...type }, type.size * frame.scale, env);
-  const room = textWrapRoom(o, frame.width);
+  const room = textWrapRoom(o, frame.width, frame.height);
   const key = `${room}|${frame.scale}|${cssOf(own)}|${own.letterSpacing ?? 0}|${cssOf(o)}|${o.letterSpacing ?? 0}|${o.text}`;
   let hit = settledFaces.get(key);
   if (!hit) {
@@ -568,7 +583,7 @@ async function paintText(
 
   // Words stay in the picture: a line wider than the room its anchor leaves
   // is broken here, measured on the very context that is about to draw it.
-  const lines = wrapTextToRoom(overlay.text, textWrapRoom(overlay, width), (line) =>
+  const lines = wrapTextToRoom(overlay.text, textWrapRoom(overlay, width, frame.height), (line) =>
     ctx.measureText(line).width
   ).split("\n");
   const lineH = fpx * (overlay.lineHeight ?? LINE_HEIGHT);
@@ -1335,7 +1350,7 @@ async function lastGlyphBox(
   ctx.font = cssFont;
   if ("letterSpacing" in ctx) ctx.letterSpacing = `${(o.letterSpacing ?? 0) * fpx}px`;
   const measure = (line: string) => ctx.measureText(line).width;
-  const lines = wrapTextToRoom(o.text, textWrapRoom(o, frame.width), measure).split("\n");
+  const lines = wrapTextToRoom(o.text, textWrapRoom(o, frame.width, frame.height), measure).split("\n");
   const widths = lines.map(measure);
   const maxW = o.wrapWidth ? textWrapRoom(o, frame.width) : Math.max(...widths, 1);
   const lineH = fpx * (o.lineHeight ?? LINE_HEIGHT);
@@ -1525,7 +1540,7 @@ export async function measureElementBounds(
   const ctx = scratch.getContext("2d")!;
   ctx.font = cssFont;
   if ("letterSpacing" in ctx) ctx.letterSpacing = `${(o.letterSpacing ?? 0) * fpx}px`;
-  const lines = wrapTextToRoom(o.text, textWrapRoom(o, frame.width), (line) =>
+  const lines = wrapTextToRoom(o.text, textWrapRoom(o, frame.width, frame.height), (line) =>
     ctx.measureText(line).width
   ).split("\n");
   const maxW = o.wrapWidth ? textWrapRoom(o, frame.width) : Math.max(...lines.map((l) => ctx.measureText(l).width), 1);

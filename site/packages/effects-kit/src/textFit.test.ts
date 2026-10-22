@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TEXT_SAFE_WIDTH, textRoom, wrapTextToRoom } from "./render";
+import { TEXT_SAFE_WIDTH, textRoom, textWrapRoom, wrapTextToRoom } from "./render";
 
 // A stand-in face: every glyph ten units wide, spaces included. Enough to pin
 // down where the breaks land without a canvas.
@@ -24,6 +24,29 @@ describe("textRoom", () => {
       expect(x * 1000 - room / 2).toBeGreaterThanOrEqual(-1e-9);
       expect(x * 1000 + room / 2).toBeLessThanOrEqual(1000 + 1e-9);
     }
+  });
+});
+
+describe("textWrapRoom", () => {
+  test("a line turned to stand upright runs the frame's height, not its width", () => {
+    // A column word at the left edge reading bottom to top: its line runs
+    // down the frame, so the room is the height it can take from its anchor.
+    const column = { x: 0.095, y: 0.5, rotation: -90 };
+    expect(textWrapRoom(column, 1920, 1080)).toBeCloseTo(TEXT_SAFE_WIDTH * 1080);
+    expect(textWrapRoom({ ...column, rotation: 90 }, 1920, 1080)).toBeCloseTo(TEXT_SAFE_WIDTH * 1080);
+    // Upright, the same anchor has only the run to the near edge.
+    expect(textWrapRoom({ ...column, rotation: 0 }, 1920, 1080)).toBeCloseTo(0.19 * 1920);
+  });
+
+  test("a tilted line takes the shorter of its runs to the sides and to the top or bottom", () => {
+    const tilted = { x: 0.5, y: 0.5, rotation: 45 };
+    const across = (TEXT_SAFE_WIDTH * 1920) / Math.SQRT1_2;
+    const down = (TEXT_SAFE_WIDTH * 1080) / Math.SQRT1_2;
+    expect(textWrapRoom(tilted, 1920, 1080)).toBeCloseTo(Math.min(across, down));
+  });
+
+  test("a box with its own width wraps at it whatever its angle", () => {
+    expect(textWrapRoom({ x: 0.1, y: 0.5, rotation: -90, wrapWidth: 0.3 }, 1920, 1080)).toBeCloseTo(576);
   });
 });
 

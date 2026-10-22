@@ -65,7 +65,7 @@ export function previewSelectionSnapshot(s: EditorState, t: number): Position[] 
       kind: "overlay", id: o.id, x: seen.x, y: seen.y, key, keys: o.kf, cam,
       rotation: (key?.rotation ?? o.rotation ?? 0) + (cam?.pose.rotation ?? 0),
       box: isShapeOverlay(o) || o.kind === "sticker" ? { w: o.w, h: o.h } : undefined,
-      text: isTextOverlay(o) ? { size: o.size, wrapWidth: o.wrapWidth, width: (textBoxSize(o, frameOf(s.aspect).w).width - (o.plate ? 2 * PLATE_PAD_X * o.size : 0)) / frameOf(s.aspect).w } : undefined,
+      text: isTextOverlay(o) ? { size: o.size, wrapWidth: o.wrapWidth, width: (textBoxSize(o, frameOf(s.aspect).w, frameOf(s.aspect).h).width - (o.plate ? 2 * PLATE_PAD_X * o.size : 0)) / frameOf(s.aspect).w } : undefined,
     });
   }
   for (const c of s.clips) {
