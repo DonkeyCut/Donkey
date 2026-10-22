@@ -56,10 +56,16 @@ export function heldFrames(
   });
 }
 
+/** How far short of an edge a time may sit and still count as on it, in
+ * seconds: a sum of clip lengths ends a hair past the next clip's start
+ * (2.6000000000000005 against 2.6), and the frame on that cut is the next
+ * clip's. */
+const EDGE_SLACK_S = 1e-6;
+
 /** Whether a footprint shows at `t`, read through its held frames when the
  * grid moved it. */
 export const showsAt = (start: number, end: number, held: HeldFrames | null, t: number) =>
-  held ? t >= held.from && t < held.to : t >= start && t < end;
+  held ? t >= held.from && t < held.to : t >= start - EDGE_SLACK_S && t < end - EDGE_SLACK_S;
 
 /**
  * The elements with every footprint the grid moves at `fps` widened onto the

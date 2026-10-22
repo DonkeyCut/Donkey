@@ -20,7 +20,7 @@ import { stageTimeAt } from "@/cut/lib/overlayLive";
 import { FrameCompositor, MISSING_FRAME, PENDING_FRAME, type Frame } from "@/cut/lib/composite";
 import { hdrCanvasSupport } from "@/cut/lib/hdrCanvas";
 import { displayIsHdr, HdrPresenter, onDisplayRangeChange, setHdrPreviewState } from "@/cut/lib/hdrPresent";
-import { crossHandles, duckGainAt, overlayPlan, soundCrossGain, trackZeroPlan } from "@/cut/lib/framePlan";
+import { crossHandles, duckGainAt, overlayPlan, soundCrossGain, trackZeroAt, trackZeroPlan } from "@/cut/lib/framePlan";
 import { type ClipFrameSource, FrameSourcePool, mappingKey, walkCostMs } from "@/cut/lib/frameSource";
 import { liveAudioFxAt } from "@/cut/lib/audioEffects";
 import { PreviewMixer, type Voice } from "@/cut/lib/previewMixer";
@@ -1001,7 +1001,8 @@ class Engine {
       this.lastRead = t;
     }
 
-    const master = spans.find((sp) => t >= sp.start && t < sp.start + sp.len);
+    // The export's rule, so a cut a float sum lands a hair late flips on its frame here too.
+    const master = trackZeroAt(spans, [], t)?.span;
     this.phase("clock");
 
     // Ask for the master's picture before clearing. A clip nothing has decoded

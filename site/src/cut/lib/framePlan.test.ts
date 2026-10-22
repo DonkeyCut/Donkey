@@ -374,6 +374,16 @@ describe("one-frame clips on a 30 fps export", () => {
     expect(trackZeroAt(spans, held, 2 / 30)?.span).toBe(spans[2]);
   });
 
+  test("a clip whose summed end lands a hair past the next one's start yields the cut's frame", () => {
+    // 1.8333… + 0.7666… sums to 2.6000000000000005, a hair past the next start.
+    const spans = laid(1.8333333333333333, [14.766666666666667 - 14, 0.9666666666666666]);
+    spans[1] = { ...spans[1], start: 2.6 };
+    expect(spans[0].start + spans[0].len).toBeGreaterThan(2.6);
+    const held = heldFrames(spans.map((sp) => ({ start: sp.start, end: sp.start + sp.len })), 30);
+    expect(trackZeroAt(spans, held, 78 / 30)?.span).toBe(spans[1]);
+    expect(trackZeroAt(spans, held, 77 / 30)?.span).toBe(spans[0]);
+  });
+
   test("an upper-track flash between two output frames holds the next one", () => {
     const spans = laid(0.01, [1 / 60, 2], 1);
     const held = heldSpans(spans, 30);
