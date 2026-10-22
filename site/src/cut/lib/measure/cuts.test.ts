@@ -150,3 +150,28 @@ test("a flash frame inside fast streaking footage keeps both of its cuts", () =>
   const { cuts } = scoreFrames(frames);
   expect([6, 7].filter((i) => cuts.includes(i))).toEqual([6, 7]);
 });
+
+test("a cutout flipping to its negative frame by frame is one flicker over its run", () => {
+  // A white figure over a blue shot, flipped to black on alternate frames,
+  // once held for two frames, the way a strobed cutout plays.
+  const bg: [number, number, number] = [40, 120, 200];
+  const plain = card(128, 128, bg, [240, 240, 240], [40, 72, 30, 100]);
+  const negative = card(128, 128, bg, [15, 15, 15], [40, 72, 30, 100]);
+  const shot = solid(128, 128, bg);
+  const run = [plain, negative, plain, negative, plain, plain, negative, plain, negative];
+  const { changes } = scoreFrames([shot, shot, shot, shot, ...run, shot, shot, shot]);
+  const flicker = changes.filter((c) => c.flicker);
+  expect(flicker).toHaveLength(1);
+  expect(flicker[0].frame).toBe(5);
+  expect(flicker[0].frames).toBe(8);
+  expect(flicker[0].box.x).toBeCloseTo(56 / 128, 1);
+  expect(changes.some((c) => !c.flicker && c.frame > 5 && c.frame < 13)).toBe(false);
+});
+
+test("a shape that pops in and out every few frames is no flicker", () => {
+  const bg: [number, number, number] = [40, 120, 200];
+  const on = card(128, 128, bg, [240, 240, 240], [40, 72, 30, 100]);
+  const off = solid(128, 128, bg);
+  const frames = Array.from({ length: 30 }, (_, i) => (Math.floor(i / 3) % 2 ? on : off));
+  expect(scoreFrames(frames).changes.some((c) => c.flicker)).toBe(false);
+});

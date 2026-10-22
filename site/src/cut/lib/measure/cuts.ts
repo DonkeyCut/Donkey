@@ -38,6 +38,13 @@ export const CUT_TUNING = {
    * and the share that marks its last. */
   SLOW_START: 0.05,
   SLOW_END: 0.95,
+  /** % of the fine grid a flicker frame changes from the frame before. */
+  FLICKER_MIN: 2,
+  /** A flicker frame sits at most this share of that change away from the
+   * frame two or three back: it returns to a look it just left. */
+  FLICKER_ECHO: 0.6,
+  /** Flicker frames a run holds at least; one held frame may part two. */
+  FLICKER_RUN: 3,
 };
 
 /** Per-cell channel means of an RGBA frame on a GRID×GRID grid. */
@@ -120,6 +127,8 @@ export interface ShotChange {
   frames: number;
   change: number;
   box: ChangeBox;
+  /** The change flips back and forth frame by frame over its run. */
+  flicker?: true;
 }
 
 export const gridsOf = (px: Pixels): FrameGrids => ({
@@ -241,10 +250,53 @@ export function pickShotEdges(steps: FrameStep[], fines?: ArrayLike<number>[]): 
   if (!fines) {
     return { cuts, changes };
   }
-  const slow = gradualChanges(fines, cuts).filter(
-    (g) => !changes.some((c) => g.frame < c.frame + c.frames && c.frame < g.frame + g.frames)
-  );
-  return { cuts, changes: [...changes, ...slow].sort((a, b) => a.frame - b.frame) };
+  const overlaps = (a: ShotChange, b: ShotChange) => a.frame < b.frame + b.frames && b.frame < a.frame + a.frames;
+  const flicks = flickers(fines);
+  const slow = gradualChanges(fines, cuts).filter((g) => !changes.some((c) => overlaps(g, c)));
+  const rest = [...changes, ...slow].filter((c) => !flicks.some((f) => overlaps(c, f)));
+  return { cuts, changes: [...rest, ...flicks].sort((a, b) => a.frame - b.frame) };
+}
+
+/** Runs of frames that flip back and forth — a strobe, a cutout flashing to
+ * its negative — each frame changed from the one before and back to a look
+ * two or three frames old. Every such frame matches its neighbours' change,
+ * so no one of them stands out as a change of its own. A shake that returns
+ * to rest echoes once; a run takes FLICKER_RUN. The run opens on the frame
+ * after the first look it returns to. */
+export function flickers(fines: ArrayLike<number>[]): ShotChange[] {
+  const { FLICKER_MIN, FLICKER_ECHO, FLICKER_RUN } = CUT_TUNING;
+  const cells = fines.length > 0 ? fines[0].length / 3 : 0;
+  const hits: { i: number; echo: number; moved: number[] }[] = [];
+  for (let i = 2; i < fines.length; i++) {
+    const moved = cellsApart(fines[i - 1], fines[i]);
+    const step = (100 * moved.length) / cells;
+    if (step < FLICKER_MIN) {
+      continue;
+    }
+    const back = [2, 3].find((k) => i - k >= 0 && (100 * cellsApart(fines[i - k], fines[i]).length) / cells <= step * FLICKER_ECHO);
+    if (back) {
+      hits.push({ i, echo: i - back, moved });
+    }
+  }
+  const out: ShotChange[] = [];
+  let run: typeof hits = [];
+  const close = () => {
+    if (run.length >= FLICKER_RUN) {
+      const frame = run[0].echo + 1;
+      const moved = [...new Set(run.flatMap((h) => h.moved))];
+      const change = Math.max(...run.map((h) => (100 * h.moved.length) / cells));
+      out.push({ frame, frames: run[run.length - 1].i - frame + 1, change, box: boxOfCells(moved), flicker: true });
+    }
+    run = [];
+  };
+  for (const h of hits) {
+    if (run.length > 0 && h.i - run[run.length - 1].i > 2) {
+      close();
+    }
+    run.push(h);
+  }
+  close();
+  return out;
 }
 
 /** The fine cells that differ between two grids past the hard tolerance. */
