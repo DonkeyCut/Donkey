@@ -540,18 +540,33 @@ export async function recordFailedInferenceUsage(input: {
   }
 }
 
+// Every open editor polls the balance, so the read stays one parallel round of
+// selects. Credit past its expiry is netted out of the stored balance here;
+// the next charge retires it in its own transaction (expireCreditsForAccount).
 export async function getCreditBalance(userId: string) {
-  await ensureCreditAccount(userId);
-  await expireCredits(userId);
-
-  const account = await prisma.userCreditAccount.findUniqueOrThrow({
-    where: {
-      userId,
-    },
-  });
   const now = new Date();
   const recentSince = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const [grants, limits, recentUsageEvents] = await Promise.all([
+  const [account, lapsed, grants, limits, recentUsageEvents] = await Promise.all([
+    prisma.userCreditAccount.findUnique({
+      where: {
+        userId,
+      },
+    }),
+    prisma.userCreditGrant.aggregate({
+      _sum: {
+        remainingAmountMicros: true,
+      },
+      where: {
+        expiresAt: {
+          lte: now,
+        },
+        remainingAmountMicros: {
+          gt: zeroCreditMicros,
+        },
+        status: "active",
+        userId,
+      },
+    }),
     prisma.userCreditGrant.findMany({
       orderBy: [
         {
@@ -637,11 +652,14 @@ export async function getCreditBalance(userId: string) {
     }),
   ]);
 
+  // An account with no row yet has nothing granted or charged.
+  const balanceMicros = (account?.balanceMicros ?? zeroCreditMicros) - (lapsed._sum.remainingAmountMicros ?? zeroCreditMicros);
+
   return {
-    balance: creditMicrosToString(account.balanceMicros),
-    balanceMicros: account.balanceMicros.toString(),
-    lifetimeCharged: creditMicrosToString(account.lifetimeChargedMicros),
-    lifetimeGranted: creditMicrosToString(account.lifetimeGrantedMicros),
+    balance: creditMicrosToString(balanceMicros),
+    balanceMicros: balanceMicros.toString(),
+    lifetimeCharged: creditMicrosToString(account?.lifetimeChargedMicros ?? zeroCreditMicros),
+    lifetimeGranted: creditMicrosToString(account?.lifetimeGrantedMicros ?? zeroCreditMicros),
     activeGrants: grants.map((grant) => ({
       id: grant.id,
       source: grant.source,

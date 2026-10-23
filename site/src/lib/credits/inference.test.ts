@@ -10,6 +10,9 @@ import { stubModule } from "@/lib/testing/stubModule";
 const recorded = { creditCostMicros: BigInt(0), remainingBalanceMicros: BigInt(0), usageEventId: "event" };
 let failures: Error[] = [];
 let attempts = 0;
+let upserts = 0;
+let account: { balanceMicros: bigint; lifetimeChargedMicros: bigint; lifetimeGrantedMicros: bigint } | null = null;
+let lapsedMicros: bigint | null = null;
 const prisma = {
   $transaction: async () => {
     attempts += 1;
@@ -19,10 +22,24 @@ const prisma = {
     }
     return recorded;
   },
+  userCreditAccount: {
+    findUnique: async () => account,
+    findUniqueOrThrow: async () => account,
+    upsert: async () => {
+      upserts += 1;
+      return account;
+    },
+  },
+  userCreditGrant: {
+    aggregate: async () => ({ _sum: { remainingAmountMicros: lapsedMicros } }),
+    findMany: async () => [],
+  },
+  userCreditLimit: { findMany: async () => [] },
+  inferenceUsageEvent: { findMany: async () => [] },
 };
 
 await stubModule<typeof import("@/lib/prisma")>("@/lib/prisma", import.meta.url, { prisma: prisma as never });
-const { recordInferenceUsage } = await import("./inference");
+const { getCreditBalance, recordInferenceUsage } = await import("./inference");
 
 const usage = {
   clientId: null,
@@ -65,5 +82,29 @@ describe("recording usage under concurrent charges", () => {
     attempts = 0;
     await expect(recordInferenceUsage(usage)).rejects.toBe(other);
     expect(attempts).toBe(1);
+  });
+});
+
+// The balance is polled by every open editor, so the read never writes: credit
+// past its expiry is netted out here and retired by the next charge.
+describe("reading the balance", () => {
+  test("nets out lapsed grants without writing", async () => {
+    account = { balanceMicros: BigInt(5_000_000), lifetimeChargedMicros: BigInt(0), lifetimeGrantedMicros: BigInt(5_000_000) };
+    lapsedMicros = BigInt(2_000_000);
+    attempts = 0;
+    upserts = 0;
+    const balance = await getCreditBalance("user");
+    expect(balance.balanceMicros).toBe("3000000");
+    expect(attempts).toBe(0);
+    expect(upserts).toBe(0);
+  });
+
+  test("an account without a row reads as empty", async () => {
+    account = null;
+    lapsedMicros = null;
+    upserts = 0;
+    const balance = await getCreditBalance("user");
+    expect(balance.balanceMicros).toBe("0");
+    expect(upserts).toBe(0);
   });
 });
