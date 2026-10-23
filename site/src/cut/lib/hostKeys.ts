@@ -30,5 +30,10 @@ export const additiveClickOn = (apple: boolean, e: Mods): boolean =>
 /** Whether this drag is asking for snapping to be held off. */
 export const snapHeldOffOn = (apple: boolean, e: Mods): boolean => (apple ? e.metaKey : e.ctrlKey);
 
+/** Whether this click asks to open its target in a new tab, the way a link
+ * does: ⌘ on a Mac, Ctrl elsewhere. */
+export const newTabClickOn = (apple: boolean, e: Mods): boolean => (apple ? e.metaKey : e.ctrlKey);
+
 export const additiveClick = (e: Mods): boolean => additiveClickOn(APPLE_KEYS, e);
+export const newTabClick = (e: Mods): boolean => newTabClickOn(APPLE_KEYS, e);
 export const snapHeldOff = (e: Mods): boolean => snapHeldOffOn(APPLE_KEYS, e);

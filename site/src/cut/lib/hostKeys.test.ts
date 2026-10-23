@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { additiveClickOn, snapHeldOffOn } from "./hostKeys";
+import { additiveClickOn, newTabClickOn, snapHeldOffOn } from "./hostKeys";
 
 const mods = (m: Partial<{ metaKey: boolean; ctrlKey: boolean; shiftKey: boolean }>) => ({
   metaKey: false,
@@ -24,5 +24,13 @@ describe("platform modifiers", () => {
   test("shift adds on either", () => {
     expect(additiveClickOn(true, mods({ shiftKey: true }))).toBe(true);
     expect(additiveClickOn(false, mods({ shiftKey: true }))).toBe(true);
+  });
+
+  test("a new tab opens on cmd on a Mac and ctrl elsewhere", () => {
+    expect(newTabClickOn(true, mods({ metaKey: true }))).toBe(true);
+    expect(newTabClickOn(true, mods({ ctrlKey: true }))).toBe(false);
+    expect(newTabClickOn(false, mods({ ctrlKey: true }))).toBe(true);
+    expect(newTabClickOn(false, mods({ metaKey: true }))).toBe(false);
+    expect(newTabClickOn(true, mods({ shiftKey: true }))).toBe(false);
   });
 });

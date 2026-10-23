@@ -40,7 +40,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { additiveClick } from "@/cut/lib/hostKeys";
+import { additiveClick, newTabClick } from "@/cut/lib/hostKeys";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
 import { capturePosterWhenReady, readPoster } from "@/cut/lib/posterCache";
 import { apiJson } from "@/cut/lib/api";
@@ -146,6 +146,9 @@ type DeleteSet = {
   projects: { project: ProjectSummary; residency: Residency }[];
 };
 const NO_PICK: DeleteSet = { folders: [], projects: [] };
+
+// MouseEvent.button for the middle (wheel) button.
+const MIDDLE_BUTTON = 1;
 
 // What a shelf's refusal says, when it says anything.
 const errorOf = async (res: Response | null) =>
@@ -827,6 +830,28 @@ export function ProjectsHome() {
     />
   );
 
+  // A project click opens it here. ⌘-click (Ctrl elsewhere) or a middle click
+  // opens it in a new tab, the way a link does; shift-click adds it to the pick.
+  const openProject = (e: React.MouseEvent, p: ProjectSummary) => {
+    const href = projectHref(base, p.id, "projects", openFolder);
+    if (e.button === MIDDLE_BUTTON || newTabClick(e)) {
+      e.preventDefault();
+      window.open(href, "_blank", "noopener");
+      return;
+    }
+
+    if (e.button !== 0) {
+      return;
+    }
+
+    if (additiveClick(e)) {
+      e.preventDefault();
+      pickTile(e, p.id, order);
+      return;
+    }
+    router.push(href);
+  };
+
   // Similar-shape tiles get their own band of wrapped rows, so a wide tile
   // never shares a row with a tall one. Bands are ordered by their most
   // recently edited project, recency kept within each band.
@@ -857,14 +882,8 @@ export function ProjectsHome() {
           className="group max-w-full cursor-pointer"
           draggable={live(r)}
           onDragStart={(e) => onProjectDragStart(e, p)}
-          onClick={(e) => {
-            if (additiveClick(e)) {
-              e.preventDefault();
-              pickTile(e, p.id, order);
-              return;
-            }
-            router.push(projectHref(base, p.id, "projects", openFolder));
-          }}
+          onClick={(e) => openProject(e, p)}
+          onAuxClick={(e) => openProject(e, p)}
         >
           <div
             className={cn(
@@ -941,14 +960,8 @@ export function ProjectsHome() {
           )}
           draggable={live(r)}
           onDragStart={(e) => onProjectDragStart(e, p)}
-          onClick={(e) => {
-            if (additiveClick(e)) {
-              e.preventDefault();
-              pickTile(e, p.id, order);
-              return;
-            }
-            router.push(projectHref(base, p.id, "projects", openFolder));
-          }}
+          onClick={(e) => openProject(e, p)}
+          onAuxClick={(e) => openProject(e, p)}
         >
           <span className="flex min-w-0 items-center gap-2.5">
             <Film className="size-4 shrink-0 text-muted-foreground" />
