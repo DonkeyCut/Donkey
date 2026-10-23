@@ -321,8 +321,11 @@ export function pictureFades(fines: ArrayLike<number>[]): PictureFade[] {
   for (let a = 1; a < fines.length; a++) {
     const sign = Math.sign(luma[a] - luma[a - 1]);
     if (!(Math.abs(luma[a] - luma[a - 1]) >= FADE_STEP)) continue;
+    // A frame shown twice (a screen recording's repeat) holds the run for a
+    // frame; the next step carries it on.
+    const steps = (i: number) => i < fines.length && Math.sign(luma[i] - luma[i - 1]) === sign && Math.abs(luma[i] - luma[i - 1]) >= FADE_STEP;
     let b = a;
-    while (b + 1 < fines.length && Math.sign(luma[b + 1] - luma[b]) === sign && Math.abs(luma[b + 1] - luma[b]) >= FADE_STEP) b++;
+    while (steps(b + 1) || (Math.abs(luma[b + 1] - luma[b]) < FADE_STEP && steps(b + 2))) b += steps(b + 1) ? 1 : 2;
     const run = b - a + 1;
     const moved = Math.abs(luma[b] - luma[a - 1]);
     const next = b;

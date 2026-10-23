@@ -247,3 +247,14 @@ test("a crossfade between two colours and a hard cut are no fades", () => {
   expect(hard.cuts).toEqual([4]);
   expect(hard.fades).toEqual([]);
 });
+
+test("a fade that repeats a frame on its way, as a screen recording does, is read whole", () => {
+  const frames = fadeRun({ ease: "sine.out", start: 8, frames: 16, amount: 1, tone: 0, way: "to", total: 30 });
+  // Frame 13 shows frame 12 again; the rest keep their times.
+  frames[13] = frames[12];
+  const { cuts, fades } = scoreFrames(frames);
+  expect(cuts).toEqual([]);
+  expect(fades).toHaveLength(1);
+  expect(fades[0].frame).toBeCloseTo(8, 0);
+  expect(fades[0].frames).toBeCloseTo(16, 0);
+});
