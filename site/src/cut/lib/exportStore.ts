@@ -99,9 +99,12 @@ interface ExportsState {
   dismiss: (id: string) => void;
   /** Clear every finished/failed row at once; running work stays. */
   dismissSettled: () => void;
-  /** One poll of the engine feed. */
-  refresh: () => Promise<void>;
+  /** One poll of every export feed. "now" reads each one; "paced", the
+   * poller's tick, reads the hosted cloud feed only once it is due. */
+  refresh: (pace?: FeedPace) => Promise<void>;
 }
+
+export type FeedPace = "now" | "paced";
 
 export const useExports = create<ExportsState>((set, get) => ({
   jobs: [],
@@ -295,7 +298,7 @@ export const useExports = create<ExportsState>((set, get) => ({
     }));
   },
 
-  refresh: async () => {
+  refresh: async (pace = "now") => {
     // One backend's feed, rows stamped with its residency; null on a hiccup so
     // the caller keeps that backend's last good view.
     const fetchFeed = async (backend: CutBackend): Promise<ExportJob[] | null> => {
@@ -315,7 +318,9 @@ export const useExports = create<ExportsState>((set, get) => ({
     const pollLocal = engineOrigin() !== "" || servedFromEngine();
     const pollCloud =
       (typeof navigator === "undefined" || navigator.onLine) &&
-      Date.now() >= cloudRetryAt;
+      Date.now() >= cloudRetryAt &&
+      (pace === "now" || Date.now() >= cloudDueAt);
+    if (pollCloud) cloudDueAt = Date.now() + (hidden() ? HIDDEN_ACTIVE_MS : CLOUD_ACTIVE_MS);
     // The browser feed is this tab's own memory, so it always answers.
     const [localRows, cloudRows, browserRows] = await Promise.all([
       pollLocal ? fetchFeed(localBackend) : Promise.resolve(null),
@@ -478,6 +483,13 @@ const ACTIVE_MS = 700;
 const IDLE_MIN_MS = 3000;
 const IDLE_MAX_MS = 30_000;
 
+// The cloud feed is a hosted request per read and its renders run for
+// minutes, so a tick reads it at this pace even while a tab render polls the
+// in-page feed at ACTIVE_MS. A hidden tab with work in flight polls every feed
+// at the slower pace: its landing still registers, and nobody watches the bar.
+const CLOUD_ACTIVE_MS = 3000;
+const HIDDEN_ACTIVE_MS = 10_000;
+
 // Jobs whose storage failure has already raised the wall, so a day of polling
 // the same errored row asks once.
 const walledJobs = new Set<string>();
@@ -486,6 +498,8 @@ const walledJobs = new Set<string>();
 // server is unreachable; coming back online resets both and polls right away.
 let cloudFailures = 0;
 let cloudRetryAt = 0;
+// When a paced tick next reads the cloud feed.
+let cloudDueAt = 0;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let ticking = false;
 let mounts = 0;
@@ -512,14 +526,14 @@ const tick = async () => {
   if (mounts === 0 || ticking) return;
   ticking = true;
   try {
-    await useExports.getState().refresh();
+    await useExports.getState().refresh("paced");
   } finally {
     ticking = false;
   }
   if (mounts === 0) return;
   if (inFlight()) {
     idleMs = IDLE_MIN_MS;
-    schedule(ACTIVE_MS);
+    schedule(hidden() ? HIDDEN_ACTIVE_MS : ACTIVE_MS);
     return;
   }
   // Idle and out of sight: park. A visibility, focus, or online event restarts
@@ -532,6 +546,7 @@ const tick = async () => {
 /** Snap back to the fast cadence and poll now. */
 const wake = () => {
   idleMs = IDLE_MIN_MS;
+  cloudDueAt = 0;
   // A tick already in flight schedules the next one off the reset interval.
   if (mounts === 0 || ticking) return;
   schedule(0);

@@ -140,3 +140,13 @@ test("a tab render that fails goes to the worker and says why in the console", a
   expect(String(message)).toContain("worker");
   expect(error).toBe(failure);
 });
+
+test("a paced poll reads the cloud feed at most every few seconds; a direct refresh always does", async () => {
+  feed();
+  const cloud = exportBackend("cloud").fetch as unknown as { mock: { calls: unknown[] } };
+  await useExports.getState().refresh();
+  await useExports.getState().refresh("paced");
+  expect(cloud.mock.calls.length).toBe(1);
+  await useExports.getState().refresh();
+  expect(cloud.mock.calls.length).toBe(2);
+});
