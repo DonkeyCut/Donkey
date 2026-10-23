@@ -16,6 +16,18 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
+// The journal pump runs on its own; poll until it lands so a slow runner waits longer.
+const SETTLE_MS = 5_000;
+async function settle(check: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + SETTLE_MS;
+  while (!(await check())) {
+    if (Date.now() > deadline) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test("the engine completes with no readers and replays the finished journal", async () => {
   let output!: ReadableStreamDefaultController<UIMessageChunk>;
   let signal!: AbortSignal;
@@ -45,12 +57,12 @@ test("a peek reports how far the journal reaches while the turn runs and after",
     controller.enqueue({ type: "tool-input-available", toolCallId: "a", toolName: "add_title", input: {} });
   } }), () => {}, () => {});
   await response.body!.cancel();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await settle(async () => (await peekTurnStream("project", "peek"))?.chunks === 2);
   expect(await peekTurnStream("project", "peek")).toEqual({ messageId: "turn-peek", chunks: 2, running: true });
   output.enqueue({ type: "tool-output-available", toolCallId: "a", output: {} });
   output.enqueue({ type: "finish" });
   output.close();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await settle(async () => (await peekTurnStream("project", "peek"))?.running === false);
   expect(await peekTurnStream("project", "peek")).toEqual({ messageId: "turn-peek", chunks: 4, running: false });
 });
 
@@ -62,11 +74,19 @@ test("a peek reads the turn's count without rereading its journal, across an eng
     controller.close();
   } }), () => {}, () => {});
   await response.body!.cancel();
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  const streams = path.join(root, "chat-streams");
+  // The finished turn's count file is the last thing the pump writes.
+  await settle(async () => {
+    for (const name of await readdir(streams)) {
+      if (name.endsWith(".json") && (await readFile(path.join(streams, name), "utf8")).includes("turn-restart")) {
+        return true;
+      }
+    }
+    return false;
+  });
   // An engine restart forgets what it held in memory.
   delete (globalThis as { __cutChatJournals?: unknown }).__cutChatJournals;
   // The journal is no longer read: garbage in its place leaves the count alone.
-  const streams = path.join(root, "chat-streams");
   for (const name of await readdir(streams)) {
     if (!name.endsWith(".sse")) continue;
     const text = await readFile(path.join(streams, name), "utf8");
