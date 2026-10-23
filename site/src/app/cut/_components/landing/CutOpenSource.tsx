@@ -25,7 +25,7 @@ export function CutOpenSource() {
             <span className="h-[10px] w-[10px] rounded-full bg-[#28C840]" />
           </div>
           <div className="whitespace-nowrap text-[#b7b7b7]">
-            <span className="text-[#5FFFB9]">$</span> cd ~/DonkeyUseCorp
+            <span className="text-[#5FFFB9]">$</span> cd ~/DonkeyCut
           </div>
           <div className="mt-3 whitespace-nowrap text-[#b7b7b7]">
             <span className="text-[#5FFFB9]">$</span> git clone {GITHUB_REPO_URL}
