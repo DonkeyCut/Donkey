@@ -21,10 +21,23 @@ interface MatteFrame {
   height: number;
 }
 
+/** How far past a read's time its matte frame is found, in matte frames: a
+ * 30 fps cut puts every other frame on a matte frame's edge, and the nudge
+ * keeps float error in that time from tipping it into the frame before. */
+const MATTE_NUDGE = 1e-3;
+
+/** The baked matte frame source time `mt` falls in. */
+const matteFrameOf = (mt: number) => Math.floor(mt * MATTE_FPS + MATTE_NUDGE);
+
 /** Which baked matte frame source time `mt` falls in — equal stamps are the
  * same pixels. */
-export const matteStamp = (assetId: string, mt: number): string =>
-  `${assetId}:${Math.floor(mt * MATTE_FPS)}`;
+export const matteStamp = (assetId: string, mt: number): string => `${assetId}:${matteFrameOf(mt)}`;
+
+/** Where to read the matte frame `mt` falls in: the middle of that frame, so
+ * every reader lands on the same one whether it picks the frame at or before
+ * the time or the nearest. Kept inside a matte `dur` seconds long. */
+export const matteReadTime = (mt: number, dur: number): number =>
+  Math.min((matteFrameOf(mt) + 0.5) / MATTE_FPS, Math.max(0, dur - 0.001));
 
 /** One matte's alpha picture, held on a single surface and converted only
  * when the frame's stamp moves. */
@@ -73,7 +86,7 @@ export function matteStage(m: Matte | undefined, assets: MediaAsset[]) {
       const stamp = matteStamp(m.assetId, mt);
       ready = alpha.held(stamp);
       if (ready) return;
-      const f = await reader.frameAt(mt);
+      const f = await reader.frameAt(matteReadTime(mt, dur));
       ready = f.kind === "ready" ? alpha.of(f, stamp) : null;
     },
     get: () => ready,

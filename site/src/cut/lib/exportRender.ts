@@ -53,7 +53,7 @@ import { applyEffectToCanvas, effectRecipe, diveView, divesAt, evalOverlayFrame,
 import { backdropStill, loadBackdropStill } from "./backdropStills";
 import { hasSubjectOverlays, SubjectMaskCompositor } from "./behindPass";
 import { overlayLiveAt } from "./overlayLive";
-import { MatteAlpha, matteStamp } from "./matteAlpha";
+import { MatteAlpha, matteReadTime, matteStamp } from "./matteAlpha";
 import { createRasterCanvas, snapshotRaster, type RasterSurface } from "./raster";
 import { exportFrameSynth, SYNTH_EDGE, synthWeight, type FrameSynth } from "./frameSynth";
 import { cutRenderEnv, renderElementCanvas, renderStillPng, requireStickers } from "./textRender";
@@ -1691,7 +1691,7 @@ export class FramePainter {
     // converted frame is reused until the read crosses into the next one.
     const stamp = matteStamp(m.assetId, mt);
     const held = alpha.held(stamp);
-    const frame = held ? null : await this.readerFor(asset).frameAt(mt);
+    const frame = held ? null : await this.readerFor(asset).frameAt(matteReadTime(mt, dur));
     const img = held ?? (frame?.kind === "ready" ? alpha.of(frame, stamp) : null);
     if (img) this.matteFrames.set(key, img);
   }

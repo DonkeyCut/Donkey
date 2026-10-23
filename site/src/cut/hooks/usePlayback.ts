@@ -40,7 +40,7 @@ import {
 import { registerSourceColor, registerSourceSampler } from "@/cut/lib/previewCanvas";
 import { colorRead, previewFile, type ColorRead } from "@/cut/lib/sourceColor";
 import { backdropStill } from "@/cut/lib/backdropStills";
-import { MatteAlpha } from "@/cut/lib/matteAlpha";
+import { MatteAlpha, matteReadTime } from "@/cut/lib/matteAlpha";
 import { createRasterCanvas, type RasterSurface } from "@/cut/lib/raster";
 import { disposeDetailGpu } from "@/cut/lib/detailGpu";
 
@@ -526,7 +526,7 @@ class Engine {
     const asset = s.assets.find((a) => a.id === m.assetId);
     if (!asset) return null;
     const dur = Math.max(0.001, asset.duration);
-    const mt = Math.max(0, Math.min(sourceTimeOf(clip, at) - m.in, dur - 0.001));
+    const mt = matteReadTime(Math.max(0, sourceTimeOf(clip, at) - m.in), dur);
     // Coverage tolerates far less resolution than the picture, and the luma →
     // alpha read below is a per-frame pixel pass; capping the matte's decode
     // keeps that pass off the frame budget.
