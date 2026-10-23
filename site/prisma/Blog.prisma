@@ -2,8 +2,11 @@
 // and every image live in R2 under blog/<id>/ (src/lib/blog/keys.ts), so the
 // article text is never in the repository or the database.
 
+// A SCHEDULED post goes live on its own once publishedAt passes; until then
+// the site treats it as a draft.
 enum BlogPostStatus {
   DRAFT
+  SCHEDULED
   PUBLISHED
 }
 
@@ -20,6 +23,7 @@ model BlogPost {
   keywords     String[]       @default([])
   featured     Boolean        @default(false)
   // The date shown on the post and the one the list sorts by; set in the CMS.
+  // On a SCHEDULED post, the moment it goes live.
   publishedAt  DateTime?
   // Shown as "Updated …" when later than publishedAt.
   revisedAt    DateTime?

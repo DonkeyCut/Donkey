@@ -10,7 +10,7 @@ import { extractHeadings, type BlogHeading } from "@/lib/blog/headings";
 import { blogBodyKey, blogImageUrl } from "@/lib/blog/keys";
 import { prisma } from "@/lib/prisma";
 import { getObject } from "@/cut/server/cloud/r2";
-import type { BlogPost } from "@/generated/prisma/client";
+import type { BlogPost, BlogPostStatus } from "@/generated/prisma/client";
 
 export const BLOG_TAG = "blog";
 export const blogPostTag = (slug: string) => `blog:${slug}`;
@@ -18,7 +18,7 @@ export const blogPostTag = (slug: string) => `blog:${slug}`;
 export type BlogPostCard = {
   id: string;
   slug: string;
-  status: "DRAFT" | "PUBLISHED";
+  status: BlogPostStatus;
   title: string;
   excerpt: string;
   summary: string | null;
