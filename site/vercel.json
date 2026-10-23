@@ -1,5 +1,6 @@
 {
   "git": { "deploymentEnabled": false },
+  "regions": ["pdx1"],
   "crons": [
     { "path": "/api/chatgpt/gc", "schedule": "15 4 * * *" },
     { "path": "/api/cut-cloud/gc", "schedule": "0 4 * * *" }

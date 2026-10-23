@@ -61,15 +61,14 @@ challenge. OAuth tokens authorize only the tools exposed by that adapter.
 
 ## Database
 
-- Reach Prisma only through the server-only client; never import it into client
-  code.
+- Reach Prisma only through the server-only client.
 - Put table and model definitions in grouped sibling `.prisma` files, not in
-  `schema.prisma` — that file holds only the generator and datasource config.
+  `schema.prisma` — it holds only generator and datasource config.
 - Use Prisma's default table names for new models; don't add `@@map`. A few
   older tables predate this and keep their mapped snake_case names.
-- Add `@@index` only for a column a query actually filters or joins on. `@id`
-  and `@unique` already index their columns, so a speculative index you never
-  query is just write overhead.
+- Add `@@index` only for a column a query actually filters or joins on.
+- Functions run in pdx1, beside the database; keep a polled read to one
+  parallel round of selects.
 - Don't run database migrations as part of API work.
 
 ## Inference Gateway
