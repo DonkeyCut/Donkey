@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { easeAt, type EaseId } from "@donkeycut/effects-kit";
 import { changePct, gridMeans, pickCuts, scoreFrames } from "./cuts";
 
 /** A w×h RGBA frame of one colour. */
@@ -174,4 +175,75 @@ test("a shape that pops in and out every few frames is no flicker", () => {
   const off = solid(128, 128, bg);
   const frames = Array.from({ length: 30 }, (_, i) => (Math.floor(i / 3) % 2 ? on : off));
   expect(scoreFrames(frames).changes.some((c) => c.flicker)).toBe(false);
+});
+
+type Rgb3 = [number, number, number];
+
+/** A card with a word on it, pulled toward `tone` by `f` (0 clear, 1 the
+ * tone alone), as the flash effect fades a picture. */
+const toned = (f: number, tone: number, bg: Rgb3 = [167, 15, 3], ink: Rgb3 = [240, 220, 200]) => {
+  const px = card(96, 54, bg, ink, [30, 66, 20, 34]);
+  for (let i = 0; i < px.data.length; i += 4)
+    for (let c = 0; c < 3; c++) px.data[i + c] = Math.round(px.data[i + c] + (tone - px.data[i + c]) * f);
+  return px;
+};
+
+/** Still frames, then a fade along `ease` from frame `start` over `frames`
+ * frames to `amount`, then held: into the tone ("to") or out of it ("from"). */
+const fadeRun = (o: { ease: EaseId; start: number; frames: number; amount: number; tone: number; way: "to" | "from"; total: number }) =>
+  Array.from({ length: o.total }, (_, i) => {
+    const e = easeAt(o.ease, (i - o.start) / o.frames);
+    return toned(o.amount * (o.way === "to" ? e : 1 - e), o.tone);
+  });
+
+test("a picture fading to black is a fade with its curve, not a cut", () => {
+  const frames = fadeRun({ ease: "power2.out", start: 10, frames: 14, amount: 1, tone: 0, way: "to", total: 28 });
+  const { cuts, changes, fades } = scoreFrames(frames);
+  expect(cuts).toEqual([]);
+  expect(changes).toEqual([]);
+  expect(fades).toHaveLength(1);
+  const f = fades[0];
+  expect(f.fade).toBe("to");
+  expect(f.tone).toBe("black");
+  expect(f.ease).toBe("power2.out");
+  expect(f.frame).toBeCloseTo(10, 0);
+  expect(f.frames).toBeCloseTo(14, 0);
+  expect(f.amount).toBeGreaterThan(0.95);
+});
+
+test("a fade that stops short of the tone says how far it goes", () => {
+  const frames = fadeRun({ ease: "linear", start: 6, frames: 12, amount: 0.6, tone: 0, way: "to", total: 24 });
+  const [f] = scoreFrames(frames).fades;
+  expect(f.ease).toBe("linear");
+  expect(f.amount).toBeCloseTo(0.6, 1);
+  expect(f.frames).toBeCloseTo(12, 0);
+});
+
+test("a picture clearing out of white is a fade from white", () => {
+  const frames = fadeRun({ ease: "sine.in", start: 4, frames: 15, amount: 1, tone: 255, way: "from", total: 26 });
+  const { cuts, fades } = scoreFrames(frames);
+  expect(cuts).toEqual([]);
+  expect(fades).toHaveLength(1);
+  expect(fades[0].fade).toBe("from");
+  expect(fades[0].tone).toBe("white");
+  expect(fades[0].ease).toBe("sine.in");
+  expect(fades[0].frame).toBeCloseTo(4, 0);
+});
+
+test("a fade cut short by the end of the source is still read whole", () => {
+  // The source ends two frames before the fade lands.
+  const frames = fadeRun({ ease: "power3.in", start: 8, frames: 16, amount: 1, tone: 0, way: "to", total: 22 });
+  const [f] = scoreFrames(frames).fades;
+  expect(f.ease).toBe("power3.in");
+  expect(f.frames).toBeCloseTo(16, 0);
+});
+
+test("a crossfade between two colours and a hard cut are no fades", () => {
+  const cross = Array.from({ length: 10 }, (_, i) => solid(64, 64, [239 - i * 10, 170 + i * 8, 127 + i * 9]));
+  expect(scoreFrames(cross).fades).toEqual([]);
+  const red = solid(128, 128, [158, 3, 2]);
+  const black = solid(128, 128, [0, 0, 0]);
+  const hard = scoreFrames([red, red, red, red, black, black, black, black]);
+  expect(hard.cuts).toEqual([4]);
+  expect(hard.fades).toEqual([]);
 });

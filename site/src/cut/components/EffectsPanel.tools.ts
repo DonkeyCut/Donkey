@@ -6,7 +6,7 @@
  * removed or renamed tool breaks the build until every side catches up.
  */
 
-import { ALL_EFFECT_IDS, AUDIO_EFFECT_IDS, EFFECT_IDS, FLASH_FADE_CHOICES, FLASH_FADE_NONE, FLASH_RHYTHMS, FLASH_RATE_MAX, FLASH_RATE_MIN, FLASH_TONES, GLITCH_KINDS, LEAK_COURSES, LOOK_EFFECTS } from "@donkeycut/effects-kit";
+import { ALL_EFFECT_IDS, EASE_IDS, AUDIO_EFFECT_IDS, EFFECT_IDS, FLASH_FADE_CHOICES, FLASH_FADE_NONE, FLASH_RHYTHMS, FLASH_RATE_MAX, FLASH_RATE_MIN, FLASH_TONES, GLITCH_KINDS, LEAK_COURSES, LOOK_EFFECTS } from "@donkeycut/effects-kit";
 import { num, obj, type AiToolDef } from "@/cut/lib/aiToolDef";
 
 /** The effects with a treatment recipe of their own; the rest of the list is
@@ -44,6 +44,11 @@ export const EFFECT_SETTING_ARGS = {
     type: "string",
     enum: [...FLASH_FADE_CHOICES],
     description: `flash only: ramp evenly across the whole element to the full tone at amount 1 — "to" fades the picture into the tone, "from" starts on it and clears, "${FLASH_FADE_NONE}" takes the fade off again. On the front row (lane 0, rows moved down with move_row if it is taken) it fades everything behind it as one, so a fade to black over the end of a stacked page (video, scrims, text, buttons, a pointer) goes black together as one picture`,
+  },
+  fade_ease: {
+    type: "string",
+    enum: [...EASE_IDS],
+    description: `flash with a fade only: the curve it runs along — "power2.out" darkens quickly and settles onto the tone, "sine.in" holds the picture and goes late; "linear" (default) is the even ramp. A fade read off a reference (detect_cuts \`fades\`) names its ease: pass it as it comes`,
   },
 };
 

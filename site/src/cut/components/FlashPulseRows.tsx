@@ -1,6 +1,7 @@
 "use client";
 
-import { FLASH_FADE_CHOICES, FLASH_FADE_NONE, FLASH_RHYTHMS, FLASH_RATE_MAX, FLASH_TONES, type FlashFadeChoice, type FlashRhythm, type FlashPulse, type FlashTone } from "@donkeycut/effects-kit";
+import { EASE_IDS, EASE_LABELS, FLASH_FADE_CHOICES, FLASH_FADE_NONE, FLASH_RHYTHMS, FLASH_RATE_MAX, FLASH_TONES, type FlashFadeChoice, type FlashRhythm, type FlashPulse, type FlashTone } from "@donkeycut/effects-kit";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Row, useSliderCheckpoint } from "@/cut/components/panelBits";
 import { parseNumberInput } from "@/cut/components/ScrubValue";
 import { ValueSlider } from "@/cut/components/ValueSlider";
@@ -88,17 +89,41 @@ export function FlashPulseRows({ pulse, write }: { pulse: FlashPulse; write: (pa
   );
 }
 
-/** A flash element's fade: off (the pop), into the tone, or out of it,
- * evenly across the element. Off writes as absence. */
+const FADE_EASE_ITEMS: Record<string, string> = Object.fromEntries(EASE_IDS.map((id) => [id, EASE_LABELS[id]]));
+
+/** A flash element's fade: off (the pop), into the tone, or out of it, and
+ * the curve it runs along. Off and the even ramp write as absence. */
 export function FlashFadeRow({ pulse, write }: { pulse: FlashPulse; write: (patch: FlashPulse, how: PulseWrite) => void }) {
   return (
-    <Row label="Fade">
-      <Segmented
-        items={FLASH_FADE_CHOICES}
-        value={pulse.fade ?? FLASH_FADE_NONE}
-        labels={FLASH_FADE_LABELS}
-        onPick={(c) => write({ fade: c === FLASH_FADE_NONE ? undefined : c }, "commit")}
-      />
-    </Row>
+    <>
+      <Row label="Fade">
+        <Segmented
+          items={FLASH_FADE_CHOICES}
+          value={pulse.fade ?? FLASH_FADE_NONE}
+          labels={FLASH_FADE_LABELS}
+          onPick={(c) => write({ fade: c === FLASH_FADE_NONE ? undefined : c }, "commit")}
+        />
+      </Row>
+      {pulse.fade && (
+        <Row label="Curve">
+          <Select
+            value={pulse.fadeEase ?? "linear"}
+            items={FADE_EASE_ITEMS}
+            onValueChange={(id) => write({ fadeEase: id === "linear" ? undefined : (id as FlashPulse["fadeEase"]) }, "commit")}
+          >
+            <SelectTrigger className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {EASE_IDS.map((id) => (
+                <SelectItem key={id} value={id} className="text-[12px]">
+                  {EASE_LABELS[id]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Row>
+      )}
+    </>
   );
 }

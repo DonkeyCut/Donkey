@@ -82,3 +82,30 @@ export function easeAt(id: EaseId | undefined, p: number): number {
       return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
   }
 }
+
+/** easeAt as an ffmpeg expression over progress `u` (already 0..1), so a
+ * filter graph runs the same curve the preview does. */
+export function easeExpr(id: EaseId | undefined, u: string): string {
+  switch (id) {
+    case "sine.in":
+      return `(1-cos(${u}*PI/2))`;
+    case "sine.out":
+      return `sin(${u}*PI/2)`;
+    case "sine.inOut":
+      return `((1-cos(PI*${u}))/2)`;
+    case "power2.in":
+      return `pow(${u},2)`;
+    case "power2.out":
+      return `(1-pow(1-${u},2))`;
+    case "power2.inOut":
+      return `if(lt(${u},0.5),2*pow(${u},2),1-pow(2-2*${u},2)/2)`;
+    case "power3.in":
+      return `pow(${u},3)`;
+    case "power3.out":
+      return `(1-pow(1-${u},3))`;
+    case "power3.inOut":
+      return `if(lt(${u},0.5),4*pow(${u},3),1-pow(2-2*${u},3)/2)`;
+    default:
+      return u;
+  }
+}

@@ -10,7 +10,7 @@ import { createRasterCanvas, decodeRasterImageUrl } from "../raster";
 import type { WrappedCanvas } from "mediabunny";
 import { CAMERA_LONG_SIDE, cameraPath, grayOf, holdsStill, type CameraPose, type Gray } from "./camera";
 import { hexOf, regionColor, parseHex, type PixelRect, type Pixels, type Rgb } from "./color";
-import { frameStep, gridsOf, pickShotEdges, type FrameGrids, type FrameStep, type ShotChange } from "./cuts";
+import { frameStep, gridsOf, pickShotEdges, type FrameGrids, type FrameStep, type PictureFade, type ShotChange } from "./cuts";
 import { fitMoves, type Move } from "./easeFit";
 import { FULL_FRAME, areaOf, findPictureBox, intoArea, type PictureFind } from "./picture";
 import { inkBox, shapeBox } from "./track";
@@ -160,6 +160,9 @@ export interface CutScan {
   /** Changes inside the shots: a word or a shape coming, going or swapping
    * style over a picture that stays. */
   changes: (Omit<ShotChange, "frame"> & { t: number; frame: number })[];
+  /** The whole picture fading into black or white or out of it: from `t`
+   * for `seconds` along `ease`. */
+  fades: (Omit<PictureFade, "frame" | "frames"> & { t: number; frame: number; seconds: number })[];
   coveredTo: number;
   truncated: boolean;
 }
@@ -204,7 +207,7 @@ export async function scanCuts(
     if (times.length === 0) throw new Error("Could not read any frames in that span.");
 
     const fps = rateOf(times, durations);
-    const { cuts: picked, changes: found } = pickShotEdges(steps, fines);
+    const { cuts: picked, changes: found, fades } = pickShotEdges(steps, fines);
 
     // A capped pass ends on the frame before the first cut or change it
     // leaves out, so the next pass scores that one against it.
@@ -228,6 +231,14 @@ export async function scanCuts(
       changes: found
         .filter((c) => c.frame < firstLeftOut)
         .map((c) => ({ ...c, t: times[c.frame], frame: frameOf(c.frame), change: Math.round(c.change * 10) / 10 })),
+      // A fade starts between frames: its time runs on from the frame before.
+      fades: fades
+        .filter((f) => f.frame < firstLeftOut)
+        .map(({ frame, frames, ...f }) => {
+          const i = Math.max(0, Math.min(times.length - 1, Math.floor(frame)));
+          const step = fps > 0 ? 1 / fps : 0;
+          return { ...f, t: times[i] + (frame - i) * step, frame: frameOf(i), seconds: frames * step };
+        }),
       coveredTo,
       truncated: capped || outOfTime,
     };

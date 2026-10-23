@@ -19,7 +19,7 @@ import { masterRawMix, packStems } from "./exportAudio";
 import { STEM_CHANNELS, STEM_RATE, type StemDef } from "../lib/stems";
 import { CLIP_MAX_ZOOM, CLIP_MIN_SECONDS, clipFrameAt, regionPx, TRANSITION_ZOOM, type ColorGrade } from "../lib/types";
 import { gridFrame, heldFrames, type HeldFrames } from "../lib/frameGrid";
-import { audioFxFilters, buildClipLut, elementLook, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, effectRecipe, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type EaseId, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
+import { audioFxFilters, buildClipLut, elementLook, buildTransferLut, CLARITY_EPS, compositeSpaceFor, detailActive, detailGain, detailRadius, effectFilterLines, easeExpr, effectRecipe, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, graphicsToHlg, hexToHlgHex, hlgToPq, isAudioEffect, lookFilterLines, lutToCube, mirrorRetimable, parseLutFile, recipeKey, retimeOf, shortestTurn, slowRuns, srcSpan, sortedKeys, soundFilters, type ChainChroma, type ClipColorRecipe, type ClipEffect, type ClipSound, type CodeFormat, type EaseId, type OutputSpace, type OverlayKey, type ParsedLut, type Retime, type SpeedNode } from "@donkeycut/effects-kit";
 
 // The render pipeline itself: spec in, finished mp4 out. Shared by the local
 // engine's job registry (jobs.ts) and the cloud render worker, which stage
@@ -410,6 +410,7 @@ export interface ExportSpec {
     rate?: number;
     rhythm?: FlashRhythm;
     fade?: FlashFade;
+    fadeEase?: EaseId;
     /** Its row in the element stack; lane 0 is the top. */
     lane?: number;
     start: number;
@@ -2084,31 +2085,6 @@ async function renderPass(
   // The pose track runs key to key along each key's ease with the ends held
   // flat, exactly the kit evaluator: v0 + Σ Δi·ease(clip((V−ti)/(ti+1−ti),0,1))
   // builds that shape as one expression, safe inside overlay/scale/rotate.
-  /** easeAt from the kit as an ffmpeg expression over progress `u`. */
-  const easeExpr = (ease: EaseId | undefined, u: string): string => {
-    switch (ease) {
-      case "sine.in":
-        return `(1-cos(${u}*PI/2))`;
-      case "sine.out":
-        return `sin(${u}*PI/2)`;
-      case "sine.inOut":
-        return `((1-cos(PI*${u}))/2)`;
-      case "power2.in":
-        return `pow(${u},2)`;
-      case "power2.out":
-        return `(1-pow(1-${u},2))`;
-      case "power2.inOut":
-        return `if(lt(${u},0.5),2*pow(${u},2),1-pow(2-2*${u},2)/2)`;
-      case "power3.in":
-        return `pow(${u},3)`;
-      case "power3.out":
-        return `(1-pow(1-${u},3))`;
-      case "power3.inOut":
-        return `if(lt(${u},0.5),4*pow(${u},3),1-pow(2-2*${u},3)/2)`;
-      default:
-        return u;
-    }
-  };
   const piecewiseExpr = (keys: { t: number; v: number; ease?: EaseId }[], varExpr: string): string => {
     const ks = [...keys].sort((a, b) => a.t - b.t);
     let e = `${num(ks[0].v)}`;

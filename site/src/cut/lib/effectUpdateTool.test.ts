@@ -76,6 +76,21 @@ describe("update_overlay on an effect", () => {
     expect(props.fade.enum).toContain("none");
   });
 
+  test("a flash's fade runs along the ease it is given, and linear is the even ramp again", async () => {
+    const { id } = (await runAiTool("add_effect", { effect: "flash", tone: "black", start: 2, end: 2.5, fade: "to", fade_ease: "sine.out", amount: 0.94 })) as {
+      id: string;
+    };
+    expect(overlay(id)).toMatchObject({ fade: "to", fadeEase: "sine.out", amount: 0.94 });
+    await runAiTool("update_overlay", { id, fade_ease: "linear" });
+    expect((overlay(id) as { fadeEase?: string }).fadeEase).toBeUndefined();
+    expect(await errorOf(() => runAiTool("update_overlay", { id, fade_ease: "bounce" }))).toContain("fade_ease is one of");
+    const props = INSPECTOR_TOOLS.find((t) => t.name === "update_overlay")!.inputSchema.properties as Record<string, { enum?: string[] }>;
+    expect(props.fade_ease.enum).toContain("power2.out");
+    useEditor.setState({ clips: [{ id: "c1", assetId: "a", start: 0, in: 0, out: 2, speed: 1 } as never] });
+    await runAiTool("set_clip_effects", { clipId: "c1", effects: [{ effect: "flash", fade: "to", fade_ease: "power2.out" }] });
+    expect(useEditor.getState().clips[0].effects).toEqual([{ effect: "flash", fade: "to", fadeEase: "power2.out" }]);
+  });
+
   test("a setting the effect doesn't take is skipped, like any field a kind lacks", async () => {
     const { id } = (await runAiTool("add_effect", { effect: "flash", start: 2, end: 3 })) as { id: string };
     await runAiTool("update_overlay", { id, leak: "burn" });

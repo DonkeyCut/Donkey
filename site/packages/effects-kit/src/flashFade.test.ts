@@ -47,14 +47,25 @@ describe("a flash that fades", () => {
     expect(effectPreviewState("flash", 0.5, DUR, undefined, undefined, DUR, { fade: "to" }).flash).toBeCloseTo(0.5, 5);
   });
 
+  test("an eased fade runs along its curve and still lands on the full tone", () => {
+    const at = (t: number, fade: "to" | "from") =>
+      effectPreviewState("flash", 1, t, undefined, undefined, DUR, { tone: "black", fade, fadeEase: "power2.out" }).flash ?? 0;
+    // Quick at first: three quarters of the way there by half time.
+    expect(at(0.5, "to")).toBeCloseTo(0.75, 5);
+    expect(at(DUR, "to")).toBeCloseTo(1, 5);
+    // Out of the tone the same way: a quarter left by half time.
+    expect(at(0, "from")).toBeCloseTo(1, 5);
+    expect(at(0.5, "from")).toBeCloseTo(0.25, 5);
+  });
+
   test("a full fade to black ends on black in the canvas pass", () => {
     expect(Math.max(...canvasAt(DUR - 1e-6, { tone: "black", fade: "to" }))).toBeLessThan(2);
   });
 
   for (const tone of ["black", "white"] as const) {
     test(`ffmpeg fades to and from ${tone} the way the canvas does`, () => {
-      for (const fade of ["to", "from"] as const) {
-        const pulse: FlashPulse = { tone: tone === "black" ? "black" : undefined, fade };
+      for (const [fade, fadeEase] of [["to", undefined], ["from", undefined], ["to", "sine.out"], ["from", "power3.in"]] as const) {
+        const pulse: FlashPulse = { tone: tone === "black" ? "black" : undefined, fade, ...(fadeEase ? { fadeEase } : {}) };
         const chroma = { pixFmt: "yuv444p", overlay: ":format=yuv444" };
         const lines = effectFilterLines("in", "out", "flash", 1, 0, DUR, W, H, "t", undefined, undefined, chroma, pulse)!;
         const graph = `color=c=0x787878:s=${W}x${H}:r=${FPS}:d=${DUR},format=yuv444p[in];${lines.join(";")}`;

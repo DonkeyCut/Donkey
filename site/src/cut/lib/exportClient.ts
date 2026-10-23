@@ -31,7 +31,7 @@ import { drawBlock } from "./blockSource";
 import { createRasterCanvas, rasterCanvasToPng } from "./raster";
 import { clipLen, clipSpeed, getClipSpans, MICRO_GAP_S, openedTimeline, overlayLayers, projectDuration, spanSequence, useEditor } from "./store";
 import { captionStyle, cueOverlay, cueWordFrames, laneCues, laneHidden, subtitleLaneCount, trackPos } from "./subtitles";
-import { drawStreak, elementLook, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, type Mask, type SpeedNode } from "@donkeycut/effects-kit";
+import { drawStreak, elementLook, isMaskAnimated, isOverlayAnimated, matteLumaToAlpha, normalizeGrade, paintMaskLuma, paintStrokeInk, retimeOf, type EaseId, type FlashFade, type FlashRhythm, type FlashTone, type GlitchKind, type LeakCourse, type Mask, type SpeedNode } from "@donkeycut/effects-kit";
 import { renderElementFrames, renderElementPng, renderStillPng, requireStickers } from "./textRender";
 import { holdOverlays } from "./frameGrid";
 import { CLIP_MIN_SECONDS, clipCovers, clipFrameAt, clipKeyed, clipPosed, clipPoseAt, clipZoom, contentRect, frameOf, isStickerOverlay, isTextOverlay, laneOf, overlayAnimStyle, projectBackground, rectOf, regionPx, removalActive, shadowInk, subjectMasked, parkedTimeline } from "./types";
@@ -1399,6 +1399,7 @@ export async function buildExportPayload(
       rate: (o as { rate?: number }).rate,
       rhythm: (o as { rhythm?: FlashRhythm }).rhythm,
       fade: (o as { fade?: FlashFade }).fade,
+      fadeEase: (o as { fadeEase?: EaseId }).fadeEase,
       lane: laneOf(o),
       start: o.start,
       end: Math.min(o.end, duration),

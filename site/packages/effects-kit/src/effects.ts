@@ -12,6 +12,7 @@ import type { OverlayBase } from "./types";
 import { AUDIO_EFFECT_IDS, AUDIO_EFFECT_LABELS, type AudioEffectId } from "./audioFx";
 import { LOOK_LABELS, lookCssFilter, lookFilterLines, lookPost, type LookStyle } from "./looks";
 import { kitCanvas } from "./surface";
+import { easeAt, easeExpr, type EaseId } from "./ease";
 
 /** The effects that treat the picture. */
 export type VisualEffectId =
@@ -68,9 +69,12 @@ export interface EffectOverlay extends OverlayBase {
   rate?: number;
   /** How a strobe's pulses land; absent = strobe. */
   rhythm?: FlashRhythm;
-  /** A flash that ramps evenly across the whole element; absent = the pop
-   * (or the strobe). */
+  /** A flash that ramps across the whole element; absent = the pop (or
+   * the strobe). */
   fade?: FlashFade;
+  /** The curve a flash's fade runs along: `power2.out` darkens quickly and
+   * settles onto the tone; absent = the even ramp. */
+  fadeEase?: EaseId;
 }
 
 /** A flash's color: `white` pops the picture bright, `black` dips it dark. */
@@ -89,8 +93,8 @@ export const FLASH_RATE_MAX = 15;
 export const FLASH_RHYTHMS = ["strobe", "flicker"] as const;
 export type FlashRhythm = (typeof FLASH_RHYTHMS)[number];
 
-/** A flash that ramps evenly across its element and up
- * to the full tone at amount 1: `to` fades the picture into the tone (a fade
+/** A flash that ramps across its element (evenly, or along its fadeEase) and
+ * up to the full tone at amount 1: `to` fades the picture into the tone (a fade
  * to black over the end of a scene), `from` starts on the tone and clears (a
  * fade up from black). It covers everything on the rows behind its own, so
  * on the front row it fades a whole stacked page as one. */
@@ -104,7 +108,7 @@ export const FLASH_FADE_CHOICES = [FLASH_FADE_NONE, ...FLASH_FADES] as const;
 export type FlashFadeChoice = (typeof FLASH_FADE_CHOICES)[number];
 
 /** What a flash plays beyond its amount: its tone, strobe rate, rhythm and fade. */
-export type FlashPulse = Pick<EffectOverlay, "tone" | "rate" | "rhythm" | "fade">;
+export type FlashPulse = Pick<EffectOverlay, "tone" | "rate" | "rhythm" | "fade" | "fadeEase">;
 
 /** How far past a frame's time a pulse is read, in pulses: at the top rate
  * every 30 fps frame lands on a pulse's edge, and the nudge keeps rounding
@@ -1127,10 +1131,10 @@ export function effectPreviewState(
     case "flash": {
       // One pop at the element start, decaying over ~0.4s; on a strobe, the
       // tone held hard for the first half of every pulse; on a fade, the
-      // tone ramped evenly across the element, to full at amount 1.
+      // tone ramped across the element along its ease, to full at amount 1.
       const tone = pulse?.tone === "black" ? "black" : undefined;
       if (pulse?.fade && dur) {
-        const u = Math.max(0, Math.min(1, tLocal / dur));
+        const u = easeAt(pulse.fadeEase, tLocal / dur);
         return { cssFilter: "", flash: k * (pulse.fade === "to" ? u : 1 - u), ...(tone ? { flashTone: tone } : {}) };
       }
       const rate = flashRate(pulse);
@@ -1840,9 +1844,9 @@ export function effectFilterLines(
       // frame of the window. White adds to luma; black pulls every plane
       // toward black at the canvas pass's alpha.
       if (pulse?.fade) {
-        // The fade's even ramp: every plane pulled toward the tone at the
-        // canvas pass's alpha, white as well as black.
-        const u = `clip((T-${fmt(start)})/${fmt(Math.max(1e-3, end - start))},0,1)`;
+        // The fade's ramp along its ease: every plane pulled toward the tone
+        // at the canvas pass's alpha, white as well as black.
+        const u = easeExpr(pulse.fadeEase, `clip((T-${fmt(start)})/${fmt(Math.max(1e-3, end - start))},0,1)`);
         const keep = `(1-${fmt(k)}*${pulse.fade === "to" ? u : `(1-${u})`})`;
         const mid = code(128, chroma.depth);
         const toward = code(pulse.tone === "black" ? 16 : 235, chroma.depth);

@@ -856,6 +856,12 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const isTextWeight = (v: unknown): v is TextWeight => (TEXT_WEIGHTS as readonly unknown[]).includes(v);
 
+/** A flash fade's ease from a tool call: linear, the even ramp, stores as absence. */
+const fadeEaseOf = (v: unknown): EaseId | undefined => {
+  if (!isEaseId(v)) throw new ToolError(`fade_ease is one of ${EASE_IDS.join(", ")}.`);
+  return v === "linear" ? undefined : v;
+};
+
 /** A flash rhythm from a tool call: strobe, the default, stores as absence. */
 const flashRhythm = (v: unknown): FlashRhythm | undefined => {
   if (!(FLASH_RHYTHMS as readonly unknown[]).includes(v)) {
@@ -1899,6 +1905,21 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           box: { x: roundT(c.box.x), y: roundT(c.box.y), w: roundT(c.box.w), h: roundT(c.box.h) },
           ...(c.flicker ? { flicker: true as const } : {}),
         })),
+        ...(scan.fades.length
+          ? {
+              fades: scan.fades.map((f) => ({
+                t: roundT(f.t),
+                frame: f.frame,
+                seconds: roundT(f.seconds),
+                fade: f.fade,
+                tone: f.tone,
+                amount: Math.round(f.amount * 100) / 100,
+                ease: f.ease,
+              })),
+              fadesNote:
+                "The whole picture fading into the tone (fade to) or out of it (fade from), each read off every frame: add_effect flash with fade, tone, amount and fade_ease as they are, start t and end t + seconds, on the front row. A fade whose end runs a frame or two past the source's end is one the source cuts off: end the effect with the cut.",
+            }
+          : {}),
         ...pictureReport(area),
         ...(keepsPicture ? { pictureKept: true as const } : {}),
         source: sourceRef(asset),
@@ -4118,7 +4139,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       // a flash also takes its tone, strobe rate and rhythm, a negative its
       // strobe rate.
       const effects: ClipEffect[] = [];
-      for (const e of input.effects as { effect?: unknown; amount?: unknown; tone?: unknown; rate?: unknown; rhythm?: unknown; fade?: unknown }[]) {
+      for (const e of input.effects as { effect?: unknown; amount?: unknown; tone?: unknown; rate?: unknown; rhythm?: unknown; fade?: unknown; fade_ease?: unknown }[]) {
         const effect = CLIP_EFFECT_IDS.find((id) => id === e?.effect);
         if (!effect) throw new ToolError(`effect must be one of ${CLIP_EFFECT_IDS.join(", ")}.`);
         if (effects.some((x) => x.effect === effect)) throw new ToolError(`${effect} is listed twice; a clip wears an effect once.`);
@@ -4142,6 +4163,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           if (e.fade !== undefined && e.fade !== FLASH_FADE_NONE) {
             if (!(FLASH_FADES as readonly unknown[]).includes(e.fade)) throw new ToolError(`fade is one of ${FLASH_FADE_CHOICES.join(", ")}.`);
             entry.fade = e.fade as FlashFade;
+            const ease = e.fade_ease === undefined ? undefined : fadeEaseOf(e.fade_ease);
+            if (ease) entry.fadeEase = ease;
           }
         }
         effects.push(entry);
@@ -8385,6 +8408,7 @@ function effectSettings(effect: EffectId, input: Record<string, unknown>): Parti
     }
     patch.fade = input.fade === FLASH_FADE_NONE ? undefined : (input.fade as FlashFade);
   }
+  if (input.fade_ease !== undefined) patch.fadeEase = fadeEaseOf(input.fade_ease);
   return patch;
 }
 

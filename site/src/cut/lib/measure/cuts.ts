@@ -3,6 +3,7 @@
  * before, and a cut is a score that stands out against the frames around it.
  * Pure data in, pure data out; sourceMeasure.ts feeds it decoded frames. */
 
+import { easeAt, EASE_IDS, type EaseId } from "@donkeycut/effects-kit";
 import { diffCellPct } from "../watch/signatures";
 import type { Pixels } from "./color";
 
@@ -45,6 +46,15 @@ export const CUT_TUNING = {
   FLICKER_ECHO: 0.6,
   /** Flicker frames a run holds at least; one held frame may part two. */
   FLICKER_RUN: 3,
+  /** Mean-luma step (0..255) a frame of a whole-picture fade takes at least. */
+  FADE_STEP: 0.5,
+  /** Frames a fade's run of steps holds at least. */
+  FADE_RUN: 4,
+  /** Mean-luma move (0..255) a fade makes in all. */
+  FADE_LUMA: 20,
+  /** Per-channel RMS (0..255) a frame strays at most from the clear picture
+   * pulled toward the tone. */
+  FADE_FIT: 6,
 };
 
 /** Per-cell channel means of an RGBA frame on a GRID×GRID grid. */
@@ -131,6 +141,18 @@ export interface ShotChange {
   flicker?: true;
 }
 
+/** The whole picture fading into a tone or out of it, as the flash effect's
+ * fade plays it: from fractional frame `frame` for `frames` frames along
+ * `ease`, to `amount` of the tone (1 = the tone alone). */
+export interface PictureFade {
+  frame: number;
+  frames: number;
+  fade: "to" | "from";
+  tone: "black" | "white";
+  amount: number;
+  ease: EaseId;
+}
+
 export const gridsOf = (px: Pixels): FrameGrids => ({
   coarse: gridMeans(px),
   fine: gridMeans(px, CUT_TUNING.FINE_GRID),
@@ -207,7 +229,10 @@ function neighbourMedian(scores: number[], i: number, skip?: Set<number>): numbe
  * appearing, a word swapping fill for outline, a small shape popping in.
  * Changes on consecutive frames are one change that runs those frames: a
  * fade-in over three frames reads as one change of three. */
-export function pickShotEdges(steps: FrameStep[], fines?: ArrayLike<number>[]): { cuts: number[]; changes: ShotChange[] } {
+export function pickShotEdges(
+  steps: FrameStep[],
+  fines?: ArrayLike<number>[]
+): { cuts: number[]; changes: ShotChange[]; fades: PictureFade[] } {
   const { FAINT_ALL, SPIKE, CHANGE_MIN, MIN_CHANGE, FLASH_LUMA } = CUT_TUNING;
   const hard = pickCuts(steps.map((s) => s.pct));
   const faintScores = steps.map((s) => s.faint);
@@ -248,13 +273,158 @@ export function pickShotEdges(steps: FrameStep[], fines?: ArrayLike<number>[]): 
     changes.push({ frame: i, frames: 1, change: s.fine, box: s.box });
   }
   if (!fines) {
-    return { cuts, changes };
+    return { cuts, changes, fades: [] };
   }
+  // A whole-picture fade moves every cell every frame: its frames are no
+  // cuts and no changes, whatever their steps.
+  const fades = pictureFades(fines);
+  const fading = (i: number) => fades.some((f) => i > Math.floor(f.frame) && i <= Math.ceil(f.frame + f.frames));
+  const kept = cuts.filter((i) => !fading(i));
   const overlaps = (a: ShotChange, b: ShotChange) => a.frame < b.frame + b.frames && b.frame < a.frame + a.frames;
   const flicks = flickers(fines);
-  const slow = gradualChanges(fines, cuts).filter((g) => !changes.some((c) => overlaps(g, c)));
+  const slow = gradualChanges(fines, kept).filter((g) => !changes.some((c) => overlaps(g, c)));
   const rest = [...changes, ...slow].filter((c) => !flicks.some((f) => overlaps(c, f)));
-  return { cuts, changes: [...rest, ...flicks].sort((a, b) => a.frame - b.frame) };
+  const inside = (c: ShotChange) => Array.from({ length: c.frames }, (_, k) => c.frame + k).some(fading);
+  return {
+    cuts: kept,
+    changes: [...rest, ...flicks].filter((c) => !inside(c)).sort((a, b) => a.frame - b.frame),
+    fades,
+  };
+}
+
+/** How far frame `x` is pulled from the clear picture `c` toward `tone`
+ * (0..255 on every channel), by least squares, and how far it strays from
+ * that pull (per-channel RMS). */
+function pullOf(c: ArrayLike<number>, x: ArrayLike<number>, tone: number): { f: number; miss: number } {
+  let dot = 0;
+  let norm = 0;
+  for (let i = 0; i < c.length; i++) {
+    dot += (x[i] - c[i]) * (tone - c[i]);
+    norm += (tone - c[i]) ** 2;
+  }
+  const f = norm > 0 ? dot / norm : 0;
+  let err = 0;
+  for (let i = 0; i < c.length; i++) err += (x[i] - c[i] - f * (tone - c[i])) ** 2;
+  return { f, miss: Math.sqrt(err / Math.max(1, c.length)) };
+}
+
+/** Whole-picture fades into black or white or out of them: runs of frames
+ * whose mean luma steps the same way every frame, each frame the clear
+ * picture pulled toward the tone. A fade into the tone is held against the
+ * frame before the run, a fade out of it against the frame the run lands
+ * on; the one that fits is the fade. Its start, length, ease and amount are
+ * fitted to every frame's pull. */
+export function pictureFades(fines: ArrayLike<number>[]): PictureFade[] {
+  const { FADE_STEP, FADE_RUN, FADE_LUMA, FADE_FIT } = CUT_TUNING;
+  const luma = fines.map((g) => meanLuma(g as Float32Array));
+  const out: PictureFade[] = [];
+  for (let a = 1; a < fines.length; a++) {
+    const sign = Math.sign(luma[a] - luma[a - 1]);
+    if (!(Math.abs(luma[a] - luma[a - 1]) >= FADE_STEP)) continue;
+    let b = a;
+    while (b + 1 < fines.length && Math.sign(luma[b + 1] - luma[b]) === sign && Math.abs(luma[b + 1] - luma[b]) >= FADE_STEP) b++;
+    const run = b - a + 1;
+    const moved = Math.abs(luma[b] - luma[a - 1]);
+    const next = b;
+    if (run < FADE_RUN || moved < FADE_LUMA) {
+      a = next;
+      continue;
+    }
+    // Darkening is into black or out of white, brightening into white or
+    // out of black: each held against its clear frame.
+    const ways: { fade: "to" | "from"; tone: number; clear: number }[] =
+      sign < 0
+        ? [
+            { fade: "to", tone: 0, clear: a - 1 },
+            { fade: "from", tone: 255, clear: b },
+          ]
+        : [
+            { fade: "to", tone: 255, clear: a - 1 },
+            { fade: "from", tone: 0, clear: b },
+          ];
+    const read = ways.map((w) => {
+      const pulls = new Map<number, number>();
+      let worst = 0;
+      for (let i = a - 1; i <= b; i++) {
+        const p = pullOf(fines[w.clear], fines[i], w.tone);
+        pulls.set(i, p.f);
+        worst = Math.max(worst, p.miss);
+      }
+      // The still frames either side that hold the same picture join the
+      // fit, so a curve that settles slowly is timed whole.
+      for (const [from, step] of [
+        [a - 2, -1],
+        [b + 1, 1],
+      ] as const) {
+        for (let i = from, n = 0; i >= 0 && i < fines.length && n < FADE_RUN; i += step, n++) {
+          const p = pullOf(fines[w.clear], fines[i], w.tone);
+          if (p.miss > FADE_FIT) break;
+          pulls.set(i, p.f);
+        }
+      }
+      return { ...w, pulls, worst };
+    });
+    const best = read.filter((r) => r.worst <= FADE_FIT).sort((x, y) => x.worst - y.worst)[0];
+    if (best) {
+      const fit = fitFade(best.pulls, best.fade, a - 1, b);
+      if (fit) out.push({ ...fit, fade: best.fade, tone: best.tone === 0 ? "black" : "white" });
+    }
+    a = next;
+  }
+  return out;
+}
+
+/** What a fade pays for stopping short of the tone, against the squared
+ * misses of its frames' pulls: enough to settle a tie, never a frame held
+ * short of it. */
+const FADE_FULL = 0.01;
+
+/** The start, length, ease and amount whose curve best runs through each
+ * frame's pull: rising into the tone, falling out of it. */
+function fitFade(
+  pulls: Map<number, number>,
+  fade: "to" | "from",
+  first: number,
+  last: number
+): Omit<PictureFade, "fade" | "tone"> | null {
+  // An ease that sets off slowly steps under FADE_STEP at first, so the
+  // fade may start on any of the still frames joined in front of the run.
+  const frames = [...pulls.keys()];
+  const end = Math.max(...frames);
+  const lead = Math.min(...frames);
+  let best: Omit<PictureFade, "fade" | "tone"> | null = null;
+  let bestErr = Infinity;
+  for (const ease of EASE_IDS) {
+    for (let s = lead - 0.5; s <= first + 1.0001; s += 0.1) {
+      for (let n = Math.max(1, last - s - 4); n <= end - s + 4; n += 0.1) {
+        // The amount that fits this curve best, by least squares.
+        let fg = 0;
+        let gg = 0;
+        const shape = (i: number) => {
+          const e = easeAt(ease, (i - s) / n);
+          return fade === "to" ? e : 1 - e;
+        };
+        for (const [i, f] of pulls) {
+          const g = shape(i);
+          fg += f * g;
+          gg += g * g;
+        }
+        if (gg <= 0) continue;
+        const amount = Math.min(1, Math.max(0, fg / gg));
+        let err = 0;
+        for (const [i, f] of pulls) err += (f - amount * shape(i)) ** 2;
+        // Frames that never show the fade land can't tell how far it goes —
+        // a power curve stopped short reads the same as a shorter one gone
+        // all the way — so it goes all the way unless the frames say otherwise.
+        err += FADE_FULL * (1 - amount) ** 2;
+        if (err < bestErr - 1e-9) {
+          bestErr = err;
+          best = { frame: s, frames: n, amount, ease };
+        }
+      }
+    }
+  }
+  return best;
 }
 
 /** Runs of frames that flip back and forth — a strobe, a cutout flashing to
@@ -399,8 +569,8 @@ function unionBox(a: ChangeBox, b: ChangeBox): ChangeBox {
   return { x: (l + r) / 2, y: (t + btm) / 2, w: r - l, h: btm - t };
 }
 
-/** Cuts and changes over a run of frames held in memory. */
-export function scoreFrames(frames: Pixels[]): { cuts: number[]; changes: ShotChange[] } {
+/** Cuts, changes and fades over a run of frames held in memory. */
+export function scoreFrames(frames: Pixels[]): { cuts: number[]; changes: ShotChange[]; fades: PictureFade[] } {
   const grids = frames.map(gridsOf);
   const none: FrameStep = { pct: NaN, faint: NaN, fine: NaN, box: null };
   return pickShotEdges(
