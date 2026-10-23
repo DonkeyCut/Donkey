@@ -50,6 +50,7 @@ import { meterMainThread, meterPerf, stopMainThreadMeter, stopMeter } from "@/cu
 import { isDragActive } from "@/cut/lib/drag";
 import { track } from "@/lib/analytics";
 import { ensureCloudThreads } from "@/cut/lib/chatCloud";
+import { nextSyncMs } from "@/cut/lib/syncCadence";
 import { registerEditorSave, editorChatActive, editorToolsActive, finishEditorWork, holdEditorLoad } from "@/cut/lib/editorWork";
 import { noteProjectRevision, projectRevision } from "@/cut/lib/projectRevision";
 import { readProjectThreads, writeActiveChat } from "@/cut/lib/chatThreads";
@@ -352,10 +353,14 @@ export function Editor({
     let stopped = false;
     let polling = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // The owner's wait between re-reads: it widens while the stored version
+    // holds still and snaps back on a change, on focus, and while this tab is
+    // busy with its own edits, playback or chat.
+    let ownerMs: number = CHAT_RUNTIME.syncIntervalMs;
     const tick = async () => {
       if (stopped || polling) return;
       polling = true;
-      let nextIn = document.hidden ? VIEWER_POLL_MAX_MS : (viewer ? VIEWER_POLL_MIN_MS : CHAT_RUNTIME.syncIntervalMs);
+      let nextIn = document.hidden ? VIEWER_POLL_MAX_MS : (viewer ? VIEWER_POLL_MIN_MS : ownerMs);
       try {
         const current = useEditor.getState();
         if (!document.hidden && current.projectId === projectId && current.loaded &&
@@ -378,13 +383,22 @@ export function Editor({
             // instead of the viewer settling on an older cut.
             const version = res.headers.get("x-cut-doc-version");
             const showing = viewer ? loadedDocVersion(projectId) : projectRevision(projectId);
-            if (version && showing && version !== showing) {
+            const moved = !!version && !!showing && version !== showing;
+            if (!viewer) {
+              ownerMs = nextSyncMs(ownerMs, moved ? "moved" : "still");
+              nextIn = ownerMs;
+            }
+            if (moved) {
               if (!viewer && (useEditor.getState().saveState !== "saved" || editorToolsActive() || editorChatActive(projectId))) return;
               const at = playheadAt();
               await useEditor.getState().loadProject(projectId, { inPlace: true, viewer });
               if (!stopped && useEditor.getState().projectId === projectId) useEditor.getState().seek(at);
             }
           }
+        } else if (!viewer && !document.hidden) {
+          // Busy with its own work: the first quiet tick re-reads at the floor.
+          ownerMs = CHAT_RUNTIME.syncIntervalMs;
+          nextIn = ownerMs;
         }
       } catch {
         // Transient network failure — the next tick retries.
@@ -396,6 +410,7 @@ export function Editor({
     const focus = () => {
       if (document.hidden) return;
       if (timer) clearTimeout(timer);
+      ownerMs = CHAT_RUNTIME.syncIntervalMs;
       void tick();
     };
     document.addEventListener("visibilitychange", focus);

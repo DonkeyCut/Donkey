@@ -112,7 +112,8 @@ import { resolvePlayheadTokens, syncTimes, type TimeMark } from "@/cut/lib/timeM
 import { productionDeps } from "@/cut/lib/pi/prodDeps";
 import { withChatProject } from "@/cut/lib/projectChatTools";
 import { runAiTool } from "@/cut/lib/aiTools";
-import { holdEditorChat } from "@/cut/lib/editorWork";
+import { editorChatActive, holdEditorChat } from "@/cut/lib/editorWork";
+import { nextSyncMs } from "@/cut/lib/syncCadence";
 import { recoverSceneCall } from "@/cut/lib/chatRecovery";
 import { countChunks, replayChatStream } from "@/cut/lib/chatReplay";
 import { INTERRUPTED_ERROR, isResumeMessage, journalAhead, RESUME_LIMIT, resumePrompt, scrubLostTurn, settledMark, unfinishedAsk, type JournalMark, type ResumeMetadata, type StreamedMark, type TurnSettled } from "@/cut/lib/chatResume";
@@ -603,16 +604,42 @@ export function AiPanel({
     };
   }, [projectId, readOnly]);
 
+  // Re-read the cloud copy of the project's chats: at the sync interval while
+  // they move or this tab's chat runs, widening while they hold still. The
+  // window coming back re-reads at once.
   useEffect(() => {
     let stopped = false;
+    let running = false;
     let timer: ReturnType<typeof setTimeout>;
+    let waitMs: number = CHAT_RUNTIME.syncIntervalMs;
     const refresh = async () => {
-      if (!document.hidden && useEditor.getState().projectId === projectId)
-        await ensureCloudThreads(projectId, true);
-      if (!stopped) timer = setTimeout(() => void refresh(), CHAT_RUNTIME.syncIntervalMs);
+      if (stopped || running) return;
+      running = true;
+      try {
+        if (!document.hidden && useEditor.getState().projectId === projectId) {
+          const pulse = await ensureCloudThreads(projectId, true);
+          waitMs = nextSyncMs(waitMs, editorChatActive(projectId) ? "moved" : pulse);
+        }
+      } finally {
+        running = false;
+        if (!stopped) timer = setTimeout(() => void refresh(), waitMs);
+      }
     };
-    timer = setTimeout(() => void refresh(), CHAT_RUNTIME.syncIntervalMs);
-    return () => { stopped = true; clearTimeout(timer); };
+    const wake = () => {
+      if (document.hidden) return;
+      clearTimeout(timer);
+      waitMs = CHAT_RUNTIME.syncIntervalMs;
+      void refresh();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("focus", wake);
+    timer = setTimeout(() => void refresh(), waitMs);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("focus", wake);
+    };
   }, [projectId]);
 
   // A shared view opens on the owner's newest thread — the viewer has no chat

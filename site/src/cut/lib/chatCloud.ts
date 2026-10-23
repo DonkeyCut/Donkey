@@ -6,6 +6,7 @@
 import { cutMode, getBackend, type CutBackend } from "./backend";
 import { cloudBackend } from "./backend/cloud";
 import { compactThreadForCloud } from "./chatCompact";
+import type { SyncPulse } from "./syncCadence";
 import {
   chatThreadDeleted,
   cloudThreadSaved,
@@ -23,7 +24,7 @@ let syncState: {
   projectId: string;
   backend: CutBackend;
   versions: Map<string, string>;
-  pending?: Promise<void>;
+  pending?: Promise<SyncPulse>;
   seeded: boolean;
   dirty: boolean;
 } | undefined;
@@ -87,24 +88,28 @@ async function sendCloudThread(backend: CutBackend, projectId: string, thread: u
   cloudThreadSaved();
 }
 
-/** Merge changed conversations and retry local saves, including offline deletions. */
-export function ensureCloudThreads(projectId: string, refresh = false): Promise<void> {
+/** Merge changed conversations and retry local saves, including offline
+ * deletions. Resolves "moved" when a conversation came down or went up, so a
+ * poller can widen its wait while nothing does. */
+export function ensureCloudThreads(projectId: string, refresh = false): Promise<SyncPulse> {
   const backend = getBackend();
   // The engine and browser stores keep no copy of their own: the history this
   // browser holds is all there is, once it has loaded.
-  if (backend.kind === "local" || backend.kind === "browser") return loadProjectThreads(projectId);
+  if (backend.kind === "local" || backend.kind === "browser") return loadProjectThreads(projectId).then(() => "still");
   if (!syncState || syncState.projectId !== projectId || syncState.backend !== backend)
     syncState = { projectId, backend, versions: new Map(), seeded: false, dirty: true };
   const state = syncState;
   if (state.pending) return state.pending;
-  if (state.seeded && !refresh) return Promise.resolve();
-  state.pending = syncThreads(state).then(() => { state.seeded = true; }).catch(() => {
+  if (state.seeded && !refresh) return Promise.resolve("still");
+  // A failed read keeps the poller at the floor, so the retry comes soon.
+  state.pending = syncThreads(state).then((pulse) => { state.seeded = true; return pulse; }).catch((): SyncPulse => {
     state.seeded = false;
+    return "moved";
   }).finally(() => { state.pending = undefined; });
   return state.pending;
 }
 
-async function syncThreads(state: NonNullable<typeof syncState>): Promise<void> {
+async function syncThreads(state: NonNullable<typeof syncState>): Promise<SyncPulse> {
   const { projectId, backend, versions } = state;
   // Merge into what this browser stored, never into a not-yet-read empty list.
   await loadProjectThreads(projectId);
@@ -113,8 +118,10 @@ async function syncThreads(state: NonNullable<typeof syncState>): Promise<void> 
   if (!response.ok) throw new Error("Could not read the project's chats.");
   const index = await response.json() as { id: string; revision: string }[];
   const remoteIds = new Set(index.map((row) => row.id));
+  let pulse: SyncPulse = "still";
   for (const row of index) {
     if (versions.get(row.id) === row.revision) continue;
+    pulse = "moved";
     const res = await backend.fetch(`${path}?id=${encodeURIComponent(row.id)}&revision=${encodeURIComponent(row.revision)}`);
     if (!res.ok) throw new Error("Could not read the conversation.");
     const remote = (await res.json() as unknown[]).filter(isStoredThread);
@@ -131,10 +138,13 @@ async function syncThreads(state: NonNullable<typeof syncState>): Promise<void> 
   }
   if (backend.kind === "cloud" && state.dirty) {
     for (const thread of readProjectThreads(projectId)) {
-      if (!remoteIds.has(thread.id)) await saveCloudThread(backend, projectId, thread);
+      if (remoteIds.has(thread.id)) continue;
+      await saveCloudThread(backend, projectId, thread);
+      pulse = "moved";
     }
     state.dirty = false;
   }
+  return pulse;
 }
 
 async function saveCloudThread(backend: CutBackend, projectId: string, thread: StoredThread): Promise<void> {

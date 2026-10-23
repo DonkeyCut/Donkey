@@ -32,10 +32,10 @@ test("unchanged polls read metadata without loading transcripts or local history
     bodyReads++;
     return Response.json([{ id: "a", updatedAt: 1 }]);
   });
-  await ensureCloudThreads("unchanged", true);
+  expect(await ensureCloudThreads("unchanged", true)).toBe("moved");
   expect(bodyReads).toBe(1);
   storageReads = 0;
-  await ensureCloudThreads("unchanged", true);
+  expect(await ensureCloudThreads("unchanged", true)).toBe("still");
   expect(bodyReads).toBe(1);
   expect(storageReads).toBe(0);
 });
