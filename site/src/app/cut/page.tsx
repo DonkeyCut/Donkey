@@ -4,14 +4,14 @@ import { CutLanding } from "@/app/cut/_components/landing/CutLanding";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
 
 export const metadata: Metadata = {
-  title: "Donkey Cut — Free, Open Source Video Editor, CapCut Alternative",
+  title: "Donkey Cut Video Editor — Free, Open Source CapCut Alternative",
   description:
     "A free, open source CapCut alternative. Edit with Chat, generate video, images, voiceovers and music, and keep your projects local.",
   alternates: {
     canonical: `${DONKEYCUT_CANONICAL}/`,
   },
   openGraph: {
-    title: "Donkey Cut — Free, Open Source Video Editor, CapCut Alternative",
+    title: "Donkey Cut Video Editor — Free, Open Source CapCut Alternative",
     description:
       "A free, open source CapCut alternative. Edit with Chat, generate video, images, voiceovers and music, and keep your projects local.",
     url: `${DONKEYCUT_CANONICAL}/`,
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Donkey Cut — Free, Open Source Video Editor, CapCut Alternative",
+    title: "Donkey Cut Video Editor — Free, Open Source CapCut Alternative",
     description:
       "A free, open source CapCut alternative. Edit with Chat, generate video, images, voiceovers and music, and keep your projects local.",
     images: ["/cut/landing/og.png"],
@@ -34,8 +34,24 @@ export const metadata: Metadata = {
 // read added later from quietly turning a link click into a wait.
 export const instant = true;
 
+// The WebSite record Google reads for the site name above a result. The
+// alternate name ties brand searches to the editor; "donkey cut" alone ranks
+// cut-out crafts and template sites.
+const WEBSITE_LD = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  name: "Donkey Cut",
+  alternateName: "Donkey Cut Video Editor",
+  url: `${DONKEYCUT_CANONICAL}/`,
+};
+
 // The Cut marketing landing, served at "/" on every host by the proxy's
 // "/…" → "/cut/…" rewrite.
 export default function CutLandingPage() {
-  return <CutLanding />;
+  return (
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(WEBSITE_LD) }} />
+      <CutLanding />
+    </>
+  );
 }

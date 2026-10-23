@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   // unset, Next reads the request's own host to resolve them, which makes the
   // metadata of an otherwise static page request-dependent.
   metadataBase: new URL(DONKEYCUT_CANONICAL),
-  title: "Donkey Cut",
+  title: "Donkey Cut Video Editor",
   description: "A video editor that does all its work on your Mac.",
   // Declared here and served from public/ at these URLs. File-based icons —
   // favicon.ico and apple-icon.png sitting in app/ — resolve per request, which

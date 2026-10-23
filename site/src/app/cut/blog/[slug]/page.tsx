@@ -26,7 +26,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { slug } = await params;
   const post = await getPost(slug);
   if (!post) return {};
-  const title = `${post.seoTitle || post.title} | Donkey Cut`;
+  const title = `${post.seoTitle || post.title} | Donkey Cut Video Editor`;
   const description = post.summary || post.excerpt;
   const canonical = post.canonicalUrl || `${DONKEYCUT_CANONICAL}${blogPath(slug)}`;
   const image = post.headerUrl ?? post.thumbnailUrl;

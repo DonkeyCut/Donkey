@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "Donkey Cut",
+  title: "Donkey Cut Video Editor",
   description: "A video editor that does all its work on your Mac.",
 };
 

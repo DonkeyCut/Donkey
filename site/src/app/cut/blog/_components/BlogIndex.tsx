@@ -5,7 +5,7 @@ import { BlogPagination } from "@/app/cut/blog/_components/BlogPagination";
 import { BLOG_PAGE_SIZE, blogPageCount } from "@/lib/blog/keys";
 import { listPublishedPosts } from "@/lib/blog/read";
 
-export const BLOG_INDEX_TITLE = "Blog | Donkey Cut";
+export const BLOG_INDEX_TITLE = "Blog | Donkey Cut Video Editor";
 export const BLOG_INDEX_DESCRIPTION =
   "Notes from building Donkey Cut: video editing techniques, how the editor works, and what changed.";
 
