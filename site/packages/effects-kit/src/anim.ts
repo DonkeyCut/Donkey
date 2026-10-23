@@ -29,7 +29,7 @@ import type { OverlayFontCycle } from "./fontCycle";
 import type { MotionPose, MotionPreset } from "./motion/types";
 import type { OverlayWords } from "./words";
 import { splitScale } from "./stretch";
-import { capStreak } from "./camera";
+import { capStreak, ELEMENT_BLUR_MAX } from "./camera";
 import { EASE_BEZIER, type EaseId } from "./ease";
 
 export type OverlayAnimStyle =
@@ -128,6 +128,10 @@ export interface OverlayEdge {
    * breaks included) in the order they go, an order read off a reference.
    * Absent = the style's own, reading order for most. */
   order?: EdgeOrder | number[];
+  /** With an order named as a list: when each of its characters starts, as a
+   * share of the hand-off (0 the first, 1 the last), for letters read off a
+   * reference that do not go evenly spaced. Absent = evenly spaced. */
+  orderAt?: number[];
   /** How far the style travels from rest at its far end, design px (1080
    * short side): a drop from high above the frame, a long slide. Absent =
    * the style's own reach. */
@@ -136,15 +140,23 @@ export interface OverlayEdge {
    * at a steady pace is linear, one that brakes into place an ease out. */
   ease?: EaseId;
   /** false: no fade — the element (each letter) stays solid the whole way
-   * in or out, as a letter falling in from beyond the frame does. Absent =
-   * the style's own. */
-  fade?: boolean;
+   * in or out, as a letter falling in from beyond the frame does. A share of
+   * the move, 0..1: it fades up over that much of its move and holds solid
+   * after. Absent or true = the style's own. */
+  fade?: boolean | number;
+  /** Defocus at the far end, design px: each letter (the element) comes in
+   * that soft and sharpens as it lands, on the move's own curve — a letter
+   * falling out of focus. 0 takes a soft style's own blur away. Absent = the
+   * style's own. */
+  blur?: number;
 }
 
 export type EdgeOrder = "reading" | "shuffle";
 export const EDGE_ORDERS: readonly EdgeOrder[] = ["reading", "shuffle"];
 /** The farthest an edge's distance may send it, design px: past any frame. */
 export const EDGE_DISTANCE_MAX = 4000;
+/** The softest an edge's far end may be, design px: an element's own blur cap. */
+export const EDGE_BLUR_MAX = ELEMENT_BLUR_MAX;
 /** Seeds the shuffled order, so the same title always scatters the same way. */
 const EDGE_SHUFFLE_SEED = 5;
 
@@ -227,7 +239,13 @@ export interface OverlayAnim {
 export const edgeMotion = (slot: OverlayEdge | undefined): MotionPreset | undefined => {
   if (!slot) return undefined;
   const base = slot.preset ?? edgePreset(slot.style);
-  if (!base || (slot.order === undefined && !(slot.distance! > 0) && !slot.ease && slot.fade !== false)) return base;
+  const plain =
+    slot.order === undefined &&
+    !(slot.distance! > 0) &&
+    !slot.ease &&
+    (slot.fade === undefined || slot.fade === true) &&
+    slot.blur === undefined;
+  if (!base || plain) return base;
   let made = shaped.get(slot);
   if (!made) {
     made = shapeEdge(base, slot);
@@ -278,7 +296,8 @@ const shaped = new WeakMap<OverlayEdge, MotionPreset>();
 function shapeEdge(base: MotionPreset, slot: OverlayEdge): MotionPreset {
   let preset = base;
   if (Array.isArray(slot.order) && base.selector) {
-    preset = { ...preset, selector: { ...base.selector, randomize: false, sequence: slot.order } };
+    const timed = slot.orderAt?.length === slot.order.length ? { sequenceAt: slot.orderAt } : {};
+    preset = { ...preset, selector: { ...base.selector, randomize: false, sequence: slot.order, ...timed } };
   } else if (slot.order && base.selector) {
     const randomize = slot.order === "shuffle";
     preset = {
@@ -299,13 +318,25 @@ function shapeEdge(base: MotionPreset, slot: OverlayEdge): MotionPreset {
       ...(preset.animateOut ? { animateOut: scaled(preset.animateOut) } : {}),
     };
   }
-  if (slot.ease || slot.fade === false) {
+  if (slot.ease || slot.fade === false || typeof slot.fade === "number" || slot.blur !== undefined) {
     const curve = slot.ease ? EASE_BEZIER[slot.ease] : undefined;
+    const soft = slot.blur === undefined ? undefined : Math.min(EDGE_BLUR_MAX, Math.max(0, slot.blur));
     const reshaped = (props: MotionPreset["animate"]): MotionPreset["animate"] => {
       const next = { ...props };
       if (curve && next.position)
         next.position = next.position.map((key, k, all) => (k < all.length - 1 ? { ...key, ease: curve } : key));
       if (slot.fade === false) delete next.opacity;
+      // A fade over the first share of the move, solid after.
+      else if (typeof slot.fade === "number" && next.opacity)
+        next.opacity = [
+          { t: 0, v: 0, ease: EASE_BEZIER.linear },
+          { t: Math.min(1, Math.max(0.01, slot.fade)), v: 1 },
+          { t: 1, v: 1 },
+        ];
+      // The defocus clears on the move's own curve, so it is sharp as it lands.
+      if (soft === 0) delete next.blur;
+      else if (soft !== undefined)
+        next.blur = [{ t: 0, v: soft, ease: curve ?? next.position?.[0]?.ease ?? EASE_BEZIER.linear }, { t: 1, v: 0 }];
       return next;
     };
     preset = {

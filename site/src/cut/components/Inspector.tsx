@@ -54,6 +54,7 @@ import {
   edgeMotion,
   edgeStagger,
   EDGE_STAGGER_MAX,
+  EDGE_BLUR_MAX,
   EDGE_DISTANCE_MAX,
   EASE_IDS,
   EASE_LABELS,
@@ -3634,6 +3635,10 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
   // A style that fades as it moves can be told to stay solid.
   const edgeFades = !!(edge && (edge.preset ?? edgePreset(edge.style))?.animate.opacity);
   const edgeFade = edge?.fade !== false;
+  // How much of the move the fade takes: a share, or all of it.
+  const edgeFadeShare = typeof edge?.fade === "number" ? edge.fade : 1;
+  // How soft it starts: the slot's own, else the style's far-end defocus.
+  const edgeBlur = edge?.blur ?? (edge ? ((edge.preset ?? edgePreset(edge.style))?.animate.blur?.[0]?.v ?? 0) : 0);
   const writeEdge = (patch: Partial<OverlayEdge>) => {
     if (!edge) return;
     ck.begin();
@@ -3734,6 +3739,26 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
           />
         </Row>
       )}
+      {edgeFades && edgeFade && (
+        <Row label="Fade length">
+          <ValueSlider
+            label="Fade length"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={edgeFadeShare}
+            min={0.05}
+            max={1}
+            step={0.05}
+            format={(v) => `${Math.round(v * 100)}%`}
+            parse={(t) => Number(t.replace("%", "")) / 100}
+            onDraft={(v) => writeEdge({ fade: v >= 1 ? undefined : v })}
+            onCommit={(v) => {
+              writeEdge({ fade: v >= 1 ? undefined : v });
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
       {edgeSequence && isTextOverlay(o) && (
         // An order read off a reference: the letters as they arrive.
         <Row label="Order">
@@ -3758,6 +3783,26 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
             onDraft={(v) => writeEdge({ distance: v })}
             onCommit={(v) => {
               writeEdge({ distance: v });
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
+      {edge && (
+        <Row label="Blur">
+          <ValueSlider
+            label="Blur"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={edgeBlur}
+            min={0}
+            max={EDGE_BLUR_MAX}
+            step={1}
+            format={(v) => String(Math.round(v))}
+            parse={(t) => Number(t)}
+            onDraft={(v) => writeEdge({ blur: v })}
+            onCommit={(v) => {
+              writeEdge({ blur: v });
               ck.end();
             }}
           />

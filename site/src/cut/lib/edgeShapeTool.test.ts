@@ -69,3 +69,42 @@ describe("set_overlay_animation ease and fade", () => {
     expect(edgeOf(t.id)?.fade).toBeUndefined();
   });
 });
+
+describe("set_overlay_animation blur", () => {
+  beforeEach(reset);
+
+  test("a soft start rides the slot, capped; a negative hands it back, 0 keeps it sharp", async () => {
+    const t = await title();
+    await runAiTool("set_overlay_animation", { id: t.id, in_style: "drop", in_blur: 40 });
+    expect(edgeOf(t.id)?.blur).toBe(40);
+    await runAiTool("set_overlay_animation", { id: t.id, in_blur: 500 });
+    expect(edgeOf(t.id)?.blur).toBe(60);
+    await runAiTool("set_overlay_animation", { id: t.id, in_blur: 0 });
+    expect(edgeOf(t.id)?.blur).toBe(0);
+    await runAiTool("set_overlay_animation", { id: t.id, in_blur: -1 });
+    expect(edgeOf(t.id)?.blur).toBeUndefined();
+  });
+});
+
+describe("set_overlay_animation fade length and letter turns", () => {
+  beforeEach(reset);
+
+  test("a fade share rides the slot; 1 or true hands back the style's own, 0 is solid", async () => {
+    const t = await title();
+    await runAiTool("set_overlay_animation", { id: t.id, in_style: "drop", in_fade: 0.45 });
+    expect(edgeOf(t.id)?.fade).toBe(0.45);
+    await runAiTool("set_overlay_animation", { id: t.id, in_fade: 1 });
+    expect(edgeOf(t.id)?.fade).toBeUndefined();
+    await runAiTool("set_overlay_animation", { id: t.id, in_fade: 0 });
+    expect(edgeOf(t.id)?.fade).toBe(false);
+  });
+
+  test("each named letter's turn rides the order; a new order drops the old turns", async () => {
+    const t = await title();
+    await runAiTool("set_overlay_animation", { id: t.id, in_style: "drop", in_sequence: [5, 4, 0], in_sequence_at: [0, 0.2, 1] });
+    expect(edgeOf(t.id)?.orderAt).toEqual([0, 0.2, 1]);
+    await expect(runAiTool("set_overlay_animation", { id: t.id, in_sequence_at: [0, 1] })).rejects.toThrow("one share per letter");
+    await runAiTool("set_overlay_animation", { id: t.id, in_sequence: [0, 4, 5] });
+    expect(edgeOf(t.id)?.orderAt).toBeUndefined();
+  });
+});

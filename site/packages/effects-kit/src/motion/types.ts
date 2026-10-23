@@ -113,6 +113,10 @@ export interface RangeSelector {
   /** The units in the order they take their turns, by index: an order read
    * off a reference. Units it leaves out go after it, in reading order. */
   sequence?: number[];
+  /** When each unit of `sequence` takes its turn, as a share of the
+   * hand-off (0 the first, 1 the last), for a reference whose letters do not
+   * go evenly spaced. Absent, or not one per unit, = evenly spaced. */
+  sequenceAt?: number[];
 }
 
 /**

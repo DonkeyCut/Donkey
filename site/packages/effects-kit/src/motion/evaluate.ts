@@ -192,6 +192,7 @@ function orderOf(sel: RangeSelector, i: number, n: number): number {
 function startShare(sel: RangeSelector, i: number, n: number, share = sel.spread, reverse = false): number {
   if (n <= 1) return 0;
   let o = orderOf(sel, i, n);
+  const spread = clamp01(share);
   if (sel.sequence?.length) {
     // A sequence hands the motion along the units it names, so the last of
     // them lands as the ramp ends; any it leaves out (a space) go with the
@@ -199,9 +200,11 @@ function startShare(sel: RangeSelector, i: number, n: number, share = sel.spread
     // reading-order exit does.
     n = Math.max(2, sel.sequence.length);
     o = Math.min(o, n - 1);
+    // Each unit's own turn, when the order carries them.
+    const at = sel.sequenceAt;
+    if (at && at.length === sel.sequence.length) return clamp01(reverse ? 1 - at[o] : at[o]) * spread;
     if (reverse) o = n - 1 - o;
   }
-  const spread = clamp01(share);
   if (sel.shape === "square") return o / n;
   const u = o / (n - 1);
   switch (sel.shape) {

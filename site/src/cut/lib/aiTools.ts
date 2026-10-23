@@ -64,6 +64,7 @@ import {
   OVERLAY_ANIM_DEFAULT_SECONDS,
   EDGE_STAGGER_MAX,
   edgeMaxSeconds,
+  EDGE_BLUR_MAX,
   EDGE_DISTANCE_MAX,
   EDGE_ORDERS,
   EASE_IDS,
@@ -250,7 +251,7 @@ import { fontKind, fontLook } from "./fontCatalog";
 import { CUT_FONT_MATCH } from "./fontMatchSettings";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
 import { compareMoments, sweepSource } from "./sourceCompare";
-import { findPicture, sampleColors, scanCuts, sourcePictureAt, trackCamera, trackElement, type FrameBox } from "./measure/sourceMeasure";
+import { findPicture, sampleColors, scanCuts, sourcePictureAt, trackCamera, trackElement, trackLetters, type FrameBox } from "./measure/sourceMeasure";
 import { FULL_FRAME, isFullFrame } from "./measure/picture";
 import { DETECT_CHANGES_MAX, DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, CAMERA_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
@@ -638,6 +639,88 @@ function statsReport(stats: ColorStats) {
     meanB: Math.round(stats.meanB),
     meanSat: r1(stats.meanSat),
     warmth: r1(stats.warmth),
+  };
+}
+
+/** track_element with match letters: how a line of type comes in letter by
+ * letter, as the per-letter entrance set_overlay_animation plays back. */
+async function trackLettersResult(
+  asset: MediaAsset,
+  input: Record<string, unknown>,
+  opts: { from: number; to: number | undefined; seed: FrameBox; color: string | undefined; area: FrameBox }
+) {
+  if (asset.type !== "video") throw new ToolError(`"${asset.name}" is a still image — letters coming in need a video.`);
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  if (!text) throw new ToolError("Pass text: the line's words exactly as they read once every letter has landed.");
+  if (opts.to === undefined)
+    throw new ToolError("Pass to: a source second just after the last letter lands, with the whole line at rest — from is where the first letter is still out of sight.");
+  const run = await withSweepPaused(() =>
+    trackLetters(asset.url, {
+      from: opts.from,
+      to: opts.to!,
+      seed: opts.seed,
+      text,
+      ...(opts.color ? { color: opts.color } : {}),
+      maxFrames: TRACK_FRAMES_MAX,
+      area: opts.area,
+    })
+  ).catch((e) => {
+    throw new ToolError(e instanceof Error ? e.message : `Could not read "${asset.name}".`, { cause: e });
+  });
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+  const e = run.edge;
+  // A first letter already moving as the stretch opens starts at its opening.
+  const start = e ? Math.max(opts.from, e.start) : undefined;
+  return {
+    color: run.color,
+    match: "letters",
+    ...(run.fps > 0 ? { fps: Math.round(run.fps * 100) / 100 } : {}),
+    framesRead: run.framesRead,
+    letters: run.letters.map((l) => ({
+      letter: l.char,
+      index: l.index,
+      shows: l.shows === null ? null : roundT(l.shows),
+      starts: l.starts === null ? null : roundT(l.starts),
+      lands: l.lands === null ? null : roundT(l.lands),
+      ...(l.alpha !== null ? { alpha: r2(l.alpha) } : {}),
+      ...(l.soft !== null ? { soft: Math.round(l.soft) } : {}),
+      ...(l.error !== null ? { error: Math.round(l.error * 1000) / 1000 } : {}),
+    })),
+    ...(e && start !== undefined
+      ? {
+          entrance: {
+            starts: roundT(start),
+            in_style: e.direction === "up" ? "rise" : "drop",
+            in_seconds: r2(e.seconds),
+            in_stagger: r2(Math.min(0.95, e.stagger)),
+            in_sequence: e.sequence,
+            in_sequence_at: e.sequenceAt.map((v) => Math.round(v * 1000) / 1000),
+            in_distance: Math.round(e.distance),
+            ...(e.ease ? { in_ease: e.ease } : {}),
+            in_fade: typeof e.fade === "number" ? Math.round(e.fade * 100) / 100 : e.fade,
+            in_blur: Math.round(Math.min(EDGE_BLUR_MAX, e.blur)),
+          },
+          entranceNote:
+            "The entrance as set_overlay_animation takes it, read off every frame: each letter's move fitted on one ease and one distance, the order their moves start in, the hand-off spread across them, whether they fade in and how soft they start. Set the title to begin on the timeline second `starts` maps to, and pass these as they are; one letter's move is in_seconds × (1 − in_stagger). Leave motion_blur off unless the letters streak along their fall — a soft start is in_blur.",
+        }
+      : {
+          entranceNote:
+            "Not every letter was seen coming in: widen from/to so the stretch opens before the first letter shows and closes once the last has landed.",
+        }),
+    ...(run.passes.length
+      ? {
+          crosses: run.passes.map((p) => ({
+            color: p.color,
+            box: { x: rF(p.box.x), y: rF(p.box.y), w: rF(p.box.w), h: rF(p.box.h) },
+            letters: p.letters,
+          })),
+          crossesNote:
+            "Other ink the letters pass over on their way in. front: the letters cover it, so the title sits on a lower lane (nearer 0) than that element; behind: it covers them, so it sits nearer 0.",
+        }
+      : {}),
+    ...(run.truncated ? { truncated: true } : {}),
+    ...pictureReport(opts.area),
+    source: sourceRef(asset),
   };
 }
 
@@ -1052,7 +1135,19 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const order = letterSequence(text, sequence as number[]);
         if (sequence.length > 0 && order.length === 0)
           throw new ToolError(`${slot}_sequence names no letter of "${text}": count its letters from 0, skipping spaces.`);
+        delete rest.orderAt;
         anim[slot] = order.length > 0 ? { ...rest, order } : rest;
+      }
+      // Each named letter's own turn, as a share of the hand-off.
+      const sequenceAt = input[`${slot}_sequence_at`];
+      if (Array.isArray(sequenceAt) && anim[slot]) {
+        const rest = { ...anim[slot]! };
+        delete rest.orderAt;
+        const named = Array.isArray(rest.order) ? rest.order.length : 0;
+        if (sequenceAt.length > 0 && sequenceAt.length !== named)
+          throw new ToolError(`${slot}_sequence_at needs one share per letter of ${slot}_sequence (${named}), in its order.`);
+        const at = (sequenceAt as unknown[]).map((v) => (isNum(v) ? clamp(v, 0, 1) : 0));
+        anim[slot] = at.length > 0 ? { ...rest, orderAt: at } : rest;
       }
       const ease = input[`${slot}_ease`];
       if (typeof ease === "string" && anim[slot]) {
@@ -1062,17 +1157,27 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         delete rest.ease;
         anim[slot] = ease === "style" ? rest : { ...rest, ease: ease as EaseId };
       }
+      // false keeps it solid, a share of the move fades it up over that much,
+      // true hands back the style's own.
       const fade = input[`${slot}_fade`];
-      if (typeof fade === "boolean" && anim[slot]) {
+      if ((typeof fade === "boolean" || isNum(fade)) && anim[slot]) {
         const rest = { ...anim[slot]! };
         delete rest.fade;
-        anim[slot] = fade ? rest : { ...rest, fade: false };
+        anim[slot] =
+          fade === true || (isNum(fade) && fade >= 1) ? rest : fade === false || fade <= 0 ? { ...rest, fade: false } : { ...rest, fade: clamp(fade, 0.01, 1) };
       }
       const distance = input[`${slot}_distance`];
       if (isNum(distance) && anim[slot]) {
         const rest = { ...anim[slot]! };
         delete rest.distance;
         anim[slot] = distance <= 0 ? rest : { ...rest, distance: clamp(distance, 1, EDGE_DISTANCE_MAX) };
+      }
+      // A soft start: 0 keeps a soft style sharp, a negative hands it back.
+      const blur = input[`${slot}_blur`];
+      if (isNum(blur) && anim[slot]) {
+        const rest = { ...anim[slot]! };
+        delete rest.blur;
+        anim[slot] = blur < 0 ? rest : { ...rest, blur: clamp(blur, 0, EDGE_BLUR_MAX) };
       }
     };
     edge("in", "in_style", "in_seconds");
@@ -1859,6 +1964,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       const from = asset.type === "video" ? clamp(isNum(input.from) ? input.from : 0, 0, end) : 0;
       const to = asset.type === "video" && isNum(input.to) && input.to > from ? clamp(input.to, 0, asset.duration) : undefined;
       const area = pictureArea(asset, input);
+      if (match === "letters") return trackLettersResult(asset, input, { from, to, seed, color, area });
       const run = await withSweepPaused(() =>
         trackElement(asset.url, asset.type === "image" ? "image" : "video", {
           area,

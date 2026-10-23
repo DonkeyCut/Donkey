@@ -14,6 +14,7 @@ import { frameStep, gridsOf, pickShotEdges, type FrameGrids, type FrameStep, typ
 import { fitMoves, type Move } from "./easeFit";
 import { FULL_FRAME, areaOf, findPictureBox, intoArea, type PictureFind } from "./picture";
 import { inkBox, shapeBox } from "./track";
+import { readLetters, type LetterFrame, type LetterRead } from "./letters";
 
 /** A box as the editor places one: centre and size, frame fractions. */
 export interface FrameBox {
@@ -387,6 +388,67 @@ export async function trackElement(
     coveredTo,
     truncated,
   };
+}
+
+export interface LetterRun extends Omit<LetterRead, "passes"> {
+  color: string;
+  fps: number;
+  framesRead: number;
+  /** Other ink the letters cross on their way in, its box in the area's fractions. */
+  passes: (Omit<LetterRead["passes"][number], "box" | "color"> & { color: string; box: FrameBox })[];
+  truncated: boolean;
+}
+
+/** How the letters of `text` come in over [from, to]: the line sits inside
+ * `seed` at `to`, every letter landed. The letters are the seed's dominant
+ * colour other than its ground, or `color`. */
+export async function trackLetters(
+  url: string,
+  opts: { from: number; to: number; seed: FrameBox; text: string; color?: string; maxFrames: number; area?: FrameBox }
+): Promise<LetterRun> {
+  const area = opts.area ?? FULL_FRAME;
+  return withSourceVideo(url, async (v) => {
+    const at = sizeAt(v.width, v.height, TRACK_LONG_SIDE, area);
+    const frames: LetterFrame[] = [];
+    const durations: number[] = [];
+    let truncated = false;
+    const crop = (f: SourceFrame) => cropPixels(f, toPixels(f, area));
+    for await (const f of v.frames(opts.from, opts.to, at)) {
+      if (frames.length >= opts.maxFrames - 1) {
+        truncated = true;
+        break;
+      }
+      frames.push({ ...crop(f), t: f.t });
+      durations.push(f.duration);
+    }
+    // The landed line is read on the frame at `to` itself.
+    for await (const f of v.framesAt([opts.to], at)) if (f && (!frames.length || f.t > frames[frames.length - 1].t)) frames.push({ ...crop(f), t: f.t });
+    if (frames.length < 3) throw new Error(`Only ${frames.length} frames between ${opts.from}s and ${opts.to}s — give the whole entrance.`);
+    const last = frames[frames.length - 1];
+    const region = toPixels(last, opts.seed);
+    let ink = opts.color ? parseHex(opts.color) : null;
+    if (!ink) {
+      // The line's colour: the seed's biggest colour other than the picture's ground.
+      const ground = regionColor(last, { x: 0, y: 0, w: last.width, h: last.height }).hex;
+      const g = parseHex(ground)!;
+      const parts = (regionColor(last, region, 3).dominant ?? []).map((d) => ({ ...d, rgb: parseHex(d.hex)! }));
+      const far = parts.filter((d) => Math.hypot(d.rgb[0] - g[0], d.rgb[1] - g[1], d.rgb[2] - g[2]) > 60);
+      ink = (far.sort((a, b) => b.share - a.share)[0] ?? parts[0])?.rgb ?? null;
+    }
+    if (!ink) throw new Error("Could not tell the letters' colour — pass color.");
+    const read = readLetters(frames, { text: opts.text, region, ink, unit: 1080 / Math.min(last.width, last.height), earliest: 0 });
+    return {
+      ...read,
+      color: hexOf(...ink),
+      fps: rateOf(
+        frames.map((f) => f.t),
+        durations
+      ),
+      framesRead: frames.length,
+      passes: read.passes.map((p) => ({ ...p, color: hexOf(...p.color), box: toFrame(last, p.box) })),
+      truncated,
+    };
+  });
 }
 
 export interface CameraRun {

@@ -17,8 +17,9 @@ export const SAMPLE_COLORS_K_MAX = 6;
 export const TRACK_FRAMES_MAX = 360;
 /** track_element: per-channel distance from the colour that still counts as it. */
 export const TRACK_TOLERANCE_DEFAULT = 40;
-/** track_element: the element as one connected piece, or every pixel of it. */
-export const TRACK_MATCHES = ["shape", "ink"] as const;
+/** track_element: the element as one connected piece, every pixel of it, or
+ * a line of type read letter by letter as it comes in. */
+export const TRACK_MATCHES = ["shape", "ink", "letters"] as const;
 /** track_element: path entries listed per call; a longer path is thinned. */
 export const TRACK_PATH_MAX = 60;
 /** track_camera: frames read per call — four seconds at 30 fps, every one

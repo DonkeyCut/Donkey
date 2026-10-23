@@ -197,3 +197,59 @@ describe("an edge's ease and fade", () => {
     expect(at({ ...edge, fade: undefined }, 0.05).alpha).toBeLessThan(0.2);
   });
 });
+
+describe("an edge's defocus", () => {
+  const at = (edge: OverlayEdge, t: number) => glyphStateAt(evalOverlayAnim({ in: edge }, t, 6, true), 0, 1);
+
+  test("a letter comes in that soft and sharpens as it lands", () => {
+    const edge: OverlayEdge = { style: "drop", seconds: 1, stagger: 0, distance: 600, blur: 18 };
+    expect(at(edge, 0).blur).toBeCloseTo(18, 0);
+    expect(at(edge, 0.5).blur!).toBeGreaterThan(0);
+    expect(at(edge, 0.5).blur!).toBeLessThan(18);
+    expect(at(edge, 1.2).blur ?? 0).toBe(0);
+    // Absent, a drop stays sharp.
+    expect(at({ ...edge, blur: undefined }, 0).blur ?? 0).toBe(0);
+  });
+
+  test("0 takes a soft style's own blur away", () => {
+    expect(at({ style: "blur", seconds: 1, stagger: 0 }, 0).blur!).toBeGreaterThan(0);
+    expect(at({ style: "blur", seconds: 1, stagger: 0, blur: 0 }, 0).blur ?? 0).toBe(0);
+  });
+
+  test("the crop pads for it and the export slices carry it", async () => {
+    const edge: OverlayEdge = { style: "drop", seconds: 2, stagger: 0.5, distance: 500, blur: 30 };
+    expect(presetExtent(edgeMotion(edge)!).travel).toBeGreaterThanOrEqual(500 + 60);
+    const { planAnimatedLayers } = await import("./render");
+    const o = { id: "t", kind: "text", text: TEXT, start: 0, end: 6, x: 0.5, y: 0.5, size: 200, color: "#ff0000", font: "bebas", anim: { in: edge } };
+    const mid = planAnimatedLayers(o as never, 6).find((l) => l.phase?.glyphs && l.start >= 0.5)!;
+    const live = evalOverlayFrame(o as never, mid.start, 16 / 9);
+    for (let i = 0; i < N; i++) expect(glyphStateAt(mid.phase!, i, N).blur ?? 0).toBeCloseTo(glyphStateAt(live, i, N).blur ?? 0, 3);
+  });
+});
+
+describe("an edge's fade length", () => {
+  const at = (edge: OverlayEdge, t: number) => glyphStateAt(evalOverlayAnim({ in: edge }, t, 6, true), 0, 1);
+
+  test("a share of the move fades the letter up that early, then holds it solid", () => {
+    const edge: OverlayEdge = { style: "drop", seconds: 1, stagger: 0, distance: 600, fade: 0.25 };
+    expect(at(edge, 0.125).alpha).toBeCloseTo(0.5, 1);
+    expect(at(edge, 0.3).alpha).toBe(1);
+    // The style's own fade runs the whole move.
+    expect(at({ ...edge, fade: undefined }, 0.3).alpha).toBeLessThan(0.5);
+  });
+});
+
+describe("an order's own timing", () => {
+  test("each named letter starts at its share of the hand-off, not evenly spaced", () => {
+    const { letterSequence } = require("./anim") as typeof import("./anim");
+    const order = letterSequence(TEXT, [5, 4, 0]);
+    // O starts at once, L a tenth of the way through the hand-off, Y at its end.
+    const edge: OverlayEdge = { style: "drop", seconds: 2, stagger: 0.5, order, orderAt: [0, 0.1, 1] };
+    const starts = order.map((i) => firstShow(edge, i));
+    expect(starts[0]).toBeCloseTo(0, 1);
+    expect(starts[1]).toBeCloseTo(0.1, 1);
+    expect(starts[2]).toBeCloseTo(1, 1);
+    // Evenly spaced, L would wait for half the hand-off.
+    expect(firstShow({ ...edge, orderAt: undefined }, order[1])).toBeCloseTo(0.5, 1);
+  });
+});
