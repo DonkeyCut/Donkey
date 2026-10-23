@@ -7,7 +7,7 @@ import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Downlo
 import { EFFECT_CHIP_ICONS, effectIconKind, SHAPE_CHIP_ICONS, TRANSITION_ICONS } from "@/cut/components/entityIcons";
 import { Button } from "@/components/ui/button";
 import { GuidesMenu } from "@/cut/components/GuidesMenu";
-import { TimelinePicker } from "@/cut/components/TimelinePicker";
+import { EmptyTimelineNote, TimelinePicker } from "@/cut/components/TimelinePicker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -2295,6 +2295,7 @@ export function Timeline() {
         </div>
       </div>
       <RulerBand />
+      {total <= 0 && <EmptyTimelineNote />}
       {marquee && (
         <div
           className="pointer-events-none fixed z-50 rounded-[3px] border-2 border-[#0a84ff]"
