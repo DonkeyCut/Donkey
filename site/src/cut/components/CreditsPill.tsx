@@ -15,7 +15,7 @@ import { useHostedBalance, useInvalidateOnSettle } from "@/cut/lib/hosted";
 import { useCutBase } from "@/cut/lib/nav";
 import { useUpgradeToPro } from "@/cut/lib/proUpgrade";
 import { track } from "@/lib/analytics";
-import { compactCredits, creditsFromDollars, formatCredits } from "@/lib/credits/format-credits";
+import { compactCredits, creditsFromDollars, formatCreditCount, formatCredits } from "@/lib/credits/format-credits";
 import { CREDITS_PILL_FLAG } from "@/lib/feature-flags";
 import { useProSubscription } from "@/queries/billing";
 import { creditBalanceQueryKey, useCreditBalance, type CreditBalance } from "@/queries/credits";
@@ -122,7 +122,9 @@ function PlanCard({ balance }: { balance: string }) {
       <div className="flex items-center gap-2.5 border-t border-border px-4 py-3">
         <Zap className="size-4 text-muted-foreground" />
         <span className="flex-1 text-muted-foreground">Credits</span>
-        <span className="font-medium tabular-nums">{formatCredits(balance)}</span>
+        <span className="font-medium tabular-nums">
+          {formatCreditCount(creditsFromDollars(balance, "down"))}
+        </span>
       </div>
     </div>
   );
