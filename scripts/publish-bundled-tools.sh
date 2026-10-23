@@ -20,7 +20,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VENDOR_DIR="$ROOT_DIR/vendor/donkey-tools"
 MANIFEST="$ROOT_DIR/apps/Donkey/Sources/DonkeyRuntime/Resources/bundled-tools.json"
 
-REPO="${DONKEY_TOOLS_REPO:-DonkeyUseCorp/Donkey}"
+REPO="${DONKEY_TOOLS_REPO:-DonkeyCut/Donkey}"
 ARCH="arm64"
 
 # True when that release already carries that asset — i.e. the version is already published and frozen.

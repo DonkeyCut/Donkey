@@ -195,7 +195,7 @@ def write_release_constants(path: Path, version: Version) -> None:
     if LATEST_VERSION_RE.search(source):
         next_source = LATEST_VERSION_RE.sub(replacement, source, count=1)
     else:
-        anchor = 'export const GITHUB_REPO_URL = "https://github.com/DonkeyUseCorp/Donkey";'
+        anchor = 'export const GITHUB_REPO_URL = "https://github.com/DonkeyCut/Donkey";'
         next_source = source.replace(anchor, f"{anchor}\n{replacement}", 1)
 
     path.write_text(next_source, encoding="utf-8")
