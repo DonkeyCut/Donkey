@@ -11,6 +11,10 @@ model CutProject {
   // Optimistic concurrency for autosave: PUT sends the version it loaded and
   // conflicts 409 instead of clobbering a newer save from another device.
   version    Int      @default(1)
+  // The transport that saved the current version and that save's place in
+  // its sequence, so a save following its own unacknowledged one applies.
+  writer     String?
+  writerSeq  Int?
   previewKey String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt

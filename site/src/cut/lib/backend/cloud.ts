@@ -4,7 +4,7 @@
 // Media bytes ride presigned R2 URLs minted by those routes, not this
 // transport.
 import { observeOperationResponse, operationFailure } from "../operationFailure";
-import type { CutBackend, CutRequestInit } from "./types";
+import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT, type CutBackend, type CutRequestInit } from "./types";
 
 const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-cloud/");
 
@@ -14,6 +14,7 @@ const cloudPath = (path: string) => path.replace(/^\/api\/cut\//, "/api/cut-clou
 let session: { base: string; headers: Record<string, string> } | null = null;
 export function bindCloudSession(base: string, headers: Record<string, string>) {
   session = { base: base.replace(/\/$/, ""), headers };
+  sessionWriter = newWriter();
 }
 
 /** A request on the hosted site as this process's user: same-origin in the
@@ -33,9 +34,10 @@ export function cloudRequest(path: string, init?: RequestInit): Promise<Response
 /** Capture transport credentials for work that outlives the active project. */
 export function captureCloudBackend(): CutBackend {
   const bound = session ? { base: session.base, headers: { ...session.headers } } : null;
+  const writer = newWriter();
   return {
     ...cloudBackend,
-    fetch: (path, init) => cloudFetch(path, init, (url, options) => requestWithSession(bound, url, options)),
+    fetch: (path, init) => cloudFetch(path, init, (url, options) => requestWithSession(bound, url, options), writer),
     url: (path) => (bound?.base ?? "") + cloudPath(path),
   };
 }
@@ -75,6 +77,15 @@ export function pinDocBase(projectId: string, version: string | null) {
   else basePins.set(projectId, version);
 }
 
+// A writer is one transport's identity on the server: the page load, a bound
+// headless session, or a captured backend. Each save it sends carries the next
+// number in its sequence, so a save that follows its own unacknowledged one
+// (the response was lost, the save retried on the old version) applies, and a
+// delayed save that its own later one overtook answers 409.
+type DocWriter = { id: string; seq: number };
+const newWriter = (): DocWriter => ({ id: crypto.randomUUID(), seq: 0 });
+let sessionWriter = newWriter();
+
 // One doc PUT on the wire per project: each waits for the one before it and
 // reads the version at dispatch. Two saves in flight would carry the same ?v=
 // and the later one would 409 against its own session's write.
@@ -87,7 +98,12 @@ const docGets = new Map<string, Promise<void>>();
 // /projects/:id only — /projects/folders is the folder collection, not a doc.
 const PROJECT_DOC = /^\/api\/cut\/projects\/(?!folders$)([^/?]+)$/;
 
-async function cloudFetch(path: string, options?: CutRequestInit, request = cloudRequest): Promise<Response> {
+async function cloudFetch(
+  path: string,
+  options?: CutRequestInit,
+  request = cloudRequest,
+  writer = sessionWriter
+): Promise<Response> {
   const { observe, ...init } = options ?? {};
   const doc = PROJECT_DOC.exec(path);
   const method = (init?.method ?? "GET").toUpperCase();
@@ -110,20 +126,29 @@ async function cloudFetch(path: string, options?: CutRequestInit, request = clou
   }
 
   const prev = putChains.get(projectId) ?? Promise.resolve();
-  const run = prev.then(() => putDoc(projectId, path, init, request));
+  const run = prev.then(() => putDoc(projectId, path, writer, init, request));
   // The chain survives a failed link; the failure is the caller's to handle.
   putChains.set(projectId, run.catch(() => undefined));
   return run;
 }
 
-async function putDoc(projectId: string, path: string, init?: RequestInit, request = cloudRequest): Promise<Response> {
+async function putDoc(
+  projectId: string,
+  path: string,
+  writer: DocWriter,
+  init?: RequestInit,
+  request = cloudRequest
+): Promise<Response> {
   await docGets.get(projectId);
   // A pinned base outranks the map; with neither, an unversioned PUT is the
   // first save and succeeds unconditionally.
   const v = basePins.get(projectId) ?? docVersions.get(projectId);
-  const res = await request(cloudPath(path) + (v ? `?v=${encodeURIComponent(v)}` : ""), init);
-  if (res.ok || res.status === 409) basePins.delete(projectId);
-  if (res.status === 409) {
+  const headers = new Headers(init?.headers);
+  headers.set(DOC_WRITER_HEADER, writer.id);
+  headers.set(DOC_SEQ_HEADER, String(++writer.seq));
+  const res = await request(cloudPath(path) + (v ? `?v=${encodeURIComponent(v)}` : ""), { ...init, headers });
+  if (res.ok || res.status === HTTP_CONFLICT) basePins.delete(projectId);
+  if (res.status === HTTP_CONFLICT) {
     const body = (await res
       .clone()
       .json()

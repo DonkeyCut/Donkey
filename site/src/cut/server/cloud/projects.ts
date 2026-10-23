@@ -3,6 +3,7 @@
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
+import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT } from "@/cut/lib/backend/types";
 import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -24,6 +25,15 @@ const projectFolderView = (row: {
   createdAt: row.createdAt.getTime(),
 });
 
+const HTTP_BAD_REQUEST = 400;
+const HTTP_NOT_FOUND = 404;
+
+// Writer ids are the transport's crypto.randomUUID().
+const WRITER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const WRITER_SEQ = /^[1-9][0-9]{0,8}$/;
+
+type DocWriter = { id: string; seq: number };
+
 type ProjectRow = {
   id: string;
   userId: string;
@@ -31,6 +41,8 @@ type ProjectRow = {
   doc: unknown;
   folderId: string | null;
   version: number;
+  writer: string | null;
+  writerSeq: number | null;
   previewKey: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -55,6 +67,71 @@ export async function takenMediaNames(userId: string, projectId: string): Promis
 function docOf(row: ProjectRow): ProjectDoc {
   const doc = row.doc as ProjectDoc;
   return { ...doc, folderId: row.folderId ?? null };
+}
+
+/** The save's writer headers. Both or neither: a save without them is a plain
+ * versioned save, and a malformed pair is refused. */
+function writerOf(req: Request): DocWriter | null | "invalid" {
+  const id = req.headers.get(DOC_WRITER_HEADER);
+  const seq = req.headers.get(DOC_SEQ_HEADER);
+  if (id === null && seq === null) {
+    return null;
+  }
+  if (!id || !seq || !WRITER_ID.test(id) || !WRITER_SEQ.test(seq)) {
+    return "invalid";
+  }
+  return { id, seq: Number(seq) };
+}
+
+/** Whether a save may apply over the row's version though it was made on an
+ * older one: the same writer saved that version, earlier in its sequence. Its
+ * state only moves forward, so this save already holds what that one did. */
+function follows(row: ProjectRow, writer: DocWriter | null): boolean {
+  return !!writer && row.writer === writer.id && row.writerSeq !== null && writer.seq > row.writerSeq;
+}
+
+/** A save's body over the stored doc: fields the body leaves out keep their
+ * stored values. */
+function mergeDoc(existing: ProjectDoc, body: Partial<ProjectDoc>): ProjectDoc {
+  const doc: ProjectDoc = {
+    ...existing,
+    name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : existing.name,
+    assets: Array.isArray(body.assets) ? body.assets : existing.assets,
+    clips: Array.isArray(body.clips) ? body.clips : existing.clips,
+    transitions: Array.isArray(body.transitions) ? body.transitions : existing.transitions,
+    audioClips: Array.isArray(body.audioClips) ? body.audioClips : existing.audioClips,
+    // Same legacy-shape handling as the engine: a merged client saving
+    // `clips` clears the old separate overlay array.
+    overlayClips: Array.isArray(body.overlayClips)
+      ? body.overlayClips
+      : Array.isArray(body.clips)
+        ? []
+        : existing.overlayClips,
+    overlays: Array.isArray(body.overlays) ? body.overlays : existing.overlays,
+    timeline: isTimelineId(body.timeline) ? body.timeline : existing.timeline,
+    timelines: sanitizeTimelines(body.timelines, existing) ?? existing.timelines,
+    templates: Array.isArray(body.templates) ? body.templates : existing.templates,
+    mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
+    aspect: normalizeAspect(body.aspect) ?? existing.aspect,
+    guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
+    guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
+    background: typeof body.background === "string" ? body.background : existing.background,
+    subtitles:
+      body.subtitles && typeof body.subtitles === "object" ? body.subtitles : existing.subtitles,
+    ui: body.ui && typeof body.ui === "object" ? { ...existing.ui, ...body.ui } : existing.ui,
+    publish:
+      body.publish && typeof body.publish === "object"
+        ? { ...existing.publish, ...body.publish }
+        : existing.publish,
+    notes:
+      body.notes && typeof body.notes === "object"
+        ? { ...existing.notes, ...body.notes }
+        : existing.notes,
+    genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
+    renders: Array.isArray(body.renders) ? body.renders : existing.renders,
+  };
+  doc.updatedAt = Date.now();
+  return doc;
 }
 
 /** Mirror of the engine's summarize(): track 0 is the cut. sizeBytes comes from
@@ -205,67 +282,58 @@ export const projectsCloud = {
       const row = await getProject(userId, id);
       if (!row) return err("Project not found.", 404);
       const vParam = new URL(req.url).searchParams.get("v");
-      const existing = docOf(row);
+      const writer = writerOf(req);
+      if (writer === "invalid") {
+        return err("Bad writer.", HTTP_BAD_REQUEST);
+      }
       const body = (await req.json()) as Partial<ProjectDoc>;
-      const doc: ProjectDoc = {
-        ...existing,
-        name: typeof body.name === "string" && body.name.trim() ? body.name.trim() : existing.name,
-        assets: Array.isArray(body.assets) ? body.assets : existing.assets,
-        clips: Array.isArray(body.clips) ? body.clips : existing.clips,
-        transitions: Array.isArray(body.transitions) ? body.transitions : existing.transitions,
-        audioClips: Array.isArray(body.audioClips) ? body.audioClips : existing.audioClips,
-        // Same legacy-shape handling as the engine: a merged client saving
-        // `clips` clears the old separate overlay array.
-        overlayClips: Array.isArray(body.overlayClips)
-          ? body.overlayClips
-          : Array.isArray(body.clips)
-            ? []
-            : existing.overlayClips,
-        overlays: Array.isArray(body.overlays) ? body.overlays : existing.overlays,
-        timeline: isTimelineId(body.timeline) ? body.timeline : existing.timeline,
-        timelines: sanitizeTimelines(body.timelines, existing) ?? existing.timelines,
-        templates: Array.isArray(body.templates) ? body.templates : existing.templates,
-        mediaFolders: Array.isArray(body.mediaFolders) ? body.mediaFolders : existing.mediaFolders,
-        aspect: normalizeAspect(body.aspect) ?? existing.aspect,
-        guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
-        guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
-        background: typeof body.background === "string" ? body.background : existing.background,
-        subtitles:
-          body.subtitles && typeof body.subtitles === "object" ? body.subtitles : existing.subtitles,
-        ui: body.ui && typeof body.ui === "object" ? { ...existing.ui, ...body.ui } : existing.ui,
-        publish:
-          body.publish && typeof body.publish === "object"
-            ? { ...existing.publish, ...body.publish }
-            : existing.publish,
-        notes:
-          body.notes && typeof body.notes === "object"
-            ? { ...existing.notes, ...body.notes }
-            : existing.notes,
-        genvideo: body.genvideo !== undefined ? body.genvideo ?? undefined : existing.genvideo,
-        renders: Array.isArray(body.renders) ? body.renders : existing.renders,
+
+      // Every save records its writer, or clears the last one's, so only a
+      // version the same writer saved can be built over by that writer.
+      const dataOver = (base: ProjectRow) => {
+        const doc = mergeDoc(docOf(base), body);
+        return {
+          doc: asJson(doc),
+          name: doc.name,
+          version: { increment: 1 },
+          writer: writer?.id ?? null,
+          writerSeq: writer?.seq ?? null,
+        };
       };
-      doc.updatedAt = Date.now();
-      const data = { doc: asJson(doc), name: doc.name, version: { increment: 1 } };
       if (vParam === null) {
         // First save: apply unconditionally, report the authoritative version.
-        const updated = await prisma.cutProject.update({ where: { id }, data });
+        const updated = await prisma.cutProject.update({ where: { id }, data: dataOver(row) });
         return Response.json({ ok: true, version: updated.version });
       }
       const v = Number(vParam);
-      if (!Number.isInteger(v)) return err("Bad version.", 400);
-      const updated = await prisma.cutProject.updateMany({
-        where: { id, userId, version: v },
-        data,
-      });
-      if (updated.count === 0) {
-        const current = await getProject(userId, id);
-        if (!current) return err("Project not found.", 404);
-        return Response.json(
-          { error: "conflict", doc: docOf(current), version: current.version },
-          { status: 409 }
-        );
+      if (!Number.isInteger(v)) {
+        return err("Bad version.", HTTP_BAD_REQUEST);
       }
-      return Response.json({ ok: true, version: v + 1 });
+
+      // The save applies on the version it was made on, or on a newer one its
+      // own writer saved earlier. The write is guarded on the row's version,
+      // so another save landing in between still conflicts.
+      const base = row.version === v || follows(row, writer) ? row : null;
+      if (base) {
+        const updated = await prisma.cutProject.updateMany({
+          where: { id, userId, version: base.version },
+          data: dataOver(base),
+        });
+        if (updated.count > 0) {
+          return Response.json({ ok: true, version: base.version + 1 });
+        }
+      }
+
+      // The conflict hands back the newest doc: the row already read, unless a
+      // write raced the guarded update.
+      const current = base ? await getProject(userId, id) : row;
+      if (!current) {
+        return err("Project not found.", HTTP_NOT_FOUND);
+      }
+      return Response.json(
+        { error: "conflict", doc: docOf(current), version: current.version },
+        { status: HTTP_CONFLICT }
+      );
     } catch (e) {
       return caught(e, "Could not save project.");
     }

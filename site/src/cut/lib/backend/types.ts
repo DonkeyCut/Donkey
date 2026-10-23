@@ -36,3 +36,13 @@ export interface CutBackend {
   /** Absolute-or-relative URL for a backend API path (media src, downloads). */
   url(path: string): string;
 }
+
+/** Headers a cloud transport stamps on every project doc save: its writer id
+ * (one per page load, headless session, or captured backend) and the save's
+ * place in that writer's sequence. The server applies a save over a newer
+ * version only when the same writer saved it earlier in the sequence. */
+export const DOC_WRITER_HEADER = "x-cut-doc-writer";
+export const DOC_SEQ_HEADER = "x-cut-doc-seq";
+
+/** The status a versioned doc save answers when another writer moved on. */
+export const HTTP_CONFLICT = 409;
