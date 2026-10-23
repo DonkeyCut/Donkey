@@ -139,7 +139,7 @@ async function Post({ params }: Params) {
       {post.headerUrl ? <BlogHeaderImage src={post.headerUrl} alt={post.headerAlt ?? post.title} focus={post.headerFocus} /> : null}
       <div className="flex flex-col gap-12 lg:grid lg:grid-cols-[minmax(0,1fr)_16rem] lg:items-start">
         <div className="w-full max-w-[72ch]">
-          <header className="mb-8 md:mb-12">
+          <header className="mb-5">
             {post.tags.length > 0 ? (
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 {post.tags.map((tag) => (
