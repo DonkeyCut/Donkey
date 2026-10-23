@@ -161,6 +161,12 @@ function flickered(pose: MotionPose, q: number, index: number): MotionPose {
 /** Where unit `i` sits in the hand-off order, 0 at the front. */
 function orderOf(sel: RangeSelector, i: number, n: number): number {
   if (n <= 1) return 0;
+  if (sel.sequence?.length) {
+    const at = sel.sequence.indexOf(i);
+    if (at >= 0) return at;
+    // The rest follow in reading order.
+    return sel.sequence.length + [...Array(i).keys()].filter((j) => !sel.sequence!.includes(j)).length;
+  }
   if (sel.randomize) {
     // Rank by the unit's own draw: a stable shuffle that needs no array.
     const mine = draw(sel.seed ?? 1, i);
@@ -183,9 +189,18 @@ function orderOf(sel: RangeSelector, i: number, n: number): number {
 
 /** The share of the window unit `i` starts at. `square` gives every unit its
  * own slot with no overlap; the ramps and curves overlap by `spread`. */
-function startShare(sel: RangeSelector, i: number, n: number, share = sel.spread): number {
+function startShare(sel: RangeSelector, i: number, n: number, share = sel.spread, reverse = false): number {
   if (n <= 1) return 0;
-  const o = orderOf(sel, i, n);
+  let o = orderOf(sel, i, n);
+  if (sel.sequence?.length) {
+    // A sequence hands the motion along the units it names, so the last of
+    // them lands as the ramp ends; any it leaves out (a space) go with the
+    // last. An exit sweeps them out in the order they came in, the way a
+    // reading-order exit does.
+    n = Math.max(2, sel.sequence.length);
+    o = Math.min(o, n - 1);
+    if (reverse) o = n - 1 - o;
+  }
   const spread = clamp01(share);
   if (sel.shape === "square") return o / n;
   const u = o / (n - 1);
@@ -216,9 +231,11 @@ export function selectorProgress(
 ): number {
   const n = Math.max(1, count);
   // An exit sweeps out the way it came in, so the order reverses.
-  const i = exiting ? n - 1 - index : index;
-  const from = startShare(sel, i, n, spread);
-  const window = sel.shape === "square" ? 1 / n : Math.max(1e-6, 1 - clamp01(spread));
+  const listed = !!sel.sequence?.length;
+  const i = exiting && !listed ? n - 1 - index : index;
+  const from = startShare(sel, i, n, spread, exiting && listed);
+  const slots = listed ? Math.max(2, sel.sequence!.length) : n;
+  const window = sel.shape === "square" ? 1 / slots : Math.max(1e-6, 1 - clamp01(spread));
   let q = clamp01((clamp01(p) - from) / window);
   if (sel.easeHigh) q = lerp(q, bezierEase([0.42, 0, 1, 1], q), clamp01(sel.easeHigh));
   if (sel.easeLow) q = lerp(q, bezierEase([0, 0, 0.58, 1], q), clamp01(sel.easeLow));

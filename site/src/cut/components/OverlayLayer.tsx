@@ -1557,6 +1557,21 @@ const MASK_CSS_FPS = 15;
 /** The mask canvas's size cap; the CSS mask stretches it over the box, so a
  * big element pays a small encode. */
 const MASK_CSS_MAX = 512;
+/** A streaking letter's taps, in its span's own px: the on-screen streak
+ * turned back through the letter's turn and stretch, and the share of the
+ * streak each copy sits at. */
+function glyphStreak(g: ReturnType<typeof glyphStateAt>, scale: number): { x: number; y: number; taps: number[] } | null {
+  const s = g.streak!;
+  const n = streakTaps(Math.hypot(s.x, s.y));
+  if (n < 2) return null;
+  const r = (-g.rotate * Math.PI) / 180;
+  const x = s.x * scale;
+  const y = s.y * scale;
+  const ux = (x * Math.cos(r) - y * Math.sin(r)) / (g.sx || 1);
+  const uy = (x * Math.sin(r) + y * Math.cos(r)) / (g.sy || 1);
+  return { x: ux, y: uy, taps: [...Array(n).keys()].map((i) => i / (n - 1) - 0.5) };
+}
+
 /** Empty coverage: hides the element while a computed matte has no person. */
 const NO_COVERAGE_MASK = "linear-gradient(transparent, transparent)";
 
@@ -1610,6 +1625,9 @@ function GlyphText({
           const blur = g.blur ? (g.blur * scale) / zoom : 0;
           // A splitting letter shows a red and a cyan copy either side.
           const split = g.split && ch !== " " ? g.split * scale : 0;
+          // A letter streaking under motion blur: its streak in the span's
+          // own space, under the letter's turn and stretch.
+          const streak = g.streak && ch !== " " && !reel ? glyphStreak(g, scale) : null;
           const copy = (tint: string, dx: number) => (
             <span
               aria-hidden
@@ -1662,6 +1680,36 @@ function GlyphText({
                     </span>
                   ))}
                 </>
+              ) : streak ? (
+                // A letter in flight under motion blur: copies along its
+                // streak that add up into one average, as the painter smears.
+                <span style={{ position: "relative", display: "inline-block", isolation: "isolate" }}>
+                  <span style={{ visibility: "hidden" }}>{ch}</span>
+                  {streak.taps.map((f, k) => (
+                    <span
+                      key={k}
+                      aria-hidden
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        top: 0,
+                        opacity: 1 / streak.taps.length,
+                        mixBlendMode: "plus-lighter",
+                        transform: `translate(${(streak.x * f).toFixed(2)}px, ${(streak.y * f).toFixed(2)}px)`,
+                      }}
+                    >
+                      {split ? (
+                        <>
+                          {copy(SPLIT_RED, -split)}
+                          {copy(SPLIT_CYAN, split)}
+                          <span style={{ position: "relative" }}>{ch}</span>
+                        </>
+                      ) : (
+                        ch
+                      )}
+                    </span>
+                  ))}
+                </span>
               ) : split ? (
                 <>
                   {copy(SPLIT_RED, -split)}

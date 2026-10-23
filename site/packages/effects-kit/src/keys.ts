@@ -359,12 +359,18 @@ export function evalOverlayFrame(o: Posable, tLocal: number, aspect?: number): O
   if (!aspect || !Number.isFinite(aspect)) {
     throw new Error("A camera or motion blur needs the frame's aspect to evaluate.");
   }
-  const placed = cam ? composeCamera(own, cameraAt(cam, tLocal), aspect) : own;
+  let placed = cam ? composeCamera(own, cameraAt(cam, tLocal), aspect) : own;
   if (!shutter) return placed;
   // The element's own motion blur streaks its whole move on screen; the
   // camera's streaks only what the camera does, with the element held still.
   const whole = !!o.motionBlur;
   const exposure = shutter * MOTION_BLUR_FRAME;
+  // Letters on a per-letter ramp carry their own moves, so each one streaks
+  // along its own: the glyph evaluator reads the shutter as a share of the
+  // ramp.
+  const ramp = placed.glyphs;
+  if (whole && ramp?.seconds)
+    placed = { ...placed, glyphs: { ...ramp, exposure: exposure / ramp.seconds, shutter } };
   const dur = Math.max(0.1, o.end - o.start);
   const t0 = Math.max(0, tLocal - exposure / 2);
   const t1 = Math.min(dur, tLocal + exposure / 2);

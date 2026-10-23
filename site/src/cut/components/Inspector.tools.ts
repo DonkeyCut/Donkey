@@ -371,7 +371,7 @@ export const INSPECTOR_TOOLS = [
   {
     name: "detach_audio",
     description:
-      "Detach Audio: lift a clip's sound onto the soundtrack track (mutes the clip) so it can be edited independently. Select the clip first or pass its id. Pass assetId instead to put a source's whole track on the soundtrack with none of its picture placed — how a cut blocked out as empty shots carries the reference's sound.",
+      "Detach Audio: lift a clip's sound onto the soundtrack track (mutes the clip) so it can be edited independently. Select the clip first or pass its id. Pass assetId instead to put a source's whole track on the soundtrack with none of its picture placed; the clip still plays that source, so a reference that came from a link brings its sound in as its own file instead (import_url audio_only), and the reference stays off the timeline.",
     inputSchema: obj({
       clipId: str("Video clip id (optional if one is selected)"),
       assetId: str("Project asset id — its whole audio track lands on the soundtrack, no clip placed"),

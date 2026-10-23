@@ -64,6 +64,12 @@ import {
   OVERLAY_ANIM_DEFAULT_SECONDS,
   EDGE_STAGGER_MAX,
   edgeMaxSeconds,
+  EDGE_DISTANCE_MAX,
+  EDGE_ORDERS,
+  EASE_IDS,
+  type EaseId,
+  type EdgeOrder,
+  letterSequence,
   OVERLAY_ANIM_MIN_SECONDS,
   OVERLAY_ANIM_STYLE_IDS,
   TEXT_ONLY_ANIM_STYLE_IDS,
@@ -1027,6 +1033,46 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const rest = { ...anim[slot]! };
         delete rest.stagger;
         anim[slot] = stagger < 0 ? rest : { ...rest, stagger: clamp(stagger, 0, EDGE_STAGGER_MAX) };
+      }
+      // The order and the reach ride the slot too; "reading" and 0 hand
+      // them back to the style's own.
+      const order = input[`${slot}_order`];
+      if (typeof order === "string" && anim[slot]) {
+        if (!(EDGE_ORDERS as readonly string[]).includes(order))
+          throw new ToolError(`Unknown ${slot}_order: ${order}. Use one of: ${EDGE_ORDERS.join(", ")}.`);
+        const rest = { ...anim[slot]! };
+        delete rest.order;
+        anim[slot] = order === "reading" ? rest : { ...rest, order: order as EdgeOrder };
+      }
+      const sequence = input[`${slot}_sequence`];
+      if (Array.isArray(sequence) && anim[slot]) {
+        const rest = { ...anim[slot]! };
+        if (Array.isArray(rest.order)) delete rest.order;
+        const text = (o.kind ?? "text") === "text" ? ((o as { text?: string }).text ?? "") : "";
+        const order = letterSequence(text, sequence as number[]);
+        if (sequence.length > 0 && order.length === 0)
+          throw new ToolError(`${slot}_sequence names no letter of "${text}": count its letters from 0, skipping spaces.`);
+        anim[slot] = order.length > 0 ? { ...rest, order } : rest;
+      }
+      const ease = input[`${slot}_ease`];
+      if (typeof ease === "string" && anim[slot]) {
+        if (ease !== "style" && !isEaseId(ease))
+          throw new ToolError(`Unknown ${slot}_ease: ${ease}. Use one of: ${EASE_IDS.join(", ")}, or "style".`);
+        const rest = { ...anim[slot]! };
+        delete rest.ease;
+        anim[slot] = ease === "style" ? rest : { ...rest, ease: ease as EaseId };
+      }
+      const fade = input[`${slot}_fade`];
+      if (typeof fade === "boolean" && anim[slot]) {
+        const rest = { ...anim[slot]! };
+        delete rest.fade;
+        anim[slot] = fade ? rest : { ...rest, fade: false };
+      }
+      const distance = input[`${slot}_distance`];
+      if (isNum(distance) && anim[slot]) {
+        const rest = { ...anim[slot]! };
+        delete rest.distance;
+        anim[slot] = distance <= 0 ? rest : { ...rest, distance: clamp(distance, 1, EDGE_DISTANCE_MAX) };
       }
     };
     edge("in", "in_style", "in_seconds");
@@ -7082,8 +7128,8 @@ function silenceNote(s: Editor, asset: MediaAsset): string {
     return "";
   }
   return sound === "yes"
-    ? `The cut plays no sound and "${asset.name}" has a soundtrack: detach_audio with its assetId lays that track on the soundtrack from 0, lined up with its picture, and its picture stays off every timeline. `
-    : `The cut plays no sound. listen_audio on "${asset.name}" says whether it has a soundtrack to lay down with detach_audio. `;
+    ? `The cut plays no sound and "${asset.name}" has a soundtrack: import_url with audio_only on the link it came from brings that track in as an audio file of its own, and add_clip at 0 lines it up with the picture while the reference stays off every timeline (detach_audio with its assetId when it came without a link). `
+    : `The cut plays no sound. listen_audio on "${asset.name}" says whether it has a soundtrack to lay down. `;
 }
 
 /** How every source-reading tool names the source it read. `type` and `sound`

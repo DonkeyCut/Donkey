@@ -29,6 +29,8 @@ import type { OverlayFontCycle } from "./fontCycle";
 import type { MotionPose, MotionPreset } from "./motion/types";
 import type { OverlayWords } from "./words";
 import { splitScale } from "./stretch";
+import { capStreak } from "./camera";
+import { EASE_BEZIER, type EaseId } from "./ease";
 
 export type OverlayAnimStyle =
   | "fade"
@@ -120,7 +122,31 @@ export interface OverlayEdge {
    * passing the motion from the first letter to the last (0 = every letter
    * together, near 1 = one at a time). Absent = the style's own. */
   stagger?: number;
+  /** The order a per-letter style deals the letters their turns: "shuffle"
+   * plays them in a fixed scattered order (After Effects' Randomize Order);
+   * a list names the characters by index (the glyph count: spaces and line
+   * breaks included) in the order they go, an order read off a reference.
+   * Absent = the style's own, reading order for most. */
+  order?: EdgeOrder | number[];
+  /** How far the style travels from rest at its far end, design px (1080
+   * short side): a drop from high above the frame, a long slide. Absent =
+   * the style's own reach. */
+  distance?: number;
+  /** The curve the move travels on, over the style's own: a letter falling
+   * at a steady pace is linear, one that brakes into place an ease out. */
+  ease?: EaseId;
+  /** false: no fade — the element (each letter) stays solid the whole way
+   * in or out, as a letter falling in from beyond the frame does. Absent =
+   * the style's own. */
+  fade?: boolean;
 }
+
+export type EdgeOrder = "reading" | "shuffle";
+export const EDGE_ORDERS: readonly EdgeOrder[] = ["reading", "shuffle"];
+/** The farthest an edge's distance may send it, design px: past any frame. */
+export const EDGE_DISTANCE_MAX = 4000;
+/** Seeds the shuffled order, so the same title always scatters the same way. */
+const EDGE_SHUFFLE_SEED = 5;
 
 /**
  * The bar at the end of the typed text. It holds solid while the entrance
@@ -198,8 +224,98 @@ export interface OverlayAnim {
 
 /** The motion a slot plays: the one it carries, or the catalog entry it
  * names. Everything downstream reads the preset, never the id. */
-export const edgeMotion = (slot: OverlayEdge | undefined): MotionPreset | undefined =>
-  slot ? (slot.preset ?? edgePreset(slot.style)) : undefined;
+export const edgeMotion = (slot: OverlayEdge | undefined): MotionPreset | undefined => {
+  if (!slot) return undefined;
+  const base = slot.preset ?? edgePreset(slot.style);
+  if (!base || (slot.order === undefined && !(slot.distance! > 0) && !slot.ease && slot.fade !== false)) return base;
+  let made = shaped.get(slot);
+  if (!made) {
+    made = shapeEdge(base, slot);
+    shaped.set(slot, made);
+  }
+  return made;
+};
+
+/** How far a preset's motion travels from rest, design px: the reach an
+ * edge's `distance` replaces. 0 for a style that never moves. */
+export function presetReach(preset: MotionPreset): number {
+  const reach = (props: MotionPreset["animate"] | undefined) =>
+    Math.max(0, ...(props?.position ?? []).map((k) => Math.max(Math.abs(k.v[0]), Math.abs(k.v[1]))));
+  return Math.max(reach(preset.animate), reach(preset.animateOut));
+}
+
+/** The style's own reach under a slot, before its distance: what the slot
+ * plays with no distance set. */
+export const edgeOwnReach = (slot: OverlayEdge | undefined): number => {
+  const base = slot ? (slot.preset ?? edgePreset(slot.style)) : undefined;
+  return base ? presetReach(base) : 0;
+};
+
+/** Glyph indices for letters counted the way a person reads them: `letters`
+ * numbers the text's characters from 0, skipping spaces and line breaks;
+ * the glyph count the renderers walk includes both. Out-of-range numbers
+ * drop out. */
+export function letterSequence(text: string, letters: number[]): number[] {
+  const at: number[] = [];
+  let gi = 0;
+  for (const line of text.split("\n")) {
+    for (const ch of line) {
+      if (!/\s/.test(ch)) at.push(gi);
+      gi++;
+    }
+    gi++; // the line break takes a turn too
+  }
+  const seen = new Set<number>();
+  return letters.filter((k) => Number.isInteger(k) && k >= 0 && k < at.length && !seen.has(k) && seen.add(k)).map((k) => at[k]);
+}
+
+/** Slots are replaced, never edited, so a shaped preset stays good for as
+ * long as its slot lives. */
+const shaped = new WeakMap<OverlayEdge, MotionPreset>();
+
+/** The slot's own order and reach written into its preset, so every reader —
+ * the glyph evaluator, the crop padding, both renderers — plays them. */
+function shapeEdge(base: MotionPreset, slot: OverlayEdge): MotionPreset {
+  let preset = base;
+  if (Array.isArray(slot.order) && base.selector) {
+    preset = { ...preset, selector: { ...base.selector, randomize: false, sequence: slot.order } };
+  } else if (slot.order && base.selector) {
+    const randomize = slot.order === "shuffle";
+    preset = {
+      ...preset,
+      selector: { ...base.selector, randomize, ...(randomize ? { seed: base.selector.seed ?? EDGE_SHUFFLE_SEED } : {}) },
+    };
+  }
+  const own = presetReach(base);
+  if (slot.distance! > 0 && own > 0) {
+    const k = Math.min(EDGE_DISTANCE_MAX, slot.distance!) / own;
+    const scaled = (props: MotionPreset["animate"]): MotionPreset["animate"] =>
+      props.position
+        ? { ...props, position: props.position.map((key) => ({ ...key, v: [key.v[0] * k, key.v[1] * k] as [number, number] })) }
+        : props;
+    preset = {
+      ...preset,
+      animate: scaled(preset.animate),
+      ...(preset.animateOut ? { animateOut: scaled(preset.animateOut) } : {}),
+    };
+  }
+  if (slot.ease || slot.fade === false) {
+    const curve = slot.ease ? EASE_BEZIER[slot.ease] : undefined;
+    const reshaped = (props: MotionPreset["animate"]): MotionPreset["animate"] => {
+      const next = { ...props };
+      if (curve && next.position)
+        next.position = next.position.map((key, k, all) => (k < all.length - 1 ? { ...key, ease: curve } : key));
+      if (slot.fade === false) delete next.opacity;
+      return next;
+    };
+    preset = {
+      ...preset,
+      animate: reshaped(preset.animate),
+      ...(preset.animateOut ? { animateOut: reshaped(preset.animateOut) } : {}),
+    };
+  }
+  return preset;
+}
 
 export const loopMotion = (slot: OverlayLoop | undefined): MotionPreset | undefined =>
   slot ? (slot.preset ?? loopPreset(slot.style)) : undefined;
@@ -279,10 +395,16 @@ export const LOOP_PERIODS = Object.fromEntries(
 export const OVERLAY_ANIM_MIN_SECONDS = 0.1;
 export const OVERLAY_ANIM_MAX_SECONDS = 2;
 export const OVERLAY_ANIM_DEFAULT_SECONDS = 0.5;
+/** A per-letter ramp hands its motion along a whole line, so it may run
+ * longer: a long title landing a letter at a time takes a few seconds. */
+export const OVERLAY_GLYPH_ANIM_MAX_SECONDS = 4;
 
-/** The longest ramp a style may run: its own cap, else the shared one. */
-export const edgeMaxSeconds = (style: string | undefined): number =>
-  (style ? edgePreset(style)?.maxSeconds : undefined) ?? OVERLAY_ANIM_MAX_SECONDS;
+/** The longest ramp a style may run: its own cap, else the per-letter one,
+ * else the shared one. */
+export const edgeMaxSeconds = (style: string | undefined): number => {
+  const preset = style ? edgePreset(style) : undefined;
+  return preset?.maxSeconds ?? (preset?.selector ? OVERLAY_GLYPH_ANIM_MAX_SECONDS : OVERLAY_ANIM_MAX_SECONDS);
+};
 
 /** The most of a ramp the letter hand-off may take: at 1 each letter would
  * get no time of its own to move. */
@@ -356,6 +478,13 @@ export interface GlyphPhase {
   exiting: boolean;
   /** The slot's own hand-off, over the style's (see `OverlayEdge.stagger`). */
   stagger?: number;
+  /** The ramp's length, seconds. */
+  seconds?: number;
+  /** The share of the ramp the shutter stays open, when the element wears
+   * motion blur: each letter then streaks along its own move. */
+  exposure?: number;
+  /** The element's shutter, frames (caps the streak's length). */
+  shutter?: number;
 }
 
 /** Where a per-glyph loop stands: one number, 0 to 1 around the cycle. Each
@@ -423,6 +552,9 @@ export interface GlyphAnimState {
   /** How far a red and a cyan copy pull apart either side, design px; absent
    * = one copy. */
   split?: number;
+  /** The motion blur streak: how far the letter travels while the shutter
+   * is open, design px, centered on this moment. Absent = sharp. */
+  streak?: { x: number; y: number };
 }
 
 const IDLE: OverlayAnimState = { dx: 0, dy: 0, scale: 1, rotate: 0, alpha: 1 };
@@ -462,7 +594,20 @@ export function glyphAnimAt(phase: GlyphPhase, index: number, count: number): Gl
   // whole-element style leaves its glyphs where they are.
   if (!preset?.selector) return GLYPH_IDLE;
   const n = Math.max(1, count);
-  return asGlyph(evalPreset(preset, p, index, n, exiting, 0, phase.stagger), index, n);
+  const at = (q: number) => asGlyph(evalPreset(preset, q, index, n, exiting, 0, phase.stagger), index, n);
+  const g = at(p);
+  const e = phase.exposure ?? 0;
+  if (!(e > 0)) return g;
+  // The letter's travel over the part of the exposure inside the ramp,
+  // scaled to the whole exposure, the way an element's own streak is.
+  const p0 = Math.max(0, p - e / 2);
+  const p1 = Math.min(1, p + e / 2);
+  if (p1 - p0 < 1e-6) return g;
+  const a = at(p0);
+  const b = at(p1);
+  const k = e / (p1 - p0);
+  const streak = capStreak((b.dx - a.dx) * k, (b.dy - a.dy) * k, phase.shutter ?? 1);
+  return streak ? { ...g, streak } : g;
 }
 
 /** Where character `index` of `count` sits with everything applied — the edge
@@ -492,6 +637,7 @@ export function glyphStateAt(
     ...(roll ? { roll } : {}),
     ...(blur ? { blur } : {}),
     ...(split ? { split } : {}),
+    ...(ramp.streak ? { streak: ramp.streak } : {}),
   };
 }
 
@@ -511,7 +657,8 @@ function edgeState(
   slot: OverlayEdge,
   p: number,
   exiting: boolean,
-  isText: boolean
+  isText: boolean,
+  seconds: number
 ): OverlayAnimState {
   const preset = edgeMotion(slot);
   if (!preset) return { ...IDLE };
@@ -519,7 +666,14 @@ function edgeState(
   if (preset.selector && isText)
     return {
       ...IDLE,
-      glyphs: { style: slot.style, preset: slot.preset, p: clamped, exiting, ...(slot.stagger !== undefined ? { stagger: slot.stagger } : {}) },
+      glyphs: {
+        style: slot.style,
+        preset,
+        p: clamped,
+        exiting,
+        seconds,
+        ...(slot.stagger !== undefined ? { stagger: slot.stagger } : {}),
+      },
     };
   // Anything with no characters to hand the motion to plays it once over the
   // whole box.
@@ -583,9 +737,9 @@ export function evalOverlayAnim(
   const outSecs = anim.out ? Math.min(anim.out.seconds, Math.max(0, dur - inSecs)) : 0;
 
   if (anim.in && tLocal < inSecs) {
-    state = edgeState(anim.in, tLocal / inSecs, false, isText);
+    state = edgeState(anim.in, tLocal / inSecs, false, isText, inSecs);
   } else if (anim.out && tLocal > dur - outSecs) {
-    state = edgeState(anim.out, (dur - tLocal) / outSecs, true, isText);
+    state = edgeState(anim.out, (dur - tLocal) / outSecs, true, isText, outSecs);
   }
 
   if (anim.loop) {

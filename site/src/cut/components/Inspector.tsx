@@ -54,6 +54,13 @@ import {
   edgeMotion,
   edgeStagger,
   EDGE_STAGGER_MAX,
+  EDGE_DISTANCE_MAX,
+  EASE_IDS,
+  EASE_LABELS,
+  type EaseId,
+  edgeOwnReach,
+  edgePreset,
+  type OverlayEdge,
   keepCaret,
   OVERLAY_HIT_DEFAULT_SECONDS,
   OVERLAY_HIT_MAX_SECONDS,
@@ -3618,6 +3625,20 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
     ck.begin();
     writeOverlayAnim(o, anim, { [slot]: { ...edge, stagger: v } }, peers);
   };
+  // The order the letters take their turns, and how far the motion reaches.
+  const edgeSequence = Array.isArray(edge?.order) ? edge.order : null;
+  const edgeOrder = edgeSequence ? "sequence" : (edge?.order ?? (edgeMotion(edge)?.selector?.randomize ? "shuffle" : "reading"));
+  const ownReach = edgeOwnReach(edge);
+  const edgeDistance = edge?.distance ?? ownReach;
+  const edgeEase = edge?.ease ?? "style";
+  // A style that fades as it moves can be told to stay solid.
+  const edgeFades = !!(edge && (edge.preset ?? edgePreset(edge.style))?.animate.opacity);
+  const edgeFade = edge?.fade !== false;
+  const writeEdge = (patch: Partial<OverlayEdge>) => {
+    if (!edge) return;
+    ck.begin();
+    writeOverlayAnim(o, anim, { [slot]: { ...edge, ...patch } }, peers);
+  };
   return bar(
     <>
       <Row label="Duration">
@@ -3661,10 +3682,97 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
           />
         </Row>
       )}
+      {stagger !== undefined && (
+        <Row label="Shuffle">
+          <Switch
+            checked={edgeOrder !== "reading"}
+            onCheckedChange={(v) => {
+              writeEdge({ order: v ? "shuffle" : "reading" });
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
+      {ownReach > 0 && (
+        // The curve the move travels on, over the style's own.
+        <Row label="Ease">
+          <Select
+            value={edgeEase}
+            items={EDGE_EASE_ITEMS}
+            onValueChange={(id) => {
+              const rest = { ...edge! };
+              delete rest.ease;
+              ck.begin();
+              writeOverlayAnim(o, anim, { [slot]: id === "style" ? rest : { ...rest, ease: id as EaseId } }, peers);
+              ck.end();
+            }}
+          >
+            <SelectTrigger className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(EDGE_EASE_ITEMS).map(([id, label]) => (
+                <SelectItem key={id} value={id} className="text-[12px]">
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Row>
+      )}
+      {edgeFades && (
+        <Row label="Fade">
+          <Switch
+            checked={edgeFade}
+            onCheckedChange={(v) => {
+              const rest = { ...edge! };
+              delete rest.fade;
+              ck.begin();
+              writeOverlayAnim(o, anim, { [slot]: v ? rest : { ...rest, fade: false } }, peers);
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
+      {edgeSequence && isTextOverlay(o) && (
+        // An order read off a reference: the letters as they arrive.
+        <Row label="Order">
+          <span className="truncate text-xs text-muted-foreground" title="Letters in the order they move">
+            {edgeSequence.map((i) => [...o.text][i] ?? "").join(" ")}
+          </span>
+        </Row>
+      )}
+      {ownReach > 0 && (
+        <Row label="Distance">
+          <ValueSlider
+            label="Distance"
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={edgeDistance}
+            min={1}
+            max={EDGE_DISTANCE_MAX}
+            step={1}
+            snap={[ownReach]}
+            format={(v) => String(Math.round(v))}
+            parse={(t) => Number(t)}
+            onDraft={(v) => writeEdge({ distance: v })}
+            onCommit={(v) => {
+              writeEdge({ distance: v });
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
       {types && <CaretSettings overlay={o} peers={peers} />}
     </>
   );
 }
+
+/** An edge's curve: the style's own, or any ease by name. */
+const EDGE_EASE_ITEMS: Record<string, string> = {
+  style: "Style's own",
+  ...Object.fromEntries(EASE_IDS.map((id) => [id, EASE_LABELS[id]])),
+};
 
 /** Rotation and opacity, shared by every overlay kind. Neutral values store
  * as absence so untouched elements carry nothing. */

@@ -32,8 +32,8 @@ import { cutAtFaces, cycleFaceTag, fontCycleCuts, fontCycleVariants, withFontCyc
 import { evalWhole, presetExtent } from "./motion/evaluate";
 import { countStep, countText } from "./count";
 import { evalOverlayFrame, hasOverlayKeys, poseAt, poseExtent, sortedKeys, type OverlayFrameState } from "./keys";
-import { ELEMENT_BLUR_MAX, hasCameraKeys, streakCap } from "./camera";
-import { ElementFx, elementLook } from "./elementFx";
+import { ELEMENT_BLUR_MAX, hasCameraKeys, MOTION_BLUR_FRAME, streakCap, streakTaps } from "./camera";
+import { drawStreak, ElementFx, elementLook } from "./elementFx";
 import { applyMaskToCanvas, isMaskAnimated } from "./mask";
 import { tracePolyShape } from "./shapePath";
 import { paintPattern } from "./pattern";
@@ -761,30 +761,32 @@ async function paintText(
   // Outline behind the fill: stroke first, then fill over it — the same order
   // the DOM pair (-webkit-text-stroke + paint-order: stroke fill) paints.
   const strokeW = (overlay.stroke?.width ?? 0) * fpx;
-  const drawText = (text: string, x: number, y: number, fill: string = overlay.color) => {
+  // `on` is where the type lands: the frame, or a streaking letter's own
+  // picture.
+  const drawText = (text: string, x: number, y: number, fill: string = overlay.color, on = ctx) => {
     if (overlay.stroke && strokeW > 0) {
-      ctx.lineJoin = "round";
+      on.lineJoin = "round";
       // In em of whatever size is set, so a resized word wears the same
       // outline weight as the words beside it.
-      ctx.lineWidth = (strokeW / fpx) * drawSize * 2; // half of a centered stroke shows behind the fill
-      ctx.strokeStyle = overlay.stroke.color;
-      ctx.strokeText(text, x, y);
+      on.lineWidth = (strokeW / fpx) * drawSize * 2; // half of a centered stroke shows behind the fill
+      on.strokeStyle = overlay.stroke.color;
+      on.strokeText(text, x, y);
     }
-    ctx.fillStyle = fill;
-    ctx.fillText(text, x, y);
+    on.fillStyle = fill;
+    on.fillText(text, x, y);
   };
   // A glitching letter's channel copies: the same outline and fill in one
   // tint, so a hollow title tears into hollow copies.
-  const drawTinted = (text: string, x: number, y: number, tint: string) => {
+  const drawTinted = (text: string, x: number, y: number, tint: string, on = ctx) => {
     if (overlay.stroke && strokeW > 0) {
-      ctx.lineJoin = "round";
-      ctx.lineWidth = (strokeW / fpx) * drawSize * 2;
-      ctx.strokeStyle = tint;
-      ctx.strokeText(text, x, y);
+      on.lineJoin = "round";
+      on.lineWidth = (strokeW / fpx) * drawSize * 2;
+      on.strokeStyle = tint;
+      on.strokeText(text, x, y);
     }
     if (!isInkless(overlay.color)) {
-      ctx.fillStyle = tint;
-      ctx.fillText(text, x, y);
+      on.fillStyle = tint;
+      on.fillText(text, x, y);
     }
   };
 
@@ -840,6 +842,72 @@ async function paintText(
     ctx.fillRect(right + CARET_GAP_EM * fpx, y + off - h / 2, Math.max(2 * scale, CARET_WIDTH_EM * fpx), h);
     ctx.restore();
   };
+  // A streaking letter's two scratches: its picture, and the smear the taps
+  // add up in. Made on the first streak and reused for every letter after.
+  let glyphPic: HTMLCanvasElement | null = null;
+  let glyphSmear: HTMLCanvasElement | null = null;
+  const smearGlyph = (
+    streak: { x: number; y: number },
+    placed: DOMMatrix,
+    w: number,
+    paint: (on: CanvasRenderingContext2D) => void
+  ) => {
+    // The streak in the target's own pixels.
+    const sx = (placed.a * streak.x + placed.c * streak.y) * scale;
+    const sy = (placed.b * streak.x + placed.d * streak.y) * scale;
+    // Room for the letter at any turn or stretch it is drawn at, its outline
+    // and its shadow.
+    const shadowPad = shadow ? (shadow.blur + Math.abs(shadow.offsetY)) * scale : 0;
+    const zoom = Math.max(Math.hypot(placed.a, placed.b), Math.hypot(placed.c, placed.d));
+    const half = Math.ceil((Math.max(w, lineH) * 1.5 + strokeW + shadowPad + 4) * zoom);
+    const pw = 2 * half;
+    const mw = pw + Math.ceil(Math.abs(sx));
+    const mh = pw + Math.ceil(Math.abs(sy));
+    glyphPic ??= newCanvas(env, pw, pw);
+    glyphSmear ??= newCanvas(env, mw, mh);
+    if (glyphPic.width !== pw || glyphPic.height !== pw) {
+      glyphPic.width = pw;
+      glyphPic.height = pw;
+    }
+    if (glyphSmear.width < mw || glyphSmear.height < mh) {
+      glyphSmear.width = Math.max(glyphSmear.width, mw);
+      glyphSmear.height = Math.max(glyphSmear.height, mh);
+    }
+    // The letter, posed as the frame would pose it, at the picture's middle.
+    const pic = glyphPic.getContext("2d")!;
+    pic.setTransform(1, 0, 0, 1, 0, 0);
+    pic.clearRect(0, 0, pw, pw);
+    pic.font = ctx.font;
+    if ("letterSpacing" in pic) pic.letterSpacing = (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing;
+    pic.textAlign = ctx.textAlign;
+    pic.textBaseline = ctx.textBaseline;
+    pic.filter = ctx.filter;
+    pic.shadowColor = ctx.shadowColor;
+    pic.shadowBlur = ctx.shadowBlur;
+    pic.shadowOffsetY = ctx.shadowOffsetY;
+    const m = ctx.getTransform();
+    // Turn and stretch carry over; the frame's own placement does not.
+    pic.setTransform(m.a, m.b, m.c, m.d, half, half);
+    paint(pic);
+    // The taps add up into the smear, so the streak averages the letter's
+    // positions the way the element's own streak does.
+    const smear = glyphSmear.getContext("2d")!;
+    smear.setTransform(1, 0, 0, 1, 0, 0);
+    smear.clearRect(0, 0, glyphSmear.width, glyphSmear.height);
+    drawStreak(smear, glyphPic, (mw - pw) / 2, (mh - pw) / 2, {
+      streakX: sx,
+      streakY: sy,
+      taps: streakTaps(Math.hypot(streak.x, streak.y)),
+    });
+    // Back at the letter's place, untransformed: the picture already wears
+    // its turn and stretch.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.filter = "none";
+    ctx.shadowColor = "transparent";
+    ctx.drawImage(glyphSmear, 0, 0, mw, mh, placed.e - mw / 2, placed.f - mh / 2, mw, mh);
+    ctx.restore();
+  };
   if ((phase && hasGlyphMotion(phase)) || (texture && !draws)) {
     // A per-glyph ramp or loop draws character by character, each at its own
     // place in the motion. The index counts through the whole element, line
@@ -875,12 +943,30 @@ async function paintText(
           ctx.save();
           ctx.globalAlpha = alpha0 * Math.min(1, Math.max(0, g.alpha));
           ctx.translate(x + w / 2 + g.dx * scale, y + g.dy * scale);
+          // Where the letter sits before its own turn and stretch: its streak
+          // runs in this space, since the move is an offset, not a turn.
+          const placed = g.streak ? ctx.getTransform() : null;
           if (g.rotate) ctx.rotate((g.rotate * Math.PI) / 180);
           ctx.scale(g.sx, g.sy);
           if (g.blur && "filter" in ctx) {
             // A letter's own defocus stacks on whatever the element wears.
             const own = ctx.filter && ctx.filter !== "none" ? `${ctx.filter} ` : "";
             ctx.filter = `${own}blur(${(g.blur * scale).toFixed(2)}px)`;
+          }
+          if (placed && g.streak && !g.roll) {
+            // A letter in flight under motion blur: painted once into its own
+            // picture, smeared along its streak, then laid down whole.
+            smearGlyph(g.streak, placed, w, (on) => {
+              if (g.split) {
+                const off = g.split * scale;
+                drawTinted(ch, -off, drop, SPLIT_RED, on);
+                drawTinted(ch, off, drop, SPLIT_CYAN, on);
+              }
+              drawText(ch, 0, drop, overlay.color, on);
+            });
+            ctx.restore();
+            x += w;
+            return;
           }
           if (g.split) {
             const off = g.split * scale;
@@ -1741,10 +1827,14 @@ export function planAnimatedLayers(o: Overlay, end: number): AnimatedLayer[] {
         push(o, at, to, rest, lit({
           glyphs: {
             style: edge.style,
-            preset: edge.preset,
+            // The slot's own order and reach, as the preview plays them.
+            preset,
             p,
             exiting: slot === "out",
+            seconds: secs,
             ...(edge.stagger !== undefined ? { stagger: edge.stagger } : {}),
+            // Under motion blur each letter streaks along its own move.
+            ...(o.motionBlur ? { exposure: (o.motionBlur * MOTION_BLUR_FRAME) / secs, shutter: o.motionBlur } : {}),
           },
         }, at, to));
       } else if (preset?.animate.erode) {

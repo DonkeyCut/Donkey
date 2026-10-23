@@ -110,6 +110,9 @@ export interface RangeSelector {
    * order — After Effects' Randomize Order. */
   randomize?: boolean;
   seed?: number;
+  /** The units in the order they take their turns, by index: an order read
+   * off a reference. Units it leaves out go after it, in reading order. */
+  sequence?: number[];
 }
 
 /**

@@ -27,6 +27,9 @@ import {
   OVERLAY_HIT_STYLE_IDS,
   OVERLAY_ANIM_DEFAULT_SECONDS,
   OVERLAY_ANIM_MAX_SECONDS,
+  OVERLAY_GLYPH_ANIM_MAX_SECONDS,
+  EDGE_DISTANCE_MAX,
+  EDGE_ORDERS,
   edgeMaxSeconds,
   OVERLAY_ANIM_MIN_SECONDS,
   GLYPH_ANIM_STYLE_IDS,
@@ -53,9 +56,12 @@ import {
 } from "@/cut/lib/textMotion";
 
 // Styles that may run past the shared cap say how far, e.g. "; count up to 10".
-const LONG_RAMPS = OVERLAY_ANIM_STYLE_IDS.filter((id) => edgeMaxSeconds(id) !== OVERLAY_ANIM_MAX_SECONDS)
-  .map((id) => `; ${id} up to ${edgeMaxSeconds(id)}`)
-  .join("");
+const LONG_RAMPS =
+  OVERLAY_ANIM_STYLE_IDS.filter(
+    (id) => edgeMaxSeconds(id) !== OVERLAY_ANIM_MAX_SECONDS && edgeMaxSeconds(id) !== OVERLAY_GLYPH_ANIM_MAX_SECONDS
+  )
+    .map((id) => `; ${id} up to ${edgeMaxSeconds(id)}`)
+    .join("") + `; the per-letter styles up to ${OVERLAY_GLYPH_ANIM_MAX_SECONDS}`;
 const RAMP_SECONDS = `${OVERLAY_ANIM_MIN_SECONDS}..${OVERLAY_ANIM_MAX_SECONDS} (default ${OVERLAY_ANIM_DEFAULT_SECONDS}${LONG_RAMPS})`;
 
 /** The loop rate multiplier's range: at the top a spin turns twice a second,
@@ -70,7 +76,7 @@ export const OVERLAY_ANIMATION_TOOLS = [
   {
     name: "set_overlay_animation",
     description:
-      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; ${TEXT_ONLY_ANIM_STYLE_IDS.join(", ")} animate titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece; in_stagger/out_stagger set how much of their ramp the hand-off from the first letter to the last takes, so a 1.6s drop at stagger 0.8 lands a letter every ~0.27s, each moving for ~0.3s. ${edgeNotes()} ${DIVE_ANIM_STYLE_IDS.join(", ")} as the exit is the zoom-through-a-letter transition: the shot after the element shows once the ink has filled the frame, so it needs no freeze frames, image stills or per-letter keyframes. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; set_overlay_keyframes is the precise way to move an element and the default reach, so name a move when it is exactly what you mean — the two compose together. Word effects — words_style, titles only — play the line word by word, timed against the cut's transcript when there is one and spread across the element's own span when there is not: an emphasis travels along a line that is fully up, and a build assembles the line as it is spoken. It is the slot for "make each word pop as I say it" and for "have the words appear one by one". A typewriter entrance on a title can carry a caret: a thin bar at the end of the typed text, solid while it types, then blinking every ${CARET_BLINK_SECONDS}s — the typed comment or search box of a call-to-action card. A hit plays one motion once at a moment inside the element (hit_at seconds from its start), between its entrance and exit: ${hitNotes()}. Use press for a button being pressed, a tap on a UI element, a like or post button; pair it with a click from stock_search kind "sound" placed at the same moment when the tap should be heard. A font cycle flickers a title through typefaces — a new face font_cycle_rate times a second, from font_cycle_at for font_cycle_seconds — and then the title settles back into its own face: the typeface-shuffle beat of a teaser title. Give each face a scale (and tracking) so it fills about the room the title's own face does; a wide tracked title cycling through condensed or hand-drawn faces wants tracking 0 and a scale above 1 on them. A face keeps the title's own line breaks: where its scale makes a line wider than the room the title wraps in, that face is set smaller to fit rather than broken onto another line. Time the faces to the music with font_cycle_beats — a new face on each beat of that clip's detect_beats grid, font_cycle_beat_step 2 for every other beat or 0.5 for half beats — or to a reference's own face changes with font_cycle_switches, the timeline seconds you read them at; either sets every hold and repeats the faces in order to fill the run. A face's own hold times one face by hand; faces repeat in the list to revisit a typeface.`,
+      `Animate an overlay element (title, shape, or sticker): preset In/Out ramps, a Loop that runs its whole duration, and a Move that says what the element does WHILE it holds. Omitted slots keep their setting; pass "none" to clear one. In/Out styles: ${OVERLAY_ANIM_STYLE_IDS.join(", ")} — slide names are the motion direction; ${TEXT_ONLY_ANIM_STYLE_IDS.join(", ")} animate titles only; ${GLYPH_ANIM_STYLE_IDS.join(", ")} move a title's letters one at a time, and move any other kind as one piece; in_stagger/out_stagger set how much of their ramp the hand-off from the first letter to the last takes, so a 1.6s drop at stagger 0.8 lands a letter every ~0.27s, each moving for ~0.3s. in_order/out_order "shuffle" deals the letters their turns in a scattered order instead of left to right — letters landing at random; in_sequence names the exact order when it is read off a reference. in_ease sets the curve the move travels on and in_fade false keeps letters solid while they fall, both read off how a letter in flight looks. A ramp's timing comes from two reads: how long ONE letter takes from first showing to settling (its own move: track_element match ink within a tall strip over that letter's column), and the span from the first letter's start to the last one's — in_seconds is that span plus one letter's move, and in_stagger is the span over in_seconds. in_distance/out_distance set how far the motion travels from rest, design px: a letter falling from above the frame drops the distance from where track_element first sees it to where it lands. A per-letter ramp on an element with update_overlay motion_blur streaks each letter along its own move, the smear a fast fall wears. ${edgeNotes()} ${DIVE_ANIM_STYLE_IDS.join(", ")} as the exit is the zoom-through-a-letter transition: the shot after the element shows once the ink has filled the frame, so it needs no freeze frames, image stills or per-letter keyframes. Loop styles: ${OVERLAY_LOOP_STYLE_IDS.join(", ")} — ${GLYPH_LOOP_STYLE_IDS.join(", ")} carry a title's letters on their own delays, and carry any other kind as one piece. A move is a slot like the others and never touches the element's keyframe track; set_overlay_keyframes is the precise way to move an element and the default reach, so name a move when it is exactly what you mean — the two compose together. Word effects — words_style, titles only — play the line word by word, timed against the cut's transcript when there is one and spread across the element's own span when there is not: an emphasis travels along a line that is fully up, and a build assembles the line as it is spoken. It is the slot for "make each word pop as I say it" and for "have the words appear one by one". A typewriter entrance on a title can carry a caret: a thin bar at the end of the typed text, solid while it types, then blinking every ${CARET_BLINK_SECONDS}s — the typed comment or search box of a call-to-action card. A hit plays one motion once at a moment inside the element (hit_at seconds from its start), between its entrance and exit: ${hitNotes()}. Use press for a button being pressed, a tap on a UI element, a like or post button; pair it with a click from stock_search kind "sound" placed at the same moment when the tap should be heard. A font cycle flickers a title through typefaces — a new face font_cycle_rate times a second, from font_cycle_at for font_cycle_seconds — and then the title settles back into its own face: the typeface-shuffle beat of a teaser title. Give each face a scale (and tracking) so it fills about the room the title's own face does; a wide tracked title cycling through condensed or hand-drawn faces wants tracking 0 and a scale above 1 on them. A face keeps the title's own line breaks: where its scale makes a line wider than the room the title wraps in, that face is set smaller to fit rather than broken onto another line. Time the faces to the music with font_cycle_beats — a new face on each beat of that clip's detect_beats grid, font_cycle_beat_step 2 for every other beat or 0.5 for half beats — or to a reference's own face changes with font_cycle_switches, the timeline seconds you read them at; either sets every hold and repeats the faces in order to fill the run. A face's own hold times one face by hand; faces repeat in the list to revisit a typeface.`,
     inputSchema: obj({
       id: str("Overlay element id"),
       move: {
@@ -95,6 +101,29 @@ export const OVERLAY_ANIMATION_TOOLS = [
       out_seconds: num(`Exit ramp seconds ${RAMP_SECONDS}`),
       in_stagger: num(`Per-letter entrance: share of the ramp spent handing the motion from the first letter to the last, 0..${EDGE_STAGGER_MAX} (0 = every letter together, higher = one after another, each moving for less of the ramp); a negative restores the style's own`),
       out_stagger: num(`Per-letter exit: the same hand-off share for the exit ramp, 0..${EDGE_STAGGER_MAX}; a negative restores the style's own`),
+      in_order: {
+        type: "string",
+        enum: [...EDGE_ORDERS],
+        description: 'Per-letter entrance: the order the letters take their turns — "reading" (left to right) or "shuffle" (a fixed scattered order)',
+      },
+      out_order: { type: "string", enum: [...EDGE_ORDERS], description: "Per-letter exit: the same order for the exit ramp" },
+      in_sequence: {
+        type: "array",
+        items: { type: "integer" },
+        description:
+          "Per-letter entrance in an order read off a reference: the letters' numbers in the order they arrive, counting the title's letters from 0 and skipping spaces (YOUR LOCATION: Y=0 … R=3, L=4 … N=11). Overrides in_order; [] clears it",
+      },
+      out_sequence: { type: "array", items: { type: "integer" }, description: "Per-letter exit: the letters' numbers in the order they leave; [] clears it" },
+      in_ease: {
+        type: "string",
+        enum: [...EASE_IDS, "style"],
+        description: `Entrance: the curve the move travels on — the ease track_element reads for the reference's move (linear for a steady fall, an .out ease for one that brakes into place); "style" restores the style's own`,
+      },
+      out_ease: { type: "string", enum: [...EASE_IDS, "style"], description: 'Exit: the same curve for the exit ramp; "style" restores the style\'s own' },
+      in_fade: bool("Entrance: false keeps the element (each letter) solid the whole way in instead of fading up as it moves — a letter falling in from beyond the frame is solid; true restores the style's fade"),
+      out_fade: bool("Exit: false keeps it solid the whole way out; true restores the style's fade"),
+      in_distance: num(`Entrance: how far the motion travels from rest at its far end, design px at 1080, 1..${EDGE_DISTANCE_MAX}; 0 restores the style's own reach`),
+      out_distance: num(`Exit: the same reach for the exit ramp, design px; 0 restores the style's own`),
       loop_style: {
         type: "string",
         enum: [...OVERLAY_LOOP_STYLE_IDS, "none"],

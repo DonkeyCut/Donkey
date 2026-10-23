@@ -404,9 +404,10 @@ test("a silent cut held up to a reference with sound says so", async () => {
   useEditor.getState().updateAsset("ref", { watch: { heard: [{ from: 0, to: 33 }] } as never });
   const out = (await runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 1, step: 0.5 })) as { note: string };
   expect(out.note).toContain("plays no sound");
-  expect(out.note).toContain("detach_audio");
-  // A reference kept off the timelines still lends its sound.
-  expect(out.note).toContain("its picture stays off every timeline");
+  // A reference kept off the timelines still lends its sound, as a file of
+  // its own, so the reference can go once the build is done.
+  expect(out.note).toContain("audio_only");
+  expect(out.note).toContain("the reference stays off every timeline");
   const look = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1] })) as { note: string };
   expect(look.note).toContain("plays no sound");
 

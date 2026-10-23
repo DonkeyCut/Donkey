@@ -37,6 +37,21 @@ export const EASE_LABELS: Record<EaseId, string> = {
   "power3.inOut": "Power3 in-out",
 };
 
+/** Each ease as cubic bezier handles, for keyframe tracks that time
+ * themselves with handles rather than by name (motion presets). */
+export const EASE_BEZIER: Record<EaseId, [number, number, number, number]> = {
+  linear: [0, 0, 1, 1],
+  "sine.in": [0.12, 0, 0.39, 0],
+  "sine.out": [0.61, 1, 0.88, 1],
+  "sine.inOut": [0.37, 0, 0.63, 1],
+  "power2.in": [0.11, 0, 0.5, 0],
+  "power2.out": [0.5, 1, 0.89, 1],
+  "power2.inOut": [0.45, 0, 0.55, 1],
+  "power3.in": [0.32, 0, 0.67, 0],
+  "power3.out": [0.33, 1, 0.68, 1],
+  "power3.inOut": [0.65, 0, 0.35, 1],
+};
+
 export const isEaseId = (v: unknown): v is EaseId => EASE_IDS.includes(v as EaseId);
 
 /** Progress `p` (0..1) through the named curve. Every curve starts at 0 and
