@@ -4,7 +4,13 @@
 
 @plugin "@tailwindcss/typography";
 
-@custom-variant dark (&:is(.dark *));
+/* Explicit themes and the system preference share the same utilities. */
+@custom-variant dark {
+  &:where(.dark, .dark *) { @slot; }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not(.light), :root:not(.light) *) { @slot; }
+  }
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -43,6 +49,8 @@
 }
 
 :root {
+  color-scheme: light;
+  --app-background: oklch(1 0 0);
   --background: #F5EFE0;
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -70,6 +78,8 @@
 }
 
 .dark {
+  color-scheme: dark;
+  --app-background: oklch(0.145 0 0);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -93,18 +103,40 @@
   --ring: oklch(0.556 0 0);
 }
 
-/* App theme: the signed-in /app surface renders on white; the cream is the
-   landing theme. The app layout marks its wrapper `.app-surface`, and this rule
-   repoints the token on the document as soon as that element parses — no script,
-   so the first painted frame is already the product surface and a session replay
-   shows the same colors the visitor saw. Defined unlayered (like :root, the
-   landing theme) so it wins the cascade — an @layer base rule would lose to the
-   unlayered :root no matter its specificity. This one token flows everywhere
-   keyed to bg-background: the html/overscroll area, body, and every shadcn
-   component (e.g. the outline button variant). CSS variables inherit from html,
-   so portaled dialogs pick it up too. */
+/* CSS selects the system theme before the first paint. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    color-scheme: dark;
+    --app-background: oklch(0.145 0 0);
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --skeleton: oklch(0.3 0 0);
+    --skeleton-pulse: oklch(0.26 0 0);
+    --skeleton-highlight: oklch(0.38 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+  }
+}
+
+/* Product pages use a white surface in light mode and the dark page surface
+   in dark mode. Repointing the document token covers overscroll and portaled
+   dialogs as soon as the app wrapper parses. */
 html:has(.app-surface) {
-  --background: oklch(1 0 0);
+  --background: var(--app-background);
 }
 
 @layer base {
@@ -113,6 +145,12 @@ html:has(.app-surface) {
   }
   body {
     @apply bg-background text-foreground;
+  }
+  /* Form hints stay legible on the page's selected surface. */
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-muted-foreground;
+    opacity: 1;
   }
   h1,
   h2,

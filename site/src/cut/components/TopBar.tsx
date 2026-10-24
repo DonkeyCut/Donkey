@@ -1,5 +1,6 @@
 "use client";
 
+import { DonkeyMark } from "@/components/DonkeyMark";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
@@ -469,13 +470,7 @@ export function TopBar({
   // carries the project name alone.
   const logo = chatgpt ? null : (
     <span className="grid size-[22px] shrink-0 place-items-center">
-      <img
-        src="/donkey-logo.svg"
-        alt="Donkey"
-        width={22}
-        height={22}
-        className="block h-full w-full object-contain"
-      />
+      <DonkeyMark alt="Donkey" context="toolbar" />
     </span>
   );
 

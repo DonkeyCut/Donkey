@@ -7,7 +7,7 @@ import { ONBOARDING_PROJECT } from "@/cut/components/editor-mock/mockData";
 // column. The editor is the layout — the slide is exactly as tall as the mock,
 // so there's no dead band above or below it — and the copy is laid over its
 // left side. Two things keep that legible, and both are needed: the mock's own
-// left half dissolves into the cream, and a cream scrim under the copy holds
+// left half dissolves into the surface, and a themed scrim under the copy holds
 // the contrast wherever the mock's edge lands at a given window size.
 export function AiChatSlide() {
   return (
@@ -30,7 +30,7 @@ export function AiChatSlide() {
               frame="flat"
             />
           </div>
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-[64%] bg-gradient-to-r from-cream via-cream/85 to-transparent" />
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-[64%] bg-gradient-to-r from-cream via-cream/85 to-transparent dark:from-background dark:via-background/85" />
           <div className="absolute top-[15%] left-0 z-10 w-[48%] min-w-[320px]">
             <Copy />
           </div>
@@ -59,12 +59,12 @@ function Copy() {
       <h2 className="text-[clamp(26px,3.2vw,38px)] leading-[1.05] font-semibold tracking-[-0.02em]">
         Chat with your editor.
       </h2>
-      <p className="mt-5 text-[16.5px] leading-[1.55] text-[#454545]">
+      <p className="mt-5 text-[16.5px] leading-[1.55] text-foreground/70">
         The AI has access to your entire project. Ask it to trim clips, generate
         missing shots, write subtitles, add voiceovers, rearrange your timeline,
         or answer questions about your footage.
       </p>
-      <p className="mt-4 text-[16.5px] leading-[1.55] text-[#454545]">
+      <p className="mt-4 text-[16.5px] leading-[1.55] text-foreground/70">
         Works out of the box with Gemini, or use your own Claude or Codex
         subscription.
       </p>

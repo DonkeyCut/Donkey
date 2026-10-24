@@ -32,17 +32,17 @@ export async function CutFooter() {
   ];
 
   return (
-    <footer className="w-full border-t-2 border-ink py-16 md:py-[80px]">
+    <footer className="w-full border-t-2 border-foreground py-16 md:py-[80px]">
       <div className="mx-auto flex max-w-[1400px] flex-col gap-12 px-6 md:flex-row md:flex-wrap md:gap-x-24 md:px-12">
         <div className="min-w-[240px] max-w-sm flex-1">
           <Link
             href="/"
             aria-label="Donkey Cut home"
-            className="text-[40px] font-semibold text-ink no-underline md:text-[48px]"
+            className="text-[40px] font-semibold text-foreground no-underline md:text-[48px]"
           >
             Donkey Cut
           </Link>
-          <p className="mt-6 text-[15px] font-semibold text-ink">
+          <p className="mt-6 text-[15px] font-semibold text-foreground">
             Need help? Join us on{" "}
             <a
               href={DISCORD_URL}
@@ -51,14 +51,14 @@ export async function CutFooter() {
               Discord
             </a>
           </p>
-          <p className="mt-6 text-[13px] text-[#666]">
+          <p className="mt-6 text-[13px] text-foreground/70">
             2026 Donkey, Inc.
           </p>
         </div>
         <div className="flex flex-1 flex-col gap-10 sm:flex-row sm:flex-wrap sm:gap-x-16 sm:gap-y-12 md:gap-x-20">
           {linkGroups.map((group) => (
             <div key={group.title} className="flex min-w-[140px] flex-col gap-4">
-              <div className="text-[15px] font-semibold text-ink">
+              <div className="text-[15px] font-semibold text-foreground">
                 {group.title}
               </div>
               <div className="flex flex-col gap-3">
@@ -66,7 +66,7 @@ export async function CutFooter() {
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="text-[15px] text-[#666] no-underline transition-colors hover:text-ink"
+                    className="text-[15px] text-foreground/70 no-underline transition-colors hover:text-foreground"
                   >
                     {link.label}
                   </Link>

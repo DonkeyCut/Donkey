@@ -44,7 +44,7 @@ export function HeadingWithAnchor({
           aria-label="Copy link to section"
           title="Copy link to section"
         >
-          <Link2 className="size-4 text-[#666] hover:text-ink" />
+          <Link2 className="size-4 text-foreground/70 hover:text-foreground" />
         </button>
       ) : null}
     </Tag>

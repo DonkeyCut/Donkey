@@ -273,7 +273,7 @@ export function NoteComposer({
           rows={1}
           value={draft.title}
           placeholder="Untitled"
-          className="resize-none overflow-hidden bg-transparent text-4xl leading-tight font-semibold tracking-tight outline-none placeholder:opacity-30"
+          className="resize-none overflow-hidden bg-transparent text-4xl leading-tight font-semibold tracking-tight outline-none placeholder:text-current placeholder:opacity-60"
           style={{ color: NOTE_INK }}
           onChange={(e) => onChange({ ...draft, title: e.target.value.replace(/\n/g, "") })}
           onKeyDown={(e) => {
@@ -301,7 +301,7 @@ export function NoteComposer({
             <PopoverTrigger
               render={
                 <button
-                  className="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium opacity-50 hover:bg-black/10 hover:opacity-80"
+                  className="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium opacity-70 hover:bg-black/10 hover:opacity-80"
                   aria-label="Add label"
                 />
               }

@@ -12,7 +12,7 @@ export function WelcomeSlide() {
         <h2 className="text-[clamp(22px,3.1vw,34px)] leading-[1.1] font-semibold tracking-[-0.02em]">
           Edit videos by chatting.
         </h2>
-        <p className="mt-4 text-[17px] leading-[1.55] text-[#454545]">
+        <p className="mt-4 text-[17px] leading-[1.55] text-foreground/70">
           Trim clips, add captions, generate images, or create new
           scenes&mdash;all from chat.
         </p>

@@ -1,0 +1,61 @@
+/* The backlit-icon guide's geometry scales with the fitted artwork. */
+.donkey-mark {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  container-type: size;
+  isolation: isolate;
+  --donkey-bloom-strength: 1;
+}
+
+.donkey-mark--toolbar {
+  --donkey-bloom-strength: 0.5;
+}
+
+.donkey-mark__stage,
+.donkey-mark__vignette,
+.donkey-mark__glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.donkey-mark__stage {
+  background: #000000;
+}
+
+.donkey-mark__vignette {
+  background: radial-gradient(circle at 50% 50%, transparent 25%, rgb(0 0 0 / 0.37) 100%);
+}
+
+.donkey-mark__glow {
+  --s: min(100cqw, calc(100cqh * 264 / 318));
+  --halo: calc(var(--s) * 0.030);
+  --bloom: calc(var(--s) * 0.088);
+  background: #ffffff;
+  mask: url(/donkey-silhouette.svg) center / contain no-repeat;
+  -webkit-mask: url(/donkey-silhouette.svg) center / contain no-repeat;
+}
+
+.donkey-mark__glow--a,
+.donkey-mark__glow--a-wide {
+  translate: calc(var(--s) * -0.0297) calc(var(--s) * 0.0043);
+}
+
+.donkey-mark__glow--b,
+.donkey-mark__glow--b-wide {
+  translate: calc(var(--s) * -0.0095) calc(var(--s) * -0.0285);
+}
+
+.donkey-mark__glow--c,
+.donkey-mark__glow--c-wide {
+  translate: calc(var(--s) * 0.0190) calc(var(--s) * 0.0232);
+}
+
+.donkey-mark__glow--a { filter: blur(var(--halo)); opacity: 0.80; }
+.donkey-mark__glow--b { filter: blur(var(--halo)); opacity: 0.62; }
+.donkey-mark__glow--c { filter: blur(var(--halo)); opacity: 0.35; }
+.donkey-mark__glow--a-wide { filter: blur(var(--bloom)); opacity: calc(0.192 * var(--donkey-bloom-strength)); }
+.donkey-mark__glow--b-wide { filter: blur(var(--bloom)); opacity: calc(0.149 * var(--donkey-bloom-strength)); }
+.donkey-mark__glow--c-wide { filter: blur(var(--bloom)); opacity: calc(0.084 * var(--donkey-bloom-strength)); }

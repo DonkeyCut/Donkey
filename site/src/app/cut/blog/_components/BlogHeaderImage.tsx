@@ -2,7 +2,7 @@
 // focus the CMS set so the subject stays in frame on every width.
 export function BlogHeaderImage({ src, alt, focus }: { src: string; alt: string; focus: string | null }) {
   return (
-    <div className="relative mb-6 h-60 w-full overflow-hidden rounded-2xl border-2 border-ink bg-cream md:mb-8">
+    <div className="relative mb-6 h-60 w-full overflow-hidden rounded-2xl border-2 border-foreground bg-card md:mb-8">
       {/* eslint-disable-next-line @next/next/no-img-element -- pre-encoded AVIF from the media host, not Next-optimizable */}
       <img
         src={src}

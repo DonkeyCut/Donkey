@@ -14,13 +14,13 @@ export function BlogVideo({ src, title }: { src: string; title?: string }) {
   }
   if (source.kind === "file") {
     return (
-      <div className="not-prose my-6 overflow-hidden rounded-2xl border-2 border-ink bg-ink">
+      <div className="not-prose my-6 overflow-hidden rounded-2xl border-2 border-foreground bg-ink">
         <video src={source.src} controls preload="metadata" playsInline className="block aspect-video w-full" />
       </div>
     );
   }
   return (
-    <div className="not-prose relative my-6 aspect-video w-full overflow-hidden rounded-2xl border-2 border-ink bg-ink">
+    <div className="not-prose relative my-6 aspect-video w-full overflow-hidden rounded-2xl border-2 border-foreground bg-ink">
       <iframe
         src={source.embedSrc}
         title={title ?? (source.kind === "youtube" ? "YouTube video" : "Vimeo video")}

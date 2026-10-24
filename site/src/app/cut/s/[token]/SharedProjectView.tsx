@@ -134,7 +134,7 @@ export function SharedProjectView() {
   // inside — the preview's zoom pill, the panel chrome — resolves against the
   // cream landing token and the viewer sees a beige editor on a white page.
   return (
-    <div className="app-surface h-[100dvh] bg-white font-system text-foreground antialiased">
+    <div className="app-surface h-[100dvh] bg-background font-system text-foreground antialiased">
       <Suspense>
         <SharedProject />
       </Suspense>

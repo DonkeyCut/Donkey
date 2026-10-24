@@ -117,22 +117,22 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
           style={{ width: googleButtonWidth }}
         />
       </button>}
-      <p className="mt-[18px] text-sm leading-normal text-[#555]">
+      <p className="mt-[18px] text-sm leading-normal text-foreground/70">
         {screenCopy.alternateLead}{" "}
         <Link
           href={alternateHref}
-          className="font-semibold text-ink underline underline-offset-[3px]"
+          className="font-semibold text-foreground underline underline-offset-[3px]"
         >
           {screenCopy.alternateLabel}
         </Link>
       </p>
-      <p className="mt-[18px] text-xs leading-normal text-[#555]">
+      <p className="mt-[18px] text-xs leading-normal text-foreground/70">
         By continuing, you agree to the{" "}
-        <Link href="/terms" className="font-semibold text-ink">
+        <Link href="/terms" className="font-semibold text-foreground">
           Terms of Use
         </Link>{" "}
         and{" "}
-        <Link href="/privacy" className="font-semibold text-ink">
+        <Link href="/privacy" className="font-semibold text-foreground">
           Privacy Policy
         </Link>
         .
@@ -140,7 +140,7 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
       {statusMessage ? (
         <div
           role="status"
-          className="mt-[14px] text-[13px] font-semibold leading-[1.4] text-[#4a403d]"
+          className="mt-[14px] text-[13px] font-semibold leading-[1.4] text-foreground"
         >
           {statusMessage}
         </div>
@@ -153,7 +153,7 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
     // under hydration; the app it leads into is marked the same way.
     <main
       translate="no"
-      className="min-h-screen w-full bg-background font-system text-ink antialiased"
+      className="min-h-screen w-full bg-background font-system text-foreground antialiased"
     >
       {/* Auth serves same-host on donkeycut.com, so the chrome is Cut's. */}
       <TopNav

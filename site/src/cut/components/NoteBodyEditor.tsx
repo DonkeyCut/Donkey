@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from "react";
 import { EditorContent, useEditor, useEditorState, type Editor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
@@ -142,7 +142,7 @@ export default function NoteBodyEditor({
         "[&_li[data-checked=true]>div]:line-through [&_li[data-checked=true]>div]:opacity-50",
         "[&_input[type=checkbox]]:size-4 [&_input[type=checkbox]]:cursor-pointer [&_input[type=checkbox]]:accent-current",
         "[&_blockquote]:border-l-[3px] [&_blockquote]:border-current [&_blockquote]:pl-4",
-        "[&_.is-editor-empty:first-child]:before:pointer-events-none [&_.is-editor-empty:first-child]:before:float-left [&_.is-editor-empty:first-child]:before:h-0 [&_.is-editor-empty:first-child]:before:opacity-40 [&_.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]",
+        "[&_.is-editor-empty:first-child]:before:pointer-events-none [&_.is-editor-empty:first-child]:before:float-left [&_.is-editor-empty:first-child]:before:h-0 [&_.is-editor-empty:first-child]:before:opacity-70 [&_.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]",
       )}
       style={{ color: ink }}
     >
@@ -183,7 +183,7 @@ function Toolbar({ editor }: { editor: Editor }) {
     <BubbleMenu
       editor={editor}
       options={{ placement: "top-start", offset: 8, onHide: () => setPanel(null) }}
-      className="z-[60] flex items-center gap-0.5 rounded-lg border border-black/10 bg-white p-1 text-sm text-neutral-800 shadow-lg"
+      className="z-[60] flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg"
       onMouseDown={keep}
     >
       <Menu
@@ -222,14 +222,14 @@ function Toolbar({ editor }: { editor: Editor }) {
         open={panel === "color"}
         onToggle={() => setPanel(panel === "color" ? null : "color")}
         label="Text color"
-        trigger={<><span className="font-semibold" style={{ color: color?.paper }}>A</span><ChevronDown className="size-3.5 opacity-50" /></>}
+        trigger={<><span className="font-semibold text-(--note-menu-color) dark:text-(--note-menu-color-dark)" style={{ "--note-menu-color": color?.paper, "--note-menu-color-dark": color?.dark } as CSSProperties}>A</span><ChevronDown className="size-3.5 opacity-50" /></>}
       >
         <MenuItem checked={!color} onPick={() => { editor.chain().focus().unsetMark("textColor").run(); setPanel(null); }}>
           <span className="w-4 text-center font-semibold">A</span> Default
         </MenuItem>
         {NOTE_TEXT_COLORS.map((c) => (
           <MenuItem key={c.id} checked={c.id === state.color} onPick={() => { editor.chain().focus().setMark("textColor", { color: c.id }).run(); setPanel(null); }}>
-            <span className="w-4 text-center font-semibold" style={{ color: c.paper }}>A</span> {c.name}
+            <span className="w-4 text-center font-semibold text-(--note-menu-color) dark:text-(--note-menu-color-dark)" style={{ "--note-menu-color": c.paper, "--note-menu-color-dark": c.dark } as CSSProperties}>A</span> {c.name}
           </MenuItem>
         ))}
       </Menu>
@@ -237,7 +237,7 @@ function Toolbar({ editor }: { editor: Editor }) {
   );
 }
 
-const Divider = () => <div className="mx-0.5 h-5 w-px bg-black/10" />;
+const Divider = () => <div className="mx-0.5 h-5 w-px bg-foreground/10" />;
 
 function Toggle({ label, on, onPress, children }: { label: string; on: boolean; onPress: () => void; children: ReactNode }) {
   return (
@@ -245,7 +245,7 @@ function Toggle({ label, on, onPress, children }: { label: string; on: boolean; 
       type="button"
       aria-label={label}
       aria-pressed={on}
-      className={cn("grid size-7 cursor-pointer place-items-center rounded-md hover:bg-black/5", on && "bg-black/10 hover:bg-black/10")}
+      className={cn("grid size-7 cursor-pointer place-items-center rounded-md hover:bg-foreground/5", on && "bg-foreground/10 hover:bg-foreground/10")}
       onClick={onPress}
     >
       {children}
@@ -263,13 +263,13 @@ function Menu({ open, onToggle, label, trigger, fit = "label", children }: { ope
         type="button"
         aria-label={label}
         aria-expanded={open}
-        className={cn("flex h-7 cursor-pointer items-center gap-1 rounded-md hover:bg-black/5", fit === "icon" ? "px-1" : "px-2", open && "bg-black/5")}
+        className={cn("flex h-7 cursor-pointer items-center gap-1 rounded-md hover:bg-foreground/5", fit === "icon" ? "px-1" : "px-2", open && "bg-foreground/5")}
         onClick={onToggle}
       >
         {trigger}
       </button>
       {open && (
-        <div role="menu" className="absolute top-full left-0 mt-1.5 w-44 rounded-lg border border-black/10 bg-white p-1 shadow-lg">
+        <div role="menu" className="absolute top-full left-0 mt-1.5 w-44 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg">
           {children}
         </div>
       )}
@@ -283,7 +283,7 @@ function MenuItem({ checked, onPick, children }: { checked: boolean; onPick: () 
       type="button"
       role="menuitemradio"
       aria-checked={checked}
-      className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-black/5"
+      className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-foreground/5"
       onClick={onPick}
     >
       <span className="flex min-w-0 flex-1 items-center gap-2">{children}</span>

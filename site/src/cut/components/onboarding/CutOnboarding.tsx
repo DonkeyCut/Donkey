@@ -1,5 +1,6 @@
 "use client";
 
+import { DonkeyMark } from "@/components/DonkeyMark";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
 
@@ -245,13 +246,7 @@ export function CutOnboarding() {
   const lockup = (
     <span className="flex items-center gap-0">
       <span className="flex size-[59px] shrink-0 items-center justify-center overflow-hidden rounded-[10px]">
-        <img
-          src="/donkey-logo.svg"
-          alt=""
-          width={59}
-          height={59}
-          className="block h-full w-full object-contain"
-        />
+        <DonkeyMark alt="" />
       </span>
       <span className="text-2xl font-semibold">Donkey Cut</span>
     </span>
@@ -268,7 +263,7 @@ export function CutOnboarding() {
   if (!run) {
     const waiting = isPending && !skipWait;
     return waiting ? (
-      <div className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-ink antialiased">
+      <div className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-foreground antialiased dark:bg-background">
         <div className="flex shrink-0 items-center justify-between px-6 py-2 md:px-10 md:py-2.5">
           {lockup}
         </div>
@@ -295,7 +290,7 @@ export function CutOnboarding() {
       role="dialog"
       aria-modal="true"
       aria-label="Welcome to Donkey Cut"
-      className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-ink antialiased"
+      className="fixed inset-0 z-[80] flex flex-col bg-cream font-system text-foreground antialiased dark:bg-background"
     >
       <div className="flex shrink-0 items-center justify-between px-6 py-2 md:px-10 md:py-2.5">
         {lockup}
@@ -307,7 +302,7 @@ export function CutOnboarding() {
           <Button
             variant="ghost"
             onClick={() => finish(true)}
-            className="text-[#454545]"
+            className="text-foreground/70"
           >
             Skip
           </Button>
@@ -346,7 +341,7 @@ export function CutOnboarding() {
         <Button
           variant="ghost"
           onClick={back}
-          className={cn("gap-1.5 text-[#454545]", step === 0 && "invisible")}
+          className={cn("gap-1.5 text-foreground/70", step === 0 && "invisible")}
         >
           <ArrowLeft className="size-4" /> Back
         </Button>
@@ -357,7 +352,7 @@ export function CutOnboarding() {
               key={i}
               className={cn(
                 "size-1.5 rounded-full transition-colors",
-                i === step ? "bg-coral" : "bg-ink/20",
+                i === step ? "bg-coral" : "bg-foreground/20",
               )}
             />
           ))}
@@ -371,7 +366,7 @@ export function CutOnboarding() {
           onClick={advance}
           disabled={slide === "referral" && !referrals.length}
           className={cn(
-            "gap-1.5 rounded-full bg-ink px-5 text-white hover:bg-ink/90",
+            "gap-1.5 rounded-full bg-primary px-5 text-primary-foreground hover:bg-primary/90",
             last && !done && "invisible",
           )}
         >

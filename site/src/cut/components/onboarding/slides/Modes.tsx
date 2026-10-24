@@ -11,7 +11,7 @@ export function ModesSlide() {
       <h2 className="text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em] text-balance">
         Works in the cloud or on your Mac
       </h2>
-      <p className="mx-auto mt-3 max-w-[560px] text-center text-[16px] leading-[1.5] text-[#454545] italic">
+      <p className="mx-auto mt-3 max-w-[560px] text-center text-[16px] leading-[1.5] text-foreground/70 italic">
         Same editor. Choose what works for you.
       </p>
 
@@ -36,7 +36,7 @@ export function ModesSlide() {
         />
       </div>
 
-      <p className="mt-7 text-center text-[15px] leading-[1.5] text-[#454545] md:mt-9">
+      <p className="mt-7 text-center text-[15px] leading-[1.5] text-foreground/70 md:mt-9">
         Automatically switches between cloud and local when available.
       </p>
     </div>

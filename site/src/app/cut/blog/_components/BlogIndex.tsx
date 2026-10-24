@@ -12,8 +12,8 @@ export const BLOG_INDEX_DESCRIPTION =
 export function BlogHeading() {
   return (
     <div className="mb-8 max-w-[72ch] md:mb-12">
-      <h1 className="text-4xl font-semibold tracking-tight text-ink lg:text-5xl">Blog</h1>
-      <p className="mt-4 text-lg text-[#454545]">Notes on editing video, and on building the editor.</p>
+      <h1 className="text-4xl font-semibold tracking-tight text-foreground lg:text-5xl">Blog</h1>
+      <p className="mt-4 text-lg text-foreground/70">Notes on editing video, and on building the editor.</p>
     </div>
   );
 }
@@ -27,7 +27,7 @@ export async function BlogIndex({ page }: { page: number }) {
   const slice = posts.slice((page - 1) * BLOG_PAGE_SIZE, page * BLOG_PAGE_SIZE);
   return (
     <>
-      {featured ? <hr className="mb-8 border-ink/15 md:mb-12" /> : null}
+      {featured ? <hr className="mb-8 border-foreground/15 md:mb-12" /> : null}
       <BlogGrid posts={slice} featured={featured} />
       <BlogPagination current={page} total={total} />
     </>

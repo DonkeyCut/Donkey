@@ -6,7 +6,6 @@ import {
   PillButton,
 } from "@/app/_components/landing/LandingPrimitives";
 import { DONKEY_DOWNLOAD_URL } from "@/app/_components/landing/data";
-import { BG, BLACK } from "@/app/_components/landing/theme";
 
 type InstallStep = {
   body: string;
@@ -42,13 +41,7 @@ const installSteps = [
 
 export function InstallInstructions() {
   return (
-    <section
-      style={{
-        background: BG,
-        color: BLACK,
-        padding: "clamp(44px, 7vw, 88px) clamp(20px, 4vw, 48px) clamp(80px, 9vw, 128px)",
-      }}
-    >
+    <section className="bg-background px-[clamp(20px,4vw,48px)] pt-[clamp(44px,7vw,88px)] pb-[clamp(80px,9vw,128px)] text-foreground">
       <div style={{ margin: "0 auto", maxWidth: 1280 }}>
         <Headline>
           Install Donkey
@@ -56,8 +49,8 @@ export function InstallInstructions() {
           <span style={{ fontStyle: "italic" }}>on your Mac.</span>
         </Headline>
         <p
+          className="text-foreground/70"
           style={{
-            color: "#454545",
             fontSize: "clamp(16px, 1.8vw, 18px)",
             lineHeight: 1.6,
             margin: "24px 0 32px",

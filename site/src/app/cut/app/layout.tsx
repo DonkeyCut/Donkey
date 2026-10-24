@@ -8,10 +8,10 @@ import { CutOnboarding } from "@/cut/components/onboarding/CutOnboarding";
 import { RequireSession } from "@/cut/components/RequireSession";
 import { AppLoading, AppLoadingOverlay, SessionGate } from "@/cut/components/SessionGate";
 
-// The Cut app (projects home, library, editor) renders on the white product
+// The Cut app (projects home, library, editor) uses the product theme
 // surface. The `app-surface` class on this wrapper is what repoints the
 // --background token (see globals.css) for the whole document, so the cream
-// landing background is gone from the first painted frame — including the
+// landing background gives way to the product from the first frame, including the
 // browser's overscroll area — with no script to run. font-system matches the
 // /app system font stack. RequireSession binds the account and redirects
 // signed-out visitors to sign-in with their target URL as the callback.
@@ -36,7 +36,7 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
     // around a canvas, so the page keeps its own words and stays standing.
     <div
       translate="no"
-      className="app-surface min-h-screen bg-white font-system text-foreground antialiased"
+      className="app-surface min-h-screen bg-background font-system text-foreground antialiased"
     >
       <NoSessionReplay />
       <NoTranslate />

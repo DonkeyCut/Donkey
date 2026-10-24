@@ -1,5 +1,6 @@
 "use client";
 
+import { DonkeyMark } from "@/components/DonkeyMark";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -87,13 +88,7 @@ export function AppSidebar() {
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-card px-3 py-4">
       <div className="mb-5 flex items-center gap-2.5 px-2">
         <span className="grid size-9 shrink-0 place-items-center p-0.5">
-          <img
-            src="/donkey-logo.svg"
-            alt="Donkey Cut"
-            width={36}
-            height={36}
-            className="block h-full w-full object-contain"
-          />
+          <DonkeyMark alt="Donkey Cut" />
         </span>
         <span className="text-[17px] font-semibold tracking-tight">Donkey Cut</span>
       </div>

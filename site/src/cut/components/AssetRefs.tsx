@@ -1615,7 +1615,7 @@ export function MentionTextarea({
         // While a pill is picked whole, the pill's ring is the selection
         // highlight — the browser's own selection paint would spill out
         // around the cover as a bare blue rectangle.
-        className={cn(className, "relative block bg-transparent", anyPicked && "selection:bg-transparent")}
+        className={cn(className, "relative block bg-transparent placeholder:text-muted-foreground", anyPicked && "selection:bg-transparent")}
         rows={rows}
         placeholder={placeholder}
         value={value}
