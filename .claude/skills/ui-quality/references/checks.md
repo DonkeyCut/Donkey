@@ -8,7 +8,7 @@ The site theme lives in [globals.css](../../../../site/src/app/globals.css). `ba
 
 The root uses the system preference until an explicit `.light` or `.dark` theme is set. Product `.app-surface` pages select `--app-background`, while public light pages use the sand background. Cold-load both kinds of surface. Check explicit light on a dark system and explicit dark on a light system when touching theme selection; exercise a preference change while the page is open.
 
-`ink`, `cream`, and `coral` are fixed brand colors. Pair fixed pastel cards with their intended ink. The note paper in [NoteComposer](../../../../site/src/cut/components/NoteComposer.tsx) keeps `NOTE_INK`; note text samples select `paper` or `dark` from [noteMarkdown](../../../../site/src/cut/lib/noteMarkdown.ts) according to their menu surface. A dark-themed menu can sit above a light note.
+`ink`, `cream`, and `coral` are fixed brand colors. Pair fixed pastel cards with their intended ink. [Note paper](../../../../site/src/cut/components/notePaper.css) retains stored palette indices, uses muted card tints in dark mode, and adapts named text colors. Verify the sheet, tiles, and portaled menus.
 
 Use [Button](../../../../site/src/components/ui/button.tsx), Input, Dialog, Popover, and DropdownMenu from the same UI directory. They carry focus, invalid, disabled, expanded, portal, and positioning behavior. Compose with `cn` and Tailwind responsive variants. Feature CSS belongs beside its owner; inline styles carry genuinely runtime values, such as data-derived CSS variables.
 

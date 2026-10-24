@@ -19,8 +19,7 @@ import { NOTE_COLORS, noteColor, type CutNoteLabel } from "@/cut/lib/notes";
 import { NOTE_LABELS_MAX } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 
-// The note paper's ink, matching the iOS app.
-const NOTE_INK = "#201a0d";
+import "./notePaper.css";
 
 // The rich text editor loads with the first note opened, off the list's own
 // bundle.
@@ -200,17 +199,13 @@ export function NoteComposer({
       aria-modal="true"
       aria-label={draft.title.trim() || "Untitled note"}
       {...KEEP_EVENTS}
-      className="fixed inset-0 z-50 flex flex-col font-system antialiased"
-      style={{ backgroundColor: paper.background, color: NOTE_INK }}
+      className="note-paper fixed inset-0 z-50 flex flex-col font-system antialiased"
+      style={{ "--note-paper-background": paper.background, "--note-accent": paper.accent } as React.CSSProperties}
     >
-      <header
-        className="flex shrink-0 items-center gap-2 px-6 py-3"
-        style={{ backgroundColor: paper.background }}
-      >
+      <header className="flex shrink-0 items-center gap-2 px-6 py-3">
         <Button
           variant="ghost"
-          className="hover:bg-black/5 hover:text-current"
-          style={{ color: NOTE_INK }}
+          className="hover:bg-black/5 hover:text-current dark:hover:bg-white/5"
           onClick={onClose}
         >
           <ArrowLeft data-icon="inline-start" />{" "}
@@ -223,8 +218,7 @@ export function NoteComposer({
               <Button
                 variant="ghost"
                 aria-label="Note color"
-                className="hover:bg-black/5 hover:text-current"
-                style={{ color: NOTE_INK }}
+                className="hover:bg-black/5 hover:text-current dark:hover:bg-white/5"
               />
             }
           >
@@ -255,7 +249,7 @@ export function NoteComposer({
         <Button
           variant="ghost"
           aria-label="Delete note"
-          className="text-destructive hover:bg-black/5 hover:text-destructive"
+          className="text-destructive hover:bg-black/5 hover:text-destructive dark:hover:bg-white/5"
           onClick={onDelete}
         >
           <Trash2 data-icon="inline-start" /> Delete
@@ -274,7 +268,6 @@ export function NoteComposer({
           value={draft.title}
           placeholder="Untitled"
           className="resize-none overflow-hidden bg-transparent text-4xl leading-tight font-semibold tracking-tight outline-none placeholder:text-current placeholder:opacity-60"
-          style={{ color: NOTE_INK }}
           onChange={(e) => onChange({ ...draft, title: e.target.value.replace(/\n/g, "") })}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -289,7 +282,7 @@ export function NoteComposer({
           {worn.map((l) => (
             <button
               key={l.id}
-              className="group flex cursor-pointer items-center gap-1 rounded-full bg-black/10 px-2.5 py-1 text-xs font-medium hover:bg-black/15"
+              className="group flex cursor-pointer items-center gap-1 rounded-full bg-black/10 px-2.5 py-1 text-xs font-medium hover:bg-black/15 dark:bg-white/10 dark:hover:bg-white/15"
               aria-label={`Remove label ${l.name}`}
               onClick={() => toggleLabel(l.id)}
             >
@@ -301,7 +294,7 @@ export function NoteComposer({
             <PopoverTrigger
               render={
                 <button
-                  className="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium opacity-70 hover:bg-black/10 hover:opacity-80"
+                  className="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium opacity-70 hover:bg-black/10 hover:opacity-80 dark:hover:bg-white/10"
                   aria-label="Add label"
                 />
               }
@@ -323,7 +316,7 @@ export function NoteComposer({
         </div>
         <NoteBodyEditor
           body={draft.body}
-          ink={NOTE_INK}
+          ink="currentColor"
           onChange={(text) => onChange({ ...draftRef.current, body: text })}
           onEditor={(editor) => (body.current = editor)}
         />

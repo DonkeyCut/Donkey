@@ -198,8 +198,7 @@ function cutLine(tr: Transaction, pos: number): number | null {
   return base + before;
 }
 
-/** A named text color. The name is what the body stores; the ink is the
- * paper's. */
+/** A named text color. The stored name carries paper and dark display inks. */
 export const TextColor = Mark.create({
   name: "textColor",
   addAttributes() {
@@ -207,10 +206,13 @@ export const TextColor = Mark.create({
       color: {
         default: null,
         parseHTML: (el) => el.getAttribute("data-color"),
-        renderHTML: (attrs) => ({
-          "data-color": attrs.color,
-          style: `color: ${NOTE_TEXT_COLORS.find((c) => c.id === attrs.color)?.paper ?? "inherit"}`,
-        }),
+        renderHTML: (attrs) => {
+          const color = NOTE_TEXT_COLORS.find((c) => c.id === attrs.color);
+          return {
+            "data-color": attrs.color,
+            style: color ? `color: var(--note-text-ink, ${color.paper}); --note-text-paper: ${color.paper}; --note-text-dark: ${color.dark}` : undefined,
+          };
+        },
       },
     };
   },
