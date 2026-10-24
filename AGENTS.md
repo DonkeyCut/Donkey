@@ -16,6 +16,10 @@ Performance comes first. Everything we ship has to be fast on the machines peopl
 - Every cache is bounded in bytes through the memory budget (`site/src/cut/lib/memoryBudget.ts`), and every reader, decoder and canvas is closed by the code that opened it.
 - Measure. A preview or timeline change runs the perf evals (`npm run eval:cut-perf`, `eval:cut-perf-lowend`) before it ships, and the summary says what moved.
 
+## UI Quality
+
+Every UI addition or change accounts for dark mode. Read the [UI Quality skill](.claude/skills/ui-quality/SKILL.md) and verify text, icons, and control states in light and dark themes.
+
 ## Site Project
 
 Before changing `site/` UI, routes, API handlers, or data access patterns:
