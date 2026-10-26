@@ -27,7 +27,7 @@ export function BlogCTA({
 }: BlogCtaProps) {
   if (variant === "banner") {
     return (
-      <div className="not-prose my-10 rounded-2xl border-2 border-foreground bg-card p-8 text-center md:p-10">
+      <div className="not-prose my-10 rounded-2xl border-2 border-foreground bg-cream dark:bg-card p-8 text-center md:p-10">
         <h2 className="mb-3 text-2xl font-semibold text-foreground md:text-3xl">{title}</h2>
         <p className="mx-auto mb-6 max-w-2xl text-base leading-relaxed text-foreground/70 md:text-lg">{description}</p>
         <PillButton href={buttonHref} size="lg">
@@ -37,7 +37,7 @@ export function BlogCTA({
     );
   }
   return (
-    <div className="not-prose my-8 rounded-2xl border-2 border-foreground bg-card p-6 md:p-8">
+    <div className="not-prose my-8 rounded-2xl border-2 border-foreground bg-cream dark:bg-card p-6 md:p-8">
       <h3 className="mb-2 text-lg font-semibold text-foreground">{title}</h3>
       <p className="mb-4 text-base leading-relaxed text-foreground/70">{description}</p>
       <PillButton href={buttonHref}>{buttonText}</PillButton>

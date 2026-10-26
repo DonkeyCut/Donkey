@@ -17,7 +17,7 @@ css.walkAtRules("theme", (rule) => {
   rule.walkDecls((decl) => { colors.set(decl.prop.replace("--color-", ""), decl.value); });
 });
 css.walkRules((rule) => {
-  const theme = rule.selector === ":root" ? "light" : rule.selector === ".dark" ? "dark" : null;
+  const theme = rule.selectors.includes(":root") ? "light" : rule.selector === ".dark" ? "dark" : null;
   if (theme) { rule.walkDecls((decl) => { tokens[theme].set(decl.prop, decl.value); }); }
 });
 

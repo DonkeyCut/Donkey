@@ -23,7 +23,7 @@ function TagPills({ tags }: { tags: string[] }) {
 function FeaturedCard({ post }: { post: BlogPostCard }) {
   return (
     <Link href={blogPath(post.slug)} className="group grid gap-6 no-underline lg:grid-cols-2 lg:gap-8">
-      <div className="relative aspect-[2/1] overflow-hidden rounded-2xl border-2 border-foreground bg-card">
+      <div className="relative aspect-[2/1] overflow-hidden rounded-2xl border-2 border-foreground bg-cream dark:bg-card">
         {post.thumbnailUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- pre-encoded AVIF from the media host, not Next-optimizable
           <img
@@ -53,7 +53,7 @@ function PostCard({ post }: { post: BlogPostCard }) {
   return (
     <Link
       href={blogPath(post.slug)}
-      className="group flex flex-col overflow-hidden rounded-2xl border-2 border-foreground bg-card no-underline transition-transform duration-300 hover:-translate-y-1"
+      className="group flex flex-col overflow-hidden rounded-2xl border-2 border-foreground bg-cream dark:bg-card no-underline transition-transform duration-300 hover:-translate-y-1"
     >
       <div className="relative aspect-[16/10] overflow-hidden border-b-2 border-foreground bg-card">
         {post.thumbnailUrl ? (
@@ -109,7 +109,7 @@ export function BlogGridSkeleton() {
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-y-8 lg:grid-cols-3" aria-hidden {...{ [BLOG_SKELETON_ATTR]: "" }}>
       {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="aspect-[4/5] animate-pulse rounded-2xl border-2 border-foreground/10 bg-card" />
+        <div key={i} className="aspect-[4/5] animate-pulse rounded-2xl border-2 border-foreground/10 bg-cream dark:bg-card" />
       ))}
     </div>
   );

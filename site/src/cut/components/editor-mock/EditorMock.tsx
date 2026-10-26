@@ -173,7 +173,7 @@ export function EditorMock({
               onClick={() => setActive(i)}
               aria-pressed={i === active}
               className={cn(
-                "flex items-center gap-1.5 rounded-full border border-border px-2.5 py-3 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground",
+                "flex items-center gap-1.5 rounded-full border border-foreground dark:border-border px-2.5 py-3 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground",
                 i === active ? "bg-primary text-primary-foreground" : "bg-card text-card-foreground hover:bg-accent hover:text-accent-foreground",
               )}
             >

@@ -180,7 +180,7 @@ async function Post({ params }: Params) {
 function PostSkeleton() {
   return (
     <div aria-hidden className="animate-pulse" {...{ [BLOG_SKELETON_ATTR]: "" }}>
-      <div className="mb-8 h-60 rounded-2xl border-2 border-foreground/10 bg-card" />
+      <div className="mb-8 h-60 rounded-2xl border-2 border-foreground/10 bg-cream dark:bg-card" />
       <div className="max-w-[72ch] space-y-4">
         <div className="h-10 w-3/4 rounded-lg bg-foreground/10" />
         <div className="h-4 w-1/3 rounded bg-foreground/10" />
