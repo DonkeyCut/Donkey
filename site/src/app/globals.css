@@ -4,11 +4,12 @@
 
 @plugin "@tailwindcss/typography";
 
-/* Explicit themes and the system preference share the same utilities. */
+/* Explicit themes and the system preference share the same utilities. A
+   `.light` element and everything inside it stay light on a dark page. */
 @custom-variant dark {
-  &:where(.dark, .dark *) { @slot; }
+  &:where(.dark, .dark *):not(:where(.light, .light *)) { @slot; }
   @media (prefers-color-scheme: dark) {
-    &:where(:root:not(.light), :root:not(.light) *) { @slot; }
+    &:where(:root, :root *):not(:where(.light, .light *)) { @slot; }
   }
 }
 
@@ -48,7 +49,8 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
+:root,
+.light {
   color-scheme: light;
   --app-background: oklch(1 0 0);
   --background: #F5EFE0;
@@ -139,18 +141,18 @@ html:has(.app-surface) {
   --background: var(--app-background);
 }
 
+/* A light element inside the app keeps the white product surface. Note paper
+   and its menus are light elements. */
+.light:not(:root) {
+  --background: var(--app-background);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
   body {
     @apply bg-background text-foreground;
-  }
-  /* Form hints stay legible on the page's selected surface. */
-  input::placeholder,
-  textarea::placeholder {
-    @apply text-muted-foreground;
-    opacity: 1;
   }
   h1,
   h2,

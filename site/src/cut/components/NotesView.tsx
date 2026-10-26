@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useImperativeHandle, useRef, useState, type Ref, type CSSProperties } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { FolderPlus, Loader2, Plus, StickyNote, Trash2 } from "lucide-react";
@@ -39,7 +39,8 @@ import { LIBRARY_SQUARE } from "./LibraryCard";
 import { NoteComposer, noteChanged, type NoteDraft } from "./NoteComposer";
 import { NoteBodyPreview } from "./NoteBodyPreview";
 
-import "./notePaper.css";
+// The note paper's ink, matching the iOS app.
+const NOTE_INK = "#201a0d";
 
 // A dragged selection of notes, the same shape the library and the projects
 // home carry: a JSON array of ids under this page's own MIME type.
@@ -742,17 +743,18 @@ export function NotesView({ library, ref }: Props = {}) {
                   onDragStart={(e) => onCardDragStart(e, n.id)}
                   onDragEnd={clearRefDrag}
                   className={cn(
-                    "note-paper flex cursor-pointer flex-col gap-1.5 text-left shadow-sm",
+                    // Paper stays light in dark mode, like the open note.
+                    "light flex cursor-pointer flex-col gap-1.5 text-left shadow-sm",
                     // A note is a file like the rest: the same square a sound
                     // tile is, here and in the Library.
                     "overflow-hidden rounded-xl p-3",
                   )}
                   style={{
-                    "--note-paper-background": noteColor(n.colorIndex).background,
-                    "--note-accent": noteColor(n.colorIndex).accent,
+                    backgroundColor: noteColor(n.colorIndex).background,
+                    color: NOTE_INK,
                     width: LIBRARY_SQUARE,
                     height: LIBRARY_SQUARE,
-                  } as CSSProperties}
+                  }}
                   onClick={(e) => {
                     if (!additiveClick(e)) {
                       openNote(n);
@@ -764,13 +766,13 @@ export function NotesView({ library, ref }: Props = {}) {
                 >
                   {/* Clear of the actions button that takes the corner on hover. */}
                   {n.title && <div className="truncate pr-6 text-[13px] font-semibold">{n.title}</div>}
-                  <NoteBodyPreview body={n.body} lines={5} className="text-[12px] opacity-80 dark:opacity-100" />
+                  <NoteBodyPreview body={n.body} lines={5} className="text-[12px] opacity-80" />
                   {worn.length > 0 && (
                     <div className="mt-auto flex flex-wrap gap-1 pt-1.5">
                       {worn.map((name) => (
                         <span
                           key={name}
-                          className="rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-medium dark:bg-white/10"
+                          className="rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-medium"
                         >
                           {name}
                         </span>

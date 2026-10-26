@@ -1,4 +1,4 @@
-import { Fragment, type CSSProperties } from "react";
+import { Fragment } from "react";
 import { NOTE_TEXT_COLORS, parseNoteBody, type NoteBlock, type NoteRun } from "@/cut/lib/noteMarkdown";
 import { cn } from "@/lib/utils";
 
@@ -38,7 +38,7 @@ export function NoteBodyPreview({ body, lines, className }: { body: string; line
 
 function Runs({ block }: { block: NoteBlock }) {
   return block.runs.map((r: NoteRun, i) => {
-    const color = r.marks.color ? NOTE_TEXT_COLORS.find((c) => c.id === r.marks.color) : undefined;
+    const color = r.marks.color ? NOTE_TEXT_COLORS.find((c) => c.id === r.marks.color)?.paper : undefined;
     const styled = r.marks.bold || r.marks.italic || r.marks.underline || r.marks.strike || color;
     if (!styled) return <Fragment key={i}>{r.text}</Fragment>;
     return (
@@ -49,8 +49,7 @@ function Runs({ block }: { block: NoteBlock }) {
           r.marks.italic && "italic",
           r.marks.underline && r.marks.strike ? "[text-decoration-line:underline_line-through]" : r.marks.underline ? "underline" : r.marks.strike && "line-through",
         )}
-        data-color={color?.id}
-        style={color ? { color: `var(--note-text-ink, ${color.paper})`, "--note-text-paper": color.paper, "--note-text-dark": color.dark } as CSSProperties : undefined}
+        style={color ? { color } : undefined}
       >
         {r.text}
       </span>

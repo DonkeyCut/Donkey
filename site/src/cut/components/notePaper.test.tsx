@@ -1,17 +1,11 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import postcss from "postcss";
-import { renderToStaticMarkup } from "react-dom/server";
-import { parseHTML } from "linkedom";
-import { DOMSerializer } from "@tiptap/pm/model";
-import { getSchema } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
 import { NOTE_COLORS, noteColor } from "@/cut/lib/notes";
-import { NOTE_TEXT_COLORS, parseNoteBody } from "@/cut/lib/noteMarkdown";
-import { docOf, TextColor } from "@/cut/lib/noteDoc";
-import { NoteBodyPreview } from "./NoteBodyPreview";
 
-// Saved palette indices keep their paper colors while CSS adapts the surface.
+const css = postcss.parse(readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8"));
+
+// Saved palette indices keep the paper colors shared with iOS.
 test("note palette indices retain the shared iOS colors", () => {
   expect(NOTE_COLORS.map((c) => [c.name, c.background])).toEqual([
     ["Butter", "#faefb6"], ["Blush", "#fbd8d4"], ["Sky", "#d5e8fb"],
@@ -21,34 +15,29 @@ test("note palette indices retain the shared iOS colors", () => {
   expect(noteColor(5)).toBe(NOTE_COLORS[0]);
 });
 
-test("dark note paper pairs a muted card tint with its foreground", () => {
-  const css = postcss.parse(readFileSync(new URL("./notePaper.css", import.meta.url), "utf8"));
-  const dark = new Map<string, string>();
-  css.walkAtRules("variant", (rule) => {
-    if (rule.params === "dark") {
-      rule.walkDecls((decl) => { dark.set(decl.prop, decl.value); });
+// Notes keep their paper in dark mode: the paper, its tiles and its menus are
+// `.light` elements, which carry the light tokens on a dark page.
+test("a light element keeps the light tokens", () => {
+  const tokens = new Map<string, string>();
+  css.walkRules((rule) => {
+    if (rule.selectors.includes(".light")) {
+      rule.walkDecls((decl) => { tokens.set(decl.prop, decl.value); });
     }
   });
-  expect(dark.get("background-color")).toBe("color-mix(in srgb, var(--card) 94%, var(--note-accent) 6%)");
-  expect(dark.get("color")).toBe("var(--card-foreground)");
-  expect(dark.get("--note-text-ink")).toBe("color-mix(in srgb, var(--note-text-dark) 75%, white 25%)");
+  expect(tokens.get("color-scheme")).toBe("light");
+  expect(tokens.get("--foreground")).toBe("oklch(0.145 0 0)");
+  expect(tokens.get("--card")).toBe("oklch(1 0 0)");
+  expect(tokens.get("--popover")).toBe("oklch(1 0 0)");
 });
 
-test("editor and tile text colors retain named marks and theme palettes", () => {
-  const schema = getSchema([StarterKit.configure({ link: false }), TextColor]);
-  const serializer = DOMSerializer.fromSchema(schema);
-  for (const color of NOTE_TEXT_COLORS) {
-    const body = `<span color="${color.id}">Readable color</span>`;
-    const { document } = parseHTML("<html><body></body></html>");
-    const node = schema.nodeFromJSON(docOf(parseNoteBody(body)));
-    const container = document.createElement("div");
-    container.appendChild(serializer.serializeFragment(node.content, { document }));
-    const preview = parseHTML(renderToStaticMarkup(<NoteBodyPreview body={body} lines={2} />)).document;
-    for (const span of [container.querySelector("[data-color]"), preview.querySelector("[data-color]")]) {
-      expect(span?.getAttribute("data-color")).toBe(color.id);
-      expect(span?.getAttribute("style")).toContain("var(--note-text-ink,");
-      expect(span?.getAttribute("style")).toContain(color.paper);
-      expect(span?.getAttribute("style")).toContain(color.dark);
+// Dark utilities skip a light element and everything inside it, for both the
+// explicit `.dark` theme and the system preference.
+test("dark utilities skip light elements", () => {
+  let variant = "";
+  css.walkAtRules("custom-variant", (rule) => {
+    if (rule.params === "dark") {
+      variant = rule.toString();
     }
-  }
+  });
+  expect(variant.match(/:not\(:where\(\.light, \.light \*\)\)/g)?.length).toBe(2);
 });

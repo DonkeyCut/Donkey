@@ -19,7 +19,8 @@ import { NOTE_COLORS, noteColor, type CutNoteLabel } from "@/cut/lib/notes";
 import { NOTE_LABELS_MAX } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 
-import "./notePaper.css";
+// The note paper's ink, matching the iOS app.
+const NOTE_INK = "#201a0d";
 
 // The rich text editor loads with the first note opened, off the list's own
 // bundle.
@@ -199,13 +200,18 @@ export function NoteComposer({
       aria-modal="true"
       aria-label={draft.title.trim() || "Untitled note"}
       {...KEEP_EVENTS}
-      className="note-paper fixed inset-0 z-50 flex flex-col font-system antialiased"
-      style={{ "--note-paper-background": paper.background, "--note-accent": paper.accent } as React.CSSProperties}
+      // `light` keeps the paper, its controls and its menus light in dark mode.
+      className="light fixed inset-0 z-50 flex flex-col font-system antialiased"
+      style={{ backgroundColor: paper.background, color: NOTE_INK }}
     >
-      <header className="flex shrink-0 items-center gap-2 px-6 py-3">
+      <header
+        className="flex shrink-0 items-center gap-2 px-6 py-3"
+        style={{ backgroundColor: paper.background }}
+      >
         <Button
           variant="ghost"
-          className="hover:bg-black/5 hover:text-current dark:hover:bg-white/5"
+          className="hover:bg-black/5 hover:text-current"
+          style={{ color: NOTE_INK }}
           onClick={onClose}
         >
           <ArrowLeft data-icon="inline-start" />{" "}
@@ -218,7 +224,8 @@ export function NoteComposer({
               <Button
                 variant="ghost"
                 aria-label="Note color"
-                className="hover:bg-black/5 hover:text-current dark:hover:bg-white/5"
+                className="hover:bg-black/5 hover:text-current"
+                style={{ color: NOTE_INK }}
               />
             }
           >
@@ -229,7 +236,7 @@ export function NoteComposer({
             {paper.name}
             <ChevronDown className="size-3.5 opacity-60" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuContent align="end" className="light w-40">
             {NOTE_COLORS.map((c, i) => (
               <DropdownMenuItem
                 key={c.name}
@@ -249,7 +256,7 @@ export function NoteComposer({
         <Button
           variant="ghost"
           aria-label="Delete note"
-          className="text-destructive hover:bg-black/5 hover:text-destructive dark:hover:bg-white/5"
+          className="text-destructive hover:bg-black/5 hover:text-destructive"
           onClick={onDelete}
         >
           <Trash2 data-icon="inline-start" /> Delete
@@ -267,7 +274,8 @@ export function NoteComposer({
           rows={1}
           value={draft.title}
           placeholder="Untitled"
-          className="resize-none overflow-hidden bg-transparent text-4xl leading-tight font-semibold tracking-tight outline-none placeholder:text-current placeholder:opacity-60"
+          className="resize-none overflow-hidden bg-transparent text-4xl leading-tight font-semibold tracking-tight outline-none placeholder:opacity-30"
+          style={{ color: NOTE_INK }}
           onChange={(e) => onChange({ ...draft, title: e.target.value.replace(/\n/g, "") })}
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -282,7 +290,7 @@ export function NoteComposer({
           {worn.map((l) => (
             <button
               key={l.id}
-              className="group flex cursor-pointer items-center gap-1 rounded-full bg-black/10 px-2.5 py-1 text-xs font-medium hover:bg-black/15 dark:bg-white/10 dark:hover:bg-white/15"
+              className="group flex cursor-pointer items-center gap-1 rounded-full bg-black/10 px-2.5 py-1 text-xs font-medium hover:bg-black/15"
               aria-label={`Remove label ${l.name}`}
               onClick={() => toggleLabel(l.id)}
             >
@@ -294,7 +302,7 @@ export function NoteComposer({
             <PopoverTrigger
               render={
                 <button
-                  className="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium opacity-70 hover:bg-black/10 hover:opacity-80 dark:hover:bg-white/10"
+                  className="flex cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium opacity-50 hover:bg-black/10 hover:opacity-80"
                   aria-label="Add label"
                 />
               }
@@ -302,7 +310,7 @@ export function NoteComposer({
               {worn.length === 0 ? <Tag className="size-3.5" /> : <Plus className="size-3.5" />}
               {worn.length === 0 ? "Add label" : "Label"}
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-64">
+            <PopoverContent align="start" className="light w-64">
               <LabelPicker
                 labels={labels}
                 selected={draft.labelIds}
@@ -316,7 +324,7 @@ export function NoteComposer({
         </div>
         <NoteBodyEditor
           body={draft.body}
-          ink="currentColor"
+          ink={NOTE_INK}
           onChange={(text) => onChange({ ...draftRef.current, body: text })}
           onEditor={(editor) => (body.current = editor)}
         />
