@@ -198,7 +198,8 @@ export function TemplateCard({
       data-sel-id={selectId}
       style={typeof tile === "number" ? { width: tile, height: tile } : undefined}
       className={cn(
-        "group flex flex-col border bg-background",
+        // A template is a file: it looks the same in both themes.
+        "light group flex flex-col border bg-background text-foreground",
         tile ? "relative overflow-hidden rounded-xl p-2.5 shadow-sm" : "rounded-lg px-2.5 py-1.5",
         tile === "fill" && "aspect-square w-full",
         selected ? PICKED_RING : "border-border",

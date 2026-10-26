@@ -59,7 +59,9 @@ export function libraryTileBox(
       : { w: 1, h: 1 };
   return {
     className: cn(
-      "relative max-w-full overflow-hidden rounded-xl border shadow-sm",
+      // `light`: a file looks the same in both themes; only the chrome around
+      // it goes dark.
+      "light relative max-w-full overflow-hidden rounded-xl border shadow-sm",
       type === "lut" ? "bg-background" : "bg-muted",
       !area && (font ? "aspect-[16/7]" : "aspect-square"),
       // The sheet is the card, so nothing is drawn around it; the type

@@ -8,7 +8,7 @@ The site theme lives in [globals.css](../../../../site/src/app/globals.css). `ba
 
 The root uses the system preference until an explicit `.light` or `.dark` theme is set. Product `.app-surface` pages select `--app-background`, while public light pages use the sand background. Cold-load both kinds of surface. Check explicit light on a dark system and explicit dark on a light system when touching theme selection; exercise a preference change while the page is open.
 
-`ink`, `cream`, and `coral` are fixed brand colors. Pair fixed pastel cards with their intended ink. A `light` element and everything inside it keep the light tokens and skip `dark:` utilities. Note paper is one: the open note, its tiles, and its menus look the same in both themes.
+`ink`, `cream`, and `coral` are fixed brand colors. Pair fixed pastel cards with their intended ink. A `light` element and everything inside it keep the light tokens and skip `dark:` utilities. Files are light elements: note paper, its menus, and every file tile look the same in both themes, and only the chrome around them goes dark.
 
 A dark-mode change leaves light mode pixel-identical. Keep the light value and add the dark one beside it, as in `text-[#454545] dark:text-foreground/70`.
 
