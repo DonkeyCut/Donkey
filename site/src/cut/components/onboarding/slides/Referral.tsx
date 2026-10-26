@@ -112,6 +112,6 @@ export function ReferralSlide({
 
 function BrandMark({ src }: { src: string }) {
   return (
-    <img src={src} alt="" width={18} height={18} className="block size-[18px] dark:rounded-sm dark:bg-cream" />
+    <img src={src} alt="" width={18} height={18} className="block size-[18px]" />
   );
 }
