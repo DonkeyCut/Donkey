@@ -1513,7 +1513,8 @@ function AssetCard({
             ref={tileRef}
             data-drag-object
             className={cn(
-              "relative aspect-square overflow-hidden rounded-xl border border-border bg-muted shadow-sm transition-colors group-hover:border-input",
+              // A file looks the same in both themes, like the Library's.
+              "light relative aspect-square overflow-hidden rounded-xl border border-border bg-muted shadow-sm transition-colors group-hover:border-input",
               (flash || selected) && PICKED_RING
             )}
           >

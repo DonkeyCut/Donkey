@@ -19,7 +19,7 @@ export function CutLocal() {
           <Headline size="lg">
             Run Donkey Cut <span className="italic">on your Mac.</span>
           </Headline>
-          <p className="mt-6 max-w-[560px] text-[17px] leading-[1.55] text-[#454545]">
+          <p className="mt-6 max-w-[560px] text-[17px] leading-[1.55] text-foreground/70">
             Edit videos locally on your Mac. The app uses your own storage and
             transcribes audio on device.
           </p>
@@ -31,7 +31,7 @@ export function CutLocal() {
         </div>
         <Image
           alt="Donkey app icon being dragged into the Applications folder."
-          className="h-auto w-full rounded-2xl"
+          className="backlight-image h-auto w-full rounded-2xl"
           height={413}
           src="/install/install-drag.png"
           unoptimized

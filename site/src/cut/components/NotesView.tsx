@@ -743,7 +743,8 @@ export function NotesView({ library, ref }: Props = {}) {
                   onDragStart={(e) => onCardDragStart(e, n.id)}
                   onDragEnd={clearRefDrag}
                   className={cn(
-                    "flex cursor-pointer flex-col gap-1.5 text-left shadow-sm",
+                    // Paper stays light in dark mode, like the open note.
+                    "light flex cursor-pointer flex-col gap-1.5 text-left shadow-sm",
                     // A note is a file like the rest: the same square a sound
                     // tile is, here and in the Library.
                     "overflow-hidden rounded-xl p-3",

@@ -1,14 +1,12 @@
 "use client";
 
-import Image from "next/image";
+import { DonkeyMark } from "@/components/DonkeyMark";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { PillButton } from "@/app/_components/landing/LandingPrimitives";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
-
-const NAV_ICON_SIZE = 59;
 
 type Props = {
   homeHref?: string;
@@ -56,24 +54,16 @@ export function TopNav({
         className={cn(
           "mx-auto flex w-full max-w-[1400px] items-center justify-between rounded-[24px] px-4 py-2 transition-all duration-300 md:px-12 md:py-2.5",
           scrolled
-            ? "border border-ink/10 bg-cream/95 shadow-[0_18px_50px_rgba(15,14,13,0.10)] backdrop-blur-md"
+            ? "border border-foreground/10 bg-cream/95 dark:bg-card/95 shadow-[0_18px_50px_rgba(15,14,13,0.10)] backdrop-blur-md"
             : "border border-transparent bg-transparent shadow-none",
         )}
       >
         <Link
           href={homeHref}
-          className="flex items-center gap-1 text-ink no-underline md:gap-3"
+          className="flex items-center gap-1 text-foreground no-underline md:gap-3"
         >
           <div className="flex h-[44px] w-[44px] items-center justify-center overflow-hidden rounded-[10px] md:h-[59px] md:w-[59px]">
-            <Image
-              src="/donkey-logo.svg"
-              alt=""
-              width={NAV_ICON_SIZE}
-              height={NAV_ICON_SIZE}
-              sizes={`${NAV_ICON_SIZE}px`}
-              className="block h-full w-full object-contain"
-              unoptimized
-            />
+            <DonkeyMark alt="" />
           </div>
           <span className="whitespace-nowrap text-lg font-semibold md:text-2xl">
             {wordmark}
@@ -91,7 +81,7 @@ export function TopNav({
                   full-page navigation the sign-in route needs. */}
               <a
                 href={signedOutAuth.logInHref}
-                className="hidden whitespace-nowrap text-sm font-semibold text-ink no-underline sm:inline"
+                className="hidden whitespace-nowrap text-sm font-semibold text-foreground no-underline sm:inline"
               >
                 Log in
               </a>
@@ -106,7 +96,7 @@ export function TopNav({
           ) : authToggle ? (
             <Link
               href={authToggle.href}
-              className="whitespace-nowrap text-sm font-semibold text-ink no-underline"
+              className="whitespace-nowrap text-sm font-semibold text-foreground no-underline"
             >
               {authToggle.label}
             </Link>

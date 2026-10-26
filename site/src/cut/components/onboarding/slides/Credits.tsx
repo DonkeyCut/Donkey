@@ -50,12 +50,12 @@ export function CreditsSlide({
         </h2>
         {/* Ragged right on a narrow measure: the line breaks stay put instead
             of the last line floating in the middle of the slide. */}
-        <p className="mx-auto mt-4 max-w-[460px] text-left text-[16px] leading-[1.55] text-[#454545]">
+        <p className="mx-auto mt-4 max-w-[460px] text-left text-[16px] leading-[1.55] text-foreground/70">
           Already in your account — nothing to claim. Spend them on generated
           video, audio and images.
         </p>
         {expiresAt !== null && (
-          <p className="mt-3 text-[13px] leading-[1.5] text-[#8a8a8a]">
+          <p className="mt-3 text-[13px] leading-[1.5] text-foreground/70">
             Expires {formatCreditExpiry(new Date(expiresAt))}.
           </p>
         )}

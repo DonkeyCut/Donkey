@@ -1,4 +1,3 @@
-import { BG, BLACK } from "@/app/_components/landing/theme";
 import { CutFinalCTA } from "@/app/cut/_components/landing/CutFinalCTA";
 import { CutFooter } from "@/app/cut/_components/landing/CutFooter";
 import { CutHero } from "@/app/cut/_components/landing/CutHero";
@@ -14,15 +13,7 @@ import { CutWorksWith } from "@/app/cut/_components/landing/CutWorksWith";
 // when signed out, "Go to App" when signed in.
 export function CutLanding() {
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background: BG,
-        color: BLACK,
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-        WebkitFontSmoothing: "antialiased",
-      }}
-    >
+    <main className="min-h-screen bg-background font-system text-foreground antialiased">
       <CutTopNav />
       <CutHero />
       <CutWorksWith />

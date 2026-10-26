@@ -79,6 +79,7 @@ export function TapedCard({
           borderRadius: 16,
           border: `2px solid ${BLACK}`,
           background: CARD[color],
+          color: BLACK,
           ...(fill ? { height: "100%" } : null),
         }}
       >

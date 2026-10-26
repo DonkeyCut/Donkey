@@ -200,7 +200,8 @@ export function NoteComposer({
       aria-modal="true"
       aria-label={draft.title.trim() || "Untitled note"}
       {...KEEP_EVENTS}
-      className="fixed inset-0 z-50 flex flex-col font-system antialiased"
+      // `light` keeps the paper, its controls and its menus light in dark mode.
+      className="light fixed inset-0 z-50 flex flex-col font-system antialiased"
       style={{ backgroundColor: paper.background, color: NOTE_INK }}
     >
       <header
@@ -235,7 +236,7 @@ export function NoteComposer({
             {paper.name}
             <ChevronDown className="size-3.5 opacity-60" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuContent align="end" className="light w-40">
             {NOTE_COLORS.map((c, i) => (
               <DropdownMenuItem
                 key={c.name}
@@ -309,7 +310,7 @@ export function NoteComposer({
               {worn.length === 0 ? <Tag className="size-3.5" /> : <Plus className="size-3.5" />}
               {worn.length === 0 ? "Add label" : "Label"}
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-64">
+            <PopoverContent align="start" className="light w-64">
               <LabelPicker
                 labels={labels}
                 selected={draft.labelIds}

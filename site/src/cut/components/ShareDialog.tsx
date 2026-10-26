@@ -236,7 +236,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
                     <button
                       disabled={busy}
                       aria-label={`Remove ${email}`}
-                      className="grid size-4 place-items-center rounded-full text-muted-foreground hover:bg-black/10 hover:text-foreground"
+                      className="grid size-4 place-items-center rounded-full text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
                       onClick={() => removeEmail(email)}
                     >
                       <X className="size-2.5" />

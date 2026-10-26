@@ -111,7 +111,7 @@ export function EditorMock({
           {frame === "card" && (
             <div
               aria-hidden
-              className="absolute inset-0 translate-x-[6px] translate-y-[6px] rounded-2xl bg-ink max-md:hidden"
+              className="absolute inset-0 translate-x-[6px] translate-y-[6px] rounded-2xl bg-ink max-md:hidden dark:hidden"
             />
           )}
           {/* On mobile every frame dissolves: mocks sit edge to edge there, so
@@ -120,9 +120,11 @@ export function EditorMock({
             className={cn(
               "relative h-full w-full overflow-hidden rounded-2xl bg-card max-md:rounded-none",
               frame === "lifted" &&
-                "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)]",
+                "shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_24px_64px_rgba(15,14,13,0.25)] dark:border dark:border-white/30 max-md:dark:border-0",
               frame === "flat" && "shadow-[0_0_0_1px_rgba(0,0,0,0.06)]",
-              frame === "card" && "border-2 border-ink max-md:border-0",
+              frame === "card" && "border-2 border-ink max-md:border-0 dark:border-white/15",
+              // A dark page swallows ink shadows, so raised frames glow there.
+              frame !== "flat" && "backlight",
             )}
           >
             <div
@@ -173,14 +175,14 @@ export function EditorMock({
               onClick={() => setActive(i)}
               aria-pressed={i === active}
               className={cn(
-                "flex items-center gap-1.5 rounded-full border border-ink px-2.5 py-3 text-xs font-medium transition-colors",
-                i === active ? "bg-ink text-white" : "bg-white text-ink hover:bg-ink/5",
+                "flex items-center gap-1.5 rounded-full border border-foreground dark:border-border px-2.5 py-3 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground",
+                i === active ? "bg-primary text-primary-foreground" : "bg-card text-card-foreground hover:bg-accent hover:text-accent-foreground",
               )}
             >
               <span
                 className={cn(
                   "size-1.5 rounded-full",
-                  i === active ? "bg-coral" : "bg-ink/25",
+                  i === active ? "bg-coral" : "bg-foreground/25",
                 )}
               />
               {p.switcherLabel}

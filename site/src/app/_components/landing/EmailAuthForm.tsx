@@ -42,20 +42,20 @@ export function EmailAuthForm({ mode, callbackURL }: Props) {
       {signingUp ? <label className="flex flex-col gap-1 text-sm">
         Name
         <input name="name" autoComplete="name" required disabled={pending}
-          className="rounded-lg border border-ink/30 bg-white px-3 py-2 outline-none focus:border-ink focus:ring-1 focus:ring-inset focus:ring-ink" />
+          className="rounded-lg border border-input bg-card text-card-foreground px-3 py-2 outline-none focus:border-foreground focus:ring-1 focus:ring-inset focus:ring-foreground" />
       </label> : null}
       <label className="flex flex-col gap-1 text-sm">
         Email
         <input name="email" type="email" autoComplete="username" required disabled={pending}
-          className="rounded-lg border border-ink/30 bg-white px-3 py-2 outline-none focus:border-ink focus:ring-1 focus:ring-inset focus:ring-ink" />
+          className="rounded-lg border border-input bg-card text-card-foreground px-3 py-2 outline-none focus:border-foreground focus:ring-1 focus:ring-inset focus:ring-foreground" />
       </label>
       <label className="flex flex-col gap-1 text-sm">
         Password
         <input name="password" type="password" autoComplete={signingUp ? "new-password" : "current-password"} required disabled={pending}
-          className="rounded-lg border border-ink/30 bg-white px-3 py-2 outline-none focus:border-ink focus:ring-1 focus:ring-inset focus:ring-ink" />
+          className="rounded-lg border border-input bg-card text-card-foreground px-3 py-2 outline-none focus:border-foreground focus:ring-1 focus:ring-inset focus:ring-foreground" />
       </label>
       <button type="submit" disabled={pending}
-        className="rounded-lg bg-ink px-4 py-2 text-background disabled:opacity-60">
+        className="rounded-lg bg-primary px-4 py-2 text-primary-foreground disabled:opacity-60">
         {pending ? "Please wait…" : signingUp ? "Create account" : "Sign in"}
       </button>
       {error ? <p role="alert" className="text-sm">{error}</p> : null}

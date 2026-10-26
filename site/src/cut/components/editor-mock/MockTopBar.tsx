@@ -1,5 +1,6 @@
 "use client";
 
+import { DonkeyMark } from "@/components/DonkeyMark";
 import {
   Check,
   ChevronDown,
@@ -35,13 +36,7 @@ export function MockTopBar({ project }: { project: MockProject }) {
           <ChevronLeft className="size-4" />
         </span>
         <span className="grid size-[22px] shrink-0 place-items-center">
-          <img
-            src="/donkey-logo.svg"
-            alt=""
-            width={22}
-            height={22}
-            className="block h-full w-full object-contain"
-          />
+          <DonkeyMark alt="" />
         </span>
         <span className="ml-1.5 max-w-64 truncate rounded-md px-2 py-1 text-sm font-medium tracking-tight">
           {project.name}

@@ -44,15 +44,15 @@ export function TableOfContents({ headings }: { headings: BlogHeading[] }) {
       aria-label="On this page"
       className="sticky top-24 max-h-[calc(100vh-8rem)] w-full overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
-      <h3 className="mb-4 text-sm font-semibold text-ink">Overview</h3>
+      <h3 className="mb-4 text-sm font-semibold text-foreground">Overview</h3>
       <ul className="space-y-2">
         {headings.map((heading) => (
-          <li key={heading.id} className={cn(heading.level === 3 && "pl-3", heading.id === "faqs" && "mt-3 border-t border-ink/15 pt-3")}>
+          <li key={heading.id} className={cn(heading.level === 3 && "pl-3", heading.id === "faqs" && "mt-3 border-t border-foreground/15 pt-3")}>
             <a
               href={`#${heading.id}`}
               className={cn(
                 "block text-sm no-underline",
-                activeId === heading.id ? "font-medium text-ink" : "text-[#666] hover:text-ink",
+                activeId === heading.id ? "font-medium text-foreground" : "text-foreground/70 hover:text-foreground",
               )}
               onClick={(event) => {
                 event.preventDefault();

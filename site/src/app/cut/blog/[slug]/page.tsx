@@ -100,8 +100,8 @@ function BackLink({ large }: { large?: boolean }) {
       href="/blog"
       className={
         large
-          ? "inline-flex items-center gap-2 text-base font-semibold text-ink no-underline transition-colors hover:text-coral"
-          : "mb-6 inline-flex items-center gap-2 text-sm text-[#666] no-underline transition-colors hover:text-ink md:mb-8"
+          ? "inline-flex items-center gap-2 text-base font-semibold text-foreground no-underline transition-colors hover:text-coral"
+          : "mb-6 inline-flex items-center gap-2 text-sm text-foreground/70 no-underline transition-colors hover:text-foreground md:mb-8"
       }
     >
       <ArrowLeft className="size-4" />
@@ -128,7 +128,7 @@ async function Post({ params }: Params) {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(article) }} />
       {faq ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faq) }} /> : null}
       {post.status !== "PUBLISHED" ? (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-ink bg-coral px-4 py-3 text-sm font-semibold text-ink">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-foreground bg-coral px-4 py-3 text-sm font-semibold text-ink">
           <span>Draft preview. Only you can see this page.</span>
           <a href="/api/blog/preview/exit" className="underline underline-offset-2">
             Exit preview
@@ -152,8 +152,8 @@ async function Post({ params }: Params) {
                 ))}
               </div>
             ) : null}
-            <h1 className="mb-4 text-3xl font-semibold leading-tight text-balance text-ink md:text-5xl">{post.title}</h1>
-            <div className="flex flex-wrap items-center gap-2 text-sm text-[#666]">
+            <h1 className="mb-4 text-3xl font-semibold leading-tight text-balance text-foreground md:text-5xl">{post.title}</h1>
+            <div className="flex flex-wrap items-center gap-2 text-sm text-foreground/70">
               {post.publishedAt ? <time dateTime={post.publishedAt}>{formatBlogDate(post.publishedAt)}</time> : null}
               {revised ? (
                 <>
@@ -162,7 +162,7 @@ async function Post({ params }: Params) {
                 </>
               ) : null}
             </div>
-            {post.summary ? <p className="mt-5 max-w-[60ch] text-lg leading-8 text-[#454545]">{post.summary}</p> : null}
+            {post.summary ? <p className="mt-5 max-w-[60ch] text-lg leading-8 text-foreground/70">{post.summary}</p> : null}
           </header>
           <PostArticle slug={slug} />
         </div>
@@ -180,12 +180,12 @@ async function Post({ params }: Params) {
 function PostSkeleton() {
   return (
     <div aria-hidden className="animate-pulse" {...{ [BLOG_SKELETON_ATTR]: "" }}>
-      <div className="mb-8 h-60 rounded-2xl border-2 border-ink/10 bg-cream" />
+      <div className="mb-8 h-60 rounded-2xl border-2 border-foreground/10 bg-cream dark:bg-card" />
       <div className="max-w-[72ch] space-y-4">
-        <div className="h-10 w-3/4 rounded-lg bg-ink/10" />
-        <div className="h-4 w-1/3 rounded bg-ink/10" />
-        <div className="h-4 w-full rounded bg-ink/10" />
-        <div className="h-4 w-5/6 rounded bg-ink/10" />
+        <div className="h-10 w-3/4 rounded-lg bg-foreground/10" />
+        <div className="h-4 w-1/3 rounded bg-foreground/10" />
+        <div className="h-4 w-full rounded bg-foreground/10" />
+        <div className="h-4 w-5/6 rounded bg-foreground/10" />
       </div>
     </div>
   );

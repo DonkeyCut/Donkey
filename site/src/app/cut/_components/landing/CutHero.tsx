@@ -17,7 +17,7 @@ export function CutHero() {
           Finally, a video editor{" "}
           <span className="italic">that&apos;s easy.</span>
         </h1>
-        <p className="mt-6 max-w-[720px] text-[17px] leading-[1.55] text-[#454545]">
+        <p className="mt-6 max-w-[720px] text-[17px] leading-[1.55] text-foreground/70">
           Edit with chat, generate images and video, and keep your files on
           your own computer. Use your existing Claude or Codex subscription if
           you already have one.

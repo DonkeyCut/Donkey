@@ -48,7 +48,7 @@ export function ReferralSlide({
       <h2 className="text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em]">
         How did you hear about us?
       </h2>
-      <p className="mt-3 text-center text-[16px] text-[#454545]">
+      <p className="mt-3 text-center text-[16px] text-foreground/70">
         Pick as many as apply — it tells us where to show up next.
       </p>
       <div className="mt-8 flex flex-col gap-2">
@@ -63,10 +63,10 @@ export function ReferralSlide({
                 className={cn(
                   // Selection is a border and a check, not a filled row: the
                   // brand marks keep their own colors and stay legible.
-                  "relative z-[1] flex w-full items-center gap-3 rounded-xl border bg-white px-4 py-3.5 text-left text-[15px] font-medium transition-colors",
+                  "relative z-[1] flex w-full items-center gap-3 rounded-xl border bg-card px-4 py-3.5 text-left text-[15px] font-medium transition-colors",
                   active
-                    ? "border-ink ring-1 ring-ink"
-                    : "border-ink/15 hover:border-ink/40",
+                    ? "border-foreground ring-1 ring-foreground"
+                    : "border-foreground/15 hover:border-foreground/40",
                 )}
               >
                 <span className="grid size-5 shrink-0 place-items-center">
@@ -97,7 +97,7 @@ export function ReferralSlide({
                       placeholder="Tell us where"
                       maxLength={REFERRAL_OTHER_MAX_LENGTH}
                       tabIndex={active ? 0 : -1}
-                      className="w-full rounded-b-xl border border-t-0 border-ink bg-white px-4 pt-6 pb-3 text-[15px] outline-none placeholder:text-ink/40"
+                      className="w-full rounded-b-xl border border-t-0 border-foreground bg-card px-4 pt-6 pb-3 text-[15px] outline-none placeholder:text-muted-foreground"
                     />
                   </div>
                 </div>

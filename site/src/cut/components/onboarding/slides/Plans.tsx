@@ -27,7 +27,7 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
       <h2 className="text-center text-[clamp(24px,3vw,32px)] leading-[1.1] font-semibold tracking-[-0.02em]">
         Simple pricing
       </h2>
-      <p className="mt-3 text-center text-[16px] text-[#454545]">
+      <p className="mt-3 text-center text-[16px] text-foreground/70">
         The editor is free. Pay only for AI generated media.
       </p>
 
@@ -85,7 +85,7 @@ export function PlansSlide({ onSkipPro }: { onSkipPro: () => void }) {
         <button
           type="button"
           onClick={onSkipPro}
-          className="text-[15px] text-[#454545] underline-offset-4 transition-colors hover:text-ink hover:underline"
+          className="text-[15px] text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline"
         >
           Continue with free
         </button>

@@ -25,7 +25,7 @@ function PageLink({ page, active, children }: { page: number; active?: boolean; 
     <Link
       href={blogPageHref(page)}
       aria-current={active ? "page" : undefined}
-      className={cn(link, active ? "border-ink bg-ink text-white" : "border-transparent text-ink hover:border-ink")}
+      className={cn(link, active ? "border-foreground bg-ink text-white" : "border-transparent text-foreground hover:border-foreground")}
     >
       {children}
     </Link>
@@ -44,7 +44,7 @@ export function BlogPagination({ current, total }: { current: number; total: num
       ) : null}
       {pageTokens(current, total).map((token, i) =>
         token === "ellipsis" ? (
-          <span key={`e${i}`} className="px-2 text-[#666]">
+          <span key={`e${i}`} className="px-2 text-foreground/70">
             …
           </span>
         ) : (

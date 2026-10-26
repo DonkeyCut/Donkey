@@ -12,13 +12,13 @@ export function CutOpenSource() {
       <Headline size="lg">
         Donkey Cut is <span className="italic">open source.</span>
       </Headline>
-      <p className="mt-6 max-w-[900px] text-[17px] leading-[1.55] text-[#454545]">
+      <p className="mt-6 max-w-[900px] text-[17px] leading-[1.55] text-foreground/70">
         The editor and its render engine are built in the open. Read the
         source, run it yourself, contribute and make it better.
       </p>
 
       <div className="mt-8">
-        <div className="max-w-[780px] overflow-x-auto rounded-xl bg-ink px-[18px] pt-5 pb-10 font-code text-[13px] text-white md:px-6 md:pt-6 md:pb-12 md:text-[15px]">
+        <div className="backlight max-w-[780px] overflow-x-auto rounded-xl bg-ink px-[18px] pt-5 pb-10 font-code text-[13px] text-white md:px-6 md:pt-6 md:pb-12 md:text-[15px]">
           <div className="mb-4 flex items-center gap-2">
             <span className="h-[10px] w-[10px] rounded-full bg-[#FF5F57]" />
             <span className="h-[10px] w-[10px] rounded-full bg-[#FEBC2E]" />

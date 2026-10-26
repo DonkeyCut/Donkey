@@ -13,7 +13,7 @@ export function CutFinalCTA() {
     >
       <div className="relative">
         <div className="absolute inset-0 translate-x-2 translate-y-2 rounded-3xl bg-coral" />
-        <div className="relative rounded-3xl border-2 border-ink bg-ink px-6 py-10 text-center text-white md:px-12 md:py-20">
+        <div className="backlight relative rounded-3xl border-2 border-ink bg-ink px-6 py-10 text-center text-white md:px-12 md:py-20">
           <div className="absolute -top-[10px] left-1/2 h-[18px] w-20 -translate-x-1/2 -rotate-2 rounded-[3px] border-2 border-ink bg-coral" />
           <h2 className="mb-4 text-[clamp(36px,5.5vw,64px)] leading-[0.95] font-medium tracking-[-0.02em]">
             Finally, a video editor{" "}

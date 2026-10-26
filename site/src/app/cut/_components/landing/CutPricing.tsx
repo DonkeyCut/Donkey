@@ -31,7 +31,7 @@ export function CutPricing() {
       <Headline size="lg">
         Simple <span style={{ fontStyle: "italic" }}>pricing</span>
       </Headline>
-      <p className="mt-6 max-w-[900px] text-[17px] leading-[1.55] text-[#454545]">
+      <p className="mt-6 max-w-[900px] text-[17px] leading-[1.55] text-foreground/70">
         The editor is free. Pay only for AI generated media.
       </p>
       <div
@@ -47,7 +47,7 @@ export function CutPricing() {
           <PricingPlanCard key={plan.name} plan={plan} />
         ))}
       </div>
-      <p className="mt-6 text-[15px] leading-[1.55] text-[#454545]">
+      <p className="mt-6 text-[15px] leading-[1.55] text-foreground/70">
         * Buy credits for AI generated content at any time.
       </p>
     </section>
