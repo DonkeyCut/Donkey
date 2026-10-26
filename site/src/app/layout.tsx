@@ -5,6 +5,7 @@ import { GeistSans } from "geist/font/sans";
 import "./globals.css";
 
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import { THEME_HEAD_SCRIPT } from "@/lib/theme";
 import { QueryProvider } from "@/queries/QueryProvider";
 import { MetaPageView } from "./_components/MetaPageView";
 import { PostHogProvider } from "./_components/PostHogProvider";
@@ -42,7 +43,12 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${GeistSans.variable} ${GeistMono.variable} h-full antialiased`}
+      // The head script adds the saved theme's class before hydration.
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_HEAD_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">
         <PostHogProvider>
           <QueryProvider>{children}</QueryProvider>

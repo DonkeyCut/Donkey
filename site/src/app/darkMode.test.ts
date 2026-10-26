@@ -7,6 +7,7 @@ import { EmailAuthForm } from "./_components/landing/EmailAuthForm";
 import { MentionTextarea } from "@/cut/components/AssetRefs";
 import { AiChatSlide } from "@/cut/components/onboarding/slides/AiChat";
 import { TopNav } from "./_components/landing/TopNav";
+import { THEME_HEAD_SCRIPT } from "@/lib/theme";
 
 const css = postcss.parse(readFileSync(new URL("./globals.css", import.meta.url), "utf8"));
 
@@ -65,5 +66,19 @@ describe("dark theme", () => {
       }
     });
     expect(overrides).toEqual(["var(--app-background)"]);
+  });
+
+  test("the head script pins a saved theme and leaves system alone", () => {
+    const run = (saved: string | null) => {
+      const classes = new Set<string>();
+      const storage = { getItem: () => saved };
+      const doc = { documentElement: { classList: { add: (c: string) => classes.add(c) } } };
+      new Function("localStorage", "document", THEME_HEAD_SCRIPT)(storage, doc);
+      return [...classes];
+    };
+    expect(run("dark")).toEqual(["dark"]);
+    expect(run("light")).toEqual(["light"]);
+    expect(run(null)).toEqual([]);
+    expect(run("sepia")).toEqual([]);
   });
 });
