@@ -2306,8 +2306,9 @@ function ChatSession({
             ref={composerBoxRef}
             className={cn(
               // z above the floating stack so the box paints over its tucked
-              // bottom edge.
-              "relative z-10 rounded-xl border bg-background transition-colors",
+              // bottom edge. Dark mode lifts the opaque fill a step above the
+              // panel's card surface so the field reads as raised.
+              "relative z-10 rounded-xl border bg-background transition-colors dark:bg-[color-mix(in_oklab,var(--card),white_5%)]",
               dropActive
                 ? "border-[#0a84ff] ring-2 ring-[#0a84ff]/30"
                 : fileDropHint

@@ -52,7 +52,7 @@ export function MockAiPanel({ project }: { project: MockProject }) {
         {/* The real composer is bg-background, which the app surface paints
             white; on the cream landing that token stays cream, so the mock
             pins white directly. */}
-        <div className="rounded-xl border border-input bg-card">
+        <div className="rounded-xl border border-input bg-card dark:bg-[color-mix(in_oklab,var(--card),white_5%)]">
           <div className="min-h-9 px-3 pt-2 text-[12.5px] leading-relaxed text-muted-foreground/70">
             Ask about your video, or tell me what to change… @ references media
           </div>
