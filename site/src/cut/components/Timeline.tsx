@@ -3,13 +3,14 @@ import { TimelineActionButton } from "@/cut/components/TimelineActionButton";
 import { TimelineGroupActions } from "@/cut/components/TimelineGroupActions";
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, MoreHorizontal, PanelBottomClose, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
+import { ArrowDownToLine, AudioLines, Check, Clapperboard, Copy, Diamond, Download, EllipsisVertical, Eye, EyeOff, FolderOpen, FolderPlus, Fullscreen, Loader2, Magnet, MoreHorizontal, PanelBottomClose, Pause, Play, Scissors, SkipBack, Sticker, Trash2, Type, Volume2, VolumeX } from "lucide-react";
 import { EFFECT_CHIP_ICONS, effectIconKind, SHAPE_CHIP_ICONS, TRANSITION_ICONS } from "@/cut/components/entityIcons";
 import { Button } from "@/components/ui/button";
 import { GuidesMenu } from "@/cut/components/GuidesMenu";
 import { EmptyTimelineNote, TimelinePicker } from "@/cut/components/TimelinePicker";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -826,7 +827,8 @@ export function Timeline() {
     if (st.clips.length === 0) return TRACK_ZERO;
     const rows = videoRows();
     if (!rows.length) return TRACK_ZERO;
-    const row = resolveRow(rows, clientY, heldRow.current, { top: true, bottom: true });
+    // With the magnet on, nothing opens below track 0.
+    const row = resolveRow(rows, clientY, heldRow.current, { top: true, bottom: !st.magnet });
     heldRow.current = row;
     if (row < 0)
       return { kind: "insert", level: Math.max(0, ...overlayLayers(st.clips).map((c) => c.track)) + 1 };
@@ -3389,12 +3391,22 @@ function TimelineTools({
 }) {
   const splitEnabled = useSplitEnabled();
   const readOnly = useEditor((s) => s.readOnly);
+  const magnet = useEditor((s) => s.magnet);
+  const toggleMagnet = useEditor((s) => s.toggleMagnet);
   if (readOnly) return null;
   return (
     <>
       <TimelineActionButton label="Text" tooltip="Text (T)" onClick={addText}><Type /></TimelineActionButton>
       <SaveSelectionButton />
-      {(splitEnabled || selectionCount > 0) && <div role="separator" aria-orientation="vertical" className="mx-1 h-4 w-px shrink-0 bg-border" />}
+      <div role="separator" aria-orientation="vertical" className="mx-1 h-4 w-px shrink-0 bg-border" />
+      <TimelineActionButton
+        label="Magnet"
+        tooltip={magnet ? "Magnet on: track 0 closes up" : "Magnet: close up track 0"}
+        pressed={magnet}
+        onClick={toggleMagnet}
+      >
+        <Magnet />
+      </TimelineActionButton>
       {splitEnabled && (
         <TimelineActionButton label="Split" tooltip="Split at pointer, or at playhead (⌘B or S)" onClick={split}><Scissors /></TimelineActionButton>
       )}
@@ -3431,6 +3443,8 @@ function TimelineToolsMenu({
   const splitEnabled = useSplitEnabled();
   const save = useSaveSelection();
   const readOnly = useEditor((s) => s.readOnly);
+  const magnet = useEditor((s) => s.magnet);
+  const toggleMagnet = useEditor((s) => s.toggleMagnet);
   // Held open, because the zoom row is not a pick: dragging the slider has to
   // leave the menu standing, while Fit beside it closes as any command would.
   const [open, setOpen] = useState(false);
@@ -3451,7 +3465,12 @@ function TimelineToolsMenu({
             {save.state === "done" ? "Saved" : "Save template"}
           </DropdownMenuItem>
         )}
-        {(splitEnabled || (!readOnly && selectionCount > 0)) && <DropdownMenuSeparator />}
+        {!readOnly && <DropdownMenuSeparator />}
+        {!readOnly && (
+          <DropdownMenuCheckboxItem checked={magnet} onCheckedChange={toggleMagnet}>
+            <Magnet /> Magnet
+          </DropdownMenuCheckboxItem>
+        )}
         {splitEnabled && <DropdownMenuItem onClick={split}><Scissors /> Split</DropdownMenuItem>}
         {!readOnly && selectionCount > 0 && (
           <DropdownMenuItem onClick={deleteSelection}>

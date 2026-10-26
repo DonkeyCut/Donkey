@@ -119,9 +119,14 @@ export function startDrag(e: React.PointerEvent, opts: DragOpts) {
     frame = 0;
     flush();
     pin?.remove();
-    activeDrags--;
-    dragListeners.forEach((fn) => fn());
-    opts.onUp?.(ev.clientX - startX, ev.clientY - startY, moved);
+    // The drag ends after its release lands, so a listener settling on the
+    // drag's end (the store's magnet) sees the gesture's last write.
+    try {
+      opts.onUp?.(ev.clientX - startX, ev.clientY - startY, moved);
+    } finally {
+      activeDrags--;
+      dragListeners.forEach((fn) => fn());
+    }
   };
   window.addEventListener("pointermove", move);
   window.addEventListener("pointerup", up);

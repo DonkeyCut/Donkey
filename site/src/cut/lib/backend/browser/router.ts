@@ -8,6 +8,7 @@
 // shelf (./library.ts). Everything else is the driver's cloud proxy.
 import { resolveParent, settleParents, subtreeOf } from "../../folderTree";
 import { sanitizeGuideLines, sanitizeGuides } from "../../guides";
+import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
 import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder } from "../../types";
 import {
   getBrowserExportJob,
@@ -100,6 +101,8 @@ async function putProject(req: Request, id: string): Promise<Response> {
       guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
       guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
       background: typeof body.background === "string" ? body.background : existing.background,
+      colorSpace: OUTPUT_SPACES.some((o) => o.id === body.colorSpace) ? body.colorSpace : existing.colorSpace,
+      magnet: typeof body.magnet === "boolean" ? body.magnet : existing.magnet,
       subtitles:
         body.subtitles && typeof body.subtitles === "object" ? body.subtitles : existing.subtitles,
       ui: body.ui && typeof body.ui === "object" ? { ...existing.ui, ...body.ui } : existing.ui,

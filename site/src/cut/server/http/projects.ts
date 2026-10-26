@@ -1,6 +1,7 @@
 import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { execFile } from "node:child_process";
 import { compatCoverIn, compatProxyNameFor } from "@/cut/lib/proxyNames";
+import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
 import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc } from "@/cut/lib/types";
 import { detectSilence, extractAudio, makeFreezeFrame, probeDims, probeDuration } from "../frames";
 import {
@@ -144,6 +145,8 @@ export const projectsApi = {
         guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
         guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
         background: typeof body.background === "string" ? body.background : existing.background,
+        colorSpace: OUTPUT_SPACES.some((o) => o.id === body.colorSpace) ? body.colorSpace : existing.colorSpace,
+        magnet: typeof body.magnet === "boolean" ? body.magnet : existing.magnet,
         subtitles:
           body.subtitles && typeof body.subtitles === "object"
             ? body.subtitles

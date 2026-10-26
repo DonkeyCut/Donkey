@@ -403,6 +403,7 @@ export function describeDoc(doc: ProjectDoc, opts?: { fullCues?: boolean; chatId
       aspect,
       background: state.background,
       colorSpace: state.colorSpace,
+      magnet: doc.magnet === true,
       guides: sanitizeGuides(doc.guides),
       guideLines: sanitizeGuideLines(doc.guideLines),
       genvideo: doc.genvideo ?? undefined,
@@ -432,6 +433,7 @@ interface DescribedState {
   aspect: Aspect;
   background: string;
   colorSpace: OutputSpace;
+  magnet: boolean;
   guides: GuideId[];
   guideLines: GuideLines;
   genvideo?: VideoProject | null;
@@ -523,6 +525,8 @@ function describeState(
       // The delivery's color space (set_project_color): sdr, or hlg / pq
       // for an HDR export and an HDR preview where the display carries it.
       colorSpace: s.colorSpace,
+      // The magnet (set_magnet): on, track 0 stays closed up.
+      magnet: s.magnet,
       // Every guide preset's safe area for this frame, whether or not it
       // shows, so placement can respect a platform's UI without a guide on:
       // safeArea and keepOut are frame fractions (x, y, w, h).

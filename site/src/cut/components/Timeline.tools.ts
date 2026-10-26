@@ -251,6 +251,12 @@ export const TIMELINE_TOOLS = [
     }, ["at"]),
   },
   {
+    name: "set_magnet",
+    description:
+      "Turn the project's magnet on or off. On, track 0 stays closed up: deleting, trimming or moving a clip there pulls everything after it left, and the clips on other tracks, the elements, captions and soundtrack move with the track-0 footage under their start, keeping their lengths (one over a closed gap lands on the join). Nothing can land below track 0 while it is on. Off, track 0 keeps its gaps, which play the background. Turning it on closes every gap at once. It is the user's setting: call it when they ask for the magnet, ripple editing, or a track 0 that never has gaps; remove_gap closes one gap. editor_state project.magnet reports it.",
+    inputSchema: obj({ on: bool("true turns the magnet on, false turns it off") }, ["on"]),
+  },
+  {
     name: "add_overlay_video",
     description:
       "Put a project video or image asset on an overlay video track, composited over track 0: tracks stack bottom-up, and the topmost full-frame clip covers everything below. Pick a layout to share the frame — halves for a split screen, pip for picture-in-picture. Asset ids come from `media` in the editor state.",

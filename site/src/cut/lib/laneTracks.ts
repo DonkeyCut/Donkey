@@ -683,7 +683,7 @@ function startGroupMove(
     : [];
   const edges = {
     top: otherRows.some((r) => r < Math.max(...rowsHeld)),
-    bottom: otherRows.some((r) => r > Math.min(...rowsHeld)),
+    bottom: otherRows.some((r) => r > Math.min(...rowsHeld)) && !(grabbed.kind === "video" && s.magnet),
   };
   const rowLo = vertical && edges.top ? -1 - homeRow : 0;
   const rowHi = vertical && edges.bottom ? usedLanes.length - homeRow : 0;
@@ -940,11 +940,12 @@ export function startLaneMove(e: React.PointerEvent, kind: LaneKind, id: string,
   // The edges this drag can open a new row past. From an outermost row an
   // item alone there has nothing to open on its side: the row it left
   // collapses behind it, so the fresh one renumbers straight back to the
-  // picture already on screen. Single-lane kinds stay on their row.
+  // picture already on screen. Single-lane kinds stay on their row. With the
+  // magnet on, the video band opens nothing below track 0, its bottom row.
   const alone = !rest.some((x) => x.view.lane === self.lane);
   const edges = {
     top: !(alone && ui.homeRow === 0),
-    bottom: !(alone && ui.homeRow === usedLanes.length - 1),
+    bottom: !(alone && ui.homeRow === usedLanes.length - 1) && !(kind === "video" && s.magnet),
   };
   const targets = snapTargets(s, kind, id);
   const tol = SNAP_PX / ui.pps;

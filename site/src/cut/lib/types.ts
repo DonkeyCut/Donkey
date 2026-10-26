@@ -1865,6 +1865,9 @@ export interface ProjectDoc {
   /** The delivery's color space — what the export writes and, on an HDR
    * display, what the preview shows. Absent = SDR. */
   colorSpace?: OutputSpace;
+  /** The magnet: track 0 stays closed up and nothing lands below it.
+   * Absent = off. */
+  magnet?: boolean;
   /** Auto-generated (then hand-edited) subtitles. */
   subtitles?: SubtitlesBlock;
   /** Legacy per-project view metadata — view state now lives in IndexedDB;

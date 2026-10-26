@@ -3629,6 +3629,16 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       return { closed: { track, ...gap }, ...tracksAfter() };
   },
 
+  set_magnet: (s, input) => {
+      if (typeof input.on !== "boolean") {
+        throw new ToolError("on (true or false) is required.");
+      }
+      if (s.magnet !== input.on) {
+        s.toggleMagnet();
+      }
+      return { magnet: useEditor.getState().magnet, ...tracksAfter() };
+  },
+
   add_title: (_s, input) => placeEach(input, "titles", checkTitle, placeTitle),
 
   add_text_sequence: (s, input) => {

@@ -98,12 +98,13 @@ import { engineTranscribeSamples, withEngineStt } from "./localStt";
 import { laneCues, subtitleLaneCount, trackLocale } from "./subtitles";
 import { cueEmphasis, mergeEmphasis, remapEmphasis, splitEmphasis, toggleEmphasis, withEmphasis } from "./captionEmphasis";
 import { clipboardItemAssetIds, clipboardItemFor, listedAssetIds, type TimelineClipboardItem } from "./itemKinds";
-import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, CLIP_MIN_SECONDS, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
+import { ANIM_STYLE_IDS, animStyleOfTransition, assetIsSilent, CLIP_MIN_SECONDS, clipPoseAt, DEFAULT_BACKGROUND, emptySubtitles, frameOf, IMAGE_CLIP_SECONDS, isAudioTransition, fontAssetId, isEffectOverlay, isStickerOverlay, MAX_SUBTITLE_LANES, mediaUrl, migrateBehindSubject, migrateLegacyTransitions, normalizeAspect, overlayAnimStyle, projectBackground, SPEED_FLOOR, SPEED_MIN, stampOverlayKinds, stripDefaultOverlayKinds, isTimelineId, laneOf, sanitizeTimelines, timelineAspect, TRANSITION_MAX, TRANSITION_STYLE_IDS, transitionBarAt, transitionBarStart, transitionStyleOfAnim, type TransitionBoundaryKind } from "./types";
 import { clampBand, clampFeather, takesBand, takesFeather } from "./transitionShape";
 import { liftMoveTracks } from "./textMotion";
 import { OWN_SOUND, soundRoom, soundSourceOf, soundWindow, SPLIT_EDIT_MAX_S } from "./soundSource";
 import { CUT_SOUND } from "./soundSettings";
 import { readTextStyle } from "./textStyle";
+import { isDragActive, subscribeDragActive } from "./drag";
 import { loadUiState, saveUiState, type ProjectUiState } from "./uiState";
 import { captureTimelineFrames } from "./visualFrames";
 
@@ -403,6 +404,9 @@ interface DocSnapshot {
   /** The delivery's color space, set from the export dialog, the Color
    * panel and the chat. */
   colorSpace: OutputSpace;
+  /** The magnet: turning it on closes track 0 up, so undo turns it back off
+   * with the gaps it closed. */
+  magnet: boolean;
   /** Each asset's beat grid. Beats are edited on the timeline like anything
    * else — dragged, added, removed, cleared — but they live on the asset
    * rather than in the doc arrays, so the checkpoint carries them separately
@@ -489,6 +493,9 @@ export interface EditorState {
   /** The delivery's color space: SDR, or HDR in HLG or PQ. The export writes
    * it and the preview shows it on an HDR display. */
   colorSpace: OutputSpace;
+  /** The magnet: track 0 stays closed up (`closeTrack0`) and nothing lands
+   * below it. Off, track 0 keeps its gaps. */
+  magnet: boolean;
   selection: Selection;
   /** Everything selected, including `selection` (the primary that drives the
    * inspector). Bulk actions — delete, copy — act on this whole set. */
@@ -591,6 +598,8 @@ export interface EditorState {
   setBackground: (hex: string) => void;
   /** Set the delivery's color space, with undo. */
   setColorSpace: (space: OutputSpace) => void;
+  /** Turn the magnet on or off, with undo. */
+  toggleMagnet: () => void;
   addAsset: (asset: MediaAsset) => void;
   updateAsset: (id: string, patch: Partial<MediaAsset>) => void;
   /** Rename a project file under the rule every Library shelf applies. */
@@ -1105,6 +1114,7 @@ let stepUndone = false;
 interface SharedFields {
   guideLines: GuideLines;
   colorSpace: OutputSpace;
+  magnet: boolean;
   beats: Map<string, AssetBeats | undefined>;
   profiles: Map<string, SourceProfile | undefined>;
   sounds: Map<string, SoundFrom | undefined>;
@@ -1113,9 +1123,10 @@ interface SharedFields {
  * brings its history back. Session only, cleared when a project opens. */
 const parkedHistory = new Map<TimelineId, { history: DocSnapshot[]; future: DocSnapshot[]; shared: SharedFields }>();
 
-const sharedFields = (s: Pick<EditorState, "guideLines" | "colorSpace" | "assets">): SharedFields => ({
+const sharedFields = (s: Pick<EditorState, "guideLines" | "colorSpace" | "magnet" | "assets">): SharedFields => ({
   guideLines: s.guideLines,
   colorSpace: s.colorSpace,
+  magnet: s.magnet,
   beats: new Map(s.assets.map((a) => [a.id, a.beats])),
   profiles: new Map(s.assets.map((a) => [a.id, a.colorProfile])),
   sounds: new Map(s.assets.map((a) => [a.id, a.soundFrom])),
@@ -1133,6 +1144,7 @@ function rebaseShared(snaps: DocSnapshot[], then: SharedFields, now: SharedField
   for (const snap of snaps) {
     if (now.guideLines !== then.guideLines) snap.guideLines = { v: [...now.guideLines.v], h: [...now.guideLines.h] };
     if (now.colorSpace !== then.colorSpace) snap.colorSpace = now.colorSpace;
+    if (now.magnet !== then.magnet) snap.magnet = now.magnet;
     if (beats.size) snap.beats = snap.beats.map((b) => (beats.has(b.id) ? { id: b.id, grid: now.beats.get(b.id) } : b));
     if (profiles.size)
       snap.sourceColor = snap.sourceColor.map((c) =>
@@ -1561,6 +1573,7 @@ export const DOC_KEYS = [
   "guideLines",
   "background",
   "colorSpace",
+  "magnet",
   "publish",
   "notes",
   "subtitles",
@@ -1574,6 +1587,41 @@ const proxyOffHere = new Set<string>();
 const proxyOn = (a: { id: string; proxy?: unknown }) => !!a.proxy && !proxyOffHere.has(a.id);
 /** A held proxy is going to be dropped or replaced: links mint it again. */
 export const releaseProxyHold = (id: string) => void proxyOffHere.delete(id);
+
+/**
+ * The magnet's part of a write: with it on, a write that touches the clips —
+ * or turns the magnet on — leaves track 0 closed up. A live drag holds off
+ * until release (the drag-end settle below), so the slot a move parts open
+ * stays open under the pointer. A read-only view shows the doc as stored.
+ */
+function closeUpWrite(prev: EditorState, next: Partial<EditorState>): Partial<EditorState> {
+  const magnet = next.magnet ?? prev.magnet;
+  if (!magnet || prev.readOnly || isDragActive() || !(next.clips || next.magnet)) {
+    return next;
+  }
+
+  const clips = next.clips ?? prev.clips;
+  const subtitles = next.subtitles ?? prev.subtitles;
+  const closed = closeTrack0({
+    clips,
+    transitions: next.transitions ?? prev.transitions,
+    audioClips: next.audioClips ?? prev.audioClips,
+    overlays: next.overlays ?? prev.overlays,
+    cues: subtitles.cues,
+  });
+  if (closed.clips === clips) {
+    return next;
+  }
+
+  return {
+    ...next,
+    clips: closed.clips,
+    transitions: closed.transitions,
+    audioClips: closed.audioClips,
+    overlays: closed.overlays,
+    subtitles: { ...subtitles, cues: closed.cues },
+  };
+}
 
 /**
  * The invariants every write to the store passes through, wherever it comes
@@ -1594,6 +1642,7 @@ function normalizeWrite(prev: EditorState, incoming: Partial<EditorState>): Part
     for (const k of DOC_KEYS) delete (next as Record<string, unknown>)[k];
   }
   if (next.clips) next = { ...next, clips: closeMicroGaps(groundTracks(next.clips)) };
+  next = closeUpWrite(prev, next);
   if (next.clips || next.transitions) {
     const clips = next.clips ?? prev.clips;
     const derived = deriveTransitionFields(clips, next.transitions ?? prev.transitions);
@@ -1771,13 +1820,14 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
   api.setState = set as typeof api.setState;
 
   const snapshot = (): DocSnapshot => {
-    const { clips, transitions, audioClips, overlays, subtitles, assets, guideLines, colorSpace } = get();
+    const { clips, transitions, audioClips, overlays, subtitles, assets, guideLines, colorSpace, magnet } = get();
     return {
       beats: assets.map((a) => ({ id: a.id, grid: a.beats })),
       sourceColor: assets.map((a) => ({ id: a.id, profile: a.colorProfile })),
       soundFrom: assets.map((a) => ({ id: a.id, from: a.soundFrom })),
       guideLines: { v: [...guideLines.v], h: [...guideLines.h] },
       colorSpace,
+      magnet,
       // Render-owned clips are excluded — history captures the user's timeline,
       // not the background run's placements (restoreDoc re-attaches the live ones).
       clips: clips.filter((c) => !genClipIds.has(c.id)).map((c) => ({ ...c })),
@@ -2034,6 +2084,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
         guideLines: EMPTY_GUIDE_LINES,
         background: DEFAULT_BACKGROUND,
         colorSpace: "sdr",
+        magnet: false,
         selection: null,
         multiSelection: [],
         playing: false,
@@ -2089,6 +2140,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
     guideLines: EMPTY_GUIDE_LINES,
     background: DEFAULT_BACKGROUND,
     colorSpace: "sdr",
+    magnet: false,
     selection: null,
     multiSelection: [],
     selectedKey: null,
@@ -2427,6 +2479,7 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
           guideLines: sanitizeGuideLines(doc.guideLines),
           background: state.background,
           colorSpace: state.colorSpace,
+          magnet: doc.magnet === true,
           // View state lives in IndexedDB; doc.ui covers projects saved
           // before the move.
           pxPerSec: clampPps(ui.pxPerSec ?? doc.ui?.pxPerSec ?? 60),
@@ -2800,6 +2853,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       if (get().colorSpace === space || get().readOnly) return;
       push();
       set({ colorSpace: space });
+    },
+    toggleMagnet: () => {
+      if (get().readOnly) {
+        return;
+      }
+      push();
+      set({ magnet: !get().magnet });
     },
 
     addAsset: (asset) =>
@@ -3995,9 +4055,13 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       set({ ...next, clips: [...next.clips].sort((a, b) => a.start - b.start), subtitles: { ...s.subtitles, cues: next.subtitles.cues } });
     },
 
-    addVideoFromAsset: (assetId, place, start) => {
+    addVideoFromAsset: (assetId, aimed, start) => {
       const asset = get().assets.find((a) => a.id === assetId);
       if (!asset || (asset.type !== "video" && asset.type !== "image")) return;
+      // With the magnet on, nothing opens a row below track 0: a drop aimed
+      // under the stack inserts into track 0 at the pointer.
+      const place: VideoTrackPlacement =
+        get().magnet && aimed.kind === "insert" && aimed.level === 0 ? { kind: "track", track: 0 } : aimed;
       const out = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
       push();
       const { track, start: at, shifts } = landOnPlacement(
@@ -5543,9 +5607,36 @@ useEditor.subscribe((s, prev) => {
     s.subtitles !== prev.subtitles ||
     s.guideLines !== prev.guideLines ||
     s.colorSpace !== prev.colorSpace ||
+    s.magnet !== prev.magnet ||
     (s.assets !== prev.assets && beatsEdited(prev.assets, s.assets))
   )
     docSeq++;
+});
+
+// A drag's release settles the magnet: the gesture's writes held off while it
+// ran, and the last of them may write no clips at all (a move that parted its
+// neighbours and landed where it began), so the close-up runs here once.
+subscribeDragActive(() => {
+  if (isDragActive()) {
+    return;
+  }
+
+  const s = useEditor.getState();
+  if (!s.magnet || s.readOnly) {
+    return;
+  }
+
+  const closed = closeTrack0({ ...s, cues: s.subtitles.cues });
+  if (closed.clips === s.clips) {
+    return;
+  }
+  useEditor.setState({
+    clips: closed.clips,
+    transitions: closed.transitions,
+    audioClips: closed.audioClips,
+    overlays: closed.overlays,
+    subtitles: { ...s.subtitles, cues: closed.cues },
+  });
 });
 
 /** Resolves once the cut is not playing. */
@@ -5710,6 +5801,7 @@ export function serializeDoc(s: {
   guideLines: GuideLines;
   background: string;
   colorSpace: OutputSpace;
+  magnet: boolean;
   publish: { caption: string; tags: string; soundTitle: string; handle: string };
   notes: { text: string; publishedAt: string; links: string[] };
   subtitles: SubtitlesBlock;
@@ -5737,6 +5829,7 @@ export function serializeDoc(s: {
     guideLines: s.guideLines,
     background: s.background,
     colorSpace: s.colorSpace,
+    magnet: s.magnet,
     subtitles: s.subtitles,
     publish: { ...s.publish },
     notes: { ...s.notes, links: [...s.notes.links] },
@@ -5778,6 +5871,7 @@ const DOC_FIELD_EDITED: {
   guideLines: (s, last) => s.guideLines !== last.guideLines,
   background: (s, last) => s.background !== last.background,
   colorSpace: (s, last) => s.colorSpace !== last.colorSpace,
+  magnet: (s, last) => s.magnet !== (last.magnet === true),
   publish: (s, last) =>
     s.publish.caption !== last.publish?.caption ||
     s.publish.tags !== last.publish?.tags ||
@@ -6206,6 +6300,125 @@ export function separateOverlaps<
       end: at(c.end),
       words: c.words?.map((w) => ({ ...w, t0: at(w.t0), t1: at(w.t1) })),
     })),
+  };
+}
+
+/** Push every item on a row right of the one before it, so a row the
+ * magnet pulled left never intersects itself. `lane` names the row. */
+function unstack<T extends { start: number }>(
+  items: T[],
+  lane: (x: T) => number,
+  len: (x: T) => number,
+  moveTo: (x: T, start: number) => T
+): T[] {
+  const ends = new Map<number, number>();
+  const placed = new Map<T, T>();
+  for (const x of [...items].sort((a, b) => a.start - b.start)) {
+    const end = ends.get(lane(x)) ?? -Infinity;
+    const y = x.start < end - 1e-6 ? moveTo(x, end) : x;
+    placed.set(x, y);
+    ends.set(lane(x), y.start + len(y));
+  }
+  return items.map((x) => placed.get(x)!);
+}
+
+/**
+ * The magnet's close-up: every gap on track 0 — at the head or between two
+ * clips — shuts, and everything timed against the picture comes along. A clip
+ * on another track, an element, a caption or a soundtrack clip moves by
+ * whatever the track-0 footage under its start moved and keeps its length;
+ * one over a gap lands on the join. Nothing is stretched. A row the move
+ * crowds pushes its later items right, so no row intersects, and transition
+ * bars re-anchor to the cuts they sat on. The same document back when track
+ * 0 has no gap.
+ *
+ *   before  t1        [broll]          [pip]
+ *           t0  [A 0–5 ]       [C 9–15      ]
+ *   after   t1        [broll]   [pip]
+ *           t0  [A 0–5 ][C 5–11      ]
+ */
+export function closeTrack0<
+  T extends {
+    clips: VideoClip[];
+    transitions: TimelineTransition[];
+    audioClips: AudioClip[];
+    overlays: Overlay[];
+    cues: SubtitleCue[];
+  },
+>(doc: T): T {
+  const row = track0Clips(doc.clips).sort((a, b) => a.start - b.start);
+
+  // Each track-0 clip's packed start: one after another from 0.
+  let cursor = 0;
+  const steps = row.map((c) => {
+    const step = { from: c.start, to: cursor, len: clipLen(c) };
+    cursor += step.len;
+    return step;
+  });
+  if (steps.every((st) => Math.abs(st.from - st.to) <= 1e-6)) {
+    return doc;
+  }
+
+  // Where a time on the old timeline lands: inside a clip it rides that clip,
+  // inside a gap it lands on the join, past the end it rides the last clip.
+  const at = (t: number) => {
+    for (const st of steps) {
+      if (t < st.from) {
+        return st.to;
+      }
+      if (t < st.from + st.len) {
+        return st.to + (t - st.from);
+      }
+    }
+    const last = steps[steps.length - 1];
+    return last.to + last.len + (t - (last.from + last.len));
+  };
+
+  const packed = new Map(row.map((c, i) => [c.id, steps[i].to]));
+  const clips = unstack(
+    doc.clips.map((c) => ({ ...c, start: packed.get(c.id) ?? at(c.start) })),
+    (c) => (c.track === 0 ? -1 : c.track),
+    clipLen,
+    (c, start) => ({ ...c, start })
+  ).sort((a, b) => a.start - b.start);
+
+  const overlays = unstack(
+    doc.overlays.map((o) => {
+      const d = at(o.start) - o.start;
+      return { ...o, start: o.start + d, end: o.end + d };
+    }),
+    laneOf,
+    (o) => o.end - o.start,
+    (o, start) => ({ ...o, start, end: start + (o.end - o.start) })
+  );
+
+  const audioClips = unstack(
+    doc.audioClips.map((a) => ({ ...a, start: at(a.start) })),
+    laneOf,
+    clipLen,
+    (a, start) => ({ ...a, start })
+  );
+
+  const shiftCue = (c: SubtitleCue, d: number): SubtitleCue => ({
+    ...c,
+    start: c.start + d,
+    end: c.end + d,
+    words: c.words?.map((w) => ({ ...w, t0: w.t0 + d, t1: w.t1 + d })),
+  });
+  const cues = unstack(
+    doc.cues.map((c) => shiftCue(c, at(c.start) - c.start)),
+    laneOf,
+    (c) => c.end - c.start,
+    (c, start) => shiftCue(c, start - c.start)
+  );
+
+  return {
+    ...doc,
+    clips,
+    transitions: reanchorTransitions(doc.clips, clips, doc.transitions),
+    audioClips,
+    overlays,
+    cues,
   };
 }
 

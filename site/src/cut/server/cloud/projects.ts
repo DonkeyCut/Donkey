@@ -4,6 +4,7 @@ import { sanitizeGuideLines, sanitizeGuides } from "@/cut/lib/guides";
 import { resolveParent, subtreeOf } from "@/cut/lib/folderTree";
 import { timelineEnd } from "@/cut/lib/timelineEnd";
 import { DOC_SEQ_HEADER, DOC_WRITER_HEADER, HTTP_CONFLICT } from "@/cut/lib/backend/types";
+import { OUTPUT_SPACES } from "@donkeycut/effects-kit";
 import { isTimelineId, normalizeAspect, sanitizeTimelines, type ProjectDoc, type ProjectFolder, type ProjectSummary } from "@/cut/lib/types";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -116,6 +117,8 @@ function mergeDoc(existing: ProjectDoc, body: Partial<ProjectDoc>): ProjectDoc {
     guides: Array.isArray(body.guides) ? sanitizeGuides(body.guides) : existing.guides,
     guideLines: body.guideLines !== undefined ? sanitizeGuideLines(body.guideLines) : existing.guideLines,
     background: typeof body.background === "string" ? body.background : existing.background,
+    colorSpace: OUTPUT_SPACES.some((o) => o.id === body.colorSpace) ? body.colorSpace : existing.colorSpace,
+    magnet: typeof body.magnet === "boolean" ? body.magnet : existing.magnet,
     subtitles:
       body.subtitles && typeof body.subtitles === "object" ? body.subtitles : existing.subtitles,
     ui: body.ui && typeof body.ui === "object" ? { ...existing.ui, ...body.ui } : existing.ui,
