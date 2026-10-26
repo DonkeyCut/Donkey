@@ -1514,7 +1514,7 @@ function AssetCard({
             data-drag-object
             className={cn(
               // A file looks the same in both themes, like the Library's.
-              "light relative aspect-square overflow-hidden rounded-xl border border-border bg-muted shadow-sm transition-colors group-hover:border-input",
+              "light relative aspect-square overflow-hidden rounded-xl border border-page-border bg-muted bg-clip-padding shadow-sm transition-colors group-hover:border-page-input",
               (flash || selected) && PICKED_RING
             )}
           >

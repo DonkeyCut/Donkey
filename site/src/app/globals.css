@@ -27,6 +27,8 @@
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-page-border: var(--page-border);
+  --color-page-input: var(--page-input);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
@@ -132,6 +134,13 @@
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
   }
+}
+
+/* The page theme's edges, resolved once at the root. A `.light` file tile on
+   a dark page redefines --border; these keep its frame in the page color. */
+:root {
+  --page-border: var(--border);
+  --page-input: var(--input);
 }
 
 /* Dark mode lights a dark panel from behind so it lifts off the dark page.

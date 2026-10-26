@@ -138,7 +138,7 @@ function MediaPanel({ panel }: { panel: Extract<MockPanel, { tab: "media" }> }) 
 
 function TemplateRow({ template }: { template: MockTemplate }) {
   return (
-    <div className="light flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5 text-foreground">
+    <div className="light flex items-center gap-2 rounded-lg border border-page-border bg-background bg-clip-padding px-2.5 py-1.5 text-foreground">
       <Layers className="size-3.5 shrink-0 text-violet-500" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[12px] font-medium">{template.name}</div>
@@ -154,7 +154,7 @@ function TemplateRow({ template }: { template: MockTemplate }) {
 function MediaCard({ item }: { item: MockMediaItem }) {
   return (
     <div className="flex flex-col gap-1.5 text-left">
-      <div className="light relative aspect-square overflow-hidden rounded-lg border border-border bg-muted">
+      <div className="light relative aspect-square overflow-hidden rounded-lg border border-page-border bg-muted bg-clip-padding">
         {item.kind === "audio" ? (
           <AudioFace item={item} />
         ) : (

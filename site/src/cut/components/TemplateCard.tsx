@@ -199,10 +199,10 @@ export function TemplateCard({
       style={typeof tile === "number" ? { width: tile, height: tile } : undefined}
       className={cn(
         // A template is a file: it looks the same in both themes.
-        "light group flex flex-col border bg-background text-foreground",
+        "light group flex flex-col border bg-background bg-clip-padding text-foreground",
         tile ? "relative overflow-hidden rounded-xl p-2.5 shadow-sm" : "rounded-lg px-2.5 py-1.5",
         tile === "fill" && "aspect-square w-full",
-        selected ? PICKED_RING : "border-border",
+        selected ? PICKED_RING : "border-page-border",
         drag ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         onRefDrop && refDrop.active && "border-primary bg-primary/10",
       )}

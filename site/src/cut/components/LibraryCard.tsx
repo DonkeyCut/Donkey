@@ -60,8 +60,8 @@ export function libraryTileBox(
   return {
     className: cn(
       // `light`: a file looks the same in both themes; only the chrome around
-      // it goes dark.
-      "light relative max-w-full overflow-hidden rounded-xl border shadow-sm",
+      // it goes dark. The frame is the page's border, clear of the tile's fill.
+      "light relative max-w-full overflow-hidden rounded-xl border bg-clip-padding shadow-sm",
       type === "lut" ? "bg-background" : "bg-muted",
       !area && (font ? "aspect-[16/7]" : "aspect-square"),
       // The sheet is the card, so nothing is drawn around it; the type
@@ -306,7 +306,7 @@ export function LibraryCard({
                 ? PICKED_RING
                 : font
                   ? "border-transparent"
-                  : "border-border",
+                  : "border-page-border",
             )}
             style={box.style}
           >

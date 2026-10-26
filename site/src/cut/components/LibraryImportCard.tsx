@@ -122,7 +122,7 @@ export function LibraryImportCard({
         "group",
         box.className,
         canPreview && "cursor-pointer",
-        item.error ? "border-destructive/50 bg-muted" : font ? "border-transparent" : "border-border",
+        item.error ? "border-destructive/50 bg-muted" : font ? "border-transparent" : "border-page-border",
       )}
       style={item.error ? { ...box.style, backgroundColor: undefined, color: undefined } : box.style}
     >
