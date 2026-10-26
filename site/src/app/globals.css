@@ -137,6 +137,20 @@
 /* Product pages use a white surface in light mode and the dark page surface
    in dark mode. Repointing the document token covers overscroll and portaled
    dialogs as soon as the app wrapper parses. */
+/* Dark mode lights a dark panel from behind so it lifts off the dark page.
+   `backlight` glows a box; `backlight-image` follows a picture's own shape. */
+@utility backlight {
+  @variant dark {
+    box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 24px 90px rgb(255 255 255 / 0.12);
+  }
+}
+
+@utility backlight-image {
+  @variant dark {
+    filter: drop-shadow(0 20px 60px rgb(255 255 255 / 0.12));
+  }
+}
+
 html:has(.app-surface) {
   --background: var(--app-background);
 }

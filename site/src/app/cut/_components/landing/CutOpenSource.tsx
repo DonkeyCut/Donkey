@@ -18,7 +18,7 @@ export function CutOpenSource() {
       </p>
 
       <div className="mt-8">
-        <div className="max-w-[780px] overflow-x-auto rounded-xl bg-ink px-[18px] pt-5 pb-10 font-code text-[13px] text-white md:px-6 md:pt-6 md:pb-12 md:text-[15px]">
+        <div className="backlight max-w-[780px] overflow-x-auto rounded-xl bg-ink px-[18px] pt-5 pb-10 font-code text-[13px] text-white md:px-6 md:pt-6 md:pb-12 md:text-[15px]">
           <div className="mb-4 flex items-center gap-2">
             <span className="h-[10px] w-[10px] rounded-full bg-[#FF5F57]" />
             <span className="h-[10px] w-[10px] rounded-full bg-[#FEBC2E]" />

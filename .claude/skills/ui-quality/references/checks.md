@@ -10,7 +10,7 @@ The root uses the system preference until an explicit `.light` or `.dark` theme 
 
 `ink`, `cream`, and `coral` are fixed brand colors. Pair fixed pastel cards with their intended ink. A `light` element and everything inside it keep the light tokens and skip `dark:` utilities. Files are light elements: note paper, its menus, and every file tile look the same in both themes, and only the chrome around them goes dark.
 
-A dark-mode change leaves light mode pixel-identical. Keep the light value and add the dark one beside it, as in `text-[#454545] dark:text-foreground/70`.
+A dark panel on a dark page takes `backlight`, or `backlight-image` for a picture with its own corners. A dark-mode change leaves light mode pixel-identical. Keep the light value and add the dark one beside it, as in `text-[#454545] dark:text-foreground/70`.
 
 Use [Button](../../../../site/src/components/ui/button.tsx), Input, Dialog, Popover, and DropdownMenu from the same UI directory. They carry focus, invalid, disabled, expanded, portal, and positioning behavior. Compose with `cn` and Tailwind responsive variants. Feature CSS belongs beside its owner; inline styles carry genuinely runtime values, such as data-derived CSS variables.
 

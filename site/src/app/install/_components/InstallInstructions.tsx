@@ -84,7 +84,7 @@ type InstallStepCardProps = {
 function InstallStepCard({ step }: InstallStepCardProps) {
   return (
     <article style={stepCardStyle}>
-      <div style={stepImageFrameStyle}>
+      <div className="backlight-image" style={stepImageFrameStyle}>
         <Image
           alt={step.imageAlt}
           height={413}

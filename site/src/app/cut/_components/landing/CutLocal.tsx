@@ -31,7 +31,7 @@ export function CutLocal() {
         </div>
         <Image
           alt="Donkey app icon being dragged into the Applications folder."
-          className="h-auto w-full rounded-2xl"
+          className="backlight-image h-auto w-full rounded-2xl"
           height={413}
           src="/install/install-drag.png"
           unoptimized

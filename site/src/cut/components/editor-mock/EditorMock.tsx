@@ -124,8 +124,7 @@ export function EditorMock({
               frame === "flat" && "shadow-[0_0_0_1px_rgba(0,0,0,0.06)]",
               frame === "card" && "border-2 border-ink max-md:border-0 dark:border-white/15",
               // A dark page swallows ink shadows, so raised frames glow there.
-              frame !== "flat" &&
-                "dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_24px_90px_rgba(255,255,255,0.12)]",
+              frame !== "flat" && "backlight",
             )}
           >
             <div
