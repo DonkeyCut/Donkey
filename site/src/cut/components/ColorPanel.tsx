@@ -472,7 +472,7 @@ function PresetView({ clip, peers, onAdjust }: { clip: VideoClip; peers?: readon
         </div>
         <SourceColorRow clip={clip} />
         <ProjectColorRow />
-        <div className="flex min-w-0 flex-wrap gap-1 px-3.5">
+        <div className="mt-2 flex min-w-0 flex-wrap gap-1 px-3.5">
           <button type="button" className={chip(category === "all")} onClick={() => setCategory("all")}>
             All
           </button>
