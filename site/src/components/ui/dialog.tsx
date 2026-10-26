@@ -73,17 +73,41 @@ const modalPopupClasses =
 // A dialog that never named its scrolling part still gets one: the header and
 // footer it declared stay where they are, and everything between them scrolls
 // in the space that is left. The wrapper inherits the popup's column and gap,
-// so the dialog lays out exactly as it did with the room it has.
+// so the dialog lays out exactly as it did with the room it has, plus a few
+// pixels on every side so a focused field's ring stays inside it.
 function withScrollingMiddle(
   children: React.ReactNode,
   chromeTypes: React.ElementType[]
-) {
+): React.ReactNode {
   const nodes = React.Children.toArray(children)
   const isType = (node: React.ReactNode, type: React.ElementType) =>
     React.isValidElement(node) && node.type === type
   if (nodes.some((node) => isType(node, DialogBody))) return children
   const chrome = (node: React.ReactNode) =>
     chromeTypes.some((type) => isType(node, type))
+
+  // A form that wraps its own footer becomes the column itself, so the footer
+  // stays pinned and its edge-to-edge margins meet the popup's padding. Inside
+  // the scrolling part they would overflow it and show both scrollbars.
+  const formIndex = nodes.findIndex(
+    (node) =>
+      React.isValidElement<{ className?: string; children?: React.ReactNode }>(node) &&
+      node.type === "form" &&
+      React.Children.toArray(node.props.children).some(chrome)
+  )
+  if (formIndex !== -1) {
+    const form = nodes[formIndex] as React.ReactElement<{
+      className?: string
+      children?: React.ReactNode
+    }>
+    nodes[formIndex] = React.cloneElement(
+      form,
+      { className: cn("flex min-h-0 flex-col", form.props.className) },
+      withScrollingMiddle(form.props.children, chromeTypes)
+    )
+    return nodes
+  }
+
   let start = 0
   while (start < nodes.length && chrome(nodes[start])) start += 1
   let end = nodes.length
@@ -94,7 +118,7 @@ function withScrollingMiddle(
     ...nodes.slice(0, start),
     <DialogBody
       key="dialog-body"
-      className="mx-0 my-0 flex flex-col gap-[inherit] px-0 py-0"
+      className="-m-1 flex flex-col gap-[inherit] p-1"
     >
       {middle}
     </DialogBody>,
