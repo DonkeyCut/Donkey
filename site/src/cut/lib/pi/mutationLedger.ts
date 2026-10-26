@@ -27,6 +27,7 @@ const READ_ONLY = new Set([
   "measure_level",
   "read_color_stats",
   "read_project",
+  "list_projects",
   "library_list",
   "library_list_folder",
   "stock_search",

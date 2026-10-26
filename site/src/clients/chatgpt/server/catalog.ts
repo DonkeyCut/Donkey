@@ -75,6 +75,7 @@ export const READ_COMMANDS = new Set([
   "notes_list",
   "read_note",
   "read_project",
+  "list_projects",
   "check_facts",
 ]);
 

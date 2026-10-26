@@ -28,6 +28,7 @@ const docs = new Map<string, ProjectDoc>([["rich", richDoc()]]);
 const copies: { src: string; file: string; dst: string }[] = [];
 
 setHostDocStore({
+  listDocs: async () => [],
   readDoc: async (id) => docs.get(id) ?? null,
   copyMedia: async (src, file, dst) => {
     copies.push({ src, file, dst });

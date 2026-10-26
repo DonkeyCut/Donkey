@@ -4,7 +4,12 @@
 // the link opens — the project's home, the share's grant — is the reader's
 // to resolve.
 
+import type { AssetRef } from "./assetRef";
 import { normalizeLink } from "./link";
+
+/** How many projects one list_projects page carries by default, and at most. */
+export const PROJECT_PAGE_DEFAULT = 100;
+export const PROJECT_PAGE_MAX = 500;
 
 export type ProjectLink = { kind: "project"; id: string } | { kind: "share"; token: string };
 
@@ -32,4 +37,17 @@ export function parseProjectLink(value: string): ProjectLink | null {
   const share = SHARE_PATH.exec(path);
   if (share && ID_RE.test(share[1])) return { kind: "share", token: share[1] };
   return null;
+}
+
+/** Another of the user's projects as a chat attachment. It carries the id, so
+ * the reference holds through a rename; read_project returns the current
+ * title. */
+export function projectDocRef(project: { id: string; name: string }): AssetRef {
+  return {
+    scope: "projectDoc",
+    id: project.id,
+    name: `Projects / ${project.name || "Untitled"}`.replace(/"/g, "”").replace(/\s+/g, " "),
+    kind: "text",
+    url: `data:text/plain;charset=utf-8,${encodeURIComponent(JSON.stringify({ tool: "read_project", link: project.id }))}`,
+  };
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
-import { CUT_APP_BASE, homeHref } from "@/cut/lib/nav";
+import { CUT_APP_BASE, homeHref, projectHref } from "@/cut/lib/nav";
 import { Check, Clock, Copy, FileText, X } from "lucide-react";
 import {
   highlightMentions,
@@ -16,7 +16,7 @@ import {
   type AssetRef,
 } from "@/cut/lib/assetRef";
 import { MEDIA_CORS } from "@/cut/lib/mediaCors";
-import { useRefFor, useRefCandidates } from "@/cut/lib/assetRef";
+import { isCollectionRef, useRefFor, useRefCandidates } from "@/cut/lib/assetRef";
 import { useInView } from "@/cut/hooks/useInView";
 import { revealRef } from "@/cut/lib/refReveal";
 import { formatTime } from "@/cut/lib/time";
@@ -45,8 +45,12 @@ import { ValueSlider } from "@/cut/components/ValueSlider";
 import { cn } from "@/lib/utils";
 
 function CollectionLink({ item, children, className }: { item: AssetRef; children: ReactNode; className?: string }) {
-  return item.scope === "note"
-    ? <Link href={`${homeHref(CUT_APP_BASE, "notes")}?note=${encodeURIComponent(item.id)}`} target="_blank" title={item.name} className={className}>{children}</Link>
+  // A note or another project opens in its own tab; a folder reveals in place.
+  const href = item.scope === "note"
+    ? `${homeHref(CUT_APP_BASE, "notes")}?note=${encodeURIComponent(item.id)}`
+    : item.scope === "projectDoc" ? projectHref(CUT_APP_BASE, item.id, "projects") : null;
+  return href
+    ? <Link href={href} target="_blank" title={item.name} className={className}>{children}</Link>
     : <button type="button" onClick={() => revealRef(item)} title={item.name} className={className}>{children}</button>;
 }
 
@@ -322,7 +326,7 @@ export function RefTokenChip({
   const [peek, setPeek] = useState(false);
   // Entity refs have no media to peek at and no card to jump to — the pill
   // itself, icon plus name, is the whole story.
-  if (item.scope === "folder" || item.scope === "note") {
+  if (isCollectionRef(item)) {
     return <CollectionLink item={item} className="inline-flex items-center gap-1 rounded-md bg-blue-500/15 px-1 text-blue-500">{entityGlyph(item, "size-3")} {item.name}</CollectionLink>;
   }
   if (item.scope === "entity") {
@@ -514,7 +518,7 @@ export function RefChips({
         // become candidates.
         const handle =
           candidates.find((c) => c.scope === r.scope && c.id === r.id)?.handle ?? r.handle;
-        if (r.scope === "folder" || r.scope === "note") return (
+        if (isCollectionRef(r)) return (
           <span key={r.id} className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-muted px-2 py-1 text-xs">
             {entityGlyph(r, "size-3 shrink-0")}
             <CollectionLink item={r} className="truncate">{r.name}</CollectionLink>
@@ -1160,14 +1164,14 @@ function MentionPill({
     )
   );
   const rich =
-    (item.scope === "entity" || item.scope === "folder" || item.scope === "note") &&
+    (item.scope === "entity" || isCollectionRef(item)) &&
     !editing &&
     !wrapped &&
     clippedFor !== text &&
     !!(glyph || item.preview);
   // Entity pills act as one object: a click selects the whole token, so the
   // caret never lands inside and typing replaces it in one stroke.
-  const atomic = (item.scope === "entity" || item.scope === "folder" || item.scope === "note") && !pinnable;
+  const atomic = (item.scope === "entity" || isCollectionRef(item)) && !pinnable;
   return (
     <span
       ref={spanRef}
@@ -1552,7 +1556,7 @@ export function MentionTextarea({
   };
 
   const pick = (ref: AssetRef) => {
-    if (ref.scope === "folder" || ref.scope === "note") onUpsertRef?.(ref);
+    if (isCollectionRef(ref)) onUpsertRef?.(ref);
     writeToken(refToken(ref) + " ");
   };
 

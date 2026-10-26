@@ -17,13 +17,14 @@ import { registerFontAsset } from "./fontAssets";
 import { enrichAsset, uploadProjectMediaTo } from "./media";
 import { localMediaFile, storedMediaUrl } from "./mediaSync";
 import type { ProjectLink } from "./projectLink";
-import { projectBackend } from "./residency";
+import { availableResidencies, backendFor, projectBackend, type Residency } from "./residency";
 import { useEditor } from "./store";
-import type { MediaAsset, ProjectDoc, ShareFeatures, StoredAsset } from "./types";
+import type { MediaAsset, ProjectDoc, ProjectSummary, ShareFeatures, StoredAsset } from "./types";
 
-/** What a headless host does for itself: read a project it stores, copy a
- * media file between two of its projects. */
+/** What a headless host does for itself: list and read the projects it
+ * stores, copy a media file between two of them. */
 export interface HostDocStore {
+  listDocs(): Promise<ProjectSummary[]>;
   readDoc(projectId: string): Promise<ProjectDoc | null>;
   copyMedia(srcProjectId: string, fileName: string, dstProjectId: string): Promise<string>;
 }
@@ -50,6 +51,51 @@ export interface ReferenceProject {
 
 const BROWSER_ONLY =
   "A project kept in a browser's own storage is readable only from that browser.";
+
+/** One of the user's own projects as the assistant finds it by name: the id
+ * every reader takes, the title it carries now, and where it lives. */
+export interface ListedProject {
+  id: string;
+  name: string;
+  residency: Residency;
+  updatedAt: number;
+}
+
+/** Every project the user owns on the shelves this process can read, newest
+ * first. A shelf that does not answer is named in `unreachable` so the reader
+ * can say why a project is missing. */
+export async function listOwnProjects(): Promise<{ projects: ListedProject[]; unreachable: Residency[] }> {
+  // A headless host reads only its own disk; the other shelves need the
+  // editor page's sign-in.
+  if (host) {
+    const docs = await host.listDocs();
+    return { projects: docs.map((p) => listed(p, "local")), unreachable: HOST_UNREAD };
+  }
+
+  // Each live shelf lists on its own; one failing leaves the others standing.
+  const unreachable: Residency[] = [];
+  const shelves = await Promise.all(
+    availableResidencies().map(async (r) => {
+      const res = await backendFor(r).fetch("/api/cut/projects").catch(() => null);
+      if (!res?.ok) {
+        unreachable.push(r);
+        return [];
+      }
+      return ((await res.json()) as ProjectSummary[]).map((p) => listed(p, r));
+    })
+  );
+  const projects = shelves.flat().sort((a, b) => b.updatedAt - a.updatedAt);
+  return { projects, unreachable };
+}
+
+const HOST_UNREAD: Residency[] = ["cloud", "browser"];
+
+const listed = (p: ProjectSummary, residency: Residency): ListedProject => ({
+  id: p.id,
+  name: p.name,
+  residency,
+  updatedAt: p.updatedAt,
+});
 
 export async function openReference(link: ProjectLink): Promise<ReferenceProject> {
   if (link.kind === "share") return openShare(link.token, link);

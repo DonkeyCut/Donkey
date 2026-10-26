@@ -412,6 +412,8 @@ export async function refsToParts(
         text:
           ref.scope === "note"
             ? `Referenced note "${ref.name}". Read its current text with read_note: ${JSON.stringify({ id: ref.id })}`
+            : ref.scope === "projectDoc"
+            ? `Referenced project "${ref.name}". Read its current document with read_project: ${JSON.stringify({ link: ref.id })}`
             : ref.use
             ? `Referenced ${ref.use.noun} "${ref.name}" in the Library. Use it with ${ref.use.tool}: ${JSON.stringify(ref.use.args)}`
             : ref.scope === "folder"

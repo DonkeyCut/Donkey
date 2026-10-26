@@ -11,7 +11,7 @@ import { serializeDoc, useEditor } from "../../lib/store";
 import type { MediaAsset, ProjectDoc } from "../../lib/types";
 import { convertToMp4 } from "../convert";
 import { probeDuration } from "../frames";
-import { deleteMedia, mediaPath, readProject, writeProject } from "../projects";
+import { deleteMedia, listProjects, mediaPath, readProject, writeProject } from "../projects";
 import { uniqueName } from "../util";
 import { withFileColors } from "../fileColor";
 import { drawnLists } from "../../lib/itemKinds";
@@ -108,10 +108,11 @@ setHostMediaStore({
   },
 });
 
-// Another project on this Mac, read as a reference: the doc off disk and a
-// file copied folder to folder. A cloud or shared reference needs the page's
+// Another project on this Mac, listed and read as a reference: the doc off
+// disk and a file copied folder to folder. A cloud or shared reference needs the page's
 // sign-in, and the reader says so.
 setHostDocStore({
+  listDocs: () => listProjects(),
   readDoc: (projectId) => readProject(projectId),
   async copyMedia(srcProjectId, fileName, dstProjectId) {
     const target = await uniqueName(fileName, (n) => mediaPath(dstProjectId, n));

@@ -11,6 +11,7 @@ import { bool, num, obj, str, type AiToolDef } from "@/cut/lib/aiToolDef";
 import { TIMELINE_IDS, WATCH_DETAIL_NOTES, WATCH_DETAILS } from "@/cut/lib/types";
 import { FACT_CLAIM_MAX_CHARS, FACT_CLAIMS_MAX } from "@/lib/inference/factCheck";
 import { URL_BATCH_MAX } from "@/cut/lib/urlBatch";
+import { PROJECT_PAGE_DEFAULT, PROJECT_PAGE_MAX } from "@/cut/lib/projectLink";
 import { FIND_MEDIA_DEFAULT, FIND_MEDIA_MAX, FIND_MEDIA_SNAPSHOT_CAP } from "@/cut/lib/findMedia";
 import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "@/cut/lib/frameDiff";
 import { EASE_IDS } from "@donkeycut/effects-kit";
@@ -411,9 +412,18 @@ export const AI_PANEL_TOOLS = [
     ),
   },
   {
+    name: "list_projects",
+    description:
+      "List the user's own Donkey Cut projects, newest edit first: each project's id, its current name, where it lives and when it was last edited, with the open project marked. Use it when the user or a note names another project by its title (\"copy the styles of the project named Graphics Ref\", \"the intro from my launch video\"): pick the project the name means, then pass its id to read_project. Names change; the id is what every project tool takes. A project attachment already carries its id, so it needs no lookup. `unreachable` names shelves this session could not read; a project the user names may live there, so say so.",
+    inputSchema: obj({
+      offset: num("Where the page starts; pass the previous page's next"),
+      limit: num(`Projects per page, 1..${PROJECT_PAGE_MAX} (default ${PROJECT_PAGE_DEFAULT})`),
+    }),
+  },
+  {
     name: "read_project",
     description:
-      "Read another Donkey Cut project as a reference: its whole edit in the same shape as <editor_state> — every clip with its trims, speed, framing, grade, look, mask, keyframes and animations; the transition bars; titles, shapes and stickers with their keyframes; the soundtrack; the caption look and cues; aspect and background — plus each source's observed notes, transcript and asset id. Takes a project link (…/app/p/<id>), a share link (…/s/<token>), or a project id. The document IS the edit: never watch_video a reference to learn what its document already states; watch a reference source (project_link) only to see footage its notes leave dark. Every item carries its id, so replicate_project can bring the whole edit or just the items the user wants — a title, one clip's treatment, the music — and copy_project_media can bring files over on their own. Nothing in the open project changes.",
+      "Read another Donkey Cut project as a reference: its whole edit in the same shape as <editor_state> — every clip with its trims, speed, framing, grade, look, mask, keyframes and animations; the transition bars; titles, shapes and stickers with their keyframes; the soundtrack; the caption look and cues; aspect and background — plus each source's observed notes, transcript and asset id. Takes a project link (…/app/p/<id>), a share link (…/s/<token>), or a project id (a project the user names by title: its id from list_projects). The document IS the edit: never watch_video a reference to learn what its document already states; watch a reference source (project_link) only to see footage its notes leave dark. Every item carries its id, so replicate_project can bring the whole edit or just the items the user wants — a title, one clip's treatment, the music — and copy_project_media can bring files over on their own. Nothing in the open project changes.",
     inputSchema: obj({ link: str("Project link, share link, or project id") }, ["link"]),
   },
   {

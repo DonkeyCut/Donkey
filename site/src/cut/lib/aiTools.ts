@@ -231,8 +231,8 @@ import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_VIDEOS } from "./stockVideoManifest";
 import { STOCK_SFX } from "./stockSfxManifest";
 import { storedMediaUrl } from "./mediaSync";
-import { parseProjectLink } from "./projectLink";
-import { landReferenceAssets as landReferenceAssetsInto, openReference, referenceMediaUrl, type LandedAsset, type ReferenceProject } from "./projectReference";
+import { parseProjectLink, PROJECT_PAGE_DEFAULT, PROJECT_PAGE_MAX } from "./projectLink";
+import { landReferenceAssets as landReferenceAssetsInto, listOwnProjects, openReference, referenceMediaUrl, type LandedAsset, type ReferenceProject } from "./projectReference";
 import { clampLayersToAssets, mediaTypeFits, templateFromDoc } from "./projectTemplate";
 import { isSoundPresetTemplate, listSoundPresets, saveSoundPreset } from "./soundPresets";
 import { isGradePresetTemplate, listSavedGrades, saveGradePreset } from "./gradePresets";
@@ -5146,6 +5146,26 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
   check_facts: async (_s, input) => {
       const { results } = await checkFacts(input);
       return factCheckToolOutput(results);
+  },
+
+  list_projects: async (s, input) => {
+      const { projects, unreachable } = await listOwnProjects();
+      const offset = typeof input.offset === "number" && Number.isSafeInteger(input.offset) && input.offset > 0 ? input.offset : 0;
+      const limit = typeof input.limit === "number" && input.limit >= 1 ? Math.min(Math.floor(input.limit), PROJECT_PAGE_MAX) : PROJECT_PAGE_DEFAULT;
+      const page = projects.slice(offset, offset + limit);
+      return {
+        projects: page.map((p) => ({
+          id: p.id,
+          name: p.name,
+          residency: p.residency,
+          edited: new Date(p.updatedAt).toISOString(),
+          ...(p.id === s.projectId ? { open: true } : {}),
+        })),
+        total: projects.length,
+        ...(offset + page.length < projects.length ? { next: offset + page.length } : {}),
+        // A shelf that did not answer may hold the project the user means.
+        ...(unreachable.length ? { unreachable } : {}),
+      };
   },
 
   read_project: async (_s, input) => {

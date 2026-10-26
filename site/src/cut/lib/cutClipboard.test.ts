@@ -26,6 +26,7 @@ const rich = richDoc();
 const docs = new Map<string, ProjectDoc>([["rich", rich]]);
 const copies: string[] = [];
 setHostDocStore({
+  listDocs: async () => [],
   readDoc: async (id) => docs.get(id) ?? null,
   copyMedia: async (_src, file) => {
     copies.push(file);
@@ -192,6 +193,7 @@ describe("pasting into another project", () => {
 
   test("a project that closes while the media lands takes none of it", async () => {
     setHostDocStore({
+      listDocs: async () => [],
       readDoc: async (id) => docs.get(id) ?? null,
       copyMedia: async (_src, file) => {
         // The user switched projects while the bytes were on their way.
@@ -207,6 +209,7 @@ describe("pasting into another project", () => {
       expect(useEditor.getState().clips).toHaveLength(0);
     } finally {
       setHostDocStore({
+        listDocs: async () => [],
         readDoc: async (id) => docs.get(id) ?? null,
         copyMedia: async (_src, file) => {
           copies.push(file);

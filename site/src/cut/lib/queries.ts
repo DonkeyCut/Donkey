@@ -16,7 +16,7 @@
  * user asked for it.
  */
 
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import { confirmedEngineUser, currentEngineUser, engineLost, onEngineUserConfirmed } from "./api";
@@ -102,6 +102,57 @@ async function fetchProjectsSection(r: Residency): Promise<ProjectsSection> {
   };
 }
 
+/** One residency's listing as the home reads it: stored for the next cold
+ * load and noted for the chat-history sweep. */
+async function loadProjectsSection(r: Residency): Promise<ProjectsSection> {
+  try {
+    const as = currentEngineUser();
+    const data = await fetchProjectsSection(r);
+    writeSnapshot(projectsSnapshotKey(r), data);
+    noteListing(r, data, as);
+    return data;
+  } catch (err) {
+    if (r === "local" && cutMode() === "local") {
+      // The engine this app is running on stopped answering; the
+      // ConnectGate falls back to the cloud and says so. A cloud-bound app
+      // whose local shelf hiccups keeps running — that failure is one
+      // section's error, not the ground moving.
+      engineLost();
+    }
+    throw err;
+  }
+}
+
+const NO_PROJECTS: ProjectSummary[] = [];
+
+/** How long the @ menu trusts a projects listing before reading it again. A
+ * rename in this tab patches the cache at once; this bounds a listing read on
+ * every shelf, which on the Mac reads every project on disk. */
+const PROJECT_REFS_STALE_MS = 5 * 60_000;
+
+// Module-level, so the combined list keeps its identity while no listing
+// changes and the @ menu's memo holds.
+const allProjects = (results: UseQueryResult<ProjectsSection>[]) => {
+  const projects = results.flatMap((q) => q.data?.projects ?? []);
+  return projects.length ? projects : NO_PROJECTS;
+};
+
+/** Every project on the shelves this browser can read now, for the chat's
+ * @ menu. The same cache entries as the home's sections, so a rename there
+ * renames the mention here. */
+export function useOwnProjects(enabled: boolean): ProjectSummary[] {
+  const live = enabled ? availableResidencies() : [];
+  return useQueries({
+    queries: live.map((r) => ({
+      queryKey: projectsKey(r),
+      queryFn: () => loadProjectsSection(r),
+      staleTime: PROJECT_REFS_STALE_MS,
+      retry: false,
+    })),
+    combine: allProjects,
+  });
+}
+
 /**
  * One residency's projects and folders. Errors surface as `isError` rather
  * than an empty list, so one backend failing never blanks the other's cards.
@@ -122,24 +173,7 @@ export function useProjectsSection(r: Residency, { list, live }: { list: boolean
   return useQuery<ProjectsSection>({
     enabled: list && live,
     queryKey: projectsKey(r),
-    queryFn: async () => {
-      try {
-        const as = currentEngineUser();
-        const data = await fetchProjectsSection(r);
-        writeSnapshot(projectsSnapshotKey(r), data);
-        noteListing(r, data, as);
-        return data;
-      } catch (err) {
-        if (r === "local" && cutMode() === "local") {
-          // The engine this app is running on stopped answering; the
-          // ConnectGate falls back to the cloud and says so. A cloud-bound app
-          // whose local shelf hiccups keeps running — that failure is one
-          // section's error, not the ground moving.
-          engineLost();
-        }
-        throw err;
-      }
-    },
+    queryFn: () => loadProjectsSection(r),
     // The listing is cheap to re-read and its cards carry edit times and
     // sizes, so every visit revalidates — behind the cached paint, never a
     // spinner.

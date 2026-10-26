@@ -8,7 +8,8 @@ import { isLinkedAssetType } from "./types";
 import type React from "react";
 import { libraryRouteUrl, type LibraryAsset, type LibraryData } from "./library";
 import { libraryLutId, LUT_MARK_ICON } from "./linkedLibrary/luts";
-import { useLibrary, useNotes } from "./queries";
+import { useLibrary, useNotes, useOwnProjects } from "./queries";
+import { parseProjectLink, projectDocRef } from "./projectLink";
 import { stockAspectDims, stockTitle, type StockImage, type StockMusic, type StockSfx, type StockVideo } from "./stock";
 import { STOCK_IMAGES } from "./stockManifest";
 import { STOCK_MUSIC } from "./stockMusicManifest";
@@ -69,8 +70,9 @@ import type {
  * (`overlay:<id>`, `key:clip:<id>:pose:<index>`, …) and its `url` is a
  * data: text payload describing the entity — the parent's id included — so a
  * mention lands in chat as grounded text the tools can act on.
- * "folder" carries a typed collection reference for read_folder. */
-export type AssetRefScope = "project" | "library" | "stock" | "file" | "clip" | "entity" | "folder" | "note";
+ * "folder" carries a typed collection reference for read_folder.
+ * "projectDoc" names another of the user's projects by id, for read_project. */
+export type AssetRefScope = "project" | "library" | "stock" | "file" | "clip" | "entity" | "folder" | "note" | "projectDoc";
 export type AssetRefKind = "video" | "audio" | "image" | "text";
 
 export interface AssetRef {
@@ -250,6 +252,11 @@ export async function refFromTextFile(file: File): Promise<AssetRef> {
   };
 }
 
+/** A ref that names a collection or a document the assistant reads by id —
+ * a folder, a note, another project — and reads as a pill with no media. */
+export const isCollectionRef = (ref: Pick<AssetRef, "scope">) =>
+  ref.scope === "folder" || ref.scope === "note" || ref.scope === "projectDoc";
+
 export const sameRef = (a: AssetRef, b: AssetRef) => a.scope === b.scope && a.id === b.id;
 
 export const addRefOnce = (list: AssetRef[], ref: AssetRef): AssetRef[] =>
@@ -293,6 +300,7 @@ export function normalizeRef(v: unknown): AssetRef | null {
   const o = v as Partial<AssetRef> & { type?: AssetRefKind };
   if (!o.id || !o.name || !o.url) return null;
   if (o.scope === "note") return noteIdSchema.safeParse(o.id).success ? { ...noteRef({ id: o.id, title: "" }), name: o.name } : null;
+  if (o.scope === "projectDoc") return parseProjectLink(o.id)?.kind === "project" ? { ...projectDocRef({ id: o.id, name: "" }), name: o.name } : null;
   const folder = o.scope === "folder" ? folderReferenceSchema.safeParse(o.folder) : null;
   if (folder && !folder.success) return null;
   if (folder?.success) return folderRef(folder.data, o.name);
@@ -945,12 +953,14 @@ export function useRefCandidates(enabled = true, includeCollections = false): As
   const lib = useLibrary({ enabled }).data ?? EMPTY_LIBRARY;
 
   const notes = useNotes(enabled && includeCollections).data;
+  const projects = useOwnProjects(enabled && includeCollections);
   const folderRefs = useMemo(() => {
     if (!includeCollections) return [];
     const refs = [
       ...(projectId ? (folders ?? []).map((f) => projectFolderRef(f, projectId)) : []),
       ...libraryFolderRefs(lib.folders),
       ...(notes?.notes ?? []).map(noteRef),
+      ...projects.filter((p) => p.id !== projectId).map(projectDocRef),
       ...lib.assets
         .filter((a) => LIBRARY_MENTION[a.type].menu === "chat")
         .map(refFromLibrary)
@@ -960,7 +970,7 @@ export function useRefCandidates(enabled = true, includeCollections = false): As
     for (const ref of refs) counts.set(ref.name.toLowerCase(), (counts.get(ref.name.toLowerCase()) ?? 0) + 1);
     return refs.map((ref) => (counts.get(ref.name.toLowerCase()) ?? 0) > 1
       ? { ...ref, name: `${ref.name} [${ref.id}]` } : ref);
-  }, [includeCollections, projectId, folders, lib.folders, lib.assets, notes]);
+  }, [includeCollections, projectId, folders, lib.folders, lib.assets, notes, projects]);
 
   return useMemo(() => {
     if (!assets || !clips || !audioClips || !overlays || !transitions || !subtitles || !projectTemplates) return [];
@@ -1020,7 +1030,7 @@ const NBSP = " ";
 export const refToken = (ref: AssetRef) =>
   ref.handle
     ? `@${ref.handle}`
-    : ref.scope === "entity" || ref.scope === "folder" || ref.scope === "note"
+    : ref.scope === "entity" || isCollectionRef(ref)
       ? `@"${ref.name.replace(/"/g, "").replace(/ /g, NBSP)}"`
       : mentionToken(ref.name);
 

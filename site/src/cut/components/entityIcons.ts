@@ -21,6 +21,7 @@ import {
   SplitSquareVertical,
   Folder,
   StickyNote,
+  Clapperboard,
   Heart,
   Hexagon,
   Brush,
@@ -103,6 +104,7 @@ export function entityGlyph(ref: AssetRef, className: string): ReactNode {
 export function entityIcon(ref: AssetRef): LucideIcon | null {
   if (ref.scope === "note") return StickyNote;
   if (ref.scope === "folder") return Folder;
+  if (ref.scope === "projectDoc") return Clapperboard;
   switch (ref.entityKind) {
     case "title":
       return Type;

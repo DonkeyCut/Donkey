@@ -12,6 +12,7 @@ import type { StoredAsset } from "./types";
 
 const copies: string[] = [];
 setHostDocStore({
+  listDocs: async () => [],
   readDoc: async () => null,
   copyMedia: async (_src, file) => {
     copies.push(file);
