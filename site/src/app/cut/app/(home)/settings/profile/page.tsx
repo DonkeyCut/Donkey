@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SettingsGuard } from "@/cut/components/SettingsGuard";
 import { UserAvatar } from "@/cut/components/UserAvatar";
 import {
   useAccountProfile,
@@ -24,6 +25,14 @@ import {
 // you can change. The display name is the product's; the Google account keeps
 // the name and email it signed in with.
 export default function CutProfilePage() {
+  return (
+    <SettingsGuard>
+      <ProfileView />
+    </SettingsGuard>
+  );
+}
+
+function ProfileView() {
   const { data: profile, isPending, isError } = useAccountProfile();
   const update = useUpdateDisplayName();
   // Null means "not edited yet", so the field follows the saved value until
