@@ -149,6 +149,10 @@ const videoRowH = (list: ClipSpan[]) =>
 /** The `mt-1.5` every row carries, so a row drag knows what one row's worth of
  * travel is. */
 const ROW_GAP = 6;
+/** One soundtrack lane's step down the band: the lane plus the gap a video
+ * row keeps above it, so every lane's clip sits the same distance under the
+ * line above. */
+const AUDIO_ROW = AUDIO_H + ROW_GAP;
 
 /** The three bands whose rows reorder: the video stack, the element rows, and
  * the soundtrack lanes. Subtitle rows are language tracks, managed in the
@@ -1453,7 +1457,7 @@ export function Timeline() {
   const rowsAbove = (slots: LaneDrag[]) => Math.max(0, ...slots.map((d) => -d.targetRow));
   const lastRow = (slots: LaneDrag[]) => Math.max(-1, ...slots.map((d) => d.targetRow));
   const topRowShift = Math.max(rowsAbove(overlaySlots), elementDrop?.row === -1 ? 1 : 0) * TEXT_H;
-  const audioTopShift = Math.max(rowsAbove(audioSlots), audioDrop?.row === -1 ? 1 : 0) * AUDIO_H;
+  const audioTopShift = Math.max(rowsAbove(audioSlots), audioDrop?.row === -1 ? 1 : 0) * AUDIO_ROW;
 
   // Scrub with auto-scroll when the pointer nears the viewport edges.
   //
@@ -2773,28 +2777,29 @@ export function Timeline() {
                     lastRow(audioSlots) + 1,
                     (audioDrop?.row ?? -1) + 1
                   ) *
-                    AUDIO_H +
+                    AUDIO_ROW -
+                  ROW_GAP +
                   audioTopShift,
               }}
               onPointerDown={deselectIfSelf}
-              onContextMenu={openStackedGapMenu("audio", AUDIO_H, audioLanes.used)}
+              onContextMenu={openStackedGapMenu("audio", AUDIO_ROW, audioLanes.used)}
             >
               {Array.from(
                 {
                   length:
                     Math.max(audioLanes.count, (audioDrop?.row ?? -1) + 1, lastRow(audioSlots) + 1) +
-                    audioTopShift / AUDIO_H,
+                    audioTopShift / AUDIO_ROW,
                 },
-                (_, r) => laneRail((r + 1) * AUDIO_H - 2, r)
+                (_, r) => laneRail(r * AUDIO_ROW + AUDIO_H - 2, r)
               )}
-              {rowMarks(audioLanes.count, AUDIO_H, audioTopShift)}
-              {insertionMarks(audioSlots, AUDIO_H, audioTopShift, audioDrop?.row)}
+              {rowMarks(audioLanes.count, AUDIO_ROW, audioTopShift)}
+              {insertionMarks(audioSlots, AUDIO_ROW, audioTopShift, audioDrop?.row)}
               {audioLanes.used.map((lane, r) => (
                 <Fragment key={`agap-${lane}`}>
                   {gapHighlight(
                     { kind: "audio", index: lane },
                     AUDIO_H - 4,
-                    stackedRowTop("audio", r, AUDIO_H) + audioTopShift
+                    stackedRowTop("audio", r, AUDIO_ROW) + audioTopShift
                   )}
                 </Fragment>
               ))}
@@ -2803,7 +2808,7 @@ export function Timeline() {
                   className="tl-audio-drop-slot pointer-events-none absolute rounded-[2.5px] border-[1.5px] border-dashed border-emerald-500/80 bg-emerald-500/10 transition-[left] duration-150 ease-out"
                   style={{
                     left: audioDrop.t * pps,
-                    top: audioDrop.row * AUDIO_H + 2 + audioTopShift,
+                    top: audioDrop.row * AUDIO_ROW + 2 + audioTopShift,
                     width: Math.max(10, audioDrop.len * pps - CLIP_GAP),
                     height: AUDIO_H - 4,
                   }}
@@ -2814,7 +2819,7 @@ export function Timeline() {
                   key={d.id}
                   drag={d}
                   pps={pps}
-                  top={d.targetRow * AUDIO_H + 2 + audioTopShift}
+                  top={d.targetRow * AUDIO_ROW + 2 + audioTopShift}
                   barH={AUDIO_H - 4}
                   className="rounded-[2.5px] bg-emerald-500/10 shadow-[inset_0_0_0_1.5px_rgba(16,185,129,0.5)]"
                 />
@@ -2829,7 +2834,7 @@ export function Timeline() {
                     asset={assets.find((x) => x.id === a.assetId)}
                     mention={audioMentions.get(a.id)}
                     pps={pps}
-                    top={stackedRowTop("audio", homeRow, AUDIO_H) + audioTopShift}
+                    top={stackedRowTop("audio", homeRow, AUDIO_ROW) + audioTopShift}
                     homeRow={homeRow}
                     rowMove={
                       rowDrag?.band === "audio"
@@ -2981,7 +2986,7 @@ export function Timeline() {
             audioLanes.used.map((lane, r) => (
               <RowGrip
                 key={`agrip-${lane}`}
-                top={gutterYs.audioTop! + stackedRowTop("audio", r, AUDIO_H)}
+                top={gutterYs.audioTop! + stackedRowTop("audio", r, AUDIO_ROW)}
                 height={AUDIO_H}
                 barH={AUDIO_H - 4}
                 enabled={audioLanes.count > 1}
@@ -3036,7 +3041,7 @@ export function Timeline() {
                   off={t.hidden === t.total}
                   partial={t.hidden > 0}
                   reveal={trackHover}
-                  top={gutterYs.audioTop! + stackedRowTop("audio", r, AUDIO_H) + AUDIO_H / 2 - 8}
+                  top={gutterYs.audioTop! + stackedRowTop("audio", r, AUDIO_ROW) + AUDIO_H / 2 - 8}
                   onGrab={gripRow("audio", r)}
                   onToggle={() =>
                     useEditor.getState().setAudioLaneHidden(lane, t.hidden !== t.total)
