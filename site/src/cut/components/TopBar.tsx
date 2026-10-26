@@ -470,7 +470,7 @@ export function TopBar({
   // carries the project name alone.
   const logo = chatgpt ? null : (
     <span className="grid size-[22px] shrink-0 place-items-center">
-      <DonkeyMark alt="Donkey" context="toolbar" />
+      <DonkeyMark alt="Donkey" />
     </span>
   );
 

@@ -25,7 +25,7 @@ Use [Button](../../../../site/src/components/ui/button.tsx), Input, Dialog, Popo
 </section>
 ```
 
-For the donkey mark, reuse [DonkeyMark](../../../../site/src/components/DonkeyMark.tsx) and the [backlit guide](../../../../docs/guides/backlit-icon.md). Check its fitted size and toolbar treatment; preserve the top artwork's fills and layer order. For native UI, use the platform's semantic colors and existing controls, then apply the same state and evidence matrix.
+For the donkey mark, reuse [DonkeyMark](../../../../site/src/components/DonkeyMark.tsx); dark mode sets it on a white tile. For native UI, use the platform's semantic colors and existing controls, then apply the same state and evidence matrix.
 
 ## State matrix
 

@@ -71,7 +71,7 @@ export function ViewerTopBar({ chatStatus }: { chatStatus: ChatStatus }) {
     <header className="relative flex items-center justify-between border-b border-border bg-card pr-3 pl-3">
       <div className="flex min-w-0 items-center gap-1">
         <span className="grid size-[22px] shrink-0 place-items-center">
-          <DonkeyMark alt="Donkey" context="toolbar" />
+          <DonkeyMark alt="Donkey" />
         </span>
         <span className="ml-1.5 max-w-64 truncate px-2 py-1 text-sm font-medium tracking-tight">
           {projectName}

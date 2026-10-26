@@ -12,9 +12,10 @@ const css = postcss.parse(readFileSync(new URL("./globals.css", import.meta.url)
 
 // Theme declarations must reach a cold page before any client code runs.
 describe("dark theme", () => {
-  test("the navigation mark carries its supported dark artwork", () => {
+  test("the navigation mark keeps its dark artwork on a white tile", () => {
     const html = renderToStaticMarkup(createElement(TopNav));
-    expect(html.includes("/donkey-icon.svg")).toBe(true);
+    expect(html.includes("/donkey-logo.svg")).toBe(true);
+    expect(html.includes("dark:bg-white")).toBe(true);
   });
 
   test("onboarding copy has a scrim matching the dark surface", () => {
