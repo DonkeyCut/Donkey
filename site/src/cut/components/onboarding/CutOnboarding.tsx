@@ -244,7 +244,9 @@ export function CutOnboarding() {
   // hold below and the open sequence, so one becoming the other repaints
   // nothing.
   const lockup = (
-    <span className="flex items-center gap-0">
+    // The light mark carries its own margin; the dark tile fills its box, so
+    // dark mode spaces the wordmark off it.
+    <span className="flex items-center gap-0 dark:gap-3">
       <span className="flex size-[59px] shrink-0 items-center justify-center overflow-hidden rounded-[10px]">
         <DonkeyMark alt="" />
       </span>
