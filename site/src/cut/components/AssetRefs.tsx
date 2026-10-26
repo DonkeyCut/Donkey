@@ -367,6 +367,41 @@ export function RefTokenChip({
   );
 }
 
+// The scopes a sent card can act on: a click reveals the tile in the side
+// panel (media, stock) or opens the folder.
+const CARD_SCOPES: ReadonlySet<AssetRef["scope"]> = new Set(["project", "library", "stock", "folder"]);
+
+/** Whether a sent ref draws as a card. A note, a desktop text file, a timeline
+ * clip or an entity has no tile a click could reveal, so it reads as its pill. */
+export const refHasCard = (ref: AssetRef) => CARD_SCOPES.has(ref.scope);
+
+/** Pills for the card-less refs a message carries without naming them in its
+ * text — a note dragged onto the composer, say — so every ref still shows. */
+export function UnmentionedRefPills({
+  text,
+  refs,
+  className,
+}: {
+  text: string;
+  refs: AssetRef[];
+  className?: string;
+}) {
+  const named = splitMentions(text, refs).filter((p): p is AssetRef => typeof p !== "string");
+  const pills = refs.filter((r) => !refHasCard(r) && !named.some((n) => sameRef(n, r)));
+
+  if (pills.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={cn("flex flex-wrap gap-1 text-[12.5px]", className)}>
+      {pills.map((r) => (
+        <RefTokenChip key={`${r.scope}:${r.id}`} item={r} />
+      ))}
+    </div>
+  );
+}
+
 /**
  * An inline `@1:34` moment token: a place in the cut the message points at.
  * Clicking it takes the playhead there. Written messages hold the moment they

@@ -15,7 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useDragSort } from "@/components/Sortable";
-import { MentionedText, RefThumb } from "./AssetRefs";
+import { MentionedText, RefThumb, refHasCard, UnmentionedRefPills } from "./AssetRefs";
 import type { AssetRef } from "@/cut/lib/assetRef";
 import type { TimeMark } from "@/cut/lib/timeMark";
 
@@ -264,14 +264,15 @@ export function ComposerQueue({
                             Running in another chat
                           </div>
                         )}
-                        {it.attachments.some((a) => a.scope !== "entity") && (
+                        <UnmentionedRefPills text={it.text} refs={it.attachments} className="mt-1 text-xs" />
+                        {it.attachments.some(refHasCard) && (
                           <div
                             className={cn(
                               "mt-1 flex flex-wrap gap-1",
                               gone && "opacity-50",
                             )}
                           >
-                            {it.attachments.filter((a) => a.scope !== "entity").map((a) => (
+                            {it.attachments.filter(refHasCard).map((a) => (
                               <RefThumb
                                 key={`${a.scope}:${a.id}`}
                                 item={a}

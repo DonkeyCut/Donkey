@@ -143,7 +143,7 @@ import { CHAT_TURN_LABEL, useEditor } from "@/cut/lib/store";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { cn } from "@/lib/utils";
 import { cardIconButton } from "@/cut/components/iconButton";
-import { MentionedText, MentionTextarea, RefChips, RefThumb } from "./AssetRefs";
+import { MentionedText, MentionTextarea, RefChips, RefThumb, refHasCard, UnmentionedRefPills } from "./AssetRefs";
 import { ComposerQueue, type QueuedMessage } from "./ComposerQueue";
 import { DictationBody } from "./MicDictation";
 import { RECORD_RUNNING_TTL_MS, ToolOutputAssets } from "./ChatAssets";
@@ -2840,9 +2840,9 @@ const MessageView = memo(function MessageView({
     )
       .map(normalizeRef)
       .filter((r): r is AssetRef => r !== null);
-    // Timeline entities (overlays, cues, keyframes) already read as pills in
-    // the bubble; only media gets a card above it.
-    const cards = attachments.filter((a) => a.scope !== "entity");
+    // Only a ref a click can act on gets a card above the bubble; the rest
+    // read as pills, in the text or in a row of their own.
+    const cards = attachments.filter(refHasCard);
     return (
       <div className="ai-msg-user group mb-3 flex flex-col items-end gap-1">
         {cards.length > 0 && (
@@ -2852,6 +2852,7 @@ const MessageView = memo(function MessageView({
             ))}
           </div>
         )}
+        <UnmentionedRefPills text={text} refs={attachments} className="max-w-[85%] justify-end" />
         {text && (
           <div className="max-w-[85%] rounded-2xl rounded-br-md bg-neutral-900 px-3 py-2 text-[12.5px] leading-relaxed break-words whitespace-pre-wrap text-white">
             <MentionedText text={text} attachments={attachments} onDark />
