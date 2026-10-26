@@ -202,7 +202,7 @@ export function ShareDialog(props: ShareResource & { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Share {libraryTarget?.kind ?? "project"}</DialogTitle>
         </DialogHeader>
