@@ -14,6 +14,7 @@
 
 import { noteReadSchema, noteSaveSchema, parseNoteLink, type NoteLocation } from "@/cut/lib/noteReference";
 import { settleParents } from "./folderTree";
+import { dropPendingNote, flushNote, sendNoteNow, stageNote, withPendingNotes, type NoteWrite } from "./noteOutbox";
 import { backendFor } from "./residency";
 
 export { folderTrail, folderWithin, subtreeOf } from "./folderTree";
@@ -86,7 +87,7 @@ export async function fetchNotes(): Promise<NotesData> {
   if (!res.ok) throw new Error("Could not load notes.");
   const body = (await res.json()) as Partial<NotesData>;
   return {
-    notes: (body.notes ?? []).filter((n) => n.deletedAt === null),
+    notes: withPendingNotes(body.notes ?? []).filter((n) => n.deletedAt === null),
     folders: settleParents(body.folders ?? []),
     labels: body.labels ?? [],
   };
@@ -111,26 +112,21 @@ export async function writeNoteFromTool(raw: unknown): Promise<CutNote> {
     ...(prior ? {} : { libraryLocation: null }), ...changes });
 }
 
-/** Write one note. The server answers with the winning version — this write,
- * or a newer one from the phone. */
-export async function saveNote(note: {
-  libraryLocation?: NoteLocation | null;
-  id: string;
-  title: string;
-  body: string;
-  colorIndex: number;
-  folderId: string | null;
-  labelIds: string[];
-}): Promise<CutNote> {
-  const res = await notesFetch(
-    `/api/cut/notes/${encodeURIComponent(note.id)}`,
-    json({ ...note, updatedAt: Date.now() }),
-  );
-  if (!res.ok) throw new Error("Could not save the note.");
-  return (await res.json()) as CutNote;
+/** Write one note: saved in this browser at once, then sent. The answer is
+ * the winning version — this write, or a newer one from the phone — or this
+ * write itself while it waits to sync. With no account bound there is no
+ * outbox, and the write goes straight to the server. */
+export async function saveNote(note: NoteWrite): Promise<CutNote> {
+  if (!stageNote(note)) {
+    return sendNoteNow(note);
+  }
+  const saved = await flushNote(note.id);
+  if (!saved) throw new Error("Could not save the note.");
+  return saved;
 }
 
 export async function deleteNote(id: string): Promise<void> {
+  dropPendingNote(id);
   const res = await notesFetch(`/api/cut/notes/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });

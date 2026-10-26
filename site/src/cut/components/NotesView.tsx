@@ -27,6 +27,7 @@ import {
 } from "@/cut/lib/notes";
 import { homeHref, useCutBase } from "@/cut/lib/nav";
 import { CUT_NOTES } from "@/cut/lib/chatRuntime";
+import { dropPendingNote, stageNote, type NoteWrite } from "@/cut/lib/noteOutbox";
 import { notesKey, patchNotes, useNotes } from "@/cut/lib/queries";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
@@ -138,6 +139,17 @@ const draftOf = (n: CutNote): NoteDraft => ({
   labelIds: n.labelIds,
   libraryLocation: n.libraryLocation,
   saved: { title: n.title, body: n.body, colorIndex: n.colorIndex, labelIds: n.labelIds },
+});
+
+/** The draft's content as a write sends it. */
+const noteWrite = (d: NoteDraft): NoteWrite => ({
+  ...(d.libraryLocation !== undefined ? { libraryLocation: d.libraryLocation } : {}),
+  id: d.id,
+  title: d.title.trim(),
+  body: d.body.trimEnd(),
+  colorIndex: d.colorIndex,
+  folderId: d.folderId,
+  labelIds: d.labelIds,
 });
 
 /** Synced notes: written on the phone or here, merged by last writer wins.
@@ -412,6 +424,14 @@ export function NotesView({ library, ref }: Props = {}) {
   };
   const change = (d: NoteDraft) => {
     edit(d);
+    // Every keystroke is saved in this browser at once, so a tab closed
+    // before the autosave still has the edit; the autosave sends it. A folder
+    // still being written waits for the autosave, which settles it first; a
+    // label still being written stays off until its write lands.
+    const folderOut = !!d.folderId && folderWrites.current.has(d.folderId);
+    if (noteChanged(d) && !folderOut) {
+      stageNote({ ...noteWrite(d), labelIds: d.labelIds.filter((id) => !labelWrites.current.has(id)) });
+    }
     holdAutosave();
     autosave.current = setTimeout(() => {
       autosave.current = null;
@@ -438,6 +458,10 @@ export function NotesView({ library, ref }: Props = {}) {
   };
   const removeNotes = (ids: string[]) => {
     const gone = new Set(ids);
+    // A pending edit sent on page hide would bring the note back.
+    for (const id of ids) {
+      dropPendingNote(id);
+    }
     patchNotes(client, (prev) => ({
       ...prev,
       notes: prev.notes.filter((n) => !gone.has(n.id)),

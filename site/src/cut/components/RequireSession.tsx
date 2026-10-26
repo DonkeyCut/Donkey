@@ -15,6 +15,7 @@ import {
 import { reportExposures, useAppLoaded } from "@/lib/analytics";
 import { authClient } from "@/lib/auth-client";
 import { useAccountConfig } from "@/queries/accountConfig";
+import { useNoteOutboxSync } from "@/cut/hooks/useNoteOutboxSync";
 
 // Session gate for the whole Cut app surface. The landing CTAs already route
 // signed-out clicks through /sign-in (useAppEntryHref); this covers direct
@@ -25,6 +26,7 @@ import { useAccountConfig } from "@/queries/accountConfig";
 // until the id lands, because every engine URL carries it.
 export function RequireSession({ children }: { children: ReactNode }) {
   const { data: session, isPending, refetch } = authClient.useSession();
+  useNoteOutboxSync();
 
   const signedOut = !isPending && !session;
   const userId = session?.user.id;
