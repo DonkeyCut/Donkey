@@ -50,8 +50,13 @@ const READ_LOST_RUN = 3;
  * comes back once the contention passes. */
 const READ_RETRY_MS = 100;
 
-/** Aspect ratios this close draw edge to edge; anything further letterboxes. */
+/** Aspect ratios this close draw edge to edge; anything further letterboxes
+ * or fills, as the call asks. */
 const ASPECT_SLACK = 0.01;
+
+/** How a source of another shape sits in the cut's frame to be scored:
+ * letterboxed whole over the background, or filling it, centre-cropped. */
+export type SourceFit = "letterbox" | "fill";
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -110,10 +115,12 @@ const readHeight = (area: FrameBox, height: number) => Math.round(height / area.
  * Reads any frame down to the score's size, in the cut's shape. Only the
  * source's picture box is read — the part of its frame the cut copies. A
  * picture of another shape is letterboxed into the cut's frame over its
- * background, the way a clip of that shape would sit on the timeline, and the
- * scorer remembers it did so the result can say so.
+ * background, the way a clip of that shape would sit on the timeline — or,
+ * with `fit` "fill", scaled to cover it and centre-cropped, the way a
+ * full-bleed replica in another shape fills its frame — and the scorer
+ * remembers it did so the result can say so.
  */
-function makeScorer(doc: ExportDoc, area: FrameBox) {
+function makeScorer(doc: ExportDoc, area: FrameBox, fit: SourceFit) {
   const size = sizeOf(doc, SCORE_LONG_SIDE);
   const canvas = createRasterCanvas(size.width, size.height);
   const ctx = canvas.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D | null;
@@ -121,14 +128,14 @@ function makeScorer(doc: ExportDoc, area: FrameBox) {
     throw new Error("No 2d context to score frames on.");
   }
   ctx.imageSmoothingQuality = "high";
-  let letterboxed: { w: number; h: number } | undefined;
+  let reshaped: { w: number; h: number } | undefined;
   return {
     // Held here so the surface lives as long as its context: a server
     // canvas's context keeps only a weak hold on it.
     canvas,
     size,
-    get letterboxed() {
-      return letterboxed;
+    get reshaped() {
+      return reshaped;
     },
     /** A source frame, read inside its picture box. */
     pixels(source: CanvasImageSource, fw: number, fh: number): Uint8ClampedArray {
@@ -146,8 +153,8 @@ function makeScorer(doc: ExportDoc, area: FrameBox) {
     if (Math.abs(r.w / r.h / (size.width / size.height) - 1) <= ASPECT_SLACK) {
       ctx!.drawImage(source, r.x, r.y, r.w, r.h, 0, 0, size.width, size.height);
     } else {
-      letterboxed = { w: r.w, h: r.h };
-      const k = Math.min(size.width / r.w, size.height / r.h);
+      reshaped = { w: r.w, h: r.h };
+      const k = (fit === "fill" ? Math.max : Math.min)(size.width / r.w, size.height / r.h);
       const dw = r.w * k;
       const dh = r.h * k;
       ctx!.drawImage(source, r.x, r.y, r.w, r.h, (size.width - dw) / 2, (size.height - dh) / 2, dw, dh);
@@ -156,14 +163,28 @@ function makeScorer(doc: ExportDoc, area: FrameBox) {
   }
 }
 
-/** The line a result carries when the source was letterboxed to score it. */
-function frameNote(doc: ExportDoc, shape: { w: number; h: number } | undefined, area: FrameBox): string | undefined {
+/** The line a result carries when the source was letterboxed or filled to
+ * score it. */
+function frameNote(
+  doc: ExportDoc,
+  shape: { w: number; h: number } | undefined,
+  area: FrameBox,
+  fit: SourceFit
+): string | undefined {
   if (!shape) {
     return undefined;
   }
+  const shapes = `The source's ${isFullFrame(area) ? "frame" : "picture box"} is ${round1(shape.w / shape.h)}:1 and the cut's is ${doc.aspect}`;
+  if (fit === "fill") {
+    return (
+      `${shapes}, so scores read the source scaled to fill the cut's frame, centre-cropped. ` +
+      "What the crop cuts off is not checked, and type and shapes read at the fill's scale; fit \"letterbox\" reads the whole source."
+    );
+  }
   return (
-    `The source's ${isFullFrame(area) ? "frame" : "picture box"} is ${round1(shape.w / shape.h)}:1 and the cut's is ${doc.aspect}, so scores read the source letterboxed into the cut's frame over its background. ` +
-    "Bars the cut does not have count as difference; set_aspect to the source's shape when the copy should match it."
+    `${shapes}, so scores read the source letterboxed into the cut's frame over its background. ` +
+    "Bars the cut does not have count as difference; set_aspect to the source's shape when the copy should match it, " +
+    'or pass fit "fill" when the copy fills its own frame edge to edge.'
   );
 }
 
@@ -196,10 +217,11 @@ export async function compareMoments(
   asset: MediaAsset,
   moments: { at: number; sourceAt: number }[],
   total: number,
-  area: FrameBox = FULL_FRAME
+  area: FrameBox = FULL_FRAME,
+  fit: SourceFit = "letterbox"
 ): Promise<{ images: string[]; checked: Checked[]; frame?: string }> {
   const size = sizeOf(doc, COMPARE_LONG_SIDE);
-  const scorer = makeScorer(doc, area);
+  const scorer = makeScorer(doc, area, fit);
   const wanted = moments.map((m) => ({
     at: clamp(m.at, 0, Math.max(0, total - 0.001)),
     sourceAt: clamp(m.sourceAt, 0, Math.max(0, asset.duration - 0.001)),
@@ -286,7 +308,7 @@ export async function compareMoments(
     });
   });
   const images = await composeComparison(pairs);
-  const frame = frameNote(doc, scorer.letterboxed, area);
+  const frame = frameNote(doc, scorer.reshaped, area, fit);
   return { images, checked, ...(frame ? { frame } : {}) };
 }
 
@@ -424,7 +446,8 @@ export async function sweepSource(
   asset: MediaAsset,
   span: { from: number; to: number; step?: number; offset: number },
   total: number,
-  area: FrameBox = FULL_FRAME
+  area: FrameBox = FULL_FRAME,
+  fit: SourceFit = "letterbox"
 ): Promise<SweepResult> {
   const from = clamp(span.from, 0, total);
   const to = clamp(span.to, from, total);
@@ -449,7 +472,7 @@ export async function sweepSource(
   }
 
   const size = sizeOf(doc, SWEEP_LONG_SIDE);
-  const scorer = makeScorer(doc, area);
+  const scorer = makeScorer(doc, area, fit);
   const width = SHIFT_REACH * 2 + 1;
   const started = performance.now();
   const outOfTime = (j: number) => j > 0 && performance.now() - started > SWEEP_BUDGET_MS;
@@ -566,7 +589,7 @@ export async function sweepSource(
   });
   const timing = still ? undefined : runShift(near, SHIFT_REACH, 0, diffs.length - 1, step);
   const onBlocks = scored.filter((s) => blockAt(doc, s.at)).length / scored.length;
-  const frame = frameNote(doc, scorer.letterboxed, area);
+  const frame = frameNote(doc, scorer.reshaped, area, fit);
   const reached = diffs.length < samples.length ? samples[diffs.length].at : undefined;
   return {
     mode: "sweep",

@@ -1743,6 +1743,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       };
       // Only the source's picture box is held against the cut's frame.
       const area = pictureArea(asset, input);
+      // A source of another shape is letterboxed unless the call asks it to fill.
+      const fit = input.fit === "fill" ? "fill" : "letterbox";
 
       // The sweep: numbers over a span, at a step, under a time budget.
       if (input.mode === "sweep") {
@@ -1756,7 +1758,8 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
             offset,
           },
           total,
-          area
+          area,
+          fit
         ).catch(failed(`Could not sweep "${asset.name}".`));
         return {
           ...sweep,
@@ -1790,7 +1793,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         throw new ToolError("Pass times: [seconds] — the moments of the cut to check, or [{at, source}] when the cut sits at a different second than the source does. To score the whole cut first, pass mode: \"sweep\".");
       if (moments.length > MAX_COMPARE)
         throw new ToolError(`That is ${moments.length} moments — ${MAX_COMPARE} is the most one call reads. Check these, fix what is off, then call again for the rest; mode: "sweep" scores every frame without pictures.`);
-      const out = await compareMoments(doc, asset, moments, total, area).catch(failed("Could not compare the frames."));
+      const out = await compareMoments(doc, asset, moments, total, area, fit).catch(failed("Could not compare the frames."));
       return {
         ...out,
         ...pictureReport(area),

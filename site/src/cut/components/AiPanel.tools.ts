@@ -228,6 +228,12 @@ export const AI_PANEL_TOOLS = [
         from: num("sweep: timeline second to start at (default 0)"),
         to: num("sweep: timeline second to stop at (default the cut's end)"),
         step: num("sweep: seconds between samples (default one frame, widened so a long span fits the call)"),
+        fit: {
+          type: "string",
+          enum: ["letterbox", "fill"],
+          description:
+            "How a source of another shape sits in the cut's frame to be scored. letterbox (the default): whole, over the background, the way a clip of that shape sits on the timeline. fill: scaled to cover the frame and centre-cropped, for a copy that fills its own frame edge to edge in another shape — what the crop cuts off is not checked, and type and shapes read at the fill's scale",
+        },
         picture: pictureArg,
       },
       ["asset_id"]

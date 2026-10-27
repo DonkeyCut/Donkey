@@ -17,8 +17,10 @@ const contextOf = (canvas: StubCanvas) =>
       canvas,
       measureText: () => ({ width: 10, actualBoundingBoxAscent: 8, actualBoundingBoxDescent: 2 }),
       createLinearGradient: () => ({ addColorStop() {} }),
-      drawImage: (src: { level?: number }) => {
+      drawImage: (src: { level?: number }, ...at: number[]) => {
         if (typeof src?.level === "number") canvas.level = src.level;
+        // The destination box of a 9-argument draw, the one that places a frame.
+        if (at.length === 8) draws.push({ into: { w: canvas.width, h: canvas.height }, x: at[4], y: at[5], w: at[6], h: at[7] });
       },
       getImageData: (_x: number, _y: number, w: number, h: number) => {
         const data = new Uint8ClampedArray(Math.max(1, w * h * 4));
@@ -45,6 +47,9 @@ setRasterFactory({
   canvasToBlob: async () => new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" }),
   snapshot: async (canvas) => canvas as unknown as ImageBitmap,
 });
+
+/** Where frames were drawn onto the score's surface, newest last. */
+const draws: { into: { w: number; h: number }; x: number; y: number; w: number; h: number }[] = [];
 
 // Checking a replica against its source reads two pictures per moment, so what
 // it accepts is worth pinning: the moments it is given, the ones it turns away
@@ -79,6 +84,7 @@ const { runAiTool } = await import("./aiTools");
 beforeEach(() => {
   reads.length = 0;
   readOpts.length = 0;
+  draws.length = 0;
   dies = () => false;
   sourceLevel = () => 0;
   sourceShape = { w: 90, h: 160 };
@@ -232,6 +238,33 @@ test("a source of another shape is scored letterboxed into the cut's frame, and 
   sourceShape = { w: 160, h: 90 };
   const out = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1] })) as { frame?: string };
   expect(out.frame).toContain("letterboxed");
+});
+
+test("a source of another shape fills the cut's frame when asked, centre-cropped, and says so", async () => {
+  // A vertical reference rebuilt widescreen out of full-bleed colour: held
+  // letterboxed, the bars score as difference on every frame and hide whether
+  // the colour matches.
+  useEditor.setState({ aspect: "16:9" });
+  const boxed = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1] })) as { frame?: string };
+  expect(boxed.frame).toContain('fit "fill"');
+
+  draws.length = 0;
+  const out = (await runAiTool("compare_to_source", { asset_id: "ref", times: [1], fit: "fill" })) as { frame?: string };
+  expect(out.frame).toContain("fill");
+  expect(out.frame).not.toContain("letterboxed");
+  // The source covers the surface it is scored on: as wide as it, taller,
+  // and centred, so its top and bottom run off the edges.
+  const placed = draws.filter((d) => d.h > d.into.h);
+  expect(placed.length).toBeGreaterThan(0);
+  for (const d of placed) {
+    expect(d.w).toBeCloseTo(d.into.w, 0);
+    expect(d.y).toBeCloseTo((d.into.h - d.h) / 2, 0);
+  }
+
+  const sweep = (await runAiTool("compare_to_source", { asset_id: "ref", mode: "sweep", from: 0, to: 1, step: 0.5, fit: "fill" })) as {
+    frame?: string;
+  };
+  expect(sweep.frame).toContain("fill");
 });
 
 test("a recording's picture box is what is held against the cut, read at the cut's size", async () => {
