@@ -3155,7 +3155,8 @@ export const useEditor = create<EditorState>((baseSet, get, api) => {
       const asset = get().assets.find((a) => a.id === assetId);
       if (!asset || (asset.type !== "video" && asset.type !== "image")) return null;
       push();
-      const out = asset.type === "image" ? IMAGE_CLIP_SECONDS : asset.duration;
+      // A block runs its shot's own length, so it fits the gap it was made for.
+      const out = asset.type === "image" && !asset.block ? IMAGE_CLIP_SECONDS : asset.duration;
       const len = Math.max(MIN_LEN, out);
       const row = track0Clips(get().clips);
       // An explicit target time always wins (a drop at the pointer, AI placing

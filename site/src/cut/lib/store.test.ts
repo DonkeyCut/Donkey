@@ -431,6 +431,17 @@ describe("video placement", () => {
     expect(clipById(resident.id).track).toBe(2); // renumbered above the insert
   });
 
+  test("a block fills a gap its own length at the time asked", () => {
+    const block: MediaAsset = { ...asset(0.5, "image"), fileName: "", block: { label: "s22" } };
+    const before = vclip({ track: 0, start: 0, out: 12.7 });
+    const after = vclip({ track: 0, start: 13.2, out: 2 });
+    useEditor.setState({ assets: [block], clips: [before, after] });
+    const id = s().addClipFromAsset(block.id, 12.7)!;
+    expect(clipById(id).start).toBeCloseTo(12.7);
+    expect(clipLen(clipById(id))).toBeCloseTo(0.5);
+    expectLaneSound(videoLane(0));
+  });
+
 });
 
 describe("committed video updates (AI chat / inspector)", () => {
