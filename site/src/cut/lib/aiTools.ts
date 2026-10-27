@@ -2036,6 +2036,12 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
           ...(smp.point ? {} : { w: rF(smp.box.w), h: rF(smp.box.h) }),
           ...read[i],
         })),
+        ...(read.some((r) => r.stripes)
+          ? {
+              stripesNote:
+                "A sample with `stripes` is laid in parallel lines: lay a block in its ground colour, then the same box over it as add_shape with fill the line colour, pattern stripes and pattern_width, pattern_gap and pattern_angle as they are.",
+            }
+          : {}),
         ...pictureReport(area),
         source: sourceRef(asset),
       };

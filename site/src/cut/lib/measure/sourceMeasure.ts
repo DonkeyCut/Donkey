@@ -9,7 +9,7 @@ import { openMedia, UnreadableMediaError, videoTrackOf, type FrameSize } from ".
 import { createRasterCanvas, decodeRasterImageUrl } from "../raster";
 import type { WrappedCanvas } from "mediabunny";
 import { CAMERA_LONG_SIDE, cameraPath, grayOf, holdsStill, type CameraPose, type Gray } from "./camera";
-import { hexOf, regionColor, parseHex, type PixelRect, type Pixels, type Rgb } from "./color";
+import { hexOf, regionColor, regionStripes, parseHex, type PixelRect, type Pixels, type Rgb, type Stripes } from "./color";
 import { frameStep, gridsOf, pickShotEdges, type FrameGrids, type FrameStep, type PictureFade, type ShotChange } from "./cuts";
 import { fitMoves, type Move } from "./easeFit";
 import { FULL_FRAME, areaOf, findPictureBox, intoArea, type PictureFind } from "./picture";
@@ -263,31 +263,40 @@ export interface ColorSample {
   box: FrameBox;
 }
 
+export type ColorRead = ReturnType<typeof regionColor> & { stripes?: Stripes };
+
 /** The colour of each sample's region at its moment, read in one ordered
- * pass over the source. `k` ≥ 2 adds the k colours each region is made of. */
+ * pass over the source. `k` ≥ 2 adds the k colours each region is made of;
+ * a region laid in parallel lines adds its `stripes`, in px at 1080 of the
+ * area's short side. */
 export async function sampleColors(
   url: string,
   kind: "video" | "image",
   samples: ColorSample[],
   k: number,
   area: FrameBox = FULL_FRAME
-): Promise<ReturnType<typeof regionColor>[]> {
+): Promise<ColorRead[]> {
   // Each sample's box is in the area's fractions; the reads are the frame's.
   samples = samples.map((s) => ({ ...s, box: intoArea(area, s.box) }));
+  const read = (px: Pixels, box: FrameBox): ColorRead => {
+    const rect = toPixels(px, box);
+    const stripes = regionStripes(px, rect, 1080 / Math.min(area.w * px.width, area.h * px.height));
+    return { ...regionColor(px, rect, k), ...(stripes ? { stripes } : {}) };
+  };
   if (kind === "image") {
     const px = await imagePixels(url, COLOR_LONG_SIDE);
-    return samples.map((s) => regionColor(px, toPixels(px, s.box), k));
+    return samples.map((s) => read(px, s.box));
   }
   const times = [...new Set(samples.map((s) => s.t))].sort((a, b) => a - b);
   return withSourceVideo(url, async (v) => {
     const size = sizeAt(v.width, v.height, COLOR_LONG_SIDE, area);
-    const out = new Array<ReturnType<typeof regionColor>>(samples.length);
+    const out = new Array<ColorRead>(samples.length);
     let at = 0;
     for await (const f of v.framesAt(times, size)) {
       const t = times[at++];
       if (!f) throw new Error(`Could not read the frame at ${t}s.`);
       samples.forEach((s, i) => {
-        if (s.t === t) out[i] = regionColor(f, toPixels(f, s.box), k);
+        if (s.t === t) out[i] = read(f, s.box);
       });
     }
     return out;
