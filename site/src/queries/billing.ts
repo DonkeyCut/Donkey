@@ -4,7 +4,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { apiFetch } from "@/queries/apiClient";
 
-export const usageQueryKey = ["billing", "usage"] as const;
 export const proSubscriptionQueryKey = ["billing", "pro"] as const;
 export const introOfferQueryKey = ["billing", "intro-offer"] as const;
 
@@ -48,40 +47,6 @@ export function useIntroOffer({ enabled = true }: { enabled?: boolean } = {}) {
     queryFn: async () => (await apiFetch<{ offer: IntroOffer | null }>("/api/billing/intro-offer")).offer,
     queryKey: introOfferQueryKey,
     staleTime: 5 * 60_000,
-  });
-}
-
-export type UsageHistory = {
-  // Recent credit-billed inference calls, newest first.
-  recent: {
-    createdAt: string;
-    // The app conversation this call belongs to; null for background/warm calls
-    // and rows recorded before grouping existed. Drives the grouped rendering.
-    conversationId: string | null;
-    requestKind: string;
-    model: string;
-    status: string;
-    // USD cost charged to credits.
-    costCredits: string;
-    billingStatus: string;
-    errorCode: string | null;
-    // Token breakdown that explains the cost.
-    usage: {
-      inputTokens: number;
-      cachedInputTokens: number;
-      outputTokens: number;
-      totalTokens: number;
-      // Images produced by asset_generation calls (priced per image).
-      generationCount: number;
-      durationMillis: number;
-    };
-  }[];
-};
-
-export function useUsage() {
-  return useQuery({
-    queryFn: () => apiFetch<UsageHistory>("/api/billing/usage"),
-    queryKey: usageQueryKey,
   });
 }
 

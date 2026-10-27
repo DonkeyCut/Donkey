@@ -255,7 +255,6 @@
   },
   "navUser": {
     "billing": "Billing",
-    "usage": "Usage",
     "onboarding": "View onboarding",
     "runLocally": "Run locally on Mac",
     "logOut": "Log out"

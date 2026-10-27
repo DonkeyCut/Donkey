@@ -1356,48 +1356,6 @@ function normalizedUsageJson(usage: NormalizedUsage): JsonObject {
   };
 }
 
-// The token/usage numbers the usage UI surfaces to explain a call's cost. Read
-// here, right next to normalizedUsageJson which writes them, so the field names
-// stay in sync — renaming a field updates both in one place.
-export type InferenceUsageBreakdown = {
-  inputTokens: number;
-  cachedInputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  generationCount: number;
-  durationMillis: number;
-};
-
-export function readInferenceUsageBreakdown(
-  normalizedUsage: unknown,
-): InferenceUsageBreakdown {
-  const source =
-    normalizedUsage &&
-    typeof normalizedUsage === "object" &&
-    !Array.isArray(normalizedUsage)
-      ? (normalizedUsage as Record<string, unknown>)
-      : {};
-  // Values are written as stringified BigInts (see normalizedUsageJson).
-  const num = (key: keyof InferenceUsageBreakdown): number => {
-    const value = source[key];
-    const parsed =
-      typeof value === "string"
-        ? Number(value)
-        : typeof value === "number"
-          ? value
-          : 0;
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-  return {
-    cachedInputTokens: num("cachedInputTokens"),
-    durationMillis: num("durationMillis"),
-    generationCount: num("generationCount"),
-    inputTokens: num("inputTokens"),
-    outputTokens: num("outputTokens"),
-    totalTokens: num("totalTokens"),
-  };
-}
-
 function nestedJsonValue(
   value: JsonObject,
   objectKey: string,

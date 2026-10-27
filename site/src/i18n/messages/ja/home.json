@@ -255,7 +255,6 @@
   },
   "navUser": {
     "billing": "請求とお支払い",
-    "usage": "利用状況",
     "onboarding": "オンボーディングを見る",
     "runLocally": "Macでローカル実行",
     "logOut": "ログアウト"

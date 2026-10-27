@@ -12,8 +12,6 @@
   },
   "saveFailed": "変更を保存できませんでした。もう一度お試しください。",
   "header": {
-    "usageTitle": "使用状況",
-    "usageDescription": "今請求期間のAI生成使用量です。",
     "profileTitle": "プロフィール",
     "billingTitle": "お支払い",
     "billingDescription": "サブスクリプションとクレジット残高。"
@@ -107,30 +105,6 @@
     "unpair": "ペアリング解除",
     "unpairHint": "このスマートフォンから送信できなくなります",
     "unreachable": "このMac上のアプリに接続できませんでした。実行されているか確認してください。"
-  },
-  "usage": {
-    "included": "付属",
-    "conversation": "会話 {id}",
-    "calls": "{count, plural, other {#回の呼び出し}}",
-    "cachedShare": "{share}% キャッシュ済み",
-    "date": "日時",
-    "kind": "種類",
-    "model": "モデル",
-    "cost": "コスト",
-    "status": "ステータス",
-    "callStatus": "{status, select, succeeded {成功} failed {失敗} other {{status}}}",
-    "noCalls": "呼び出し履歴はまだありません。",
-    "imagesGenerated": "生成された画像",
-    "inputTokens": "入力トークン",
-    "cachedInput": "キャッシュされた入力",
-    "cachedValue": "{tokens} ({share}%)",
-    "outputTokens": "出力トークン",
-    "totalTokens": "合計トークン",
-    "duration": "所要時間",
-    "imageExplanation": "画像生成はトークン単位ではなく、画像1枚ごとに課金されます。",
-    "tokenExplanation": "コストはトークン数によって決まり、ここでは入力が大半を占めます。キャッシュされた入力とは、プロバイダーが割安な料金で再利用する変更のないプロンプトのプレフィックスです。繰り返しの呼び出しでキャッシュの割合が低い場合は、キャッシュがヒットしていません。",
-    "noUsage": "この呼び出しに対する課金対象の利用はありませんでした。",
-    "error": "エラー: {code}"
   },
   "checkout": {
     "creditsProduct": "Donkeyクレジット"

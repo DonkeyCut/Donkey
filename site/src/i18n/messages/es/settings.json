@@ -12,8 +12,6 @@
   },
   "saveFailed": "No se pudo guardar ese cambio; inténtalo de nuevo.",
   "header": {
-    "usageTitle": "Uso",
-    "usageDescription": "Tu uso de generación con IA en este período de facturación.",
     "profileTitle": "Perfil",
     "billingTitle": "Facturación",
     "billingDescription": "Tu suscripción y saldo de créditos."
@@ -107,30 +105,6 @@
     "unpair": "Desvincular",
     "unpairHint": "Este teléfono ya no podrá enviar archivos aquí",
     "unreachable": "No se pudo conectar con la app en esta Mac; comprueba que esté abierta."
-  },
-  "usage": {
-    "included": "Incluido",
-    "conversation": "Conversación {id}",
-    "calls": "{count, plural, one {# llamada} other {# llamadas}}",
-    "cachedShare": "{share}% en caché",
-    "date": "Fecha",
-    "kind": "Tipo",
-    "model": "Modelo",
-    "cost": "Costo",
-    "status": "Estado",
-    "callStatus": "{status, select, succeeded {exitosa} failed {fallida} other {{status}}}",
-    "noCalls": "Aún no hay llamadas.",
-    "imagesGenerated": "Imágenes generadas",
-    "inputTokens": "Tokens de entrada",
-    "cachedInput": "Entrada en caché",
-    "cachedValue": "{tokens} ({share}%)",
-    "outputTokens": "Tokens de salida",
-    "totalTokens": "Tokens totales",
-    "duration": "Duración",
-    "imageExplanation": "La generación de imágenes se cobra por imagen, no por tokens.",
-    "tokenExplanation": "El costo depende de los tokens, y aquí predomina la entrada. La entrada en caché es un prefijo de prompt sin cambios que el proveedor reutiliza a una fracción de la tarifa; un porcentaje bajo en caché en una llamada repetida significa que no se está aprovechando la caché.",
-    "noUsage": "No se registró uso facturable en esta llamada.",
-    "error": "Error: {code}"
   },
   "checkout": {
     "creditsProduct": "Créditos Donkey"

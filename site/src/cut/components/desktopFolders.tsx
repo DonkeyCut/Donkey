@@ -23,6 +23,9 @@ import { formatBytes } from "@/lib/bytes";
 import { RefDropZone } from "./RefDropZone";
 import { cn } from "@/lib/utils";
 
+// A folder under a drag that would land in it, in the selection blue.
+const DROP_OVER = "bg-[#0a84ff]/15 dark:bg-[#0a84ff]/25";
+
 // A desktop-style folder surface shared by the projects home and the library:
 // macOS folder tiles, marquee multi-select, drag a selection onto a folder with
 // a ghost, and open-to-navigate. Both pages carry a selection as a JSON array of
@@ -602,7 +605,11 @@ export function FolderShelf<F extends DeskFolder>({
                   e.dataTransfer.dropEffect = dragTypes(e).includes("Files") ? "copy" : "move";
                   setOver(f.id);
                 },
-                onDragLeave: () => setOver((o: string | null) => (o === f.id ? null : o)),
+                onDragLeave: (e: React.DragEvent) => {
+                  // Crossing onto the tile's own glyph or label is still over it.
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                  setOver((o: string | null) => (o === f.id ? null : o));
+                },
                 onDrop: (e: React.DragEvent) => {
                   if (!accepts(e, f.id)) return;
                   e.preventDefault();
@@ -678,7 +685,7 @@ export function FolderShelf<F extends DeskFolder>({
           <div
             className={cn(
               "group/f flex cursor-pointer items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
-              isOver && "bg-primary/10",
+              isOver && DROP_OVER,
               isPicked && PICKED_RING
             )}
             {...interact}
@@ -704,6 +711,7 @@ export function FolderShelf<F extends DeskFolder>({
           <div
             className={cn(
               "group/f relative flex w-[92px] cursor-pointer flex-col items-start rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-muted/60",
+              isOver && DROP_OVER,
               isPicked && PICKED_RING
             )}
             {...interact}
@@ -729,7 +737,7 @@ export function FolderShelf<F extends DeskFolder>({
           <RefDropZone
             key={f.id}
             onRef={(r) => onRefDrop(r, f.id)}
-            activeClassName={cn("bg-primary/10", rows ? "rounded-lg" : "rounded-xl")}
+            activeClassName={cn(DROP_OVER, rows ? "rounded-lg" : "rounded-xl")}
           >
             {tile}
           </RefDropZone>

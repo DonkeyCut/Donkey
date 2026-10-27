@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
-  ChartColumn,
   ChevronRight,
   CreditCard,
   EllipsisVertical,
@@ -119,9 +118,6 @@ export function NavUser() {
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={() => router.push(`${base}/settings`)}>
           <CreditCard /> {t("billing")}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => router.push(`${base}/settings/usage`)}>
-          <ChartColumn /> {t("usage")}
         </DropdownMenuItem>
         {/* The welcome sequence is a full-window overlay mounted in the app
             shell, so this asks for it rather than routing anywhere. */}

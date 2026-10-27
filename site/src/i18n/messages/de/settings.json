@@ -12,8 +12,6 @@
   },
   "saveFailed": "Änderung konnte nicht gespeichert werden – versuch es noch einmal.",
   "header": {
-    "usageTitle": "Nutzung",
-    "usageDescription": "Deine KI-Generierungsnutzung in diesem Abrechnungszeitraum.",
     "profileTitle": "Profil",
     "billingTitle": "Abrechnung",
     "billingDescription": "Dein Abo und dein Credit-Guthaben."
@@ -107,30 +105,6 @@
     "unpair": "Entkoppeln",
     "unpairHint": "Dieses Smartphone kann danach keine Medien mehr hierher senden",
     "unreachable": "Konnte die App auf diesem Mac nicht erreichen – prüfe, ob sie läuft."
-  },
-  "usage": {
-    "included": "Inbegriffen",
-    "conversation": "Unterhaltung {id}",
-    "calls": "{count, plural, one {# Aufruf} other {# Aufrufe}}",
-    "cachedShare": "{share} % im Cache",
-    "date": "Datum",
-    "kind": "Art",
-    "model": "Modell",
-    "cost": "Kosten",
-    "status": "Status",
-    "callStatus": "{status, select, succeeded {erfolgreich} failed {fehlgeschlagen} other {{status}}}",
-    "noCalls": "Noch keine Aufrufe.",
-    "imagesGenerated": "Generierte Bilder",
-    "inputTokens": "Input-Token",
-    "cachedInput": "Gecachter Input",
-    "cachedValue": "{tokens} ({share} %)",
-    "outputTokens": "Output-Token",
-    "totalTokens": "Gesamt-Token",
-    "duration": "Dauer",
-    "imageExplanation": "Bildgenerierung wird pro Bild abgerechnet, nicht nach Token.",
-    "tokenExplanation": "Die Kosten hängen von Tokens ab, wobei der Input hier überwiegt. Gecachter Input ist ein unveränderter Prompt-Präfix, den der Anbieter zu einem Bruchteil des Preises wiederverwendet; ein geringer Cache-Anteil bei wiederholten Aufrufen bedeutet, dass der Cache nicht genutzt wird.",
-    "noUsage": "Für diesen Aufruf wurde keine abrechenbare Nutzung erfasst.",
-    "error": "Fehler: {code}"
   },
   "checkout": {
     "creditsProduct": "Donkey-Credits"

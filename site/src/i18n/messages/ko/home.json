@@ -255,7 +255,6 @@
   },
   "navUser": {
     "billing": "결제",
-    "usage": "사용량",
     "onboarding": "온보딩 보기",
     "runLocally": "Mac에서 로컬로 실행",
     "logOut": "로그아웃"

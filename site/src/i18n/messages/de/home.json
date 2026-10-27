@@ -255,7 +255,6 @@
   },
   "navUser": {
     "billing": "Abrechnung",
-    "usage": "Nutzung",
     "onboarding": "Onboarding ansehen",
     "runLocally": "Lokal auf Mac ausführen",
     "logOut": "Abmelden"

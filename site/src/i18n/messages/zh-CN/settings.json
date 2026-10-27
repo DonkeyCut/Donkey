@@ -12,8 +12,6 @@
   },
   "saveFailed": "无法保存更改，请重试。",
   "header": {
-    "usageTitle": "用量",
-    "usageDescription": "你在此账单周期的 AI 生成用量。",
     "profileTitle": "个人资料",
     "billingTitle": "账单",
     "billingDescription": "你的订阅和点数余额。"
@@ -107,30 +105,6 @@
     "unpair": "解除配对",
     "unpairHint": "此手机将无法再发送内容至此处",
     "unreachable": "无法连接此 Mac 上的应用——请确认其正在运行。"
-  },
-  "usage": {
-    "included": "已包含",
-    "conversation": "对话 {id}",
-    "calls": "{count, plural, other {# 次调用}}",
-    "cachedShare": "{share}% 已缓存",
-    "date": "日期",
-    "kind": "类别",
-    "model": "模型",
-    "cost": "费用",
-    "status": "状态",
-    "callStatus": "{status, select, succeeded {成功} failed {失败} other {{status}}}",
-    "noCalls": "暂无调用。",
-    "imagesGenerated": "生成图片数",
-    "inputTokens": "输入 Token",
-    "cachedInput": "缓存输入",
-    "cachedValue": "{tokens}（{share}%）",
-    "outputTokens": "输出 Token",
-    "totalTokens": "总 Token",
-    "duration": "时长",
-    "imageExplanation": "图片生成按张计费，不按 Token 计费。",
-    "tokenExplanation": "费用取决于 Token，且主要来自输入。缓存输入是指服务商以更低费率复用的未变更提示词前缀；若重复调用时缓存占比较低，则说明未命中缓存。",
-    "noUsage": "本次调用未产生计费使用量。",
-    "error": "错误：{code}"
   },
   "checkout": {
     "creditsProduct": "Donkey 积分"

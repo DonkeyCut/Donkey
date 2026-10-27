@@ -12,8 +12,6 @@
   },
   "saveFailed": "Não foi possível salvar a alteração — tente novamente.",
   "header": {
-    "usageTitle": "Uso",
-    "usageDescription": "Seu uso de geração com IA neste período de faturamento.",
     "profileTitle": "Perfil",
     "billingTitle": "Faturamento",
     "billingDescription": "Sua assinatura e saldo de créditos."
@@ -107,30 +105,6 @@
     "unpair": "Desvincular",
     "unpairHint": "Este celular não poderá mais enviar arquivos para cá",
     "unreachable": "Não foi possível conectar ao app neste Mac — verifique se ele está aberto."
-  },
-  "usage": {
-    "included": "Incluído",
-    "conversation": "Conversa {id}",
-    "calls": "{count, plural, one {# chamada} other {# chamadas}}",
-    "cachedShare": "{share}% em cache",
-    "date": "Data",
-    "kind": "Tipo",
-    "model": "Modelo",
-    "cost": "Custo",
-    "status": "Status",
-    "callStatus": "{status, select, succeeded {sucesso} failed {falhou} other {{status}}}",
-    "noCalls": "Nenhuma chamada ainda.",
-    "imagesGenerated": "Imagens geradas",
-    "inputTokens": "Tokens de entrada",
-    "cachedInput": "Entrada em cache",
-    "cachedValue": "{tokens} ({share}%)",
-    "outputTokens": "Tokens de saída",
-    "totalTokens": "Total de tokens",
-    "duration": "Duração",
-    "imageExplanation": "A geração de imagens é cobrada por imagem, não por tokens.",
-    "tokenExplanation": "O custo é determinado pelos tokens, e a entrada predomina aqui. A entrada em cache é um prefixo de prompt inalterado que o provedor reutiliza por uma fração do valor; uma baixa porcentagem em cache em chamadas repetidas significa que o cache não está sendo aproveitado.",
-    "noUsage": "Nenhum consumo faturável foi registrado para esta chamada.",
-    "error": "Erro: {code}"
   },
   "checkout": {
     "creditsProduct": "Créditos Donkey"

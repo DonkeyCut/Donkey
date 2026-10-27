@@ -255,7 +255,6 @@
   },
   "navUser": {
     "billing": "Facturación",
-    "usage": "Uso",
     "onboarding": "Ver guía de inicio",
     "runLocally": "Ejecutar localmente en Mac",
     "logOut": "Cerrar sesión"

@@ -255,7 +255,6 @@
   },
   "navUser": {
     "billing": "账单",
-    "usage": "用量",
     "onboarding": "查看新手引导",
     "runLocally": "在 Mac 上本地运行",
     "logOut": "退出登录"

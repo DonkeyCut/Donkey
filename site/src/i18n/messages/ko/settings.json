@@ -12,8 +12,6 @@
   },
   "saveFailed": "변경 사항을 저장하지 못했어요. 다시 시도해 주세요.",
   "header": {
-    "usageTitle": "사용량",
-    "usageDescription": "이번 결제 주기의 AI 생성 사용량이에요.",
     "profileTitle": "프로필",
     "billingTitle": "결제",
     "billingDescription": "구독 및 크레딧 잔액이에요."
@@ -107,30 +105,6 @@
     "unpair": "페어링 해제",
     "unpairHint": "이 휴대폰에서 더 이상 전송할 수 없게 돼요",
     "unreachable": "이 Mac의 앱과 연결할 수 없어요. 앱이 실행 중인지 확인해 주세요."
-  },
-  "usage": {
-    "included": "기본 제공",
-    "conversation": "대화 {id}",
-    "calls": "{count, plural, other {호출 #회}}",
-    "cachedShare": "{share}% 캐시됨",
-    "date": "날짜",
-    "kind": "종류",
-    "model": "모델",
-    "cost": "비용",
-    "status": "상태",
-    "callStatus": "{status, select, succeeded {성공} failed {실패} other {{status}}}",
-    "noCalls": "아직 호출 기록이 없어요.",
-    "imagesGenerated": "생성된 이미지",
-    "inputTokens": "입력 토큰",
-    "cachedInput": "캐시된 입력",
-    "cachedValue": "{tokens} ({share}%)",
-    "outputTokens": "출력 토큰",
-    "totalTokens": "총 토큰",
-    "duration": "소요 시간",
-    "imageExplanation": "이미지 생성 요금은 토큰이 아닌 이미지 수 기준으로 부과돼요.",
-    "tokenExplanation": "비용은 토큰에 따라 책정되며, 여기서는 입력이 대부분을 차지해요. 캐시된 입력은 제공자가 훨씬 저렴한 요금으로 재사용하는 변경되지 않은 프롬프트 접두사예요. 반복 호출 시 캐시 비율이 낮다면 캐시가 적중되지 않고 있다는 뜻이에요.",
-    "noUsage": "이 호출에 기록된 청구 가능 사용량이 없어요.",
-    "error": "오류: {code}"
   },
   "checkout": {
     "creditsProduct": "Donkey 크레딧"

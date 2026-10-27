@@ -12,8 +12,6 @@
   },
   "saveFailed": "Couldn't save that change — try again.",
   "header": {
-    "usageTitle": "Usage",
-    "usageDescription": "Your AI generation usage this billing period.",
     "profileTitle": "Profile",
     "billingTitle": "Billing",
     "billingDescription": "Your subscription and credit balance."
@@ -107,30 +105,6 @@
     "unpair": "Unpair",
     "unpairHint": "This phone stops being able to send here",
     "unreachable": "Couldn't reach the app on this Mac — check that it's running."
-  },
-  "usage": {
-    "included": "Included",
-    "conversation": "Conversation {id}",
-    "calls": "{count, plural, one {# call} other {# calls}}",
-    "cachedShare": "{share}% cached",
-    "date": "Date",
-    "kind": "Kind",
-    "model": "Model",
-    "cost": "Cost",
-    "status": "Status",
-    "callStatus": "{status, select, succeeded {succeeded} failed {failed} other {{status}}}",
-    "noCalls": "No calls yet.",
-    "imagesGenerated": "Images generated",
-    "inputTokens": "Input tokens",
-    "cachedInput": "Cached input",
-    "cachedValue": "{tokens} ({share}%)",
-    "outputTokens": "Output tokens",
-    "totalTokens": "Total tokens",
-    "duration": "Duration",
-    "imageExplanation": "Image generation is priced per image, not by tokens.",
-    "tokenExplanation": "Cost is driven by tokens, and input dominates here. Cached input is an unchanged prompt prefix the provider reuses at a fraction of the rate; a low cached share on a repeated call means the cache isn't being hit.",
-    "noUsage": "No billable usage was recorded for this call.",
-    "error": "Error: {code}"
   },
   "checkout": {
     "creditsProduct": "Donkey credits"

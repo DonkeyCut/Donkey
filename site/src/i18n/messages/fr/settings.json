@@ -12,8 +12,6 @@
   },
   "saveFailed": "Impossible d'enregistrer cette modification — réessayez.",
   "header": {
-    "usageTitle": "Consommation",
-    "usageDescription": "Votre consommation de génération par IA sur cette période de facturation.",
     "profileTitle": "Profil",
     "billingTitle": "Facturation",
     "billingDescription": "Votre abonnement et votre solde de crédits."
@@ -107,30 +105,6 @@
     "unpair": "Dissocier",
     "unpairHint": "Ce téléphone ne pourra plus envoyer de fichiers ici",
     "unreachable": "Impossible de joindre l'application sur ce Mac — vérifiez qu'elle est bien lancée."
-  },
-  "usage": {
-    "included": "Inclus",
-    "conversation": "Conversation {id}",
-    "calls": "{count, plural, one {# appel} other {# appels}}",
-    "cachedShare": "{share} % en cache",
-    "date": "Date",
-    "kind": "Type",
-    "model": "Modèle",
-    "cost": "Coût",
-    "status": "Statut",
-    "callStatus": "{status, select, succeeded {réussi} failed {échoué} other {{status}}}",
-    "noCalls": "Aucun appel pour le moment.",
-    "imagesGenerated": "Images générées",
-    "inputTokens": "Jetons d'entrée",
-    "cachedInput": "Entrée en cache",
-    "cachedValue": "{tokens} ({share} %)",
-    "outputTokens": "Jetons de sortie",
-    "totalTokens": "Total des jetons",
-    "duration": "Durée",
-    "imageExplanation": "La génération d'images est facturée par image, et non par jeton.",
-    "tokenExplanation": "Le coût dépend des jetons, et l'entrée domine ici. L'entrée en cache correspond à un préfixe de prompt inchangé que le fournisseur réutilise à une fraction du tarif ; une faible part en cache lors d'un appel répété indique que le cache n'est pas sollicité.",
-    "noUsage": "Aucune utilisation facturable enregistrée pour cet appel.",
-    "error": "Erreur : {code}"
   },
   "checkout": {
     "creditsProduct": "Crédits Donkey"
