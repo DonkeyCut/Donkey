@@ -77,7 +77,7 @@
         "hint": "約30秒"
       },
       "song": {
-        "label": "フル尺",
+        "label": "フルトラック",
         "hint": "約2分"
       }
     },
@@ -300,7 +300,7 @@
     "apply": "適用",
     "color": "カラー",
     "width": "幅",
-    "feather": "ぼかし",
+    "feather": "フェザー",
     "horizontal": "水平",
     "vertical": "垂直",
     "image": "画像",

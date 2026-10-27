@@ -41,5 +41,7 @@
     "no_payment_method": "Achetez des crédits une fois pour enregistrer une carte, puis activez le rechargement automatique.",
     "unsupported_image_type": "Type d'image non pris en charge.",
     "image_too_large": "Image trop volumineuse."
-  }
+  },
+  "languageSaveFailed": "Impossible d'enregistrer votre langue. Réessayez.",
+  "languageBlocked": "Ce navigateur n'enregistre pas les cookies, la langue ne peut donc pas être modifiée."
 }

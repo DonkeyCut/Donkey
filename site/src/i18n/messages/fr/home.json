@@ -177,7 +177,7 @@
     "newNote": "Nouvelle note",
     "loadFailed": "Impossible de charger les notes.",
     "retry": "Réessayer",
-    "emptyTitle": "Aucune note pour l'instant.",
+    "emptyTitle": "Aucune note pour le moment.",
     "emptyHint": "Les notes se synchronisent avec l'application Donkey Cut pour iOS — un script rédigé ici est aussitôt prêt sur le téléprompteur de votre téléphone.",
     "delete": "Supprimer",
     "deleteTitle": "Supprimer {what} ?",
@@ -251,7 +251,7 @@
     "emptyHint": "Les clips enregistrés dans l'application iOS Donkey Cut se synchronisent automatiquement ici.",
     "delete": "Supprimer",
     "deleteTitle": "Supprimer {what} ?",
-    "deleteBody": "{count, plural, =1 {Le clip sera retiré de votre pellicule cloud et du téléphone avec lequel il a été filmé. Les projets qui l'utilisent déjà en conservent une copie.} other {Les clips seront retirés de votre pellicule cloud et du téléphone avec lequel ils ont été filmés. Les projets qui les utilisent déjà en conservent une copie.}}"
+    "deleteBody": "{count, plural, =1 {Le clip est retiré de votre Pellicule cloud et du téléphone avec lequel il a été filmé. Les projets qui l'utilisent déjà en conservent leur propre copie.} other {Les clips sont retirés de votre Pellicule cloud et du téléphone avec lequel ils ont été filmés. Les projets qui les utilisent déjà en conservent leur propre copie.}}"
   },
   "navUser": {
     "billing": "Facturation",

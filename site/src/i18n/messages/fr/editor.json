@@ -306,10 +306,10 @@
   },
   "topBar": {
     "aspects": {
-      "16x9": "Écran large",
+      "16x9": "Panoramique",
       "9x16": "Vertical",
       "4x3": "Classique",
-      "2x1": "Cinéma",
+      "2x1": "Cinématique",
       "1x1": "Carré",
       "3x4": "Portrait"
     },
@@ -357,8 +357,7 @@
     "needsApp": "Ceci est un projet local — il réside sur ce Mac. Ouvrez l'app Donkey et il s'ouvrira ici.",
     "shareGone": "Ce partage n'est plus disponible.",
     "conflictReloaded": "Version plus récente enregistrée ailleurs rechargée.",
-    "dismiss": "Ignorer",
-    "defaultText": "Votre texte"
+    "dismiss": "Ignorer"
   },
   "preview": {
     "showingOriginal": "Affichage de l'original — cliquez pour voir le détourage",

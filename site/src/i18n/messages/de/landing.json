@@ -59,10 +59,10 @@
   },
   "blog": {
     "metaTitle": "Blog | Donkey Cut Video Editor",
-    "metaDescription": "Einblicke in die Entwicklung von Donkey Cut: Schnitttechniken, Funktionsweise des Editors und Neuerungen.",
+    "metaDescription": "Notizen aus der Entwicklung von Donkey Cut: Videoschnitt-Techniken, wie der Editor funktioniert und was sich geändert hat.",
     "metaPageTitle": "Blog | Donkey Cut Video Editor — Seite {page}",
     "heading": "Blog",
-    "subtitle": "Gedanken zum Videoschnitt und zur Entwicklung des Editors.",
+    "subtitle": "Notizen zum Videoschnitt und zur Entwicklung des Editors.",
     "latestPosts": "Neueste Beiträge",
     "empty": "Hier gibt es noch nichts.",
     "pagination": "Seitennummerierung",

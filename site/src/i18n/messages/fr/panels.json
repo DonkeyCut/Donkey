@@ -73,7 +73,7 @@
     "length": "Durée",
     "musicVariants": {
       "clip": {
-        "label": "Extrait",
+        "label": "Clip",
         "hint": "~30 s"
       },
       "song": {

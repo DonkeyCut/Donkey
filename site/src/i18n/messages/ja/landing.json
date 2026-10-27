@@ -31,7 +31,7 @@
       "cta": "新規プロジェクトを開始",
       "editor": "動画エディターへのフルアクセス",
       "storage": "{mb, number} MBのクラウドストレージ",
-      "tools": "インポート、エクスポート、ローカル文字起こし",
+      "tools": "インポート、書き出し、ローカル文字起こし",
       "subscriptions": "ClaudeやCodexのサブスクリプションと連携"
     },
     "pro": {
@@ -59,10 +59,10 @@
   },
   "blog": {
     "metaTitle": "ブログ | Donkey Cut 動画エディター",
-    "metaDescription": "Donkey Cut開発の記録：動画編集のテクニック、エディターの仕組み、変更履歴。",
+    "metaDescription": "Donkey Cutの開発ノート：動画編集テクニック、エディターの仕組み、変更点など。",
     "metaPageTitle": "ブログ | Donkey Cut 動画エディター — {page}ページ",
     "heading": "ブログ",
-    "subtitle": "動画編集のヒントと、エディター開発の記録。",
+    "subtitle": "動画編集やエディター開発に関するノート。",
     "latestPosts": "最新の記事",
     "empty": "まだ記事がありません。",
     "pagination": "ページネーション",

@@ -41,5 +41,7 @@
     "no_payment_method": "カードを保存するためにクレジットを1度購入してから、自動チャージを有効にしてください。",
     "unsupported_image_type": "サポートされていない画像形式です。",
     "image_too_large": "画像が大きすぎます。"
-  }
+  },
+  "languageSaveFailed": "言語を保存できませんでした。もう一度お試しください。",
+  "languageBlocked": "このブラウザではCookieが保存されないため、言語を変更できません。"
 }

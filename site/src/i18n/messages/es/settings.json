@@ -128,7 +128,7 @@
     "totalTokens": "Tokens totales",
     "duration": "Duración",
     "imageExplanation": "La generación de imágenes se cobra por imagen, no por tokens.",
-    "tokenExplanation": "El costo depende de los tokens, principalmente de entrada. La entrada en caché es un prefijo de prompt que el proveedor reutiliza a menor tarifa; un porcentaje bajo de caché en llamadas repetidas significa que no se está aprovechando.",
+    "tokenExplanation": "El costo depende de los tokens, y aquí predomina la entrada. La entrada en caché es un prefijo de prompt sin cambios que el proveedor reutiliza a una fracción de la tarifa; un porcentaje bajo en caché en una llamada repetida significa que no se está aprovechando la caché.",
     "noUsage": "No se registró uso facturable en esta llamada.",
     "error": "Error: {code}"
   },

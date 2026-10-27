@@ -309,7 +309,7 @@
       "16x9": "Breitbild",
       "9x16": "Vertikal",
       "4x3": "Klassisch",
-      "2x1": "Cinematisch",
+      "2x1": "Kino",
       "1x1": "Quadratisch",
       "3x4": "Hochformat"
     },
@@ -357,8 +357,7 @@
     "needsApp": "Das ist ein lokales Projekt – es liegt auf diesem Mac. Öffne die Donkey-App und es öffnet sich hier.",
     "shareGone": "Diese Freigabe ist nicht mehr verfügbar.",
     "conflictReloaded": "Eine neuere, andernorts gespeicherte Version wurde neu geladen.",
-    "dismiss": "Schließen",
-    "defaultText": "Dein Text"
+    "dismiss": "Schließen"
   },
   "preview": {
     "showingOriginal": "Original wird angezeigt – klicke, um den Ausschnitt zu sehen",

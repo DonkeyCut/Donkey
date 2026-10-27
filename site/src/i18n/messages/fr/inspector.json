@@ -55,12 +55,12 @@
     "shutter": "Obturateur",
     "blur": "Flou",
     "camera": "Caméra",
-    "lookAt": "Viser",
+    "lookAt": "Point visé",
     "cameraAxis": "Caméra {axis}",
     "zoom": "Zoom",
-    "cameraZoom": "Zoom caméra",
+    "cameraZoom": "Zoom de la caméra",
     "roll": "Roulis",
-    "cameraRoll": "Roulis caméra"
+    "cameraRoll": "Roulis de la caméra"
   },
   "animationTiles": {
     "none": "Aucun",
@@ -339,10 +339,10 @@
     "volume": "Volume",
     "mute": "Couper le son",
     "beats": "Battements",
-    "beatsInfo": "Marqueurs de rythme détectés dans l'audio du clip, affichés sous forme de points. Chaque déplacement et raccord s'y aligne automatiquement. Glissez un point pour le déplacer, double-cliquez pour le supprimer, ⌥-cliquez sur le clip pour en ajouter un.",
+    "beatsInfo": "Marqueurs de temps détectés à partir du son du clip, affichés sous forme de points le long de sa barre. Chaque déplacement et rognage s'y aligne ; faites glisser un point pour le déplacer, double-cliquez pour le supprimer, ⌥-cliquez sur le clip pour en ajouter un.",
     "syncFailed": "Impossible de synchroniser l'enregistrement.",
     "sound": "Son",
-    "soundInfo": "Origine du son de cette vidéo. Choisissez un fichier audio enregistré en parallèle (micro-cravate ou enregistreur) et il sera synchronisé avec le son de la caméra. Tous les clips issus de cette vidéo liront cet enregistrement, y compris après coupure, changement de vitesse ou scission.",
+    "soundInfo": "Origine du son de cette vidéo. Choisissez un fichier audio enregistré en parallèle (micro-cravate ou enregistreur) et il sera synchronisé avec le son de la caméra ; chaque clip de cette vidéo lira ensuite cet enregistrement, quels que soient les rognages, vitesses ou scissions.",
     "camera": "Caméra",
     "useCameraSound": "Utiliser le son de la caméra",
     "synced": "Synchronisé ({offset} s) · lu par chaque clip de cette vidéo",
@@ -358,7 +358,7 @@
     "duck": "Atténuer les autres pistes",
     "duckInfoSet": "Pendant la lecture de ce clip, tout le reste est réduit à {percent} % du volume.",
     "duckInfo": "Pendant la lecture de ce clip, réduisez toutes les autres pistes à ce niveau de volume.",
-    "musicBeatsInfo": "Marqueurs de rythme détectés dans la musique, affichés sous forme de points sur le clip. Chaque déplacement et raccord s'y aligne automatiquement. Glissez un point pour le déplacer, double-cliquez pour le supprimer, ⌥-cliquez sur le clip pour en ajouter un."
+    "musicBeatsInfo": "Marqueurs de temps détectés à partir de la musique, affichés sous forme de points sur le clip. Chaque déplacement et rognage s'y aligne ; faites glisser un point pour le déplacer, double-cliquez pour le supprimer, ⌥-cliquez sur le clip pour en ajouter un."
   },
   "sound": {
     "equalizer": "Égaliseur",
@@ -405,10 +405,10 @@
   "clip": {
     "color": "Couleur",
     "blockColor": "Couleur du bloc",
-    "trim": "Raccord",
-    "trimStart": "Raccorder le début",
-    "trimEnd": "Raccorder la fin",
-    "resetTrim": "Réinitialiser le raccord",
+    "trim": "Rogner",
+    "trimStart": "Rogner le début",
+    "trimEnd": "Rogner la fin",
+    "resetTrim": "Réinitialiser le rognage",
     "startsAt": "Commence à",
     "speed": "Vitesse",
     "resetSpeed": "Réinitialiser la vitesse",
@@ -664,10 +664,10 @@
     "glitchKinds": {
       "mix": "Mélange",
       "smear": "Bavure",
-      "split": "Séparation",
+      "split": "Scission",
       "tint": "Teinte",
       "blowout": "Surexposition",
-      "rgb": "Séparation RVB"
+      "rgb": "Scission RVB"
     },
     "course": "Trajectoire",
     "leakCourses": {

@@ -59,7 +59,7 @@
   },
   "blog": {
     "metaTitle": "Blog | Éditeur vidéo Donkey Cut",
-    "metaDescription": "Coulisses du développement de Donkey Cut : techniques de montage vidéo, fonctionnement de l'éditeur et nouveautés.",
+    "metaDescription": "Notes sur le développement de Donkey Cut : techniques de montage vidéo, fonctionnement de l'éditeur et ce qui a changé.",
     "metaPageTitle": "Blog | Éditeur vidéo Donkey Cut — Page {page}",
     "heading": "Blog",
     "subtitle": "Notes sur le montage vidéo et la création de l'éditeur.",

@@ -41,5 +41,7 @@
     "no_payment_method": "购买一次点数以保存银行卡，然后即可开启自动充值。",
     "unsupported_image_type": "不支持的图片格式。",
     "image_too_large": "图片过大。"
-  }
+  },
+  "languageSaveFailed": "无法保存语言设置。请重试。",
+  "languageBlocked": "此浏览器未保存 Cookie，因此无法更改语言。"
 }

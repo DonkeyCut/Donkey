@@ -1,6 +1,6 @@
 {
   "editorMock": {
-    "caption": "El editor de Donkey Cut con un proyecto terminado abierto: contenido generado en el panel lateral, clips y música en la línea de tiempo, y el chat de IA que los organizó."
+    "caption": "El editor de Donkey Cut con un proyecto terminado abierto: multimedia generada en el panel lateral, clips y música en la línea de tiempo, y el chat de IA que los organizó."
   },
   "topBar": {
     "aspect": "{name} · {ratio}",
@@ -15,7 +15,7 @@
   },
   "sidePanel": {
     "tabs": {
-      "media": "Medios",
+      "media": "Multimedia",
       "video": "Video",
       "image": "Imagen",
       "audio": "Audio",
@@ -33,7 +33,7 @@
   },
   "aiPanel": {
     "working": "Trabajando… {seconds}s",
-    "placeholder": "Pregunta sobre tu video o dime qué cambiar… @ hace referencia a medios"
+    "placeholder": "Pregunta sobre tu video o dime qué cambiar… @ hace referencia a multimedia"
   },
   "projects": {
     "posters": {
@@ -62,7 +62,7 @@
       "trainWhistle": "silbato de tren",
       "wheelsOnGravel": "ruedas sobre grava",
       "chat1": "Crea el guion gráfico para una persecución estilo cómic de los años 20: una figura misteriosa en un tren a vapor y un niño persiguiéndolo en bicicleta por un cañón.",
-      "chat2": "Tres tomas: 1) el tren cruzando el cañón, 2) la figura con capa manteniendo el equilibrio en el techo, 3) el niño pedaleando fuerte junto a las vías.",
+      "chat2": "Tres tomas: 1) el tren atravesando el cañón, 2) la figura encapuchada manteniendo el equilibrio en el techo, 3) el niño pedaleando con fuerza junto a las vías.",
       "chat3": "Anima las tres en ese estilo de línea clara.",
       "chat4": "Generé las tres tomas y las edité con una banda sonora de metales y cuerdas:",
       "chat5": "Agrega un silbato de tren cuando salga del túnel y grava bajo la bicicleta.",

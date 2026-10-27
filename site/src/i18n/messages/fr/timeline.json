@@ -68,8 +68,8 @@
     "sticker": "Sticker"
   },
   "picker": {
-    "label": "Chronologie",
-    "heading": "Chronologies",
+    "label": "Timeline",
+    "heading": "Timelines",
     "emptyNote": "{current} est vide. Votre montage se trouve sur {other}.",
     "open": "Ouvrir {name}"
   },
@@ -87,11 +87,11 @@
     "unmute": "Activer le son"
   },
   "trackRow": {
-    "track": "Suivi",
+    "track": "Suivre",
     "follow": "Suivre",
     "tracking": "Suivi {progress} %",
     "pickTarget": "Sélectionnez une cible",
-    "failed": "Impossible d'effectuer le suivi de la vidéo.",
+    "failed": "Impossible de suivre le métrage.",
     "targets": {
       "hands_gap": "Entre les mains",
       "left_hand": "Main gauche",

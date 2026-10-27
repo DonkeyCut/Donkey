@@ -1,7 +1,7 @@
 {
   "transitions": {
     "groups": {
-      "fade": "淡入淡出",
+      "fade": "淡化",
       "zoom": "缩放",
       "push": "推入",
       "wipe": "划像",
@@ -77,7 +77,7 @@
         "hint": "约 30 秒"
       },
       "song": {
-        "label": "整曲",
+        "label": "完整曲目",
         "hint": "约 2 分钟"
       }
     },
@@ -136,7 +136,7 @@
     "generateAudio": "生成音频",
     "pause": "暂停",
     "play": "播放",
-    "dragOrAdd": "拖动到时间轴，或点击 + 添加",
+    "dragOrAdd": "拖动至时间线，或点击 + 添加",
     "addAtPlayhead": "在播放头处添加",
     "generatedAudio": "已生成的音频",
     "noGeneratedAudio": "暂无生成的音频——在上方编写文案即可生成。",

@@ -136,7 +136,7 @@
     "generateAudio": "Gerar áudio",
     "pause": "Pausar",
     "play": "Reproduzir",
-    "dragOrAdd": "Arraste para a timeline ou clique em + para adicionar",
+    "dragOrAdd": "Arraste para a linha do tempo ou clique em + para adicionar",
     "addAtPlayhead": "Adicionar no indicador de reprodução",
     "generatedAudio": "Áudios gerados",
     "noGeneratedAudio": "Nenhum áudio gerado ainda — escreva um roteiro acima e gere um.",

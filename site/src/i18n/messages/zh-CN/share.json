@@ -4,7 +4,7 @@
     "restrictedDescription": "此项目仅与特定人员共享。",
     "title": "{name} · Donkey Cut",
     "description": "在浏览器中观看 {name}。",
-    "libraryTitle": "共享媒体库 · Donkey Cut"
+    "libraryTitle": "共享素材库 · Donkey Cut"
   },
   "view": {
     "signInPrompt": "此项目仅与特定人员共享——登录以确认你是否有权限。",

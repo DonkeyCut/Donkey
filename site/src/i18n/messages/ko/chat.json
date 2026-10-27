@@ -17,11 +17,11 @@
     "providerNote": "{provider}: {note}",
     "providerUnavailable": "{provider}을(를) 사용할 수 없습니다.",
     "providerTesting": "테스트 중",
-    "intro": "클립, 제목, 자막, 게시 메타데이터 등 전체 프로젝트를 확인하고 직접 편집해 드릴 수 있어요. 항목을 선택하고 변경할 내용을 말하거나, 편집본에 대해 무엇이든 물어보세요.",
+    "intro": "클립, 타이틀, 자막, 게시 메타데이터를 포함한 전체 프로젝트를 확인하고 대신 편집해 드릴 수 있어요. 항목을 선택해 변경할 내용을 알려주시거나, 컷에 대해 무엇이든 물어보세요.",
     "suggestions": {
       "whatsInVideo": "이 동영상에 어떤 내용이 있나요?",
       "addTransitions": "클립 사이에 전환 효과 추가",
-      "improveTitle": "제목 다듬기",
+      "improveTitle": "타이틀 개선",
       "createSubtitles": "동영상을 보고 자막 생성",
       "rewriteSubtitles": "소셜 미디어용으로 자막 다시 쓰기",
       "writeCaption": "게시물 캡션 및 태그 작성"

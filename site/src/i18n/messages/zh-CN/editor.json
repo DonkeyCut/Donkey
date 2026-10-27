@@ -107,7 +107,7 @@
     "noDetails": "未分享任何详情。",
     "caption": "文案",
     "published": "已发布",
-    "notes": "备注",
+    "notes": "笔记",
     "links": "链接",
     "noTranscript": "未分享任何文稿。",
     "noMedia": "未分享媒体。",
@@ -133,7 +133,7 @@
       },
       "details": {
         "label": "详细信息",
-        "hint": "文案、标签和备注"
+        "hint": "文案、标签和笔记"
       }
     },
     "saveFailed": "无法保存分享设置。",
@@ -311,7 +311,7 @@
       "4x3": "经典",
       "2x1": "电影",
       "1x1": "正方形",
-      "3x4": "竖屏"
+      "3x4": "纵向"
     },
     "aspectPreset": "{name} · {ratio}",
     "customAspect": "自定义 · {ratio}",
@@ -353,12 +353,11 @@
     "moving": "正在移动…"
   },
   "editor": {
-    "backTo": "{tab, select, library {返回媒体库} other {返回项目}}",
+    "backTo": "{tab, select, library {返回素材库} other {返回项目}}",
     "needsApp": "这是一个本地项目 — 存放在此 Mac 上。打开 Donkey 应用即可在此打开。",
     "shareGone": "此分享已不再可用。",
     "conflictReloaded": "已重新加载在其他地方保存的较新版本。",
-    "dismiss": "忽略",
-    "defaultText": "你的文本"
+    "dismiss": "忽略"
   },
   "preview": {
     "showingOriginal": "正在显示原始画面 — 点击查看抠像",

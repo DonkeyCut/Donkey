@@ -50,10 +50,10 @@
     "used": "Has usado {used} de {quota}.",
     "graceToday": "Tu plan Pro terminó. Tus proyectos más antiguos en la nube se eliminarán hoy a menos que mejores tu plan o liberes {bytes}.",
     "graceDays": "Tu plan Pro terminó. Tus proyectos más antiguos en la nube se eliminarán en {days, plural, one {# día} other {# días}} a menos que mejores tu plan o liberes {bytes}.",
-    "proBody": "Libera espacio eliminando proyectos o archivos que ya no necesites.",
+    "proBody": "Libera espacio eliminando proyectos o multimedia que ya no necesites.",
     "body": "Pro incluye 100 GB de almacenamiento en la nube.",
     "bodyUsed": "Has usado {used} de {quota}. Pro incluye 100 GB de almacenamiento en la nube.",
-    "freeUpTerms": "O libera espacio eliminando proyectos y archivos que ya no necesites."
+    "freeUpTerms": "O libera espacio eliminando proyectos y multimedia que ya no necesites."
   },
   "subscribeBonus": {
     "daysLeft": "Quedan {count} d",

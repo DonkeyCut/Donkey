@@ -149,7 +149,7 @@
   },
   "cardMenu": {
     "moreActions": "Mais ações",
-    "addToTimeline": "Adicionar à timeline",
+    "addToTimeline": "Adicionar à linha do tempo",
     "share": "Compartilhar",
     "rename": "Renomear",
     "download": "Baixar",
@@ -163,7 +163,7 @@
     "download": "Baixar",
     "delete": "Excluir",
     "deleteTitle": "Excluir “{name}”?",
-    "timelineUses": "{count, plural, one {Está em # ponto da timeline, que será removido junto.} other {Está em # pontos da timeline, que serão removidos junto.}}",
+    "timelineUses": "{count, plural, one {É reproduzido em # lugar na linha do tempo, que o acompanha.} other {É reproduzido em # lugares na linha do tempo, que o acompanham.}}",
     "fileGoes": "O arquivo de mídia também será excluído e isso não pode ser desfeito.",
     "cancel": "Cancelar"
   },
@@ -251,7 +251,7 @@
     "emptyHint": "Os clipes gravados no app Donkey Cut para iOS são sincronizados aqui automaticamente.",
     "delete": "Excluir",
     "deleteTitle": "Excluir {what}?",
-    "deleteBody": "{count, plural, =1 {O clipe sai do seu Rolo da Câmera na nuvem e do celular onde foi gravado. Projetos que já o usam mantêm sua própria cópia.} other {Os clipes saem do seu Rolo da Câmera na nuvem e do celular onde foram gravados. Projetos que já os usam mantêm sua própria cópia.}}"
+    "deleteBody": "{count, plural, =1 {O clipe será removido do seu Rolo da Câmera na nuvem e do celular onde foi gravado. Os projetos que já o utilizam mantêm a própria cópia.} other {Os clipes serão removidos do seu Rolo da Câmera na nuvem e do celular onde foram gravados. Os projetos que já os utilizam mantêm a própria cópia.}}"
   },
   "navUser": {
     "billing": "Faturamento",

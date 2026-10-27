@@ -128,7 +128,7 @@
     "totalTokens": "Gesamt-Token",
     "duration": "Dauer",
     "imageExplanation": "Bildgenerierung wird pro Bild abgerechnet, nicht nach Token.",
-    "tokenExplanation": "Kosten hängen von Token ab, wobei Input überwiegt. Gecachter Input ist ein unverändertes Prompt-Präfix, das der Provider zu einem Bruchteil des Preises wiederverwendet; ein geringer Cache-Anteil bei wiederholten Aufrufen bedeutet, dass der Cache nicht getroffen wird.",
+    "tokenExplanation": "Die Kosten hängen von Tokens ab, wobei der Input hier überwiegt. Gecachter Input ist ein unveränderter Prompt-Präfix, den der Anbieter zu einem Bruchteil des Preises wiederverwendet; ein geringer Cache-Anteil bei wiederholten Aufrufen bedeutet, dass der Cache nicht genutzt wird.",
     "noUsage": "Für diesen Aufruf wurde keine abrechenbare Nutzung erfasst.",
     "error": "Fehler: {code}"
   },

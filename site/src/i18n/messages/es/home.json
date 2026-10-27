@@ -10,9 +10,9 @@
     "title": "Nuevo proyecto",
     "placeholder": "Nombre del proyecto",
     "create": "Crear proyecto",
-    "whereSaved": "Dónde se guardan los nuevos proyectos y medios: {place}",
-    "scopeLocal": "Todos los proyectos y medios creados a partir de ahora<br></br>se guardarán en <b>este dispositivo</b>",
-    "scopeCloud": "Todos los proyectos y medios creados a partir de ahora<br></br>se guardarán en la <b>nube</b>"
+    "whereSaved": "Dónde se guardan los nuevos proyectos y multimedia: {place}",
+    "scopeLocal": "Todos los proyectos y multimedia creados a partir<br></br>de ahora se guardarán en <b>este dispositivo</b>",
+    "scopeCloud": "Todos los proyectos y multimedia creados a partir<br></br>de ahora se guardarán en la <b>nube</b>"
   },
   "embeddedNewProject": {
     "create": "Crear nuevo proyecto",
@@ -95,7 +95,7 @@
   "library": {
     "share": "Compartir",
     "newFolder": "Nueva carpeta",
-    "addMedia": "Agregar medios",
+    "addMedia": "Agregar multimedia",
     "emptyTitle": "Tu biblioteca se comparte entre todos los proyectos.",
     "emptyHint": "Arrastra y suelta videos, imágenes, audios o fuentes aquí.",
     "chooseFiles": "Elegir archivos",
@@ -158,7 +158,7 @@
   },
   "generatedMenu": {
     "moreActions": "Más acciones",
-    "addToMedia": "Agregar a Medios",
+    "addToMedia": "Agregar a Multimedia",
     "addToLibrary": "Agregar a la biblioteca",
     "download": "Descargar",
     "delete": "Eliminar",
@@ -251,7 +251,7 @@
     "emptyHint": "Los clips que grabes en la app de Donkey Cut para iOS se sincronizan aquí automáticamente.",
     "delete": "Eliminar",
     "deleteTitle": "¿Eliminar {what}?",
-    "deleteBody": "{count, plural, =1 {El clip se quitará de tu Carrete en la nube y del teléfono donde se grabó. Los proyectos que ya lo usan conservarán su propia copia.} other {Los clips se quitarán de tu Carrete en la nube y del teléfono donde se grabaron. Los proyectos que ya los usan conservarán su propia copia.}}"
+    "deleteBody": "{count, plural, =1 {El clip se eliminará de tu Carrete en la nube y del teléfono donde se grabó. Los proyectos que ya lo usan conservarán su propia copia.} other {Los clips se eliminarán de tu Carrete en la nube y del teléfono donde se grabaron. Los proyectos que ya los usan conservarán su propia copia.}}"
   },
   "navUser": {
     "billing": "Facturación",

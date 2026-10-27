@@ -74,7 +74,7 @@
     "upload": "Fazer upload",
     "root": "Arquivos do projeto",
     "folder": "Pasta",
-    "addToTimeline": "Adicionar à timeline",
+    "addToTimeline": "Adicionar à linha do tempo",
     "addToLibrary": "Adicionar à Biblioteca",
     "emptyFolder": "Pasta vazia",
     "empty": "Solte vídeos, áudios e imagens aqui. Eles só estarão disponíveis neste projeto.",
@@ -83,7 +83,7 @@
     "delete": "Excluir",
     "removeOneTitle": "Remover este arquivo do projeto?",
     "removeManyTitle": "Remover {label} do projeto?",
-    "clipsRemovedToo": "Os clipes da timeline criados a partir deles também serão removidos.",
+    "clipsRemovedToo": "Clipes da linha do tempo criados a partir deles também são removidos.",
     "remove": "Remover"
   },
   "uploadState": {
@@ -166,7 +166,7 @@
     "rendering": "Renderizando…",
     "retry": "Tentar novamente",
     "dismiss": "Dispensar",
-    "addToTimeline": "Adicionar à timeline",
+    "addToTimeline": "Adicionar à linha do tempo",
     "expand": "Expandir",
     "useThisPrompt": "Usar este prompt",
     "copyReference": "Copiar referência"

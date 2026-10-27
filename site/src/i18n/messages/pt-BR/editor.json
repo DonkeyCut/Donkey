@@ -357,8 +357,7 @@
     "needsApp": "Este é um projeto local — ele fica neste Mac. Abra o app Donkey e ele abrirá aqui.",
     "shareGone": "Este compartilhamento não está mais disponível.",
     "conflictReloaded": "Uma versão mais recente salva em outro local foi recarregada.",
-    "dismiss": "Dispensar",
-    "defaultText": "Seu texto"
+    "dismiss": "Dispensar"
   },
   "preview": {
     "showingOriginal": "Mostrando o original — clique para ver o recorte",
@@ -377,7 +376,7 @@
   "maskGizmo": {
     "moveCorner": "Arraste para mover o canto; clique duas vezes para remover",
     "addCorner": "Arraste para adicionar um canto aqui",
-    "feather": "Arraste para suavizar a borda",
+    "feather": "Arraste para aplicar difusão à borda",
     "round": "Arraste para arredondar os cantos",
     "rotate": "Arraste para girar a máscara",
     "resize": "Arraste para redimensionar a máscara"

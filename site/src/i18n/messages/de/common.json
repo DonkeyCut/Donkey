@@ -28,7 +28,7 @@
     "close": "Schließen"
   },
   "proPlan": {
-    "body": "Erstelle Rich Media mit KI.",
+    "body": "Generiere Rich Media mit KI.",
     "price": "{price}/Monat",
     "storage": "{gb, number} GB Cloud-Speicher",
     "credits": "{credits} KI-Credits jeden Monat",
@@ -41,5 +41,7 @@
     "no_payment_method": "Kaufe einmalig Credits, um eine Karte zu speichern, und aktiviere dann das automatische Aufladen.",
     "unsupported_image_type": "Nicht unterstütztes Bildformat.",
     "image_too_large": "Bild zu groß."
-  }
+  },
+  "languageSaveFailed": "Deine Sprache konnte nicht gespeichert werden. Versuch es noch einmal.",
+  "languageBlocked": "Dieser Browser speichert keine Cookies, daher kann die Sprache nicht geändert werden."
 }

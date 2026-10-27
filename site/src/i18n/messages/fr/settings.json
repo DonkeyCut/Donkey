@@ -128,7 +128,7 @@
     "totalTokens": "Total des jetons",
     "duration": "Durée",
     "imageExplanation": "La génération d'images est facturée par image, et non par jeton.",
-    "tokenExplanation": "Le coût dépend des jetons, dominés par l'entrée. L'entrée en cache est un préfixe d'invite inchangé réutilisé par le fournisseur à un tarif réduit ; une part faible en cache lors d'un appel répété indique que le cache n'est pas utilisé.",
+    "tokenExplanation": "Le coût dépend des jetons, et l'entrée domine ici. L'entrée en cache correspond à un préfixe de prompt inchangé que le fournisseur réutilise à une fraction du tarif ; une faible part en cache lors d'un appel répété indique que le cache n'est pas sollicité.",
     "noUsage": "Aucune utilisation facturable enregistrée pour cet appel.",
     "error": "Erreur : {code}"
   },

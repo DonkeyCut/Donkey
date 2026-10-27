@@ -2,7 +2,7 @@
   "tabs": {
     "projects": "프로젝트",
     "library": "라이브러리",
-    "notes": "노트",
+    "notes": "메모",
     "cameraRoll": "카메라 롤"
   },
   "newProject": {
@@ -47,7 +47,7 @@
     "rename": "이름 변경",
     "deleteTitle": "{what} 삭제할까요?",
     "foldersEmpty": "{count, plural, other {폴더가 비어 있어요.}}",
-    "deletesFolders": "{count, plural, other {미디어 파일 및 내보낸 항목을 포함한 프로젝트 폴더 전체가 삭제돼요.}}",
+    "deletesFolders": "{count, plural, =1 {미디어 파일과 내보내기를 포함한 프로젝트 폴더 전체가 삭제돼요.} other {미디어 파일과 내보내기를 포함한 각 프로젝트의 전체 폴더가 삭제돼요.}}",
     "cannotUndo": "이 작업은 실행 취소할 수 없어요.",
     "deleteProjects": "{count, plural, other {프로젝트 삭제}}",
     "deleteFolder": "폴더 삭제",
@@ -62,7 +62,7 @@
     "file": "{count, plural, other {파일 #개}}",
     "item": "{count, plural, other {항목 #개}}",
     "clip": "{count, plural, other {클립 #개}}",
-    "note": "{count, plural, other {노트 #개}}",
+    "note": "{count, plural, other {메모 #개}}",
     "folder": "{count, plural, other {폴더 #개}}",
     "named": "“{name}”",
     "namedHolding": "“{name}” 및 포함된 {held}",

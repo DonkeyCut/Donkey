@@ -23,7 +23,7 @@
       "details": "Details"
     },
     "projectFiles": "Projektdateien",
-    "library": "Bibliothek",
+    "library": "Mediathek",
     "upload": "Hochladen",
     "templateMeta": "{duration} · {count, plural, one {# Element} other {# Elemente}}",
     "generateImage": "Bild generieren",
@@ -49,7 +49,7 @@
       "chat1": "Erstelle zwei handgemalte Reiseplakate – Paris und New York, auf beiden dieselbe Frau, die die Straße überquert.",
       "chat2": "Hier sind die beiden Plakate mit abgestimmter Farbpalette und Typografie:",
       "chat3": "Animiere sie – sie geht, langsame Kamerabewegung, behalte die gemalte Textur bei. Schneide sie dann mit Untertiteln und Musik zusammen.",
-      "chat4": "Habe zwei 4s-Clips gerendert und die Timeline mit Untertiteln und einem Walzer zusammengestellt. Möchtest du einen anderen Track?"
+      "chat4": "Zwei 4s-Clips gerendert und die Timeline mit Untertiteln und einem Walzer zusammengestellt. Willst du eine andere Spur?"
     },
     "railway": {
       "switcherLabel": "Eisenbahn-Mysterium",
@@ -62,7 +62,7 @@
       "trainWhistle": "Zugpfeife",
       "wheelsOnGravel": "Räder auf Schotter",
       "chat1": "Erstelle ein Storyboard für eine Verfolgungsjagd im Comic-Stil der 1920er: Eine geheimnisvolle Gestalt auf einem Dampfzug, ein Kind auf dem Fahrrad, das ihn durch eine Schlucht verfolgt.",
-      "chat2": "Drei Einstellungen: 1) Der Zug schlängelt sich durch die Schlucht, 2) die verhüllte Gestalt balanciert auf dem Dach, 3) der Junge tritt neben den Gleisen kräftig in die Pedale.",
+      "chat2": "Drei Einstellungen: 1) der Zug schlängelt sich durch die Schlucht, 2) die verhüllte Gestalt hält sich auf dem Dach im Gleichgewicht, 3) der Junge tritt neben den Gleisen kräftig in die Pedale.",
       "chat3": "Animiere alle drei im Ligne-Claire-Stil.",
       "chat4": "Habe die drei Einstellungen gerendert und mit Bläser- und Streichermusik geschnitten:",
       "chat5": "Füge eine Zugpfeife hinzu, wenn er aus dem Tunnel kommt, und Schottergeräusche unter dem Fahrrad.",

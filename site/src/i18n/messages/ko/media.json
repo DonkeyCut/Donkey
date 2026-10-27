@@ -117,8 +117,8 @@
     "copyTags": "태그 복사",
     "tagsPlaceholder": "추천 꿀팁 편집",
     "tagsHint": "핵심 태그 3~5개가 가장 효과적이에요. 태그도 캡션 글자 수에 포함돼요.",
-    "soundTitle": "사운드 제목",
-    "copySoundTitle": "사운드 제목 복사",
+    "soundTitle": "사운드 타이틀",
+    "copySoundTitle": "사운드 타이틀 복사",
     "soundTitlePlaceholder": "트랙 제목 — 아티스트",
     "notes": "메모",
     "published": "게시됨",
@@ -212,7 +212,7 @@
     "cardHint": "클릭하여 프롬프트 불러오기 · 타임라인 또는 프롬프트 상자로 드래그",
     "pause": "일시정지",
     "play": "재생",
-    "addAtPlayhead": "재생 헤드 위치에 추가"
+    "addAtPlayhead": "재생헤드 위치에 추가"
   },
   "emoji": {
     "search": "이모지 검색",

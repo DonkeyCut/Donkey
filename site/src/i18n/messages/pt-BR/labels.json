@@ -137,15 +137,15 @@
     "wave": "Onda",
     "converge": "Convergir",
     "streak": "Rastro",
-    "tumble": "Tombo",
+    "tumble": "Tombar",
     "scatter": "Dispersar",
-    "slot": "Caça-níquel",
+    "slot": "Slot",
     "dive": "Mergulhar",
     "count": "Contagem",
-    "disintegrate": "Desintegrar",
+    "disintegrate": "Desintegração",
     "blur": "Desfoque",
     "glitch": "Glitch",
-    "flicker": "Piscar"
+    "flicker": "Cintilação"
   },
   "overlayLoop": {
     "pulse": "Pulsar",

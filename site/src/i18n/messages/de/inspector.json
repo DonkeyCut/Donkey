@@ -49,18 +49,18 @@
     "remove": "Entfernen"
   },
   "motion": {
-    "ease": "Ease",
+    "ease": "Easing",
     "motionBlur": "Bewegungsunschärfe",
     "mixed": "Gemischt",
     "shutter": "Verschluss",
-    "blur": "Unschärfe",
+    "blur": "Weichzeichner",
     "camera": "Kamera",
     "lookAt": "Blickpunkt",
     "cameraAxis": "Kamera-{axis}",
     "zoom": "Zoom",
     "cameraZoom": "Kamerazoom",
     "roll": "Rollen",
-    "cameraRoll": "Kamerarollen"
+    "cameraRoll": "Kamera-Rollwinkel"
   },
   "animationTiles": {
     "none": "Keine",
@@ -212,9 +212,9 @@
       "purple": "Lila",
       "magenta": "Magenta"
     },
-    "lutMissing": "LUT nicht in der Bibliothek",
+    "lutMissing": "LUT nicht in der Mediathek",
     "removeLut": "LUT entfernen",
-    "lutEmpty": "Ziehe eine LUT aus der Bibliothek",
+    "lutEmpty": "Ziehe eine LUT aus der Mediathek hierher",
     "lutIntensity": "LUT-Intensität",
     "categories": {
       "cinematic": "Cinematic",
@@ -291,7 +291,7 @@
       "summer": "Sommer",
       "cross-process": "Cross-Prozess",
       "snapshot": "Schnappschuss",
-      "warm-fade": "Warmes Verblassen",
+      "warm-fade": "Warm Fade",
       "nostalgic": "Nostalgisch",
       "dusty": "Staubig",
       "press": "Presse",
@@ -342,7 +342,7 @@
     "beatsInfo": "Aus dem Ton des Clips erkannte Beat-Marker, dargestellt als Punkte auf der Leiste. Jedes Ziehen und Trimmen rastet daran ein; ziehe einen Punkt zum Verschieben, Doppelklick entfernt ihn, ⌥-Klick auf den Clip fügt einen hinzu.",
     "syncFailed": "Aufnahme konnte nicht synchronisiert werden.",
     "sound": "Ton",
-    "soundInfo": "Woher der Ton dieses Videos stammt. Wähle eine separat aufgenommene Audiodatei (Lavaliermikrofon oder Rekorder) und sie wird über den Kameraton synchronisiert. Jeder Clip dieses Videos spielt dann diese Aufnahme ab – auch nach Trimmen, Tempoänderungen oder Schnitten.",
+    "soundInfo": "Woher der Ton dieses Videos stammt. Wähle eine parallel aufgenommene Audiodatei (Lavalier oder Rekorder); sie wird anhand des Kameratons synchronisiert. Jeder Clip dieses Videos spielt danach die Aufnahme ab – über jedes Trimmen, Tempo und Trennen hinweg.",
     "camera": "Kamera",
     "useCameraSound": "Kameraton verwenden",
     "synced": "Synchronisiert ({offset} s) · Jeder Clip dieses Videos spielt ihn ab",
@@ -521,12 +521,12 @@
     "stagger": "Staffelung",
     "shuffle": "Mischen",
     "ease": "Easing",
-    "fade": "Fade",
-    "fadeLength": "Fade-Länge",
+    "fade": "Blende",
+    "fadeLength": "Blendenlänge",
     "order": "Reihenfolge",
     "orderHint": "Buchstaben in der Reihenfolge ihrer Bewegung",
     "distance": "Abstand",
-    "blur": "Unschärfe"
+    "blur": "Weichzeichner"
   },
   "fontCycle": {
     "removeFace": "Schriftschnitt entfernen",
@@ -571,7 +571,7 @@
   "keys": {
     "title": "Keyframes",
     "update": "Keyframe hier aktualisieren",
-    "add": "Keyframe am Playhead hinzufügen",
+    "add": "Keyframe an der Abspielposition hinzufügen",
     "previous": "Vorheriger Key",
     "next": "Nächster Key",
     "remove": "Key hier entfernen"

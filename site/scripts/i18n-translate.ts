@@ -43,8 +43,129 @@ const GLOSSARY = [
   "File formats and units (MP4, MOV, ProRes, SRT, LUT, 4K, 1080p, fps, dB, Hz, px, MB, GB) stay as they are",
 ];
 
+type Target = Exclude<Locale, "en">;
+
+// Editing terms and the one word each language uses for each, so a term reads
+// the same on every screen. The sense says which meaning of the English the
+// word stands for; the same English in another sense translates freely.
+const TERMS: { english: string; sense: string; words: Record<Target, string> }[] = [
+  {
+    english: "Export",
+    sense: "render the project to a video file",
+    words: { es: "Exportar", "pt-BR": "Exportar", fr: "Exporter", de: "Exportieren", ja: "書き出し", ko: "내보내기", "zh-CN": "导出" },
+  },
+  {
+    english: "Share",
+    sense: "give other people a link",
+    words: { es: "Compartir", "pt-BR": "Compartilhar", fr: "Partager", de: "Teilen", ja: "共有", ko: "공유", "zh-CN": "分享" },
+  },
+  {
+    english: "Split",
+    sense: "cut a clip in two at the playhead",
+    words: { es: "Dividir", "pt-BR": "Dividir", fr: "Scinder", de: "Trennen", ja: "分割", ko: "분할", "zh-CN": "分割" },
+  },
+  {
+    english: "Trim",
+    sense: "shorten a clip from its start or end",
+    words: { es: "Recortar", "pt-BR": "Aparar", fr: "Rogner", de: "Trimmen", ja: "トリム", ko: "트리밍", "zh-CN": "修剪" },
+  },
+  {
+    english: "Library",
+    sense: "the person's collection of media and assets",
+    words: { es: "Biblioteca", "pt-BR": "Biblioteca", fr: "Bibliothèque", de: "Mediathek", ja: "ライブラリ", ko: "라이브러리", "zh-CN": "素材库" },
+  },
+  {
+    english: "Notes",
+    sense: "the written notes and scripts the person keeps",
+    words: { es: "Notas", "pt-BR": "Notas", fr: "Notes", de: "Notizen", ja: "ノート", ko: "메모", "zh-CN": "笔记" },
+  },
+  {
+    english: "Blur",
+    sense: "soften the picture",
+    words: { es: "Desenfoque", "pt-BR": "Desfoque", fr: "Flou", de: "Weichzeichner", ja: "ブラー", ko: "블러", "zh-CN": "模糊" },
+  },
+  {
+    english: "Feather",
+    sense: "soften the edge of a mask or shape",
+    words: { es: "Calado", "pt-BR": "Difusão", fr: "Contour progressif", de: "Weiche Kante", ja: "フェザー", ko: "페더", "zh-CN": "羽化" },
+  },
+  {
+    english: "Timeline",
+    sense: "where clips are arranged in time",
+    words: { es: "Línea de tiempo", "pt-BR": "Linha do tempo", fr: "Timeline", de: "Timeline", ja: "タイムライン", ko: "타임라인", "zh-CN": "时间线" },
+  },
+  {
+    english: "Clip",
+    sense: "a piece of media placed on the timeline",
+    words: { es: "Clip", "pt-BR": "Clipe", fr: "Clip", de: "Clip", ja: "クリップ", ko: "클립", "zh-CN": "片段" },
+  },
+  {
+    english: "Track",
+    sense: "a horizontal lane of the timeline",
+    words: { es: "Pista", "pt-BR": "Faixa", fr: "Piste", de: "Spur", ja: "トラック", ko: "트랙", "zh-CN": "轨道" },
+  },
+  {
+    english: "Title",
+    sense: "text placed over the video",
+    words: { es: "Título", "pt-BR": "Título", fr: "Titre", de: "Titel", ja: "タイトル", ko: "타이틀", "zh-CN": "标题" },
+  },
+  {
+    english: "Subtitles",
+    sense: "timed captions of what is said",
+    words: { es: "Subtítulos", "pt-BR": "Legendas", fr: "Sous-titres", de: "Untertitel", ja: "字幕", ko: "자막", "zh-CN": "字幕" },
+  },
+  {
+    english: "Transition",
+    sense: "the blend from one clip into the next",
+    words: { es: "Transición", "pt-BR": "Transição", fr: "Transition", de: "Übergang", ja: "トランジション", ko: "전환", "zh-CN": "转场" },
+  },
+  {
+    english: "Effect",
+    sense: "a visual effect applied to a clip",
+    words: { es: "Efecto", "pt-BR": "Efeito", fr: "Effet", de: "Effekt", ja: "エフェクト", ko: "효과", "zh-CN": "特效" },
+  },
+  {
+    english: "Keyframe",
+    sense: "a value pinned at a moment of an animation",
+    words: { es: "Fotograma clave", "pt-BR": "Quadro-chave", fr: "Image clé", de: "Keyframe", ja: "キーフレーム", ko: "키프레임", "zh-CN": "关键帧" },
+  },
+  {
+    english: "Playhead",
+    sense: "the marker of the current time on the timeline",
+    words: { es: "Cabezal de reproducción", "pt-BR": "Indicador de reprodução", fr: "Tête de lecture", de: "Abspielposition", ja: "再生ヘッド", ko: "재생헤드", "zh-CN": "播放头" },
+  },
+  {
+    english: "Fade",
+    sense: "one word for both fading in and fading out",
+    words: { es: "Fundido", "pt-BR": "Fade", fr: "Fondu", de: "Blende", ja: "フェード", ko: "페이드", "zh-CN": "淡化" },
+  },
+  {
+    english: "Roll",
+    sense: "the camera turning around its forward axis, beside pan and tilt",
+    words: { es: "Alabeo", "pt-BR": "Rolamento", fr: "Roulis", de: "Rollen", ja: "ロール", ko: "롤", "zh-CN": "横滚" },
+  },
+  {
+    english: "Media",
+    sense: "imported video, audio and images",
+    words: { es: "Multimedia", "pt-BR": "Mídia", fr: "Médias", de: "Medien", ja: "メディア", ko: "미디어", "zh-CN": "媒体" },
+  },
+];
+
+// What a group of site keys means where it appears, by key prefix
+// ("namespace.path."). The keys alone leave these open.
+const CONTEXT_NOTES: Record<string, string> = {
+  "labels.anim.":
+    "Animation names. One name labels both the In and the Out animation, so name the motion in a direction-neutral word: Fade is neither fading in nor fading out, and Pop is a quick springy scale.",
+  "labels.overlayAnim.":
+    "Title animation names. One name labels both the In and the Out animation, so name the motion in a direction-neutral word: Fade is neither fading in nor fading out, and Pop is a quick springy scale.",
+  "inspector.motion.":
+    "Camera move controls. Roll is the camera turning around its forward axis; it is never a phone's photo library.",
+  "editor.topBar.aspects.":
+    "Aspect ratio names listed together in one menu, so each must read differently: Vertical is 9:16 and Portrait is 3:4.",
+};
+
 // How each language addresses the person using the app.
-const VOICE: Record<Exclude<Locale, "en">, string> = {
+const VOICE: Record<Target, string> = {
   es: "Latin American neutral Spanish, informal tú",
   "pt-BR": "Brazilian Portuguese, você",
   fr: "French, vous",
@@ -131,11 +252,13 @@ function client(): GoogleGenAI {
 type Syntax = "icu" | "printf";
 
 type Job = {
-  locale: Exclude<Locale, "en">;
+  locale: Target;
   namespace: string;
   entries: [string, string][];
   syntax: Syntax;
   product: string;
+  // What a key means where it appears, when the key alone leaves it open.
+  notes: Map<string, string>;
 };
 
 const WEB_PRODUCT = "Donkey Cut, a video editor that runs in the browser";
@@ -152,6 +275,27 @@ const SYNTAX_RULES: Record<Syntax, string[]> = {
   ],
 };
 
+// The notes for the keys in a batch, one line per key that has one.
+function contextLines(job: Job): string[] {
+  const lines = job.entries.flatMap(([key]) => {
+    const note = job.notes.get(key);
+    return note ? [`  - ${key}: ${note}`] : [];
+  });
+  return lines.length > 0 ? ["- Where these keys appear:", ...lines] : [];
+}
+
+// The site's notes for a namespace's keys, from the prefixes they fall under.
+function siteNotes(namespace: string, keys: Iterable<string>): Map<string, string> {
+  const notes = new Map<string, string>();
+  for (const key of keys) {
+    const prefix = Object.keys(CONTEXT_NOTES).find((start) => `${namespace}.${key}`.startsWith(start));
+    if (prefix) {
+      notes.set(key, CONTEXT_NOTES[prefix]);
+    }
+  }
+  return notes;
+}
+
 async function translateBatch(ai: GoogleGenAI, job: Job): Promise<Map<string, string>> {
   const prompt = [
     `Translate these user interface strings of ${job.product}, from English into ${LOCALE_NAMES[job.locale]} (${job.locale}).`,
@@ -162,6 +306,9 @@ async function translateBatch(ai: GoogleGenAI, job: Job): Promise<Map<string, st
     "- Keep it as short as the English; these are buttons, menu items and labels.",
     "- Keep punctuation conventions of the target language (ellipsis …, quotes).",
     ...GLOSSARY.map((term) => `- ${term}`),
+    "- Use these words for these terms wherever the English means the sense given, inflected as the grammar needs:",
+    ...TERMS.map((term) => `  - ${term.english} (${term.sense}): ${term.words[job.locale]}`),
+    ...contextLines(job),
     "Return every key with its translation.",
     "",
     JSON.stringify(Object.fromEntries(job.entries), null, 2),
@@ -264,6 +411,7 @@ async function syncCatalogs(dir: string, check: boolean) {
           entries: stale.slice(i, i + BATCH_SIZE),
           syntax: "icu",
           product: WEB_PRODUCT,
+          notes: siteNotes(namespace, english.keys()),
         });
       }
       results.set(`${locale}/${namespace}`, current);
@@ -362,6 +510,8 @@ type Rows = Map<string, string>;
 type NativeCatalog = {
   name: string;
   product: string;
+  // The developer comment on a row's string, where one says how it is used.
+  notes: (locale: Job["locale"]) => Map<string, string>;
   english: (locale: Job["locale"]) => Rows;
   current: (locale: Job["locale"]) => Rows;
   save: (translated: Map<Job["locale"], Rows>) => void;
@@ -372,7 +522,7 @@ type XcLocalization = {
   stringUnit?: StringUnit;
   variations?: { plural?: Record<string, { stringUnit: StringUnit }> };
 };
-type XcEntry = { shouldTranslate?: boolean; localizations?: Record<string, XcLocalization> };
+type XcEntry = { comment?: string; shouldTranslate?: boolean; localizations?: Record<string, XcLocalization> };
 type XcCatalog = { sourceLanguage: string; strings: Record<string, XcEntry>; version: string };
 
 function findFiles(dir: string, match: (file: string) => boolean, out: string[] = []): string[] {
@@ -482,7 +632,21 @@ function xcstringsCatalog(file: string): NativeCatalog {
     writeXcodeJson(file, catalog);
   };
 
-  return { name: path.relative(REPO_ROOT, file), product: productFor(file), english, current, save };
+  // Every row of a commented string carries its comment, plural forms too.
+  const notes = (locale: Job["locale"]) => {
+    const rows = english(locale);
+    const byKey = new Map(translatable.map(([key, entry]) => [key, entry.comment]));
+    const out = new Map<string, string>();
+    for (const row of rows.keys()) {
+      const comment = byKey.get(row) ?? byKey.get(row.split("|")[0]);
+      if (comment) {
+        out.set(row, comment);
+      }
+    }
+    return out;
+  };
+
+  return { name: path.relative(REPO_ROOT, file), product: productFor(file), notes, english, current, save };
 }
 
 const STRINGS_LINE = /^\s*"((?:[^"\\]|\\.)*)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/gm;
@@ -524,6 +688,7 @@ function stringsCatalog(file: string): NativeCatalog {
   return {
     name: path.relative(REPO_ROOT, file),
     product: productFor(file),
+    notes: () => new Map(),
     english: () => english,
     current: (locale) => readStrings(localized(locale)),
     save,
@@ -563,6 +728,7 @@ async function syncNative(check: boolean) {
             entries: stale.slice(i, i + BATCH_SIZE),
             syntax: "printf",
             product: catalog.product,
+            notes: catalog.notes(locale),
           },
         });
       }

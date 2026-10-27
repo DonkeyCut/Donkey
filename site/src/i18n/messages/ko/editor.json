@@ -307,11 +307,11 @@
   "topBar": {
     "aspects": {
       "16x9": "와이드스크린",
-      "9x16": "세로형",
+      "9x16": "세로",
       "4x3": "클래식",
       "2x1": "시네마틱",
       "1x1": "정사각형",
-      "3x4": "세로"
+      "3x4": "포트레이트"
     },
     "aspectPreset": "{name} · {ratio}",
     "customAspect": "사용자 지정 · {ratio}",
@@ -357,8 +357,7 @@
     "needsApp": "로컬 프로젝트예요 — 이 Mac에 저장되어 있어요. Donkey 앱을 열면 여기서 열려요.",
     "shareGone": "더 이상 유효하지 않은 공유 링크예요.",
     "conflictReloaded": "다른 곳에서 저장된 최신 버전을 다시 불러왔어요.",
-    "dismiss": "닫기",
-    "defaultText": "텍스트 입력"
+    "dismiss": "닫기"
   },
   "preview": {
     "showingOriginal": "원본 표시 중 — 컷아웃을 보려면 클릭해요",

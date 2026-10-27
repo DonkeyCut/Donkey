@@ -41,9 +41,9 @@
     "pangram": "将五打酒罐装进我的箱子"
   },
   "clipEffects": {
-    "title": "效果",
-    "info": "每个效果仅在蒙版范围内、在此剪辑的整个时长内独立处理其画面。“效果”标签页中的效果则处理其窗口下方的整个画幅。",
-    "add": "添加效果",
+    "title": "特效",
+    "info": "每个特效仅在片段蒙版内单独处理该片段的画面，贯穿整个片段时长。“特效”标签页中的特效则处理其窗口下方的整个画幅。",
+    "add": "添加特效",
     "amount": "{effect}强度",
     "removeEffect": "移除{effect}",
     "remove": "移除"
@@ -56,11 +56,11 @@
     "blur": "模糊",
     "camera": "摄像机",
     "lookAt": "注视点",
-    "cameraAxis": "摄像机 {axis} 轴",
-    "zoom": "缩放",
-    "cameraZoom": "摄像机缩放",
-    "roll": "翻滚",
-    "cameraRoll": "摄像机翻滚"
+    "cameraAxis": "摄像机 {axis}",
+    "zoom": "变焦",
+    "cameraZoom": "摄像机变焦",
+    "roll": "横滚",
+    "cameraRoll": "摄像机横滚"
   },
   "animationTiles": {
     "none": "无",
@@ -154,7 +154,7 @@
       "whites": "白色",
       "blacks": "黑色",
       "brilliance": "鲜明度",
-      "fade": "褪色",
+      "fade": "淡化",
       "temperature": "色温",
       "tint": "色调",
       "saturation": "饱和度",
@@ -172,7 +172,7 @@
       "whites": "重置白色",
       "blacks": "重置黑色",
       "brilliance": "重置鲜明度",
-      "fade": "重置褪色",
+      "fade": "重置淡化",
       "temperature": "重置色温",
       "tint": "重置色调",
       "saturation": "重置饱和度",
@@ -212,9 +212,9 @@
       "purple": "紫色",
       "magenta": "洋红色"
     },
-    "lutMissing": "资源库中未找到 LUT",
+    "lutMissing": "LUT 不在素材库中",
     "removeLut": "移除 LUT",
-    "lutEmpty": "从资源库中拖入 LUT",
+    "lutEmpty": "从素材库拖入 LUT",
     "lutIntensity": "LUT 强度",
     "categories": {
       "cinematic": "电影感",
@@ -291,7 +291,7 @@
       "summer": "夏日",
       "cross-process": "正片负冲",
       "snapshot": "快照",
-      "warm-fade": "暖调褪色",
+      "warm-fade": "暖色淡化",
       "nostalgic": "怀旧",
       "dusty": "微尘",
       "press": "新闻",
@@ -339,10 +339,10 @@
     "volume": "音量",
     "mute": "静音音频",
     "beats": "节拍",
-    "beatsInfo": "从片段声音中检测出的节拍标记，在条形条上显示为圆点。拖动和裁剪均可吸附至标记；拖动圆点可移动位置，双击可删除，按住 ⌥ 单击片段可添加。",
+    "beatsInfo": "从片段声音中检测出的节拍标记，以圆点形式显示在其条形上。所有拖动和修剪都会吸附到这些标记；拖动圆点可移动它，双击删除，按住 ⌥ 点击片段即可添加。",
     "syncFailed": "无法对齐录音。",
     "sound": "声音",
-    "soundInfo": "此视频的声音来源。选择同步录制的音频文件（领夹麦或录音机），将通过与相机声音匹配进行对齐；此视频的每个片段随后都将播放该录音，无论经过裁剪、变速还是分割。",
+    "soundInfo": "此视频声音的来源。选取一段与其同步录制的音频文件（领夹麦或录音机），系统会将其与摄像机声音进行匹配对齐；之后该视频的每个片段都会播放该录音，不受任何修剪、变速或分割的影响。",
     "camera": "相机",
     "useCameraSound": "使用相机声音",
     "synced": "已同步 {offset} s · 此视频的每个片段均会播放",
@@ -358,7 +358,7 @@
     "duck": "避让其他音频",
     "duckInfoSet": "播放此片段时，其他所有音频的音量降至 {percent}%。",
     "duckInfo": "播放此片段时，将其他所有音频降至该音量。",
-    "musicBeatsInfo": "从音乐中检测出的节拍标记，在片段上显示为圆点。拖动和裁剪均可吸附至标记；拖动圆点可移动位置，双击可删除，按住 ⌥ 单击片段可添加。"
+    "musicBeatsInfo": "从音乐中检测出的节拍标记，以圆点形式显示在片段上。所有拖动和修剪都会吸附到这些标记；拖动圆点可移动它，双击删除，按住 ⌥ 点击片段即可添加。"
   },
   "sound": {
     "equalizer": "均衡器",

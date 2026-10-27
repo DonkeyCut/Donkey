@@ -65,7 +65,7 @@
     "copyTokenHint": "{token} kopieren, um es in Prompts zu referenzieren",
     "clickToCopyHint": "Klicke, um {token} zu kopieren – in einen Prompt einfügen, um auf dieses Asset zu verweisen",
     "pinHint": "{name} – klicken, um den Moment zu pinnen",
-    "playhead": "Playhead"
+    "playhead": "Abspielposition"
   },
   "chatAssets": {
     "renderInterrupted": "Das Rendern wurde unterbrochen.",

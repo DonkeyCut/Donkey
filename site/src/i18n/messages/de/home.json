@@ -110,7 +110,7 @@
   },
   "libraryShare": {
     "title": "{kind, select, folder {Ordner teilen} other {Asset teilen}}",
-    "body": "{kind, select, folder {Kopiere diesen Ordner in die Cloud, damit andere ihn öffnen können, wenn dein Gerät offline ist.} other {Kopiere dieses Asset in die Cloud, damit andere es öffnen können, wenn dein Gerät offline ist.}} Freigabeeinstellungen gelten für die Cloud-Kopie. Deine lokalen Dateien bleiben hier.",
+    "body": "{kind, select, folder {Kopiere diesen Ordner in die Cloud, damit andere ihn öffnen können, während dein Gerät offline ist.} other {Kopiere dieses Asset in die Cloud, damit andere es öffnen können, während dein Gerät offline ist.}} Einstellungen zum Teilen gelten für die Cloud-Kopie. Deine lokalen Dateien bleiben hier.",
     "copyFailed": "Konnte nicht in die Cloud kopiert werden.",
     "copying": "In die Cloud kopieren…",
     "copy": "In die Cloud kopieren"
@@ -251,7 +251,7 @@
     "emptyHint": "Clips, die du in der Donkey Cut iOS-App aufnimmst, werden hier automatisch synchronisiert.",
     "delete": "Löschen",
     "deleteTitle": "{what} löschen?",
-    "deleteBody": "{count, plural, =1 {Der Clip wird aus deinen Cloud-Aufnahmen und von dem Smartphone gelöscht, mit dem er aufgenommen wurde. Projekte, die ihn bereits verwenden, behalten ihre eigene Kopie.} other {Die Clips werden aus deinen Cloud-Aufnahmen und von den Smartphones gelöscht, mit denen sie aufgenommen wurden. Projekte, die sie bereits verwenden, behalten ihre eigene Kopie.}}"
+    "deleteBody": "{count, plural, =1 {Der Clip wird aus deinen Cloud-Aufnahmen und von dem Smartphone entfernt, mit dem er aufgenommen wurde. Projekte, die ihn bereits verwenden, behalten ihre eigene Kopie.} other {Die Clips werden aus deinen Cloud-Aufnahmen und von dem Smartphone entfernt, mit dem sie aufgenommen wurden. Projekte, die sie bereits verwenden, behalten ihre eigene Kopie.}}"
   },
   "navUser": {
     "billing": "Abrechnung",

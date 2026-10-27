@@ -41,5 +41,7 @@
     "no_payment_method": "Compre créditos uma vez para salvar um cartão e, depois, ative a recarga automática.",
     "unsupported_image_type": "Tipo de imagem não suportado.",
     "image_too_large": "Imagem grande demais."
-  }
+  },
+  "languageSaveFailed": "Não foi possível salvar seu idioma. Tente novamente.",
+  "languageBlocked": "Este navegador não está salvando cookies, então o idioma não pode ser alterado."
 }

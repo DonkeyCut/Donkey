@@ -8,7 +8,7 @@
     "transitionIn": "{name}（イン）",
     "transitionOut": "{name}（アウト）",
     "transitionTitle": "{name} {seconds}秒 — 行に沿って自由にドラッグできます。カットやクリップの端に重なる位置で再生されます",
-    "dragToTrim": "ドラッグしてトリミング",
+    "dragToTrim": "ドラッグしてトリム",
     "removeEmptySpace": "空白を削除",
     "removeKeyframe": "キーフレームを削除",
     "show": "表示",

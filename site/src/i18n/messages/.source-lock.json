@@ -329,7 +329,9 @@
     "apiErrors.auto_reload_invalid": "efb00868e5ca",
     "apiErrors.no_payment_method": "6ba414ee3707",
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
-    "apiErrors.image_too_large": "3fdb4028f18f"
+    "apiErrors.image_too_large": "3fdb4028f18f",
+    "languageSaveFailed": "8d8a247bafe6",
+    "languageBlocked": "6cdf84383309"
   },
   "de/editor": {
     "embeddedSignIn.message": "20237ca72c09",
@@ -616,7 +618,6 @@
     "editor.shareGone": "65bfd8cc936d",
     "editor.conflictReloaded": "989357c6da98",
     "editor.dismiss": "70afe9eff3f2",
-    "editor.defaultText": "c8a65d39412e",
     "preview.showingOriginal": "ef4e6098a9b9",
     "preview.previewingSdr": "9d329085f57c",
     "preview.copyingFrame": "8b4936f92e20",
@@ -778,6 +779,7 @@
     "label_delete_failed": "57402b11cb1d",
     "label_name_required": "28b6bf0caed5",
     "label_save_failed": "9749918d0c1f",
+    "language_cookie_blocked": "6cdf84383309",
     "library_add_failed": "0b9e6e23b33e",
     "library_asset_not_found": "6192abf2bdca",
     "library_asset_update_failed": "dab8ac0a0b3d",
@@ -3381,7 +3383,9 @@
     "apiErrors.auto_reload_invalid": "efb00868e5ca",
     "apiErrors.no_payment_method": "6ba414ee3707",
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
-    "apiErrors.image_too_large": "3fdb4028f18f"
+    "apiErrors.image_too_large": "3fdb4028f18f",
+    "languageSaveFailed": "8d8a247bafe6",
+    "languageBlocked": "6cdf84383309"
   },
   "es/editor": {
     "embeddedSignIn.message": "20237ca72c09",
@@ -3668,7 +3672,6 @@
     "editor.shareGone": "65bfd8cc936d",
     "editor.conflictReloaded": "989357c6da98",
     "editor.dismiss": "70afe9eff3f2",
-    "editor.defaultText": "c8a65d39412e",
     "preview.showingOriginal": "ef4e6098a9b9",
     "preview.previewingSdr": "9d329085f57c",
     "preview.copyingFrame": "8b4936f92e20",
@@ -3830,6 +3833,7 @@
     "label_delete_failed": "57402b11cb1d",
     "label_name_required": "28b6bf0caed5",
     "label_save_failed": "9749918d0c1f",
+    "language_cookie_blocked": "6cdf84383309",
     "library_add_failed": "0b9e6e23b33e",
     "library_asset_not_found": "6192abf2bdca",
     "library_asset_update_failed": "dab8ac0a0b3d",
@@ -6433,7 +6437,9 @@
     "apiErrors.auto_reload_invalid": "efb00868e5ca",
     "apiErrors.no_payment_method": "6ba414ee3707",
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
-    "apiErrors.image_too_large": "3fdb4028f18f"
+    "apiErrors.image_too_large": "3fdb4028f18f",
+    "languageSaveFailed": "8d8a247bafe6",
+    "languageBlocked": "6cdf84383309"
   },
   "fr/editor": {
     "embeddedSignIn.message": "20237ca72c09",
@@ -6720,7 +6726,6 @@
     "editor.shareGone": "65bfd8cc936d",
     "editor.conflictReloaded": "989357c6da98",
     "editor.dismiss": "70afe9eff3f2",
-    "editor.defaultText": "c8a65d39412e",
     "preview.showingOriginal": "ef4e6098a9b9",
     "preview.previewingSdr": "9d329085f57c",
     "preview.copyingFrame": "8b4936f92e20",
@@ -6882,6 +6887,7 @@
     "label_delete_failed": "57402b11cb1d",
     "label_name_required": "28b6bf0caed5",
     "label_save_failed": "9749918d0c1f",
+    "language_cookie_blocked": "6cdf84383309",
     "library_add_failed": "0b9e6e23b33e",
     "library_asset_not_found": "6192abf2bdca",
     "library_asset_update_failed": "dab8ac0a0b3d",
@@ -9485,7 +9491,9 @@
     "apiErrors.auto_reload_invalid": "efb00868e5ca",
     "apiErrors.no_payment_method": "6ba414ee3707",
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
-    "apiErrors.image_too_large": "3fdb4028f18f"
+    "apiErrors.image_too_large": "3fdb4028f18f",
+    "languageSaveFailed": "8d8a247bafe6",
+    "languageBlocked": "6cdf84383309"
   },
   "ja/editor": {
     "embeddedSignIn.message": "20237ca72c09",
@@ -9772,7 +9780,6 @@
     "editor.shareGone": "65bfd8cc936d",
     "editor.conflictReloaded": "989357c6da98",
     "editor.dismiss": "70afe9eff3f2",
-    "editor.defaultText": "c8a65d39412e",
     "preview.showingOriginal": "ef4e6098a9b9",
     "preview.previewingSdr": "9d329085f57c",
     "preview.copyingFrame": "8b4936f92e20",
@@ -9934,6 +9941,7 @@
     "label_delete_failed": "57402b11cb1d",
     "label_name_required": "28b6bf0caed5",
     "label_save_failed": "9749918d0c1f",
+    "language_cookie_blocked": "6cdf84383309",
     "library_add_failed": "0b9e6e23b33e",
     "library_asset_not_found": "6192abf2bdca",
     "library_asset_update_failed": "dab8ac0a0b3d",
@@ -12537,7 +12545,9 @@
     "apiErrors.auto_reload_invalid": "efb00868e5ca",
     "apiErrors.no_payment_method": "6ba414ee3707",
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
-    "apiErrors.image_too_large": "3fdb4028f18f"
+    "apiErrors.image_too_large": "3fdb4028f18f",
+    "languageSaveFailed": "8d8a247bafe6",
+    "languageBlocked": "6cdf84383309"
   },
   "ko/editor": {
     "embeddedSignIn.message": "20237ca72c09",
@@ -12824,7 +12834,6 @@
     "editor.shareGone": "65bfd8cc936d",
     "editor.conflictReloaded": "989357c6da98",
     "editor.dismiss": "70afe9eff3f2",
-    "editor.defaultText": "c8a65d39412e",
     "preview.showingOriginal": "ef4e6098a9b9",
     "preview.previewingSdr": "9d329085f57c",
     "preview.copyingFrame": "8b4936f92e20",
@@ -12986,6 +12995,7 @@
     "label_delete_failed": "57402b11cb1d",
     "label_name_required": "28b6bf0caed5",
     "label_save_failed": "9749918d0c1f",
+    "language_cookie_blocked": "6cdf84383309",
     "library_add_failed": "0b9e6e23b33e",
     "library_asset_not_found": "6192abf2bdca",
     "library_asset_update_failed": "dab8ac0a0b3d",
@@ -15589,7 +15599,9 @@
     "apiErrors.auto_reload_invalid": "efb00868e5ca",
     "apiErrors.no_payment_method": "6ba414ee3707",
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
-    "apiErrors.image_too_large": "3fdb4028f18f"
+    "apiErrors.image_too_large": "3fdb4028f18f",
+    "languageSaveFailed": "8d8a247bafe6",
+    "languageBlocked": "6cdf84383309"
   },
   "pt-BR/editor": {
     "embeddedSignIn.message": "20237ca72c09",
@@ -15876,7 +15888,6 @@
     "editor.shareGone": "65bfd8cc936d",
     "editor.conflictReloaded": "989357c6da98",
     "editor.dismiss": "70afe9eff3f2",
-    "editor.defaultText": "c8a65d39412e",
     "preview.showingOriginal": "ef4e6098a9b9",
     "preview.previewingSdr": "9d329085f57c",
     "preview.copyingFrame": "8b4936f92e20",
@@ -16038,6 +16049,7 @@
     "label_delete_failed": "57402b11cb1d",
     "label_name_required": "28b6bf0caed5",
     "label_save_failed": "9749918d0c1f",
+    "language_cookie_blocked": "6cdf84383309",
     "library_add_failed": "0b9e6e23b33e",
     "library_asset_not_found": "6192abf2bdca",
     "library_asset_update_failed": "dab8ac0a0b3d",
@@ -18641,7 +18653,9 @@
     "apiErrors.auto_reload_invalid": "efb00868e5ca",
     "apiErrors.no_payment_method": "6ba414ee3707",
     "apiErrors.unsupported_image_type": "73cf38d0e3e1",
-    "apiErrors.image_too_large": "3fdb4028f18f"
+    "apiErrors.image_too_large": "3fdb4028f18f",
+    "languageSaveFailed": "8d8a247bafe6",
+    "languageBlocked": "6cdf84383309"
   },
   "zh-CN/editor": {
     "embeddedSignIn.message": "20237ca72c09",
@@ -18928,7 +18942,6 @@
     "editor.shareGone": "65bfd8cc936d",
     "editor.conflictReloaded": "989357c6da98",
     "editor.dismiss": "70afe9eff3f2",
-    "editor.defaultText": "c8a65d39412e",
     "preview.showingOriginal": "ef4e6098a9b9",
     "preview.previewingSdr": "9d329085f57c",
     "preview.copyingFrame": "8b4936f92e20",
@@ -19090,6 +19103,7 @@
     "label_delete_failed": "57402b11cb1d",
     "label_name_required": "28b6bf0caed5",
     "label_save_failed": "9749918d0c1f",
+    "language_cookie_blocked": "6cdf84383309",
     "library_add_failed": "0b9e6e23b33e",
     "library_asset_not_found": "6192abf2bdca",
     "library_asset_update_failed": "dab8ac0a0b3d",

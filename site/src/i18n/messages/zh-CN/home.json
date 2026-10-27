@@ -2,7 +2,7 @@
   "tabs": {
     "projects": "项目",
     "library": "素材库",
-    "notes": "备忘录",
+    "notes": "笔记",
     "cameraRoll": "相机胶卷"
   },
   "newProject": {
@@ -62,7 +62,7 @@
     "file": "{count, plural, other {# 个文件}}",
     "item": "{count, plural, other {# 项}}",
     "clip": "{count, plural, other {# 个片段}}",
-    "note": "{count, plural, other {# 条便签}}",
+    "note": "{count, plural, other {# 条笔记}}",
     "folder": "{count, plural, other {# 个文件夹}}",
     "named": "“{name}”",
     "namedHolding": "“{name}”及其{held}",
@@ -109,19 +109,19 @@
     "remove": "移除"
   },
   "libraryShare": {
-    "title": "{kind, select, folder {共享文件夹} other {共享素材}}",
-    "body": "{kind, select, folder {将此文件夹复制到云端，这样即使你的设备离线，其他人也能打开。} other {将此素材复制到云端，这样即使你的设备离线，其他人也能打开。}}共享设置将应用于云端副本。你的本地文件仍会保留在此处。",
+    "title": "{kind, select, folder {分享文件夹} other {分享素材}}",
+    "body": "{kind, select, folder {将此文件夹复制到云端，以便他人能在你的设备离线时打开。} other {将此素材复制到云端，以便他人能在你的设备离线时打开。}} 分享设置将应用于云端副本。你的本地文件将保留在此处。",
     "copyFailed": "无法复制到云端。",
     "copying": "正在复制到云端…",
     "copy": "复制到云端"
   },
   "sharedLibrary": {
-    "viewOnly": "共享资源库 · 仅供查看",
-    "loading": "正在加载共享资源库",
-    "signInToView": "登录以查看此共享内容。",
-    "noAccess": "你没有访问此共享内容的权限。请让所有者邀请你。",
-    "gone": "此共享链接已失效。",
-    "loadFailed": "无法加载此共享内容。",
+    "viewOnly": "共享素材库 · 仅查看",
+    "loading": "正在加载共享素材库",
+    "signInToView": "登录以查看此分享。",
+    "noAccess": "你没有访问此分享的权限。请让所有者邀请你。",
+    "gone": "此分享链接已失效。",
+    "loadFailed": "无法加载此分享。",
     "signIn": "登录",
     "tryAgain": "重试",
     "breadcrumb": "文件夹路径导航",
@@ -159,7 +159,7 @@
   "generatedMenu": {
     "moreActions": "更多操作",
     "addToMedia": "添加到媒体",
-    "addToLibrary": "添加到资源库",
+    "addToLibrary": "添加到素材库",
     "download": "下载",
     "delete": "删除",
     "deleteTitle": "删除“{name}”？",
@@ -248,10 +248,10 @@
   },
   "cameraRoll": {
     "emptyTitle": "暂无手机中的内容。",
-    "emptyHint": "你在 Donkey Cut iOS App 中录制的素材会自动同步到这里。",
+    "emptyHint": "你在 Donkey Cut iOS 应用中录制的片段会自动同步到此处。",
     "delete": "删除",
     "deleteTitle": "删除{what}？",
-    "deleteBody": "{count, plural, other {素材将从云端相机胶卷以及拍摄它的手机中移除。已使用该素材的项目将保留其副本。}}"
+    "deleteBody": "{count, plural, =1 {该片段将从你的云端相机胶卷及拍摄它的手机中移除。已使用它的项目仍将保留各自的副本。} other {这些片段将从你的云端相机胶卷及拍摄它们的手机中移除。已使用它们的项目仍将保留各自的副本。}}"
   },
   "navUser": {
     "billing": "账单",

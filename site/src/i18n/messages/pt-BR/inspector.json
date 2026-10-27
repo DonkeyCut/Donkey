@@ -49,7 +49,7 @@
     "remove": "Remover"
   },
   "motion": {
-    "ease": "Atenuação",
+    "ease": "Suavização",
     "motionBlur": "Desfoque de movimento",
     "mixed": "Misto",
     "shutter": "Obturador",
@@ -59,8 +59,8 @@
     "cameraAxis": "Câmera {axis}",
     "zoom": "Zoom",
     "cameraZoom": "Zoom da câmera",
-    "roll": "Rolagem",
-    "cameraRoll": "Rolagem da câmera"
+    "roll": "Rolamento",
+    "cameraRoll": "Rolamento da câmera"
   },
   "animationTiles": {
     "none": "Nenhum",
@@ -154,7 +154,7 @@
       "whites": "Brancos",
       "blacks": "Pretos",
       "brilliance": "Luminosidade",
-      "fade": "Esmaecimento",
+      "fade": "Fade",
       "temperature": "Temperatura",
       "tint": "Tonalidade",
       "saturation": "Saturação",
@@ -172,7 +172,7 @@
       "whites": "Redefinir brancos",
       "blacks": "Redefinir pretos",
       "brilliance": "Redefinir luminosidade",
-      "fade": "Redefinir esmaecimento",
+      "fade": "Redefinir fade",
       "temperature": "Redefinir temperatura",
       "tint": "Redefinir tonalidade",
       "saturation": "Redefinir saturação",
@@ -291,7 +291,7 @@
       "summer": "Verão",
       "cross-process": "Processo cruzado",
       "snapshot": "Instantâneo",
-      "warm-fade": "Esmaecido quente",
+      "warm-fade": "Fade quente",
       "nostalgic": "Nostálgico",
       "dusty": "Empoeirado",
       "press": "Imprensa",
@@ -339,10 +339,10 @@
     "volume": "Volume",
     "mute": "Silenciar áudio",
     "beats": "Batidas",
-    "beatsInfo": "Marcadores de batida detectados no som do clipe, exibidos como pontos na barra. Ações de arrastar e cortar se ajustam a eles; arraste um ponto para movê-lo, clique duas vezes para removê-lo e ⌥-clique no clipe para adicionar um.",
+    "beatsInfo": "Marcadores de batida detectados no som do clipe, exibidos como pontos na barra. Qualquer ação de arrastar e aparar se ajusta a eles; arraste um ponto para movê-lo, clique duas vezes para remover e use ⌥-clique no clipe para adicionar um.",
     "syncFailed": "Não foi possível alinhar a gravação.",
     "sound": "Som",
-    "soundInfo": "De onde vem o som deste vídeo. Escolha um arquivo de áudio gravado junto a ele (como lapela ou gravador) e ele será alinhado ao som da câmera; cada clipe deste vídeo reproduzirá a gravação, mesmo com cortes, alterações de velocidade ou divisões.",
+    "soundInfo": "De onde vem o som deste vídeo. Escolha um arquivo de áudio gravado junto dele (lapela ou gravador) e ele será alinhado ao som da câmera; cada clipe deste vídeo reproduzirá a gravação, independentemente de aparar, alterar a velocidade ou dividir.",
     "camera": "Câmera",
     "useCameraSound": "Usar o som da câmera",
     "synced": "Sincronizado {offset} s · todos os clipes deste vídeo o reproduzem",
@@ -358,7 +358,7 @@
     "duck": "Atenuar outros",
     "duckInfoSet": "Enquanto este clipe é reproduzido, todo o restante diminui para {percent}% do volume.",
     "duckInfo": "Enquanto este clipe é reproduzido, diminua todo o restante para este volume.",
-    "musicBeatsInfo": "Marcadores de batida detectados na música, exibidos como pontos no clipe. Ações de arrastar e cortar se ajustam a eles; arraste um ponto para movê-lo, clique duas vezes para removê-lo e ⌥-clique no clipe para adicionar um."
+    "musicBeatsInfo": "Marcadores de batida detectados na música, exibidos como pontos no clipe. Qualquer ação de arrastar e aparar se ajusta a eles; arraste um ponto para movê-lo, clique duas vezes para remover e use ⌥-clique no clipe para adicionar um."
   },
   "sound": {
     "equalizer": "Equalizador",
@@ -408,7 +408,7 @@
     "trim": "Aparar",
     "trimStart": "Aparar início",
     "trimEnd": "Aparar fim",
-    "resetTrim": "Redefinir corte",
+    "resetTrim": "Redefinir aparamento",
     "startsAt": "Começa em",
     "speed": "Velocidade",
     "resetSpeed": "Redefinir velocidade",
@@ -521,8 +521,8 @@
     "stagger": "Escalonamento",
     "shuffle": "Embaralhar",
     "ease": "Atenuação",
-    "fade": "Esmaecer",
-    "fadeLength": "Duração do esmaecimento",
+    "fade": "Fade",
+    "fadeLength": "Duração do fade",
     "order": "Ordem",
     "orderHint": "Letras na ordem em que se movem",
     "distance": "Distância",
@@ -533,7 +533,7 @@
     "weight": "Peso",
     "italic": "Itálico",
     "size": "Tamanho",
-    "tracking": "Espaçamento",
+    "tracking": "Tracking",
     "hold": "Pausa",
     "rate": "Taxa",
     "addFace": "Adicionar face",
@@ -569,9 +569,9 @@
     "emphasisInfo": "Destaque palavras com o estilo de ênfase da faixa, definido na aba Opções do painel Legendas."
   },
   "keys": {
-    "title": "Keyframes",
+    "title": "Quadros-chave",
     "update": "Atualizar o keyframe aqui",
-    "add": "Adicionar um keyframe no playhead",
+    "add": "Adicionar quadro-chave no indicador de reprodução",
     "previous": "Keyframe anterior",
     "next": "Próximo keyframe",
     "remove": "Remover o keyframe aqui"
@@ -664,7 +664,7 @@
     "glitchKinds": {
       "mix": "Mistura",
       "smear": "Borrão",
-      "split": "Divisão",
+      "split": "Dividir",
       "tint": "Tonalidade",
       "blowout": "Estouro",
       "rgb": "Divisão RGB"

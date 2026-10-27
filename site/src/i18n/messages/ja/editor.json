@@ -107,7 +107,7 @@
     "noDetails": "共有された詳細情報はありません。",
     "caption": "キャプション",
     "published": "公開日",
-    "notes": "メモ",
+    "notes": "ノート",
     "links": "リンク",
     "noTranscript": "共有された文字起こしはありません。",
     "noMedia": "共有されたメディアはありません。",
@@ -133,7 +133,7 @@
       },
       "details": {
         "label": "詳細",
-        "hint": "キャプション、タグ、メモ"
+        "hint": "キャプション、タグ、ノート"
       }
     },
     "saveFailed": "共有設定を保存できませんでした。",
@@ -293,7 +293,7 @@
     "mbps": "Mbps",
     "stems": "ステム",
     "stemsHint": "別環境でのミキシング用に、ダイアログと各サウンドトラックのレーンごとにWAVを1つずつZIP保存します。",
-    "exportStems": "ステムを書き出す",
+    "exportStems": "ステムを書き出し",
     "captionsFile": "字幕ファイル",
     "captionsFileHint": "独自字幕に対応したプラットフォーム用に、字幕をSRTファイルとしてダウンロードフォルダーに保存します。",
     "saveCaptionsFile": "字幕ファイルを保存",
@@ -301,17 +301,17 @@
     "lufs": "{lufs} LUFS",
     "stemsTag": "ステム",
     "reading": "フッテージを読み込み中…",
-    "exportVideo": "動画を書き出す",
+    "exportVideo": "ビデオを書き出し",
     "scalePresets": "{label}のプリセット"
   },
   "topBar": {
     "aspects": {
       "16x9": "ワイドスクリーン",
-      "9x16": "縦型",
+      "9x16": "縦向き",
       "4x3": "クラシック",
       "2x1": "シネマティック",
       "1x1": "スクエア",
-      "3x4": "縦向き"
+      "3x4": "ポートレート"
     },
     "aspectPreset": "{name} · {ratio}",
     "customAspect": "カスタム · {ratio}",
@@ -327,7 +327,7 @@
     "moveToCloud": "クラウドに移動",
     "cloud": "クラウド",
     "retryImportsFirst": "失敗したインポートを先に再試行してください",
-    "export": "エクスポート",
+    "export": "書き出し",
     "openInCut": "Donkey Cutで開く",
     "open": "開く",
     "fullscreen": "フルスクリーン",
@@ -349,7 +349,7 @@
     "recordCamera": "カメラを録画",
     "recordAudio": "音声を録音",
     "moreActions": "その他のアクション",
-    "moveBody": "{from, select, browser {このプロジェクトとメディアをクラウドにコピーし、このブラウザから削除します。ここで書き出されたファイルはそのまま残ります。} other {このプロジェクトとメディアをクラウドにコピーし、このMacから削除します。ここで書き出されたファイルはそのまま残ります。}}",
+    "moveBody": "{from, select, browser {このプロジェクトとメディアをクラウドにコピーし、このブラウザから削除します。ここで書き出したファイルはそのまま残ります。} other {このプロジェクトとメディアをクラウドにコピーし、このMacから削除します。ここで書き出したファイルはそのまま残ります。}}",
     "moving": "移動中…"
   },
   "editor": {
@@ -357,8 +357,7 @@
     "needsApp": "これはこのMac上にあるローカルプロジェクトです。Donkeyアプリを開くとここに表示されます。",
     "shareGone": "この共有は利用できなくなりました。",
     "conflictReloaded": "別の場所で保存された新しいバージョンを再読み込みしました。",
-    "dismiss": "閉じる",
-    "defaultText": "テキストを入力"
+    "dismiss": "閉じる"
   },
   "preview": {
     "showingOriginal": "オリジナルを表示中 — クリックで切り抜きを表示",
@@ -377,7 +376,7 @@
   "maskGizmo": {
     "moveCorner": "ドラッグして角を移動、ダブルクリックで削除",
     "addCorner": "ドラッグしてここに角を追加",
-    "feather": "ドラッグしてエッジをぼかす",
+    "feather": "ドラッグしてエッジにフェザーを適用",
     "round": "ドラッグして角を丸くします",
     "rotate": "ドラッグしてマスクを回転させます",
     "resize": "ドラッグしてマスクのサイズを変更します"

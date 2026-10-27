@@ -8,7 +8,7 @@
   },
   "welcome": {
     "title": "Montez vos vidéos en discutant.",
-    "body": "Coupez des clips, ajoutez des sous-titres, générez des images ou créez de nouvelles scènes — le tout depuis le chat."
+    "body": "Rognez des clips, ajoutez des sous-titres, générez des images ou créez de nouvelles scènes — le tout depuis le chat."
   },
   "referral": {
     "title": "Comment nous avez-vous connus ?",
@@ -40,7 +40,7 @@
   },
   "aiChat": {
     "title": "Discutez avec votre éditeur.",
-    "body": "L'IA a accès à l'ensemble de votre projet. Demandez-lui de couper des clips, de générer des plans manquants, d'écrire des sous-titres, d'ajouter une voix off, de réorganiser votre timeline ou de répondre à vos questions sur vos séquences.",
+    "body": "L'IA a accès à l'ensemble de votre projet. Demandez-lui de rogner des clips, de générer les plans manquants, d'écrire des sous-titres, d'ajouter des voix off, de réorganiser votre timeline ou de répondre à des questions sur vos rushs.",
     "models": "Fonctionne nativement avec Gemini, ou avec votre propre abonnement Claude ou Codex."
   },
   "credits": {

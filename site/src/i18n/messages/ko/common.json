@@ -41,5 +41,7 @@
     "no_payment_method": "카드를 저장하려면 먼저 크레딧을 1회 구매한 뒤 자동 충전을 켜 주세요.",
     "unsupported_image_type": "지원하지 않는 이미지 형식이에요.",
     "image_too_large": "이미지가 너무 커요."
-  }
+  },
+  "languageSaveFailed": "언어를 저장하지 못했어요. 다시 시도해 주세요.",
+  "languageBlocked": "이 브라우저에서 쿠키가 저장되지 않아 언어를 변경할 수 없어요."
 }

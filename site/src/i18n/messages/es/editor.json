@@ -62,8 +62,8 @@
     "cardSideBleed": "Sangrado lateral de la tarjeta",
     "shadow": "Sombra",
     "popOut": "Sobresalir",
-    "feather": "Desvanecimiento",
-    "popOutFeather": "Desvanecimiento al sobresalir",
+    "feather": "Calado",
+    "popOutFeather": "Calado de pop out",
     "retry": "Reintentar",
     "footageSize": "Tamaño del metraje",
     "footageOffset": "Desplazamiento del metraje",
@@ -309,7 +309,7 @@
       "16x9": "Panorámico",
       "9x16": "Vertical",
       "4x3": "Clásico",
-      "2x1": "Cinemático",
+      "2x1": "Cinematográfico",
       "1x1": "Cuadrado",
       "3x4": "Retrato"
     },
@@ -320,7 +320,7 @@
     "copying": "{count, plural, one {Copiando} other {Copiando # archivos}}",
     "finishingUploads": "Finalizando subidas…",
     "finishingCopies": "Finalizando copias…",
-    "movingMedia": "Moviendo archivos {done}/{total}…",
+    "movingMedia": "Moviendo multimedia {done}/{total}…",
     "moveFailed": "No se pudo mover el proyecto.",
     "share": "Compartir",
     "moveToShare": "Mueve a Cloud para compartir",
@@ -349,7 +349,7 @@
     "recordCamera": "Grabar cámara",
     "recordAudio": "Grabar audio",
     "moreActions": "Más acciones",
-    "moveBody": "{from, select, browser {Copia este proyecto y sus archivos a la nube y luego los elimina de este navegador. Las exportaciones renderizadas aquí se conservan.} other {Copia este proyecto y sus archivos a la nube y luego los elimina de esta Mac. Las exportaciones renderizadas aquí se conservan.}}",
+    "moveBody": "{from, select, browser {Copia este proyecto y su multimedia a la nube y luego lo elimina de este navegador. Las exportaciones renderizadas aquí se quedan.} other {Copia este proyecto y su multimedia a la nube y luego lo elimina de este Mac. Las exportaciones renderizadas aquí se quedan.}}",
     "moving": "Moviendo…"
   },
   "editor": {
@@ -357,8 +357,7 @@
     "needsApp": "Este es un proyecto local: está guardado en esta Mac. Abre la app de Donkey y se abrirá aquí.",
     "shareGone": "Este enlace compartido ya no está disponible.",
     "conflictReloaded": "Se recargó una versión más reciente guardada en otro lugar.",
-    "dismiss": "Descartar",
-    "defaultText": "Tu texto"
+    "dismiss": "Descartar"
   },
   "preview": {
     "showingOriginal": "Mostrando el original; haz clic para ver el recorte",
@@ -377,7 +376,7 @@
   "maskGizmo": {
     "moveCorner": "Arrastra para mover la esquina; doble clic para eliminarla",
     "addCorner": "Arrastra para agregar una esquina aquí",
-    "feather": "Arrastra para desvanecer el borde",
+    "feather": "Arrastra para calar el borde",
     "round": "Arrastra para redondear las esquinas",
     "rotate": "Arrastra para rotar la máscara",
     "resize": "Arrastra para redimensionar la máscara"

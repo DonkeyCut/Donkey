@@ -41,5 +41,7 @@
     "no_payment_method": "Compra créditos una vez para guardar una tarjeta y luego activa la recarga automática.",
     "unsupported_image_type": "Tipo de imagen no compatible.",
     "image_too_large": "Imagen demasiado grande."
-  }
+  },
+  "languageSaveFailed": "No se pudo guardar tu idioma. Inténtalo de nuevo.",
+  "languageBlocked": "Este navegador no guarda cookies, así que no se puede cambiar el idioma."
 }

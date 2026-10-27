@@ -40,7 +40,7 @@
   },
   "aiChat": {
     "title": "Chatte mit deinem Editor.",
-    "body": "Die KI hat Zugriff auf dein gesamtes Projekt. Lass sie Clips schneiden, fehlende Shots generieren, Untertitel schreiben, Voiceovers einfügen, deine Timeline umstellen oder Fragen zu deinem Footage beantworten.",
+    "body": "Die KI hat Zugriff auf dein gesamtes Projekt. Bitte sie, Clips zu trimmen, fehlende Aufnahmen zu generieren, Untertitel zu schreiben, Voiceovers hinzuzufügen, deine Timeline neu anzuordnen oder Fragen zu deinem Material zu beantworten.",
     "models": "Funktioniert direkt mit Gemini, oder nutze dein eigenes Claude- oder Codex-Abo."
   },
   "credits": {

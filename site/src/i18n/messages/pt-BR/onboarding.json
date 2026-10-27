@@ -8,7 +8,7 @@
   },
   "welcome": {
     "title": "Edite vídeos pelo chat.",
-    "body": "Corte clipes, adicione legendas, gere imagens ou crie novas cenas — tudo pelo chat."
+    "body": "Apare clipes, adicione legendas, gere imagens ou crie novas cenas — tudo pelo chat."
   },
   "referral": {
     "title": "Como você nos conheceu?",
@@ -40,7 +40,7 @@
   },
   "aiChat": {
     "title": "Converse com o seu editor.",
-    "body": "A IA tem acesso a todo o seu projeto. Peça para cortar clipes, gerar cenas que faltam, criar legendas, adicionar locuções, reorganizar a timeline ou tirar dúvidas sobre suas gravações.",
+    "body": "A IA tem acesso a todo o seu projeto. Peça a ela para aparar clipes, gerar planos que faltam, escrever legendas, adicionar narrações, reorganizar sua linha do tempo ou responder a perguntas sobre suas filmagens.",
     "models": "Funciona de fábrica com o Gemini, ou use sua própria assinatura do Claude ou Codex."
   },
   "credits": {

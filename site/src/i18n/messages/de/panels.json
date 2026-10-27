@@ -1,7 +1,7 @@
 {
   "transitions": {
     "groups": {
-      "fade": "Fade",
+      "fade": "Blende",
       "zoom": "Zoom",
       "push": "Schieben",
       "wipe": "Wischen",
