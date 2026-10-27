@@ -440,7 +440,10 @@ PLIST
 # resource bundles follow that choice, so every language the string catalogs compiled into gets a
 # folder here, carrying the translated permission prompts (InfoPlist.strings).
 stage_localizations() {
-  local source_dir="$RESOURCES_DIR/Donkey_Donkey.bundle/Contents/Resources" lproj name
+  local source_dir="$RESOURCES_DIR/Donkey_Donkey.bundle" lproj name
+  if [ -d "$source_dir/Contents/Resources" ]; then
+    source_dir="$source_dir/Contents/Resources"
+  fi
   for lproj in "$source_dir"/*.lproj; do
     [ -d "$lproj" ] || continue
     name="$(basename "$lproj")"
@@ -453,6 +456,17 @@ stage_localizations() {
     echo "No compiled localizations in $source_dir; the app would show English only." >&2
     exit 1
   fi
+}
+
+# SwiftPM's native build system copies a String Catalog into the resource bundle as-is; only the
+# swiftbuild engine (the default from Xcode 27) compiles it. Compile any catalog still raw into
+# .lproj folders beside it, so a release localizes on either toolchain.
+compile_string_catalogs() {
+  local catalog
+  while IFS= read -r catalog; do
+    xcrun xcstringstool compile "$catalog" --output-directory "$(dirname "$catalog")"
+    rm "$catalog"
+  done < <(find "$RESOURCES_DIR" -path "*/Donkey_*.bundle/*" -name "*.xcstrings")
 }
 
 rm -rf "$APP_DIR"
@@ -490,6 +504,7 @@ if [ "$copied_any_bundle" -eq 0 ]; then
   echo "No SwiftPM resource bundles found to stage; the app will crash at launch." >&2
   exit 1
 fi
+compile_string_catalogs
 stage_localizations
 prepare_app_icon
 
