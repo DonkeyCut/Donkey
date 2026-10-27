@@ -16,7 +16,7 @@
  * user asked for it.
  */
 
-import { useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { keepPreviousData, useQueries, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useEffect } from "react";
 
 import { confirmedEngineUser, currentEngineUser, engineLost, onEngineUserConfirmed } from "./api";
@@ -236,7 +236,7 @@ export function useLibrary({ live = false, enabled = true }: { live?: boolean; e
     enabled,
     queryKey: libraryKey(scope),
     queryFn: async () => {
-      const data = await fetchLibrary({ remembered: true });
+      const data = await fetchLibrary({ remembered: true, held: client.getQueryData<LibraryData>(libraryKey(scope)) });
       writeSnapshot(snap, data);
       return data;
     },
@@ -245,6 +245,9 @@ export function useLibrary({ live = false, enabled = true }: { live?: boolean; e
     refetchOnWindowFocus: live,
     refetchInterval: live ? LIBRARY_LIVE_MS : false,
     retry: false,
+    // The shelf set keys the listing, so the engine connecting or dropping
+    // starts a new read; the page keeps the last listing until it answers.
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -266,10 +266,25 @@ async function rememberedLibraryFrom(
   return hit?.value ?? null;
 }
 
+/** One residency's part of a listing already on screen, standing in for a
+ * read of that shelf that failed. */
+function heldShelf(r: Residency, held: LibraryData | undefined): LibraryData | null {
+  if (!held) {
+    return null;
+  }
+  return {
+    assets: held.assets.filter((a) => a.residency === r),
+    folders: held.folders.filter((f) => f.residency === r),
+    templates: held.templates.filter((t) => t.residency === r),
+  };
+}
+
 /**
  * The whole shelf: every residency's library in one listing, newest first. A
- * residency that fails is left out rather than failing the read — one
- * unreachable half never hides the other; only both failing is an error.
+ * residency that fails keeps what `held` — the listing the caller already
+ * shows — lists for it, so a read that blinks never empties the page; with
+ * nothing held it is recalled when `remembered`, else left out. Only every
+ * shelf failing is an error.
  *
  * `remembered` widens that from what this browser can reach to what the user
  * has: a shelf whose backend isn't answering is recalled from its last
@@ -279,13 +294,17 @@ async function rememberedLibraryFrom(
  */
 export async function fetchLibrary(opts?: {
   remembered?: boolean;
+  held?: LibraryData;
 }): Promise<LibraryData> {
   const live = availableResidencies();
   const rs = opts?.remembered ? listedResidencies() : live;
   const parts = await Promise.all(
     rs.map((r) =>
       live.includes(r)
-        ? fetchLibraryFrom(r).catch(() => null)
+        ? fetchLibraryFrom(r).catch(() =>
+            heldShelf(r, opts?.held) ??
+            (opts?.remembered ? rememberedLibraryFrom(r) : null),
+          )
         : rememberedLibraryFrom(r),
     ),
   );
