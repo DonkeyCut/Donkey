@@ -1,14 +1,17 @@
 import { renderProjectFrames } from "./exportRender";
 import { FULL_FRAME, isFullFrame } from "./measure/picture";
 import type { FrameBox } from "./measure/sourceMeasure";
-import { bestShift, diffPixels, edgeBand, meanDiff, runShift, SCORE_LONG_SIDE, SWEEP_TARGET, sweepStats, worstStretches, type Edge } from "./frameDiff";
+import { bestShift, diffPixels, edgeBand, inkColor, inkOff, meanDiff, runShift, SCORE_LONG_SIDE, SWEEP_TARGET, sweepStats, worstStretches, type Edge } from "./frameDiff";
+import { hexOf } from "./measure/color";
 import { composeComparison, makeStillFrame } from "./media";
 import type { WrappedCanvas } from "mediabunny";
 import { framesAt, type FrameSize } from "./mediaRead";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl, type RasterSurface } from "./raster";
 import type { ExportDoc } from "./renderSnapshot";
 import { clipLen } from "./store";
-import { DEFAULT_BACKGROUND, frameOf, type MediaAsset } from "./types";
+import { textBoxSize } from "./textFit";
+import { DEFAULT_BACKGROUND, frameOf, isTextOverlay, type MediaAsset, type TextOverlay } from "./types";
+import { poseAt } from "@donkeycut/effects-kit";
 
 // Holding a replica up against the video it copies, as pictures and as
 // numbers. The pictures are for the eye; the numbers say how far off each
@@ -49,6 +52,14 @@ const READ_LOST_RUN = 3;
 /** The breath before a fresh reader, per try: a decoder lost to contention
  * comes back once the contention passes. */
 const READ_RETRY_MS = 100;
+
+/** How far a title's ink may sit from the source's (inkOff) before the sweep
+ * names it: a white label where the source's is black reads near 230, the
+ * same label a shade off or a little thinner under 30. */
+const INK_TOLERANCE = 64;
+
+/** The most titles one sweep names. */
+const MAX_TITLES = 8;
 
 /** Aspect ratios this close draw edge to edge; anything further letterboxes
  * or fills, as the call asks. */
@@ -120,8 +131,8 @@ const readHeight = (area: FrameBox, height: number) => Math.round(height / area.
  * full-bleed replica in another shape fills its frame — and the scorer
  * remembers it did so the result can say so.
  */
-function makeScorer(doc: ExportDoc, area: FrameBox, fit: SourceFit) {
-  const size = sizeOf(doc, SCORE_LONG_SIDE);
+function makeScorer(doc: ExportDoc, area: FrameBox, fit: SourceFit, longSide = SCORE_LONG_SIDE) {
+  const size = sizeOf(doc, longSide);
   const canvas = createRasterCanvas(size.width, size.height);
   const ctx = canvas.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D | null;
   if (!ctx) {
@@ -407,6 +418,15 @@ type Stretch = {
   block?: string;
 };
 
+export type TitleInk = {
+  id: string;
+  text: string;
+  at: number;
+  source: number;
+  ink: string;
+  sourceInk: string;
+};
+
 export type SweepResult = {
   mode: "sweep";
   from: number;
@@ -423,6 +443,9 @@ export type SweepResult = {
   /** Stretches whose difference runs along whole edges of the frame while
    * the middle matches — a border or band one side lacks — under target too. */
   edges?: (Omit<Stretch, "shift"> & { edges: Edge[] })[];
+  /** Titles whose letters read another colour than the source's under them,
+   * each read once at the sample nearest its middle. */
+  titles?: TitleInk[];
   timing?: { shift: number; diff: number };
   onBlocks?: number;
   frame?: string;
@@ -473,6 +496,11 @@ export async function sweepSource(
 
   const size = sizeOf(doc, SWEEP_LONG_SIDE);
   const scorer = makeScorer(doc, area, fit);
+  // Titles read at the render's own size, where letters still have cores.
+  const reads = titleReads(doc, samples);
+  const fine = reads.size > 0 ? makeScorer(doc, area, fit, SWEEP_LONG_SIDE) : null;
+  const fineSources = new Map<number, Uint8ClampedArray>();
+  const titles: (TitleInk & { off: number })[] = [];
   const width = SHIFT_REACH * 2 + 1;
   const started = performance.now();
   const outOfTime = (j: number) => j > 0 && performance.now() - started > SWEEP_BUDGET_MS;
@@ -487,11 +515,18 @@ export async function sweepSource(
   const still = asset.type === "image" ? (await stillPixels(asset, scorer, area)).pixels : null;
   if (still) {
     sources.push(...samples.map(() => still));
+    if (fine) {
+      const px = (await stillPixels(asset, fine, area)).pixels;
+      for (const j of reads.keys()) fineSources.set(j, px);
+    }
   } else {
     try {
       for await (const c of steadyFrames(asset, samples.map((s) => s.source), { height: readHeight(area, size.height) }, lost)) {
         if (outOfTime(sources.length)) {
           break;
+        }
+        if (c && fine && reads.has(sources.length)) {
+          fineSources.set(sources.length, fine.pixels(c.canvas, c.canvas.width, c.canvas.height));
         }
         sources.push(c ? scorer.pixels(c.canvas, c.canvas.width, c.canvas.height) : null);
       }
@@ -536,6 +571,20 @@ export async function sweepSource(
       }
       cuts.set(j, cut);
       cuts.delete(j - SHIFT_REACH);
+
+      const fineSrc = fineSources.get(j);
+      if (fine && fineSrc) {
+        const fineCut = fine.cut(canvas, canvas.width, canvas.height);
+        for (const o of reads.get(j) ?? []) {
+          const box = titleBox(doc, o, samples[j].at, fine.size);
+          const ink = inkColor(fineCut, fine.size.width, fine.size.height, box);
+          const sourceInk = inkColor(fineSrc, fine.size.width, fine.size.height, box);
+          const off = ink && sourceInk ? inkOff(ink, sourceInk) : null;
+          if (off !== null && off > INK_TOLERANCE) {
+            titles.push({ id: o.id, text: o.text, at: samples[j].at, source: samples[j].source, ink: hexOf(...ink!.ink), sourceInk: hexOf(...sourceInk!.ink), off });
+          }
+        }
+      }
     });
   } catch (e) {
     if (!(e instanceof SweepOutOfTime)) {
@@ -603,10 +652,47 @@ export async function sweepSource(
     target: SWEEP_TARGET,
     worst,
     ...(edges.length > 0 ? { edges } : {}),
+    ...(titles.length > 0
+      ? { titles: titles.sort((a, b) => b.off - a.off).slice(0, MAX_TITLES).map(({ off: _off, ...t }) => t) }
+      : {}),
     ...(timing ? { timing } : {}),
     ...(onBlocks > 0 ? { onBlocks: Math.round(onBlocks * 100) / 100 } : {}),
     ...(frame ? { frame } : {}),
     ...(lost.length > 0 ? { lost } : {}),
     ...(stopped ? { stopped: `${stopped.message} Cut ${samples[stopped.index].at}s.` } : {}),
   };
+}
+
+/** The titles a sweep reads the ink of, by the sample each is read at: the
+ * one nearest the title's middle, so it is read settled, past its way in. */
+function titleReads(doc: ExportDoc, samples: { at: number }[]): Map<number, TextOverlay[]> {
+  const reads = new Map<number, TextOverlay[]>();
+  const first = samples[0].at;
+  const last = samples[samples.length - 1].at;
+  for (const o of doc.overlays) {
+    if (!isTextOverlay(o) || o.hidden || !o.text.trim() || o.end <= first || o.start > last) {
+      continue;
+    }
+    const mid = clamp((o.start + o.end) / 2, Math.max(first, o.start), Math.min(last, o.end));
+    let j = 0;
+    for (let i = 1; i < samples.length; i++) {
+      if (Math.abs(samples[i].at - mid) < Math.abs(samples[j].at - mid)) j = i;
+    }
+    if (samples[j].at < o.start || samples[j].at >= o.end || poseAt(o, samples[j].at - o.start).opacity < 0.5) {
+      continue;
+    }
+    reads.set(j, [...(reads.get(j) ?? []), o]);
+  }
+  return reads;
+}
+
+/** Where a title sits in a frame of `size` at timeline second `at`. */
+function titleBox(doc: ExportDoc, o: TextOverlay, at: number, size: { width: number; height: number }) {
+  const design = frameOf(doc.aspect);
+  const pose = poseAt(o, at - o.start);
+  const box = textBoxSize(o, design.w, design.h);
+  const k = (size.width / design.w) * pose.scale;
+  const w = box.width * k;
+  const h = box.height * k;
+  return { x: pose.x * size.width - w / 2, y: pose.y * size.height - h / 2, w, h };
 }

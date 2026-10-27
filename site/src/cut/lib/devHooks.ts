@@ -16,6 +16,7 @@ import { awaitingFrame, startTrace, stopTrace, traceReport } from "./perfTrace";
 import { markSignedBatch } from "./mediaLinks";
 import { prefetchCloudMedia } from "./mediaSync";
 import { playheadAt } from "./playhead";
+import { sweepSource } from "./sourceCompare";
 import { projectDuration, useEditor } from "./store";
 
 export function installDevHooks(): void {
@@ -49,6 +50,9 @@ export function installDevHooks(): void {
     // sees what the cut actually draws at a moment.
     renderProjectFrame,
     projectDuration,
+    // A replica check sweeps the cut against its source the way
+    // compare_to_source does, and reads the numbers back.
+    sweepSource,
     // The export eval starts a real export through the store, the way the
     // dialog does, and watches the dock's feed for the file.
     useExports,

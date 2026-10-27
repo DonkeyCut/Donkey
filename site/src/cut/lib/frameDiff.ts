@@ -248,3 +248,92 @@ export function edgeBand(grid: number[][], target: number): { edges: Edge[]; dif
   const cells = hot.flatMap(([, c]) => c);
   return { edges: hot.map(([e]) => e), diff: round1(cells.reduce((a, b) => a + b, 0) / cells.length) };
 }
+
+/** How far a pixel stands off a title box's ground before it counts as ink. */
+const INK_MIN = 30;
+
+/** The share of a title box's pixels its ink is read from, the furthest off
+ * the ground: the cores of the strokes, not their soft edges. */
+const INK_SHARE = 0.08;
+
+/** How much of the way from its ground to the other's ink a read may sit:
+ * thinner or smaller letters read part way, never past the colour itself. */
+const INK_BLEND = [0.3, 1.1] as const;
+
+/** How far apart the grounds under a title may be for its letters to be
+ * compared: past it the title sits on something else in one frame — a card's
+ * edge, another shape — which is the frame score's to find, not the ink's. */
+const GROUND_SLACK = 48;
+
+type Rgb3 = [number, number, number];
+
+/** A title's letters as a frame shows them: their colour and the ground's. */
+export type Ink = { ink: Rgb3; ground: Rgb3 };
+
+/** How far apart two colours are: the largest of their channel differences. */
+export function inkDiff(a: Rgb3, b: Rgb3): number {
+  return Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+}
+
+/**
+ * How far the source's letters are from ours in colour. Letters a little
+ * thinner, smaller or softer than ours read as our colour part way into their
+ * ground, so the source's ink is held against the nearest blend of ours into
+ * the source's ground: white letters read pale over purple are the same
+ * white, black ones where ours are white are not. Null when the two sit on
+ * different grounds.
+ */
+export function inkOff(cut: Ink, source: Ink): number | null {
+  if (inkDiff(cut.ground, source.ground) > GROUND_SLACK) {
+    return null;
+  }
+  const dir = cut.ink.map((v, c) => v - cut.ground[c]);
+  const seen = source.ink.map((v, c) => v - source.ground[c]);
+  const len = dir.reduce((a, v) => a + v * v, 0);
+  const k = len > 0 ? Math.min(INK_BLEND[1], Math.max(INK_BLEND[0], dir.reduce((a, v, c) => a + v * seen[c], 0) / len)) : 1;
+  return inkDiff(source.ground.map((v, c) => v + dir[c] * k) as Rgb3, source.ink);
+}
+
+/**
+ * The colour a title's letters are drawn in, read off a frame: inside the
+ * box, the ground is the median colour and the ink is the mean of the pixels
+ * furthest from it. A title's box is mostly ground, so this holds on a flat
+ * card and on footage alike, and it reads the letters' colour where a frame
+ * score at a sweep's size barely moves for it. Null when nothing in the box
+ * stands off the ground.
+ */
+export function inkColor(
+  px: Uint8ClampedArray,
+  w: number,
+  h: number,
+  box: { x: number; y: number; w: number; h: number }
+): Ink | null {
+  const x0 = Math.max(0, Math.floor(box.x));
+  const y0 = Math.max(0, Math.floor(box.y));
+  const x1 = Math.min(w, Math.ceil(box.x + box.w));
+  const y1 = Math.min(h, Math.ceil(box.y + box.h));
+  if (x1 <= x0 || y1 <= y0) {
+    return null;
+  }
+  const at: number[] = [];
+  const ch: number[][] = [[], [], []];
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * w + x) * 4;
+      at.push(i);
+      for (let c = 0; c < 3; c++) ch[c].push(px[i + c]);
+    }
+  }
+  const ground = ch.map((v) => v.sort((a, b) => a - b)[v.length >> 1]) as Rgb3;
+  const off = at
+    .map((i) => ({ i, d: inkDiff([px[i], px[i + 1], px[i + 2]], ground) }))
+    .filter((p) => p.d > INK_MIN)
+    .sort((a, b) => b.d - a.d)
+    .slice(0, Math.max(1, Math.ceil(at.length * INK_SHARE)));
+  if (off.length === 0) {
+    return null;
+  }
+  const sum = [0, 0, 0];
+  for (const { i } of off) for (let c = 0; c < 3; c++) sum[c] += px[i + c];
+  return { ink: sum.map((v) => Math.round(v / off.length)) as Rgb3, ground };
+}

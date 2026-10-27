@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bestShift, diffPixels, edgeBand, meanDiff, runShift, sweepStats, worstStretches } from "./frameDiff";
+import { bestShift, diffPixels, edgeBand, inkColor, inkDiff, inkOff, meanDiff, runShift, sweepStats, worstStretches } from "./frameDiff";
 
 // The numbers a replica is judged by. A score is only useful to the model if
 // it means the same thing every call: 0 for identical frames, 255 for black
@@ -139,4 +139,56 @@ test("a difference along a whole edge while the middle matches is a band, under 
   expect(edgeBand([[9, 9, 9, 9], [9, 9, 9, 9], [9, 9, 9, 9], [9, 9, 9, 9]], 5)).toBeNull();
   // A faint edge is noise.
   expect(edgeBand([[3, 3, 3, 3], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], 5)).toBeNull();
+});
+
+/** A w×h frame of `ground` with a `rgb` block of letters-like strokes at x 4..5, 8..9 of rows 3..5. */
+const lettered = (w: number, h: number, ground: [number, number, number], rgb: [number, number, number]) => {
+  const px = solid(w, h, ground);
+  for (const x of [4, 5, 8, 9]) for (let y = 3; y <= 5; y++) px.set([...rgb, 255], (y * w + x) * 4);
+  return px;
+};
+
+test("a title's ink is the colour its letters stand off the ground in", () => {
+  const box = { x: 2, y: 2, w: 10, h: 5 };
+  expect(inkColor(lettered(16, 9, [237, 105, 87], [0, 0, 0]), 16, 9, box)).toEqual({ ink: [0, 0, 0], ground: [237, 105, 87] });
+  expect(inkColor(lettered(16, 9, [237, 105, 87], [255, 255, 255]), 16, 9, box)?.ink).toEqual([255, 255, 255]);
+  // Nothing stands off a flat ground: no letters to read.
+  expect(inkColor(solid(16, 9, [237, 105, 87]), 16, 9, box)).toBeNull();
+});
+
+test("white letters where the source has black ones are off; the same letters a shade apart aren't", () => {
+  const box = { x: 0, y: 0, w: 16, h: 9 };
+  const black = inkColor(lettered(16, 9, [237, 105, 87], [0, 0, 0]), 16, 9, box)!;
+  const white = inkColor(lettered(16, 9, [237, 105, 87], [255, 255, 255]), 16, 9, box)!;
+  const softer = inkColor(lettered(16, 9, [237, 105, 87], [20, 14, 12]), 16, 9, box)!;
+  expect(inkOff(white, black)).toBeGreaterThan(150);
+  expect(inkOff(softer, black)).toBeLessThan(30);
+  expect(inkDiff(white.ink, black.ink)).toBe(255);
+});
+
+test("thinner letters of the same colour, blended into their ground, are not off", () => {
+  // White on purple, and the source's white read through its thin strokes:
+  // part way from the ground to white.
+  const ours = { ink: [255, 255, 255] as [number, number, number], ground: [184, 3, 239] as [number, number, number] };
+  const thin = { ink: [219, 155, 231] as [number, number, number], ground: [184, 3, 239] as [number, number, number] };
+  expect(inkOff(ours, thin)).toBeLessThan(30);
+});
+
+test("tan letters where the source's are pale cyan are off, though both stand bright off black", () => {
+  const tan = { ink: [204, 166, 151] as [number, number, number], ground: [0, 0, 0] as [number, number, number] };
+  const cyan = { ink: [187, 231, 245] as [number, number, number], ground: [0, 0, 0] as [number, number, number] };
+  expect(inkOff(tan, cyan)).toBeGreaterThan(64);
+});
+
+test("letters over another ground are left to the frame score", () => {
+  // Ours reads the red card's edge off black; the source's white label sits on the card.
+  const edge = { ink: [243, 47, 48] as [number, number, number], ground: [0, 0, 0] as [number, number, number] };
+  const label = { ink: [230, 186, 185] as [number, number, number], ground: [242, 46, 48] as [number, number, number] };
+  expect(inkOff(edge, label)).toBeNull();
+});
+
+test("a box past the frame's edge reads only what is inside it", () => {
+  const px = lettered(16, 9, [0, 0, 0], [255, 255, 255]);
+  expect(inkColor(px, 16, 9, { x: 6, y: -4, w: 20, h: 20 })?.ink).toEqual([255, 255, 255]);
+  expect(inkColor(px, 16, 9, { x: 20, y: 20, w: 4, h: 4 })).toBeNull();
 });
