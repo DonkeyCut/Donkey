@@ -81,6 +81,49 @@ export function subtreeOf(folders: readonly TreeFolder[], id: string): string[] 
   return tree;
 }
 
+/** The items filed in `id` or any folder under it, however deep: what the
+ * folder holds. */
+export function subtreeItems<T extends { folderId?: string | null }>(
+  folders: readonly TreeFolder[],
+  items: readonly T[],
+  id: string,
+): T[] {
+  const tree = new Set(subtreeOf(folders, id));
+  return items.filter((item) => !!item.folderId && tree.has(item.folderId));
+}
+
+/** Every folder's total of `weigh` over the items filed in it or anywhere
+ * under it, in one pass: each folder's own sum climbs to every folder above
+ * it. A loop in the listing is climbed once. */
+export function subtreeTotals<T extends { folderId?: string | null }>(
+  folders: readonly TreeFolder[],
+  items: readonly T[],
+  weigh: (item: T) => number,
+): Map<string, number> {
+  // Each folder's own sum, before anything climbs.
+  const own = new Map<string, number>();
+  for (const item of items) {
+    if (!item.folderId) {
+      continue;
+    }
+    own.set(item.folderId, (own.get(item.folderId) ?? 0) + weigh(item));
+  }
+
+  // Climb each sum up the parent chain, stopping at a folder already passed.
+  const parents = new Map(folders.map((f) => [f.id, parentOf(f)]));
+  const totals = new Map<string, number>(folders.map((f) => [f.id, 0]));
+  for (const [id, sum] of own) {
+    const seen = new Set<string>();
+    let cur: string | null = id;
+    while (cur && parents.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      totals.set(cur, (totals.get(cur) ?? 0) + sum);
+      cur = parents.get(cur) ?? null;
+    }
+  }
+  return totals;
+}
+
 /** The folders filed right under `parentId` (null for the top level). */
 export function childrenOf<F extends TreeFolder>(
   folders: readonly F[],

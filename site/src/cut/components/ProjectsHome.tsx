@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -88,7 +88,7 @@ import {
 } from "@/cut/lib/types";
 import { cn } from "@/lib/utils";
 import { setObjectDragImage } from "@/cut/lib/assetDrag";
-import { childrenOf, folderTrail, folderWithin, parentOf, subtreeOf } from "@/cut/lib/folderTree";
+import { childrenOf, folderTrail, folderWithin, parentOf, subtreeItems, subtreeOf, subtreeTotals } from "@/cut/lib/folderTree";
 import { PICKED_RING } from "@/cut/lib/assetPick";
 import { projectsHomeView } from "@/cut/lib/projectsHomeView";
 import { errorFromBody } from "@/cut/lib/userError";
@@ -304,6 +304,18 @@ export function ProjectsHome() {
     cloud: asSection(cloudSection),
     browser: asSection(browserSection),
   };
+  // Every folder's size with its subfolders, one pass per listing, kept until
+  // a listing changes.
+  const folderBytes = useMemo(() => {
+    const bytes = new Map<string, number>();
+    for (const q of [localSection.data, cloudSection.data, browserSection.data]) {
+      const totals = subtreeTotals(q?.folders ?? [], q?.projects ?? [], (p) => p.sizeBytes ?? 0);
+      for (const [id, n] of totals) {
+        bytes.set(id, n);
+      }
+    }
+    return bytes;
+  }, [localSection.data, cloudSection.data, browserSection.data]);
 
   // Optimistic edits to a section's cached listing; the next revalidation
   // reconciles whatever the server actually did.
@@ -404,11 +416,11 @@ export function ProjectsHome() {
   const deleteFolder = async (r: Residency, id: string) => {
     if (!live(r)) return;
     const tree = new Set(subtreeOf(data[r].folders, id));
-    const inTree = (p: ProjectSummary) => !!p.folderId && tree.has(p.folderId);
-    const held = (data[r].projects ?? []).filter(inTree);
+    const held = subtreeItems(data[r].folders, data[r].projects ?? [], id);
+    const heldIds = new Set(held.map((p) => p.id));
     patch(r, (s) => ({
       folders: s.folders.filter((f) => !tree.has(f.id)),
-      projects: s.projects.filter((p) => !inTree(p)),
+      projects: s.projects.filter((p) => !heldIds.has(p.id)),
     }));
     const res = await backendFor(r)
       .fetch(`/api/cut/projects/folders/${id}`, { method: "DELETE" })
@@ -424,8 +436,7 @@ export function ProjectsHome() {
   const heldBy = (fs: ProjectFolder[]) =>
     fs.reduce((n, f) => {
       const r = residencyOfFolder(f.id);
-      const tree = new Set(subtreeOf(data[r].folders, f.id));
-      return n + (data[r].projects ?? []).filter((p) => !!p.folderId && tree.has(p.folderId)).length;
+      return n + subtreeItems(data[r].folders, data[r].projects ?? [], f.id).length;
     }, 0);
 
   // File folders under a folder (or out to the root, parentId null). A folder
@@ -801,7 +812,7 @@ export function ProjectsHome() {
         const items = (data[r].projects ?? []).filter((p) => (p.folderId ?? null) === id);
         return {
           count: items.length + childrenOf(data[r].folders, id).length,
-          size: items.reduce((n, p) => n + (p.sizeBytes ?? 0), 0),
+          size: folderBytes.get(id) ?? 0,
         };
       }}
       picked={selected}
