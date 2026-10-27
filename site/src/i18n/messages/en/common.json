@@ -41,5 +41,7 @@
     "no_payment_method": "Buy credits once to save a card, then turn on auto-reload.",
     "unsupported_image_type": "Unsupported image type.",
     "image_too_large": "Image too large."
-  }
+  },
+  "languageSaveFailed": "Couldn't save your language. Try again.",
+  "languageBlocked": "This browser isn't saving cookies, so the language can't change."
 }

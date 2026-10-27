@@ -4,6 +4,7 @@ import { useLocale } from "next-intl";
 import { useEffect, useRef } from "react";
 
 import { bindCreatorLocale } from "@/cut/lib/defaultNames";
+import { editorHost } from "@/cut/lib/environment";
 import { switchLocale } from "@/i18n/localeCookie";
 import { useAccountProfile, useUpdateLocale } from "@/queries/accountProfile";
 
@@ -11,12 +12,15 @@ import { useAccountProfile, useUpdateLocale } from "@/queries/accountProfile";
 // cookie decides what the proxy serves, so once the profile loads, an account
 // language that differs from the page's switches the page to it. An account
 // with no language yet takes this browser's, which is what its emails and
-// headless chat turns are written in from then on.
+// headless chat turns are written in from then on. Inside ChatGPT the page
+// speaks ChatGPT's language and leaves the account alone. A switch is tried
+// once per load: a browser that drops the cookie would reload forever.
 export function LocaleSync() {
   const locale = useLocale();
   const profile = useAccountProfile();
   const updateLocale = useUpdateLocale();
   const recorded = useRef(false);
+  const switched = useRef(false);
   const saved = profile.data?.locale;
 
   // What the editor creates (an untitled project, a new title) is named in
@@ -26,11 +30,14 @@ export function LocaleSync() {
   }, [locale]);
 
   useEffect(() => {
-    if (!profile.data) {
+    if (!profile.data || editorHost() === "chatgpt") {
       return;
     }
     if (saved && saved !== locale) {
-      switchLocale(saved);
+      if (!switched.current) {
+        switched.current = true;
+        switchLocale(saved);
+      }
       return;
     }
     if (!saved && !recorded.current) {

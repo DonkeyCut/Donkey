@@ -6,14 +6,16 @@ import { useState } from "react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { switchLocale } from "@/i18n/localeCookie";
+import { ApiError } from "@/queries/apiClient";
+import { useUpdateLocale } from "@/queries/accountProfile";
 import { LOCALE_NAMES, LOCALES, isLocale, type Locale } from "@/i18n/locales";
 
-// Where the picker sits decides how its trigger looks: the marketing footer's
-// bold bordered style, or the settings rows' compact one.
+// Where the picker sits decides how its trigger sizes: fit to the label in the
+// marketing footer, a fixed width in the settings rows.
 type Placement = "footer" | "settings";
 
 const TRIGGER_CLASS: Record<Placement, string> = {
-  footer: "h-9 gap-2 rounded-lg border-2 border-foreground bg-card text-[15px] font-semibold text-foreground",
+  footer: "gap-2",
   settings: "w-44",
 };
 
@@ -50,47 +52,64 @@ function LanguageLabel({ locale }: { locale: Locale }) {
   );
 }
 
+// The account answers 401 to a visitor who is not signed in; their choice
+// lives in this browser alone.
+const UNAUTHORIZED = 401;
+
+// Why a pick did not take, worded under `common`.
+type PickFailure = "languageSaveFailed" | "languageBlocked";
+
 /**
  * The language menu. Each language is named in itself; choosing one saves it
- * (the account's copy too, through `save`, when someone is signed in) and
- * reloads the page in it.
+ * to the account when someone is signed in, so the editor does not switch it
+ * back, then reloads the page in it.
  */
-export function LanguagePicker({
-  placement,
-  save,
-}: {
-  placement: Placement;
-  save?: (locale: Locale) => Promise<unknown>;
-}) {
+export function LanguagePicker({ placement }: { placement: Placement }) {
   const t = useTranslations("common");
   const locale = useLocale();
+  const updateLocale = useUpdateLocale();
   const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<PickFailure | null>(null);
 
-  // Save first, so the reload already reads the account's new choice.
+  // Save first, so the reload already reads the account's new choice. A save
+  // that fails leaves the page as it is: switching anyway would be undone by
+  // the account's old language on the next editor load.
   const pick = async (value: unknown) => {
     if (!isLocale(value) || value === locale) {
       return;
     }
     setBusy(true);
+    setFailure(null);
     try {
-      await save?.(value);
-    } finally {
-      switchLocale(value);
+      await updateLocale.mutateAsync(value);
+    } catch (error) {
+      if (!(error instanceof ApiError && error.status === UNAUTHORIZED)) {
+        setFailure("languageSaveFailed");
+        setBusy(false);
+        return;
+      }
+    }
+    if (!switchLocale(value)) {
+      setFailure("languageBlocked");
+      setBusy(false);
     }
   };
 
   return (
-    <Select value={locale} onValueChange={(value) => void pick(value)} disabled={busy}>
-      <SelectTrigger aria-label={t("language")} className={TRIGGER_CLASS[placement]}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent {...MENU_PROPS[placement]}>
-        {LOCALES.map((choice) => (
-          <SelectItem key={choice} value={choice} lang={choice}>
-            <LanguageLabel locale={choice} />
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div>
+      <Select value={locale} onValueChange={(value) => void pick(value)} disabled={busy}>
+        <SelectTrigger aria-label={t("language")} className={TRIGGER_CLASS[placement]}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent {...MENU_PROPS[placement]}>
+          {LOCALES.map((choice) => (
+            <SelectItem key={choice} value={choice} lang={choice}>
+              <LanguageLabel locale={choice} />
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {failure ? <p className="mt-2 text-sm text-destructive">{t(failure)}</p> : null}
+    </div>
   );
 }

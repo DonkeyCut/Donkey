@@ -357,8 +357,7 @@
     "needsApp": "This is a local project — it lives on this Mac. Open the Donkey app and it opens here.",
     "shareGone": "This share is no longer available.",
     "conflictReloaded": "Reloaded a newer version saved elsewhere.",
-    "dismiss": "Dismiss",
-    "defaultText": "Your text"
+    "dismiss": "Dismiss"
   },
   "preview": {
     "showingOriginal": "Showing the original — click to see the cutout",

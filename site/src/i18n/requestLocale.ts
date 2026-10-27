@@ -1,10 +1,21 @@
-import type { NextRequest } from "next/server";
+import { isLocale, LOCALE_COOKIE, type Locale } from "@/i18n/locales";
+import { negotiateLocale } from "@/i18n/negotiate";
 
-import { DEFAULT_LOCALE, isLocale, LOCALE_COOKIE, type Locale } from "@/i18n/locales";
-
-/** The reader's locale in a route handler, which has no root params: the
- * cookie the proxy routes on, else English. */
-export function requestLocale(request: NextRequest): Locale {
-  const picked = request.cookies.get(LOCALE_COOKIE)?.value;
-  return isLocale(picked) ? picked : DEFAULT_LOCALE;
+/**
+ * The language a request is served in, the same everywhere a request lands:
+ * the language a picker saved in the cookie, else the closest match to the
+ * browser's Accept-Language. The proxy routes pages on it, so a route handler
+ * that reads it answers in the language the page was drawn in.
+ */
+export function requestLocale(request: Request): Locale {
+  const picked = request.headers
+    .get("cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${LOCALE_COOKIE}=`))
+    ?.slice(LOCALE_COOKIE.length + 1);
+  if (isLocale(picked)) {
+    return picked;
+  }
+  return negotiateLocale(request.headers.get("accept-language"));
 }

@@ -34,7 +34,8 @@ import {
 } from "@/clients/chatgpt/server/oauthRateLimit";
 import { identitySigner, openIdMetadata } from "@/clients/chatgpt/server/oidc";
 import { signInReturnCookie } from "@/lib/signInReturn";
-import { escapeHtml, requestLocale } from "@/clients/chatgpt/server/locale";
+import { escapeHtml } from "@/clients/chatgpt/server/locale";
+import { requestLocale } from "@/i18n/requestLocale";
 import type { Locale } from "@/i18n/locales";
 import { translatorFor } from "@/i18n/translator";
 

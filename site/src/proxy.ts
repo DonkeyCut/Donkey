@@ -2,8 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
 import { DONKEYCUT_CANONICAL, isDonkeycutHost } from "@/cut/lib/hosts";
-import { LOCALE_COOKIE, isLocale, type Locale } from "@/i18n/locales";
-import { negotiateLocale } from "@/i18n/negotiate";
+import { requestLocale } from "@/i18n/requestLocale";
 import { BEACON_PATH, META_COOKIE_MAX_AGE_S, metaCookies } from "@/lib/meta/identity";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
@@ -95,15 +94,9 @@ function withMetaCookies(req: NextRequest, res: NextResponse): NextResponse {
 // of the mapping below prefixes the internal path with the visitor's locale:
 // the language they picked (the cookie the pickers write), or else the
 // closest match to their browser's Accept-Language, worked out per request.
-function visitorLocale(req: NextRequest): Locale {
-  const picked = req.cookies.get(LOCALE_COOKIE)?.value;
-  if (isLocale(picked)) return picked;
-  return negotiateLocale(req.headers.get("accept-language"));
-}
-
 function localized(req: NextRequest, internalPath: string): NextResponse {
   const url = new URL(req.url);
-  url.pathname = `/${visitorLocale(req)}${internalPath === "/" ? "" : internalPath}`;
+  url.pathname = `/${requestLocale(req)}${internalPath === "/" ? "" : internalPath}`;
   return withMetaCookies(req, NextResponse.rewrite(url));
 }
 

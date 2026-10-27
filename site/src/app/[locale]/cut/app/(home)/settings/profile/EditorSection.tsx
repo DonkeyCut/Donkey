@@ -21,7 +21,6 @@ import {
   THEME_CHOICES,
   type ThemeChoice,
 } from "@/lib/theme";
-import { useUpdateLocale } from "@/queries/accountProfile";
 import { useAccountFlags, useSetAccountFlag } from "@/queries/featureFlags";
 
 // Editor preferences: the language and theme, then the account flags that
@@ -69,7 +68,6 @@ export function EditorSection() {
 // emails and its chat replies follow it.
 function LanguageRow() {
   const t = useTranslations("settings.editor");
-  const updateLocale = useUpdateLocale();
 
   return (
     <div className="flex items-center justify-between gap-6">
@@ -77,7 +75,7 @@ function LanguageRow() {
         <span className="block text-sm font-medium">{t("language")}</span>
         <span className="mt-0.5 block text-sm text-muted-foreground">{t("languageHint")}</span>
       </span>
-      <LanguagePicker placement="settings" save={(locale) => updateLocale.mutateAsync(locale)} />
+      <LanguagePicker placement="settings" />
     </div>
   );
 }

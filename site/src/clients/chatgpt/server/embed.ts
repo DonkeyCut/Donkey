@@ -7,7 +7,8 @@ import {
   OAuthRateLimitError,
 } from "@/clients/chatgpt/server/oauthRateLimit";
 import { recordEditorSession, redeemEditorCode } from "@/clients/chatgpt/server/oauthTokens";
-import { escapeHtml, requestLocale } from "@/clients/chatgpt/server/locale";
+import { escapeHtml } from "@/clients/chatgpt/server/locale";
+import { requestLocale } from "@/i18n/requestLocale";
 import type { Locale } from "@/i18n/locales";
 import type { Messages } from "@/i18n/namespaces";
 import { translatorFor } from "@/i18n/translator";

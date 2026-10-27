@@ -1,25 +1,10 @@
-import { isLocale, LOCALE_COOKIE, type Locale } from "@/i18n/locales";
+import { isLocale, type Locale } from "@/i18n/locales";
 import { negotiateLocale } from "@/i18n/negotiate";
 import { prisma } from "@/lib/prisma";
 
 // ChatGPT names the person's language in a request's _meta; older clients
 // use the second key.
 const META_LOCALE_KEYS = ["openai/locale", "webplus/i18n"] as const;
-
-/** The language of a page this adapter draws: the language the browser chose
- * on donkeycut.com, else its Accept-Language. */
-export function requestLocale(request: Request): Locale {
-  const saved = request.headers
-    .get("cookie")
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${LOCALE_COOKIE}=`))
-    ?.slice(LOCALE_COOKIE.length + 1);
-  if (isLocale(saved)) {
-    return saved;
-  }
-  return negotiateLocale(request.headers.get("accept-language"));
-}
 
 /**
  * The language of the status lines ChatGPT shows under a tool call. ChatGPT

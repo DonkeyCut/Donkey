@@ -1176,7 +1176,7 @@ export function Editor({
         e.preventDefault();
         s.toggleGuidesShown();
       } else if (e.key.toLowerCase() === "t" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        s.addOverlay({ text: t("defaultText") });
+        s.addOverlay();
       } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !controlFocused) {
         e.preventDefault();
         // While playing, arrows skip in 1s jumps and playback rolls on (seek

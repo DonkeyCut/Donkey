@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { escapeHtml, mcpLocale, requestLocale } from "./locale";
+import { requestLocale } from "@/i18n/requestLocale";
+
+import { escapeHtml, mcpLocale } from "./locale";
 
 const page = (headers: Record<string, string>) => new Request("https://donkeycut.com/api/chatgpt/embed", { headers });
 const rpc = (body: unknown) =>

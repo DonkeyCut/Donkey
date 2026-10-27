@@ -1639,7 +1639,9 @@ function ChatSession({
     void (async () => {
       await Promise.all([flushThreadSaves(), flushCloudThreadSaves(), flushEditorSave(projectId)]);
       await updateLocale.mutateAsync(next);
-      switchLocale(next);
+      if (!switchLocale(next)) {
+        throw new UserError("language_cookie_blocked", "This browser isn't saving cookies, so the language can't change.");
+      }
     })().catch((error: unknown) => setSendError(error));
   }, [busy, projectId, updateLocale]);
   useEffect(() => {

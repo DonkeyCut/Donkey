@@ -140,6 +140,7 @@
   "label_delete_failed": "Could not delete the label.",
   "label_name_required": "Label name required.",
   "label_save_failed": "Could not save the label.",
+  "language_cookie_blocked": "This browser isn't saving cookies, so the language can't change.",
   "library_add_failed": "Could not add from library.",
   "library_asset_not_found": "Library asset not found.",
   "library_asset_update_failed": "Could not update the library asset.",
