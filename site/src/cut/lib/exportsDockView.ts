@@ -4,7 +4,7 @@ export type DockChoice = "open" | "closed" | null;
 const IN_FLIGHT = new Set(["running", "rendering", "queued", "preparing"]);
 
 /**
- * Whether the exports dock shows its rows. It sits over the chat composer, so
+ * Whether the exports dock shows its rows. It sits over the timeline, so
  * it opens while something renders or waits and rests on its header once
  * everything has settled. A toggle wins until the next export starts.
  */

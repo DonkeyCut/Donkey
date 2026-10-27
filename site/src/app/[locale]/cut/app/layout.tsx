@@ -56,7 +56,7 @@ export default function CutAppLayout({ children }: { children: ReactNode }) {
                 overlays read the account, so they wait for it; neither has a
                 shape worth drawing before then. */}
               <SessionGate>
-                <ExportsDock />
+                <ExportsDock placement="window" />
               </SessionGate>
             </ConnectGate>
             {/* Outside the gate so a first run covers the whole window, gate and

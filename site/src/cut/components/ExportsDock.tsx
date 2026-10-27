@@ -32,17 +32,30 @@ import { cn } from "@/lib/utils";
 import { useDescribeError } from "@/i18n/describeError";
 import { exportsDockOpen, inFlightCount, type DockChoice } from "@/cut/lib/exportsDockView";
 
+/** Where the dock floats: the window's corner, or the timeline's inside a project. */
+export type DockPlacement = "window" | "timeline";
+
+const PLACEMENT_CLASS: Record<DockPlacement, string> = {
+  window: "fixed right-4 bottom-4 max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)]",
+  // Clear of the timeline's scrollbars, above its playhead and ruler.
+  timeline: "absolute right-8 bottom-8 max-h-[calc(100%-4rem)] max-w-[calc(100%-4rem)]",
+};
+
 /**
- * The app-wide exports dock: one card pinned to the bottom-right that shows
- * every export across every project, live in every tab. It mirrors the engine's
- * job feed, so a render started in one project keeps showing while you open
- * another, exports queued past the running cap show their place in line, and a
- * finished file is one click from Finder or a re-download. Mounted once in the
- * Cut app layout, above the per-project editor.
+ * The app-wide exports dock: one card that shows every export across every
+ * project, live in every tab. It mirrors the engine's job feed, so a render
+ * started in one project keeps showing while you open another, exports queued
+ * past the running cap show their place in line, and a finished file is one
+ * click from Finder or a re-download. The Cut app layout mounts it in the
+ * window's corner; inside a project it hovers over the timeline's corner and
+ * hides with the timeline.
  */
-export function ExportsDock() {
+export function ExportsDock({ placement }: { placement: DockPlacement }) {
   const t = useTranslations("editor.exportsDock");
   const [choice, setChoice] = useState<DockChoice>(null);
+
+  // Inside a project the timeline carries the dock, so the window's stands down.
+  const inProject = Boolean(useParams<{ id?: string }>()?.id);
 
   // Poll the feed while the dock is mounted (i.e. the whole time the app is up).
   useEffect(() => {
@@ -56,16 +69,9 @@ export function ExportsDock() {
   // Media tab's Exports list, where the cancel lives.
   const dismissed = useExports((s) => s.dismissed);
   const all = useExportRows();
-
-  // Inside a project, that project's exports already show in its Media tab,
-  // so the dock carries only the other projects' work.
-  const openProject = useParams<{ id?: string }>()?.id;
   const items = useMemo(
-    () =>
-      all.filter(
-        (i) => !dismissed.includes(i.data.id) && i.data.projectId !== openProject
-      ),
-    [all, dismissed, openProject]
+    () => all.filter((i) => !dismissed.includes(i.data.id)),
+    [all, dismissed]
   );
 
   // The dock opens while work is in flight and rests on its header once it
@@ -81,7 +87,12 @@ export function ExportsDock() {
   }, [inFlight]);
   const open = exportsDockOpen(statuses, choice);
 
-  if (items.length === 0) return null;
+  if (items.length === 0) {
+    return null;
+  }
+  if (placement === "window" && inProject) {
+    return null;
+  }
 
   const running = items.filter(
     (i) => i.data.status === "running" || i.data.status === "rendering"
@@ -95,7 +106,12 @@ export function ExportsDock() {
   const multi = items.length > 1;
 
   return (
-    <div className="fixed right-4 bottom-4 z-50 max-h-[calc(100dvh-2rem)] w-72 max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card shadow-lg">
+    <div
+      className={cn(
+        PLACEMENT_CLASS[placement],
+        "z-50 w-72 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card shadow-lg"
+      )}
+    >
       {(multi || !open || choice === "open") && (
         <div className="flex items-center gap-2 px-3 py-2">
           <span className="text-xs font-semibold">{t("title")}</span>

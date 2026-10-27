@@ -75,6 +75,7 @@ import type { AudioClip, ClipSpan, ColorGrade, MediaAsset, Overlay, Selection, S
 import { isLottieAsset } from "@/cut/lib/lottieAssets";
 import { gradeCssApprox, normalizeGrade } from "@donkeycut/effects-kit";
 import { useLabels } from "@/i18n/labels";
+import { ExportsDock } from "@/cut/components/ExportsDock";
 import { cn } from "@/lib/utils";
 
 /**
@@ -3193,6 +3194,9 @@ export function Timeline() {
             );
           })()}
       </DropdownMenu>
+      {/* Exports hover over the corner, after the tracks so they paint above
+          the playhead and the ruler. */}
+      <ExportsDock placement="timeline" />
       {frameMenu && (
         <div
           className="fixed inset-0 z-50"
