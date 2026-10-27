@@ -31,6 +31,7 @@ import type { OverlayWords } from "./words";
 import { splitScale } from "./stretch";
 import { capStreak, ELEMENT_BLUR_MAX } from "./camera";
 import { EASE_BEZIER, type EaseId } from "./ease";
+import { SLOT_PITCH, type ReelDirection, type ReelShape } from "./dive";
 
 export type OverlayAnimStyle =
   | "fade"
@@ -149,6 +150,21 @@ export interface OverlayEdge {
    * falling out of focus. 0 takes a soft style's own blur away. Absent = the
    * style's own. */
   blur?: number;
+  /** Slot only: which way the reel turns (up brings each character in from
+   * below, down from above). Absent = up. */
+  reel?: ReelDirection;
+  /** Slot only: how far apart the reel's characters sit, em of the type
+   * size. Absent = the style's own, tighter than a line. */
+  pitch?: number;
+  /** Slot only: how far the band the reel shows through reaches either side
+   * of the line's middle, em. Absent = the line itself. */
+  band?: number;
+  /** Slot only: how far, em, the reel runs past each character's slot before
+   * it settles back into it — a reel that lands with a bounce. */
+  overshoot?: number;
+  /** Slot only, with an overshoot: the share of each character's move spent
+   * settling back from the far side, 0..0.6. Absent = 0.3. */
+  settle?: number;
 }
 
 export type EdgeOrder = "reading" | "shuffle";
@@ -244,7 +260,8 @@ export const edgeMotion = (slot: OverlayEdge | undefined): MotionPreset | undefi
     !(slot.distance! > 0) &&
     !slot.ease &&
     (slot.fade === undefined || slot.fade === true) &&
-    slot.blur === undefined;
+    slot.blur === undefined &&
+    !hasReelShape(slot);
   if (!base || plain) return base;
   let made = shaped.get(slot);
   if (!made) {
@@ -345,7 +362,63 @@ function shapeEdge(base: MotionPreset, slot: OverlayEdge): MotionPreset {
       ...(preset.animateOut ? { animateOut: reshaped(preset.animateOut) } : {}),
     };
   }
+  if (preset.animate.roll && (slot.ease || hasReelShape(slot) || slot.fade === false)) {
+    preset = reelEdge(preset, slot);
+  }
   return preset;
+}
+
+/** The share of a character's move an overshoot spends settling back, when
+ * the edge names none, and the most it may take. */
+const SETTLE_DEFAULT = 0.3;
+export const EDGE_SETTLE_MAX = 0.6;
+/** The widest a slot reel's pitch, band or overshoot may be set, em. */
+export const EDGE_REEL_EM_MAX = 4;
+/** The style's own pitch in em, at the editor's default line height (render.ts
+ * LINE_HEIGHT): what an overshoot is counted in characters against when the
+ * edge names no pitch. */
+const SLOT_PITCH_EM = SLOT_PITCH * 1.25;
+
+/** Whether an edge sets any part of a slot's reel. */
+const hasReelShape = (slot: OverlayEdge): boolean =>
+  slot.reel !== undefined ||
+  slot.pitch !== undefined ||
+  slot.band !== undefined ||
+  slot.overshoot !== undefined ||
+  slot.settle !== undefined;
+
+/** A slot edge's reel written into its preset: the roll on the edge's curve,
+ * run past the slot and settled back when it overshoots, and the reel's shape
+ * for the renderers to draw it by. */
+function reelEdge(preset: MotionPreset, slot: OverlayEdge): MotionPreset {
+  const keys = preset.animate.roll!;
+  const from = keys[0].v;
+  const curve = slot.ease ? EASE_BEZIER[slot.ease] : keys[0].ease;
+  let roll = keys.map((key, k) => (k < keys.length - 1 && curve ? { ...key, ease: curve } : key));
+  // An overshoot: the reel comes to rest past the slot, then glides back.
+  const past = slot.overshoot! > 0 ? slot.overshoot! / (slot.pitch! > 0 ? slot.pitch! : SLOT_PITCH_EM) : 0;
+  if (past > 0) {
+    const settle = Math.min(EDGE_SETTLE_MAX, Math.max(0.05, slot.settle ?? SETTLE_DEFAULT));
+    roll = [
+      { t: 0, v: from, ...(curve ? { ease: curve } : {}) },
+      { t: 1 - settle, v: -past, ease: EASE_BEZIER["sine.inOut"] },
+      { t: 1, v: 0 },
+    ];
+  }
+  const shape: ReelShape = {
+    ...(slot.reel ? { dir: slot.reel } : {}),
+    ...(slot.pitch! > 0 ? { pitch: slot.pitch } : {}),
+    ...(slot.band! > 0 ? { band: slot.band } : {}),
+    ...(slot.fade === false ? { solid: true } : {}),
+  };
+  // A solid reel is still out of sight before its turn: it shows whole the
+  // moment it starts to roll, not standing still while it waits.
+  const opacity = slot.fade === false ? [{ t: 0, v: 0, ease: EASE_BEZIER.linear }, { t: 0.001, v: 1 }, { t: 1, v: 1 }] : preset.animate.opacity;
+  return {
+    ...preset,
+    animate: { ...preset.animate, roll, ...(opacity ? { opacity } : {}) },
+    ...(Object.keys(shape).length ? { reel: shape } : {}),
+  };
 }
 
 export const loopMotion = (slot: OverlayLoop | undefined): MotionPreset | undefined =>
@@ -578,6 +651,8 @@ export interface GlyphAnimState {
   /** Characters its reel still rolls past before it lands (slot); absent or
    * 0 = the character alone. `slotReel` says what to draw. */
   roll?: number;
+  /** The reel's shape while it rolls, when its edge sets one. */
+  reel?: ReelShape;
   /** Defocus, design px; absent = sharp. */
   blur?: number;
   /** How far a red and a cyan copy pull apart either side, design px; absent
@@ -626,7 +701,8 @@ export function glyphAnimAt(phase: GlyphPhase, index: number, count: number): Gl
   if (!preset?.selector) return GLYPH_IDLE;
   const n = Math.max(1, count);
   const at = (q: number) => asGlyph(evalPreset(preset, q, index, n, exiting, 0, phase.stagger), index, n);
-  const g = at(p);
+  const rolled = at(p);
+  const g = rolled.roll && preset.reel ? { ...rolled, reel: preset.reel } : rolled;
   const e = phase.exposure ?? 0;
   if (!(e > 0)) return g;
   // The letter's travel over the part of the exposure inside the ramp,
@@ -666,6 +742,7 @@ export function glyphStateAt(
     rotate: ramp.rotate + loop.rotate,
     alpha: ramp.alpha * loop.alpha,
     ...(roll ? { roll } : {}),
+    ...(roll && ramp.reel ? { reel: ramp.reel } : {}),
     ...(blur ? { blur } : {}),
     ...(split ? { split } : {}),
     ...(ramp.streak ? { streak: ramp.streak } : {}),

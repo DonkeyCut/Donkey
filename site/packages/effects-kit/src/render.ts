@@ -27,7 +27,7 @@ import {
   type GlyphPhase,
   type OverlayAnim,
 } from "./anim";
-import { diveView, slotReel, slotSeed, type DiveFocus, type DiveView } from "./dive";
+import { diveView, reelBand, slotReel, slotSeed, type DiveFocus, type DiveView } from "./dive";
 import { cutAtFaces, cycleFaceTag, fontCycleCuts, fontCycleVariants, withFontCycle } from "./fontCycle";
 import { evalWhole, presetExtent } from "./motion/evaluate";
 import { countStep, countText } from "./count";
@@ -974,13 +974,16 @@ async function paintText(
             drawTinted(ch, off, drop, SPLIT_CYAN);
           }
           if (g.roll) {
-            // A rolling reel shows through its own line band only; sideways
-            // it stays open, so a wide filler is not cut to the slot.
+            // A rolling reel shows through its own band only — the line, or
+            // the band its edge sets; sideways it stays open, so a wide
+            // filler is not cut to the slot.
+            const em = fpx / lineH;
+            const band = reelBand(g.reel, em) * lineH;
             ctx.beginPath();
-            ctx.rect(-w * 3, -lineH / 2, w * 6, lineH);
+            ctx.rect(-w * 3, -band, w * 6, band * 2);
             ctx.clip();
             const a = ctx.globalAlpha;
-            for (const r of slotReel(ch, gi - 1, g.roll, slotSeed(overlay.text))) {
+            for (const r of slotReel(ch, gi - 1, g.roll, slotSeed(overlay.text), g.reel, em)) {
               ctx.globalAlpha = a * r.alpha;
               drawText(r.ch, 0, r.y * lineH + drop);
             }
@@ -2066,7 +2069,13 @@ export async function renderOverlayFrames(
     accent && (overlay.kind ?? "text") === "text"
       ? wordReach(accent) * (overlay as TextOverlay).size * scale
       : 0;
-  const travel = (edgeTravel + loop.travel + move.travel) * scale + wordTravel;
+  // A slot reel set to show through a band wider than its line reaches past
+  // the line by up to that band, em of the type's own size.
+  const reelTravel =
+    (overlay.kind ?? "text") === "text"
+      ? Math.max(0, ...edges.map((p) => p.reel?.band ?? 0)) * (overlay as TextOverlay).size * scale
+      : 0;
+  const travel = (edgeTravel + loop.travel + move.travel) * scale + wordTravel + reelTravel;
   // A keyframed element carries its own travel and its own zoom: the region
   // spans every pose the track visits, at the largest scale it reaches.
   const keyed = hasOverlayKeys(overlay);

@@ -253,3 +253,35 @@ describe("an order's own timing", () => {
     expect(firstShow({ ...edge, orderAt: undefined }, order[1])).toBeCloseTo(0.5, 1);
   });
 });
+
+describe("a slot edge's reel", () => {
+  const SLOT_TEXT = "2026";
+  const roll = (edge: OverlayEdge, t: number, i = 0) => glyphStateAt(evalOverlayAnim({ in: edge }, t, 6, true), i, 4).roll ?? 0;
+
+  test("the edge's ease shapes the roll", () => {
+    const own: OverlayEdge = { style: "slot", seconds: 1, stagger: 0 };
+    const linear: OverlayEdge = { ...own, ease: "linear" };
+    expect(roll(linear, 0.5)).toBeCloseTo(2.5, 1);
+    expect(Math.abs(roll(own, 0.5) - roll(linear, 0.5))).toBeGreaterThan(0.3);
+  });
+
+  test("an overshoot runs the reel past its slot, then settles it back", () => {
+    const edge: OverlayEdge = { style: "slot", seconds: 1, stagger: 0, overshoot: 0.6, pitch: 1.5, settle: 0.3 };
+    // 0.6 em past at a 1.5 em pitch is 0.4 of a character, at 70% of the move.
+    expect(roll(edge, 0.7)).toBeCloseTo(-0.4, 2);
+    expect(roll(edge, 0.999)).toBeCloseTo(0, 1);
+    expect(roll(edge, 0.3)).toBeGreaterThan(0);
+  });
+
+  test("its direction, spacing, band and solidity reach every renderer through the glyph", () => {
+    const edge: OverlayEdge = { style: "slot", seconds: 1, stagger: 0, reel: "down", pitch: 1.5, band: 1, fade: false };
+    const g = glyphStateAt(evalOverlayAnim({ in: edge }, 0.3, 6, true), 0, SLOT_TEXT.length);
+    expect(g.reel).toEqual({ dir: "down", pitch: 1.5, band: 1, solid: true });
+    // Solid, a digit waiting its turn is out of sight, not a still reel.
+    const waiting = glyphStateAt(evalOverlayAnim({ in: { ...edge, stagger: 0.8 } }, 0.05, 6, true), 3, SLOT_TEXT.length);
+    expect(waiting.alpha).toBe(0);
+    // Without any of them the glyph carries no shape, and the reel is the style's own.
+    const plain = glyphStateAt(evalOverlayAnim({ in: { style: "slot", seconds: 1 } }, 0.3, 6, true), 0, 4);
+    expect(plain.reel).toBeUndefined();
+  });
+});

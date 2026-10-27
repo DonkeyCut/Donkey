@@ -57,6 +57,12 @@ import {
   EDGE_STAGGER_MAX,
   EDGE_BLUR_MAX,
   EDGE_DISTANCE_MAX,
+  EDGE_REEL_EM_MAX,
+  EDGE_SETTLE_MAX,
+  LINE_HEIGHT,
+  REEL_DIRECTIONS,
+  SLOT_PITCH,
+  type ReelDirection,
   EASE_IDS,
   type EaseId,
   edgeOwnReach,
@@ -3690,6 +3696,17 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
     ck.begin();
     writeOverlayAnim(o, anim, { [slot]: { ...edge, ...patch } }, peers);
   };
+  // A slot on a title: its reel's turn, spacing, window and landing, shown in
+  // design px of the title's size (the edge keeps them in em).
+  const rolls = isTextOverlay(o) && !!edgeMotion(edge)?.animate.roll;
+  const typeSize = isTextOverlay(o) ? o.size : 0;
+  const lineEm = (isTextOverlay(o) ? o.lineHeight : undefined) ?? LINE_HEIGHT;
+  const edgeReel: ReelDirection = edge?.reel ?? "up";
+  const edgeReelPitch = (edge?.pitch ?? SLOT_PITCH * lineEm) * typeSize;
+  const edgeReelBand = (edge?.band ?? lineEm / 2) * typeSize;
+  const edgeOvershoot = (edge?.overshoot ?? 0) * typeSize;
+  const edgeSettle = edge?.settle ?? 0.3;
+  const reelItems: Record<ReelDirection, string> = { up: t("reelUp"), down: t("reelDown") };
   return bar(
     <>
       <Row label={t("duration")}>
@@ -3829,6 +3846,76 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
             onDraft={(v) => writeEdge({ distance: v })}
             onCommit={(v) => {
               writeEdge({ distance: v });
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
+      {rolls && (
+        <Row label={t("reel")}>
+          <Select
+            value={edgeReel}
+            items={reelItems}
+            onValueChange={(id) => {
+              writeEdge({ reel: id as ReelDirection });
+              ck.end();
+            }}
+          >
+            <SelectTrigger className="h-8 w-36 text-[12px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {REEL_DIRECTIONS.map((id) => (
+                <SelectItem key={id} value={id} className="text-[12px]">
+                  {reelItems[id]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Row>
+      )}
+      {rolls &&
+        (
+          [
+            ["reelPitch", edgeReelPitch, "pitch", 0.2],
+            ["reelBand", edgeReelBand, "band", 0.2],
+            ["overshoot", edgeOvershoot, "overshoot", 0],
+          ] as const
+        ).map(([label, value, field, minEm]) => (
+          <Row key={field} label={t(label)}>
+            <ValueSlider
+              label={t(label)}
+              sliderClassName="data-horizontal:w-24"
+              valueClassName="w-9 text-muted-foreground"
+              value={value}
+              min={minEm * typeSize}
+              max={EDGE_REEL_EM_MAX * typeSize}
+              step={1}
+              format={(v) => String(Math.round(v))}
+              parse={(t) => Number(t)}
+              onDraft={(v) => writeEdge({ [field]: v > 0 ? v / typeSize : undefined })}
+              onCommit={(v) => {
+                writeEdge({ [field]: v > 0 ? v / typeSize : undefined });
+                ck.end();
+              }}
+            />
+          </Row>
+        ))}
+      {rolls && edgeOvershoot > 0 && (
+        <Row label={t("settle")}>
+          <ValueSlider
+            label={t("settle")}
+            sliderClassName="data-horizontal:w-24"
+            valueClassName="w-9 text-muted-foreground"
+            value={edgeSettle}
+            min={0.05}
+            max={EDGE_SETTLE_MAX}
+            step={0.01}
+            format={(v) => `${Math.round(v * 100)}%`}
+            parse={(t) => Number(t.replace("%", "")) / 100}
+            onDraft={(v) => writeEdge({ settle: v })}
+            onCommit={(v) => {
+              writeEdge({ settle: v });
               ck.end();
             }}
           />

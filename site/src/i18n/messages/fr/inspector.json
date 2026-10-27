@@ -526,7 +526,14 @@
     "order": "Ordre",
     "orderHint": "Lettres dans l'ordre où elles bougent",
     "distance": "Distance",
-    "blur": "Flou"
+    "blur": "Flou",
+    "reel": "Rouleau",
+    "reelUp": "Haut",
+    "reelDown": "Bas",
+    "reelPitch": "Espacement",
+    "reelBand": "Fenêtre",
+    "overshoot": "Dépassement",
+    "settle": "Stabilisation"
   },
   "fontCycle": {
     "removeFace": "Supprimer la fonte",

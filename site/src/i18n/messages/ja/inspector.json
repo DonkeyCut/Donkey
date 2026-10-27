@@ -526,7 +526,14 @@
     "order": "順序",
     "orderHint": "文字が動く順序",
     "distance": "距離",
-    "blur": "ブラー"
+    "blur": "ブラー",
+    "reel": "リール",
+    "reelUp": "上",
+    "reelDown": "下",
+    "reelPitch": "間隔",
+    "reelBand": "ウィンドウ",
+    "overshoot": "オーバーシュート",
+    "settle": "収束"
   },
   "fontCycle": {
     "removeFace": "書体を削除",

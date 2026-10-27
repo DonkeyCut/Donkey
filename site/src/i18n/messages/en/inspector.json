@@ -526,7 +526,14 @@
     "order": "Order",
     "orderHint": "Letters in the order they move",
     "distance": "Distance",
-    "blur": "Blur"
+    "blur": "Blur",
+    "reel": "Reel",
+    "reelUp": "Up",
+    "reelDown": "Down",
+    "reelPitch": "Spacing",
+    "reelBand": "Window",
+    "overshoot": "Overshoot",
+    "settle": "Settle"
   },
   "fontCycle": {
     "removeFace": "Remove face",

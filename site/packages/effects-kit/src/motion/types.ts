@@ -17,6 +17,8 @@
 /** Cubic bezier timing handles, [x1, y1, x2, y2], the curve running [0,0] to
  * [1,1] — the same shape Lottie's `o`/`i` handles and CSS cubic-bezier take.
  * Absent = linear. */
+import type { ReelShape } from "../dive";
+
 export type Easing = [number, number, number, number];
 
 /**
@@ -150,6 +152,9 @@ export interface MotionPreset {
   animate: MotionProperties;
   /** An exit that is not simply the entry played backwards. */
   animateOut?: MotionProperties;
+  /** A slot's reel as an edge sets it (see `ReelShape`); absent = the
+   * style's own. */
+  reel?: ReelShape;
 }
 
 export interface MotionCatalog {

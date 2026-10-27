@@ -526,7 +526,14 @@
     "order": "顺序",
     "orderHint": "字母移动的顺序",
     "distance": "距离",
-    "blur": "模糊"
+    "blur": "模糊",
+    "reel": "滚轮",
+    "reelUp": "向上",
+    "reelDown": "向下",
+    "reelPitch": "间距",
+    "reelBand": "窗口",
+    "overshoot": "过冲",
+    "settle": "回稳"
   },
   "fontCycle": {
     "removeFace": "移除字体",

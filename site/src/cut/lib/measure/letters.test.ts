@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { evalOverlayAnim, glyphStateAt, type OverlayEdge } from "@donkeycut/effects-kit";
+import { evalOverlayAnim, glyphStateAt, reelBand, slotReel, slotSeed, type OverlayEdge } from "@donkeycut/effects-kit";
 import { readLetters, type LetterFrame } from "./letters";
 
 type Rgb = [number, number, number];
@@ -199,5 +199,115 @@ describe("reading a line's letters as they come in", () => {
   test("a last frame missing a letter is refused, not misread", () => {
     const frames = framesOf(edge).slice(0, 20);
     expect(() => read(frames)).toThrow(/letters? of that colour/);
+  });
+});
+
+// A 320×180 picture: a pixel is 6 design px. "2026" in teal on black, each
+// digit 40 px tall at rest — type of 55.6 px (digits stand 0.72 em), lines
+// 1.25 em apart.
+const RW = 320;
+const RH = 180;
+const RUNIT = 1080 / RH;
+const TEAL: Rgb = [0, 73, 89];
+const DIGITS = "2026";
+const EM_PX = 40 / 0.72;
+const LINE_PX = EM_PX * 1.25;
+const DIGIT_REST = [0, 1, 2, 3].map((i) => ({ x: 100 + i * 32, y: 70, w: 18, h: 40 }));
+
+/** The picture at `t` with "2026" coming in on a slot `edge`, each digit's
+ * reel drawn through its band as the renderers draw it. */
+function reelFrameAt(t: number, edge: OverlayEdge): LetterFrame {
+  const data = new Uint8ClampedArray(RW * RH * 4);
+  for (let i = 0; i < RW * RH; i++) data.set([0, 0, 0, 255], i * 4);
+  const st = evalOverlayAnim({ in: edge }, t, 10, true);
+  const em = 1 / 1.25;
+  [...DIGITS].forEach((ch, gi) => {
+    const g = glyphStateAt(st, gi, DIGITS.length);
+    const rest = DIGIT_REST[gi];
+    const mid = rest.y + rest.h / 2;
+    const band = g.roll ? reelBand(g.reel, em) * LINE_PX : Infinity;
+    const reel = g.roll ? slotReel(ch, gi, g.roll, slotSeed(DIGITS), g.reel, em) : [{ ch, y: 0, alpha: 1 }];
+    for (const r of reel) {
+      const top = Math.round(mid + r.y * LINE_PX - rest.h / 2);
+      for (let y = Math.max(0, top, Math.ceil(mid - band)); y < Math.min(RH, top + rest.h, Math.floor(mid + band)); y++)
+        for (let x = rest.x; x < rest.x + rest.w; x++) {
+          const k = r.alpha * Math.min(1, Math.max(0, g.alpha));
+          const i = (y * RW + x) * 4;
+          data.set([...mix([data[i], data[i + 1], data[i + 2]], TEAL, k), 255], i);
+        }
+    }
+  });
+  return { data, width: RW, height: RH, t };
+}
+
+describe("reading a line whose letters roll in on a slot reel", () => {
+  // Turning down, its digits 1.6 em apart behind a band 1 em either side,
+  // solid, each landing 0.4 em past its slot and settling back.
+  const edge: OverlayEdge = {
+    style: "slot",
+    seconds: 2,
+    stagger: 0.6,
+    reel: "down",
+    pitch: 1.6,
+    band: 1,
+    overshoot: 0.4,
+    settle: 0.3,
+    fade: false,
+  };
+  const frames = Array.from({ length: Math.round((edge.seconds + 0.3) * 30) }, (_, f) => reelFrameAt(f / 30, edge));
+  const r = readLetters(frames, { text: DIGITS, region: { x: 90, y: 55, w: 140, h: 70 }, ink: TEAL, unit: RUNIT });
+
+  test("reads it as a reel: its turn, its spacing, its band and its landing", () => {
+    const reel = r.edge?.reel;
+    expect(reel).toBeDefined();
+    expect(reel!.dir).toBe("down");
+    const em = EM_PX * RUNIT;
+    expect(reel!.pitch / em).toBeCloseTo(1.6, 1);
+    expect(reel!.band / em).toBeGreaterThan(0.9);
+    expect(reel!.band / em).toBeLessThan(1.1);
+    expect(reel!.overshoot / em).toBeGreaterThan(0.3);
+    expect(reel!.overshoot / em).toBeLessThan(0.5);
+    expect(reel!.settle).toBeGreaterThan(0.2);
+    expect(reel!.settle).toBeLessThan(0.4);
+    expect(r.edge!.fade).toBe(false);
+  });
+
+  test("times the hand-off and each digit's turn", () => {
+    expect(r.edge!.sequence).toEqual([0, 1, 2, 3]);
+    // Each digit's move is 2 × 0.4 = 0.8s; the starts span 2 × 0.6 = 1.2s.
+    expect(r.edge!.move).toBeCloseTo(0.8, 1);
+    expect(r.edge!.seconds * r.edge!.stagger).toBeCloseTo(1.2, 1);
+    expect(r.edge!.start).toBeCloseTo(0, 1);
+  });
+});
+
+describe("reading a line whose letters pop in where they stand", () => {
+  // Each letter appears whole at its rest, a character every 0.5s — the
+  // space takes its turn too: typing.
+  const shows = [0.6, 1.1, 1.6, 2.1, 3.1, 3.6];
+  const frames = Array.from({ length: 120 }, (_, f) => {
+    const t = f / 30;
+    const data = new Uint8ClampedArray(W * H * 4);
+    for (let i = 0; i < W * H; i++) data.set([...GROUNDS[0], 255], i * 4);
+    REST.forEach((rest, k) => {
+      if (t < shows[k]) return;
+      for (let y = rest.y; y < rest.y + rest.h; y++)
+        for (let x = rest.x; x < rest.x + rest.w; x++) data.set([...RED, 255], (y * W + x) * 4);
+    });
+    return { data, width: W, height: H, t };
+  });
+
+  test("reads a typewriter whose turns land on each letter's frame", () => {
+    const e = read(frames).edge;
+    expect(e?.typed).toBe(true);
+    // "ABCD EF" is 7 characters, the space among them: letter k is glyph g,
+    // shown once the typed share passes g / 7.
+    const glyphs = [0, 1, 2, 3, 5, 6];
+    glyphs.forEach((g, k) => {
+      const at = e!.start + (e!.seconds * g) / 7;
+      // Typed share passes g / 7 just after `at`: the letter shows on the
+      // frame after, within a frame of the reference.
+      expect(Math.abs(at - shows[k])).toBeLessThan(0.05);
+    });
   });
 });

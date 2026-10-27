@@ -92,27 +92,60 @@ export function diveView(
  * line, so the band shows the letters above and below the one in the slot. */
 export const SLOT_PITCH = 0.62;
 
+/** Which way a slot's reel turns: up brings the landing character in from
+ * below, down from above. */
+export type ReelDirection = "up" | "down";
+export const REEL_DIRECTIONS: readonly ReelDirection[] = ["up", "down"];
+
+/** A slot's reel as a reference sets it, each part absent for the style's
+ * own: which way it turns, how far apart its characters sit and how far the
+ * band they show through reaches either side of the line's middle (both in
+ * em of the type size), and whether every character on it stays solid. */
+export interface ReelShape {
+  dir?: ReelDirection;
+  pitch?: number;
+  band?: number;
+  solid?: boolean;
+}
+
+/** The band's reach either side of the line's middle, in line heights:
+ * `em` is one em in line heights (size ÷ line height). The style's own band
+ * is the line itself. */
+export const reelBand = (shape: ReelShape | undefined, em = 1): number =>
+  shape?.band !== undefined ? shape.band * em : 0.5;
+
 /** A slot character's reel: what is in sight at `roll`, each at its vertical
  * offset in line heights (positive is below) and its own opacity. Letters roll
  * through letters of their own case and digits through digits; anything else
  * — a space, a mark — holds still. The fillers are a fixed draw per title and
  * position (`seed` is `slotSeed` of the title), so each title rolls through
- * its own characters and rolls the same way every time it plays. */
+ * its own characters and rolls the same way every time it plays. A negative
+ * roll is the reel run past its slot, before it settles back. `shape` sets
+ * the reel as a reference does; `em` is one em in line heights. */
 export function slotReel(
   ch: string,
   index: number,
   roll: number,
-  seed: number
+  seed: number,
+  shape?: ReelShape,
+  em = 1
 ): { ch: string; y: number; alpha: number }[] {
   const pool = reelPool(ch);
-  if (!pool || roll <= 0) return [{ ch, y: 0, alpha: 1 }];
-  const lo = Math.floor(roll);
+  if (!pool || roll === 0) return [{ ch, y: 0, alpha: 1 }];
+  const pitch = shape?.pitch !== undefined ? shape.pitch * em : SLOT_PITCH;
+  const sign = shape?.dir === "down" ? -1 : 1;
+  // Past the band's edge nothing of the character shows.
+  const reach = (reelBand(shape, em) + 0.4) / pitch;
+  const lo = Math.floor(roll - reach);
   const out: { ch: string; y: number; alpha: number }[] = [];
-  for (let j = Math.max(0, lo - 1); j <= lo + 2; j++) {
-    const y = (roll - j) * SLOT_PITCH;
-    // Past the band's edge nothing of the character shows.
-    if (Math.abs(y) >= 0.9) continue;
-    out.push({ ch: j === 0 ? ch : filler(pool, ch, index, j, seed), y, alpha: 1 - Math.min(1, Math.abs(y)) * 0.7 });
+  for (let j = lo; j <= Math.ceil(roll + reach); j++) {
+    const y = sign * (roll - j) * pitch;
+    if (Math.abs(y) >= reach * pitch) continue;
+    // The landing character ends the reel: nothing follows it, even while
+    // the reel runs past its slot.
+    if (j < 0) continue;
+    const alpha = shape?.solid ? 1 : 1 - Math.min(1, Math.abs(y)) * 0.7;
+    out.push({ ch: j === 0 ? ch : filler(pool, ch, index, j, seed), y, alpha });
   }
   return out;
 }

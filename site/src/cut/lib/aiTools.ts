@@ -67,6 +67,10 @@ import {
   EDGE_BLUR_MAX,
   EDGE_DISTANCE_MAX,
   EDGE_ORDERS,
+  EDGE_REEL_EM_MAX,
+  EDGE_SETTLE_MAX,
+  REEL_DIRECTIONS,
+  type ReelDirection,
   EASE_IDS,
   type EaseId,
   type EdgeOrder,
@@ -689,7 +693,36 @@ async function trackLettersResult(
       ...(l.soft !== null ? { soft: Math.round(l.soft) } : {}),
       ...(l.error !== null ? { error: Math.round(l.error * 1000) / 1000 } : {}),
     })),
-    ...(e && start !== undefined
+    ...(e && start !== undefined && e.reel
+      ? {
+          entrance: {
+            starts: roundT(start),
+            in_style: "slot",
+            in_seconds: r2(e.seconds),
+            in_stagger: r2(Math.min(0.95, e.stagger)),
+            in_sequence: e.sequence,
+            in_sequence_at: e.sequenceAt.map((v) => Math.round(v * 1000) / 1000),
+            in_reel: e.reel.dir,
+            in_reel_pitch: Math.round(e.reel.pitch),
+            in_reel_band: Math.round(e.reel.band),
+            in_overshoot: Math.round(e.reel.overshoot),
+            ...(e.reel.settle !== null ? { in_settle: r2(e.reel.settle) } : {}),
+            in_fade: e.fade,
+          },
+          entranceNote:
+            "The letters roll in on a slot reel, read off every frame: the way it turns (from how each letter arrives at its slot — a fast spin aliases between frames, so trust this over a contact sheet), how far apart its characters sit and how far the band reaches either side of the line's middle (design px), how far each letter lands past its slot and how long it takes settling back, the order and hand-off. Set the title's size first (the lengths are kept in em of it), begin it on the timeline second `starts` maps to, and pass these to set_overlay_animation as they are.",
+        }
+      : e && start !== undefined && e.typed
+      ? {
+          entrance: {
+            starts: roundT(start),
+            in_style: "typewriter",
+            in_seconds: r2(e.seconds),
+          },
+          entranceNote:
+            "The letters appear where they stand, one at a time, without moving: typed. A typewriter shows each character (spaces included) once its share of in_seconds has passed, so with the title beginning on the timeline second `starts` maps to, each letter lands on the frame the reference shows it. Compare the letters' `shows` with that spacing: a turn far off it is a beat the typing holds, which a typewriter cannot — split the title there.",
+        }
+      : e && start !== undefined
       ? {
           entrance: {
             starts: roundT(start),
@@ -1188,6 +1221,36 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         const rest = { ...anim[slot]! };
         delete rest.blur;
         anim[slot] = blur < 0 ? rest : { ...rest, blur: clamp(blur, 0, EDGE_BLUR_MAX) };
+      }
+      // A slot's reel as a reference sets it. Lengths come in design px, as
+      // track_element reads them, and are kept in em of the title's size so
+      // they follow it when it is resized; 0 (or "style") hands each back.
+      const reel = input[`${slot}_reel`];
+      if (typeof reel === "string" && anim[slot]) {
+        if (reel !== "style" && !(REEL_DIRECTIONS as readonly string[]).includes(reel))
+          throw new ToolError(`Unknown ${slot}_reel: ${reel}. Use one of: ${REEL_DIRECTIONS.join(", ")}, or "style".`);
+        const rest = { ...anim[slot]! };
+        delete rest.reel;
+        anim[slot] = reel === "style" ? rest : { ...rest, reel: reel as ReelDirection };
+      }
+      const size = (o.kind ?? "text") === "text" ? (o as { size?: number }).size ?? 0 : 0;
+      for (const [key, field] of [
+        [`${slot}_reel_pitch`, "pitch"],
+        [`${slot}_reel_band`, "band"],
+        [`${slot}_overshoot`, "overshoot"],
+      ] as const) {
+        const px = input[key];
+        if (!isNum(px) || !anim[slot]) continue;
+        if (!(size > 0)) throw new ToolError(`${key} sets a title's slot reel; this element has no type size.`);
+        const rest = { ...anim[slot]! };
+        delete rest[field];
+        anim[slot] = px <= 0 ? rest : { ...rest, [field]: Math.min(EDGE_REEL_EM_MAX, px / size) };
+      }
+      const settle = input[`${slot}_settle`];
+      if (isNum(settle) && anim[slot]) {
+        const rest = { ...anim[slot]! };
+        delete rest.settle;
+        anim[slot] = settle <= 0 ? rest : { ...rest, settle: clamp(settle, 0.05, EDGE_SETTLE_MAX) };
       }
     };
     edge("in", "in_style", "in_seconds");

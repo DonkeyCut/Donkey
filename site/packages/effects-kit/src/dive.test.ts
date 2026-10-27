@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { diveView, DIVE_MAX_SCALE, slotReel, slotSeed } from "./dive";
+import { diveView, DIVE_MAX_SCALE, reelBand, slotReel, slotSeed } from "./dive";
 import { evalOverlayAnim } from "./anim";
 
 const frame = { width: 1080, height: 1920, scale: 1 };
@@ -78,5 +78,38 @@ describe("dive", () => {
     const inn = { in: { style: "dive" as const, seconds: 1 } };
     expect(evalOverlayAnim(inn, 0, 3).dive).toBeCloseTo(1, 6);
     expect(evalOverlayAnim(inn, 0.999, 3).dive).toBeLessThan(0.01);
+  });
+});
+
+describe("a slot reel's own shape", () => {
+  const seed = slotSeed("2026");
+
+  test("a reel turning down brings the landing character in from above", () => {
+    const up = slotReel("6", 3, 0.5, seed).find((r) => r.ch === "6")!;
+    const down = slotReel("6", 3, 0.5, seed, { dir: "down" }).find((r) => r.ch === "6")!;
+    expect(up.y).toBeGreaterThan(0);
+    expect(down.y).toBeCloseTo(-up.y, 6);
+  });
+
+  test("its characters sit `pitch` em apart, shown through a band `band` em either side", () => {
+    // 1 em is 1/1.2 of a line at line height 1.2.
+    const em = 1 / 1.2;
+    const reel = slotReel("6", 3, 0.25, seed, { pitch: 1.5, band: 1 }, em);
+    const ys = reel.map((r) => r.y).sort((a, b) => a - b);
+    for (let k = 1; k < ys.length; k++) expect(ys[k] - ys[k - 1]).toBeCloseTo(1.5 * em, 6);
+    expect(reelBand({ band: 1 }, em)).toBeCloseTo(em, 6);
+    expect(reelBand(undefined, em)).toBe(0.5);
+  });
+
+  test("a solid reel keeps every character at full strength", () => {
+    for (const r of slotReel("6", 3, 0.4, seed, { solid: true })) expect(r.alpha).toBe(1);
+    expect(slotReel("6", 3, 0.4, seed).some((r) => r.alpha < 1)).toBe(true);
+  });
+
+  test("a reel run past its slot shows the landing character beyond it", () => {
+    const past = slotReel("6", 3, -0.3, seed, { dir: "down", pitch: 1.5 }, 1 / 1.2);
+    const six = past.find((r) => r.ch === "6")!;
+    // Turning down, the overshoot carries it below its slot.
+    expect(six.y).toBeGreaterThan(0);
   });
 });

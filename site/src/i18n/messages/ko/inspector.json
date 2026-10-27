@@ -526,7 +526,14 @@
     "order": "순서",
     "orderHint": "글자가 움직이는 순서",
     "distance": "거리",
-    "blur": "블러"
+    "blur": "블러",
+    "reel": "릴",
+    "reelUp": "위",
+    "reelDown": "아래",
+    "reelPitch": "간격",
+    "reelBand": "윈도우",
+    "overshoot": "오버슈트",
+    "settle": "안정화"
   },
   "fontCycle": {
     "removeFace": "서체 제거",

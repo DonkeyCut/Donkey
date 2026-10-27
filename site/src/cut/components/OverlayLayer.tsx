@@ -30,7 +30,7 @@ import { elementCameraAt } from "@/cut/lib/groupCamera";
 import { cameraPoint, worldPoint } from "@donkeycut/effects-kit";
 import { TILT_PERSPECTIVE } from "@donkeycut/effects-kit";
 import { CARET_GAP_EM, CARET_HEIGHT_EM, CARET_WIDTH_EM, typeCaret } from "@donkeycut/effects-kit";
-import { diveView, evalOverlayFrame, glyphStateAt, measureDiveFocus, paintElementInto, slotReel, slotSeed, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type DiveFocus, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
+import { diveView, evalOverlayFrame, glyphStateAt, measureDiveFocus, paintElementInto, reelBand, slotReel, slotSeed, hasGlyphMotion, hasMaskKeys, hasOverlayKeys, isOverlayAnimated, lineLikeShape, MASK_FEATHER_MAX, MASK_RADIUS_MAX, maskFrameAt, maskHasRadius, maskInverts, maskOutlinePathD, maskSizeAxes, overlayWords, paintMaskCoverage, PEN_MIN_POINTS, penClosed, resolveShadow, shapeMetrics, shapePathD, WORD_ACCENT_DEFAULT, wordDrawsAt, type LottieHandle, type Mask, type MaskKey, type DiveFocus, type MaskPoint, type OverlayFrameState, type WordDraw } from "@donkeycut/effects-kit";
 import {
   LINE_HEIGHT,
   PLATE_PAD_X,
@@ -1424,6 +1424,7 @@ function OverlayItem({
               tail={caretBar}
               texture={texture}
               typed={typed}
+              em={1 / ((isTextOverlay(o) ? o.lineHeight : undefined) ?? LINE_HEIGHT)}
             />
           ) : wordDraw ? (
             <WordText
@@ -1594,6 +1595,7 @@ function GlyphText({
   tail,
   texture,
   typed,
+  em = 1 / LINE_HEIGHT,
 }: {
   text: string;
   phase: Parameters<typeof glyphStateAt>[0];
@@ -1609,6 +1611,9 @@ function GlyphText({
   texture?: TextTexture;
   /** Characters a typewriter has typed; the rest hold their room unseen. */
   typed?: number;
+  /** One em of the type in line heights: a slot reel's pitch and band are
+   * set in em. */
+  em?: number;
 }) {
   const total = Math.max(1, [...text].length);
   const lines = text.split("\n");
@@ -1622,9 +1627,11 @@ function GlyphText({
           const i = gi++;
           const g = glyphStateAt(phase, i, total);
           const unseen = typed !== undefined && i >= typed;
-          // A slot character shows its reel through its own line band; the
-          // band clips top and bottom only, so a wide filler is not cut.
-          const reel = g.roll ? slotReel(ch, i, g.roll, seed) : null;
+          // A slot character shows its reel through its own line band, or the
+          // band its edge sets; the band clips top and bottom only, so a wide
+          // filler is not cut.
+          const reel = g.roll ? slotReel(ch, i, g.roll, seed, g.reel, em) : null;
+          const bandInset = reel && g.reel?.band !== undefined ? (0.5 - reelBand(g.reel, em)) * 100 : null;
           // A letter sharpening out of a blur wears its own defocus.
           const blur = g.blur ? (g.blur * scale) / zoom : 0;
           // A splitting letter shows a red and a cyan copy either side.
@@ -1661,7 +1668,9 @@ function GlyphText({
                   `translate(${g.dx * scale}px, ${g.dy * scale}px)` +
                   ` rotate(${g.rotate}deg) scale(${g.sx}, ${g.sy})`,
                 ...(reel
-                  ? { position: "relative", overflowX: "visible", overflowY: "clip", verticalAlign: "top" }
+                  ? bandInset !== null
+                    ? { position: "relative", clipPath: `inset(${bandInset.toFixed(2)}% -1000%)`, verticalAlign: "top" }
+                    : { position: "relative", overflowX: "visible", overflowY: "clip", verticalAlign: "top" }
                   : {}),
                 ...(texture && ch !== " " ? textureMask(texture) : {}),
               }}

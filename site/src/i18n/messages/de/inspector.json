@@ -526,7 +526,14 @@
     "order": "Reihenfolge",
     "orderHint": "Buchstaben in der Reihenfolge ihrer Bewegung",
     "distance": "Abstand",
-    "blur": "Weichzeichner"
+    "blur": "Weichzeichner",
+    "reel": "Rolle",
+    "reelUp": "Nach oben",
+    "reelDown": "Nach unten",
+    "reelPitch": "Abstand",
+    "reelBand": "Fenster",
+    "overshoot": "Überschwingen",
+    "settle": "Einpendeln"
   },
   "fontCycle": {
     "removeFace": "Schriftschnitt entfernen",

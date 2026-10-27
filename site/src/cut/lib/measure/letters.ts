@@ -49,6 +49,15 @@ const PASS_MIN = 30;
 const MARK = 6;
 /** Share of the crossed ink a letter's colour must take to be in front. */
 const FRONT_SHARE = 0.15;
+/** A letter rolls on a reel when this many of its frames show two characters
+ * in its column at once. */
+const REEL_FRAMES = 2;
+/** A run this share of the letter's rest height or more is a whole character
+ * on the reel; a shorter one is cut by the band. */
+const REEL_WHOLE = 0.85;
+/** A reel character whose strongest pixels reach this share of the letter's
+ * colour is solid, not faded. */
+const REEL_SOLID = 0.85;
 
 export interface LetterTiming {
   char: string;
@@ -101,6 +110,15 @@ export interface LetterRead {
     fade: boolean | number;
     /** Defocus at the far end, design px, clearing on the move's curve. */
     blur: number;
+    /** The letters roll in on a slot reel: which way it turns (read off how
+     * each letter arrives at its slot, since a fast spin aliases between
+     * frames), how far apart its characters sit and how far its band reaches
+     * either side of the line's middle (design px), how far each lands past
+     * its slot (design px) and the share of its move spent settling back. */
+    reel?: { dir: "up" | "down"; pitch: number; band: number; overshoot: number; settle: number | null };
+    /** The letters appear where they stand, no move: typed, one character's
+     * turn every seconds ÷ characters, the spaces taking theirs. */
+    typed?: boolean;
   } | null;
   passes: LetterPass[];
 }
@@ -199,6 +217,42 @@ function columnInk(px: Pixels, x0: number, x1: number, ink: Rgb, tall = 0): { y0
   // The blur's faint tails, however long, carry mass too: the column's own.
   const sum = mass.reduce((a, m) => a + m, 0);
   return { y0: best.y0, y1: best.y1, mass: sum };
+}
+
+/** Every run of inked rows in one column, a one-row gap bridged, with the
+ * strongest share of the letter's colour any of its pixels reach: the
+ * characters a reel shows there at once. */
+function columnRuns(px: Pixels, x0: number, x1: number, ink: Rgb): { y0: number; y1: number; peak: number }[] {
+  const ground = groundOf(px, { x: x0, y: 0, w: x1 - x0, h: px.height }, ink);
+  if (dist(ground, ink) < 30) return [];
+  const rows: number[] = [];
+  const peaks: number[] = [];
+  for (let y = 0; y < px.height; y++) {
+    let n = 0;
+    let peak = 0;
+    for (let x = x0; x < x1; x++) {
+      const v = mixOf(at(px, x, y), ground, ink);
+      if (v >= INK_MIX) n++;
+      peak = Math.max(peak, v);
+    }
+    rows.push(n);
+    peaks.push(peak);
+  }
+  const runs: { y0: number; y1: number; peak: number }[] = [];
+  let y = 0;
+  while (y < rows.length) {
+    if (rows[y] < ROW_INK) {
+      y++;
+      continue;
+    }
+    let e = y;
+    let peak = 0;
+    while (e < rows.length && (rows[e] >= ROW_INK || (e + 1 < rows.length && rows[e + 1] >= ROW_INK))) peak = Math.max(peak, peaks[e++]);
+    // A sliver of a few rows is a character's edge leaving the band.
+    if (e - y >= 3) runs.push({ y0: y, y1: e, peak });
+    y = e;
+  }
+  return runs;
 }
 
 /** The letters' columns on the settled frame: runs of columns holding ink,
@@ -462,6 +516,11 @@ export function readLetters(
     );
   const step = frames.length > 1 ? median(frames.slice(1).map((f, i) => f.t - frames[i].t)) : 1 / 30;
 
+  // Letters rolling in on a slot reel show two characters in a column at
+  // once; that is read as a reel, not fitted as a move.
+  const reel = readReel(frames, cols, chars, opts.ink, opts.unit);
+  if (reel) return { ...reel, passes: [] };
+
   // Each letter's frames: where it shows, and how solid.
   const reads = cols.map((c) => {
     const rest = columnInk(last, c.x0, c.x1, opts.ink);
@@ -627,7 +686,183 @@ export function readLetters(
     };
   }
 
+  // Letters that appear where they stand were typed: the typed share passes
+  // glyph g of n at start + seconds × g / n (the spaces take turns too), and
+  // each shows on the frame after.
+  if (!edge && !travels && letters.every((l) => l.shows !== null)) {
+    const glyphs: number[] = [];
+    [...opts.text].forEach((c, gi) => {
+      if (c.trim()) glyphs.push(gi);
+    });
+    const n = [...opts.text].length;
+    const xs = glyphs;
+    const ys = letters.map((l) => l.shows!);
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    const sxx = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+    const slope = sxx > 0 ? xs.reduce((a, x, k) => a + (x - mx) * (ys[k] - my), 0) / sxx : 0;
+    const start = my - slope * mx - step / 2;
+    const seconds = Math.max(step, slope * n);
+    edge = {
+      sequence: letters.map((l) => l.index),
+      sequenceAt: letters.map((_, k) => (letters.length > 1 ? k / (letters.length - 1) : 0)),
+      seconds,
+      stagger: 0,
+      start,
+      move: 0,
+      distance: 0,
+      direction: "none",
+      ease: null,
+      fade: false,
+      blur: 0,
+      typed: true,
+    };
+  }
+
   return { letters, edge, passes: passesOf(frames, cols, opts.ink) };
+}
+
+/** How a line rolls in on a slot reel, or null when its letters do not: on
+ * enough of their frames, two characters show in one column at once. */
+function readReel(
+  frames: LetterFrame[],
+  cols: { x0: number; x1: number; y0: number; y1: number }[],
+  chars: string[],
+  ink: Rgb,
+  unit: number,
+): Omit<LetterRead, "passes"> | null {
+  const last = frames[frames.length - 1];
+  const per = cols.map((c) => {
+    const rest = columnInk(last, c.x0, c.x1, ink);
+    const mid = rest ? (rest.y0 + rest.y1) / 2 : (c.y0 + c.y1) / 2;
+    const h = rest ? rest.y1 - rest.y0 : c.y1 - c.y0;
+    return { mid, h, runs: frames.map((f) => columnRuns(f, c.x0, c.x1, ink)) };
+  });
+  // Two characters in sight reach further than one letter can, even one cut
+  // in two by a line drawn over it or streaking along its fall.
+  const twoInSight = (p: (typeof per)[number], runs: { y0: number; y1: number }[]) =>
+    runs.length >= 2 && Math.max(...runs.map((r) => r.y1)) - Math.min(...runs.map((r) => r.y0)) > p.h * TALL;
+  const rolls = per.filter((p) => p.runs.filter((r) => twoInSight(p, r)).length >= REEL_FRAMES).length;
+  if (rolls < Math.ceil(cols.length / 2)) return null;
+
+  const reads = per.map((p) => {
+    const whole = (r: { y0: number; y1: number }) => r.y1 - r.y0 >= p.h * REEL_WHOLE;
+    // Where the run nearest the slot sits, px from rest (+ below); one cut by
+    // the band is placed by its uncut side.
+    const offsetOf = (r: { y0: number; y1: number }) =>
+      whole(r) ? (r.y0 + r.y1) / 2 - p.mid : r.y0 < p.mid - p.h / 2 ? r.y1 - (p.mid + p.h / 2) : r.y0 - (p.mid - p.h / 2);
+    const nearest = (runs: { y0: number; y1: number }[]) =>
+      runs.reduce<{ y0: number; y1: number } | null>((b, r) => (!b || Math.abs(offsetOf(r)) < Math.abs(offsetOf(b)) ? r : b), null);
+    const shows = p.runs.findIndex((r) => r.length > 0);
+    const multi = p.runs.flatMap((r, i) => (twoInSight(p, r) ? [i] : []));
+    // The spacing: a whole character's top to the next one's top, or a whole
+    // character's bottom to the one above's bottom (a band cuts the far side).
+    const pitches: number[] = [];
+    const peaks: number[] = [];
+    for (const i of multi) {
+      const runs = [...p.runs[i]].sort((a, b) => a.y0 - b.y0);
+      for (let k = 1; k < runs.length; k++) {
+        const a = runs[k - 1];
+        const b = runs[k];
+        const d = whole(a) ? b.y0 - a.y0 : whole(b) ? b.y1 - a.y1 : 0;
+        if (d >= p.h) pitches.push(d);
+      }
+      for (const r of runs) if (whole(r)) peaks.push(r.peak);
+    }
+    // The band: as far from the slot as any character ever shows.
+    let band = p.h / 2;
+    for (const runs of p.runs) for (const r of runs) band = Math.max(band, p.mid - r.y0, r.y1 - p.mid);
+    // The landing: which side the character nearest its slot arrives from on
+    // the last frame with two in sight, then how far past it runs and when
+    // it is still.
+    const lastMulti = multi.length ? multi[multi.length - 1] : shows;
+    const near = lastMulti >= 0 ? nearest(p.runs[lastMulti]) : null;
+    const dir: "up" | "down" = near && offsetOf(near) < 0 ? "down" : "up";
+    const sign = dir === "down" ? 1 : -1;
+    let peak = 0;
+    let peakAt = lastMulti;
+    const after: { i: number; o: number }[] = [];
+    for (let i = Math.max(0, lastMulti + 1); i < frames.length; i++) {
+      const r = nearest(p.runs[i]);
+      if (!r) continue;
+      const o = offsetOf(r);
+      after.push({ i, o });
+      if (sign * o > peak) {
+        peak = sign * o;
+        peakAt = i;
+      }
+    }
+    const overshoot = peak > REST_PX * 2 ? peak : 0;
+    const showsT = shows >= 0 ? frames[shows].t : null;
+    // Settling back glides in and out, so it is halfway home halfway
+    // through: that crossing, between frames, times it better than the
+    // moment it looks still.
+    let landsT: number | null = null;
+    if (overshoot) {
+      const k = after.findIndex((a) => a.i > peakAt && sign * a.o <= overshoot / 2);
+      if (k > 0) {
+        const a = after[k - 1];
+        const b = after[k];
+        const half = frames[a.i].t + ((sign * a.o - overshoot / 2) / Math.max(1e-6, sign * (a.o - b.o))) * (frames[b.i].t - frames[a.i].t);
+        landsT = frames[peakAt].t + 2 * (half - frames[peakAt].t);
+      }
+    }
+    if (landsT === null) {
+      const still = after.find((a, k) => a.i > lastMulti && after.slice(k).every((b) => Math.abs(b.o) <= REST_PX * 2));
+      landsT = still ? frames[still.i].t : showsT;
+    }
+    const settle =
+      overshoot && showsT !== null && landsT !== null && landsT > showsT ? (landsT - frames[peakAt].t) / (landsT - showsT) : null;
+    return { showsT, landsT, pitches, peaks, band, dir, overshoot, settle };
+  });
+
+  const letters: LetterTiming[] = reads.map((r, index) => ({
+    char: chars[index],
+    index,
+    shows: r.showsT,
+    starts: r.showsT,
+    lands: r.landsT,
+    from: null,
+    alpha: r.peaks.length ? Math.min(1, median(r.peaks)) : null,
+    soft: null,
+    ease: null,
+    error: null,
+  }));
+  if (letters.some((l) => l.shows === null || l.lands === null)) return { letters, edge: null };
+  const order = [...letters].sort((a, b) => a.starts! - b.starts! || a.index - b.index);
+  const first = order[0].starts!;
+  const span = order[order.length - 1].starts! - first;
+  const move = median(letters.map((l) => l.lands! - l.starts!));
+  const seconds = span + move;
+  // A reel first shows on the frame after its turn begins.
+  const step = frames.length > 1 ? median(frames.slice(1).map((f, i) => f.t - frames[i].t)) : 1 / 30;
+  const start = first - step / 2;
+  const downs = reads.filter((r) => r.dir === "down").length;
+  const settles = reads.flatMap((r) => (r.settle !== null ? [r.settle] : []));
+  const peaks = reads.flatMap((r) => r.peaks);
+  return {
+    letters,
+    edge: {
+      sequence: order.map((l) => l.index),
+      sequenceAt: order.map((l) => (span > 0 ? (l.starts! - first) / span : 0)),
+      seconds,
+      stagger: seconds > 0 ? span / seconds : 0,
+      start,
+      move,
+      distance: 0,
+      direction: "none",
+      ease: null,
+      fade: peaks.length > 0 && median(peaks) >= REEL_SOLID ? false : true,
+      blur: 0,
+      reel: {
+        dir: downs * 2 >= reads.length ? "down" : "up",
+        pitch: median(reads.flatMap((r) => r.pitches)) * unit,
+        band: median(reads.map((r) => r.band)) * unit,
+        overshoot: median(reads.map((r) => r.overshoot)) * unit,
+        settle: settles.length ? median(settles) : null,
+      },
+    },
+  };
 }
 /** Which side of other ink the moving letters pass. The other ink is read off
  * the last frame inside the letters' columns, above and below the line; on
