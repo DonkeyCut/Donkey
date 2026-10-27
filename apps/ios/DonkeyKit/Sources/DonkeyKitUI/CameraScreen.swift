@@ -714,7 +714,7 @@ struct TeleprompterCard: View {
             .font(.body.weight(.semibold))
             // The script is a note's body, styles and all, and edits the same
             // way the note does.
-            NoteBodyEditor(editing: editing, placeholder: "Add your script here...")
+            NoteBodyEditor(editing: editing, placeholder: String(localized: "Add your script here..."))
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 96, maxHeight: 160)
                 .focused($editingScript)

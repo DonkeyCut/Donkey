@@ -22,14 +22,14 @@ public struct AnalyticsScreen: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 case .empty:
                     EmptyState(
-                        title: "No data yet",
-                        message: "The nightly analytics job hasn't produced a rollup."
+                        title: String(localized: "No data yet"),
+                        message: String(localized: "The nightly analytics job hasn't produced a rollup.")
                     )
                 case .failed(let reason):
                     EmptyState(
-                        title: "Couldn't load analytics",
+                        title: String(localized: "Couldn't load analytics"),
                         message: reason,
-                        actionTitle: "Retry"
+                        actionTitle: String(localized: "Retry")
                     ) {
                         Task { await analytics.refresh() }
                     }
@@ -63,18 +63,18 @@ private struct SummaryList: View {
 
                 Divider()
                 MetricSection(
-                    title: "Total registered",
+                    title: String(localized: "Total registered"),
                     value: summary.registered.formatted(),
-                    caption: "Cumulative registrations"
+                    caption: String(localized: "Cumulative registrations")
                 ) {
                     RegisteredChart(points: summary.points)
                 }
 
                 Divider()
                 MetricSection(
-                    title: "Signups",
+                    title: String(localized: "Signups"),
                     value: summary.signupsWindow.formatted(),
-                    caption: "Last \(summary.points.count) days"
+                    caption: String(localized: "Last \(summary.points.count) days")
                 ) {
                     SignupsChart(points: summary.points)
                 }
@@ -82,9 +82,9 @@ private struct SummaryList: View {
                 if let revenueDollars = summary.revenueDollars {
                     Divider()
                     MetricSection(
-                        title: "Revenue",
+                        title: String(localized: "Revenue"),
                         value: dollars(revenueDollars),
-                        caption: "Paid charges, last \(summary.revenue.count) days"
+                        caption: String(localized: "Paid charges, last \(summary.revenue.count) days")
                     ) {
                         RevenueChart(points: summary.revenue)
                     }
@@ -92,7 +92,7 @@ private struct SummaryList: View {
 
                 Divider()
                 MetricSection(
-                    title: "Active users",
+                    title: String(localized: "Active users"),
                     value: summary.active7d.map { $0.formatted() } ?? "—",
                     caption: activeCaption,
                     deltaPercent: summary.weekDeltaPercent
@@ -115,9 +115,8 @@ private struct SummaryList: View {
     }
 
     private var activeCaption: String {
-        let base = "Active in the last 7 days"
-        guard summary.missingDayCount > 0 else { return base }
-        return "\(base) · \(summary.missingDayCount) days without data"
+        guard summary.missingDayCount > 0 else { return String(localized: "Active in the last 7 days") }
+        return String(localized: "Active in the last 7 days · \(summary.missingDayCount) days without data")
     }
 }
 
@@ -129,24 +128,28 @@ private struct StatGrid: View {
     var body: some View {
         LazyVGrid(columns: [GridItem(.flexible(), alignment: .topLeading), GridItem(.flexible(), alignment: .topLeading)], spacing: 20) {
             StatTile(
-                label: "Registered users",
+                label: String(localized: "Registered users"),
                 value: summary.registered.formatted(),
-                sub: "+\(summary.signups7d.formatted()) last 7 days"
+                sub: String(localized: "+\(summary.signups7d.formatted()) last 7 days")
             )
             StatTile(
-                label: "Active yesterday",
+                label: String(localized: "Active yesterday"),
                 value: summary.activeYesterday.map { $0.formatted() } ?? "—",
-                sub: summary.activeYesterday == nil ? "no extract yet" : "of \(summary.registered.formatted()) registered"
+                sub: summary.activeYesterday == nil
+                    ? String(localized: "no extract yet")
+                    : String(localized: "of \(summary.registered.formatted()) registered")
             )
             StatTile(
-                label: "Pro subscribers",
+                label: String(localized: "Pro subscribers"),
                 value: summary.subscribers.map { $0.formatted() } ?? "—",
-                sub: summary.canceling.map { "\($0.formatted()) canceling" } ?? "not in this rollup"
+                sub: summary.canceling.map { String(localized: "\($0.formatted()) canceling") }
+                    ?? String(localized: "not in this rollup")
             )
             StatTile(
-                label: "Paid all time",
+                label: String(localized: "Paid all time"),
                 value: summary.fundedDollars.map(dollars) ?? "—",
-                sub: summary.funded.map { "by \($0.formatted()) people" } ?? "not in this rollup"
+                sub: summary.funded.map { String(localized: "by \($0.formatted()) people") }
+                    ?? String(localized: "not in this rollup")
             )
         }
     }
@@ -210,12 +213,12 @@ private struct PeopleSection: View {
     }
 
     private var selectedLabel: String {
-        analytics.sorts.first { $0.id == analytics.sort }?.label ?? "Sort"
+        analytics.sorts.first { $0.id == analytics.sort }?.label ?? String(localized: "Sort")
     }
 
     private var caption: String {
-        guard analytics.peopleTotal > 0 else { return "Accounts in rank order" }
-        return "\(analytics.people.count.formatted()) of \(analytics.peopleTotal.formatted()) accounts"
+        guard analytics.peopleTotal > 0 else { return String(localized: "Accounts in rank order") }
+        return String(localized: "\(analytics.people.count.formatted()) of \(analytics.peopleTotal.formatted()) accounts")
     }
 }
 
@@ -249,13 +252,13 @@ private struct PersonRow: View {
     private var sub: String {
         var parts = [
             person.activeDays == 0
-                ? "no activity"
-                : "\(person.activeDays) active \(person.activeDays == 1 ? "day" : "days")",
-            "joined \(joined)",
+                ? String(localized: "no activity")
+                : String(localized: "\(person.activeDays) active days"),
+            String(localized: "joined \(joined)"),
             usd(person.balanceMicros),
         ]
         if let funded = person.fundedMicros {
-            parts.append("paid \(usd(funded))")
+            parts.append(String(localized: "paid \(usd(funded))"))
         }
         return parts.joined(separator: " · ")
     }
@@ -344,6 +347,11 @@ private struct DeltaBadge: View {
 
 private let workingPurple = Color(hex: "#9d7bff")
 
+// The charts' series names, read by the legend and matched by the color scale.
+private let activeSeries = String(localized: "Active")
+private let workingSeries = String(localized: "Working")
+private let topUpsSeries = String(localized: "Top-ups")
+
 private struct ActiveChart: View {
     let points: [AnalyticsSummary.DayPoint]
 
@@ -354,7 +362,7 @@ private struct ActiveChart: View {
                     x: .value("Day", point.day, unit: .day),
                     y: .value("Users", point.active ?? 0)
                 )
-                .foregroundStyle(by: .value("Series", "Active"))
+                .foregroundStyle(by: .value("Series", activeSeries))
                 .interpolationMethod(.monotone)
             }
             ForEach(points.filter { $0.working != nil }) { point in
@@ -362,11 +370,11 @@ private struct ActiveChart: View {
                     x: .value("Day", point.day, unit: .day),
                     y: .value("Users", point.working ?? 0)
                 )
-                .foregroundStyle(by: .value("Series", "Working"))
+                .foregroundStyle(by: .value("Series", workingSeries))
                 .interpolationMethod(.monotone)
             }
         }
-        .chartForegroundStyleScale(["Active": Color.accentBlue, "Working": workingPurple])
+        .chartForegroundStyleScale([activeSeries: Color.accentBlue, workingSeries: workingPurple])
         .chartLegend(position: .bottom, spacing: 12)
         .analyticsAxes()
     }
@@ -402,10 +410,10 @@ private struct RevenueChart: View {
                     x: .value("Day", point.day, unit: .day),
                     y: .value("Dollars", point.topupDollars)
                 )
-                .foregroundStyle(by: .value("Series", "Top-ups"))
+                .foregroundStyle(by: .value("Series", topUpsSeries))
             }
         }
-        .chartForegroundStyleScale(["Pro": Color.accentBlue, "Top-ups": workingPurple])
+        .chartForegroundStyleScale(["Pro": Color.accentBlue, topUpsSeries: workingPurple])
         .chartLegend(position: .bottom, spacing: 12)
         .analyticsAxes()
     }

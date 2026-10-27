@@ -23,11 +23,11 @@ enum AuthError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .googleNotConfigured:
-            "Google sign-in isn't configured in this build yet."
+            String(localized: "Google sign-in isn't configured in this build yet.")
         case .missingIdentityToken:
-            "The sign-in didn't return an identity token."
+            String(localized: "The sign-in didn't return an identity token.")
         case .noPresenter:
-            "No window to present sign-in from."
+            String(localized: "No window to present sign-in from.")
         case .server(let message):
             message
         }
@@ -130,7 +130,7 @@ final class AuthController: NSObject, AuthServicing {
             throw AuthError.server(Self.serverMessage(from: data, status: http.statusCode))
         }
         guard let token = http.value(forHTTPHeaderField: "set-auth-token"), !token.isEmpty else {
-            throw AuthError.server("Sign-in succeeded but no session token was returned.")
+            throw AuthError.server(String(localized: "Sign-in succeeded but no session token was returned."))
         }
         return token
     }
@@ -156,7 +156,7 @@ final class AuthController: NSObject, AuthServicing {
             var user: User?
         }
         guard let user = try? JSONDecoder().decode(SessionResponse.self, from: data).user else {
-            throw AuthError.server("Your session has expired. Sign in again.")
+            throw AuthError.server(String(localized: "Your session has expired. Sign in again."))
         }
         return UserProfile(
             id: user.id,
@@ -186,7 +186,7 @@ final class AuthController: NSObject, AuthServicing {
         if let message = (try? JSONDecoder().decode(ErrorBody.self, from: data))?.message {
             return message
         }
-        return "Sign-in failed (\(status))."
+        return String(localized: "Sign-in failed (\(status)).")
     }
 
     // MARK: Google

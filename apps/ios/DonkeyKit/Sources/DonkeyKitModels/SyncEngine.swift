@@ -704,12 +704,12 @@ public final class SyncEngine {
                     try? journal.markInspirationLinkSynced(item.id, jobId: jobId)
                     landed = true
                 } catch CloudSyncError.unauthorized {
-                    note(item.id, "Sign in again to fetch this link.", &landed)
+                    note(item.id, String(localized: "Sign in again to fetch this link."), &landed)
                     return
                 } catch CloudSyncError.refused(let message) {
                     note(item.id, message, &landed)
                 } catch {
-                    note(item.id, "Couldn't reach the cloud. Trying again.", &landed)
+                    note(item.id, String(localized: "Couldn't reach the cloud. Trying again."), &landed)
                 }
                 continue
             }
@@ -738,10 +738,10 @@ public final class SyncEngine {
                     landed = true
                 }
             } catch CloudSyncError.unauthorized {
-                note(item.id, "Sign in again to fetch this link.", &landed)
+                note(item.id, String(localized: "Sign in again to fetch this link."), &landed)
                 return
             } catch {
-                note(item.id, "Couldn't reach the cloud. Trying again.", &landed)
+                note(item.id, String(localized: "Couldn't reach the cloud. Trying again."), &landed)
             }
         }
         if landed { ideas?.reloadFromStore() }

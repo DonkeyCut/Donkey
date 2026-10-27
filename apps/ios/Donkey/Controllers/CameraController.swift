@@ -38,7 +38,7 @@ final class CameraController: CameraControlling {
             let cameraGranted = await AVCaptureDevice.requestAccess(for: .video)
             _ = await AVCaptureDevice.requestAccess(for: .audio)
             guard cameraGranted else {
-                model?.sessionFailed(reason: "Camera access is off.\nAllow camera access in Settings to record.")
+                model?.sessionFailed(reason: String(localized: "Camera access is off.\nAllow camera access in Settings to record."))
                 return
             }
             let facing = model?.facing ?? .front
@@ -193,7 +193,7 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
     }
 
     @objc private func sessionInterrupted() {
-        events?(.failed(reason: "Camera paused.\nAnother app is using the camera."))
+        events?(.failed(reason: String(localized: "Camera paused.\nAnother app is using the camera.")))
     }
 
     @objc private func sessionResumed() {
@@ -366,7 +366,7 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
     private func installCamera(facing: CameraFacing) {
         self.facing = facing
         guard let device = Self.camera(for: facing) else {
-            events?(.failed(reason: "No camera available."))
+            events?(.failed(reason: String(localized: "No camera available.")))
             return
         }
         session.beginConfiguration()
@@ -376,7 +376,7 @@ private nonisolated final class CaptureEngine: NSObject, AVCaptureFileOutputReco
         }
         guard let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else {
             session.commitConfiguration()
-            events?(.failed(reason: "The camera could not be opened."))
+            events?(.failed(reason: String(localized: "The camera could not be opened.")))
             return
         }
         session.addInput(input)

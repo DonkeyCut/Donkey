@@ -15,7 +15,7 @@ struct ProjectsScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ScreenHeader(title: "Projects", app: app, auth: auth)
+            ScreenHeader(title: String(localized: "Projects"), app: app, auth: auth)
             ScrollView {
                 if projects.projects.isEmpty {
                     if projects.isLoading {
@@ -23,8 +23,8 @@ struct ProjectsScreen: View {
                             .padding(.top, 80)
                     } else {
                         EmptyState(
-                            title: "No projects yet",
-                            message: "Projects you create in Donkey Cut will show up here."
+                            title: String(localized: "No projects yet"),
+                            message: String(localized: "Projects you create in Donkey Cut will show up here.")
                         )
                     }
                 } else {
@@ -393,8 +393,8 @@ struct ProjectPlayerView: View {
         return [
             ProjectExportSize(
                 id: Self.latestId,
-                label: "Latest export",
-                note: "already rendered · saves right away"
+                label: String(localized: "Latest export"),
+                note: String(localized: "already rendered · saves right away")
             )
         ] + sizes
     }
@@ -412,10 +412,10 @@ struct ProjectPlayerView: View {
     /// direct save of an existing render otherwise.
     private var phase: ExportPhase {
         switch projects.exportRuns[project.id] {
-        case .queued: .working("Queued…", nil)
-        case .rendering(let ratio): .working("Rendering… \(Int((ratio * 100).rounded()))%", ratio)
-        case .downloading: .working("Downloading…", nil)
-        case .ready: .working("Saving…", nil)
+        case .queued: .working(String(localized: "Queued…"), nil)
+        case .rendering(let ratio): .working(String(localized: "Rendering… \(Int((ratio * 100).rounded()))%"), ratio)
+        case .downloading: .working(String(localized: "Downloading…"), nil)
+        case .ready: .working(String(localized: "Saving…"), nil)
         case .saved: .saved
         case .failed(let message): .failed(message)
         case nil: local
@@ -445,7 +445,7 @@ struct ProjectPlayerView: View {
         switch phase {
         case .idle: nil
         case .working(let step, _): step
-        case .saved: "Saved to Photos"
+        case .saved: String(localized: "Saved to Photos")
         case .failed(let message): message
         }
     }
@@ -470,7 +470,7 @@ struct ProjectPlayerView: View {
     /// cloud render or download the render the project already has.
     private func start() async {
         guard await photosAllowed() else {
-            local = .failed("Allow photo access in Settings to save videos.")
+            local = .failed(String(localized: "Allow photo access in Settings to save videos."))
             return
         }
         if choice == Self.latestId {
@@ -492,19 +492,19 @@ struct ProjectPlayerView: View {
     /// library. The stream URL is resolved again rather than reused: a CDN
     /// link minted when the view opened can expire while the video plays.
     private func saveLatest() async {
-        local = .working("Downloading…", nil)
+        local = .working(String(localized: "Downloading…"), nil)
         guard let url = await projects.streamURL(for: project) ?? streamed else {
-            local = .failed("Couldn't reach this project's video.")
+            local = .failed(String(localized: "Couldn't reach this project's video."))
             return
         }
         do {
             let file = try await downloadedCopy(of: url)
             defer { try? FileManager.default.removeItem(at: file) }
-            local = .working("Saving…", nil)
+            local = .working(String(localized: "Saving…"), nil)
             try await addToLibrary(file)
             local = .saved
         } catch {
-            local = .failed("Couldn't save this video.")
+            local = .failed(String(localized: "Couldn't save this video."))
         }
     }
 
@@ -512,14 +512,14 @@ struct ProjectPlayerView: View {
     /// it went, so the run ends and its temporary copy goes with it.
     private func commit(_ file: URL) async {
         guard await photosAllowed() else {
-            projects.finishExport(project.id, error: "Allow photo access in Settings to save videos.")
+            projects.finishExport(project.id, error: String(localized: "Allow photo access in Settings to save videos."))
             return
         }
         do {
             try await addToLibrary(file)
             projects.finishExport(project.id, error: nil)
         } catch {
-            projects.finishExport(project.id, error: "Couldn't save this video.")
+            projects.finishExport(project.id, error: String(localized: "Couldn't save this video."))
         }
     }
 

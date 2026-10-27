@@ -526,15 +526,15 @@ public final class AnalyticsModel {
     private static func reason(for error: any Error) -> String {
         switch error {
         case CloudSyncError.unauthorized:
-            "This account can't read analytics. Sign out and back in."
+            String(localized: "This account can't read analytics. Sign out and back in.")
         case CloudSyncError.refused(let message):
             message
         case CloudSyncError.unreachable(let reach, let code):
             "\(reach.sentence) (\(code))"
         case AnalyticsError.unreadable(let detail):
-            "The summary came back in a shape this build doesn't read: \(detail)."
+            String(localized: "The summary came back in a shape this build doesn't read: \(detail).")
         default:
-            "The summary didn't load. Try again."
+            String(localized: "The summary didn't load. Try again.")
         }
     }
 }

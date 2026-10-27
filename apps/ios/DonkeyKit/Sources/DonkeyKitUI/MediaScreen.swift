@@ -37,9 +37,9 @@ struct MediaScreen: View {
             Group {
                 if media.recordings.isEmpty {
                     EmptyState(
-                        title: "No clips yet",
-                        message: "Anything you record with the camera lands here.",
-                        actionTitle: "Open camera"
+                        title: String(localized: "No clips yet"),
+                        message: String(localized: "Anything you record with the camera lands here."),
+                        actionTitle: String(localized: "Open camera")
                     ) {
                         app.selectedTab = .camera
                     }
@@ -72,7 +72,7 @@ struct MediaScreen: View {
             if empty { endSelecting() }
         }
         .alert(
-            selection.count == 1 ? "Delete Video?" : "Delete \(selection.count) Videos?",
+            String(localized: "Delete \(selection.count) Videos?"),
             isPresented: $confirmingDelete
         ) {
             Button("Delete", role: .destructive) { deleteSelected() }
@@ -86,8 +86,8 @@ struct MediaScreen: View {
     }
 
     private var headerTitle: String {
-        guard selecting else { return "Library" }
-        return selection.isEmpty ? "Select Clips" : "\(selection.count) Selected"
+        guard selecting else { return String(localized: "Library") }
+        return selection.isEmpty ? String(localized: "Select Clips") : String(localized: "\(selection.count) Selected")
     }
 
     private var selectedURLs: [URL] {

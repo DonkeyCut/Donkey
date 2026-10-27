@@ -270,14 +270,14 @@ struct NoteFormatControls: View {
     }
 
     private static let kinds = [
-        Kind(name: "Text", symbol: "text.alignleft", kind: .paragraph),
-        Kind(name: "Heading 1", symbol: "textformat.size.larger", kind: .heading(1)),
-        Kind(name: "Heading 2", symbol: "textformat.size", kind: .heading(2)),
-        Kind(name: "Heading 3", symbol: "textformat.size.smaller", kind: .heading(3)),
-        Kind(name: "Bulleted List", symbol: "list.bullet", kind: .bullet),
-        Kind(name: "Numbered List", symbol: "list.number", kind: .number),
-        Kind(name: "To-do", symbol: "checklist", kind: .todo(checked: false)),
-        Kind(name: "Quote", symbol: "text.quote", kind: .quote),
+        Kind(name: String(localized: "Text"), symbol: "text.alignleft", kind: .paragraph),
+        Kind(name: String(localized: "Heading 1"), symbol: "textformat.size.larger", kind: .heading(1)),
+        Kind(name: String(localized: "Heading 2"), symbol: "textformat.size", kind: .heading(2)),
+        Kind(name: String(localized: "Heading 3"), symbol: "textformat.size.smaller", kind: .heading(3)),
+        Kind(name: String(localized: "Bulleted List"), symbol: "list.bullet", kind: .bullet),
+        Kind(name: String(localized: "Numbered List"), symbol: "list.number", kind: .number),
+        Kind(name: String(localized: "To-do"), symbol: "checklist", kind: .todo(checked: false)),
+        Kind(name: String(localized: "Quote"), symbol: "text.quote", kind: .quote),
     ]
 
     var body: some View {
@@ -307,10 +307,10 @@ struct NoteFormatControls: View {
         }
         .accessibilityLabel("Block style")
 
-        markButton(.bold, symbol: "bold", name: "Bold")
-        markButton(.italic, symbol: "italic", name: "Italic")
-        markButton(.underline, symbol: "underline", name: "Underline")
-        markButton(.strike, symbol: "strikethrough", name: "Strikethrough")
+        markButton(.bold, symbol: "bold", name: String(localized: "Bold"))
+        markButton(.italic, symbol: "italic", name: String(localized: "Italic"))
+        markButton(.underline, symbol: "underline", name: String(localized: "Underline"))
+        markButton(.strike, symbol: "strikethrough", name: String(localized: "Strikethrough"))
 
         Menu {
             Button("Default") { editing.setColor(nil, in: fontContext) }

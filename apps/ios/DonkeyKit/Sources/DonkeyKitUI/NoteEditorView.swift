@@ -80,7 +80,7 @@ struct NoteEditorView: View {
             // The body edits as rich text: the keyboard's format controls
             // and the system's format menu style the words, and typing a
             // list marker starts a list.
-            NoteBodyEditor(editing: editing, placeholder: "Write down an idea...")
+            NoteBodyEditor(editing: editing, placeholder: String(localized: "Write down an idea..."))
                 .scrollContentBackground(.hidden)
                 .scrollDismissesKeyboard(.interactively)
                 .padding(.horizontal, 18)

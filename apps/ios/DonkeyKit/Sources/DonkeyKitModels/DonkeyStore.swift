@@ -167,7 +167,7 @@ final class InspirationRecord {
             } else if importJobId != nil {
                 .fetching
             } else {
-                .failed("The fetch didn't finish.")
+                .failed(String(localized: "The fetch didn't finish."))
             }
             return InspirationItem(
                 id: id,

@@ -64,7 +64,7 @@ struct IdeasScreen: View {
                 if media.waitingForWiFi {
                     WiFiBanner()
                 }
-                ScreenHeader(title: "Ideas", app: app, auth: auth)
+                ScreenHeader(title: String(localized: "Ideas"), app: app, auth: auth)
                 filterChips
                     .padding(.horizontal, 20)
                     .padding(.top, 14)
@@ -131,7 +131,7 @@ struct IdeasScreen: View {
                     }
                 }
                 pickerItems = []
-                app.show(toast: "Saved to Inspiration")
+                app.show(toast: String(localized: "Saved to Inspiration"))
             }
         }
         // A folder opened here and then deleted on the desktop takes the
@@ -168,7 +168,7 @@ struct IdeasScreen: View {
             case .authorized, .limited:
                 showsPhotoPicker = true
             default:
-                app.show(toast: "Allow photo access in Settings to import from your camera roll.")
+                app.show(toast: String(localized: "Allow photo access in Settings to import from your camera roll."))
             }
         }
     }
@@ -176,10 +176,17 @@ struct IdeasScreen: View {
     private var filterChips: some View {
         Picker("Filter", selection: $ideas.filter) {
             ForEach(IdeasFilter.allCases, id: \.self) { filter in
-                Text(filter.rawValue.capitalized).tag(filter)
+                Text(filterName(filter)).tag(filter)
             }
         }
         .pickerStyle(.segmented)
+    }
+
+    private func filterName(_ filter: IdeasFilter) -> String {
+        switch filter {
+        case .notes: String(localized: "Notes")
+        case .inspiration: String(localized: "Inspiration")
+        }
     }
 
     /// The notes at the top level; the ones inside folders are shown there.
@@ -201,7 +208,7 @@ struct IdeasScreen: View {
 
     @ViewBuilder private var notesContent: some View {
         if ideas.notes.isEmpty && ideas.folders.isEmpty {
-            EmptyState(title: "No notes yet", message: "Tap the note button to capture an idea.")
+            EmptyState(title: String(localized: "No notes yet"), message: String(localized: "Tap the note button to capture an idea."))
         } else {
             notesSection
         }
@@ -210,8 +217,8 @@ struct IdeasScreen: View {
     @ViewBuilder private var inspirationContent: some View {
         if ideas.inspiration.isEmpty {
             EmptyState(
-                title: "Nothing saved yet",
-                message: "Save posts and clips you like and they'll show up here."
+                title: String(localized: "Nothing saved yet"),
+                message: String(localized: "Save posts and clips you like and they'll show up here.")
             )
         } else {
             inspirationGrid
@@ -311,8 +318,8 @@ struct NoteFolderScreen: View {
                 )
                 if notes.isEmpty && subfolders.isEmpty {
                     EmptyState(
-                        title: "This folder is empty",
-                        message: "Notes you move here — or write here — show up in this folder."
+                        title: String(localized: "This folder is empty"),
+                        message: String(localized: "Notes you move here — or write here — show up in this folder.")
                     )
                     .padding(.top, 20)
                 } else {
@@ -486,7 +493,7 @@ struct MoveToFolderSheet: View {
         NavigationStack {
             List {
                 Section {
-                    row(name: "Notes", systemImage: "note.text", folderId: nil, depth: 0)
+                    row(name: String(localized: "Notes"), systemImage: "note.text", folderId: nil, depth: 0)
                     ForEach(rows) { row in
                         self.row(name: row.folder.name, systemImage: "folder", folderId: row.folder.id, depth: row.depth)
                     }
@@ -545,8 +552,8 @@ enum FolderPrompt: Identifiable {
 
     var title: String {
         switch self {
-        case .create: "New Folder"
-        case .rename: "Rename Folder"
+        case .create: String(localized: "New Folder")
+        case .rename: String(localized: "Rename Folder")
         }
     }
 
@@ -1005,7 +1012,7 @@ struct LinkCard: View {
     let onRetry: () -> Void
 
     var body: some View {
-        let host = url.host()?.replacingOccurrences(of: "www.", with: "") ?? "link"
+        let host = url.host()?.replacingOccurrences(of: "www.", with: "") ?? String(localized: "link")
         VStack(alignment: .leading, spacing: 8) {
             Link(destination: url) {
                 Label(host, systemImage: "link")
@@ -1083,7 +1090,7 @@ struct LinkSheet: View {
     private func saveURL() {
         guard ideas.addInspiration(urlText: urlText) else { return }
         dismiss()
-        app.show(toast: "Fetching the link…")
+        app.show(toast: String(localized: "Fetching the link…"))
     }
 }
 #endif

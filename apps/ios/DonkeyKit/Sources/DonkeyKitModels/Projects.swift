@@ -55,9 +55,9 @@ nonisolated public struct ProjectExportSize: Identifiable, Equatable, Sendable {
     }
 
     public static let all: [ProjectExportSize] = [
-        ProjectExportSize(id: "original", label: "Original · matches source", note: "H.264 · best quality"),
-        ProjectExportSize(id: "tiktok", label: "Best · 1080p", note: "smaller file"),
-        ProjectExportSize(id: "light", label: "Draft · 720p", note: "fastest render"),
+        ProjectExportSize(id: "original", label: String(localized: "Original · matches source"), note: String(localized: "H.264 · best quality")),
+        ProjectExportSize(id: "tiktok", label: String(localized: "Best · 1080p"), note: String(localized: "smaller file")),
+        ProjectExportSize(id: "light", label: String(localized: "Draft · 720p"), note: String(localized: "fastest render")),
     ]
 }
 
@@ -239,9 +239,9 @@ public final class ProjectsModel {
     private static func message(for error: any Error) -> String {
         switch error {
         case CloudSyncError.refused(let message): message
-        case CloudSyncError.storageFull: "Your cloud storage is full — free some space and try again."
-        case CloudSyncError.unauthorized: "Sign in again to export this project."
-        default: "Couldn't export this project."
+        case CloudSyncError.storageFull: String(localized: "Your cloud storage is full — free some space and try again.")
+        case CloudSyncError.unauthorized: String(localized: "Sign in again to export this project.")
+        default: String(localized: "Couldn't export this project.")
         }
     }
 

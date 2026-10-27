@@ -75,10 +75,10 @@ struct WatchCameraView: View {
     /// anything in between stays quiet so nothing flashes on the way up.
     private var hint: (icon: String, text: String)? {
         if link.hasState, !link.state.isCameraOpen {
-            return ("iphone", "Open the camera on your iPhone")
+            return ("iphone", String(localized: "Open the camera on your iPhone"))
         }
         if link.isPhoneAway {
-            return ("iphone.slash", "Open Donkey Cut on your iPhone")
+            return ("iphone.slash", String(localized: "Open Donkey Cut on your iPhone"))
         }
         return nil
     }

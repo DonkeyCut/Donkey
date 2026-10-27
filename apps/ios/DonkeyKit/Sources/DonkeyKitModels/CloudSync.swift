@@ -264,10 +264,10 @@ nonisolated public enum NetworkReach: Sendable, Equatable {
     /// A sentence for the person holding the phone, naming this cause.
     public var sentence: String {
         switch self {
-        case .offline: "This phone is offline. Reconnect and try again."
-        case .timedOut: "donkeycut.com took too long to answer."
-        case .dropped: "The connection dropped before the answer arrived."
-        case .unreachable: "Couldn't reach donkeycut.com."
+        case .offline: String(localized: "This phone is offline. Reconnect and try again.")
+        case .timedOut: String(localized: "donkeycut.com took too long to answer.")
+        case .dropped: String(localized: "The connection dropped before the answer arrived.")
+        case .unreachable: String(localized: "Couldn't reach donkeycut.com.")
         }
     }
 }

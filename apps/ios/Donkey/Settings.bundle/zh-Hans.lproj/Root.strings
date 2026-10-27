@@ -1,0 +1,3 @@
+"Sync" = "同步";
+"Videos on Wi-Fi Only" = "仅限 Wi-Fi 同步视频";
+"Notes, folders and saved links move on any connection. Videos wait for Wi-Fi while this is on, and go up as soon as the phone joins a network." = "笔记、文件夹和已保存的链接可在任意网络下传输。开启此项后，视频将等待 Wi-Fi，并在手机连接到网络后立即上传。";

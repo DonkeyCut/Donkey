@@ -434,7 +434,7 @@ extension CutCloudClient: CloudSyncServicing {
                 )
             )
         default:
-            return .failed(status.error ?? "The fetch failed.")
+            return .failed(status.error ?? String(localized: "The fetch failed."))
         }
     }
 
@@ -655,7 +655,7 @@ extension CutCloudClient: CloudProjectsServicing {
         case "queued": return .queued
         case "running": return .running(min(1, max(0, status.progress ?? 0)))
         case "done": return .done
-        default: return .failed(status.error ?? "The render didn't finish.")
+        default: return .failed(status.error ?? String(localized: "The render didn't finish."))
         }
     }
 
@@ -730,7 +730,7 @@ extension CutCloudClient: AnalyticsServicing {
         case 200..<300: break
         case 404: throw AnalyticsError.noRollup
         case 401, 403: throw CloudSyncError.unauthorized
-        default: throw CloudSyncError.refused("The server answered \(http.statusCode).")
+        default: throw CloudSyncError.refused(String(localized: "The server answered \(http.statusCode)."))
         }
         return try AnalyticsSummaryDocument.decode(data)
     }
@@ -747,7 +747,7 @@ extension CutCloudClient: AnalyticsServicing {
         case 200..<300: break
         case 404: throw AnalyticsError.noRollup
         case 401, 403: throw CloudSyncError.unauthorized
-        default: throw CloudSyncError.refused("The server answered \(http.statusCode).")
+        default: throw CloudSyncError.refused(String(localized: "The server answered \(http.statusCode)."))
         }
         return try AnalyticsUsersPage.decode(data)
     }

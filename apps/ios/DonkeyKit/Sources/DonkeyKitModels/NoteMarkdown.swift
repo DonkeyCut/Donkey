@@ -21,7 +21,19 @@ import Foundation
 nonisolated public enum NoteTextColor: String, CaseIterable, Hashable, Sendable {
     case gray, brown, orange, yellow, green, blue, purple, pink, red
 
-    public var name: String { rawValue.capitalized }
+    public var name: String {
+        switch self {
+        case .gray: String(localized: "Gray")
+        case .brown: String(localized: "Brown")
+        case .orange: String(localized: "Orange")
+        case .yellow: String(localized: "Yellow")
+        case .green: String(localized: "Green")
+        case .blue: String(localized: "Blue")
+        case .purple: String(localized: "Purple")
+        case .pink: String(localized: "Pink")
+        case .red: String(localized: "Red")
+        }
+    }
 
     public var paper: String {
         switch self {

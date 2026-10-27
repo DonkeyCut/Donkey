@@ -1,0 +1,3 @@
+"Sync" = "同期";
+"Videos on Wi-Fi Only" = "動画はWi-Fi接続時のみ";
+"Notes, folders and saved links move on any connection. Videos wait for Wi-Fi while this is on, and go up as soon as the phone joins a network." = "メモ、フォルダ、保存したリンクはどの接続環境でも同期されます。この設定がオンの場合、動画はWi-Fi接続を待機し、iPhoneがネットワークに接続されるとすぐにアップロードされます。";

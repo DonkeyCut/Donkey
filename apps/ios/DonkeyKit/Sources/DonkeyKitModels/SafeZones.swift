@@ -12,11 +12,11 @@ nonisolated public enum ShortFormGuide {
     private static func phone(_ px: Double, of total: Double) -> Double { px / total }
 
     public static let boxes: [SafeZoneRegion] = [
-        SafeZoneRegion(x: 0, y: 0, width: 1, height: phone(215, of: 1920), label: "Top bar"),
-        SafeZoneRegion(x: 0, y: 0, width: phone(50, of: 1080), height: 1, label: "Cropped"),
-        SafeZoneRegion(x: 1 - phone(50, of: 1080), y: 0, width: phone(50, of: 1080), height: 1, label: "Cropped"),
-        SafeZoneRegion(x: phone(895, of: 1080), y: phone(730, of: 1920), width: phone(185, of: 1080), height: phone(730, of: 1920), label: "Actions"),
-        SafeZoneRegion(x: 0, y: phone(1460, of: 1920), width: 1, height: phone(460, of: 1920), label: "Caption · music · nav"),
+        SafeZoneRegion(x: 0, y: 0, width: 1, height: phone(215, of: 1920), label: String(localized: "Top bar")),
+        SafeZoneRegion(x: 0, y: 0, width: phone(50, of: 1080), height: 1, label: String(localized: "Cropped")),
+        SafeZoneRegion(x: 1 - phone(50, of: 1080), y: 0, width: phone(50, of: 1080), height: 1, label: String(localized: "Cropped")),
+        SafeZoneRegion(x: phone(895, of: 1080), y: phone(730, of: 1920), width: phone(185, of: 1080), height: phone(730, of: 1920), label: String(localized: "Actions")),
+        SafeZoneRegion(x: 0, y: phone(1460, of: 1920), width: 1, height: phone(460, of: 1920), label: String(localized: "Caption · music · nav")),
     ]
 }
 

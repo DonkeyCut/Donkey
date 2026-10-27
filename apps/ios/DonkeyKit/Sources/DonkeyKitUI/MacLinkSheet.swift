@@ -53,8 +53,8 @@ struct MacLinkSheet: View {
     private func pairedSection(_ paired: PhoneLinkPairing) -> some View {
         Section {
             LabeledContent("Mac", value: paired.macName)
-            LabeledContent("In range", value: inRange ? "Yes" : "No")
-            LabeledContent("Waiting", value: "\(undelivered) \(undelivered == 1 ? "clip" : "clips")")
+            LabeledContent("In range", value: inRange ? String(localized: "Yes") : String(localized: "No"))
+            LabeledContent("Waiting", value: String(localized: "\(undelivered) clips"))
         } header: {
             Text("Paired")
         } footer: {

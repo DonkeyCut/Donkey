@@ -133,7 +133,7 @@ public final class PhoneLinkModel {
     public func pair(with macId: String, code: String) async {
         lastError = nil
         guard let endpoint = endpoints[macId] else {
-            lastError = "That Mac is out of range."
+            lastError = String(localized: "That Mac is out of range.")
             return
         }
         let header = PhoneLinkWire.Header(
@@ -144,14 +144,14 @@ public final class PhoneLinkModel {
         do {
             let reply = try await PhoneLinkSession(endpoint: endpoint).send(header: header)
             guard reply.ok, let token = reply.token else {
-                lastError = reply.error ?? "That Mac would not pair."
+                lastError = reply.error ?? String(localized: "That Mac would not pair.")
                 return
             }
             let pairing = PhoneLinkPairing(macName: macId, token: token)
             self.pairing = pairing
             tokens.writePairing(pairing)
         } catch {
-            lastError = "That Mac did not answer."
+            lastError = String(localized: "That Mac did not answer.")
         }
     }
 
@@ -224,7 +224,7 @@ public final class PhoneLinkModel {
                 self?.sending = (recording.id, fraction)
             }
         }
-        guard reply.ok else { throw PhoneLinkError.refused(reply.error ?? "That Mac would not take the clip.") }
+        guard reply.ok else { throw PhoneLinkError.refused(reply.error ?? String(localized: "That Mac would not take the clip.")) }
     }
 
     private func markDelivered(_ id: UUID) {
