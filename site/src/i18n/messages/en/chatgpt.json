@@ -1,0 +1,70 @@
+{
+  "widget": {
+    "deleted": "This project was deleted.",
+    "createNewProject": "Create New Project",
+    "dismiss": "Dismiss",
+    "tryAgain": "Try again",
+    "cloudProjects": "Cloud projects",
+    "chooseProject": "Choose a project to preview.",
+    "connecting": "Connecting to Donkey Cut…",
+    "loadProjects": "Load projects",
+    "yourProjects": "Your projects",
+    "noProjects": "Save a project to the cloud in Donkey Cut to preview it here.",
+    "moreProjects": "More projects",
+    "refreshList": "Refresh list",
+    "previewOf": "Preview of {name}",
+    "waitingToRender": "Waiting to render…",
+    "rendering": "Rendering preview… {percent}%",
+    "renderToWatch": "Render a preview to watch this project here.",
+    "expired": "This preview has expired. Render it again to watch.",
+    "earlierEdit": "This preview may be from an earlier edit.",
+    "renderPreview": "Render preview",
+    "openInDonkey": "Open in Donkey Cut ↗",
+    "projects": "Projects",
+    "openingEditor": "Opening the editor",
+    "editing": "Editing {name}",
+    "untitled": "Untitled",
+    "problems": {
+      "requestFailed": "Donkey Cut could not complete this request. Try again.",
+      "unreadable": "The preview response could not be read.",
+      "editorFailed": "Donkey Cut could not open the editor. Try again.",
+      "connect": "Connect this preview from ChatGPT to continue.",
+      "generic": "Request failed.",
+      "videoFailed": "Video could not load. Try opening the project again.",
+      "openFailed": "Could not open Donkey Cut.",
+      "saveFailed": "Could not save {name}."
+    }
+  },
+  "status": {
+    "createProject": { "invoking": "Creating the project", "invoked": "Project created" },
+    "importMedia": { "invoking": "Importing footage", "invoked": "Footage imported" },
+    "inspectProject": { "invoking": "Reading the project", "invoked": "Project read" },
+    "listCommands": { "invoking": "Listing commands", "invoked": "Commands listed" },
+    "describeCommands": { "invoking": "Describing commands", "invoked": "Commands described" },
+    "listSkills": { "invoking": "Listing guides", "invoked": "Guides listed" },
+    "readSkill": { "invoking": "Reading the guide", "invoked": "Guide read" },
+    "editProject": { "invoking": "Editing the project", "invoked": "Project edited" },
+    "undo": { "invoking": "Undoing", "invoked": "Undone" },
+    "redo": { "invoking": "Redoing", "invoked": "Redone" },
+    "exportVideo": { "invoking": "Exporting the video", "invoked": "Export started" },
+    "exportStatus": { "invoking": "Checking the export", "invoked": "Export checked" },
+    "jobStatus": { "invoking": "Checking the job", "invoked": "Job checked" },
+    "accountStatus": { "invoking": "Reading the account", "invoked": "Account read" }
+  },
+  "embed": {
+    "failed": "Donkey Cut could not open the editor. Open the project again from ChatGPT.",
+    "disabled": "ChatGPT connection is not enabled.",
+    "tooMany": "Too many requests. Try again in a minute.",
+    "badRequest": "Bad request.",
+    "expired": "This editor link has expired. Open the project again from ChatGPT."
+  },
+  "consent": {
+    "title": "Connect to ChatGPT",
+    "access": "ChatGPT can {access, select, edit {view and edit} other {view}} your projects{identity, select, email { and read your account information, including your email address} account { and read your account information} other {}}.",
+    "connect": "Connect",
+    "cancel": "Cancel",
+    "expiredTitle": "Restart connection",
+    "expiredHeading": "Start the connection again",
+    "expiredBody": "This connection page expired or your signed-in account changed. Return to OpenAI and start the connection again."
+  }
+}

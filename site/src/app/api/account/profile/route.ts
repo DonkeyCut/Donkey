@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { LOCALES } from "@/i18n/locales";
 import { accountProfile } from "@/lib/account-profile";
 import {
   notFoundResponse,
@@ -13,9 +14,11 @@ import { prisma } from "@/lib/prisma";
 // The visible name is the product's own field. `name` keeps whatever Google
 // gave us at sign-in — billing and the provider record depend on it — so a
 // user renaming themselves writes `displayName`, and clearing it falls back to
-// the Google name rather than blanking the account.
+// the Google name rather than blanking the account. A request changes only
+// the fields it names.
 const updateProfileSchema = z.object({
-  displayName: z.string().trim().max(60).nullable(),
+  displayName: z.string().trim().max(60).nullable().optional(),
+  locale: z.enum(LOCALES).optional(),
 });
 
 export const GET = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) => {
@@ -29,8 +32,12 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
   if (!parsed.success) return validationErrorResponse(parsed.error);
 
   const userId = request.donkey.userId;
+  const { displayName, locale } = parsed.data;
   await prisma.user.update({
-    data: { displayName: parsed.data.displayName || null },
+    data: {
+      ...(displayName !== undefined ? { displayName: displayName || null } : {}),
+      ...(locale ? { locale } : {}),
+    },
     where: { id: userId },
   });
 

@@ -11,6 +11,9 @@ model User {
   // Stripe customer id, one per user, shared across every billing product
   // (Pro, one-time credit top-ups) so a customer is never duplicated.
   stripeCustomerId String? @unique
+  // The language the product speaks to this person (UI, chat, emails), one of
+  // src/i18n/locales.ts. Set from the browser's language on first visit.
+  locale        String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   sessions      Session[]

@@ -1,0 +1,269 @@
+{
+  "tabs": {
+    "projects": "Projects",
+    "library": "Library",
+    "notes": "Notes",
+    "cameraRoll": "Camera Roll"
+  },
+  "newProject": {
+    "button": "New project",
+    "title": "New project",
+    "placeholder": "Project name",
+    "create": "Create project",
+    "whereSaved": "Where new projects and media are saved: {place}",
+    "scopeLocal": "All projects and media created going<br></br>forward will be stored on <b>this device</b>",
+    "scopeCloud": "All projects and media created going<br></br>forward will be stored on the <b>Cloud</b>"
+  },
+  "embeddedNewProject": {
+    "create": "Create New Project",
+    "limit": "This account is at its free project limit. Upgrade to Pro in Donkey Cut to make more.",
+    "failed": "Could not create the project."
+  },
+  "projects": {
+    "badgeLocal": "This is a local project",
+    "badgeCloud": "This is a cloud project",
+    "badgeOffline": "This is a local project — open the Donkey app to edit it",
+    "grace": "Your Pro plan ended and you’re over the free storage limit. Your oldest cloud projects will be deleted {days, plural, =0 {today} one {in # day} other {in # days}} unless you upgrade or free {size}.",
+    "upgradeToPro": "Upgrade to Pro",
+    "deleteFolderFailed": "Could not delete the folder.",
+    "deleteProjectFailed": "Could not delete the project.",
+    "duplicateFailed": "Could not duplicate the project.",
+    "moveFailed": "Could not move the project.",
+    "deleteFailed": "Could not delete.",
+    "cardMeta": "{size} · edited {date}",
+    "columnName": "Name",
+    "columnLength": "Length",
+    "columnSize": "Size",
+    "columnEdited": "Edited",
+    "importing": "Importing… <elapsed></elapsed>",
+    "newFolder": "New folder",
+    "galleryView": "Gallery view",
+    "listView": "List view",
+    "loadFailed": "Couldn’t load these projects.",
+    "loadFailedCloud": "Couldn’t load cloud projects.",
+    "loadFailedLocal": "Couldn’t load the projects on this Mac.",
+    "emptyTitle": "Create a new project to get started",
+    "renameTitle": "Rename project",
+    "rename": "Rename",
+    "deleteTitle": "Delete {what}?",
+    "foldersEmpty": "{count, plural, =1 {The folder is empty.} other {The folders are empty.}}",
+    "deletesFolders": "{count, plural, =1 {This deletes the whole project folder, including its media files and exports.} other {This deletes each project’s whole folder, including its media files and exports.}}",
+    "cannotUndo": "This can’t be undone.",
+    "deleteProjects": "{count, plural, =1 {Delete project} other {Delete projects}}",
+    "deleteFolder": "Delete folder",
+    "delete": "Delete",
+    "duplicate": "Duplicate",
+    "moveToLocal": "Move to Local",
+    "moveToCloud": "Move to Cloud",
+    "actions": "Project actions"
+  },
+  "pick": {
+    "project": "{count, plural, one {# project} other {# projects}}",
+    "file": "{count, plural, one {# file} other {# files}}",
+    "item": "{count, plural, one {# item} other {# items}}",
+    "clip": "{count, plural, one {# clip} other {# clips}}",
+    "note": "{count, plural, one {# note} other {# notes}}",
+    "folder": "{count, plural, one {# folder} other {# folders}}",
+    "named": "“{name}”",
+    "namedHolding": "“{name}” and its {held}",
+    "foldersHolding": "{folders} ({held})",
+    "both": "{folders} and {items}",
+    "foldersGo": "{count, plural, =1 {Everything inside the folder goes with it.} other {Everything inside the folders goes with them.}}",
+    "phoneOnly": "It was synced from your phone and is removed there too.",
+    "phoneSome": "{count, plural, =1 {One of them was synced from your phone and is removed there too.} other {# of them were synced from your phone and are removed there too.}}",
+    "cancel": "Cancel",
+    "delete": "Delete"
+  },
+  "folders": {
+    "renameFolder": "Rename folder",
+    "renameFailed": "Could not rename folder.",
+    "createFailed": "Could not create folder.",
+    "share": "Share",
+    "rename": "Rename",
+    "delete": "Delete",
+    "deleteFolder": "Delete folder",
+    "options": "Folder options",
+    "items": "{count, plural, one {# item} other {# items}}",
+    "namePlaceholder": "Name"
+  },
+  "rename": {
+    "name": "Name"
+  },
+  "shelfBadge": {
+    "offline": "Local — open the Donkey app to use it"
+  },
+  "library": {
+    "share": "Share",
+    "newFolder": "New folder",
+    "addMedia": "Add media",
+    "emptyTitle": "Your Library is shared across all projects.",
+    "emptyHint": "Drag and drop videos, images, audio, or font files here.",
+    "chooseFiles": "Choose files",
+    "orPasteLink": "or paste a link",
+    "linkPlaceholder": "TikTok, YouTube, or Instagram link…",
+    "import": "Import",
+    "addNote": "Add note",
+    "delete": "Delete",
+    "deleteTitle": "Delete {what}?",
+    "keepCopy": "{count, plural, =1 {Projects that already use it keep their own copy.} other {Projects that already use them keep their own copy.}}",
+    "remove": "Remove"
+  },
+  "libraryShare": {
+    "title": "{kind, select, folder {Share folder} other {Share asset}}",
+    "body": "{kind, select, folder {Copy this folder to Cloud so people can open it while your device is offline.} other {Copy this asset to Cloud so people can open it while your device is offline.}} Share settings will apply to the cloud copy. Your local files stay here.",
+    "copyFailed": "Could not copy to Cloud.",
+    "copying": "Copying to Cloud…",
+    "copy": "Copy to Cloud"
+  },
+  "sharedLibrary": {
+    "viewOnly": "Shared library · View only",
+    "loading": "Loading shared library",
+    "signInToView": "Sign in to view this share.",
+    "noAccess": "You don’t have access to this share. Ask the owner to invite you.",
+    "gone": "This share link is no longer available.",
+    "loadFailed": "Could not load this share.",
+    "signIn": "Sign in",
+    "tryAgain": "Try again",
+    "breadcrumb": "Folder breadcrumb",
+    "templateMedia": "Template media",
+    "emptyFolder": "This folder is empty.",
+    "pages": "Pages",
+    "firstPage": "First page",
+    "nextPage": "Next page"
+  },
+  "card": {
+    "renameFailed": "Could not rename the file.",
+    "renameFailedBadge": "Rename failed",
+    "preparing": "Preparing",
+    "cantPlay": "Can't play",
+    "makingCopy": "Making a copy this browser can play"
+  },
+  "importCard": {
+    "preview": "Preview {name}",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "archive": "Archive",
+    "failed": "Failed",
+    "importing": "Importing",
+    "importingFor": "Importing <time>{elapsed}</time>"
+  },
+  "cardMenu": {
+    "moreActions": "More actions",
+    "addToTimeline": "Add to timeline",
+    "share": "Share",
+    "rename": "Rename",
+    "download": "Download",
+    "openOriginal": "Open original",
+    "delete": "Delete"
+  },
+  "generatedMenu": {
+    "moreActions": "More actions",
+    "addToMedia": "Add to Media",
+    "addToLibrary": "Add to Library",
+    "download": "Download",
+    "delete": "Delete",
+    "deleteTitle": "Delete “{name}”?",
+    "timelineUses": "{count, plural, one {It plays in # place on the timeline, which goes with it.} other {It plays in # places on the timeline, which go with it.}}",
+    "fileGoes": "The media file is deleted too, and this can’t be undone.",
+    "cancel": "Cancel"
+  },
+  "notes": {
+    "untitled": "Untitled",
+    "untitledNote": "Untitled note",
+    "allNotes": "All notes",
+    "saveFailed": "Could not save the note.",
+    "reopen": "Reopen and retry",
+    "newFolder": "New folder",
+    "newNote": "New note",
+    "loadFailed": "Could not load notes.",
+    "retry": "Retry",
+    "emptyTitle": "No notes yet.",
+    "emptyHint": "Notes sync with the Donkey Cut iOS app — a script written here is ready on the phone's teleprompter.",
+    "delete": "Delete",
+    "deleteTitle": "Delete {what}?",
+    "deleteFolderTitle": "Delete “{name}”?",
+    "folderFallback": "folder",
+    "removedFromPhone": "{count, plural, =1 {It is removed from your phone too.} other {They are removed from your phone too.}}"
+  },
+  "composer": {
+    "untitledNote": "Untitled note",
+    "titlePlaceholder": "Untitled",
+    "noteColor": "Note color",
+    "deleteNote": "Delete note",
+    "delete": "Delete",
+    "removeLabel": "Remove label {name}",
+    "addLabel": "Add label",
+    "label": "Label",
+    "colors": {
+      "butter": "Butter",
+      "blush": "Blush",
+      "sky": "Sky",
+      "mint": "Mint",
+      "lilac": "Lilac"
+    }
+  },
+  "labelPicker": {
+    "newLabel": "New label…",
+    "findOrCreate": "Find or create…",
+    "renameLabel": "Rename label {name}",
+    "deleteLabel": "Delete label {name}",
+    "create": "Create “{name}”",
+    "full": "A note holds {max} labels. Take one off to add another.",
+    "firstLabel": "Type a name to make your first label."
+  },
+  "noteEditor": {
+    "placeholder": "Write your note…",
+    "turnInto": {
+      "text": "Text",
+      "h1": "Heading 1",
+      "h2": "Heading 2",
+      "h3": "Heading 3",
+      "bullet": "Bulleted list",
+      "number": "Numbered list",
+      "todo": "To-do list",
+      "quote": "Quote"
+    },
+    "bold": "Bold",
+    "italic": "Italic",
+    "underline": "Underline",
+    "strikethrough": "Strikethrough",
+    "listStyle": "List style",
+    "textColor": "Text color",
+    "defaultColor": "Default",
+    "textColors": {
+      "gray": "Gray",
+      "brown": "Brown",
+      "orange": "Orange",
+      "yellow": "Yellow",
+      "green": "Green",
+      "blue": "Blue",
+      "purple": "Purple",
+      "pink": "Pink",
+      "red": "Red"
+    }
+  },
+  "docText": {
+    "empty": "Empty file.",
+    "moreRows": "+{count} more rows"
+  },
+  "cameraRoll": {
+    "emptyTitle": "Nothing from your phone yet.",
+    "emptyHint": "Clips you record in the Donkey Cut iOS app sync here automatically.",
+    "delete": "Delete",
+    "deleteTitle": "Delete {what}?",
+    "deleteBody": "{count, plural, =1 {The clip leaves your cloud Camera Roll and the phone it was shot on. Projects that already use it keep their own copy.} other {The clips leave your cloud Camera Roll and the phone they were shot on. Projects that already use them keep their own copy.}}"
+  },
+  "navUser": {
+    "billing": "Billing",
+    "usage": "Usage",
+    "onboarding": "View onboarding",
+    "runLocally": "Run locally on Mac",
+    "logOut": "Log out"
+  },
+  "navStorage": {
+    "get100": "Get 100 GB",
+    "upgradeTip": "Upgrade for 100 GB + AI credits",
+    "grace": "Your Pro plan ended. Upgrade or free {size} before your oldest projects are deleted."
+  },
+  "justNow": "just now"
+}

@@ -1,0 +1,61 @@
+{
+  "sequence": {
+    "dialogLabel": "Willkommen bei Donkey Cut",
+    "skip": "Überspringen",
+    "back": "Zurück",
+    "next": "Weiter",
+    "done": "Fertig"
+  },
+  "welcome": {
+    "title": "Videos schneiden per Chat.",
+    "body": "Clips trimmen, Untertitel hinzufügen, Bilder generieren oder neue Szenen erstellen – alles direkt im Chat."
+  },
+  "referral": {
+    "title": "Wie hast du von uns erfahren?",
+    "body": "Wähle alles aus, was zutrifft – so wissen wir, wo wir als Nächstes sein sollten.",
+    "otherPlaceholder": "Verrate uns wo",
+    "sources": {
+      "discord": "Discord",
+      "tiktok": "TikTok",
+      "instagram": "Instagram",
+      "youtube": "YouTube",
+      "reddit": "Reddit",
+      "search": "Suche",
+      "friend": "Freund/in",
+      "other": "Sonstiges"
+    }
+  },
+  "modes": {
+    "title": "Läuft in der Cloud oder auf deinem Mac",
+    "subtitle": "Derselbe Editor. Wähle, was am besten für dich passt.",
+    "cloudTitle": "In der Cloud",
+    "cloudNoInstall": "Keine Installation nötig",
+    "cloudAnyBrowser": "Funktioniert in jedem Browser",
+    "cloudRendering": "Wir übernehmen das Rendering",
+    "macTitle": "Auf deinem Mac",
+    "macLocalFiles": "Deine Dateien bleiben lokal",
+    "macHardware": "Nutzt die Hardware deines Mac",
+    "macFaster": "Schnellere Exporte & KI-Funktionen",
+    "switching": "Wechselt automatisch zwischen Cloud und lokal, wenn verfügbar."
+  },
+  "aiChat": {
+    "title": "Chatte mit deinem Editor.",
+    "body": "Die KI hat Zugriff auf dein gesamtes Projekt. Lass sie Clips schneiden, fehlende Shots generieren, Untertitel schreiben, Voiceovers einfügen, deine Timeline umstellen oder Fragen zu deinem Footage beantworten.",
+    "models": "Funktioniert direkt mit Gemini, oder nutze dein eigenes Claude- oder Codex-Abo."
+  },
+  "credits": {
+    "onUs": "geschenkt",
+    "body": "Bereits auf deinem Konto – du musst nichts aktivieren. Nutze sie für generierte Videos, Audio und Bilder.",
+    "expires": "Gültig bis {date}."
+  },
+  "plans": {
+    "title": "Einfache Preise",
+    "subtitle": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien.",
+    "forIndividuals": "Für Einzelpersonen",
+    "getPro": "Pro holen",
+    "getProOff": "{percent} % Rabatt auf Pro sichern",
+    "continueFree": "Kostenlos weitermachen",
+    "endsIn": "{percent} % Rabatt endet in {hours}h {minutes}m {seconds}s",
+    "covers": "{months, plural, one {Für deinen ersten Monat, danach {price}/Monat} other {Pro Monat für deine ersten # Monate, danach {price}/Monat}}"
+  }
+}

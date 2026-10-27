@@ -26,7 +26,7 @@ export const PUT = withDonkeyAuth(
       await request.json().catch(() => null),
     );
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+      return NextResponse.json({ error: "invalid_request", message: "Invalid request." }, { status: 400 });
     }
     await setMarketingUnsubscribed(
       request.donkey.userId,

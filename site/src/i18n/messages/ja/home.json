@@ -1,0 +1,269 @@
+{
+  "tabs": {
+    "projects": "プロジェクト",
+    "library": "ライブラリ",
+    "notes": "ノート",
+    "cameraRoll": "カメラロール"
+  },
+  "newProject": {
+    "button": "新規プロジェクト",
+    "title": "新規プロジェクト",
+    "placeholder": "プロジェクト名",
+    "create": "プロジェクトを作成",
+    "whereSaved": "新規プロジェクトとメディアの保存先: {place}",
+    "scopeLocal": "今後作成されるすべてのプロジェクトとメディアは<br></br><b>このデバイス</b>に保存されます",
+    "scopeCloud": "今後作成されるすべてのプロジェクトとメディアは<br></br><b>クラウド</b>に保存されます"
+  },
+  "embeddedNewProject": {
+    "create": "新規プロジェクトを作成",
+    "limit": "このアカウントは無料プロジェクトの上限に達しています。さらに作成するにはDonkey CutでProにアップグレードしてください。",
+    "failed": "プロジェクトを作成できませんでした。"
+  },
+  "projects": {
+    "badgeLocal": "これはローカルプロジェクトです",
+    "badgeCloud": "これはクラウドプロジェクトです",
+    "badgeOffline": "これはローカルプロジェクトです — 編集するにはDonkeyアプリを開いてください",
+    "grace": "Proプランが終了したため、無料ストレージの上限を超えています。アップグレードするか{size}を解放しない限り、最も古いクラウドプロジェクトは{days, plural, =0 {今日} other {#日後}}に削除されます。",
+    "upgradeToPro": "Proにアップグレード",
+    "deleteFolderFailed": "フォルダーを削除できませんでした。",
+    "deleteProjectFailed": "プロジェクトを削除できませんでした。",
+    "duplicateFailed": "プロジェクトを複製できませんでした。",
+    "moveFailed": "プロジェクトを移動できませんでした。",
+    "deleteFailed": "削除できませんでした。",
+    "cardMeta": "{size} · {date}に編集",
+    "columnName": "名前",
+    "columnLength": "長さ",
+    "columnSize": "サイズ",
+    "columnEdited": "更新日時",
+    "importing": "インポート中… <elapsed></elapsed>",
+    "newFolder": "新規フォルダー",
+    "galleryView": "ギャラリー表示",
+    "listView": "リスト表示",
+    "loadFailed": "プロジェクトを読み込めませんでした。",
+    "loadFailedCloud": "クラウドプロジェクトを読み込めませんでした。",
+    "loadFailedLocal": "このMac上のプロジェクトを読み込めませんでした。",
+    "emptyTitle": "新規プロジェクトを作成して始めましょう",
+    "renameTitle": "プロジェクト名の変更",
+    "rename": "名前を変更",
+    "deleteTitle": "{what}を削除しますか？",
+    "foldersEmpty": "{count, plural, other {フォルダーは空です。}}",
+    "deletesFolders": "{count, plural, =1 {メディアファイルや書き出しを含め、プロジェクトフォルダー全体が削除されます。} other {メディアファイルや書き出しを含め、各プロジェクトのフォルダー全体が削除されます。}}",
+    "cannotUndo": "この操作は取り消せません。",
+    "deleteProjects": "{count, plural, other {プロジェクトを削除}}",
+    "deleteFolder": "フォルダーを削除",
+    "delete": "削除",
+    "duplicate": "複製",
+    "moveToLocal": "ローカルに移動",
+    "moveToCloud": "クラウドに移動",
+    "actions": "プロジェクト操作"
+  },
+  "pick": {
+    "project": "{count, plural, other {#件のプロジェクト}}",
+    "file": "{count, plural, other {#件のファイル}}",
+    "item": "{count, plural, other {#件のアイテム}}",
+    "clip": "{count, plural, other {#件のクリップ}}",
+    "note": "{count, plural, other {#件のノート}}",
+    "folder": "{count, plural, other {#個のフォルダー}}",
+    "named": "「{name}」",
+    "namedHolding": "「{name}」とその{held}",
+    "foldersHolding": "{folders}（{held}）",
+    "both": "{folders}と{items}",
+    "foldersGo": "{count, plural, other {フォルダー内のすべてのアイテムもあわせて削除されます。}}",
+    "phoneOnly": "スマートフォンから同期されたため、端末からも削除されます。",
+    "phoneSome": "{count, plural, other {そのうち#件はスマートフォンから同期されたため、端末からも削除されます。}}",
+    "cancel": "キャンセル",
+    "delete": "削除"
+  },
+  "folders": {
+    "renameFolder": "フォルダー名を変更",
+    "renameFailed": "フォルダー名を変更できませんでした。",
+    "createFailed": "フォルダーを作成できませんでした。",
+    "share": "共有",
+    "rename": "名前を変更",
+    "delete": "削除",
+    "deleteFolder": "フォルダーを削除",
+    "options": "フォルダーのオプション",
+    "items": "{count, plural, other {#件のアイテム}}",
+    "namePlaceholder": "名前"
+  },
+  "rename": {
+    "name": "名前"
+  },
+  "shelfBadge": {
+    "offline": "ローカル — 使用するにはDonkeyアプリを開いてください"
+  },
+  "library": {
+    "share": "共有",
+    "newFolder": "新規フォルダー",
+    "addMedia": "メディアを追加",
+    "emptyTitle": "ライブラリはすべてのプロジェクトで共有されます。",
+    "emptyHint": "動画、画像、音声、またはフォントファイルをここにドラッグ＆ドロップしてください。",
+    "chooseFiles": "ファイルを選択",
+    "orPasteLink": "またはリンクを貼り付け",
+    "linkPlaceholder": "TikTok、YouTube、Instagramのリンク…",
+    "import": "インポート",
+    "addNote": "メモを追加",
+    "delete": "削除",
+    "deleteTitle": "{what}を削除しますか？",
+    "keepCopy": "{count, plural, other {すでに使用しているプロジェクトにはコピーが保持されます。}}",
+    "remove": "削除"
+  },
+  "libraryShare": {
+    "title": "{kind, select, folder {フォルダーを共有} other {アセットを共有}}",
+    "body": "{kind, select, folder {お使いのデバイスがオフラインのときでも他のユーザーが開けるよう、このフォルダーをクラウドにコピーします。} other {お使いのデバイスがオフラインのときでも他のユーザーが開けるよう、このアセットをクラウドにコピーします。}}共有設定はクラウド上のコピーに適用されます。ローカルファイルは保持されます。",
+    "copyFailed": "クラウドにコピーできませんでした。",
+    "copying": "クラウドにコピー中…",
+    "copy": "クラウドにコピー"
+  },
+  "sharedLibrary": {
+    "viewOnly": "共有ライブラリ · 閲覧のみ",
+    "loading": "共有ライブラリを読み込み中",
+    "signInToView": "この共有を表示するにはサインインしてください。",
+    "noAccess": "この共有へのアクセス権がありません。所有者に招待を依頼してください。",
+    "gone": "この共有リンクは現在利用できません。",
+    "loadFailed": "この共有を読み込めませんでした。",
+    "signIn": "サインイン",
+    "tryAgain": "再試行",
+    "breadcrumb": "フォルダーのパンくずリスト",
+    "templateMedia": "テンプレートメディア",
+    "emptyFolder": "このフォルダーは空です。",
+    "pages": "ページ",
+    "firstPage": "最初のページ",
+    "nextPage": "次のページ"
+  },
+  "card": {
+    "renameFailed": "ファイル名を変更できませんでした。",
+    "renameFailedBadge": "名前の変更に失敗",
+    "preparing": "準備中",
+    "cantPlay": "再生不可",
+    "makingCopy": "このブラウザで再生可能なコピーを作成中"
+  },
+  "importCard": {
+    "preview": "{name}をプレビュー",
+    "retry": "再試行",
+    "cancel": "キャンセル",
+    "archive": "アーカイブ",
+    "failed": "失敗",
+    "importing": "インポート中",
+    "importingFor": "インポート中: <time>{elapsed}</time>"
+  },
+  "cardMenu": {
+    "moreActions": "その他の操作",
+    "addToTimeline": "タイムラインに追加",
+    "share": "共有",
+    "rename": "名前を変更",
+    "download": "ダウンロード",
+    "openOriginal": "オリジナルを開く",
+    "delete": "削除"
+  },
+  "generatedMenu": {
+    "moreActions": "その他の操作",
+    "addToMedia": "メディアに追加",
+    "addToLibrary": "ライブラリに追加",
+    "download": "ダウンロード",
+    "delete": "削除",
+    "deleteTitle": "「{name}」を削除しますか？",
+    "timelineUses": "{count, plural, other {タイムラインの#か所で使用されており、それらも一緒に削除されます。}}",
+    "fileGoes": "メディアファイルも削除されます。この操作は取り消せません。",
+    "cancel": "キャンセル"
+  },
+  "notes": {
+    "untitled": "無題",
+    "untitledNote": "無題のノート",
+    "allNotes": "すべてのノート",
+    "saveFailed": "ノートを保存できませんでした。",
+    "reopen": "再度開いて再試行",
+    "newFolder": "新規フォルダー",
+    "newNote": "新規ノート",
+    "loadFailed": "ノートを読み込めませんでした。",
+    "retry": "再試行",
+    "emptyTitle": "ノートはまだありません。",
+    "emptyHint": "ノートはDonkey Cut iOSアプリと同期されます。ここで作成した原稿はスマートフォンのテレプロンプターですぐに使えます。",
+    "delete": "削除",
+    "deleteTitle": "{what}を削除しますか？",
+    "deleteFolderTitle": "「{name}」を削除しますか？",
+    "folderFallback": "フォルダー",
+    "removedFromPhone": "{count, plural, other {スマートフォンからも削除されます。}}"
+  },
+  "composer": {
+    "untitledNote": "無題のノート",
+    "titlePlaceholder": "無題",
+    "noteColor": "ノートの色",
+    "deleteNote": "ノートを削除",
+    "delete": "削除",
+    "removeLabel": "ラベル「{name}」を削除",
+    "addLabel": "ラベルを追加",
+    "label": "ラベル",
+    "colors": {
+      "butter": "バター",
+      "blush": "ブラッシュ",
+      "sky": "スカイ",
+      "mint": "ミント",
+      "lilac": "ライラック"
+    }
+  },
+  "labelPicker": {
+    "newLabel": "新規ラベル…",
+    "findOrCreate": "検索または作成…",
+    "renameLabel": "ラベル「{name}」の名前を変更",
+    "deleteLabel": "ラベル「{name}」を削除",
+    "create": "「{name}」を作成",
+    "full": "ノートに付けられるラベルは最大{max}個です。別のラベルを追加するには、いずれかを外してください。",
+    "firstLabel": "名前を入力して最初のラベルを作成します。"
+  },
+  "noteEditor": {
+    "placeholder": "ノートを入力…",
+    "turnInto": {
+      "text": "テキスト",
+      "h1": "見出し1",
+      "h2": "見出し2",
+      "h3": "見出し3",
+      "bullet": "箇条書きリスト",
+      "number": "番号付きリスト",
+      "todo": "ToDoリスト",
+      "quote": "引用"
+    },
+    "bold": "太字",
+    "italic": "斜体",
+    "underline": "下線",
+    "strikethrough": "取り消し線",
+    "listStyle": "リストスタイル",
+    "textColor": "文字色",
+    "defaultColor": "デフォルト",
+    "textColors": {
+      "gray": "グレー",
+      "brown": "ブラウン",
+      "orange": "オレンジ",
+      "yellow": "イエロー",
+      "green": "グリーン",
+      "blue": "ブルー",
+      "purple": "パープル",
+      "pink": "ピンク",
+      "red": "レッド"
+    }
+  },
+  "docText": {
+    "empty": "空のファイルです。",
+    "moreRows": "+他{count}行"
+  },
+  "cameraRoll": {
+    "emptyTitle": "スマートフォンからのデータはまだありません。",
+    "emptyHint": "Donkey Cut iOSアプリで録画したクリップはここに自動同期されます。",
+    "delete": "削除",
+    "deleteTitle": "{what}を削除しますか？",
+    "deleteBody": "{count, plural, other {クラウドのカメラロールおよび撮影元のスマートフォンからクリップが削除されます。すでに使用中のプロジェクトにはコピーが残ります。}}"
+  },
+  "navUser": {
+    "billing": "請求とお支払い",
+    "usage": "利用状況",
+    "onboarding": "オンボーディングを見る",
+    "runLocally": "Macでローカル実行",
+    "logOut": "ログアウト"
+  },
+  "navStorage": {
+    "get100": "100 GB を入手",
+    "upgradeTip": "アップグレードで 100 GB ＋ AI クレジット",
+    "grace": "Pro プランが終了しました。最も古いプロジェクトが削除される前に、アップグレードするか {size} の空き容量を確保してください。"
+  },
+  "justNow": "たった今"
+}

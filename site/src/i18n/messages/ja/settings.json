@@ -1,0 +1,138 @@
+{
+  "editor": {
+    "title": "エディター",
+    "language": "言語",
+    "languageHint": "Donkey Cut、メール、チャットの返信で使用される言語です。",
+    "appearance": "外観",
+    "appearanceHint": "ライト、ダーク、またはシステム設定に合わせます。",
+    "saveFailed": "変更を保存できませんでした。もう一度お試しください。"
+  },
+  "meta": {
+    "description": "Donkey Cutのサブスクリプション、クレジット、使用状況を管理します。"
+  },
+  "saveFailed": "変更を保存できませんでした。もう一度お試しください。",
+  "header": {
+    "usageTitle": "使用状況",
+    "usageDescription": "今請求期間のAI生成使用量です。",
+    "profileTitle": "プロフィール",
+    "billingTitle": "お支払い",
+    "billingDescription": "サブスクリプションとクレジット残高。"
+  },
+  "pro": {
+    "title": "Donkey Pro",
+    "description": "毎月リセットされる月間使用枠です。クレジットはいつでも追加購入できます。",
+    "status": "{status, select, active {アクティブ} trialing {トライアル中} past_due {支払い遅延} canceled {キャンセル済み} incomplete {未完了} unpaid {未払い} other {{status}}}",
+    "promotionUntil": "<b>{day}までにProに登録</b>すると、それまでに開始するすべての月で通常の{usual}の{multiplier}倍となる{allowance}が付与されます。",
+    "promotionOpen": "現在、毎月通常の{usual}の{multiplier}倍となる{allowance}が付与されます。",
+    "left": "今月の残り: {left} / {total}",
+    "cancels": "{date}にキャンセルされます。",
+    "renews": "更新日: {date}",
+    "activePromotionUntil": "{day}までに開始する月には{allowance}が含まれます。",
+    "activePromotionOpen": "毎月{allowance}が含まれます。",
+    "bonusLanded": "{credits}の{origin, select, app {登録ボーナス} other {クレジット特典}}が残高に付与されました。",
+    "subscribeOffer": "{deadline}までに{price}で登録すると、1回限りの{credits}が付与されます。{lifeClause}",
+    "introDeadline": "{terms} {deadline}までにご登録ください。",
+    "opening": "開いています…",
+    "manage": "請求の管理",
+    "starting": "開始中…",
+    "subscribe": "Proに登録",
+    "unavailable": "現在、請求機能を利用できません。"
+  },
+  "credits": {
+    "title": "クレジット",
+    "description": "Donkeyアプリの都度払い残高です。いつでも追加購入できます。",
+    "available": "利用可能残高",
+    "buy": "クレジットを購入",
+    "preset": "{credits} · {price}",
+    "customLabel": "クレジット",
+    "starting": "処理中…",
+    "buyFor": "{price}で購入",
+    "buyPlain": "購入",
+    "checkoutFailed": "チェックアウトを開始できませんでした。しばらくしてからもう一度お試しください。",
+    "autoReload": "残高不足時に自動リチャージ",
+    "fallsBelow": "残高が以下を下回った場合",
+    "unit": "クレジット",
+    "thenBuy": "自動購入する額",
+    "saving": "保存中…",
+    "save": "保存",
+    "saveFailed": "自動リチャージを保存できませんでした。しばらくしてからもう一度お試しください。",
+    "lastFailed": "前回の自動リチャージに失敗しました: {error}",
+    "needsCard": "自動リチャージには保存済みのカードが必要です。<buy>クレジットを一度購入</buy>してカードを登録してから有効にしてください。"
+  },
+  "profile": {
+    "loadFailed": "プロフィールを読み込めませんでした。",
+    "changePicture": "プロフィール画像を変更",
+    "emailVerified": "メール認証済み",
+    "displayName": "表示名",
+    "save": "保存",
+    "nameSaveFailed": "名前を保存できませんでした。もう一度お試しください。"
+  },
+  "avatar": {
+    "title": "プロフィール画像",
+    "chooseImage": "画像を選択",
+    "zoom": "ズーム",
+    "replace": "変更",
+    "choose": "選択",
+    "remove": "削除",
+    "save": "保存",
+    "unreadable": "読み取れる画像ファイルではありません。",
+    "prepareFailed": "画像を準備できませんでした。もう一度お試しください。",
+    "saveFailed": "画像を保存できませんでした。もう一度お試しください。"
+  },
+  "email": {
+    "title": "メール設定",
+    "product": "プロダクトメール",
+    "productHint": "Donkey Cutに関する最新情報や告知。"
+  },
+  "flagsSection": {
+    "title": "機能フラグ",
+    "hint": "アカウントで有効にできる先行機能。"
+  },
+  "flags": {
+    "editor_credits_pill": {
+      "title": "エディターにクレジットを表示",
+      "description": "エディターの上部バーに残高を表示します。"
+    }
+  },
+  "phoneLink": {
+    "title": "スマートフォン連携",
+    "body": "ネットワークの有無にかかわらず、Wi-Fi Direct経由でDonkey Cut iPhoneアプリからこのMacに直接動画を送信できます。クリップは開いているプロジェクトに追加されます。",
+    "instructions": "スマートフォンでアバターメニュー →「Mac Link」を開き、このMacを選択して次を入力してください:",
+    "cancel": "キャンセル",
+    "codeLife": "コードの有効期限は5分間です。",
+    "pair": "スマートフォンをペアリング",
+    "refused": "前回のコードが3回間違えて入力されたため終了しました。新しく開始してください。",
+    "lastSeen": "最終アクセス: {when}",
+    "justNow": "たった今",
+    "unpair": "ペアリング解除",
+    "unpairHint": "このスマートフォンから送信できなくなります",
+    "unreachable": "このMac上のアプリに接続できませんでした。実行されているか確認してください。"
+  },
+  "usage": {
+    "included": "付属",
+    "conversation": "会話 {id}",
+    "calls": "{count, plural, other {#回の呼び出し}}",
+    "cachedShare": "{share}% キャッシュ済み",
+    "date": "日時",
+    "kind": "種類",
+    "model": "モデル",
+    "cost": "コスト",
+    "status": "ステータス",
+    "callStatus": "{status, select, succeeded {成功} failed {失敗} other {{status}}}",
+    "noCalls": "呼び出し履歴はまだありません。",
+    "imagesGenerated": "生成された画像",
+    "inputTokens": "入力トークン",
+    "cachedInput": "キャッシュされた入力",
+    "cachedValue": "{tokens} ({share}%)",
+    "outputTokens": "出力トークン",
+    "totalTokens": "合計トークン",
+    "duration": "所要時間",
+    "imageExplanation": "画像生成はトークン単位ではなく、画像1枚ごとに課金されます。",
+    "tokenExplanation": "コストはトークン数に応じて発生し、主に入力トークンが占めます。キャッシュされた入力とは、プロバイダーが大幅に割引された料金で再利用する未変更のプロンプトプレフィックスです。繰り返しの呼び出しでキャッシュ割合が低い場合、キャッシュがヒットしていません。",
+    "noUsage": "この呼び出しに対する課金対象の利用はありませんでした。",
+    "error": "エラー: {code}"
+  },
+  "checkout": {
+    "creditsProduct": "Donkeyクレジット"
+  }
+}

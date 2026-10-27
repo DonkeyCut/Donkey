@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { requestLocale } from "@/i18n/requestLocale";
 import { auth } from "@/lib/auth";
 import { introCouponId } from "@/lib/billing/intro-offer";
 import { introCoupon, readIntroOffer } from "@/lib/billing/intro-offer-server";
 import { metaCheckoutMetadata, trackCheckoutStarted } from "@/lib/billing/meta-checkout";
 import { proPriceId } from "@/lib/billing/pro-subscription";
+import { STRIPE_LOCALE } from "@/lib/billing/stripe-locale";
 import { ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
 import { contextFromRequest } from "@/lib/config/effective";
 import { verifyCreditOfferToken } from "@/lib/credits/offers";
@@ -64,6 +66,7 @@ export const POST = withDonkeyAuth(async (request) => {
     client_reference_id: session.user.id,
     customer: customerId,
     line_items: [{ price: priceId, quantity: 1 }],
+    locale: STRIPE_LOCALE[requestLocale(request)],
     metadata: metaCheckoutMetadata(request.headers),
     mode: "subscription",
     subscription_data: {
@@ -78,7 +81,7 @@ export const POST = withDonkeyAuth(async (request) => {
 
   if (!checkout.url) {
     return NextResponse.json(
-      { error: "server-error", message: "Stripe did not return a URL." },
+      { error: "checkout_no_url", message: "Stripe did not return a URL." },
       { status: 502 },
     );
   }

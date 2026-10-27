@@ -1,0 +1,45 @@
+{
+  "language": "Language",
+  "footer": {
+    "product": "Product",
+    "legal": "Legal",
+    "blog": "Blog",
+    "privacy": "Privacy Policy",
+    "terms": "Terms of Use",
+    "cutHome": "Donkey Cut home",
+    "donkeyHome": "Donkey home",
+    "helpDiscord": "Need help? Join us on <link>Discord</link>",
+    "helpEmail": "Need help? Email us at <link>{email}</link>",
+    "copyright": "2026 Donkey, Inc."
+  },
+  "meta": {
+    "title": "Donkey Cut Video Editor",
+    "description": "A video editor that does all its work on your Mac."
+  },
+  "pagination": {
+    "label": "pagination",
+    "previous": "Previous",
+    "previousLabel": "Go to previous page",
+    "next": "Next",
+    "nextLabel": "Go to next page",
+    "morePages": "More pages"
+  },
+  "dialog": {
+    "close": "Close"
+  },
+  "proPlan": {
+    "body": "Generate rich media with AI.",
+    "price": "{price}/month",
+    "storage": "{gb, number} GB of cloud storage",
+    "credits": "{credits} AI credits every month",
+    "generation": "Image, video, voiceover, and music generation"
+  },
+  "apiErrors": {
+    "checkout_no_url": "Stripe did not return a URL.",
+    "credit_amount_out_of_range": "Choose between {min} and {max}, in whole thousands.",
+    "auto_reload_invalid": "Provide enabled, thresholdDollars, and amountDollars.",
+    "no_payment_method": "Buy credits once to save a card, then turn on auto-reload.",
+    "unsupported_image_type": "Unsupported image type.",
+    "image_too_large": "Image too large."
+  }
+}

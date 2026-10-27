@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "restrictedTitle": "Geteiltes Projekt · Donkey Cut",
+    "restrictedDescription": "Dieses Projekt ist mit bestimmten Personen geteilt.",
+    "title": "{name} · Donkey Cut",
+    "description": "Schau dir {name} im Browser an.",
+    "libraryTitle": "Geteilte Mediathek · Donkey Cut"
+  },
+  "view": {
+    "signInPrompt": "Dieses Projekt ist mit bestimmten Personen geteilt – melde dich an, um zu sehen, ob du dazugehörst.",
+    "signIn": "Anmelden",
+    "denied": "Du hast keinen Zugriff auf dieses Projekt. Bitte den Eigentümer, dich einzuladen.",
+    "deniedAs": "Du hast als {email} keinen Zugriff auf dieses Projekt. Bitte den Eigentümer, dich einzuladen.",
+    "inactive": "Dieser Freigabelink ist nicht mehr aktiv.",
+    "untitled": "Ohne Titel"
+  }
+}

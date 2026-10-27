@@ -1,0 +1,79 @@
+{
+  "notNow": "今はしない",
+  "ok": "OK",
+  "upgradeToPro": "Proにアップグレード",
+  "subscribeToPro": "Proに登録",
+  "buyCredits": "クレジットを購入",
+  "billingUnavailable": "現在、お支払いはご利用いただけません。",
+  "offer": {
+    "validThrough": "追加クレジットの有効期限は{date}までです。",
+    "validFor": "追加クレジットの有効期限は{days, plural, other {#日間}}です。",
+    "claimBody": "受け取り可能なクレジットが{credits}あります。",
+    "claimBodyBy": "受け取り可能なクレジットが{credits}あります。{date}までにお受け取りください。",
+    "claimTerms": "受け取り後、{days, plural, other {#日間}}有効です。",
+    "subscribeBody": "{price}でProに登録すると、追加で{credits}を獲得できます。",
+    "expiresIn": "オファー終了まであと{hours}時間{minutes}分{seconds}秒"
+  },
+  "intro": {
+    "terms": "{months, plural, other {{percent}%オフ：最初の#か月は{price}/月、その後は{full}/月。}}"
+  },
+  "upgrade": {
+    "outOfCredits": "クレジットがなくなりました",
+    "proOutBody": "今月のProクレジットを使い切りました。生成を続けるにはクレジットを購入してください。",
+    "projectsTitle": "アップグレードしてさらにプロジェクトを作成",
+    "creditsBody": "Proにアップグレードすると、{price}で毎月{credits}と100 GBのクラウドストレージをご利用いただけます。",
+    "creditsBodyOffer": "Proにアップグレードすると、毎月{credits}と100 GBのクラウドストレージをご利用いただけます。",
+    "proPrice": "Proは{price}です。",
+    "projectsBodyStarter": "無料プランで保持できるのはスタータープロジェクトのみです。Proなら必要なだけ作成できます。",
+    "projectsBody": "無料プランではスタータープロジェクトのほかに{count, plural, other {#個のプロジェクト}}を保持できます。Proなら必要なだけ作成できます。"
+  },
+  "claim": {
+    "expiredTitle": "このオファーは期限切れです",
+    "alreadyProTitle": "すでにProをご利用中です",
+    "invalidTitle": "このリンクは無効です",
+    "wrongAccount": "このオファーは別のアカウントのものです。メールを受信したアドレスでログインしてください。",
+    "windowClosed": "このオファーの受け取り期間は終了しました。",
+    "proOnly": "このオファーはProに登録していないアカウントが対象です。",
+    "gone": "リンク先のオファーは見つかりません。",
+    "addedTitle": "アカウントに{credits}が追加されました",
+    "ready": "今すぐご利用いただけます。",
+    "readyExpires": "今すぐご利用いただけます。有効期限は{date}です。",
+    "startEditing": "編集を開始",
+    "withProTitle": "Proで{credits}を獲得",
+    "waitingTitle": "{credits}を受け取れます",
+    "claimButton": "{credits}を受け取る",
+    "failed": "処理を完了できませんでした。もう一度お試しください。"
+  },
+  "storage": {
+    "title": "クラウドストレージ",
+    "fullTitle": "クラウドストレージの空き容量がありません",
+    "used": "{quota}中{used}を使用しています。",
+    "graceToday": "Proプランが終了しました。アップグレードするか{bytes}の空き容量を確保しない限り、最も古いクラウドプロジェクトは本日削除されます。",
+    "graceDays": "Proプランが終了しました。アップグレードするか{bytes}の空き容量を確保しない限り、最も古いクラウドプロジェクトは{days, plural, other {#日後}}に削除されます。",
+    "proBody": "不要になったプロジェクトやメディアを削除して空き容量を増やしてください。",
+    "body": "Proには100 GBのクラウドストレージが含まれます。",
+    "bodyUsed": "{quota}中{used}を使用しています。Proには100 GBのクラウドストレージが含まれます。",
+    "freeUpTerms": "または、不要になったプロジェクトやメディアを削除して空き容量を増やしてください。"
+  },
+  "subscribeBonus": {
+    "daysLeft": "残り{count}日",
+    "hoursLeft": "残り{count}時間",
+    "minutesLeft": "残り{count}分",
+    "pillLabel": "Proで{credits}、{timeLeft}",
+    "pill": "Proで{credits}クレジット · {timeLeft}",
+    "starting": "開始中…"
+  },
+  "creditsPill": {
+    "label": "クレジット: {credits}",
+    "free": "無料",
+    "upgrade": "アップグレード",
+    "credits": "クレジット"
+  },
+  "storagePill": {
+    "cancelTooltip": "Proプランの解約が予約されています。クラウドストレージを維持するにはプランを再開してください。",
+    "ends": "Pro · {days, plural, =0 {本日終了} other {#日後に終了}}",
+    "graceTooltip": "Proプランが終了し、無料の上限を超えています。最も古いプロジェクトが削除される前に、アップグレードするか空き容量を確保してください。",
+    "fullTooltip": "クラウドストレージの空き容量がなくなりました。アップロードを続けるには、アップグレードするか空き容量を確保してください。",
+    "usedTooltip": "クラウドストレージ{quota}のうち{used}を使用しています。"
+  }
+}

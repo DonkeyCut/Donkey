@@ -1,0 +1,138 @@
+{
+  "editor": {
+    "title": "编辑器",
+    "language": "语言",
+    "languageHint": "Donkey Cut 界面、电子邮件和聊天回复使用的语言。",
+    "appearance": "外观",
+    "appearanceHint": "浅色、深色或跟随系统。",
+    "saveFailed": "无法保存更改，请重试。"
+  },
+  "meta": {
+    "description": "管理你的 Donkey Cut 订阅、点数和用量。"
+  },
+  "saveFailed": "无法保存更改，请重试。",
+  "header": {
+    "usageTitle": "用量",
+    "usageDescription": "你在此账单周期的 AI 生成用量。",
+    "profileTitle": "个人资料",
+    "billingTitle": "账单",
+    "billingDescription": "你的订阅和点数余额。"
+  },
+  "pro": {
+    "title": "Donkey Pro",
+    "description": "每月重置的使用额度——你仍可随时购买点数。",
+    "status": "{status, select, active {有效} trialing {试用中} past_due {已逾期} canceled {已取消} incomplete {未完成} unpaid {未支付} other {{status}}}",
+    "promotionUntil": "<b>在 {day} 前开通 Pro</b>，在此之前开始的每个月均包含 {allowance}，是平时 {usual} 的 {multiplier} 倍。",
+    "promotionOpen": "目前每个月均包含 {allowance}，是平时 {usual} 的 {multiplier} 倍。",
+    "left": "本月剩余 {left} / {total}",
+    "cancels": "将于 {date} 取消。",
+    "renews": "续费日期：{date}",
+    "activePromotionUntil": "在 {day} 之前开始的月份均包含 {allowance}。",
+    "activePromotionOpen": "每个新月份均包含 {allowance}。",
+    "bonusLanded": "你的 {credits} {origin, select, app {订阅奖励} other {特惠点数}}已计入点数余额。",
+    "subscribeOffer": "在 {deadline} 前以 {price} 订阅，即可获赠一次性 {credits}。{lifeClause}",
+    "introDeadline": "{terms} 请在 {deadline} 前订阅。",
+    "opening": "正在打开…",
+    "manage": "管理账单",
+    "starting": "正在启动…",
+    "subscribe": "订阅 Pro",
+    "unavailable": "账单服务目前不可用。"
+  },
+  "credits": {
+    "title": "点数",
+    "description": "Donkey 应用程序的按需付费余额。可随时购买更多。",
+    "available": "可用余额",
+    "buy": "购买点数",
+    "preset": "{credits} · {price}",
+    "customLabel": "点数",
+    "starting": "正在启动…",
+    "buyFor": "以 {price} 购买",
+    "buyPlain": "购买",
+    "checkoutFailed": "无法发起结账。请稍后重试。",
+    "autoReload": "余额不足时自动充值",
+    "fallsBelow": "当余额低于",
+    "unit": "点数",
+    "thenBuy": "自动购买",
+    "saving": "正在保存…",
+    "save": "保存",
+    "saveFailed": "无法保存自动充值设置。请稍后重试。",
+    "lastFailed": "上次自动充值失败：{error}",
+    "needsCard": "自动充值需要保存的银行卡。<buy>先购买一次点数</buy>以保存卡片，然后即可开启此功能。"
+  },
+  "profile": {
+    "loadFailed": "无法加载个人资料。",
+    "changePicture": "更改头像",
+    "emailVerified": "邮箱已验证",
+    "displayName": "显示名称",
+    "save": "保存",
+    "nameSaveFailed": "无法保存该名称，请重试。"
+  },
+  "avatar": {
+    "title": "头像",
+    "chooseImage": "选择图片",
+    "zoom": "缩放",
+    "replace": "更换",
+    "choose": "选择",
+    "remove": "移除",
+    "save": "保存",
+    "unreadable": "该文件不是可读取的图片格式。",
+    "prepareFailed": "无法处理该图片，请重试。",
+    "saveFailed": "无法保存该图片，请重试。"
+  },
+  "email": {
+    "title": "邮件偏好设置",
+    "product": "产品邮件",
+    "productHint": "关于 Donkey Cut 的最新动态与公告。"
+  },
+  "flagsSection": {
+    "title": "功能开关",
+    "hint": "可为你的账户启用的抢先体验功能。"
+  },
+  "flags": {
+    "editor_credits_pill": {
+      "title": "在编辑器中显示积分",
+      "description": "在编辑器顶栏显示剩余积分余额。"
+    }
+  },
+  "phoneLink": {
+    "title": "手机互联",
+    "body": "无论是否有局域网，均可通过 Wi-Fi 直连将视频从 Donkey Cut iPhone 应用直接发送到此 Mac。素材片段将直接导入当前打开的项目中。",
+    "instructions": "在手机上打开头像菜单 → Mac 互联，选择此 Mac，然后输入：",
+    "cancel": "取消",
+    "codeLife": "验证码有效期为 5 分钟。",
+    "pair": "配对手机",
+    "refused": "上一个验证码已连续输错 3 次并失效。请重新生成。",
+    "lastSeen": "上次活跃于 {when}",
+    "justNow": "刚刚",
+    "unpair": "解除配对",
+    "unpairHint": "此手机将无法再发送内容至此处",
+    "unreachable": "无法连接此 Mac 上的应用——请确认其正在运行。"
+  },
+  "usage": {
+    "included": "已包含",
+    "conversation": "对话 {id}",
+    "calls": "{count, plural, other {# 次调用}}",
+    "cachedShare": "{share}% 已缓存",
+    "date": "日期",
+    "kind": "类别",
+    "model": "模型",
+    "cost": "费用",
+    "status": "状态",
+    "callStatus": "{status, select, succeeded {成功} failed {失败} other {{status}}}",
+    "noCalls": "暂无调用。",
+    "imagesGenerated": "生成图片数",
+    "inputTokens": "输入 Token",
+    "cachedInput": "缓存输入",
+    "cachedValue": "{tokens} ({share}%)",
+    "outputTokens": "输出 Token",
+    "totalTokens": "总 Token",
+    "duration": "时长",
+    "imageExplanation": "图片生成按张计费，不按 Token 计费。",
+    "tokenExplanation": "费用由 Token 决定，其中输入占主要部分。缓存输入是服务商以更低费率复用的未修改提示词前缀；若重复调用时的缓存比例偏低，说明未命中缓存。",
+    "noUsage": "本次调用未产生计费使用量。",
+    "error": "错误：{code}"
+  },
+  "checkout": {
+    "creditsProduct": "Donkey 积分"
+  }
+}

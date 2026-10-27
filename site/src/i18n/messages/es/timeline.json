@@ -1,0 +1,207 @@
+{
+  "main": {
+    "resize": "Arrastra para cambiar el tamaño de la línea de tiempo",
+    "zoom": "Zoom",
+    "fit": "Ajustar",
+    "fitTitle": "Ajustar línea de tiempo a la ventana",
+    "sticker": "Sticker",
+    "transitionIn": "{name} de entrada",
+    "transitionOut": "{name} de salida",
+    "transitionTitle": "{name} {seconds}s — arrástrala a cualquier parte de la fila; se reproduce donde se alinee con un corte o borde de clip",
+    "dragToTrim": "Arrastra para recortar",
+    "removeEmptySpace": "Eliminar espacio vacío",
+    "removeKeyframe": "Eliminar fotograma clave",
+    "show": "Mostrar",
+    "hide": "Ocultar",
+    "captureFrame": "Capturar fotograma",
+    "copyFrame": "Copiar fotograma"
+  },
+  "toolbar": {
+    "text": "Texto",
+    "textTooltip": "Texto ({key})",
+    "magnet": "Imán",
+    "magnetOn": "Imán activado: la pista 0 se compacta",
+    "magnetOff": "Imán: compactar pista 0",
+    "split": "Dividir",
+    "splitTooltip": "Dividir en el puntero o en el cabezal (⌘B o S)",
+    "delete": "Eliminar",
+    "deleteCount": "Eliminar {count}",
+    "deleteTooltip": "Eliminar ({key})",
+    "tools": "Herramientas de línea de tiempo",
+    "zoom": "Zoom",
+    "fit": "Ajustar",
+    "fitTitle": "Ajustar línea de tiempo a la ventana",
+    "hideTimeline": "Ocultar línea de tiempo",
+    "saved": "Guardado",
+    "saveTemplate": "Guardar plantilla",
+    "backToStart": "Volver al inicio",
+    "playPause": "Reproducir/Pausar (Space)"
+  },
+  "clip": {
+    "lut": "LUT",
+    "cutting": "Cortando…",
+    "cuttingShort": "C…",
+    "speedCurve": "Curva de velocidad · {rate}× en promedio",
+    "speed": "Velocidad {rate}×",
+    "detachAudio": "Separar audio",
+    "brushStroke": "Trazo de pincel",
+    "options": "Opciones del clip",
+    "addToMedia": "Agregar a Medios",
+    "addToLibrary": "Agregar a la biblioteca",
+    "exportSegment": "Exportar segmento",
+    "download": "Descargar",
+    "showInFinder": "Mostrar en Finder",
+    "reorderRow": "Arrastra para reordenar la fila",
+    "showTrack": "Mostrar pista",
+    "hideTrack": "Ocultar pista",
+    "unmuteTrack": "Reactivar sonido de pista",
+    "muteTrack": "Silenciar pista",
+    "enable": "Activar clip",
+    "disable": "Desactivar clip",
+    "missingMedia": "Medios faltantes",
+    "mute": "Silenciar clip",
+    "unmute": "Reactivar sonido del clip",
+    "beat": "Arrastra para mover, doble clic para eliminar",
+    "fadeIn": "Arrastra para ajustar el fundido de entrada",
+    "fadeOut": "Arrastra para ajustar el fundido de salida",
+    "key": "Arrastra para ajustar tiempo, Delete para eliminar",
+    "sticker": "Sticker"
+  },
+  "picker": {
+    "label": "Línea de tiempo",
+    "heading": "Líneas de tiempo",
+    "emptyNote": "{current} está vacía. Tu edición está en {other}.",
+    "open": "Abrir {name}"
+  },
+  "group": {
+    "group": "Agrupar",
+    "ungroup": "Desagrupar",
+    "groupTooltip": "Agrupar ({key})",
+    "ungroupTooltip": "Desagrupar ({key})"
+  },
+  "media": {
+    "play": "Reproducir",
+    "pause": "Pausar",
+    "seek": "Buscar",
+    "mute": "Silenciar",
+    "unmute": "Activar sonido"
+  },
+  "trackRow": {
+    "track": "Rastrear",
+    "follow": "Seguir",
+    "tracking": "Rastreando {progress}%",
+    "pickTarget": "Elige un objetivo",
+    "failed": "No se pudo rastrear el metraje.",
+    "targets": {
+      "hands_gap": "Entre las manos",
+      "left_hand": "Mano izquierda",
+      "right_hand": "Mano derecha",
+      "head": "Cabeza",
+      "person": "Persona"
+    }
+  },
+  "flash": {
+    "tone": "Tono",
+    "strobe": "Estrobo",
+    "strobeRate": "Frecuencia de estrobo",
+    "off": "Desactivado",
+    "rhythm": "Ritmo",
+    "fade": "Fundido",
+    "curve": "Curva",
+    "tones": {
+      "white": "Blanco",
+      "black": "Negro"
+    },
+    "rhythms": {
+      "strobe": "Estrobo",
+      "flicker": "Parpadeo"
+    },
+    "fades": {
+      "none": "Desactivado",
+      "to": "Hacia",
+      "from": "Desde"
+    }
+  },
+  "curves": {
+    "channels": {
+      "m": "Master",
+      "r": "Rojo",
+      "g": "Verde",
+      "b": "Azul"
+    }
+  },
+  "guides": {
+    "show": "Mostrar guías",
+    "hide": "Ocultar guías",
+    "showTitle": "Mostrar guías ({key})",
+    "hideTitle": "Ocultar guías ({key})",
+    "presetsLabel": "Preajustes de guías",
+    "heading": "Guías",
+    "portraitOnly": "Marcos verticales",
+    "addVertical": "Agregar línea vertical",
+    "addHorizontal": "Agregar línea horizontal",
+    "presets": {
+      "thirds": "Tercios",
+      "center": "Centro",
+      "margins": "Márgenes seguros",
+      "shortform": "Formato corto",
+      "custom": "Personalizado"
+    },
+    "sublabels": {
+      "margins": "Margen de {inset}",
+      "shortform": "TikTok, Instagram, YouTube",
+      "custom": "Arrastra las líneas en la vista previa"
+    },
+    "regions": {
+      "topBar": "Barra superior",
+      "cropped": "Recortado",
+      "actions": "Acciones",
+      "caption": "Subtítulos · música · nav."
+    }
+  },
+  "speedCurve": {
+    "node": "nodo {rate} en {time}",
+    "pickPreset": "Elige una curva preestablecida",
+    "custom": "Personalizado",
+    "smoothSlow": "Cámara lenta fluida",
+    "smoothSlowInfo": "Al activarse, todo lo inferior a 1× se suaviza al exportar.",
+    "addNode": "Agrega un nodo en el cabezal",
+    "removeNode": "Elimina el nodo seleccionado (Delete)",
+    "flatten": "Aplanar a 1×",
+    "close": "Cerrar ({key})",
+    "presets": {
+      "flat": {
+        "label": "Plana",
+        "hint": "misma velocidad en todo el clip"
+      },
+      "rampIn": {
+        "label": "Rampa de entrada",
+        "hint": "inicia rápido y pasa suave a cámara lenta"
+      },
+      "rampOut": {
+        "label": "Rampa de salida",
+        "hint": "inicia en cámara lenta y acelera con suavidad"
+      },
+      "drift": {
+        "label": "Deriva",
+        "hint": "un impulso que baja a cámara lenta y se recupera"
+      },
+      "pulse": {
+        "label": "Pulso",
+        "hint": "dos aceleraciones en torno a un momento lento"
+      },
+      "hold": {
+        "label": "Pausa",
+        "hint": "acelera al inicio, frena en el medio y sale rápido"
+      },
+      "whip": {
+        "label": "Latigazo",
+        "hint": "cámara lenta con una ráfaga de velocidad al centro"
+      },
+      "stutter": {
+        "label": "Entrecortado",
+        "hint": "aceleraciones y momentos lentos alternados"
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "notNow": "Nicht jetzt",
+  "ok": "OK",
+  "upgradeToPro": "Upgrade auf Pro",
+  "subscribeToPro": "Pro abonnieren",
+  "buyCredits": "Credits kaufen",
+  "billingUnavailable": "Abrechnung ist gerade nicht verfügbar.",
+  "offer": {
+    "validThrough": "Zusätzliche Credits sind gültig bis {date}.",
+    "validFor": "Zusätzliche Credits sind gültig für {days, plural, one {# Tag} other {# Tage}}.",
+    "claimBody": "Du hast {credits} zum Einlösen.",
+    "claimBodyBy": "Du hast {credits} zum Einlösen. Löse sie bis {date} ein.",
+    "claimTerms": "Einmal eingelöst sind sie gültig für {days, plural, one {# Tag} other {# Tage}}.",
+    "subscribeBody": "Abonniere Pro für {price} und erhalte zusätzlich {credits}.",
+    "expiresIn": "Angebot endet in {hours}h {minutes}m {seconds}s"
+  },
+  "intro": {
+    "terms": "{months, plural, one {{percent} % Rabatt: {price} für deinen ersten Monat, danach {full}/Monat.} other {{percent} % Rabatt: {price}/Monat für deine ersten # Monate, danach {full}/Monat.}}"
+  },
+  "upgrade": {
+    "outOfCredits": "Du hast keine Credits mehr",
+    "proOutBody": "Deine Pro-Credits für diesen Monat sind aufgebraucht. Kaufe mehr, um weiter zu generieren.",
+    "projectsTitle": "Upgrade für mehr Projekte",
+    "creditsBody": "Upgrade auf Pro und erhalte jeden Monat {credits} sowie 100 GB Cloud-Speicher für {price}.",
+    "creditsBodyOffer": "Upgrade auf Pro und erhalte jeden Monat {credits} sowie 100 GB Cloud-Speicher.",
+    "proPrice": "Pro kostet {price}.",
+    "projectsBodyStarter": "Im kostenlosen Tarif bleibt dein Starter-Projekt erhalten. Mit Pro erstellst du so viele, wie du brauchst.",
+    "projectsBody": "Im kostenlosen Tarif bleibt neben deinem Starter-Projekt {count, plural, one {# weiteres Projekt} other {# weitere Projekte}} erhalten. Mit Pro erstellst du so viele, wie du brauchst."
+  },
+  "claim": {
+    "expiredTitle": "Dieses Angebot ist abgelaufen",
+    "alreadyProTitle": "Du hast bereits Pro",
+    "invalidTitle": "Dieser Link ist nicht mehr gültig",
+    "wrongAccount": "Dieses Angebot gehört zu einem anderen Account. Melde dich mit der Adresse an, an die die E-Mail gesendet wurde.",
+    "windowClosed": "Die Einlösefrist für dieses Angebot ist abgelaufen.",
+    "proOnly": "Dieses Angebot gilt nur für Accounts ohne Pro-Abo.",
+    "gone": "Das verlinkte Angebot ist nicht mehr verfügbar.",
+    "addedTitle": "{credits} wurden deinem Account gutgeschrieben",
+    "ready": "Du kannst sie jetzt nutzen.",
+    "readyExpires": "Du kannst sie jetzt nutzen. Sie verfallen am {date}.",
+    "startEditing": "Bearbeitung starten",
+    "withProTitle": "Hol dir {credits} mit Pro",
+    "waitingTitle": "{credits} warten auf dich",
+    "claimButton": "{credits} sichern",
+    "failed": "Das hat nicht geklappt. Versuch es noch einmal."
+  },
+  "storage": {
+    "title": "Cloud-Speicher",
+    "fullTitle": "Cloud-Speicher ist voll",
+    "used": "Du hast {used} von {quota} belegt.",
+    "graceToday": "Dein Pro-Abo ist abgelaufen. Deine ältesten Cloud-Projekte werden heute gelöscht, sofern du kein Upgrade durchführst oder {bytes} freigibst.",
+    "graceDays": "Dein Pro-Abo ist abgelaufen. Deine ältesten Cloud-Projekte werden in {days, plural, one {# Tag} other {# Tagen}} gelöscht, sofern du kein Upgrade durchführst oder {bytes} freigibst.",
+    "proBody": "Gib Speicherplatz frei, indem du nicht mehr benötigte Projekte oder Medien löschst.",
+    "body": "Pro enthält 100 GB Cloud-Speicher.",
+    "bodyUsed": "Du hast {used} von {quota} belegt. Pro enthält 100 GB Cloud-Speicher.",
+    "freeUpTerms": "Oder gib Speicherplatz frei, indem du nicht mehr benötigte Projekte und Medien löschst."
+  },
+  "subscribeBonus": {
+    "daysLeft": "{count}d übrig",
+    "hoursLeft": "{count}h übrig",
+    "minutesLeft": "{count}m übrig",
+    "pillLabel": "{credits} mit Pro, {timeLeft}",
+    "pill": "{credits} Credits mit Pro · {timeLeft}",
+    "starting": "Wird gestartet…"
+  },
+  "creditsPill": {
+    "label": "Credits: {credits}",
+    "free": "Kostenlos",
+    "upgrade": "Upgrade",
+    "credits": "Credits"
+  },
+  "storagePill": {
+    "cancelTooltip": "Dein Pro-Abo wird gekündigt. Setze es fort, um deinen Cloud-Speicher zu behalten.",
+    "ends": "Pro · {days, plural, =0 {endet heute} one {endet in # Tag} other {endet in # Tagen}}",
+    "graceTooltip": "Dein Pro-Abo ist abgelaufen und du hast das kostenlose Limit überschritten. Führe ein Upgrade durch oder gib Speicherplatz frei, bevor deine ältesten Projekte gelöscht werden.",
+    "fullTooltip": "Dein Cloud-Speicher ist voll. Führe ein Upgrade durch oder gib Speicherplatz frei, um weiter hochzuladen.",
+    "usedTooltip": "{used} von {quota} Cloud-Speicher belegt."
+  }
+}

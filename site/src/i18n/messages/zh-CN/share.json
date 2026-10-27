@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "restrictedTitle": "共享项目 · Donkey Cut",
+    "restrictedDescription": "此项目仅与特定人员共享。",
+    "title": "{name} · Donkey Cut",
+    "description": "在浏览器中观看 {name}。",
+    "libraryTitle": "共享媒体库 · Donkey Cut"
+  },
+  "view": {
+    "signInPrompt": "此项目仅与特定人员共享——登录以确认你是否有权限。",
+    "signIn": "登录",
+    "denied": "你没有此项目的访问权限。请联系所有者邀请你。",
+    "deniedAs": "你以 {email} 登录的账号没有此项目的访问权限。请联系所有者邀请你。",
+    "inactive": "此分享链接已失效。",
+    "untitled": "未命名"
+  }
+}

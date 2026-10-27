@@ -1,0 +1,269 @@
+{
+  "tabs": {
+    "projects": "Projetos",
+    "library": "Biblioteca",
+    "notes": "Notas",
+    "cameraRoll": "Rolo da Câmera"
+  },
+  "newProject": {
+    "button": "Novo projeto",
+    "title": "Novo projeto",
+    "placeholder": "Nome do projeto",
+    "create": "Criar projeto",
+    "whereSaved": "Onde novos projetos e mídias são salvos: {place}",
+    "scopeLocal": "Todos os projetos e mídias criados a partir<br></br>de agora serão salvos <b>neste dispositivo</b>",
+    "scopeCloud": "Todos os projetos e mídias criados a partir<br></br>de agora serão salvos na <b>Nuvem</b>"
+  },
+  "embeddedNewProject": {
+    "create": "Criar novo projeto",
+    "limit": "Esta conta atingiu o limite de projetos gratuitos. Faça upgrade para o Pro no Donkey Cut para criar mais.",
+    "failed": "Não foi possível criar o projeto."
+  },
+  "projects": {
+    "badgeLocal": "Este é um projeto local",
+    "badgeCloud": "Este é um projeto na nuvem",
+    "badgeOffline": "Este é um projeto local — abra o app Donkey para editá-lo",
+    "grace": "Seu plano Pro terminou e você excedeu o limite de armazenamento gratuito. Seus projetos mais antigos na nuvem serão excluídos {days, plural, =0 {hoje} one {em # dia} other {em # dias}}, a menos que você faça upgrade ou libere {size}.",
+    "upgradeToPro": "Fazer upgrade para o Pro",
+    "deleteFolderFailed": "Não foi possível excluir a pasta.",
+    "deleteProjectFailed": "Não foi possível excluir o projeto.",
+    "duplicateFailed": "Não foi possível duplicar o projeto.",
+    "moveFailed": "Não foi possível mover o projeto.",
+    "deleteFailed": "Não foi possível excluir.",
+    "cardMeta": "{size} · editado em {date}",
+    "columnName": "Nome",
+    "columnLength": "Duração",
+    "columnSize": "Tamanho",
+    "columnEdited": "Editado",
+    "importing": "Importando… <elapsed></elapsed>",
+    "newFolder": "Nova pasta",
+    "galleryView": "Visualização em galeria",
+    "listView": "Visualização em lista",
+    "loadFailed": "Não foi possível carregar estes projetos.",
+    "loadFailedCloud": "Não foi possível carregar os projetos na nuvem.",
+    "loadFailedLocal": "Não foi possível carregar os projetos neste Mac.",
+    "emptyTitle": "Crie um novo projeto para começar",
+    "renameTitle": "Renomear projeto",
+    "rename": "Renomear",
+    "deleteTitle": "Excluir {what}?",
+    "foldersEmpty": "{count, plural, =1 {A pasta está vazia.} other {As pastas estão vazias.}}",
+    "deletesFolders": "{count, plural, =1 {Isso exclui toda a pasta do projeto, incluindo seus arquivos de mídia e exportações.} other {Isso exclui toda a pasta de cada projeto, incluindo seus arquivos de mídia e exportações.}}",
+    "cannotUndo": "Isso não pode ser desfeito.",
+    "deleteProjects": "{count, plural, =1 {Excluir projeto} other {Excluir projetos}}",
+    "deleteFolder": "Excluir pasta",
+    "delete": "Excluir",
+    "duplicate": "Duplicar",
+    "moveToLocal": "Mover para Local",
+    "moveToCloud": "Mover para Nuvem",
+    "actions": "Ações do projeto"
+  },
+  "pick": {
+    "project": "{count, plural, one {# projeto} other {# projetos}}",
+    "file": "{count, plural, one {# arquivo} other {# arquivos}}",
+    "item": "{count, plural, one {# item} other {# itens}}",
+    "clip": "{count, plural, one {# clipe} other {# clipes}}",
+    "note": "{count, plural, one {# nota} other {# notas}}",
+    "folder": "{count, plural, one {# pasta} other {# pastas}}",
+    "named": "“{name}”",
+    "namedHolding": "“{name}” e seus {held}",
+    "foldersHolding": "{folders} ({held})",
+    "both": "{folders} e {items}",
+    "foldersGo": "{count, plural, =1 {Tudo dentro da pasta vai junto.} other {Tudo dentro das pastas vai junto.}}",
+    "phoneOnly": "Foi sincronizado do seu celular e também será removido de lá.",
+    "phoneSome": "{count, plural, =1 {Um deles foi sincronizado do seu celular e também será removido de lá.} other {# deles foram sincronizados do seu celular e também serão removidos de lá.}}",
+    "cancel": "Cancelar",
+    "delete": "Excluir"
+  },
+  "folders": {
+    "renameFolder": "Renomear pasta",
+    "renameFailed": "Não foi possível renomear a pasta.",
+    "createFailed": "Não foi possível criar a pasta.",
+    "share": "Compartilhar",
+    "rename": "Renomear",
+    "delete": "Excluir",
+    "deleteFolder": "Excluir pasta",
+    "options": "Opções da pasta",
+    "items": "{count, plural, one {# item} other {# itens}}",
+    "namePlaceholder": "Nome"
+  },
+  "rename": {
+    "name": "Nome"
+  },
+  "shelfBadge": {
+    "offline": "Local — abra o app Donkey para usar"
+  },
+  "library": {
+    "share": "Compartilhar",
+    "newFolder": "Nova pasta",
+    "addMedia": "Adicionar mídia",
+    "emptyTitle": "Sua Biblioteca é compartilhada entre todos os projetos.",
+    "emptyHint": "Arraste e solte vídeos, imagens, áudios ou arquivos de fontes aqui.",
+    "chooseFiles": "Escolher arquivos",
+    "orPasteLink": "ou cole um link",
+    "linkPlaceholder": "Link do TikTok, YouTube ou Instagram…",
+    "import": "Importar",
+    "addNote": "Adicionar nota",
+    "delete": "Excluir",
+    "deleteTitle": "Excluir {what}?",
+    "keepCopy": "{count, plural, =1 {Projetos que já o usam mantêm sua própria cópia.} other {Projetos que já os usam mantêm sua própria cópia.}}",
+    "remove": "Remover"
+  },
+  "libraryShare": {
+    "title": "{kind, select, folder {Compartilhar pasta} other {Compartilhar recurso}}",
+    "body": "{kind, select, folder {Copie esta pasta para a Nuvem para que as pessoas possam abri-la mesmo se o seu dispositivo estiver offline.} other {Copie este recurso para a Nuvem para que as pessoas possam abri-lo mesmo se o seu dispositivo estiver offline.}} As configurações de compartilhamento serão aplicadas à cópia na nuvem. Seus arquivos locais continuam aqui.",
+    "copyFailed": "Não foi possível copiar para a Nuvem.",
+    "copying": "Copiando para a Nuvem…",
+    "copy": "Copiar para a Nuvem"
+  },
+  "sharedLibrary": {
+    "viewOnly": "Biblioteca compartilhada · Somente visualização",
+    "loading": "Carregando biblioteca compartilhada",
+    "signInToView": "Entre para ver este compartilhamento.",
+    "noAccess": "Você não tem acesso a este compartilhamento. Peça para o proprietário convidar você.",
+    "gone": "Este link de compartilhamento não está mais disponível.",
+    "loadFailed": "Não foi possível carregar este compartilhamento.",
+    "signIn": "Entrar",
+    "tryAgain": "Tentar novamente",
+    "breadcrumb": "Navegação estrutural da pasta",
+    "templateMedia": "Mídia de modelo",
+    "emptyFolder": "Esta pasta está vazia.",
+    "pages": "Páginas",
+    "firstPage": "Primeira página",
+    "nextPage": "Próxima página"
+  },
+  "card": {
+    "renameFailed": "Não foi possível renomear o arquivo.",
+    "renameFailedBadge": "Falha ao renomear",
+    "preparing": "Preparando",
+    "cantPlay": "Não é possível reproduzir",
+    "makingCopy": "Criando uma cópia compatível com este navegador"
+  },
+  "importCard": {
+    "preview": "Pré-visualizar {name}",
+    "retry": "Tentar novamente",
+    "cancel": "Cancelar",
+    "archive": "Arquivar",
+    "failed": "Falhou",
+    "importing": "Importando",
+    "importingFor": "Importando <time>{elapsed}</time>"
+  },
+  "cardMenu": {
+    "moreActions": "Mais ações",
+    "addToTimeline": "Adicionar à timeline",
+    "share": "Compartilhar",
+    "rename": "Renomear",
+    "download": "Baixar",
+    "openOriginal": "Abrir original",
+    "delete": "Excluir"
+  },
+  "generatedMenu": {
+    "moreActions": "Mais ações",
+    "addToMedia": "Adicionar a Mídia",
+    "addToLibrary": "Adicionar à Biblioteca",
+    "download": "Baixar",
+    "delete": "Excluir",
+    "deleteTitle": "Excluir “{name}”?",
+    "timelineUses": "{count, plural, one {Está em # ponto da timeline, que será removido junto.} other {Está em # pontos da timeline, que serão removidos junto.}}",
+    "fileGoes": "O arquivo de mídia também será excluído e isso não pode ser desfeito.",
+    "cancel": "Cancelar"
+  },
+  "notes": {
+    "untitled": "Sem título",
+    "untitledNote": "Nota sem título",
+    "allNotes": "Todas as notas",
+    "saveFailed": "Não foi possível salvar a nota.",
+    "reopen": "Reabrir e tentar novamente",
+    "newFolder": "Nova pasta",
+    "newNote": "Nova nota",
+    "loadFailed": "Não foi possível carregar as notas.",
+    "retry": "Tentar novamente",
+    "emptyTitle": "Nenhuma nota ainda.",
+    "emptyHint": "As notas sincronizam com o app do Donkey Cut para iOS — um roteiro escrito aqui fica pronto no teleprompter do celular.",
+    "delete": "Excluir",
+    "deleteTitle": "Excluir {what}?",
+    "deleteFolderTitle": "Excluir “{name}”?",
+    "folderFallback": "pasta",
+    "removedFromPhone": "{count, plural, =1 {Também será removido do seu celular.} other {Também serão removidos do seu celular.}}"
+  },
+  "composer": {
+    "untitledNote": "Nota sem título",
+    "titlePlaceholder": "Sem título",
+    "noteColor": "Cor da nota",
+    "deleteNote": "Excluir nota",
+    "delete": "Excluir",
+    "removeLabel": "Remover etiqueta {name}",
+    "addLabel": "Adicionar etiqueta",
+    "label": "Etiqueta",
+    "colors": {
+      "butter": "Manteiga",
+      "blush": "Blush",
+      "sky": "Céu",
+      "mint": "Menta",
+      "lilac": "Lilás"
+    }
+  },
+  "labelPicker": {
+    "newLabel": "Nova etiqueta…",
+    "findOrCreate": "Buscar ou criar…",
+    "renameLabel": "Renomear etiqueta {name}",
+    "deleteLabel": "Excluir etiqueta {name}",
+    "create": "Criar “{name}”",
+    "full": "Uma nota comporta até {max} etiquetas. Remova uma para adicionar outra.",
+    "firstLabel": "Digite um nome para criar sua primeira etiqueta."
+  },
+  "noteEditor": {
+    "placeholder": "Escreva sua nota…",
+    "turnInto": {
+      "text": "Texto",
+      "h1": "Título 1",
+      "h2": "Título 2",
+      "h3": "Título 3",
+      "bullet": "Lista com marcadores",
+      "number": "Lista numerada",
+      "todo": "Lista de tarefas",
+      "quote": "Citação"
+    },
+    "bold": "Negrito",
+    "italic": "Itálico",
+    "underline": "Sublinhado",
+    "strikethrough": "Tachado",
+    "listStyle": "Estilo de lista",
+    "textColor": "Cor do texto",
+    "defaultColor": "Padrão",
+    "textColors": {
+      "gray": "Cinza",
+      "brown": "Marrom",
+      "orange": "Laranja",
+      "yellow": "Amarelo",
+      "green": "Verde",
+      "blue": "Azul",
+      "purple": "Roxo",
+      "pink": "Rosa",
+      "red": "Vermelho"
+    }
+  },
+  "docText": {
+    "empty": "Arquivo vazio.",
+    "moreRows": "+{count} mais linhas"
+  },
+  "cameraRoll": {
+    "emptyTitle": "Nada do seu celular ainda.",
+    "emptyHint": "Os clipes gravados no app Donkey Cut para iOS são sincronizados aqui automaticamente.",
+    "delete": "Excluir",
+    "deleteTitle": "Excluir {what}?",
+    "deleteBody": "{count, plural, =1 {O clipe sai do seu Rolo da Câmera na nuvem e do celular onde foi gravado. Projetos que já o usam mantêm sua própria cópia.} other {Os clipes saem do seu Rolo da Câmera na nuvem e do celular onde foram gravados. Projetos que já os usam mantêm sua própria cópia.}}"
+  },
+  "navUser": {
+    "billing": "Faturamento",
+    "usage": "Uso",
+    "onboarding": "Ver introdução",
+    "runLocally": "Executar localmente no Mac",
+    "logOut": "Sair"
+  },
+  "navStorage": {
+    "get100": "Obter 100 GB",
+    "upgradeTip": "Faça upgrade para 100 GB + créditos de IA",
+    "grace": "Seu plano Pro terminou. Faça upgrade ou libere {size} antes que seus projetos mais antigos sejam excluídos."
+  },
+  "justNow": "agora mesmo"
+}

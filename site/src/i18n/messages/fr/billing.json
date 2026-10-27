@@ -1,0 +1,79 @@
+{
+  "notNow": "Pas maintenant",
+  "ok": "OK",
+  "upgradeToPro": "Passer à Pro",
+  "subscribeToPro": "S'abonner à Pro",
+  "buyCredits": "Acheter des crédits",
+  "billingUnavailable": "La facturation est indisponible pour le moment.",
+  "offer": {
+    "validThrough": "Les crédits supplémentaires sont valables jusqu'au {date}.",
+    "validFor": "Les crédits supplémentaires sont valables {days, plural, one {# jour} other {# jours}}.",
+    "claimBody": "Vous avez {credits} à réclamer.",
+    "claimBodyBy": "Vous avez {credits} à réclamer. Réclamez-les avant le {date}.",
+    "claimTerms": "Une fois réclamés, ils sont valables {days, plural, one {# jour} other {# jours}}.",
+    "subscribeBody": "Abonnez-vous à Pro pour {price} et recevez {credits} supplémentaires.",
+    "expiresIn": "L'offre expire dans {hours}h {minutes}m {seconds}s"
+  },
+  "intro": {
+    "terms": "{months, plural, one {-{percent} % : {price} le premier mois, puis {full}/mois.} other {-{percent} % : {price}/mois les # premiers mois, puis {full}/mois.}}"
+  },
+  "upgrade": {
+    "outOfCredits": "Vous n'avez plus de crédits",
+    "proOutBody": "Les crédits Pro de ce mois sont épuisés. Achetez-en pour continuer à générer.",
+    "projectsTitle": "Passez à Pro pour créer plus de projets",
+    "creditsBody": "Passez à Pro pour obtenir {credits} chaque mois et 100 GB de stockage cloud pour {price}.",
+    "creditsBodyOffer": "Passez à Pro pour obtenir {credits} chaque mois et 100 GB de stockage cloud.",
+    "proPrice": "Pro est à {price}.",
+    "projectsBodyStarter": "Le forfait gratuit conserve votre projet de départ. Pro en crée autant que nécessaire.",
+    "projectsBody": "Le forfait gratuit conserve {count, plural, one {# projet} other {# projets}} en plus de votre projet de départ. Pro en crée autant que nécessaire."
+  },
+  "claim": {
+    "expiredTitle": "Cette offre a expiré",
+    "alreadyProTitle": "Vous avez déjà Pro",
+    "invalidTitle": "Ce lien n'est plus valide",
+    "wrongAccount": "Cette offre est associée à un autre compte. Connectez-vous avec l'adresse à laquelle l'e-mail a été envoyé.",
+    "windowClosed": "La période pour réclamer cette offre est terminée.",
+    "proOnly": "Cette offre est réservée aux comptes sans abonnement Pro.",
+    "gone": "L'offre associée n'existe plus.",
+    "addedTitle": "{credits} ajoutés à votre compte",
+    "ready": "Ils sont prêts à être utilisés.",
+    "readyExpires": "Ils sont prêts à être utilisés. Ils expirent le {date}.",
+    "startEditing": "Commencer le montage",
+    "withProTitle": "Obtenez {credits} avec Pro",
+    "waitingTitle": "{credits} vous attendent",
+    "claimButton": "Récupérer {credits}",
+    "failed": "L'opération a échoué. Réessayez."
+  },
+  "storage": {
+    "title": "Stockage cloud",
+    "fullTitle": "Le stockage cloud est plein",
+    "used": "Vous avez utilisé {used} sur {quota}.",
+    "graceToday": "Votre forfait Pro a pris fin. Vos projets cloud les plus anciens seront supprimés aujourd'hui, sauf si vous passez à l'offre supérieure ou libérez {bytes}.",
+    "graceDays": "Votre forfait Pro a pris fin. Vos projets cloud les plus anciens seront supprimés dans {days, plural, one {# jour} other {# jours}}, sauf si vous passez à l'offre supérieure ou libérez {bytes}.",
+    "proBody": "Libérez de l'espace en supprimant les projets ou médias dont vous n'avez plus besoin.",
+    "body": "Pro inclut 100 GB de stockage cloud.",
+    "bodyUsed": "Vous avez utilisé {used} sur {quota}. Pro inclut 100 GB de stockage cloud.",
+    "freeUpTerms": "Ou libérez de l'espace en supprimant les projets et médias dont vous n'avez plus besoin."
+  },
+  "subscribeBonus": {
+    "daysLeft": "{count} j restants",
+    "hoursLeft": "{count} h restantes",
+    "minutesLeft": "{count} min restantes",
+    "pillLabel": "{credits} avec Pro, {timeLeft}",
+    "pill": "{credits} crédits avec Pro · {timeLeft}",
+    "starting": "Démarrage…"
+  },
+  "creditsPill": {
+    "label": "Crédits : {credits}",
+    "free": "Gratuit",
+    "upgrade": "Passer à Pro",
+    "credits": "Crédits"
+  },
+  "storagePill": {
+    "cancelTooltip": "Votre forfait Pro va être résilié. Réactivez-le pour conserver votre stockage cloud.",
+    "ends": "Pro · {days, plural, =0 {se termine aujourd'hui} one {se termine dans # jour} other {se termine dans # jours}}",
+    "graceTooltip": "Votre forfait Pro a pris fin et vous dépassez la limite gratuite. Passez à l'offre supérieure ou libérez de l'espace avant la suppression de vos plus anciens projets.",
+    "fullTooltip": "Vous n'avez plus d'espace de stockage cloud. Passez à l'offre supérieure ou libérez de l'espace pour continuer à importer.",
+    "usedTooltip": "{used} sur {quota} de stockage cloud utilisé."
+  }
+}

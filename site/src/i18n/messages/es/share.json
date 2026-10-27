@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "restrictedTitle": "Proyecto compartido · Donkey Cut",
+    "restrictedDescription": "Este proyecto está compartido con personas específicas.",
+    "title": "{name} · Donkey Cut",
+    "description": "Mira {name} en el navegador.",
+    "libraryTitle": "Biblioteca compartida · Donkey Cut"
+  },
+  "view": {
+    "signInPrompt": "Este proyecto está compartido con personas específicas: inicia sesión para ver si tienes acceso.",
+    "signIn": "Iniciar sesión",
+    "denied": "No tienes acceso a este proyecto. Pídele al propietario que te invite.",
+    "deniedAs": "No tienes acceso a este proyecto como {email}. Pídele al propietario que te invite.",
+    "inactive": "Este enlace para compartir ya no está activo.",
+    "untitled": "Sin título"
+  }
+}

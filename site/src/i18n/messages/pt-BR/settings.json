@@ -1,0 +1,138 @@
+{
+  "editor": {
+    "title": "Editor",
+    "language": "Idioma",
+    "languageHint": "O idioma usado pelo Donkey Cut, seus e-mails e respostas do chat.",
+    "appearance": "Aparência",
+    "appearanceHint": "Clara, escura ou igual à do sistema.",
+    "saveFailed": "Não foi possível salvar a alteração — tente novamente."
+  },
+  "meta": {
+    "description": "Gerencie sua assinatura, créditos e uso do Donkey Cut."
+  },
+  "saveFailed": "Não foi possível salvar a alteração — tente novamente.",
+  "header": {
+    "usageTitle": "Uso",
+    "usageDescription": "Seu uso de geração com IA neste período de faturamento.",
+    "profileTitle": "Perfil",
+    "billingTitle": "Faturamento",
+    "billingDescription": "Sua assinatura e saldo de créditos."
+  },
+  "pro": {
+    "title": "Donkey Pro",
+    "description": "Um limite mensal de uso renovado a cada mês — você ainda pode comprar créditos a qualquer momento.",
+    "status": "{status, select, active {ativo} trialing {em teste} past_due {em atraso} canceled {cancelado} incomplete {incompleto} unpaid {não pago} other {{status}}}",
+    "promotionUntil": "<b>Assine o Pro até {day}</b> e cada mês iniciado até lá incluirá {allowance}, {multiplier}× o habitual de {usual}.",
+    "promotionOpen": "Atualmente, cada mês inclui {allowance}, {multiplier}× o habitual de {usual}.",
+    "left": "Restam {left} de {total} este mês",
+    "cancels": "Cancela em {date}.",
+    "renews": "Renova em: {date}",
+    "activePromotionUntil": "Meses iniciados até {day} incluem {allowance}.",
+    "activePromotionOpen": "Cada novo mês inclui {allowance}.",
+    "bonusLanded": "{origin, select, app {Seu bônus de assinatura} other {Sua oferta de créditos}} de {credits} foi adicionado aos seus créditos.",
+    "subscribeOffer": "Assine por {price} até {deadline} e ganhe {credits} de uso único.{lifeClause}",
+    "introDeadline": "{terms} Assine até {deadline}.",
+    "opening": "Abrindo…",
+    "manage": "Gerenciar faturamento",
+    "starting": "Iniciando…",
+    "subscribe": "Assinar o Pro",
+    "unavailable": "O faturamento não está disponível no momento."
+  },
+  "credits": {
+    "title": "Créditos",
+    "description": "Saldo pré-pago para o app Donkey. Compre mais a qualquer momento.",
+    "available": "Saldo disponível",
+    "buy": "Comprar créditos",
+    "preset": "{credits} · {price}",
+    "customLabel": "Créditos",
+    "starting": "Iniciando…",
+    "buyFor": "Comprar por {price}",
+    "buyPlain": "Comprar",
+    "checkoutFailed": "Não foi possível iniciar o checkout. Tente novamente em instantes.",
+    "autoReload": "Recarregar automaticamente quando o saldo estiver baixo",
+    "fallsBelow": "Quando o saldo ficar abaixo de",
+    "unit": "créditos",
+    "thenBuy": "comprar automaticamente",
+    "saving": "Salvando…",
+    "save": "Salvar",
+    "saveFailed": "Não foi possível salvar a recarga automática. Tente novamente em instantes.",
+    "lastFailed": "A última recarga automática falhou: {error}",
+    "needsCard": "A recarga automática precisa de um cartão salvo. <buy>Compre créditos uma vez</buy> para salvar um e depois ative este recurso."
+  },
+  "profile": {
+    "loadFailed": "Não foi possível carregar seu perfil.",
+    "changePicture": "Alterar foto do perfil",
+    "emailVerified": "E-mail verificado",
+    "displayName": "Nome de exibição",
+    "save": "Salvar",
+    "nameSaveFailed": "Não foi possível salvar o nome — tente novamente."
+  },
+  "avatar": {
+    "title": "Foto do perfil",
+    "chooseImage": "Escolher imagem",
+    "zoom": "Zoom",
+    "replace": "Substituir",
+    "choose": "Escolher",
+    "remove": "Remover",
+    "save": "Salvar",
+    "unreadable": "Não conseguimos ler esse arquivo de imagem.",
+    "prepareFailed": "Não foi possível preparar a imagem — tente novamente.",
+    "saveFailed": "Não foi possível salvar a foto — tente novamente."
+  },
+  "email": {
+    "title": "Preferências de e-mail",
+    "product": "E-mails do produto",
+    "productHint": "Novidades e avisos sobre o Donkey Cut."
+  },
+  "flagsSection": {
+    "title": "Recursos experimentais",
+    "hint": "Recursos antecipados que você pode ativar na sua conta."
+  },
+  "flags": {
+    "editor_credits_pill": {
+      "title": "Mostrar créditos no editor",
+      "description": "Seu saldo restante na barra superior do editor."
+    }
+  },
+  "phoneLink": {
+    "title": "Conexão com celular",
+    "body": "Envie vídeos do app Donkey Cut para iPhone direto para este Mac via Wi-Fi Direct, com ou sem rede. Os clipes vão para o projeto que estiver aberto.",
+    "instructions": "No celular, abra o menu do avatar → Mac Link, escolha este Mac e digite:",
+    "cancel": "Cancelar",
+    "codeLife": "O código é válido por cinco minutos.",
+    "pair": "Vincular celular",
+    "refused": "O último código foi digitado incorretamente três vezes e expirou. Gere um novo.",
+    "lastSeen": "Visto por último {when}",
+    "justNow": "agora mesmo",
+    "unpair": "Desvincular",
+    "unpairHint": "Este celular não poderá mais enviar arquivos para cá",
+    "unreachable": "Não foi possível conectar ao app neste Mac — verifique se ele está aberto."
+  },
+  "usage": {
+    "included": "Incluído",
+    "conversation": "Conversa {id}",
+    "calls": "{count, plural, one {# chamada} other {# chamadas}}",
+    "cachedShare": "{share}% em cache",
+    "date": "Data",
+    "kind": "Tipo",
+    "model": "Modelo",
+    "cost": "Custo",
+    "status": "Status",
+    "callStatus": "{status, select, succeeded {sucesso} failed {falhou} other {{status}}}",
+    "noCalls": "Nenhuma chamada ainda.",
+    "imagesGenerated": "Imagens geradas",
+    "inputTokens": "Tokens de entrada",
+    "cachedInput": "Entrada em cache",
+    "cachedValue": "{tokens} ({share}%)",
+    "outputTokens": "Tokens de saída",
+    "totalTokens": "Total de tokens",
+    "duration": "Duração",
+    "imageExplanation": "A geração de imagens é cobrada por imagem, não por tokens.",
+    "tokenExplanation": "O custo é determinado pelos tokens, e a entrada é a maior parte aqui. A entrada em cache é um prefixo de prompt inalterado que o provedor reutiliza por uma fração do preço; uma baixa porcentagem em cache em uma chamada repetida significa que o cache não está sendo aproveitado.",
+    "noUsage": "Nenhum consumo faturável foi registrado para esta chamada.",
+    "error": "Erro: {code}"
+  },
+  "checkout": {
+    "creditsProduct": "Créditos Donkey"
+  }
+}

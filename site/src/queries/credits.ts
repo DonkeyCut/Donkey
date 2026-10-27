@@ -147,9 +147,7 @@ export type CreditOffer = {
   claimed: boolean;
   // The last moment the offer can be claimed; null keeps it open.
   closesAt: string | null;
-  // The amount as people read it, "5,000 credits".
-  credits: string;
-  // The same amount in USD, "5", for analytics.
+  // The amount in USD, "5"; the dialog words it as credits.
   dollars: string;
   // When the claimed credit expires; null before the claim and for a credit
   // that keeps forever.

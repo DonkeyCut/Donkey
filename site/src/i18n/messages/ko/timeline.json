@@ -1,0 +1,207 @@
+{
+  "main": {
+    "resize": "드래그하여 타임라인 크기 조절",
+    "zoom": "확대/축소",
+    "fit": "화면에 맞추기",
+    "fitTitle": "타임라인을 창 크기에 맞추기",
+    "sticker": "스티커",
+    "transitionIn": "{name} 인",
+    "transitionOut": "{name} 아웃",
+    "transitionTitle": "{name} {seconds}초 — 트랙을 따라 원하는 곳으로 드래그하세요. 컷이나 클립 가장자리에 맞춰지면 재생돼요",
+    "dragToTrim": "드래그하여 트리밍",
+    "removeEmptySpace": "빈 공간 제거",
+    "removeKeyframe": "키프레임 제거",
+    "show": "표시",
+    "hide": "숨기기",
+    "captureFrame": "프레임 캡처",
+    "copyFrame": "프레임 복사"
+  },
+  "toolbar": {
+    "text": "텍스트",
+    "textTooltip": "텍스트 ({key})",
+    "magnet": "마그넷",
+    "magnetOn": "마그넷 켜짐: 트랙 0 공백 메우기",
+    "magnetOff": "마그넷: 트랙 0 공백 메우기",
+    "split": "분할",
+    "splitTooltip": "포인터 또는 재생 헤드 위치에서 분할 (⌘B 또는 S)",
+    "delete": "삭제",
+    "deleteCount": "{count}개 삭제",
+    "deleteTooltip": "삭제 ({key})",
+    "tools": "타임라인 도구",
+    "zoom": "확대/축소",
+    "fit": "화면에 맞추기",
+    "fitTitle": "타임라인을 창 크기에 맞추기",
+    "hideTimeline": "타임라인 숨기기",
+    "saved": "저장됨",
+    "saveTemplate": "템플릿 저장",
+    "backToStart": "처음으로 이동",
+    "playPause": "재생/일시정지 (Space)"
+  },
+  "clip": {
+    "lut": "LUT",
+    "cutting": "자르는 중…",
+    "cuttingShort": "자…",
+    "speedCurve": "속도 곡선 · 평균 {rate}배",
+    "speed": "{rate}배 속도",
+    "detachAudio": "오디오 분리",
+    "brushStroke": "브러시 스트로크",
+    "options": "클립 옵션",
+    "addToMedia": "미디어에 추가",
+    "addToLibrary": "라이브러리에 추가",
+    "exportSegment": "구간 내보내기",
+    "download": "다운로드",
+    "showInFinder": "Finder에서 보기",
+    "reorderRow": "드래그하여 행 순서 변경",
+    "showTrack": "트랙 표시",
+    "hideTrack": "트랙 숨기기",
+    "unmuteTrack": "트랙 음소거 해제",
+    "muteTrack": "트랙 음소거",
+    "enable": "클립 활성화",
+    "disable": "클립 비활성화",
+    "missingMedia": "누락된 미디어",
+    "mute": "클립 음소거",
+    "unmute": "클립 음소거 해제",
+    "beat": "드래그하여 이동, 더블클릭하여 제거",
+    "fadeIn": "드래그하여 페이드 인 설정",
+    "fadeOut": "드래그하여 페이드 아웃 설정",
+    "key": "드래그하여 시간 조절, Delete로 삭제",
+    "sticker": "스티커"
+  },
+  "picker": {
+    "label": "타임라인",
+    "heading": "타임라인",
+    "emptyNote": "{current}이(가) 비어 있어요. 편집 내용은 {other}에 있어요.",
+    "open": "{name} 열기"
+  },
+  "group": {
+    "group": "그룹화",
+    "ungroup": "그룹 해제",
+    "groupTooltip": "그룹화 ({key})",
+    "ungroupTooltip": "그룹 해제 ({key})"
+  },
+  "media": {
+    "play": "재생",
+    "pause": "일시정지",
+    "seek": "탐색",
+    "mute": "음소거",
+    "unmute": "음소거 해제"
+  },
+  "trackRow": {
+    "track": "트래킹",
+    "follow": "팔로우",
+    "tracking": "트래킹 중 {progress}%",
+    "pickTarget": "대상 선택",
+    "failed": "영상을 트래킹하지 못했어요.",
+    "targets": {
+      "hands_gap": "양손 사이",
+      "left_hand": "왼손",
+      "right_hand": "오른손",
+      "head": "머리",
+      "person": "사람"
+    }
+  },
+  "flash": {
+    "tone": "톤",
+    "strobe": "스트로브",
+    "strobeRate": "스트로브 속도",
+    "off": "끔",
+    "rhythm": "리듬",
+    "fade": "페이드",
+    "curve": "커브",
+    "tones": {
+      "white": "화이트",
+      "black": "블랙"
+    },
+    "rhythms": {
+      "strobe": "스트로브",
+      "flicker": "플리커"
+    },
+    "fades": {
+      "none": "없음",
+      "to": "끝으로",
+      "from": "시작부터"
+    }
+  },
+  "curves": {
+    "channels": {
+      "m": "마스터",
+      "r": "레드",
+      "g": "그린",
+      "b": "블루"
+    }
+  },
+  "guides": {
+    "show": "가이드 표시",
+    "hide": "가이드 숨기기",
+    "showTitle": "가이드 표시 ({key})",
+    "hideTitle": "가이드 숨기기 ({key})",
+    "presetsLabel": "가이드 프리셋",
+    "heading": "가이드",
+    "portraitOnly": "세로 프레임",
+    "addVertical": "세로선 추가",
+    "addHorizontal": "가로선 추가",
+    "presets": {
+      "thirds": "3분할",
+      "center": "중앙",
+      "margins": "안전 여백",
+      "shortform": "숏폼",
+      "custom": "사용자 지정"
+    },
+    "sublabels": {
+      "margins": "{inset} 여백",
+      "shortform": "TikTok, Instagram, YouTube",
+      "custom": "미리보기에서 선을 드래그하세요"
+    },
+    "regions": {
+      "topBar": "상단 바",
+      "cropped": "크롭 영역",
+      "actions": "액션",
+      "caption": "캡션 · 음악 · 내비게이션"
+    }
+  },
+  "speedCurve": {
+    "node": "{time} 위치의 노드 {rate}",
+    "pickPreset": "곡선 프리셋 선택",
+    "custom": "사용자 지정",
+    "smoothSlow": "부드러운 슬로모션",
+    "smoothSlowInfo": "활성화하면 1× 미만의 모든 구간이 내보내기 시 부드럽게 처리돼요.",
+    "addNode": "재생 헤드 위치에 노드 추가",
+    "removeNode": "선택한 노드 삭제 (Delete)",
+    "flatten": "1×로 평탄화",
+    "close": "닫기 ({key})",
+    "presets": {
+      "flat": {
+        "label": "플랫",
+        "hint": "클립 전체에 단일 배속 적용"
+      },
+      "rampIn": {
+        "label": "램프 인",
+        "hint": "빠르게 시작하여 서서히 슬로모션으로 전환"
+      },
+      "rampOut": {
+        "label": "램프 아웃",
+        "hint": "슬로모션으로 시작하여 서서히 가속"
+      },
+      "drift": {
+        "label": "드리프트",
+        "hint": "급가속 후 슬로모션으로 진입했다가 다시 원래대로 회복"
+      },
+      "pulse": {
+        "label": "펄스",
+        "hint": "느린 구간 앞뒤로 두 번의 가속"
+      },
+      "hold": {
+        "label": "홀드",
+        "hint": "빠르게 진입 후 중간에 잠시 멈칫했다가 다시 가속"
+      },
+      "whip": {
+        "label": "윕",
+        "hint": "슬로모션 도중 중간에 순간 가속"
+      },
+      "stutter": {
+        "label": "스터터",
+        "hint": "빠른 구간과 느린 구간이 번갈아 반복"
+      }
+    }
+  }
+}

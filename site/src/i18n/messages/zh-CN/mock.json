@@ -1,0 +1,89 @@
+{
+  "editorMock": {
+    "caption": "Donkey Cut 编辑器中打开的一个完整项目：侧边栏是生成的媒体资源，时间线上是片段和音乐，旁边是完成剪辑的 AI 对话。"
+  },
+  "topBar": {
+    "aspect": "{name} · {ratio}",
+    "record": "录制",
+    "saved": "已保存",
+    "chat": "对话",
+    "export": "导出"
+  },
+  "aspectNames": {
+    "vertical": "竖屏",
+    "widescreen": "宽屏"
+  },
+  "sidePanel": {
+    "tabs": {
+      "media": "媒体",
+      "video": "视频",
+      "image": "图片",
+      "audio": "音频",
+      "subtitles": "字幕",
+      "details": "详情"
+    },
+    "projectFiles": "项目文件",
+    "library": "媒体库",
+    "upload": "上传",
+    "templateMeta": "{duration} · {count, plural, other {# 项}}",
+    "generateImage": "生成图片",
+    "generateVideo": "生成视频",
+    "renderNote": "渲染需要一到两分钟。后台渲染期间你可以继续编辑。",
+    "generated": "已生成"
+  },
+  "aiPanel": {
+    "working": "正在处理… {seconds}秒",
+    "placeholder": "询问有关视频的问题，或告诉我需要调整什么… 输入 @ 引用媒体"
+  },
+  "projects": {
+    "posters": {
+      "switcherLabel": "旅行海报",
+      "name": "城市海报系列",
+      "prompt": "手绘旅行海报，巴黎 — 身穿风衣的女子正在过马路，背景为埃菲尔铁塔，配有咖啡馆遮阳篷，红色手写体“感受浪漫”",
+      "paris": "巴黎",
+      "newYork": "纽约",
+      "clipParis": "巴黎 — 感受浪漫",
+      "clipNewYork": "纽约 — 俯瞰都市",
+      "captionParis": "感受浪漫",
+      "captionNewYork": "俯瞰都市",
+      "chat1": "制作两张手绘旅行海报 — 巴黎和纽约，两张海报中都有同一个过马路的女子。",
+      "chat2": "这是两张海报，配色方案和排版风格保持一致：",
+      "chat3": "制作成动画 — 她在走动，镜头缓慢平移，保留手绘质感。然后将它们剪辑在一起，加上字幕和音乐。",
+      "chat4": "已渲染两个 4 秒片段，并配上字幕和圆舞曲组装到时间线上。想换一首配乐吗？"
+    },
+    "railway": {
+      "switcherLabel": "铁道迷案",
+      "name": "铁道迷案",
+      "prompt": "法比漫画风格，带有胶片颗粒感的 20 世纪初动画：一列蒸汽火车在峡谷悬崖边的铁轨上飞驰；一个身披斗篷的身影伏在车厢顶上；一个骑自行车的男孩在后方追赶",
+      "canyonRun": "峡谷飞驰",
+      "onTheRoof": "车顶追逐",
+      "bicycleChase": "单车追击",
+      "shot": "镜头 {number}",
+      "trainWhistle": "火车鸣笛",
+      "wheelsOnGravel": "车轮碾过碎石",
+      "chat1": "帮我做一个 1920 年代漫画风格的追逐戏分镜：蒸汽火车上的神秘人，以及在峡谷铁道旁拼命蹬单车追赶的少年。",
+      "chat2": "三个镜头：1）火车穿过峡谷，2）斗篷人在车顶稳住身形，3）男孩在轨道旁奋力骑车。",
+      "chat3": "把这三个镜头都按清线画派风格制作成动画。",
+      "chat4": "已渲染三个镜头，并搭配铜管与弦乐配乐剪辑完成：",
+      "chat5": "火车出隧道时加上鸣笛声，再给自行车加上碾过碎石的声音。",
+      "chat6": "两个音效均已放到音效轨道，并混入配乐中。要不要将火车进隧道的剪辑点裁得更紧凑些？"
+    },
+    "mason": {
+      "switcherLabel": "Mason",
+      "name": "卡通",
+      "template": "模板",
+      "voiceover": "AI 旁白 — {text}",
+      "scenePrompt": "粗黑色轮廓的手绘 2D 卡通动画，…",
+      "walkingToSchool": "上学路上",
+      "schoolGates": "校门口",
+      "fishTank": "鱼缸",
+      "strawberries": "草莓",
+      "soccer": "足球",
+      "taekwondo": "跆拳道",
+      "swimming": "游泳",
+      "chat1": "@a1 是我儿子 Mason 用韩语做自我介绍。为他提到的每件事绘制一个场景，并对齐音频进行剪辑。",
+      "chat2": "我已清除时间线末尾吃草莓的场景，并开始生成与 Mason 最喜欢的运动（足球、跆拳道和游泳）匹配的三个全新场景！\\n\\n它们将在后台渲染，并从 9.5 秒处直接出现在你的时间线上，与音频完美对齐。如果 Mason 还需要其他体育训练，随时告诉我！",
+      "chat3": "他也喜欢草莓。你需要对齐音频"
+    }
+  }
+}

@@ -1,0 +1,225 @@
+{
+  "videoAspect": {
+    "16:9": "横向き (16:9)",
+    "9:16": "縦向き (9:16)"
+  },
+  "videoResolution": {
+    "360p": "360p ドラフト",
+    "720p": "720p",
+    "1080p": "1080p",
+    "4k": "4K"
+  },
+  "stockAspect": {
+    "16:9": "横向き (16:9)",
+    "9:16": "縦向き (9:16)",
+    "1:1": "正方形 (1:1)"
+  },
+  "transition": {
+    "crossfade": "クロスフェード",
+    "crosszoom": "クロスズーム",
+    "dipblack": "ディップ（黒）",
+    "dipwhite": "ディップ（白）",
+    "blur": "ブラー",
+    "pushleft": "左へプッシュ",
+    "pushright": "右へプッシュ",
+    "pushup": "上へプッシュ",
+    "pushdown": "下へプッシュ",
+    "wipeleft": "左へワイプ",
+    "wiperight": "右へワイプ",
+    "wipeup": "上へワイプ",
+    "wipedown": "下へワイプ",
+    "circleopen": "サークルオープン",
+    "circleclose": "サークルクローズ",
+    "splitopen": "スプリットオープン",
+    "splitclose": "スプリットクローズ",
+    "clockwipe": "クロックワイプ",
+    "sliceleft": "左へスライス",
+    "sliceup": "上へスライス",
+    "audiocross": "クロスディゾルブ"
+  },
+  "anim": {
+    "fade": "フェード",
+    "blur": "ブラー",
+    "zoom": "ズーム",
+    "pop": "ポップ",
+    "slideleft": "左へスライド",
+    "slideright": "右へスライド",
+    "slideup": "上へスライド",
+    "slidedown": "下へスライド"
+  },
+  "shape": {
+    "rect": "長方形",
+    "ellipse": "楕円",
+    "triangle": "三角形",
+    "diamond": "ひし形",
+    "star": "星",
+    "heart": "ハート",
+    "hexagon": "六角形",
+    "line": "線",
+    "arrow": "矢印",
+    "doodle": "落書き"
+  },
+  "timeline": {
+    "main": "メイン",
+    "second": "セカンド",
+    "third": "サード"
+  },
+  "residency": {
+    "local": "ローカル",
+    "cloud": "クラウド",
+    "browser": "ローカル"
+  },
+  "imageAspect": {
+    "16:9": "横向き (16:9)",
+    "9:16": "縦向き (9:16)",
+    "1:1": "正方形 (1:1)"
+  },
+  "imageResolution": {
+    "1K": "1K",
+    "2K": "2K",
+    "4K": "4K"
+  },
+  "theme": {
+    "system": "システム",
+    "light": "ライト",
+    "dark": "ダーク"
+  },
+  "audioEffect": {
+    "echo": "エコー",
+    "reverb": "リバーブ",
+    "muffle": "マッフル",
+    "telephone": "テレフォン",
+    "deep": "ディープ",
+    "bright": "ブライト",
+    "wobble": "ウォブル",
+    "crush": "クラッシュ"
+  },
+  "look": {
+    "vintage": "ヴィンテージ",
+    "vhs": "VHS",
+    "horror": "アナログホラー",
+    "halation": "ハレーション",
+    "tech": "モダンテック",
+    "noir": "ノワール",
+    "grain": "フィルムグレイン",
+    "pastel": "パステル",
+    "blockbuster": "ブロックバスター",
+    "dreamy": "ドリーミー"
+  },
+  "strokeStyle": {
+    "glow": "グロー",
+    "hand": "手描き",
+    "cut": "直線カット",
+    "solid": "実線",
+    "offset": "オフセット",
+    "dotted": "点線"
+  },
+  "overlayHit": {
+    "press": "プレス",
+    "zap": "ザップ"
+  },
+  "overlayAnim": {
+    "fade": "フェード",
+    "pop": "ポップ",
+    "zoom": "ズーム",
+    "slideleft": "左へスライド",
+    "slideright": "右へスライド",
+    "slideup": "上へスライド",
+    "slidedown": "下へスライド",
+    "typewriter": "タイプライター",
+    "wipe": "ワイプ",
+    "rise": "上昇",
+    "drop": "ドロップ",
+    "grow": "拡大",
+    "flip": "フリップ",
+    "swivel": "スイベル",
+    "bounce": "バウンス",
+    "wave": "ウェーブ",
+    "converge": "収束",
+    "streak": "ストリーク",
+    "tumble": "タンブル",
+    "scatter": "散乱",
+    "slot": "スロット",
+    "dive": "ダイブ",
+    "count": "カウント",
+    "disintegrate": "分解",
+    "blur": "ブラー",
+    "glitch": "グリッチ",
+    "flicker": "フリッカー"
+  },
+  "overlayLoop": {
+    "pulse": "パルス",
+    "heartbeat": "ハートビート",
+    "float": "フロート",
+    "sway": "スウェイ",
+    "spin": "スピン",
+    "wiggle": "ウィグル",
+    "shake": "シェイク",
+    "flicker": "フリッカー",
+    "wave": "ウェーブ",
+    "bounce": "バウンス",
+    "flip": "フリップ",
+    "flutter": "フラッター"
+  },
+  "ease": {
+    "linear": "リニア",
+    "sine_in": "サイン（イン）",
+    "sine_out": "サイン（アウト）",
+    "sine_inOut": "サイン（イン・アウト）",
+    "power2_in": "Power2（イン）",
+    "power2_out": "Power2（アウト）",
+    "power2_inOut": "Power2（イン・アウト）",
+    "power3_in": "Power3（イン）",
+    "power3_out": "Power3（アウト）",
+    "power3_inOut": "Power3（イン・アウト）"
+  },
+  "wheel": {
+    "s": "リフト",
+    "m": "ガンマ",
+    "h": "ゲイン",
+    "o": "オフセット"
+  },
+  "effect": {
+    "echo": "エコー",
+    "reverb": "リバーブ",
+    "muffle": "マッフル",
+    "telephone": "電話",
+    "deep": "ディープ",
+    "bright": "ブライト",
+    "wobble": "ウォブル",
+    "crush": "クラッシュ",
+    "zoom": "ズーム",
+    "grain": "フィルムグレイン",
+    "vhs": "VHS",
+    "glitch": "グリッチ",
+    "blur": "ブラー",
+    "vignette": "ビネット",
+    "lightleak": "ライトリーク",
+    "lightbars": "ライトバー",
+    "flash": "フラッシュ",
+    "shake": "シェイク",
+    "negative": "ネガティブ",
+    "huecycle": "カラーサイクル",
+    "vintage": "ビンテージ",
+    "horror": "アナログホラー",
+    "halation": "ハレーション",
+    "tech": "モダンテック",
+    "noir": "ノワール",
+    "pastel": "パステル",
+    "blockbuster": "ブロックバスター",
+    "dreamy": "ドリーミー"
+  },
+  "wordEffect": {
+    "color": "カラー",
+    "pop": "ポップ",
+    "underline": "下線",
+    "box": "ハイライト",
+    "spotlight": "スポットライト",
+    "build": "ビルドアップ",
+    "fill": "塗りつぶし",
+    "rise": "ライズアップ",
+    "bloom": "ブルーム",
+    "swing": "スイングイン",
+    "paint": "ペイントオン"
+  }
+}

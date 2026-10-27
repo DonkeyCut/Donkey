@@ -1,0 +1,61 @@
+{
+  "sequence": {
+    "dialogLabel": "Welcome to Donkey Cut",
+    "skip": "Skip",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done"
+  },
+  "welcome": {
+    "title": "Edit videos by chatting.",
+    "body": "Trim clips, add captions, generate images, or create new scenes—all from chat."
+  },
+  "referral": {
+    "title": "How did you hear about us?",
+    "body": "Pick as many as apply — it tells us where to show up next.",
+    "otherPlaceholder": "Tell us where",
+    "sources": {
+      "discord": "Discord",
+      "tiktok": "TikTok",
+      "instagram": "Instagram",
+      "youtube": "YouTube",
+      "reddit": "Reddit",
+      "search": "Search",
+      "friend": "A friend",
+      "other": "Other"
+    }
+  },
+  "modes": {
+    "title": "Works in the cloud or on your Mac",
+    "subtitle": "Same editor. Choose what works for you.",
+    "cloudTitle": "In the cloud",
+    "cloudNoInstall": "No install",
+    "cloudAnyBrowser": "Works in any browser",
+    "cloudRendering": "We handle rendering",
+    "macTitle": "On your Mac",
+    "macLocalFiles": "Your files stay local",
+    "macHardware": "Uses your Mac's hardware",
+    "macFaster": "Faster exports & AI features",
+    "switching": "Automatically switches between cloud and local when available."
+  },
+  "aiChat": {
+    "title": "Chat with your editor.",
+    "body": "The AI has access to your entire project. Ask it to trim clips, generate missing shots, write subtitles, add voiceovers, rearrange your timeline, or answer questions about your footage.",
+    "models": "Works out of the box with Gemini, or use your own Claude or Codex subscription."
+  },
+  "credits": {
+    "onUs": "on us",
+    "body": "Already in your account — nothing to claim. Spend them on generated video, audio and images.",
+    "expires": "Expires {date}."
+  },
+  "plans": {
+    "title": "Simple pricing",
+    "subtitle": "The editor is free. Pay only for AI generated media.",
+    "forIndividuals": "For individuals",
+    "getPro": "Get Pro",
+    "getProOff": "Get {percent}% off Pro",
+    "continueFree": "Continue with free",
+    "endsIn": "{percent}% off ends in {hours}h {minutes}m {seconds}s",
+    "covers": "{months, plural, one {For your first month, then {price}/month} other {Per month for your first # months, then {price}/month}}"
+  }
+}

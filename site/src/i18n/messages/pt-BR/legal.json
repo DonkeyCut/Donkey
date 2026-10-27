@@ -1,0 +1,20 @@
+{
+  "privacyMeta": {
+    "title": "Política de Privacidade | Donkey Cut",
+    "description": "Leia a política de privacidade do Donkey Cut."
+  },
+  "termsMeta": {
+    "title": "Termos de Uso | Donkey Cut",
+    "description": "Leia os termos de uso do Donkey Cut."
+  },
+  "englishGoverns": "Esta política é publicada em inglês. O texto em inglês abaixo é a versão vinculativa.",
+  "unsubscribe": {
+    "title": "Preferências de e-mail",
+    "checking": "Verificando este link…",
+    "invalid": "Este link não é mais válido. Você pode gerenciar os e-mails sobre o produto em Configurações no app.",
+    "done": "Você cancelou a inscrição dos e-mails sobre o produto. Você pode reativá-los a qualquer momento em Configurações no app.",
+    "prompt": "Parar de receber novidades e comunicados do Donkey Cut? E-mails sobre a sua conta, como cobrança e segurança, continuarão sendo enviados.",
+    "button": "Cancelar inscrição",
+    "failed": "Não foi possível concluir — tente novamente."
+  }
+}

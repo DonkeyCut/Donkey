@@ -1,0 +1,20 @@
+{
+  "privacyMeta": {
+    "title": "隐私政策 | Donkey Cut",
+    "description": "阅读 Donkey Cut 隐私政策。"
+  },
+  "termsMeta": {
+    "title": "使用条款 | Donkey Cut",
+    "description": "阅读 Donkey Cut 使用条款。"
+  },
+  "englishGoverns": "本政策以英文发布。以下英文文本具有法律约束力。",
+  "unsubscribe": {
+    "title": "邮件偏好设置",
+    "checking": "正在检查链接…",
+    "invalid": "此链接已失效。你可以在应用内的“设置”中管理产品邮件。",
+    "done": "你已退订产品邮件。随时可以在应用内的“设置”中重新开启。",
+    "prompt": "不再接收 Donkey Cut 的产品动态和公告？无论如何，账单、安全等与账户相关的邮件仍会正常发送。",
+    "button": "退订",
+    "failed": "操作失败，请重试。"
+  }
+}

@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { CreditOffer } from "@/generated/prisma/client";
 import { CUT_APP_BASE } from "@/cut/lib/appBase";
 import { DONKEYCUT_CANONICAL } from "@/cut/lib/hosts";
+import { DEFAULT_LOCALE } from "@/i18n/locales";
 import { grantCredits } from "@/lib/credits/inference";
 import { isLinkClaimedKind, promotionOfferKind } from "@/lib/credits/offerKinds";
 import type { CreditOfferTerms, OfferVars } from "@/lib/credits/offerTerms";
@@ -129,8 +130,12 @@ export async function createTermsCreditOffer(input: {
           ...terms,
         },
       });
+  // The email's words are written in English, so the day they name is too.
   return {
     offer,
-    vars: { claimUrl: creditOfferClaimUrl(offer.id), claimBy: formatCreditExpiry(offer.closesAt ?? offer.createdAt) },
+    vars: {
+      claimUrl: creditOfferClaimUrl(offer.id),
+      claimBy: formatCreditExpiry(offer.closesAt ?? offer.createdAt, DEFAULT_LOCALE),
+    },
   };
 }

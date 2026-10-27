@@ -7,6 +7,7 @@ import ts from "typescript";
 import { EmailAuthForm } from "./_components/landing/EmailAuthForm";
 import { EditorMock } from "@/cut/components/editor-mock/EditorMock";
 import { CreditsSlide } from "@/cut/components/onboarding/slides/Credits";
+import { WithIntl } from "@/i18n/testing";
 
 type Theme = "light" | "dark";
 type Color = [number, number, number, number];
@@ -64,7 +65,7 @@ const pageColor = (theme: Theme) => colorOf("background", theme)!;
 test("auth input focus stays distinguishable on its card in both themes", () => {
   for (const theme of ["light", "dark"] as const) {
     for (const mode of ["sign-in", "sign-up"] as const) {
-      const { document } = parseHTML(renderToStaticMarkup(<EmailAuthForm mode={mode} />));
+      const { document } = parseHTML(renderToStaticMarkup(<WithIntl><EmailAuthForm mode={mode} /></WithIntl>));
       for (const input of document.querySelectorAll("input")) {
         const background = over(paint(input, "bg-", theme), pageColor(theme));
         expect(contrast(over(paint(input, "border-", theme, "focus:"), background), background)).toBeGreaterThanOrEqual(3);
@@ -74,7 +75,7 @@ test("auth input focus stays distinguishable on its card in both themes", () => 
 });
 
 test("showcase labels remain readable in resting, selected and hover states", () => {
-  const { document } = parseHTML(renderToStaticMarkup(<EditorMock />));
+  const { document } = parseHTML(renderToStaticMarkup(<WithIntl><EditorMock /></WithIntl>));
   const buttons = document.querySelectorAll("button[aria-pressed]");
   expect(buttons.length).toBeGreaterThan(1);
   for (const theme of ["light", "dark"] as const) {
@@ -88,7 +89,7 @@ test("showcase labels remain readable in resting, selected and hover states", ()
 });
 
 test("credit expiry text remains readable against both onboarding surfaces", () => {
-  const { document } = parseHTML(renderToStaticMarkup(<CreditsSlide credits="5" expiresAt="2026-11-01T00:00:00Z" />));
+  const { document } = parseHTML(renderToStaticMarkup(<WithIntl><CreditsSlide credits="5" expiresAt="2026-11-01T00:00:00Z" /></WithIntl>));
   const expiry = Array.from(document.querySelectorAll("p")).find((p) => p.textContent?.startsWith("Expires "))!;
   expect(expiry).toBeDefined();
   for (const theme of ["light", "dark"] as const) {
@@ -99,7 +100,7 @@ test("credit expiry text remains readable against both onboarding surfaces", () 
 
 test("article loading bars remain visible against both blog surfaces", () => {
   // Inspect the private fallback without executing its server data reads.
-  const text = readFileSync(new URL("./cut/blog/[slug]/page.tsx", import.meta.url), "utf8");
+  const text = readFileSync(new URL("./[locale]/cut/blog/[slug]/page.tsx", import.meta.url), "utf8");
   const source = ts.createSourceFile("page.tsx", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const node = source.statements.find((s) => ts.isFunctionDeclaration(s) && s.name?.text === "PostSkeleton")!;
   const bars: { className: string }[] = [];

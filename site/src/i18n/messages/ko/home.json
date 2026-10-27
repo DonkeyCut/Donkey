@@ -1,0 +1,269 @@
+{
+  "tabs": {
+    "projects": "프로젝트",
+    "library": "라이브러리",
+    "notes": "노트",
+    "cameraRoll": "카메라 롤"
+  },
+  "newProject": {
+    "button": "새 프로젝트",
+    "title": "새 프로젝트",
+    "placeholder": "프로젝트 이름",
+    "create": "프로젝트 만들기",
+    "whereSaved": "새 프로젝트 및 미디어 저장 위치: {place}",
+    "scopeLocal": "앞으로 생성되는 모든 프로젝트와 미디어는<br></br><b>이 기기</b>에 저장돼요",
+    "scopeCloud": "앞으로 생성되는 모든 프로젝트와 미디어는<br></br><b>클라우드</b>에 저장돼요"
+  },
+  "embeddedNewProject": {
+    "create": "새 프로젝트 만들기",
+    "limit": "이 계정은 무료 프로젝트 한도에 도달했어요. 더 생성하려면 Donkey Cut에서 Pro로 업그레이드하세요.",
+    "failed": "프로젝트를 만들지 못했어요."
+  },
+  "projects": {
+    "badgeLocal": "로컬 프로젝트예요",
+    "badgeCloud": "클라우드 프로젝트예요",
+    "badgeOffline": "로컬 프로젝트예요 — 편집하려면 Donkey 앱을 여세요",
+    "grace": "Pro 플랜이 만료되어 무료 저장 공간 한도를 초과했어요. 업그레이드하거나 {size}를 확보하지 않으면 가장 오래된 클라우드 프로젝트가 {days, plural, =0 {오늘} other {#일 후}} 삭제돼요.",
+    "upgradeToPro": "Pro로 업그레이드",
+    "deleteFolderFailed": "폴더를 삭제하지 못했어요.",
+    "deleteProjectFailed": "프로젝트를 삭제하지 못했어요.",
+    "duplicateFailed": "프로젝트를 복제하지 못했어요.",
+    "moveFailed": "프로젝트를 이동하지 못했어요.",
+    "deleteFailed": "삭제하지 못했어요.",
+    "cardMeta": "{size} · {date} 수정",
+    "columnName": "이름",
+    "columnLength": "길이",
+    "columnSize": "크기",
+    "columnEdited": "수정일",
+    "importing": "가져오는 중… <elapsed></elapsed>",
+    "newFolder": "새 폴더",
+    "galleryView": "갤러리 보기",
+    "listView": "목록 보기",
+    "loadFailed": "이 프로젝트를 불러오지 못했어요.",
+    "loadFailedCloud": "클라우드 프로젝트를 불러오지 못했어요.",
+    "loadFailedLocal": "이 Mac에 있는 프로젝트를 불러오지 못했어요.",
+    "emptyTitle": "시작하려면 새 프로젝트를 만드세요",
+    "renameTitle": "프로젝트 이름 변경",
+    "rename": "이름 변경",
+    "deleteTitle": "{what} 삭제할까요?",
+    "foldersEmpty": "{count, plural, other {폴더가 비어 있어요.}}",
+    "deletesFolders": "{count, plural, other {미디어 파일 및 내보낸 항목을 포함한 프로젝트 폴더 전체가 삭제돼요.}}",
+    "cannotUndo": "이 작업은 실행 취소할 수 없어요.",
+    "deleteProjects": "{count, plural, other {프로젝트 삭제}}",
+    "deleteFolder": "폴더 삭제",
+    "delete": "삭제",
+    "duplicate": "복제",
+    "moveToLocal": "로컬로 이동",
+    "moveToCloud": "클라우드로 이동",
+    "actions": "프로젝트 작업"
+  },
+  "pick": {
+    "project": "{count, plural, other {프로젝트 #개}}",
+    "file": "{count, plural, other {파일 #개}}",
+    "item": "{count, plural, other {항목 #개}}",
+    "clip": "{count, plural, other {클립 #개}}",
+    "note": "{count, plural, other {노트 #개}}",
+    "folder": "{count, plural, other {폴더 #개}}",
+    "named": "“{name}”",
+    "namedHolding": "“{name}” 및 포함된 {held}",
+    "foldersHolding": "{folders}({held})",
+    "both": "{folders} 및 {items}",
+    "foldersGo": "{count, plural, other {폴더 안의 모든 항목도 함께 삭제돼요.}}",
+    "phoneOnly": "휴대폰에서 동기화되었으며 휴대폰에서도 함께 삭제돼요.",
+    "phoneSome": "{count, plural, other {그중 #개 항목은 휴대폰에서 동기화되었으며 휴대폰에서도 함께 삭제돼요.}}",
+    "cancel": "취소",
+    "delete": "삭제"
+  },
+  "folders": {
+    "renameFolder": "폴더 이름 바꾸기",
+    "renameFailed": "폴더 이름을 바꿀 수 없어요.",
+    "createFailed": "폴더를 만들 수 없어요.",
+    "share": "공유",
+    "rename": "이름 바꾸기",
+    "delete": "삭제",
+    "deleteFolder": "폴더 삭제",
+    "options": "폴더 옵션",
+    "items": "{count, plural, other {항목 #개}}",
+    "namePlaceholder": "이름"
+  },
+  "rename": {
+    "name": "이름"
+  },
+  "shelfBadge": {
+    "offline": "로컬 — Donkey 앱을 열어 사용하세요"
+  },
+  "library": {
+    "share": "공유",
+    "newFolder": "새 폴더",
+    "addMedia": "미디어 추가",
+    "emptyTitle": "라이브러리는 모든 프로젝트에서 공유돼요.",
+    "emptyHint": "동영상, 이미지, 오디오 또는 폰트 파일을 여기로 드래그 앤 드롭하세요.",
+    "chooseFiles": "파일 선택",
+    "orPasteLink": "또는 링크 붙여넣기",
+    "linkPlaceholder": "TikTok, YouTube 또는 Instagram 링크…",
+    "import": "가져오기",
+    "addNote": "메모 추가",
+    "delete": "삭제",
+    "deleteTitle": "{what}을(를) 삭제할까요?",
+    "keepCopy": "{count, plural, other {해당 항목을 이미 사용 중인 프로젝트에는 사본이 유지돼요.}}",
+    "remove": "제거"
+  },
+  "libraryShare": {
+    "title": "{kind, select, folder {폴더 공유} other {에셋 공유}}",
+    "body": "{kind, select, folder {기기가 오프라인 상태여도 다른 사용자가 열어볼 수 있도록 이 폴더를 Cloud에 복사해요.} other {기기가 오프라인 상태여도 다른 사용자가 열어볼 수 있도록 이 에셋을 Cloud에 복사해요.}} 공유 설정은 클라우드 사본에 적용돼요. 로컬 파일은 그대로 유지돼요.",
+    "copyFailed": "Cloud에 복사할 수 없어요.",
+    "copying": "Cloud로 복사 중…",
+    "copy": "Cloud로 복사"
+  },
+  "sharedLibrary": {
+    "viewOnly": "공유 라이브러리 · 보기 전용",
+    "loading": "공유 라이브러리 불러오는 중",
+    "signInToView": "이 공유 항목을 보려면 로그인해 주세요.",
+    "noAccess": "이 공유 항목에 대한 접근 권한이 없어요. 소유자에게 초대를 요청해 보세요.",
+    "gone": "이 공유 링크는 더 이상 유효하지 않아요.",
+    "loadFailed": "이 공유 항목을 불러올 수 없어요.",
+    "signIn": "로그인",
+    "tryAgain": "다시 시도",
+    "breadcrumb": "폴더 경로",
+    "templateMedia": "템플릿 미디어",
+    "emptyFolder": "이 폴더는 비어 있어요.",
+    "pages": "페이지",
+    "firstPage": "첫 페이지",
+    "nextPage": "다음 페이지"
+  },
+  "card": {
+    "renameFailed": "파일 이름을 변경할 수 없어요.",
+    "renameFailedBadge": "이름 변경 실패",
+    "preparing": "준비 중",
+    "cantPlay": "재생할 수 없음",
+    "makingCopy": "이 브라우저에서 재생 가능한 사본을 만드는 중"
+  },
+  "importCard": {
+    "preview": "{name} 미리보기",
+    "retry": "다시 시도",
+    "cancel": "취소",
+    "archive": "보관",
+    "failed": "실패",
+    "importing": "가져오는 중",
+    "importingFor": "가져오는 중 <time>{elapsed}</time>"
+  },
+  "cardMenu": {
+    "moreActions": "추가 작업",
+    "addToTimeline": "타임라인에 추가",
+    "share": "공유",
+    "rename": "이름 변경",
+    "download": "다운로드",
+    "openOriginal": "원본 열기",
+    "delete": "삭제"
+  },
+  "generatedMenu": {
+    "moreActions": "추가 작업",
+    "addToMedia": "미디어에 추가",
+    "addToLibrary": "라이브러리에 추가",
+    "download": "다운로드",
+    "delete": "삭제",
+    "deleteTitle": "“{name}”을(를) 삭제할까요?",
+    "timelineUses": "{count, plural, other {타임라인의 #곳에서 재생 중이며 함께 삭제돼요.}}",
+    "fileGoes": "미디어 파일도 함께 삭제되며, 되돌릴 수 없어요.",
+    "cancel": "취소"
+  },
+  "notes": {
+    "untitled": "제목 없음",
+    "untitledNote": "제목 없는 메모",
+    "allNotes": "모든 메모",
+    "saveFailed": "메모를 저장하지 못했어요.",
+    "reopen": "다시 열고 재시도",
+    "newFolder": "새 폴더",
+    "newNote": "새 메모",
+    "loadFailed": "메모를 불러오지 못했어요.",
+    "retry": "재시도",
+    "emptyTitle": "아직 메모가 없어요.",
+    "emptyHint": "메모는 Donkey Cut iOS 앱과 동기화돼요. 여기서 작성한 스크립트는 스마트폰 텔레프롬프터에서 바로 쓸 수 있어요.",
+    "delete": "삭제",
+    "deleteTitle": "{what}을(를) 삭제할까요?",
+    "deleteFolderTitle": "“{name}”을(를) 삭제할까요?",
+    "folderFallback": "폴더",
+    "removedFromPhone": "{count, plural, other {휴대폰에서도 삭제돼요.}}"
+  },
+  "composer": {
+    "untitledNote": "제목 없는 메모",
+    "titlePlaceholder": "제목 없음",
+    "noteColor": "메모 색상",
+    "deleteNote": "메모 삭제",
+    "delete": "삭제",
+    "removeLabel": "{name} 라벨 제거",
+    "addLabel": "라벨 추가",
+    "label": "라벨",
+    "colors": {
+      "butter": "버터",
+      "blush": "블러시",
+      "sky": "스카이",
+      "mint": "민트",
+      "lilac": "라일락"
+    }
+  },
+  "labelPicker": {
+    "newLabel": "새 라벨…",
+    "findOrCreate": "찾기 또는 만들기…",
+    "renameLabel": "{name} 라벨 이름 변경",
+    "deleteLabel": "{name} 라벨 삭제",
+    "create": "“{name}” 만들기",
+    "full": "메모에는 라벨을 {max}개까지 지정할 수 있어요. 다른 라벨을 추가하려면 하나를 제거해 주세요.",
+    "firstLabel": "이름을 입력하여 첫 라벨을 만들어 보세요."
+  },
+  "noteEditor": {
+    "placeholder": "메모를 작성하세요…",
+    "turnInto": {
+      "text": "텍스트",
+      "h1": "제목 1",
+      "h2": "제목 2",
+      "h3": "제목 3",
+      "bullet": "글머리 기호 목록",
+      "number": "번호 매기기 목록",
+      "todo": "할 일 목록",
+      "quote": "인용구"
+    },
+    "bold": "굵게",
+    "italic": "기울임꼴",
+    "underline": "밑줄",
+    "strikethrough": "취소선",
+    "listStyle": "목록 스타일",
+    "textColor": "텍스트 색상",
+    "defaultColor": "기본값",
+    "textColors": {
+      "gray": "회색",
+      "brown": "갈색",
+      "orange": "주황색",
+      "yellow": "노란색",
+      "green": "초록색",
+      "blue": "파란색",
+      "purple": "보라색",
+      "pink": "분홍색",
+      "red": "빨간색"
+    }
+  },
+  "docText": {
+    "empty": "빈 파일이에요.",
+    "moreRows": "+{count}개 행 더 보기"
+  },
+  "cameraRoll": {
+    "emptyTitle": "아직 휴대폰에서 가져온 항목이 없어요.",
+    "emptyHint": "Donkey Cut iOS 앱에서 녹화한 클립이 여기에 자동으로 동기화돼요.",
+    "delete": "삭제",
+    "deleteTitle": "{what}을(를) 삭제할까요?",
+    "deleteBody": "{count, plural, other {클라우드 카메라 롤 및 촬영한 휴대폰에서 클립이 삭제돼요. 이미 해당 클립을 사용 중인 프로젝트에는 복사본이 유지돼요.}}"
+  },
+  "navUser": {
+    "billing": "결제",
+    "usage": "사용량",
+    "onboarding": "온보딩 보기",
+    "runLocally": "Mac에서 로컬로 실행",
+    "logOut": "로그아웃"
+  },
+  "navStorage": {
+    "get100": "100 GB 받기",
+    "upgradeTip": "업그레이드하고 100 GB + AI 크레딧 받기",
+    "grace": "Pro 플랜이 만료되었어요. 가장 오래된 프로젝트가 삭제되기 전에 업그레이드하거나 {size}를 확보하세요."
+  },
+  "justNow": "방금 전"
+}

@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "title": "Donkey Cut Video Editor — Kostenlose Open-Source-Alternative zu CapCut",
+    "description": "Eine kostenlose Open-Source-Alternative zu CapCut. Schneide per Chat, erstelle Videos, Bilder, Voiceovers und Musik – und behalte deine Projekte lokal."
+  },
+  "nav": {
+    "logIn": "Anmelden",
+    "signUp": "Registrieren",
+    "dashboard": "Dashboard",
+    "goToApp": "Zur App"
+  },
+  "tagline": "Endlich ein Video-Editor, <italic>der einfach ist.</italic>",
+  "hero": {
+    "body": "Schneide per Chat, generiere Bilder und Videos und behalte deine Dateien auf deinem eigenen Computer. Nutze einfach dein bestehendes Claude- oder Codex-Abo weiter.",
+    "cta": "Neues Projekt starten"
+  },
+  "worksWith": {
+    "title": "Kompatibel <italic>mit</italic>",
+    "body": "Der Assistent nutzt die Claude- und Codex-Apps, bei denen du auf deinem Mac bereits angemeldet bist. Wenn du ein Abo hast, bist du startklar – kein Setup, keine API-Keys."
+  },
+  "pricing": {
+    "title": "Einfache <italic>Preise</italic>",
+    "body": "Der Editor ist kostenlos. Zahle nur für KI-generierte Medien.",
+    "footnote": "* Guthaben für KI-generierte Inhalte kannst du jederzeit nachkaufen."
+  },
+  "plans": {
+    "free": {
+      "name": "Free",
+      "detail": "Für alle",
+      "body": "Der gesamte Editor, in der Cloud oder auf deinem Mac.",
+      "cta": "Neues Projekt starten",
+      "editor": "Voller Zugriff auf den Video-Editor",
+      "storage": "{mb, number} MB Cloud-Speicher",
+      "tools": "Import, Export und lokale Transkription",
+      "subscriptions": "Verbinde dein Claude- oder Codex-Abo"
+    },
+    "pro": {
+      "detail": "Für Einzelpersonen",
+      "cta": "Pro holen",
+      "everythingInFree": "Alles aus Free"
+    }
+  },
+  "local": {
+    "title": "Nutze Donkey Cut <italic>auf deinem Mac.</italic>",
+    "body": "Schneide Videos lokal auf deinem Mac. Die App nutzt deinen eigenen Speicherplatz und transkribiert Audio direkt auf dem Gerät.",
+    "cta": "Für Mac herunterladen",
+    "imageAlt": "Donkey-App-Symbol wird in den Programme-Ordner gezogen."
+  },
+  "openSource": {
+    "title": "Donkey Cut ist <italic>Open Source.</italic>",
+    "body": "Der Editor und die Render-Engine werden öffentlich entwickelt. Sieh dir den Code an, führe ihn selbst aus und hilf mit, ihn noch besser zu machen.",
+    "runLocally": "Editor lokal ausführen",
+    "running": "Editor läuft – {url}",
+    "star": "Auf GitHub bewerten"
+  },
+  "finalCta": {
+    "body": "Starte dein nächstes Projekt in wenigen Minuten.",
+    "cta": "Jetzt schneiden"
+  },
+  "blog": {
+    "metaTitle": "Blog | Donkey Cut Video Editor",
+    "metaDescription": "Einblicke in die Entwicklung von Donkey Cut: Schnitttechniken, Funktionsweise des Editors und Neuerungen.",
+    "metaPageTitle": "Blog | Donkey Cut Video Editor — Seite {page}",
+    "heading": "Blog",
+    "subtitle": "Gedanken zum Videoschnitt und zur Entwicklung des Editors.",
+    "latestPosts": "Neueste Beiträge",
+    "empty": "Hier gibt es noch nichts.",
+    "pagination": "Seitennummerierung",
+    "previous": "Zurück",
+    "next": "Weiter",
+    "copyLink": "Link zum Abschnitt kopieren",
+    "onThisPage": "Auf dieser Seite",
+    "overview": "Übersicht",
+    "draftPreview": "Entwurf-Vorschau. Nur du kannst diese Seite sehen.",
+    "exitPreview": "Vorschau beenden",
+    "updated": "Aktualisiert am {date}",
+    "backToBlog": "Zurück zum Blog",
+    "backToAll": "Zurück zu allen Beiträgen"
+  }
+}

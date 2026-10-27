@@ -1,0 +1,45 @@
+{
+  "language": "Sprache",
+  "footer": {
+    "product": "Produkt",
+    "legal": "Rechtliches",
+    "blog": "Blog",
+    "privacy": "Datenschutz",
+    "terms": "Nutzungsbedingungen",
+    "cutHome": "Donkey Cut-Startseite",
+    "donkeyHome": "Donkey-Startseite",
+    "helpDiscord": "Brauchst du Hilfe? Tritt uns auf <link>Discord</link> bei",
+    "helpEmail": "Brauchst du Hilfe? Schreib uns an <link>{email}</link>",
+    "copyright": "2026 Donkey, Inc."
+  },
+  "meta": {
+    "title": "Donkey Cut Video-Editor",
+    "description": "Ein Video-Editor, der alles direkt auf deinem Mac erledigt."
+  },
+  "pagination": {
+    "label": "Seitennavigation",
+    "previous": "Zurück",
+    "previousLabel": "Zur vorherigen Seite",
+    "next": "Weiter",
+    "nextLabel": "Zur nächsten Seite",
+    "morePages": "Weitere Seiten"
+  },
+  "dialog": {
+    "close": "Schließen"
+  },
+  "proPlan": {
+    "body": "Erstelle Rich Media mit KI.",
+    "price": "{price}/Monat",
+    "storage": "{gb, number} GB Cloud-Speicher",
+    "credits": "{credits} KI-Credits jeden Monat",
+    "generation": "Bild-, Video-, Voiceover- und Musikgenerierung"
+  },
+  "apiErrors": {
+    "checkout_no_url": "Stripe hat keine URL zurückgegeben.",
+    "credit_amount_out_of_range": "Wähle zwischen {min} und {max}, in vollen Tausendern.",
+    "auto_reload_invalid": "Gib enabled, thresholdDollars und amountDollars an.",
+    "no_payment_method": "Kaufe einmalig Credits, um eine Karte zu speichern, und aktiviere dann das automatische Aufladen.",
+    "unsupported_image_type": "Nicht unterstütztes Bildformat.",
+    "image_too_large": "Bild zu groß."
+  }
+}

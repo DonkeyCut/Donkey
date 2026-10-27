@@ -1,0 +1,138 @@
+{
+  "editor": {
+    "title": "Editor",
+    "language": "Sprache",
+    "languageHint": "Die Sprache, die Donkey Cut, dessen E-Mails und Chat-Antworten verwenden.",
+    "appearance": "Erscheinungsbild",
+    "appearanceHint": "Hell, dunkel oder wie dein System.",
+    "saveFailed": "Änderung konnte nicht gespeichert werden – versuch es noch einmal."
+  },
+  "meta": {
+    "description": "Verwalte dein Donkey Cut-Abo, deine Credits und deine Nutzung."
+  },
+  "saveFailed": "Änderung konnte nicht gespeichert werden – versuch es noch einmal.",
+  "header": {
+    "usageTitle": "Nutzung",
+    "usageDescription": "Deine KI-Generierungsnutzung in diesem Abrechnungszeitraum.",
+    "profileTitle": "Profil",
+    "billingTitle": "Abrechnung",
+    "billingDescription": "Dein Abo und dein Credit-Guthaben."
+  },
+  "pro": {
+    "title": "Donkey Pro",
+    "description": "Ein monatliches Nutzungskontingent, das sich jeden Monat erneuert – du kannst jederzeit zusätzliche Credits kaufen.",
+    "status": "{status, select, active {aktiv} trialing {Testphase} past_due {überfällig} canceled {gekündigt} incomplete {unvollständig} unpaid {unbezahlt} other {{status}}}",
+    "promotionUntil": "<b>Hol dir Pro bis zum {day}</b> und jeder Monat, der bis dahin beginnt, enthält {allowance}, {multiplier}× so viel wie die üblichen {usual}.",
+    "promotionOpen": "Jeder Monat enthält aktuell {allowance}, {multiplier}× so viel wie die üblichen {usual}.",
+    "left": "Diesen Monat noch {left} von {total} übrig",
+    "cancels": "Endet am {date}.",
+    "renews": "Verlängert sich am: {date}",
+    "activePromotionUntil": "Monate, die bis zum {day} beginnen, enthalten {allowance}.",
+    "activePromotionOpen": "Jeder neue Monat enthält {allowance}.",
+    "bonusLanded": "Dein {credits} {origin, select, app {Abo-Bonus} other {Credit-Angebot}} wurde deinen Credits gutgeschrieben.",
+    "subscribeOffer": "Abonniere für {price} bis zum {deadline} und erhalte einmalig {credits}.{lifeClause}",
+    "introDeadline": "{terms} Abonniere bis zum {deadline}.",
+    "opening": "Wird geöffnet…",
+    "manage": "Abrechnung verwalten",
+    "starting": "Wird gestartet…",
+    "subscribe": "Pro abonnieren",
+    "unavailable": "Abrechnung ist momentan nicht verfügbar."
+  },
+  "credits": {
+    "title": "Credits",
+    "description": "Nutzungsbasiertes Guthaben für die Donkey-App. Jederzeit nachkaufbar.",
+    "available": "Verfügbares Guthaben",
+    "buy": "Credits kaufen",
+    "preset": "{credits} · {price}",
+    "customLabel": "Credits",
+    "starting": "Wird gestartet…",
+    "buyFor": "Für {price} kaufen",
+    "buyPlain": "Kaufen",
+    "checkoutFailed": "Checkout konnte nicht gestartet werden. Versuch es gleich noch einmal.",
+    "autoReload": "Automatisch aufladen, wenn das Guthaben zur Neige geht",
+    "fallsBelow": "Wenn das Guthaben fällt unter",
+    "unit": "Credits",
+    "thenBuy": "automatisch kaufen",
+    "saving": "Wird gespeichert…",
+    "save": "Speichern",
+    "saveFailed": "Automatisches Aufladen konnte nicht gespeichert werden. Versuch es gleich noch einmal.",
+    "lastFailed": "Letztes automatisches Aufladen fehlgeschlagen: {error}",
+    "needsCard": "Automatisches Aufladen erfordert eine gespeicherte Karte. <buy>Kaufe einmalig Credits</buy>, um eine zu hinterlegen, und aktiviere dies dann."
+  },
+  "profile": {
+    "loadFailed": "Dein Profil konnte nicht geladen werden.",
+    "changePicture": "Profilbild ändern",
+    "emailVerified": "E-Mail bestätigt",
+    "displayName": "Anzeigename",
+    "save": "Speichern",
+    "nameSaveFailed": "Name konnte nicht gespeichert werden – versuch es noch einmal."
+  },
+  "avatar": {
+    "title": "Profilbild",
+    "chooseImage": "Bild auswählen",
+    "zoom": "Zoom",
+    "replace": "Ersetzen",
+    "choose": "Auswählen",
+    "remove": "Entfernen",
+    "save": "Speichern",
+    "unreadable": "Diese Datei ist kein lesbares Bild.",
+    "prepareFailed": "Bild konnte nicht vorbereitet werden – versuch es noch einmal.",
+    "saveFailed": "Bild konnte nicht gespeichert werden – versuch es noch einmal."
+  },
+  "email": {
+    "title": "E-Mail-Einstellungen",
+    "product": "Produkt-E-Mails",
+    "productHint": "Neuigkeiten und Ankündigungen zu Donkey Cut."
+  },
+  "flagsSection": {
+    "title": "Feature-Flags",
+    "hint": "Vorabfunktionen, die du für deinen Account aktivieren kannst."
+  },
+  "flags": {
+    "editor_credits_pill": {
+      "title": "Guthaben im Editor anzeigen",
+      "description": "Dein restliches Guthaben in der oberen Leiste des Editors."
+    }
+  },
+  "phoneLink": {
+    "title": "Smartphone-Verbindung",
+    "body": "Sende Videos von der Donkey Cut iPhone-App direkt über Wi-Fi Direct an diesen Mac – mit oder ohne Netzwerk. Clips landen direkt in deinem geöffneten Projekt.",
+    "instructions": "Öffne auf dem Smartphone das Profilmenü → Mac-Link, wähle diesen Mac und gib Folgendes ein:",
+    "cancel": "Abbrechen",
+    "codeLife": "Der Code ist fünf Minuten lang gültig.",
+    "pair": "Smartphone koppeln",
+    "refused": "Der letzte Code wurde dreimal falsch eingegeben und abgewiesen. Fordere einen neuen an.",
+    "lastSeen": "Zuletzt gesehen: {when}",
+    "justNow": "gerade eben",
+    "unpair": "Entkoppeln",
+    "unpairHint": "Dieses Smartphone kann danach keine Medien mehr hierher senden",
+    "unreachable": "Konnte die App auf diesem Mac nicht erreichen – prüfe, ob sie läuft."
+  },
+  "usage": {
+    "included": "Inbegriffen",
+    "conversation": "Unterhaltung {id}",
+    "calls": "{count, plural, one {# Aufruf} other {# Aufrufe}}",
+    "cachedShare": "{share} % im Cache",
+    "date": "Datum",
+    "kind": "Art",
+    "model": "Modell",
+    "cost": "Kosten",
+    "status": "Status",
+    "callStatus": "{status, select, succeeded {erfolgreich} failed {fehlgeschlagen} other {{status}}}",
+    "noCalls": "Noch keine Aufrufe.",
+    "imagesGenerated": "Generierte Bilder",
+    "inputTokens": "Input-Token",
+    "cachedInput": "Gecachter Input",
+    "cachedValue": "{tokens} ({share} %)",
+    "outputTokens": "Output-Token",
+    "totalTokens": "Gesamt-Token",
+    "duration": "Dauer",
+    "imageExplanation": "Bildgenerierung wird pro Bild abgerechnet, nicht nach Token.",
+    "tokenExplanation": "Kosten hängen von Token ab, wobei Input überwiegt. Gecachter Input ist ein unverändertes Prompt-Präfix, das der Provider zu einem Bruchteil des Preises wiederverwendet; ein geringer Cache-Anteil bei wiederholten Aufrufen bedeutet, dass der Cache nicht getroffen wird.",
+    "noUsage": "Für diesen Aufruf wurde keine abrechenbare Nutzung erfasst.",
+    "error": "Fehler: {code}"
+  },
+  "checkout": {
+    "creditsProduct": "Donkey-Credits"
+  }
+}

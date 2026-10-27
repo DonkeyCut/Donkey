@@ -1,0 +1,138 @@
+{
+  "editor": {
+    "title": "Éditeur",
+    "language": "Langue",
+    "languageHint": "La langue utilisée par Donkey Cut, ses e-mails et ses réponses de chat.",
+    "appearance": "Apparence",
+    "appearanceHint": "Clair, sombre ou synchronisé avec votre système.",
+    "saveFailed": "Impossible d'enregistrer cette modification — réessayez."
+  },
+  "meta": {
+    "description": "Gérez votre abonnement, vos crédits et votre consommation Donkey Cut."
+  },
+  "saveFailed": "Impossible d'enregistrer cette modification — réessayez.",
+  "header": {
+    "usageTitle": "Consommation",
+    "usageDescription": "Votre consommation de génération par IA sur cette période de facturation.",
+    "profileTitle": "Profil",
+    "billingTitle": "Facturation",
+    "billingDescription": "Votre abonnement et votre solde de crédits."
+  },
+  "pro": {
+    "title": "Donkey Pro",
+    "description": "Un quota d'utilisation mensuel réinitialisé chaque mois — vous pouvez acheter des crédits à tout moment.",
+    "status": "{status, select, active {actif} trialing {en essai} past_due {en retard} canceled {annulé} incomplete {incomplet} unpaid {impayé} other {{status}}}",
+    "promotionUntil": "<b>Passez à Pro avant le {day}</b> et chaque mois commençant d'ici là inclura {allowance}, soit {multiplier}× le volume habituel ({usual}).",
+    "promotionOpen": "Chaque mois inclut actuellement {allowance}, soit {multiplier}× le volume habituel ({usual}).",
+    "left": "{left} sur {total} restants ce mois-ci",
+    "cancels": "Prend fin le {date}.",
+    "renews": "Renouvellement : {date}",
+    "activePromotionUntil": "Les mois débutant avant le {day} incluent {allowance}.",
+    "activePromotionOpen": "Chaque nouveau mois inclut {allowance}.",
+    "bonusLanded": "Votre {origin, select, app {bonus d'abonnement} other {offre de crédits}} de {credits} a été ajouté à votre solde.",
+    "subscribeOffer": "Abonnez-vous pour {price} avant le {deadline} et recevez {credits} en bonus unique.{lifeClause}",
+    "introDeadline": "{terms} Abonnez-vous avant le {deadline}.",
+    "opening": "Ouverture…",
+    "manage": "Gérer la facturation",
+    "starting": "Démarrage…",
+    "subscribe": "S'abonner à Pro",
+    "unavailable": "La facturation est indisponible pour le moment."
+  },
+  "credits": {
+    "title": "Crédits",
+    "description": "Solde prépayé pour l'application Donkey. Achetez-en à tout moment.",
+    "available": "Solde disponible",
+    "buy": "Acheter des crédits",
+    "preset": "{credits} · {price}",
+    "customLabel": "Crédits",
+    "starting": "Démarrage…",
+    "buyFor": "Acheter pour {price}",
+    "buyPlain": "Acheter",
+    "checkoutFailed": "Impossible de lancer le paiement. Réessayez dans un instant.",
+    "autoReload": "Recharger automatiquement quand mon solde est bas",
+    "fallsBelow": "Quand le solde passe sous",
+    "unit": "crédits",
+    "thenBuy": "acheter automatiquement",
+    "saving": "Enregistrement…",
+    "save": "Enregistrer",
+    "saveFailed": "Impossible d'enregistrer le rechargement automatique. Réessayez dans un instant.",
+    "lastFailed": "Échec du dernier rechargement automatique : {error}",
+    "needsCard": "Le rechargement automatique requiert une carte enregistrée. <buy>Achetez des crédits une fois</buy> pour en enregistrer une, puis activez cette option."
+  },
+  "profile": {
+    "loadFailed": "Impossible de charger votre profil.",
+    "changePicture": "Modifier la photo de profil",
+    "emailVerified": "E-mail vérifié",
+    "displayName": "Nom affiché",
+    "save": "Enregistrer",
+    "nameSaveFailed": "Impossible d'enregistrer ce nom — réessayez."
+  },
+  "avatar": {
+    "title": "Photo de profil",
+    "chooseImage": "Choisir une image",
+    "zoom": "Zoom",
+    "replace": "Remplacer",
+    "choose": "Choisir",
+    "remove": "Supprimer",
+    "save": "Enregistrer",
+    "unreadable": "Ce fichier n'est pas une image lisible.",
+    "prepareFailed": "Impossible de préparer cette image — réessayez.",
+    "saveFailed": "Impossible d'enregistrer cette image — réessayez."
+  },
+  "email": {
+    "title": "Préférences d'e-mail",
+    "product": "E-mails sur les produits",
+    "productHint": "Actualités et annonces concernant Donkey Cut."
+  },
+  "flagsSection": {
+    "title": "Fonctionnalités expérimentales",
+    "hint": "Fonctionnalités en avant-première que vous pouvez activer pour votre compte."
+  },
+  "flags": {
+    "editor_credits_pill": {
+      "title": "Afficher les crédits dans l'éditeur",
+      "description": "Votre solde restant dans la barre supérieure de l'éditeur."
+    }
+  },
+  "phoneLink": {
+    "title": "Liaison mobile",
+    "body": "Envoyez des vidéos depuis l'application iPhone Donkey Cut directement vers ce Mac via Wi-Fi Direct, avec ou sans réseau. Les clips s'ajoutent au projet ouvert.",
+    "instructions": "Sur le téléphone, ouvrez le menu de l'avatar → Lien Mac, choisissez ce Mac et saisissez :",
+    "cancel": "Annuler",
+    "codeLife": "Le code est valide pendant cinq minutes.",
+    "pair": "Jumeler un téléphone",
+    "refused": "Le dernier code a été erroné trois fois et invalidé. Générez-en un nouveau.",
+    "lastSeen": "Dernière connexion {when}",
+    "justNow": "à l'instant",
+    "unpair": "Dissocier",
+    "unpairHint": "Ce téléphone ne pourra plus envoyer de fichiers ici",
+    "unreachable": "Impossible de joindre l'application sur ce Mac — vérifiez qu'elle est bien lancée."
+  },
+  "usage": {
+    "included": "Inclus",
+    "conversation": "Conversation {id}",
+    "calls": "{count, plural, one {# appel} other {# appels}}",
+    "cachedShare": "{share} % en cache",
+    "date": "Date",
+    "kind": "Type",
+    "model": "Modèle",
+    "cost": "Coût",
+    "status": "Statut",
+    "callStatus": "{status, select, succeeded {réussi} failed {échoué} other {{status}}}",
+    "noCalls": "Aucun appel pour le moment.",
+    "imagesGenerated": "Images générées",
+    "inputTokens": "Jetons d'entrée",
+    "cachedInput": "Entrée en cache",
+    "cachedValue": "{tokens} ({share} %)",
+    "outputTokens": "Jetons de sortie",
+    "totalTokens": "Total des jetons",
+    "duration": "Durée",
+    "imageExplanation": "La génération d'images est facturée par image, et non par jeton.",
+    "tokenExplanation": "Le coût dépend des jetons, dominés par l'entrée. L'entrée en cache est un préfixe d'invite inchangé réutilisé par le fournisseur à un tarif réduit ; une part faible en cache lors d'un appel répété indique que le cache n'est pas utilisé.",
+    "noUsage": "Aucune utilisation facturable enregistrée pour cet appel.",
+    "error": "Erreur : {code}"
+  },
+  "checkout": {
+    "creditsProduct": "Crédits Donkey"
+  }
+}

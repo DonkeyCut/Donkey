@@ -1,0 +1,61 @@
+{
+  "sequence": {
+    "dialogLabel": "Boas-vindas ao Donkey Cut",
+    "skip": "Pular",
+    "back": "Voltar",
+    "next": "Avançar",
+    "done": "Concluir"
+  },
+  "welcome": {
+    "title": "Edite vídeos pelo chat.",
+    "body": "Corte clipes, adicione legendas, gere imagens ou crie novas cenas — tudo pelo chat."
+  },
+  "referral": {
+    "title": "Como você nos conheceu?",
+    "body": "Escolha quantas opções quiser — isso nos ajuda a saber onde aparecer.",
+    "otherPlaceholder": "Conte para a gente",
+    "sources": {
+      "discord": "Discord",
+      "tiktok": "TikTok",
+      "instagram": "Instagram",
+      "youtube": "YouTube",
+      "reddit": "Reddit",
+      "search": "Busca",
+      "friend": "Um amigo",
+      "other": "Outro"
+    }
+  },
+  "modes": {
+    "title": "Funciona na nuvem ou no seu Mac",
+    "subtitle": "O mesmo editor. Escolha o que funciona melhor para você.",
+    "cloudTitle": "Na nuvem",
+    "cloudNoInstall": "Sem instalação",
+    "cloudAnyBrowser": "Funciona em qualquer navegador",
+    "cloudRendering": "Cuidamos da renderização",
+    "macTitle": "No seu Mac",
+    "macLocalFiles": "Seus arquivos continuam locais",
+    "macHardware": "Usa o hardware do seu Mac",
+    "macFaster": "Exportações e recursos de IA mais rápidos",
+    "switching": "Alterna automaticamente entre a nuvem e o local quando disponível."
+  },
+  "aiChat": {
+    "title": "Converse com o seu editor.",
+    "body": "A IA tem acesso a todo o seu projeto. Peça para cortar clipes, gerar cenas que faltam, criar legendas, adicionar locuções, reorganizar a timeline ou tirar dúvidas sobre suas gravações.",
+    "models": "Funciona de fábrica com o Gemini, ou use sua própria assinatura do Claude ou Codex."
+  },
+  "credits": {
+    "onUs": "por nossa conta",
+    "body": "Já estão na sua conta — não precisa resgatar. Use para gerar vídeos, áudios e imagens.",
+    "expires": "Expira em {date}."
+  },
+  "plans": {
+    "title": "Preços simples",
+    "subtitle": "O editor é grátis. Pague apenas por mídias geradas por IA.",
+    "forIndividuals": "Para uso individual",
+    "getPro": "Assinar o Pro",
+    "getProOff": "Garanta {percent}% de desconto no Pro",
+    "continueFree": "Continuar grátis",
+    "endsIn": "{percent}% de desconto acaba em {hours}h {minutes}m {seconds}s",
+    "covers": "{months, plural, one {No seu primeiro mês, depois {price}/mês} other {Por mês nos seus primeiros # meses, depois {price}/mês}}"
+  }
+}

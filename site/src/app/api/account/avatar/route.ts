@@ -36,12 +36,12 @@ export const GET = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
 export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) => {
   const contentType = request.headers.get("content-type")?.split(";")[0].trim() ?? "";
   if (!ALLOWED_TYPES.has(contentType)) {
-    return NextResponse.json({ error: "Unsupported image type." }, { status: 415 });
+    return NextResponse.json({ error: "unsupported_image_type", message: "Unsupported image type." }, { status: 415 });
   }
 
   const data = new Uint8Array(await request.arrayBuffer());
   if (data.byteLength === 0 || data.byteLength > MAX_BYTES) {
-    return NextResponse.json({ error: "Image too large." }, { status: 413 });
+    return NextResponse.json({ error: "image_too_large", message: "Image too large." }, { status: 413 });
   }
 
   const userId = request.donkey.userId;

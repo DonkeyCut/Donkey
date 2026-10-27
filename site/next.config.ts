@@ -1,5 +1,6 @@
 import createMDX from "@next/mdx";
 import type { NextConfig } from "next";
+import createNextIntlPlugin from "next-intl/plugin";
 
 const nextConfig: NextConfig = {
   // Prebuilt uploads carry this ID through to Vercel's Skew Protection.
@@ -106,4 +107,8 @@ const withMDX = createMDX({
   extension: /\.(md|mdx)$/,
 });
 
-export default withMDX(nextConfig);
+// next-intl reads its per-request config (the locale and its messages) from
+// this file; see src/i18n/request.ts.
+const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
+
+export default withNextIntl(withMDX(nextConfig));

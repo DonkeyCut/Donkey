@@ -1,0 +1,89 @@
+{
+  "editorMock": {
+    "caption": "The Donkey Cut editor with a finished project open: generated media in the side panel, clips and music on the timeline, and the AI chat that assembled them."
+  },
+  "topBar": {
+    "aspect": "{name} · {ratio}",
+    "record": "Record",
+    "saved": "Saved",
+    "chat": "Chat",
+    "export": "Export"
+  },
+  "aspectNames": {
+    "vertical": "Vertical",
+    "widescreen": "Widescreen"
+  },
+  "sidePanel": {
+    "tabs": {
+      "media": "Media",
+      "video": "Video",
+      "image": "Image",
+      "audio": "Audio",
+      "subtitles": "Subtitles",
+      "details": "Details"
+    },
+    "projectFiles": "Project Files",
+    "library": "Library",
+    "upload": "Upload",
+    "templateMeta": "{duration} · {count, plural, one {# item} other {# items}}",
+    "generateImage": "Generate image",
+    "generateVideo": "Generate video",
+    "renderNote": "Renders take a minute or two. Keep editing while it runs.",
+    "generated": "Generated"
+  },
+  "aiPanel": {
+    "working": "Working… {seconds}s",
+    "placeholder": "Ask about your video, or tell me what to change… @ references media"
+  },
+  "projects": {
+    "posters": {
+      "switcherLabel": "Travel posters",
+      "name": "City poster series",
+      "prompt": "Hand-painted travel poster, PARIS — woman in a trench coat crossing the street, Eiffel Tower behind, café awnings, 'Live the romance' in red script",
+      "paris": "Paris",
+      "newYork": "New York",
+      "clipParis": "Paris — Live the romance",
+      "clipNewYork": "New York — Rise above the city",
+      "captionParis": "Live the romance",
+      "captionNewYork": "Rise above the city",
+      "chat1": "Make two hand-painted travel posters — Paris and New York, same woman crossing the street in both.",
+      "chat2": "Here are the two posters, matched palette and typography:",
+      "chat3": "Animate them — she walks, slow camera drift, keep the painted texture. Then cut them together with captions and music.",
+      "chat4": "Rendered two 4s clips and assembled the timeline with captions and a waltz. Want a different track?"
+    },
+    "railway": {
+      "switcherLabel": "Railway mystery",
+      "name": "The Railway Mystery",
+      "prompt": "Franco-Belgian comic style, early-1900s animation with film grain: a steam train races a cliffside railway through a mountain canyon; a cloaked figure rides the carriage roof; a boy on a bicycle gives chase",
+      "canyonRun": "Canyon run",
+      "onTheRoof": "On the roof",
+      "bicycleChase": "Bicycle chase",
+      "shot": "Shot {number}",
+      "trainWhistle": "train whistle",
+      "wheelsOnGravel": "wheels on gravel",
+      "chat1": "Storyboard a 1920s comic-style chase: a mysterious figure on a steam train, a kid chasing on a bicycle through a canyon.",
+      "chat2": "Three shots: 1) the train threading the canyon, 2) the cloaked figure steadying himself on the roof, 3) the boy pedaling hard beside the tracks.",
+      "chat3": "Animate all three in that ligne-claire style.",
+      "chat4": "Rendered the three shots and cut them with a brass-and-strings score:",
+      "chat5": "Add a train whistle when it clears the tunnel, and gravel under the bicycle.",
+      "chat6": "Placed both on the effects track and mixed them under the score. Want the cut tightened where the train enters the tunnel?"
+    },
+    "mason": {
+      "switcherLabel": "Mason",
+      "name": "Cartoon",
+      "template": "Template",
+      "voiceover": "AI voice — {text}",
+      "scenePrompt": "Hand-drawn 2D cartoon animation with bold black outlines,…",
+      "walkingToSchool": "Walking to school",
+      "schoolGates": "School gates",
+      "fishTank": "Fish tank",
+      "strawberries": "Strawberries",
+      "soccer": "Soccer",
+      "taekwondo": "Taekwondo",
+      "swimming": "Swimming",
+      "chat1": "@a1 is my son Mason introducing himself in Korean. Draw a scene for everything he mentions and cut it to the audio.",
+      "chat2": "I've cleared the strawberry eating scene at the end of the timeline and started generating three brand new scenes matching Mason's favorite sports: soccer, taekwondo, and swimming!\n\nThey will render in the background and pop right onto your timeline starting at 9.5 seconds to match the audio perfectly. Let me know if Mason needs any more athletic training!",
+      "chat3": "he also likes strawberries. you need to match the audio"
+    }
+  }
+}

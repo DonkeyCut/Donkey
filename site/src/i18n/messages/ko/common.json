@@ -1,0 +1,45 @@
+{
+  "language": "언어",
+  "footer": {
+    "product": "제품",
+    "legal": "법적 고지",
+    "blog": "블로그",
+    "privacy": "개인정보 처리방침",
+    "terms": "이용약관",
+    "cutHome": "Donkey Cut 홈",
+    "donkeyHome": "Donkey 홈",
+    "helpDiscord": "도움이 필요하신가요? <link>Discord</link>에 참여해 보세요",
+    "helpEmail": "도움이 필요하신가요? <link>{email}</link>으로 이메일을 보내주세요",
+    "copyright": "2026 Donkey, Inc."
+  },
+  "meta": {
+    "title": "Donkey Cut 동영상 편집기",
+    "description": "모든 작업을 Mac에서 처리하는 동영상 편집기예요."
+  },
+  "pagination": {
+    "label": "페이지 매김",
+    "previous": "이전",
+    "previousLabel": "이전 페이지로 이동",
+    "next": "다음",
+    "nextLabel": "다음 페이지로 이동",
+    "morePages": "페이지 더보기"
+  },
+  "dialog": {
+    "close": "닫기"
+  },
+  "proPlan": {
+    "body": "AI로 풍부한 미디어를 생성해 보세요.",
+    "price": "{price}/월",
+    "storage": "{gb, number}GB 클라우드 저장 공간",
+    "credits": "매월 AI 크레딧 {credits}개",
+    "generation": "이미지, 동영상, 음성 더빙 및 음악 생성"
+  },
+  "apiErrors": {
+    "checkout_no_url": "Stripe에서 URL을 반환하지 않았어요.",
+    "credit_amount_out_of_range": "1,000단위로 {min}에서 {max} 사이를 선택해 주세요.",
+    "auto_reload_invalid": "enabled, thresholdDollars, amountDollars를 입력해 주세요.",
+    "no_payment_method": "카드를 저장하려면 먼저 크레딧을 1회 구매한 뒤 자동 충전을 켜 주세요.",
+    "unsupported_image_type": "지원하지 않는 이미지 형식이에요.",
+    "image_too_large": "이미지가 너무 커요."
+  }
+}

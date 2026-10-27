@@ -21,6 +21,36 @@ const eslintConfig = defineConfig([
     "src/cut/worker/cf/**",
   ]),
   {
+    // Every word the UI shows comes from the catalogs (src/i18n/messages), so
+    // it reads in the visitor's language. JSX text and the attributes a person
+    // reads or hears must not be literals; symbols and punctuation may be.
+    files: [
+      "src/app/**/*.tsx",
+      "src/components/**/*.tsx",
+      "src/cut/components/**/*.tsx",
+      "src/clients/chatgpt/ui/**/*.tsx",
+    ],
+    // Super-user surfaces stay English.
+    ignores: ["**/*.test.tsx", "src/app/legal/**", "**/SuperUserSection.tsx"],
+    rules: {
+      "react/jsx-no-literals": [
+        "error",
+        {
+          noStrings: false,
+          ignoreProps: true,
+          allowedStrings: [".", "·", "—", "–", "-", "×", "/", "|", "…", "%", ":", "+", "•", "→", "←", "↗", "(", ")", "x", "#", "@", "&", "s", "%)", "×)", "$", "°", "✕", "∿", "A", "Aa", "Donkey", "Donkey Cut", "Pro", "Reels", "Shorts", "Lottie", "Fable 5.1"],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "JSXAttribute[name.name=/^(aria-label|aria-description|placeholder|title|alt)$/] > Literal[value=/[A-Za-z]/]:not([value=/^Donkey( Cut)?$/])",
+          message: "Read this from the catalog (useTranslations / getTranslations).",
+        },
+      ],
+    },
+  },
+  {
     // The packages are standalone: each must build for any host, so none
     // reaches into the app's source or aliases.
     files: ["packages/*/**/*.ts", "packages/*/**/*.tsx"],

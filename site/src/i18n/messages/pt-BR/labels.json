@@ -1,0 +1,225 @@
+{
+  "videoAspect": {
+    "16:9": "Paisagem (16:9)",
+    "9:16": "Retrato (9:16)"
+  },
+  "videoResolution": {
+    "360p": "Rascunho 360p",
+    "720p": "720p",
+    "1080p": "1080p",
+    "4k": "4K"
+  },
+  "stockAspect": {
+    "16:9": "Paisagem (16:9)",
+    "9:16": "Retrato (9:16)",
+    "1:1": "Quadrado (1:1)"
+  },
+  "transition": {
+    "crossfade": "Crossfade",
+    "crosszoom": "Zoom cruzado",
+    "dipblack": "Mergulho no preto",
+    "dipwhite": "Mergulho no branco",
+    "blur": "Desfoque",
+    "pushleft": "Empurrar para a esquerda",
+    "pushright": "Empurrar para a direita",
+    "pushup": "Empurrar para cima",
+    "pushdown": "Empurrar para baixo",
+    "wipeleft": "Varrer para a esquerda",
+    "wiperight": "Varrer para a direita",
+    "wipeup": "Varrer para cima",
+    "wipedown": "Varrer para baixo",
+    "circleopen": "Abrir em círculo",
+    "circleclose": "Fechar em círculo",
+    "splitopen": "Dividir abrindo",
+    "splitclose": "Dividir fechando",
+    "clockwipe": "Varredura de relógio",
+    "sliceleft": "Fatiar para a esquerda",
+    "sliceup": "Fatiar para cima",
+    "audiocross": "Dissolvência cruzada"
+  },
+  "anim": {
+    "fade": "Fade",
+    "blur": "Desfoque",
+    "zoom": "Zoom",
+    "pop": "Pop",
+    "slideleft": "Deslizar para a esquerda",
+    "slideright": "Deslizar para a direita",
+    "slideup": "Deslizar para cima",
+    "slidedown": "Deslizar para baixo"
+  },
+  "shape": {
+    "rect": "Retângulo",
+    "ellipse": "Elipse",
+    "triangle": "Triângulo",
+    "diamond": "Losango",
+    "star": "Estrela",
+    "heart": "Coração",
+    "hexagon": "Hexágono",
+    "line": "Linha",
+    "arrow": "Seta",
+    "doodle": "Rabisco"
+  },
+  "timeline": {
+    "main": "Principal",
+    "second": "Segunda",
+    "third": "Terceira"
+  },
+  "residency": {
+    "local": "Local",
+    "cloud": "Nuvem",
+    "browser": "Local"
+  },
+  "imageAspect": {
+    "16:9": "Paisagem (16:9)",
+    "9:16": "Retrato (9:16)",
+    "1:1": "Quadrado (1:1)"
+  },
+  "imageResolution": {
+    "1K": "1K",
+    "2K": "2K",
+    "4K": "4K"
+  },
+  "theme": {
+    "system": "Sistema",
+    "light": "Claro",
+    "dark": "Escuro"
+  },
+  "audioEffect": {
+    "echo": "Eco",
+    "reverb": "Reverb",
+    "muffle": "Abafado",
+    "telephone": "Telefone",
+    "deep": "Grave",
+    "bright": "Brilhante",
+    "wobble": "Oscilação",
+    "crush": "Crush"
+  },
+  "look": {
+    "vintage": "Vintage",
+    "vhs": "VHS",
+    "horror": "Terror analógico",
+    "halation": "Halação",
+    "tech": "Tech moderno",
+    "noir": "Noir",
+    "grain": "Granulação",
+    "pastel": "Pastel",
+    "blockbuster": "Blockbuster",
+    "dreamy": "Onírico"
+  },
+  "strokeStyle": {
+    "glow": "Brilho",
+    "hand": "Desenhado à mão",
+    "cut": "Corte reto",
+    "solid": "Sólido",
+    "offset": "Deslocado",
+    "dotted": "Pontilhado"
+  },
+  "overlayHit": {
+    "press": "Pressionar",
+    "zap": "Zap"
+  },
+  "overlayAnim": {
+    "fade": "Fade",
+    "pop": "Pop",
+    "zoom": "Zoom",
+    "slideleft": "Deslizar para a esquerda",
+    "slideright": "Deslizar para a direita",
+    "slideup": "Deslizar para cima",
+    "slidedown": "Deslizar para baixo",
+    "typewriter": "Máquina de escrever",
+    "wipe": "Varredura",
+    "rise": "Subir",
+    "drop": "Cair",
+    "grow": "Crescer",
+    "flip": "Virar",
+    "swivel": "Girar",
+    "bounce": "Quicar",
+    "wave": "Onda",
+    "converge": "Convergir",
+    "streak": "Rastro",
+    "tumble": "Tombo",
+    "scatter": "Dispersar",
+    "slot": "Caça-níquel",
+    "dive": "Mergulhar",
+    "count": "Contagem",
+    "disintegrate": "Desintegrar",
+    "blur": "Desfoque",
+    "glitch": "Glitch",
+    "flicker": "Piscar"
+  },
+  "overlayLoop": {
+    "pulse": "Pulsar",
+    "heartbeat": "Batimento",
+    "float": "Flutuar",
+    "sway": "Balançar",
+    "spin": "Girar",
+    "wiggle": "Oscilar",
+    "shake": "Tremer",
+    "flicker": "Piscar",
+    "wave": "Ondular",
+    "bounce": "Quicar",
+    "flip": "Virar",
+    "flutter": "Tremular"
+  },
+  "ease": {
+    "linear": "Linear",
+    "sine_in": "Seno in",
+    "sine_out": "Seno out",
+    "sine_inOut": "Seno in-out",
+    "power2_in": "Power2 in",
+    "power2_out": "Power2 out",
+    "power2_inOut": "Power2 in-out",
+    "power3_in": "Power3 in",
+    "power3_out": "Power3 out",
+    "power3_inOut": "Power3 in-out"
+  },
+  "wheel": {
+    "s": "Lift",
+    "m": "Gama",
+    "h": "Ganho",
+    "o": "Deslocamento"
+  },
+  "effect": {
+    "echo": "Eco",
+    "reverb": "Reverb",
+    "muffle": "Abafado",
+    "telephone": "Telefone",
+    "deep": "Grave",
+    "bright": "Brilhante",
+    "wobble": "Oscilação",
+    "crush": "Esmagar",
+    "zoom": "Zoom",
+    "grain": "Granulação de filme",
+    "vhs": "VHS",
+    "glitch": "Glitch",
+    "blur": "Desfoque",
+    "vignette": "Vinheta",
+    "lightleak": "Vazamento de luz",
+    "lightbars": "Barras de luz",
+    "flash": "Flash",
+    "shake": "Tremor",
+    "negative": "Negativo",
+    "huecycle": "Ciclo de cores",
+    "vintage": "Vintage",
+    "horror": "Terror analógico",
+    "halation": "Halation",
+    "tech": "Tech moderno",
+    "noir": "Noir",
+    "pastel": "Pastel",
+    "blockbuster": "Blockbuster",
+    "dreamy": "Onírico"
+  },
+  "wordEffect": {
+    "color": "Cor",
+    "pop": "Pop",
+    "underline": "Sublinhado",
+    "box": "Destaque",
+    "spotlight": "Holofote",
+    "build": "Construir",
+    "fill": "Preencher",
+    "rise": "Elevar",
+    "bloom": "Bloom",
+    "swing": "Balançar",
+    "paint": "Pintura"
+  }
+}

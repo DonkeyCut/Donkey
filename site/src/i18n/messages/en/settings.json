@@ -1,0 +1,138 @@
+{
+  "editor": {
+    "title": "Editor",
+    "language": "Language",
+    "languageHint": "The language Donkey Cut, its emails and its chat replies use.",
+    "appearance": "Appearance",
+    "appearanceHint": "Light, dark, or matching your system.",
+    "saveFailed": "Couldn't save that change — try again."
+  },
+  "meta": {
+    "description": "Manage your Donkey Cut subscription, credits, and usage."
+  },
+  "saveFailed": "Couldn't save that change — try again.",
+  "header": {
+    "usageTitle": "Usage",
+    "usageDescription": "Your AI generation usage this billing period.",
+    "profileTitle": "Profile",
+    "billingTitle": "Billing",
+    "billingDescription": "Your subscription and credit balance."
+  },
+  "pro": {
+    "title": "Donkey Pro",
+    "description": "A monthly usage allowance that resets each month — you can still buy credits any time.",
+    "status": "{status, select, active {active} trialing {trialing} past_due {past_due} canceled {canceled} incomplete {incomplete} unpaid {unpaid} other {{status}}}",
+    "promotionUntil": "<b>Get Pro by {day}</b> and every month that starts by then includes {allowance}, {multiplier}× the usual {usual}.",
+    "promotionOpen": "Every month currently includes {allowance}, {multiplier}× the usual {usual}.",
+    "left": "{left} of {total} left this month",
+    "cancels": "Cancels on {date}.",
+    "renews": "Renews: {date}",
+    "activePromotionUntil": "Months that start by {day} include {allowance}.",
+    "activePromotionOpen": "Each new month includes {allowance}.",
+    "bonusLanded": "Your {credits} {origin, select, app {subscribe bonus} other {credit offer}} landed in your credits.",
+    "subscribeOffer": "Subscribe for {price} by {deadline} and get a one-time {credits}.{lifeClause}",
+    "introDeadline": "{terms} Subscribe by {deadline}.",
+    "opening": "Opening…",
+    "manage": "Manage billing",
+    "starting": "Starting…",
+    "subscribe": "Subscribe to Pro",
+    "unavailable": "Billing is unavailable right now."
+  },
+  "credits": {
+    "title": "Credits",
+    "description": "Pay-as-you-go balance for the Donkey app. Buy more any time.",
+    "available": "Available balance",
+    "buy": "Buy credits",
+    "preset": "{credits} · {price}",
+    "customLabel": "Credits",
+    "starting": "Starting…",
+    "buyFor": "Buy for {price}",
+    "buyPlain": "Buy",
+    "checkoutFailed": "Couldn't start checkout. Try again in a moment.",
+    "autoReload": "Auto-reload when my balance runs low",
+    "fallsBelow": "When balance falls below",
+    "unit": "credits",
+    "thenBuy": "automatically buy",
+    "saving": "Saving…",
+    "save": "Save",
+    "saveFailed": "Couldn't save auto-reload. Try again in a moment.",
+    "lastFailed": "Last auto-reload failed: {error}",
+    "needsCard": "Auto-reload needs a saved card. <buy>Buy credits once</buy> to save one, then turn this on."
+  },
+  "profile": {
+    "loadFailed": "Couldn't load your profile.",
+    "changePicture": "Change profile picture",
+    "emailVerified": "Email verified",
+    "displayName": "Display name",
+    "save": "Save",
+    "nameSaveFailed": "Couldn't save that name — try again."
+  },
+  "avatar": {
+    "title": "Profile picture",
+    "chooseImage": "Choose an image",
+    "zoom": "Zoom",
+    "replace": "Replace",
+    "choose": "Choose",
+    "remove": "Remove",
+    "save": "Save",
+    "unreadable": "That file isn't an image we can read.",
+    "prepareFailed": "Couldn't prepare that image — try again.",
+    "saveFailed": "Couldn't save that picture — try again."
+  },
+  "email": {
+    "title": "Email preferences",
+    "product": "Product emails",
+    "productHint": "News and announcements about Donkey Cut."
+  },
+  "flagsSection": {
+    "title": "Feature flags",
+    "hint": "Early features you can turn on for your account."
+  },
+  "flags": {
+    "editor_credits_pill": {
+      "title": "Show credits in the editor",
+      "description": "Your remaining balance in the editor's top bar."
+    }
+  },
+  "phoneLink": {
+    "title": "Phone link",
+    "body": "Send video from the Donkey Cut iPhone app straight to this Mac over Wi-Fi Direct, with or without a network. Clips land in the project you have open.",
+    "instructions": "On the phone, open the avatar menu → Mac Link, pick this Mac, and type:",
+    "cancel": "Cancel",
+    "codeLife": "The code is good for five minutes.",
+    "pair": "Pair a phone",
+    "refused": "The last code was answered wrong three times and closed. Start a new one.",
+    "lastSeen": "Last seen {when}",
+    "justNow": "just now",
+    "unpair": "Unpair",
+    "unpairHint": "This phone stops being able to send here",
+    "unreachable": "Couldn't reach the app on this Mac — check that it's running."
+  },
+  "usage": {
+    "included": "Included",
+    "conversation": "Conversation {id}",
+    "calls": "{count, plural, one {# call} other {# calls}}",
+    "cachedShare": "{share}% cached",
+    "date": "Date",
+    "kind": "Kind",
+    "model": "Model",
+    "cost": "Cost",
+    "status": "Status",
+    "callStatus": "{status, select, succeeded {succeeded} failed {failed} other {{status}}}",
+    "noCalls": "No calls yet.",
+    "imagesGenerated": "Images generated",
+    "inputTokens": "Input tokens",
+    "cachedInput": "Cached input",
+    "cachedValue": "{tokens} ({share}%)",
+    "outputTokens": "Output tokens",
+    "totalTokens": "Total tokens",
+    "duration": "Duration",
+    "imageExplanation": "Image generation is priced per image, not by tokens.",
+    "tokenExplanation": "Cost is driven by tokens, and input dominates here. Cached input is an unchanged prompt prefix the provider reuses at a fraction of the rate; a low cached share on a repeated call means the cache isn't being hit.",
+    "noUsage": "No billable usage was recorded for this call.",
+    "error": "Error: {code}"
+  },
+  "checkout": {
+    "creditsProduct": "Donkey credits"
+  }
+}

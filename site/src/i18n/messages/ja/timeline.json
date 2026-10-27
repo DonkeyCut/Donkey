@@ -1,0 +1,207 @@
+{
+  "main": {
+    "resize": "ドラッグしてタイムラインのサイズを変更",
+    "zoom": "ズーム",
+    "fit": "全体表示",
+    "fitTitle": "タイムラインをウィンドウに合わせる",
+    "sticker": "ステッカー",
+    "transitionIn": "{name}（イン）",
+    "transitionOut": "{name}（アウト）",
+    "transitionTitle": "{name} {seconds}秒 — 行に沿って自由にドラッグできます。カットやクリップの端に重なる位置で再生されます",
+    "dragToTrim": "ドラッグしてトリミング",
+    "removeEmptySpace": "空白を削除",
+    "removeKeyframe": "キーフレームを削除",
+    "show": "表示",
+    "hide": "非表示",
+    "captureFrame": "フレームをキャプチャ",
+    "copyFrame": "フレームをコピー"
+  },
+  "toolbar": {
+    "text": "テキスト",
+    "textTooltip": "テキスト ({key})",
+    "magnet": "マグネット",
+    "magnetOn": "マグネットON: トラック0の間隔を詰める",
+    "magnetOff": "マグネット: トラック0の間隔を詰める",
+    "split": "分割",
+    "splitTooltip": "ポインターまたは再生ヘッドの位置で分割 (⌘B または S)",
+    "delete": "削除",
+    "deleteCount": "{count}件を削除",
+    "deleteTooltip": "削除 ({key})",
+    "tools": "タイムラインツール",
+    "zoom": "ズーム",
+    "fit": "全体表示",
+    "fitTitle": "タイムラインをウィンドウに合わせる",
+    "hideTimeline": "タイムラインを非表示",
+    "saved": "保存済み",
+    "saveTemplate": "テンプレートを保存",
+    "backToStart": "先頭に戻る",
+    "playPause": "再生/一時停止 (Space)"
+  },
+  "clip": {
+    "lut": "LUT",
+    "cutting": "カット中…",
+    "cuttingShort": "カ…",
+    "speedCurve": "速度カーブ · 平均 {rate}×",
+    "speed": "{rate}倍速",
+    "detachAudio": "音声を切り離す",
+    "brushStroke": "ブラシストローク",
+    "options": "クリップのオプション",
+    "addToMedia": "メディアに追加",
+    "addToLibrary": "ライブラリに追加",
+    "exportSegment": "セグメントを書き出し",
+    "download": "ダウンロード",
+    "showInFinder": "Finderで表示",
+    "reorderRow": "ドラッグして行を並べ替え",
+    "showTrack": "トラックを表示",
+    "hideTrack": "トラックを非表示",
+    "unmuteTrack": "トラックのミュートを解除",
+    "muteTrack": "トラックをミュート",
+    "enable": "クリップを有効化",
+    "disable": "クリップを無効化",
+    "missingMedia": "メディアが見つかりません",
+    "mute": "クリップをミュート",
+    "unmute": "クリップのミュートを解除",
+    "beat": "ドラッグで移動、ダブルクリックで削除",
+    "fadeIn": "ドラッグしてフェードインを設定",
+    "fadeOut": "ドラッグしてフェードアウトを設定",
+    "key": "ドラッグしてリタイム、Deleteで削除",
+    "sticker": "ステッカー"
+  },
+  "picker": {
+    "label": "タイムライン",
+    "heading": "タイムライン",
+    "emptyNote": "{current} は空です。編集内容は {other} にあります。",
+    "open": "{name} を開く"
+  },
+  "group": {
+    "group": "グループ化",
+    "ungroup": "グループ解除",
+    "groupTooltip": "グループ化 ({key})",
+    "ungroupTooltip": "グループ解除 ({key})"
+  },
+  "media": {
+    "play": "再生",
+    "pause": "一時停止",
+    "seek": "シーク",
+    "mute": "ミュート",
+    "unmute": "ミュート解除"
+  },
+  "trackRow": {
+    "track": "トラッキング",
+    "follow": "追従",
+    "tracking": "トラッキング中 {progress}%",
+    "pickTarget": "ターゲットを選択",
+    "failed": "映像をトラッキングできませんでした。",
+    "targets": {
+      "hands_gap": "両手の間",
+      "left_hand": "左手",
+      "right_hand": "右手",
+      "head": "頭部",
+      "person": "人物"
+    }
+  },
+  "flash": {
+    "tone": "トーン",
+    "strobe": "ストロボ",
+    "strobeRate": "ストロボレート",
+    "off": "オフ",
+    "rhythm": "リズム",
+    "fade": "フェード",
+    "curve": "カーブ",
+    "tones": {
+      "white": "ホワイト",
+      "black": "ブラック"
+    },
+    "rhythms": {
+      "strobe": "ストロボ",
+      "flicker": "フリッカー"
+    },
+    "fades": {
+      "none": "オフ",
+      "to": "フェード先",
+      "from": "フェード元"
+    }
+  },
+  "curves": {
+    "channels": {
+      "m": "マスター",
+      "r": "レッド",
+      "g": "グリーン",
+      "b": "ブルー"
+    }
+  },
+  "guides": {
+    "show": "ガイドを表示",
+    "hide": "ガイドを非表示",
+    "showTitle": "ガイドを表示 ({key})",
+    "hideTitle": "ガイドを非表示 ({key})",
+    "presetsLabel": "ガイドプリセット",
+    "heading": "ガイド",
+    "portraitOnly": "縦向きフレーム",
+    "addVertical": "垂直線を追加",
+    "addHorizontal": "水平線を追加",
+    "presets": {
+      "thirds": "三分割",
+      "center": "センター",
+      "margins": "セーフマージン",
+      "shortform": "ショート動画",
+      "custom": "カスタム"
+    },
+    "sublabels": {
+      "margins": "{inset} インセット",
+      "shortform": "TikTok, Instagram, YouTube",
+      "custom": "プレビュー上の線をドラッグ"
+    },
+    "regions": {
+      "topBar": "トップバー",
+      "cropped": "クロップ領域",
+      "actions": "アクション",
+      "caption": "キャプション・音楽・ナビ"
+    }
+  },
+  "speedCurve": {
+    "node": "ノード: {rate} ({time})",
+    "pickPreset": "プリセットカーブを選択",
+    "custom": "カスタム",
+    "smoothSlow": "スムーズスロー",
+    "smoothSlowInfo": "オンにすると、1×未満の箇所が書き出し時にスムーズに補間されます。",
+    "addNode": "再生ヘッドの位置にノードを追加",
+    "removeNode": "選択したノードを削除 (Delete)",
+    "flatten": "1×にリセット",
+    "close": "閉じる ({key})",
+    "presets": {
+      "flat": {
+        "label": "フラット",
+        "hint": "クリップ全体で一定の速度"
+      },
+      "rampIn": {
+        "label": "ランプイン",
+        "hint": "高速で開始し、徐々にスローモーションへ"
+      },
+      "rampOut": {
+        "label": "ランプアウト",
+        "hint": "スローモーションで開始し、徐々に高速へ"
+      },
+      "drift": {
+        "label": "ドリフト",
+        "hint": "急速からスローに落ち込み、再び加速"
+      },
+      "pulse": {
+        "label": "パルス",
+        "hint": "スローな中間部を挟む2つの加速"
+      },
+      "hold": {
+        "label": "ホールド",
+        "hint": "高速突入、中央でスロー、再び高速抜け"
+      },
+      "whip": {
+        "label": "ウィップ",
+        "hint": "スローモーションの中央で瞬間的に加速"
+      },
+      "stutter": {
+        "label": "スタッター",
+        "hint": "加速とスローを交互に反復"
+      }
+    }
+  }
+}

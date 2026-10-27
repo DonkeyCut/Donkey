@@ -1,0 +1,89 @@
+{
+  "editorMock": {
+    "caption": "Der Donkey Cut-Editor mit einem geöffneten, fertigen Projekt: generierte Medien in der Seitenleiste, Clips und Musik auf der Timeline und der KI-Chat, der sie zusammengestellt hat."
+  },
+  "topBar": {
+    "aspect": "{name} · {ratio}",
+    "record": "Aufnehmen",
+    "saved": "Gespeichert",
+    "chat": "Chat",
+    "export": "Exportieren"
+  },
+  "aspectNames": {
+    "vertical": "Hochformat",
+    "widescreen": "Breitbild"
+  },
+  "sidePanel": {
+    "tabs": {
+      "media": "Medien",
+      "video": "Video",
+      "image": "Bild",
+      "audio": "Audio",
+      "subtitles": "Untertitel",
+      "details": "Details"
+    },
+    "projectFiles": "Projektdateien",
+    "library": "Bibliothek",
+    "upload": "Hochladen",
+    "templateMeta": "{duration} · {count, plural, one {# Element} other {# Elemente}}",
+    "generateImage": "Bild generieren",
+    "generateVideo": "Video generieren",
+    "renderNote": "Das Rendern dauert ein, zwei Minuten. Du kannst währenddessen weiterschneiden.",
+    "generated": "Generiert"
+  },
+  "aiPanel": {
+    "working": "In Arbeit … {seconds}s",
+    "placeholder": "Frag nach deinem Video oder sag, was geändert werden soll … @ referenziert Medien"
+  },
+  "projects": {
+    "posters": {
+      "switcherLabel": "Reiseplakate",
+      "name": "Städteplakate-Reihe",
+      "prompt": "Handgemaltes Reiseplakat, PARIS – Frau im Trenchcoat überquert die Straße, Eiffelturm im Hintergrund, Café-Markisen, „Live the romance“ in roter Schreibschrift",
+      "paris": "Paris",
+      "newYork": "New York",
+      "clipParis": "Paris – Live the romance",
+      "clipNewYork": "New York – Rise above the city",
+      "captionParis": "Live the romance",
+      "captionNewYork": "Rise above the city",
+      "chat1": "Erstelle zwei handgemalte Reiseplakate – Paris und New York, auf beiden dieselbe Frau, die die Straße überquert.",
+      "chat2": "Hier sind die beiden Plakate mit abgestimmter Farbpalette und Typografie:",
+      "chat3": "Animiere sie – sie geht, langsame Kamerabewegung, behalte die gemalte Textur bei. Schneide sie dann mit Untertiteln und Musik zusammen.",
+      "chat4": "Habe zwei 4s-Clips gerendert und die Timeline mit Untertiteln und einem Walzer zusammengestellt. Möchtest du einen anderen Track?"
+    },
+    "railway": {
+      "switcherLabel": "Eisenbahn-Mysterium",
+      "name": "Das Eisenbahn-Mysterium",
+      "prompt": "Franko-belgischer Comic-Stil, Animation aus den frühen 1900ern mit Filmkorn: Ein Dampfzug rast auf einer Klippenstrecke durch eine Bergschlucht; eine verhüllte Gestalt auf dem Waggondach; ein Junge auf einem Fahrrad nimmt die Verfolgung auf",
+      "canyonRun": "Fahrt durch die Schlucht",
+      "onTheRoof": "Auf dem Dach",
+      "bicycleChase": "Fahrrad-Verfolgungsjagd",
+      "shot": "Einstellung {number}",
+      "trainWhistle": "Zugpfeife",
+      "wheelsOnGravel": "Räder auf Schotter",
+      "chat1": "Erstelle ein Storyboard für eine Verfolgungsjagd im Comic-Stil der 1920er: Eine geheimnisvolle Gestalt auf einem Dampfzug, ein Kind auf dem Fahrrad, das ihn durch eine Schlucht verfolgt.",
+      "chat2": "Drei Einstellungen: 1) Der Zug schlängelt sich durch die Schlucht, 2) die verhüllte Gestalt balanciert auf dem Dach, 3) der Junge tritt neben den Gleisen kräftig in die Pedale.",
+      "chat3": "Animiere alle drei im Ligne-Claire-Stil.",
+      "chat4": "Habe die drei Einstellungen gerendert und mit Bläser- und Streichermusik geschnitten:",
+      "chat5": "Füge eine Zugpfeife hinzu, wenn er aus dem Tunnel kommt, und Schottergeräusche unter dem Fahrrad.",
+      "chat6": "Habe beides auf die Effektspur gelegt und unter die Musik gemischt. Soll der Schnitt beim Einfahren in den Tunnel gestrafft werden?"
+    },
+    "mason": {
+      "switcherLabel": "Mason",
+      "name": "Cartoon",
+      "template": "Vorlage",
+      "voiceover": "KI-Stimme – {text}",
+      "scenePrompt": "Handgezeichnete 2D-Cartoon-Animation mit kräftigen schwarzen Konturen, …",
+      "walkingToSchool": "Schulweg",
+      "schoolGates": "Schultor",
+      "fishTank": "Aquarium",
+      "strawberries": "Erdbeeren",
+      "soccer": "Fußball",
+      "taekwondo": "Taekwondo",
+      "swimming": "Schwimmen",
+      "chat1": "@a1 ist mein Sohn Mason, der sich auf Koreanisch vorstellt. Zeichne eine Szene für alles, was er erwähnt, und schneide sie passend zum Audio.",
+      "chat2": "Ich habe die Erdbeer-Essszene am Ende der Timeline entfernt und begonnen, drei brandneue Szenen passend zu Masons Lieblingssportarten zu generieren: Fußball, Taekwondo und Schwimmen!\n\nSie rendern im Hintergrund und erscheinen ab Sekunde 9,5 direkt in deiner Timeline, perfekt abgestimmt auf das Audio. Sag Bescheid, wenn Mason noch mehr sportliches Training braucht!",
+      "chat3": "er mag auch Erdbeeren. du musst es an das Audio anpassen"
+    }
+  }
+}

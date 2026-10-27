@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { requestLocale } from "@/i18n/requestLocale";
 import { getActiveProSubscription } from "@/lib/billing/pro-subscription";
 import { creditMicrosToString } from "@/lib/credits/amounts";
 import { formatCredits } from "@/lib/credits/format-credits";
@@ -54,7 +55,9 @@ export const GET = withDonkeyAuth(async (request) => {
     claim,
     claimed: offer.claimedAt !== null,
     closesAt: offer.closesAt?.toISOString() ?? null,
-    credits: formatCredits(creditMicrosToString(offer.amountMicros)),
+    // Read by claim dialogs from builds before the catalog; the current one
+    // words the amount from `dollars`.
+    credits: formatCredits(creditMicrosToString(offer.amountMicros), requestLocale(request)),
     dollars: creditMicrosToString(offer.amountMicros),
     expiresAt: offer.grant?.expiresAt?.toISOString() ?? null,
     lifetimeDays: offer.expiresAfterDays,

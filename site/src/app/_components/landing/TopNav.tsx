@@ -2,6 +2,7 @@
 
 import { DonkeyMark } from "@/components/DonkeyMark";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 
 import { PillButton } from "@/app/_components/landing/LandingPrimitives";
@@ -27,9 +28,12 @@ export function TopNav({
   homeHref = "/",
   wordmark = "Donkey",
   authToggle,
-  signedInPill = { href: "/app", label: "Dashboard" },
+  signedInPill,
   signedOutAuth,
 }: Props) {
+  const t = useTranslations("landing.nav");
+  const pill = signedInPill ?? { href: "/app", label: t("dashboard") };
+
   // Signed-in visitors don't need the auth links or the download CTA; the whole
   // right cluster collapses to a single white button into the product. During the
   // initial (pending) client render `session` is null, which matches the static
@@ -71,8 +75,8 @@ export function TopNav({
         </Link>
         <div className="flex items-center gap-[10px] md:gap-4">
           {isSignedIn ? (
-            <PillButton href={signedInPill.href} variant="secondary" size="sm">
-              {signedInPill.label}
+            <PillButton href={pill.href} variant="secondary" size="sm">
+              {pill.label}
             </PillButton>
           ) : signedOutAuth ? (
             <>
@@ -83,14 +87,14 @@ export function TopNav({
                 href={signedOutAuth.logInHref}
                 className="hidden whitespace-nowrap text-sm font-semibold text-foreground no-underline sm:inline"
               >
-                Log in
+                {t("logIn")}
               </a>
               <PillButton
                 href={signedOutAuth.signUpHref}
                 variant="primary"
                 size="sm"
               >
-                Sign up
+                {t("signUp")}
               </PillButton>
             </>
           ) : authToggle ? (

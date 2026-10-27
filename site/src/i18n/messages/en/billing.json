@@ -1,0 +1,79 @@
+{
+  "notNow": "Not now",
+  "ok": "OK",
+  "upgradeToPro": "Upgrade to Pro",
+  "subscribeToPro": "Subscribe to Pro",
+  "buyCredits": "Buy credits",
+  "billingUnavailable": "Billing is unavailable right now.",
+  "offer": {
+    "validThrough": "Extra credits are valid through {date}.",
+    "validFor": "Extra credits are valid for {days, plural, one {# day} other {# days}}.",
+    "claimBody": "You have {credits} to claim.",
+    "claimBodyBy": "You have {credits} to claim. Claim them by {date}.",
+    "claimTerms": "Once claimed, they’re valid for {days, plural, one {# day} other {# days}}.",
+    "subscribeBody": "Subscribe to Pro for {price} and get an extra {credits}.",
+    "expiresIn": "Offer expires in {hours}h {minutes}m {seconds}s"
+  },
+  "intro": {
+    "terms": "{months, plural, one {{percent}% off: {price} for your first month, then {full}/month.} other {{percent}% off: {price}/month for your first # months, then {full}/month.}}"
+  },
+  "upgrade": {
+    "outOfCredits": "You're out of credits",
+    "proOutBody": "This month's Pro credits are spent. Buy more to keep generating.",
+    "projectsTitle": "Upgrade to make more projects",
+    "creditsBody": "Upgrade to Pro and get {credits} every month and 100 GB of cloud storage for {price}.",
+    "creditsBodyOffer": "Upgrade to Pro and get {credits} every month and 100 GB of cloud storage.",
+    "proPrice": "Pro is {price}.",
+    "projectsBodyStarter": "The free plan keeps your starter project. Pro makes as many as you need.",
+    "projectsBody": "The free plan keeps {count, plural, one {# project} other {# projects}} besides your starter. Pro makes as many as you need."
+  },
+  "claim": {
+    "expiredTitle": "This offer has expired",
+    "alreadyProTitle": "You already have Pro",
+    "invalidTitle": "This link is no longer valid",
+    "wrongAccount": "This offer belongs to a different account. Sign in with the address the email was sent to.",
+    "windowClosed": "The claim window for this offer has closed.",
+    "proOnly": "This offer is for accounts without a Pro subscription.",
+    "gone": "The offer it pointed to is gone.",
+    "addedTitle": "{credits} added to your account",
+    "ready": "They’re ready to spend.",
+    "readyExpires": "They’re ready to spend. They expire {date}.",
+    "startEditing": "Start editing",
+    "withProTitle": "Get {credits} with Pro",
+    "waitingTitle": "{credits} are waiting",
+    "claimButton": "Claim {credits}",
+    "failed": "That didn’t go through. Try again."
+  },
+  "storage": {
+    "title": "Cloud storage",
+    "fullTitle": "Cloud storage is full",
+    "used": "You've used {used} of {quota}.",
+    "graceToday": "Your Pro plan ended. Your oldest cloud projects will be deleted today unless you upgrade or free {bytes}.",
+    "graceDays": "Your Pro plan ended. Your oldest cloud projects will be deleted in {days, plural, one {# day} other {# days}} unless you upgrade or free {bytes}.",
+    "proBody": "Free up space by deleting projects or media you no longer need.",
+    "body": "Pro includes 100 GB of cloud storage.",
+    "bodyUsed": "You've used {used} of {quota}. Pro includes 100 GB of cloud storage.",
+    "freeUpTerms": "Or free up space by deleting projects and media you no longer need."
+  },
+  "subscribeBonus": {
+    "daysLeft": "{count}d left",
+    "hoursLeft": "{count}h left",
+    "minutesLeft": "{count}m left",
+    "pillLabel": "{credits} with Pro, {timeLeft}",
+    "pill": "{credits} credits with Pro · {timeLeft}",
+    "starting": "Starting…"
+  },
+  "creditsPill": {
+    "label": "Credits: {credits}",
+    "free": "Free",
+    "upgrade": "Upgrade",
+    "credits": "Credits"
+  },
+  "storagePill": {
+    "cancelTooltip": "Your Pro plan is set to cancel. Resume it to keep your cloud storage.",
+    "ends": "Pro · {days, plural, =0 {ends today} one {ends in # day} other {ends in # days}}",
+    "graceTooltip": "Your Pro plan ended and you're over the free limit. Upgrade or free up space before your oldest projects are deleted.",
+    "fullTooltip": "You've run out of cloud storage. Upgrade or free up space to keep uploading.",
+    "usedTooltip": "{used} of {quota} of cloud storage used."
+  }
+}

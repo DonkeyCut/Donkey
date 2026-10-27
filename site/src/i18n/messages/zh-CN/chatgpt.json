@@ -1,0 +1,112 @@
+{
+  "widget": {
+    "deleted": "此项目已删除。",
+    "createNewProject": "新建项目",
+    "dismiss": "忽略",
+    "tryAgain": "重试",
+    "cloudProjects": "云端项目",
+    "chooseProject": "选择一个项目进行预览。",
+    "connecting": "正在连接至 Donkey Cut…",
+    "loadProjects": "加载项目",
+    "yourProjects": "你的项目",
+    "noProjects": "在 Donkey Cut 中将项目保存到云端，即可在此处预览。",
+    "moreProjects": "更多项目",
+    "refreshList": "刷新列表",
+    "previewOf": "{name} 预览",
+    "waitingToRender": "等待渲染…",
+    "rendering": "正在渲染预览… {percent}%",
+    "renderToWatch": "渲染预览后即可在此观看此项目。",
+    "expired": "此预览已过期。重新渲染即可观看。",
+    "earlierEdit": "此预览可能来自较早的编辑版本。",
+    "renderPreview": "渲染预览",
+    "openInDonkey": "在 Donkey Cut 中打开 ↗",
+    "projects": "项目",
+    "openingEditor": "正在打开编辑器",
+    "editing": "正在编辑 {name}",
+    "untitled": "未命名",
+    "problems": {
+      "requestFailed": "Donkey Cut 无法完成此请求。请重试。",
+      "unreadable": "无法读取预览响应。",
+      "editorFailed": "Donkey Cut 无法打开编辑器。请重试。",
+      "connect": "从 ChatGPT 连接此预览以继续。",
+      "generic": "请求失败。",
+      "videoFailed": "视频无法加载。请尝试重新打开项目。",
+      "openFailed": "无法打开 Donkey Cut。",
+      "saveFailed": "无法保存 {name}。"
+    }
+  },
+  "status": {
+    "createProject": {
+      "invoking": "正在创建项目",
+      "invoked": "项目已创建"
+    },
+    "importMedia": {
+      "invoking": "正在导入素材",
+      "invoked": "素材已导入"
+    },
+    "inspectProject": {
+      "invoking": "正在读取项目",
+      "invoked": "项目已读取"
+    },
+    "listCommands": {
+      "invoking": "正在列出命令",
+      "invoked": "命令已列出"
+    },
+    "describeCommands": {
+      "invoking": "正在描述命令",
+      "invoked": "命令已描述"
+    },
+    "listSkills": {
+      "invoking": "正在列出指南",
+      "invoked": "指南已列出"
+    },
+    "readSkill": {
+      "invoking": "正在读取指南",
+      "invoked": "指南已读取"
+    },
+    "editProject": {
+      "invoking": "正在编辑项目",
+      "invoked": "项目已编辑"
+    },
+    "undo": {
+      "invoking": "正在撤销",
+      "invoked": "已撤销"
+    },
+    "redo": {
+      "invoking": "正在重做",
+      "invoked": "已重做"
+    },
+    "exportVideo": {
+      "invoking": "正在导出视频",
+      "invoked": "已开始导出"
+    },
+    "exportStatus": {
+      "invoking": "正在检查导出",
+      "invoked": "已检查导出"
+    },
+    "jobStatus": {
+      "invoking": "正在检查任务",
+      "invoked": "已检查任务"
+    },
+    "accountStatus": {
+      "invoking": "正在读取账户",
+      "invoked": "已读取账户"
+    }
+  },
+  "embed": {
+    "failed": "Donkey Cut 无法打开编辑器。请从 ChatGPT 重新打开该项目。",
+    "disabled": "未启用 ChatGPT 连接。",
+    "tooMany": "请求过多。请一分钟后再试。",
+    "badRequest": "错误请求。",
+    "expired": "此编辑器链接已过期。请从 ChatGPT 重新打开该项目。"
+  },
+  "consent": {
+    "title": "连接到 ChatGPT",
+    "access": "ChatGPT 可以{access, select, edit {查看和编辑} other {查看}}你的项目{identity, select, email {并读取你的账户信息，包括你的邮箱地址} account {并读取你的账户信息} other {}}。",
+    "connect": "连接",
+    "cancel": "取消",
+    "expiredTitle": "重新连接",
+    "expiredHeading": "重新发起连接",
+    "expiredBody": "此连接页面已过期，或你的登录账户已更改。请返回 OpenAI 并重新发起连接。"
+  }
+}

@@ -1,0 +1,269 @@
+{
+  "tabs": {
+    "projects": "项目",
+    "library": "素材库",
+    "notes": "备忘录",
+    "cameraRoll": "相机胶卷"
+  },
+  "newProject": {
+    "button": "新建项目",
+    "title": "新建项目",
+    "placeholder": "项目名称",
+    "create": "创建项目",
+    "whereSaved": "新项目和媒体保存位置：{place}",
+    "scopeLocal": "后续创建的所有项目和媒体<br></br>都将保存在<b>此设备</b>上",
+    "scopeCloud": "后续创建的所有项目和媒体<br></br>都将保存在<b>云端</b>"
+  },
+  "embeddedNewProject": {
+    "create": "创建新项目",
+    "limit": "此账号已达到免费项目数量上限。在 Donkey Cut 中升级至 Pro 即可创建更多项目。",
+    "failed": "无法创建项目。"
+  },
+  "projects": {
+    "badgeLocal": "本地项目",
+    "badgeCloud": "云端项目",
+    "badgeOffline": "此为本地项目 — 请打开 Donkey 应用进行编辑",
+    "grace": "你的 Pro 方案已结束，且已超出免费存储空间上限。除非升级或释放 {size} 空间，否则最早的云端项目将在{days, plural, =0 {今天} other {# 天后}}被删除。",
+    "upgradeToPro": "升级至 Pro",
+    "deleteFolderFailed": "无法删除文件夹。",
+    "deleteProjectFailed": "无法删除项目。",
+    "duplicateFailed": "无法创建项目副本。",
+    "moveFailed": "无法移动项目。",
+    "deleteFailed": "无法删除。",
+    "cardMeta": "{size} · 编辑于 {date}",
+    "columnName": "名称",
+    "columnLength": "时长",
+    "columnSize": "大小",
+    "columnEdited": "修改时间",
+    "importing": "正在导入… <elapsed></elapsed>",
+    "newFolder": "新建文件夹",
+    "galleryView": "画廊视图",
+    "listView": "列表视图",
+    "loadFailed": "无法加载这些项目。",
+    "loadFailedCloud": "无法加载云端项目。",
+    "loadFailedLocal": "无法加载此 Mac 上的项目。",
+    "emptyTitle": "创建新项目以开始",
+    "renameTitle": "重命名项目",
+    "rename": "重命名",
+    "deleteTitle": "删除{what}？",
+    "foldersEmpty": "{count, plural, =1 {文件夹为空。} other {这些文件夹为空。}}",
+    "deletesFolders": "{count, plural, =1 {这会删除整个项目文件夹，包括其中的媒体文件和导出文件。} other {这会删除每个项目的整个文件夹，包括其中的媒体文件和导出文件。}}",
+    "cannotUndo": "此操作无法撤销。",
+    "deleteProjects": "{count, plural, =1 {删除项目} other {删除项目}}",
+    "deleteFolder": "删除文件夹",
+    "delete": "删除",
+    "duplicate": "创建副本",
+    "moveToLocal": "移至本地",
+    "moveToCloud": "移至云端",
+    "actions": "项目操作"
+  },
+  "pick": {
+    "project": "{count, plural, other {# 个项目}}",
+    "file": "{count, plural, other {# 个文件}}",
+    "item": "{count, plural, other {# 项}}",
+    "clip": "{count, plural, other {# 个片段}}",
+    "note": "{count, plural, other {# 条便签}}",
+    "folder": "{count, plural, other {# 个文件夹}}",
+    "named": "“{name}”",
+    "namedHolding": "“{name}”及其{held}",
+    "foldersHolding": "{folders}（{held}）",
+    "both": "{folders}和{items}",
+    "foldersGo": "{count, plural, other {文件夹内的所有内容也会随之一并删除。}}",
+    "phoneOnly": "此内容已从手机同步，也将从手机中删除。",
+    "phoneSome": "{count, plural, other {其中 # 项已从手机同步，也将从手机中删除。}}",
+    "cancel": "取消",
+    "delete": "删除"
+  },
+  "folders": {
+    "renameFolder": "重命名文件夹",
+    "renameFailed": "无法重命名文件夹。",
+    "createFailed": "无法创建文件夹。",
+    "share": "分享",
+    "rename": "重命名",
+    "delete": "删除",
+    "deleteFolder": "删除文件夹",
+    "options": "文件夹选项",
+    "items": "{count, plural, other {# 项}}",
+    "namePlaceholder": "名称"
+  },
+  "rename": {
+    "name": "名称"
+  },
+  "shelfBadge": {
+    "offline": "本地 — 打开 Donkey 应用即可使用"
+  },
+  "library": {
+    "share": "分享",
+    "newFolder": "新建文件夹",
+    "addMedia": "添加媒体",
+    "emptyTitle": "素材库在所有项目间共享。",
+    "emptyHint": "将视频、图片、音频或字体文件拖放至此处。",
+    "chooseFiles": "选择文件",
+    "orPasteLink": "或粘贴链接",
+    "linkPlaceholder": "TikTok、YouTube 或 Instagram 链接…",
+    "import": "导入",
+    "addNote": "添加备注",
+    "delete": "删除",
+    "deleteTitle": "删除 {what}？",
+    "keepCopy": "{count, plural, other {已使用该内容的项目将保留各自的副本。}}",
+    "remove": "移除"
+  },
+  "libraryShare": {
+    "title": "{kind, select, folder {共享文件夹} other {共享素材}}",
+    "body": "{kind, select, folder {将此文件夹复制到云端，这样即使你的设备离线，其他人也能打开。} other {将此素材复制到云端，这样即使你的设备离线，其他人也能打开。}}共享设置将应用于云端副本。你的本地文件仍会保留在此处。",
+    "copyFailed": "无法复制到云端。",
+    "copying": "正在复制到云端…",
+    "copy": "复制到云端"
+  },
+  "sharedLibrary": {
+    "viewOnly": "共享资源库 · 仅供查看",
+    "loading": "正在加载共享资源库",
+    "signInToView": "登录以查看此共享内容。",
+    "noAccess": "你没有访问此共享内容的权限。请让所有者邀请你。",
+    "gone": "此共享链接已失效。",
+    "loadFailed": "无法加载此共享内容。",
+    "signIn": "登录",
+    "tryAgain": "重试",
+    "breadcrumb": "文件夹路径导航",
+    "templateMedia": "模板媒体",
+    "emptyFolder": "此文件夹为空。",
+    "pages": "页数",
+    "firstPage": "首页",
+    "nextPage": "下一页"
+  },
+  "card": {
+    "renameFailed": "无法重命名文件。",
+    "renameFailedBadge": "重命名失败",
+    "preparing": "准备中",
+    "cantPlay": "无法播放",
+    "makingCopy": "正在创建此浏览器可播放的副本"
+  },
+  "importCard": {
+    "preview": "预览 {name}",
+    "retry": "重试",
+    "cancel": "取消",
+    "archive": "归档",
+    "failed": "失败",
+    "importing": "正在导入",
+    "importingFor": "正在导入 <time>{elapsed}</time>"
+  },
+  "cardMenu": {
+    "moreActions": "更多操作",
+    "addToTimeline": "添加到时间线",
+    "share": "分享",
+    "rename": "重命名",
+    "download": "下载",
+    "openOriginal": "打开原文件",
+    "delete": "删除"
+  },
+  "generatedMenu": {
+    "moreActions": "更多操作",
+    "addToMedia": "添加到媒体",
+    "addToLibrary": "添加到资源库",
+    "download": "下载",
+    "delete": "删除",
+    "deleteTitle": "删除“{name}”？",
+    "timelineUses": "{count, plural, other {它在时间线上有 # 处使用，将一并删除。}}",
+    "fileGoes": "媒体文件也将被删除，且无法撤销。",
+    "cancel": "取消"
+  },
+  "notes": {
+    "untitled": "未命名",
+    "untitledNote": "未命名笔记",
+    "allNotes": "所有笔记",
+    "saveFailed": "无法保存笔记。",
+    "reopen": "重新打开并重试",
+    "newFolder": "新建文件夹",
+    "newNote": "新建笔记",
+    "loadFailed": "无法加载笔记。",
+    "retry": "重试",
+    "emptyTitle": "暂无笔记。",
+    "emptyHint": "笔记会与 Donkey Cut iOS 应用同步——在此编写的台本即可在手机提词器上直接使用。",
+    "delete": "删除",
+    "deleteTitle": "删除{what}？",
+    "deleteFolderTitle": "删除“{name}”？",
+    "folderFallback": "文件夹",
+    "removedFromPhone": "{count, plural, other {也会从你的手机中移除。}}"
+  },
+  "composer": {
+    "untitledNote": "无标题笔记",
+    "titlePlaceholder": "无标题",
+    "noteColor": "笔记颜色",
+    "deleteNote": "删除笔记",
+    "delete": "删除",
+    "removeLabel": "移除标签 {name}",
+    "addLabel": "添加标签",
+    "label": "标签",
+    "colors": {
+      "butter": "黄油",
+      "blush": "浅粉",
+      "sky": "天蓝",
+      "mint": "薄荷",
+      "lilac": "丁香紫"
+    }
+  },
+  "labelPicker": {
+    "newLabel": "新建标签…",
+    "findOrCreate": "查找或创建…",
+    "renameLabel": "重命名标签 {name}",
+    "deleteLabel": "删除标签 {name}",
+    "create": "创建“{name}”",
+    "full": "每条笔记最多容纳 {max} 个标签。移除一个后方可继续添加。",
+    "firstLabel": "输入名称以创建你的第一个标签。"
+  },
+  "noteEditor": {
+    "placeholder": "写点什么…",
+    "turnInto": {
+      "text": "正文",
+      "h1": "一级标题",
+      "h2": "二级标题",
+      "h3": "三级标题",
+      "bullet": "无序列表",
+      "number": "编号列表",
+      "todo": "待办事项列表",
+      "quote": "引用"
+    },
+    "bold": "粗体",
+    "italic": "斜体",
+    "underline": "下划线",
+    "strikethrough": "删除线",
+    "listStyle": "列表样式",
+    "textColor": "文本颜色",
+    "defaultColor": "默认",
+    "textColors": {
+      "gray": "灰色",
+      "brown": "棕色",
+      "orange": "橙色",
+      "yellow": "黄色",
+      "green": "绿色",
+      "blue": "蓝色",
+      "purple": "紫色",
+      "pink": "粉色",
+      "red": "红色"
+    }
+  },
+  "docText": {
+    "empty": "空文件。",
+    "moreRows": "还有 {count} 行"
+  },
+  "cameraRoll": {
+    "emptyTitle": "暂无手机中的内容。",
+    "emptyHint": "你在 Donkey Cut iOS App 中录制的素材会自动同步到这里。",
+    "delete": "删除",
+    "deleteTitle": "删除{what}？",
+    "deleteBody": "{count, plural, other {素材将从云端相机胶卷以及拍摄它的手机中移除。已使用该素材的项目将保留其副本。}}"
+  },
+  "navUser": {
+    "billing": "账单",
+    "usage": "用量",
+    "onboarding": "查看新手引导",
+    "runLocally": "在 Mac 上本地运行",
+    "logOut": "退出登录"
+  },
+  "navStorage": {
+    "get100": "获取 100 GB",
+    "upgradeTip": "升级获取 100 GB + AI 积分",
+    "grace": "你的 Pro 计划已到期。请在最早的项目被删除前升级或释放 {size} 空间。"
+  },
+  "justNow": "刚刚"
+}

@@ -1,0 +1,89 @@
+{
+  "editorMock": {
+    "caption": "L'éditeur Donkey Cut avec un projet terminé ouvert : médias générés dans le panneau latéral, clips et musique sur la timeline, et le chat IA qui les a assemblés."
+  },
+  "topBar": {
+    "aspect": "{name} · {ratio}",
+    "record": "Enregistrer",
+    "saved": "Enregistré",
+    "chat": "Chat",
+    "export": "Exporter"
+  },
+  "aspectNames": {
+    "vertical": "Vertical",
+    "widescreen": "Écran large"
+  },
+  "sidePanel": {
+    "tabs": {
+      "media": "Médias",
+      "video": "Vidéo",
+      "image": "Image",
+      "audio": "Audio",
+      "subtitles": "Sous-titres",
+      "details": "Détails"
+    },
+    "projectFiles": "Fichiers du projet",
+    "library": "Bibliothèque",
+    "upload": "Importer",
+    "templateMeta": "{duration} · {count, plural, one {# élément} other {# éléments}}",
+    "generateImage": "Générer une image",
+    "generateVideo": "Générer une vidéo",
+    "renderNote": "Le rendu prend une minute ou deux. Continuez à monter pendant ce temps.",
+    "generated": "Généré"
+  },
+  "aiPanel": {
+    "working": "Traitement… {seconds}s",
+    "placeholder": "Posez une question sur votre vidéo ou dites quoi modifier… @ pour référencer un média"
+  },
+  "projects": {
+    "posters": {
+      "switcherLabel": "Affiches de voyage",
+      "name": "Série d'affiches de villes",
+      "prompt": "Affiche de voyage peinte à la main, PARIS — femme en trench traversant la rue, tour Eiffel en arrière-plan, stores de café, « Vivez la romance » en lettres rouges manuscrites",
+      "paris": "Paris",
+      "newYork": "New York",
+      "clipParis": "Paris — Vivez la romance",
+      "clipNewYork": "New York — Prenez de la hauteur",
+      "captionParis": "Vivez la romance",
+      "captionNewYork": "Prenez de la hauteur",
+      "chat1": "Créez deux affiches de voyage peintes à la main — Paris et New York, avec la même femme qui traverse la rue sur les deux.",
+      "chat2": "Voici les deux affiches, avec une palette et une typographie coordonnées :",
+      "chat3": "Animez-les — elle marche, léger travelling, conservez la texture peinte. Montez-les ensuite ensemble avec sous-titres et musique.",
+      "chat4": "Deux clips de 4 s générés et assemblés sur la timeline avec sous-titres et une valse. Vous voulez une autre piste ?"
+    },
+    "railway": {
+      "switcherLabel": "Mystère ferroviaire",
+      "name": "Le Mystère ferroviaire",
+      "prompt": "Style bande dessinée franco-belge, animation début XXe avec grain de pellicule : un train à vapeur fonce sur une voie à flanc de falaise dans un canyon ; une silhouette en cape sur le toit d'un wagon ; un garçon à vélo le poursuit",
+      "canyonRun": "Course dans le canyon",
+      "onTheRoof": "Sur le toit",
+      "bicycleChase": "Poursuite à vélo",
+      "shot": "Plan {number}",
+      "trainWhistle": "sifflet de train",
+      "wheelsOnGravel": "roues sur gravier",
+      "chat1": "Créez le storyboard d'une poursuite style BD des années 1920 : une silhouette mystérieuse sur un train à vapeur, un enfant à vélo le poursuivant à travers un canyon.",
+      "chat2": "Trois plans : 1) le train s'engageant dans le canyon, 2) la silhouette en cape en équilibre sur le toit, 3) le garçon pédalant à fond près des rails.",
+      "chat3": "Animez les trois dans ce style ligne claire.",
+      "chat4": "Les trois plans sont générés et montés sur une partition de cuivres et cordes :",
+      "chat5": "Ajoutez un sifflet de train à la sortie du tunnel et le bruit des graviers sous le vélo.",
+      "chat6": "Les deux sont placés sur la piste d'effets et mixés sous la musique. Voulez-vous resserrer la coupe à l'entrée du train dans le tunnel ?"
+    },
+    "mason": {
+      "switcherLabel": "Mason",
+      "name": "Dessin animé",
+      "template": "Modèle",
+      "voiceover": "Voix IA — {text}",
+      "scenePrompt": "Animation cartoon 2D dessinée à la main aux contours noirs marqués,…",
+      "walkingToSchool": "Sur le chemin de l'école",
+      "schoolGates": "Grille de l'école",
+      "fishTank": "Aquarium",
+      "strawberries": "Fraises",
+      "soccer": "Football",
+      "taekwondo": "Taekwondo",
+      "swimming": "Natation",
+      "chat1": "@a1 est mon fils Mason qui se présente en coréen. Dessinez une scène pour chaque élément qu'il mentionne et calez-la sur l'audio.",
+      "chat2": "J'ai supprimé la scène de dégustation de fraises à la fin de la timeline et commencé à générer trois toutes nouvelles scènes correspondant aux sports préférés de Mason : le football, le taekwondo et la natation !\\n\\nLeur rendu s'effectuera en arrière-plan et elles apparaîtront directement sur votre timeline à partir de 9,5 secondes pour s'aligner parfaitement sur l'audio. Dites-moi si Mason a besoin d'autres entraînements sportifs !",
+      "chat3": "il aime aussi les fraises. vous devez vous caler sur l'audio"
+    }
+  }
+}

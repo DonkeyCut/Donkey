@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "Donkeyをインストール",
+    "description": "macOS版Donkeyをダウンロードし、アプリケーションフォルダへの通常のドラッグ＆ドロップでインストールします。"
+  },
+  "title": "Donkeyをインストール<br></br><italic>お使いのMacに。</italic>",
+  "body": "プロジェクトはお使いのMac内に保持されます。テキスト読み上げや書き出しはローカルで実行されるため、共有する準備ができるまでファイルがコンピュータの外に出ることはありません。",
+  "download": "Mac版をダウンロード",
+  "step": "ステップ {number}",
+  "steps": {
+    "open": {
+      "title": "開く",
+      "body": "ダウンロードからDonkey.dmgファイルを開きます。",
+      "imageAlt": "ブラウザのダウンロードトレイでDonkeyディスクイメージのダウンロードが完了した状態。"
+    },
+    "install": {
+      "title": "インストール",
+      "body": "Donkeyアプリを「アプリケーション」フォルダにドラッグ＆ドロップします。",
+      "imageAlt": "Donkeyアプリのアイコンが「アプリケーション」フォルダにドラッグされている様子。"
+    },
+    "launch": {
+      "title": "起動",
+      "body": "「アプリケーション」フォルダまたはLaunchpadからDonkeyを開きます。",
+      "imageAlt": "macOSのDock内にあるDonkeyアプリアイコン。"
+    }
+  }
+}

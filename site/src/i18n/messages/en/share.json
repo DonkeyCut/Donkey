@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "restrictedTitle": "Shared project · Donkey Cut",
+    "restrictedDescription": "This project is shared with specific people.",
+    "title": "{name} · Donkey Cut",
+    "description": "Watch {name} in the browser.",
+    "libraryTitle": "Shared library · Donkey Cut"
+  },
+  "view": {
+    "signInPrompt": "This project is shared with specific people — sign in to see if that's you.",
+    "signIn": "Sign in",
+    "denied": "You don't have access to this project. Ask the owner to invite you.",
+    "deniedAs": "You don't have access to this project as {email}. Ask the owner to invite you.",
+    "inactive": "This share link isn't active anymore.",
+    "untitled": "Untitled"
+  }
+}

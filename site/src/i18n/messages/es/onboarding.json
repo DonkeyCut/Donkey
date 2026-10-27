@@ -1,0 +1,61 @@
+{
+  "sequence": {
+    "dialogLabel": "Te damos la bienvenida a Donkey Cut",
+    "skip": "Omitir",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "done": "Listo"
+  },
+  "welcome": {
+    "title": "Edita videos chateando.",
+    "body": "Recorta clips, agrega subtítulos, genera imágenes o crea nuevas escenas, todo desde el chat."
+  },
+  "referral": {
+    "title": "¿Cómo te enteraste de nosotros?",
+    "body": "Elige todas las que apliquen; nos ayuda a saber dónde aparecer la próxima vez.",
+    "otherPlaceholder": "Cuéntanos dónde",
+    "sources": {
+      "discord": "Discord",
+      "tiktok": "TikTok",
+      "instagram": "Instagram",
+      "youtube": "YouTube",
+      "reddit": "Reddit",
+      "search": "Búsqueda",
+      "friend": "Un amigo",
+      "other": "Otro"
+    }
+  },
+  "modes": {
+    "title": "Funciona en la nube o en tu Mac",
+    "subtitle": "El mismo editor. Elige lo que mejor te funcione.",
+    "cloudTitle": "En la nube",
+    "cloudNoInstall": "Sin instalar nada",
+    "cloudAnyBrowser": "Funciona en cualquier navegador",
+    "cloudRendering": "Nos encargamos del renderizado",
+    "macTitle": "En tu Mac",
+    "macLocalFiles": "Tus archivos se quedan en local",
+    "macHardware": "Usa el hardware de tu Mac",
+    "macFaster": "Exportaciones y funciones de IA más rápidas",
+    "switching": "Cambia automáticamente entre la nube y local cuando esté disponible."
+  },
+  "aiChat": {
+    "title": "Chatea con tu editor.",
+    "body": "La IA tiene acceso a todo tu proyecto. Pídele que recorte clips, genere tomas faltantes, escriba subtítulos, agregue locuciones, reorganice tu línea de tiempo o responda preguntas sobre tu material.",
+    "models": "Funciona desde el primer momento con Gemini, o usa tu propia suscripción a Claude o Codex."
+  },
+  "credits": {
+    "onUs": "por nuestra cuenta",
+    "body": "Ya están en tu cuenta; no tienes que reclamar nada. Úsalos en video, audio e imágenes generadas.",
+    "expires": "Vence el {date}."
+  },
+  "plans": {
+    "title": "Precios simples",
+    "subtitle": "El editor es gratis. Paga solo por el contenido generado con IA.",
+    "forIndividuals": "Para uso individual",
+    "getPro": "Obtén Pro",
+    "getProOff": "Obtén {percent}% de descuento en Pro",
+    "continueFree": "Continuar gratis",
+    "endsIn": "{percent}% de descuento termina en {hours}h {minutes}m {seconds}s",
+    "covers": "{months, plural, one {Durante tu primer mes, luego {price}/mes} other {Al mes durante tus primeros # meses, luego {price}/mes}}"
+  }
+}

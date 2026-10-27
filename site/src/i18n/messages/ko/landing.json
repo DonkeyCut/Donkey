@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "title": "Donkey Cut 동영상 편집기 — 무료 오픈 소스 CapCut 대안",
+    "description": "무료 오픈 소스 CapCut 대안. 채팅으로 편집하고 비디오, 이미지, 음성, 음악을 생성하며 프로젝트를 로컬에 보관하세요."
+  },
+  "nav": {
+    "logIn": "로그인",
+    "signUp": "회원가입",
+    "dashboard": "대시보드",
+    "goToApp": "앱으로 이동"
+  },
+  "tagline": "드디어, <italic>다루기 쉬운</italic> 동영상 편집기.",
+  "hero": {
+    "body": "채팅으로 편집하고, 이미지와 비디오를 생성하며, 파일을 내 컴퓨터에 안전하게 보관하세요. 구독 중인 Claude나 Codex가 있다면 그대로 사용할 수 있어요.",
+    "cta": "새 프로젝트 시작하기"
+  },
+  "worksWith": {
+    "title": "완벽한 <italic>호환성</italic>",
+    "body": "어시스턴트가 Mac에 이미 로그인된 Claude 및 Codex 앱을 활용해요. 구독 중이라면 별도 설정이나 API 키 없이 바로 쓸 수 있어요."
+  },
+  "pricing": {
+    "title": "단순한 <italic>요금제</italic>",
+    "body": "편집기는 무료예요. AI로 생성하는 미디어에 대해서만 결제하세요.",
+    "footnote": "* AI 생성 콘텐츠용 크레딧은 언제든지 구매할 수 있어요."
+  },
+  "plans": {
+    "free": {
+      "name": "Free",
+      "detail": "모두를 위한 플랜",
+      "body": "클라우드나 Mac에서 편집기 전체 기능을 무료로 이용하세요.",
+      "cta": "새 프로젝트 시작하기",
+      "editor": "동영상 편집기 전체 기능 이용",
+      "storage": "클라우드 스토리지 {mb, number} MB",
+      "tools": "가져오기, 내보내기 및 온디바이스 텍스트 변환",
+      "subscriptions": "보유한 Claude 또는 Codex 구독 연동"
+    },
+    "pro": {
+      "detail": "개인용 플랜",
+      "cta": "Pro 시작하기",
+      "everythingInFree": "Free 플랜의 모든 기능 포함"
+    }
+  },
+  "local": {
+    "title": "Donkey Cut을 <italic>Mac에서 실행하세요.</italic>",
+    "body": "Mac에서 로컬로 비디오를 편집하세요. 내 저장공간을 사용하며 기기 내에서 오디오를 텍스트로 변환해요.",
+    "cta": "Mac용 다운로드",
+    "imageAlt": "응용 프로그램 폴더로 드래그되는 Donkey 앱 아이콘."
+  },
+  "openSource": {
+    "title": "Donkey Cut은 <italic>오픈 소스</italic>예요.",
+    "body": "편집기와 렌더 엔진은 공개적으로 개발돼요. 소스를 확인하고, 직접 실행해 보며, 기여를 통해 더 멋지게 만들어 보세요.",
+    "runLocally": "편집기 로컬 실행",
+    "running": "편집기 실행 중 - {url}",
+    "star": "GitHub에서 Star 주기"
+  },
+  "finalCta": {
+    "body": "몇 분 만에 다음 프로젝트를 시작해 보세요.",
+    "cta": "편집 시작하기"
+  },
+  "blog": {
+    "metaTitle": "블로그 | Donkey Cut 동영상 편집기",
+    "metaDescription": "Donkey Cut 개발 이야기: 비디오 편집 기술, 편집기 작동 방식, 최신 변경 사항.",
+    "metaPageTitle": "블로그 | Donkey Cut 동영상 편집기 — {page}페이지",
+    "heading": "블로그",
+    "subtitle": "비디오 편집과 편집기 개발에 관한 이야기.",
+    "latestPosts": "최신 글",
+    "empty": "아직 글이 없어요.",
+    "pagination": "페이지 탐색",
+    "previous": "이전",
+    "next": "다음",
+    "copyLink": "섹션 링크 복사",
+    "onThisPage": "목차",
+    "overview": "개요",
+    "draftPreview": "초안 미리보기입니다. 나에게만 보여요.",
+    "exitPreview": "미리보기 종료",
+    "updated": "업데이트: {date}",
+    "backToBlog": "블로그로 돌아가기",
+    "backToAll": "전체 글 목록으로 돌아가기"
+  }
+}

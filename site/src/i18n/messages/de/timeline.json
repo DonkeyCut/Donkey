@@ -1,0 +1,207 @@
+{
+  "main": {
+    "resize": "Ziehen, um Timeline-Größe anzupassen",
+    "zoom": "Zoom",
+    "fit": "Einpassen",
+    "fitTitle": "Timeline an Fenster anpassen",
+    "sticker": "Sticker",
+    "transitionIn": "{name} Ein",
+    "transitionOut": "{name} Aus",
+    "transitionTitle": "{name} {seconds} s – ziehe es an eine beliebige Stelle in der Spur; spielt dort ab, wo es an einem Schnitt oder Clip-Rand anliegt",
+    "dragToTrim": "Ziehen zum Trimmen",
+    "removeEmptySpace": "Leerraum entfernen",
+    "removeKeyframe": "Keyframe entfernen",
+    "show": "Einblenden",
+    "hide": "Ausblenden",
+    "captureFrame": "Frame aufnehmen",
+    "copyFrame": "Frame kopieren"
+  },
+  "toolbar": {
+    "text": "Text",
+    "textTooltip": "Text ({key})",
+    "magnet": "Magnet",
+    "magnetOn": "Magnet an: Spur 0 schließt Lücken",
+    "magnetOff": "Magnet: Lücken in Spur 0 schließen",
+    "split": "Teilen",
+    "splitTooltip": "Am Zeiger oder am Playhead teilen (⌘B oder S)",
+    "delete": "Löschen",
+    "deleteCount": "{count} löschen",
+    "deleteTooltip": "Löschen ({key})",
+    "tools": "Timeline-Werkzeuge",
+    "zoom": "Zoom",
+    "fit": "Einpassen",
+    "fitTitle": "Timeline an Fenster anpassen",
+    "hideTimeline": "Timeline ausblenden",
+    "saved": "Gespeichert",
+    "saveTemplate": "Vorlage speichern",
+    "backToStart": "Zurück zum Anfang",
+    "playPause": "Wiedergabe/Pause (Space)"
+  },
+  "clip": {
+    "lut": "LUT",
+    "cutting": "Schneiden…",
+    "cuttingShort": "S…",
+    "speedCurve": "Geschwindigkeitskurve · {rate}× im Schnitt",
+    "speed": "{rate}× Geschwindigkeit",
+    "detachAudio": "Audio trennen",
+    "brushStroke": "Pinselstrich",
+    "options": "Clip-Optionen",
+    "addToMedia": "Zu Medien hinzufügen",
+    "addToLibrary": "Zur Bibliothek hinzufügen",
+    "exportSegment": "Segment exportieren",
+    "download": "Herunterladen",
+    "showInFinder": "Im Finder anzeigen",
+    "reorderRow": "Ziehen, um Zeile neu anzuordnen",
+    "showTrack": "Spur einblenden",
+    "hideTrack": "Spur ausblenden",
+    "unmuteTrack": "Spur laut schalten",
+    "muteTrack": "Spur stummschalten",
+    "enable": "Clip aktivieren",
+    "disable": "Clip deaktivieren",
+    "missingMedia": "Fehlende Medien",
+    "mute": "Clip stummschalten",
+    "unmute": "Clip laut schalten",
+    "beat": "Ziehen zum Verschieben, Doppelklick zum Entfernen",
+    "fadeIn": "Ziehen, um Einblendung einzustellen",
+    "fadeOut": "Ziehen, um Ausblendung einzustellen",
+    "key": "Ziehen zum Ändern des Timings, Delete zum Entfernen",
+    "sticker": "Sticker"
+  },
+  "picker": {
+    "label": "Timeline",
+    "heading": "Timelines",
+    "emptyNote": "{current} ist leer. Dein Schnitt befindet sich in {other}.",
+    "open": "{name} öffnen"
+  },
+  "group": {
+    "group": "Gruppieren",
+    "ungroup": "Gruppierung aufheben",
+    "groupTooltip": "Gruppieren ({key})",
+    "ungroupTooltip": "Gruppierung aufheben ({key})"
+  },
+  "media": {
+    "play": "Abspielen",
+    "pause": "Pause",
+    "seek": "Spulen",
+    "mute": "Stummschalten",
+    "unmute": "Stummschaltung aufheben"
+  },
+  "trackRow": {
+    "track": "Tracken",
+    "follow": "Folgen",
+    "tracking": "Tracking {progress} %",
+    "pickTarget": "Ziel auswählen",
+    "failed": "Material konnte nicht getrackt werden.",
+    "targets": {
+      "hands_gap": "Zwischen den Händen",
+      "left_hand": "Linke Hand",
+      "right_hand": "Rechte Hand",
+      "head": "Kopf",
+      "person": "Person"
+    }
+  },
+  "flash": {
+    "tone": "Farbton",
+    "strobe": "Stroboskop",
+    "strobeRate": "Stroboskop-Rate",
+    "off": "Aus",
+    "rhythm": "Rhythmus",
+    "fade": "Fade",
+    "curve": "Kurve",
+    "tones": {
+      "white": "Weiß",
+      "black": "Schwarz"
+    },
+    "rhythms": {
+      "strobe": "Stroboskop",
+      "flicker": "Flackern"
+    },
+    "fades": {
+      "none": "Aus",
+      "to": "Nach",
+      "from": "Von"
+    }
+  },
+  "curves": {
+    "channels": {
+      "m": "Master",
+      "r": "Rot",
+      "g": "Grün",
+      "b": "Blau"
+    }
+  },
+  "guides": {
+    "show": "Hilfslinien anzeigen",
+    "hide": "Hilfslinien ausblenden",
+    "showTitle": "Hilfslinien anzeigen ({key})",
+    "hideTitle": "Hilfslinien ausblenden ({key})",
+    "presetsLabel": "Hilfslinien-Presets",
+    "heading": "Hilfslinien",
+    "portraitOnly": "Hochformat",
+    "addVertical": "Vertikale Linie hinzufügen",
+    "addHorizontal": "Horizontale Linie hinzufügen",
+    "presets": {
+      "thirds": "Drittel",
+      "center": "Mitte",
+      "margins": "Sicherheitsbereich",
+      "shortform": "Short-Form",
+      "custom": "Benutzerdefiniert"
+    },
+    "sublabels": {
+      "margins": "{inset} Rand",
+      "shortform": "TikTok, Instagram, YouTube",
+      "custom": "Linien in der Vorschau ziehen"
+    },
+    "regions": {
+      "topBar": "Obere Leiste",
+      "cropped": "Beschnitten",
+      "actions": "Aktionen",
+      "caption": "Untertitel · Musik · Nav"
+    }
+  },
+  "speedCurve": {
+    "node": "Knoten {rate} bei {time}",
+    "pickPreset": "Preset-Kurve wählen",
+    "custom": "Benutzerdefiniert",
+    "smoothSlow": "Flüssige Zeitlupe",
+    "smoothSlowInfo": "Wenn aktiviert, wird beim Export alles unter 1× geglättet.",
+    "addNode": "Knoten an der Abspielposition hinzufügen",
+    "removeNode": "Ausgewählten Knoten entfernen (Delete)",
+    "flatten": "Auf 1× abflachen",
+    "close": "Schließen ({key})",
+    "presets": {
+      "flat": {
+        "label": "Flach",
+        "hint": "gleichbleibendes Tempo über den gesamten Clip"
+      },
+      "rampIn": {
+        "label": "Ramp-in",
+        "hint": "startet schnell und geht sanft in Zeitlupe über"
+      },
+      "rampOut": {
+        "label": "Ramp-out",
+        "hint": "startet in Zeitlupe und beschleunigt sanft"
+      },
+      "drift": {
+        "label": "Drift",
+        "hint": "ein Temposchub, der in Zeitlupe absinkt und sich wieder fängt"
+      },
+      "pulse": {
+        "label": "Puls",
+        "hint": "zwei Temposchübe um einen langsamen Moment"
+      },
+      "hold": {
+        "label": "Hold",
+        "hint": "schneller Einstieg, kurzer Moment in der Mitte, schneller Ausstieg"
+      },
+      "whip": {
+        "label": "Whip",
+        "hint": "Zeitlupe mit einem Temposchub in der Mitte"
+      },
+      "stutter": {
+        "label": "Stutter",
+        "hint": "abwechselnd schnelle und langsame Phasen"
+      }
+    }
+  }
+}

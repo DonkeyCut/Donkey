@@ -13,15 +13,29 @@
   }
 }
 
+/* Geist has no Chinese, Japanese or Korean glyphs. A page in one of those
+   languages names its own script's system fonts after Geist, so Han
+   characters take the shapes that language uses and nothing downloads. */
+:root:lang(ja) {
+  --font-cjk: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", Meiryo, sans-serif;
+}
+:root:lang(ko) {
+  --font-cjk: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+:root:lang(zh-CN) {
+  --font-cjk: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-ink: #0f0e0d;
   --color-coral: #ec7868;
   --color-cream: #faf6ec;
-  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* --font-cjk is the system font for a ja, ko or zh-CN page (above). */
+  --font-system: -apple-system, BlinkMacSystemFont, "Segoe UI", var(--font-cjk, sans-serif);
   --font-code: ui-monospace, "SF Mono", Menlo, monospace;
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-geist-sans), var(--font-cjk, sans-serif);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
   --color-ring: var(--ring);

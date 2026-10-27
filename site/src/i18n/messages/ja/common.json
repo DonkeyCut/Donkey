@@ -1,0 +1,45 @@
+{
+  "language": "言語",
+  "footer": {
+    "product": "製品",
+    "legal": "法的情報",
+    "blog": "ブログ",
+    "privacy": "プライバシーポリシー",
+    "terms": "利用規約",
+    "cutHome": "Donkey Cut ホーム",
+    "donkeyHome": "Donkey ホーム",
+    "helpDiscord": "お困りですか？<link>Discord</link> に参加する",
+    "helpEmail": "お困りですか？メールでお問い合わせ: <link>{email}</link>",
+    "copyright": "2026 Donkey, Inc."
+  },
+  "meta": {
+    "title": "Donkey Cut 動画エディター",
+    "description": "すべての処理を Mac 上で完結できる動画エディター。"
+  },
+  "pagination": {
+    "label": "ページネーション",
+    "previous": "前へ",
+    "previousLabel": "前のページへ戻る",
+    "next": "次へ",
+    "nextLabel": "次のページへ進む",
+    "morePages": "その他のページ"
+  },
+  "dialog": {
+    "close": "閉じる"
+  },
+  "proPlan": {
+    "body": "AIでリッチメディアを生成。",
+    "price": "{price}/月",
+    "storage": "クラウドストレージ {gb, number} GB",
+    "credits": "毎月 {credits} AIクレジット",
+    "generation": "画像、動画、ナレーション、音楽の生成"
+  },
+  "apiErrors": {
+    "checkout_no_url": "Stripe から URL が返されませんでした。",
+    "credit_amount_out_of_range": "{min} から {max} の間で、1,000単位で指定してください。",
+    "auto_reload_invalid": "enabled、thresholdDollars、amountDollars を指定してください。",
+    "no_payment_method": "カードを保存するためにクレジットを1度購入してから、自動チャージを有効にしてください。",
+    "unsupported_image_type": "サポートされていない画像形式です。",
+    "image_too_large": "画像が大きすぎます。"
+  }
+}

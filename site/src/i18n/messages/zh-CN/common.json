@@ -1,0 +1,45 @@
+{
+  "language": "语言",
+  "footer": {
+    "product": "产品",
+    "legal": "法律条款",
+    "blog": "博客",
+    "privacy": "隐私政策",
+    "terms": "使用条款",
+    "cutHome": "Donkey Cut 首页",
+    "donkeyHome": "Donkey 首页",
+    "helpDiscord": "需要帮助？加入我们的 <link>Discord</link>",
+    "helpEmail": "需要帮助？发送邮件至 <link>{email}</link>",
+    "copyright": "2026 Donkey, Inc."
+  },
+  "meta": {
+    "title": "Donkey Cut 视频编辑器",
+    "description": "完全在你的 Mac 上运行的视频编辑器。"
+  },
+  "pagination": {
+    "label": "分页",
+    "previous": "上一页",
+    "previousLabel": "前往上一页",
+    "next": "下一页",
+    "nextLabel": "前往下一页",
+    "morePages": "更多页面"
+  },
+  "dialog": {
+    "close": "关闭"
+  },
+  "proPlan": {
+    "body": "利用 AI 生成富媒体内容。",
+    "price": "{price}/月",
+    "storage": "{gb, number} GB 云存储空间",
+    "credits": "每月 {credits} 点 AI 额度",
+    "generation": "图像、视频、配音与音乐生成"
+  },
+  "apiErrors": {
+    "checkout_no_url": "Stripe 未返回 URL。",
+    "credit_amount_out_of_range": "请选择 {min} 到 {max} 之间，且为整千数。",
+    "auto_reload_invalid": "请提供 enabled、thresholdDollars 和 amountDollars。",
+    "no_payment_method": "购买一次点数以保存银行卡，然后即可开启自动充值。",
+    "unsupported_image_type": "不支持的图片格式。",
+    "image_too_large": "图片过大。"
+  }
+}

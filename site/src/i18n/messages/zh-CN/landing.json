@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "title": "Donkey Cut 视频编辑器 — 免费开源的剪映/CapCut替代工具",
+    "description": "免费开源的剪映/CapCut替代工具。通过对话轻松剪辑，生成视频、图像、配音和音乐，项目文件完全保存在本地。"
+  },
+  "nav": {
+    "logIn": "登录",
+    "signUp": "注册",
+    "dashboard": "控制台",
+    "goToApp": "进入应用"
+  },
+  "tagline": "终于有一款<italic>简单好用</italic>的视频编辑器了。",
+  "hero": {
+    "body": "通过对话进行剪辑，直接生成图像和视频，并将文件保存在自己的电脑上。如果你已有 Claude 或 Codex 订阅，可直接关联使用。",
+    "cta": "新建项目"
+  },
+  "worksWith": {
+    "title": "无缝<italic>协作</italic>",
+    "body": "AI 助手直接调用你 Mac 上已登录的 Claude 和 Codex 应用。只要你有订阅，无需配置，无需 API 密钥，即刻可用。"
+  },
+  "pricing": {
+    "title": "价格<italic>简单透明</italic>",
+    "body": "编辑器完全免费，仅对 AI 生成的媒体内容按需付费。",
+    "footnote": "* 可随时购买积分用于生成 AI 内容。"
+  },
+  "plans": {
+    "free": {
+      "name": "免费版",
+      "detail": "面向所有人",
+      "body": "完整的编辑器功能，支持云端或在你的 Mac 本地运行。",
+      "cta": "新建项目",
+      "editor": "完整使用视频编辑器",
+      "storage": "{mb, number} MB 云存储空间",
+      "tools": "导入、导出及本地转录",
+      "subscriptions": "关联你的 Claude 或 Codex 订阅"
+    },
+    "pro": {
+      "detail": "面向个人创作者",
+      "cta": "获取 Pro",
+      "everythingInFree": "包含免费版的全部功能"
+    }
+  },
+  "local": {
+    "title": "在你的 Mac 上<italic>运行 Donkey Cut</italic>。",
+    "body": "在 Mac 本地剪辑视频。应用使用本地存储空间，并在设备端直接转录音频。",
+    "cta": "下载 Mac 版",
+    "imageAlt": "正在将 Donkey 应用图标拖入“应用程序”文件夹。"
+  },
+  "openSource": {
+    "title": "Donkey Cut 完全<italic>开源</italic>。",
+    "body": "编辑器及其渲染引擎均公开透明开发。随时查看源码、自行运行、贡献代码，共同打造更棒的工具。",
+    "runLocally": "在本地运行编辑器",
+    "running": "编辑器运行中 - {url}",
+    "star": "在 GitHub 上点个 Star"
+  },
+  "finalCta": {
+    "body": "只需几分钟，开启你的下一个项目。",
+    "cta": "开始剪辑"
+  },
+  "blog": {
+    "metaTitle": "博客 | Donkey Cut 视频编辑器",
+    "metaDescription": "Donkey Cut 开发笔记：视频剪辑技巧、编辑器工作原理及最新动态。",
+    "metaPageTitle": "博客 | Donkey Cut 视频编辑器 — 第 {page} 页",
+    "heading": "博客",
+    "subtitle": "关于视频剪辑与编辑器开发的思考笔记。",
+    "latestPosts": "最新文章",
+    "empty": "暂无内容。",
+    "pagination": "分页导航",
+    "previous": "上一页",
+    "next": "下一页",
+    "copyLink": "复制本节链接",
+    "onThisPage": "本页目录",
+    "overview": "概览",
+    "draftPreview": "草稿预览模式，仅你自己可见。",
+    "exitPreview": "退出预览",
+    "updated": "更新于 {date}",
+    "backToBlog": "返回博客",
+    "backToAll": "返回全部文章"
+  }
+}

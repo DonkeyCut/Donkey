@@ -1,0 +1,385 @@
+{
+  "embeddedSignIn": {
+    "message": "Vuelve a conectarte para seguir editando aquí.",
+    "reconnect": "Reconectar"
+  },
+  "importPoster": {
+    "video": "Video"
+  },
+  "bottomSheet": {
+    "close": "Cerrar"
+  },
+  "transformHandles": {
+    "resize": "Arrastra para redimensionar",
+    "rotate": "Arrastra para rotar"
+  },
+  "viewerTopBar": {
+    "copyFailed": "No se pudo copiar el proyecto.",
+    "viewOnly": "Solo lectura",
+    "chat": "Chat",
+    "chatShortcut": "Chat ({key})",
+    "copying": "Copiando…",
+    "copyProject": "Copiar proyecto"
+  },
+  "connectGate": {
+    "bannerBlocked": "Este proyecto está guardado en este Mac y tu navegador está bloqueando la conexión de esta página con la app Donkey.",
+    "bannerUnreachable": "Este proyecto está guardado en este Mac y Donkey Cut no puede conectarse con la app Donkey.",
+    "howToFix": "Cómo solucionarlo",
+    "dismiss": "Descartar",
+    "titleBlocked": "Conexión bloqueada",
+    "titleAsk": "Conectarse a la app Donkey",
+    "titleStored": "Este proyecto está guardado en este Mac",
+    "bodyBlocked": "Este es un proyecto local: su video y sus ediciones están en este Mac, y tu navegador está bloqueando el acceso de esta página a la app Donkey que los abre. Abre la configuración del sitio desde el ícono junto a la barra de direcciones, activa <em>Apps en el dispositivo</em> y vuelve a intentarlo.",
+    "bodyAsk": "Este es un proyecto local: está guardado en la app Donkey en este Mac. Tu navegador te pedirá permiso para conectarse a las apps en este dispositivo; elige <em>Permitir</em>.",
+    "bodyInstall": "Este es un proyecto local: su video y sus ediciones están en este Mac, y la app Donkey es la que los abre. Instala Donkey o ábrela si ya la tienes; esta página se conectará automáticamente.",
+    "siteSettingsAlt": "Configuración del sitio de Chrome abierta sobre la barra de direcciones, con el interruptor Apps en el dispositivo",
+    "download": "Descargar para Mac",
+    "connecting": "Conectando…",
+    "connect": "Conectar",
+    "tryAgain": "Reintentar"
+  },
+  "cameraCard": {
+    "side": {
+      "auto": "Auto ({side})",
+      "bottom": "Abajo",
+      "left": "Izquierda",
+      "right": "Derecha"
+    },
+    "matteReady": "Máscara de persona lista",
+    "matteBaking": "Procesando máscara de persona {progress, number, percent}",
+    "matteFailed": "No se pudo procesar la máscara de persona.",
+    "matteStarting": "Iniciando máscara de persona",
+    "title": "Tarjeta de cámara",
+    "info": "El orador se muestra dentro de una tarjeta redondeada al borde del encuadre y su cabeza sobresale por encima. Automático coloca la tarjeta en la parte inferior de un encuadre vertical y en el lateral derecho de uno cuadrado u horizontal. Coloca el gráfico en una pista inferior. La tarjeta posiciona el metraje y genera sus propias esquinas y sombra, por lo que el zoom de encuadre, paneo, borde y sombra se desactivan mientras esté activa. Las medidas son en píxeles de diseño.",
+    "sideLabel": "Lado",
+    "top": "Superior",
+    "resetTop": "Restablecer superior",
+    "width": "Ancho",
+    "resetWidth": "Restablecer ancho",
+    "radius": "Radio",
+    "cardRadius": "Radio de la tarjeta",
+    "sideBleed": "Sangrado lateral",
+    "cardSideBleed": "Sangrado lateral de la tarjeta",
+    "shadow": "Sombra",
+    "popOut": "Sobresalir",
+    "feather": "Desvanecimiento",
+    "popOutFeather": "Desvanecimiento al sobresalir",
+    "retry": "Reintentar",
+    "footageSize": "Tamaño del metraje",
+    "footageOffset": "Desplazamiento del metraje",
+    "footageAxisOffset": "Desplazamiento del metraje en {axis}"
+  },
+  "lightbox": {
+    "close": "Cerrar",
+    "added": "Agregado",
+    "use": "Usar",
+    "prompt": "Prompt",
+    "copyPrompt": "Copiar prompt",
+    "copied": "Copiado",
+    "copy": "Copiar",
+    "preparingPlayback": "Preparando reproducción",
+    "readFailed": "No se pudo leer el archivo."
+  },
+  "platformPreview": {
+    "original": "Original",
+    "defaultHandle": "tú",
+    "originalSound": "sonido original - {handle}",
+    "close": "Cerrar vista previa",
+    "unmute": "Activar sonido",
+    "mute": "Silenciar",
+    "following": "Siguiendo",
+    "forYou": "Para ti",
+    "share": "Compartir",
+    "follow": "Seguir",
+    "more": "… más",
+    "like": "Me gusta",
+    "dislike": "No me gusta",
+    "subscribe": "Suscribirse"
+  },
+  "mobileShare": {
+    "details": "Detalles",
+    "transcript": "Transcripción",
+    "media": "Multimedia",
+    "chat": "Chat",
+    "cantPlay": "Este proyecto no se puede reproducir ahora.",
+    "preparing": "Preparando este proyecto para reproducir…",
+    "loading": "Cargando…",
+    "noDetails": "No se compartieron detalles.",
+    "caption": "Descripción",
+    "published": "Publicado",
+    "notes": "Notas",
+    "links": "Enlaces",
+    "noTranscript": "No se compartió ninguna transcripción.",
+    "noMedia": "No se compartió multimedia.",
+    "noChat": "No se compartió el chat."
+  },
+  "shareDialog": {
+    "features": {
+      "chat": {
+        "label": "Chat",
+        "hint": "Hilos de chat de IA y sus tarjetas"
+      },
+      "media": {
+        "label": "Multimedia",
+        "hint": "Archivos subidos fuera de la línea de tiempo"
+      },
+      "genai": {
+        "label": "Generaciones de IA",
+        "hint": "Video, imagen y audio generados"
+      },
+      "subtitles": {
+        "label": "Subtítulos",
+        "hint": "El panel de transcripción"
+      },
+      "details": {
+        "label": "Detalles",
+        "hint": "Descripción, etiquetas y notas"
+      }
+    },
+    "saveFailed": "No se pudo guardar el acceso compartido.",
+    "invalidEmail": "Eso no parece un correo electrónico.",
+    "copyFailed": "No se pudo copiar el enlace. Intenta de nuevo.",
+    "removeFailed": "No se pudo quitar el acceso compartido.",
+    "title": "{kind, select, folder {Compartir carpeta} asset {Compartir recurso} other {Compartir proyecto}}",
+    "people": "Personas",
+    "invitePlaceholder": "Invita por correo, presiona Enter",
+    "removeEmail": "Quitar {email}",
+    "generalAccess": "Acceso general",
+    "public": "Cualquier persona con el enlace",
+    "restricted": "Restringido",
+    "publicHint": "Cualquiera puede ver — no requiere iniciar sesión",
+    "restrictedHint": "Solo las personas que invites pueden ver, con su sesión iniciada",
+    "timeline": "Línea de tiempo",
+    "timelineHint": "Lo que ven los espectadores",
+    "alsoShare": "Compartir también",
+    "alsoShareHint": "Los espectadores siempre tienen la vista previa y la línea de tiempo en solo lectura. Activa cualquier otra cosa que deban ver.",
+    "folderHint": "Los espectadores pueden explorar y descargar el contenido de esta carpeta, incluyendo subcarpetas. Los cambios en la carpeta se verán en el enlace compartido.",
+    "assetHint": "Los espectadores pueden previsualizar y descargar este recurso.",
+    "tryAgain": "Reintentar",
+    "copied": "Copiado",
+    "copyLink": "Copiar enlace",
+    "stopSharing": "Dejar de compartir"
+  },
+  "exportsDock": {
+    "title": "Exportaciones",
+    "running": "{count} en curso",
+    "queuedCount": "{count} en cola",
+    "doneCount": "{count} listas",
+    "clearAll": "Borrar todo",
+    "collapse": "Contraer exportaciones",
+    "expand": "Expandir exportaciones",
+    "untitled": "Sin título",
+    "queued": "En cola",
+    "ready": "Listo",
+    "exportFailed": "Error al exportar",
+    "cancel": "Cancelar",
+    "dismiss": "Descartar",
+    "hide": "Ocultar — la exportación sigue en curso",
+    "showInFinder": "Mostrar en Finder",
+    "downloadAgain": "Descargar de nuevo",
+    "download": "Descargar",
+    "rendering": "Renderizando… {pct}%",
+    "preparing": "Preparando…",
+    "startFailed": "No se pudo iniciar la exportación"
+  },
+  "recordDialog": {
+    "deviceFallback": "No se pudo iniciar ese dispositivo; se volvió al predeterminado.",
+    "cameraBlocked": "Se bloqueó el acceso a la cámara. Permite la cámara y el micrófono para este sitio en Chrome y vuelve a intentarlo.",
+    "micBlocked": "Se bloqueó el acceso al micrófono. Permite el micrófono para este sitio en Chrome y vuelve a intentarlo.",
+    "cameraStartFailed": "Este navegador no pudo iniciar la grabación de la cámara. Verifica que ninguna otra app esté usando la cámara y vuelve a intentarlo.",
+    "startFailed": "Este navegador no pudo iniciar la grabación. Vuelve a intentarlo.",
+    "saveFailed": "No se pudo guardar la grabación. Intenta de nuevo.",
+    "emptyRecording": "La grabación quedó vacía. Verifica que ninguna otra app esté usando la cámara e intenta de nuevo.",
+    "cameraN": "Cámara {n}",
+    "micN": "Micrófono {n}",
+    "titleCamera": "Grabar cámara",
+    "titleAudio": "Grabar audio",
+    "close": "Cerrar",
+    "waiting": "Esperando permiso…",
+    "start": "Iniciar grabación",
+    "stop": "Detener y usar grabación"
+  },
+  "exportDialog": {
+    "title": "Exportar",
+    "presetGroup": "Preajuste de exportación",
+    "quickPresets": {
+      "share": {
+        "label": "Compartir",
+        "detail": "1080p · se reproduce en todas partes"
+      },
+      "best": {
+        "label": "Mejor",
+        "detail": "ajustes del archivo original"
+      },
+      "social4k": {
+        "label": "Social 4K",
+        "detail": "escalado a 4K · las plataformas lo transcodifican a mayor bitrate"
+      },
+      "small": {
+        "label": "Pequeño",
+        "detail": "720p · el más rápido"
+      },
+      "master": {
+        "label": "Master",
+        "detail": "ProRes 4444 · MOV · PCM · sin sacrificar nada"
+      }
+    },
+    "qualities": {
+      "high": {
+        "label": "Alta",
+        "detail": "mejor calidad"
+      },
+      "balanced": {
+        "label": "Equilibrada",
+        "detail": "archivo más pequeño"
+      },
+      "small": {
+        "label": "Pequeña",
+        "detail": "renderizado más rápido"
+      }
+    },
+    "codecs": {
+      "h264": "se reproduce en todas partes",
+      "hevc": "mitad de tamaño · dispositivos más nuevos",
+      "prores": "máster de edición · MOV",
+      "prores4444": "color propio por píxel · MOV"
+    },
+    "audioCodecs": {
+      "aac": "audio comprimido",
+      "pcm": "sin comprimir · MOV"
+    },
+    "colorSpaces": {
+      "sdr": "SDR",
+      "hlg": "HDR (HLG)",
+      "pq": "HDR (PQ)"
+    },
+    "loudness": {
+      "off": "Desactivado",
+      "social": "Redes sociales",
+      "podcast": "Pódcast",
+      "broadcast": "Transmisión"
+    },
+    "loudnessTarget": "{name} · {lufs} LUFS",
+    "custom": "Personalizado",
+    "customHint": "Configura cada opción tú mismo",
+    "source": "Origen",
+    "resolution": "Resolución",
+    "size": "{width} × {height}",
+    "sizeUpscaled": "{width} × {height} · escalado",
+    "sizeUpscaledFromSource": "{width} × {height} · escalado desde el origen",
+    "quality": "Calidad",
+    "customRateValue": "{mbps} Mbps · {size}",
+    "fileName": "Nombre del archivo",
+    "range": "Rango",
+    "wholeVideo": "Todo el video",
+    "selectionHint": "Desde el inicio del primer elemento seleccionado hasta el final del último, todas las filas incluidas",
+    "selectionRange": "Selección · {start}–{end}",
+    "frameRate": "Velocidad de fotogramas",
+    "sourceRateHint": "La velocidad a la que se reproduce el material",
+    "sourceReading": "Origen · leyendo…",
+    "sourceRate": "Origen · {fps} fps",
+    "fps": "{fps} fps",
+    "format": "Formato",
+    "eightBit": "8 bits",
+    "color": "Color",
+    "audio": "Audio",
+    "loudnessLabel": "Sonoridad",
+    "loudnessHint": "Ajusta toda la mezcla al objetivo y mantiene los picos verdaderos por debajo de {ceiling} dBTP.",
+    "moreSettings": "Más ajustes",
+    "customBitrate": "Bitrate personalizado",
+    "customBitrateHint": "Un bitrate más alto da mejor calidad y archivos más grandes. Úsalo si una plataforma requiere un bitrate específico; ProRes define el suyo.",
+    "auto": "Auto",
+    "bitrateLabel": "Bitrate en megabits por segundo",
+    "mbps": "Mbps",
+    "stems": "Stems",
+    "stemsHint": "Guarda un archivo WAV por pista, diálogo y cada pista musical, comprimidos en un ZIP junto al video para mezclarlos en otro lugar.",
+    "exportStems": "Exportar stems",
+    "captionsFile": "Archivo de subtítulos",
+    "captionsFileHint": "Guarda los subtítulos en un archivo SRT en tu carpeta Descargas, para plataformas que admiten subtítulos propios.",
+    "saveCaptionsFile": "Guardar archivo de subtítulos",
+    "cloudRender": "Este navegador no puede codificar {kind, select, prores {ProRes} hdr {HDR} other {esto}} por sí mismo, así que se renderiza en la nube y aparecerá aquí al terminar.",
+    "lufs": "{lufs} LUFS",
+    "stemsTag": "stems",
+    "reading": "Leyendo el metraje…",
+    "exportVideo": "Exportar video",
+    "scalePresets": "Ajustes predefinidos de {label}"
+  },
+  "topBar": {
+    "aspects": {
+      "16x9": "Panorámico",
+      "9x16": "Vertical",
+      "4x3": "Clásico",
+      "2x1": "Cinemático",
+      "1x1": "Cuadrado",
+      "3x4": "Retrato"
+    },
+    "aspectPreset": "{name} · {ratio}",
+    "customAspect": "Personalizado · {ratio}",
+    "customEllipsis": "Personalizado…",
+    "uploading": "{count, plural, one {Subiendo} other {Subiendo # archivos}}",
+    "copying": "{count, plural, one {Copiando} other {Copiando # archivos}}",
+    "finishingUploads": "Finalizando subidas…",
+    "finishingCopies": "Finalizando copias…",
+    "movingMedia": "Moviendo archivos {done}/{total}…",
+    "moveFailed": "No se pudo mover el proyecto.",
+    "share": "Compartir",
+    "moveToShare": "Mueve a Cloud para compartir",
+    "moveToCloud": "Mover a Cloud",
+    "cloud": "Cloud",
+    "retryImportsFirst": "Reintenta primero las importaciones fallidas",
+    "export": "Exportar",
+    "openInCut": "Abrir en Donkey Cut",
+    "open": "Abrir",
+    "fullscreen": "Pantalla completa",
+    "chat": "Chat",
+    "chatShortcut": "Chat ({key})",
+    "backTo": "{tab, select, library {Volver a la biblioteca} other {Volver a proyectos}}",
+    "rename": "Renombrar proyecto",
+    "importsFailed": "{count, plural, one {Falló # importación} other {Fallaron # importaciones}}",
+    "retry": "Reintentar",
+    "saving": "Guardando",
+    "saveFailed": "No se pudo guardar",
+    "saved": "Guardado",
+    "background": "Fondo",
+    "aspectLimit": "Hasta una proporción de 8:1",
+    "width": "Ancho",
+    "height": "Alto",
+    "aspectPresets": "Ajustes de relación de aspecto",
+    "record": "Grabar",
+    "recordCamera": "Grabar cámara",
+    "recordAudio": "Grabar audio",
+    "moreActions": "Más acciones",
+    "moveBody": "{from, select, browser {Copia este proyecto y sus archivos a la nube y luego los elimina de este navegador. Las exportaciones renderizadas aquí se conservan.} other {Copia este proyecto y sus archivos a la nube y luego los elimina de esta Mac. Las exportaciones renderizadas aquí se conservan.}}",
+    "moving": "Moviendo…"
+  },
+  "editor": {
+    "backTo": "{tab, select, library {Volver a la biblioteca} other {Volver a proyectos}}",
+    "needsApp": "Este es un proyecto local: está guardado en esta Mac. Abre la app de Donkey y se abrirá aquí.",
+    "shareGone": "Este enlace compartido ya no está disponible.",
+    "conflictReloaded": "Se recargó una versión más reciente guardada en otro lugar.",
+    "dismiss": "Descartar",
+    "defaultText": "Tu texto"
+  },
+  "preview": {
+    "showingOriginal": "Mostrando el original; haz clic para ver el recorte",
+    "previewingSdr": "Previsualizando SDR",
+    "copyingFrame": "Copiando fotograma…",
+    "copied": "Copiado",
+    "copyFrameFailed": "No se pudo copiar el fotograma",
+    "copyFrame": "Copiar fotograma",
+    "zoomOut": "Alejar",
+    "zoomIn": "Acercar",
+    "reset": "Restablecer",
+    "zoomLevel": "Zoom {percent}%",
+    "panPicture": "Arrastra para desplazar la imagen",
+    "zoomPicture": "Arrastra para hacer zoom en la imagen"
+  },
+  "maskGizmo": {
+    "moveCorner": "Arrastra para mover la esquina; doble clic para eliminarla",
+    "addCorner": "Arrastra para agregar una esquina aquí",
+    "feather": "Arrastra para desvanecer el borde",
+    "round": "Arrastra para redondear las esquinas",
+    "rotate": "Arrastra para rotar la máscara",
+    "resize": "Arrastra para redimensionar la máscara"
+  }
+}

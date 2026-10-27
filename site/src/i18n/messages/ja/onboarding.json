@@ -1,0 +1,61 @@
+{
+  "sequence": {
+    "dialogLabel": "Donkey Cutへようこそ",
+    "skip": "スキップ",
+    "back": "戻る",
+    "next": "次へ",
+    "done": "完了"
+  },
+  "welcome": {
+    "title": "チャットで動画を編集。",
+    "body": "クリップのトリミング、テロップの追加、画像の生成、新しいシーンの作成まで、すべてチャットから行えます。"
+  },
+  "referral": {
+    "title": "Donkey Cutをどこで知りましたか？",
+    "body": "当てはまるものをすべて選択してください（今後の発信の参考にさせていただきます）。",
+    "otherPlaceholder": "詳細を入力",
+    "sources": {
+      "discord": "Discord",
+      "tiktok": "TikTok",
+      "instagram": "Instagram",
+      "youtube": "YouTube",
+      "reddit": "Reddit",
+      "search": "検索",
+      "friend": "友人・知人",
+      "other": "その他"
+    }
+  },
+  "modes": {
+    "title": "クラウドでも、お使いのMacでも",
+    "subtitle": "機能はそのまま。作業環境に合わせて選べます。",
+    "cloudTitle": "クラウド",
+    "cloudNoInstall": "インストール不要",
+    "cloudAnyBrowser": "どのブラウザでも動作",
+    "cloudRendering": "レンダリングはクラウドで処理",
+    "macTitle": "Mac上",
+    "macLocalFiles": "ファイルはローカルに保存",
+    "macHardware": "Macのハードウェア性能を活用",
+    "macFaster": "より高速な書き出し＆AI機能",
+    "switching": "利用可能な場合、クラウドとローカルを自動で切り替えます。"
+  },
+  "aiChat": {
+    "title": "エディターとチャット。",
+    "body": "AIがプロジェクト全体を把握します。クリップのトリミング、不足カットの生成、字幕作成、ナレーション追加、タイムラインの並べ替え、素材についての質問まで何でも依頼できます。",
+    "models": "Geminiですぐに使えるほか、ご自身のClaudeやCodexのサブスクリプションも利用可能です。"
+  },
+  "credits": {
+    "onUs": "プレゼント",
+    "body": "すでにアカウントに付与されています（受け取り手続きは不要です）。動画、音声、画像の生成にご利用いただけます。",
+    "expires": "有効期限: {date}"
+  },
+  "plans": {
+    "title": "シンプルな料金プラン",
+    "subtitle": "エディターは無料。AI生成メディアにのみお支払いいただけます。",
+    "forIndividuals": "個人向け",
+    "getPro": "Proを利用",
+    "getProOff": "Proを{percent}%オフで利用",
+    "continueFree": "無料で続ける",
+    "endsIn": "{percent}%オフの終了まであと{hours}時間{minutes}分{seconds}秒",
+    "covers": "{months, plural, other {最初の#か月間の月額、以降は{price}/月}}"
+  }
+}

@@ -1,0 +1,225 @@
+{
+  "videoAspect": {
+    "16:9": "가로 (16:9)",
+    "9:16": "세로 (9:16)"
+  },
+  "videoResolution": {
+    "360p": "360p 초안",
+    "720p": "720p",
+    "1080p": "1080p",
+    "4k": "4K"
+  },
+  "stockAspect": {
+    "16:9": "가로 (16:9)",
+    "9:16": "세로 (9:16)",
+    "1:1": "정사각형 (1:1)"
+  },
+  "transition": {
+    "crossfade": "크로스 페이드",
+    "crosszoom": "크로스 줌",
+    "dipblack": "딥 투 블랙",
+    "dipwhite": "딥 투 화이트",
+    "blur": "블러",
+    "pushleft": "왼쪽으로 밀기",
+    "pushright": "오른쪽으로 밀기",
+    "pushup": "위로 밀기",
+    "pushdown": "아래로 밀기",
+    "wipeleft": "왼쪽으로 와이프",
+    "wiperight": "오른쪽으로 와이프",
+    "wipeup": "위로 와이프",
+    "wipedown": "아래로 와이프",
+    "circleopen": "원형 열기",
+    "circleclose": "원형 닫기",
+    "splitopen": "분할 열기",
+    "splitclose": "분할 닫기",
+    "clockwipe": "시계 방향 와이프",
+    "sliceleft": "왼쪽 슬라이스",
+    "sliceup": "위쪽 슬라이스",
+    "audiocross": "크로스 디졸브"
+  },
+  "anim": {
+    "fade": "페이드",
+    "blur": "블러",
+    "zoom": "줌",
+    "pop": "팝",
+    "slideleft": "왼쪽 슬라이드",
+    "slideright": "오른쪽 슬라이드",
+    "slideup": "위쪽 슬라이드",
+    "slidedown": "아래쪽 슬라이드"
+  },
+  "shape": {
+    "rect": "직사각형",
+    "ellipse": "타원",
+    "triangle": "삼각형",
+    "diamond": "다이아몬드",
+    "star": "별",
+    "heart": "하트",
+    "hexagon": "육각형",
+    "line": "선",
+    "arrow": "화살표",
+    "doodle": "낙서"
+  },
+  "timeline": {
+    "main": "메인",
+    "second": "두 번째",
+    "third": "세 번째"
+  },
+  "residency": {
+    "local": "로컬",
+    "cloud": "클라우드",
+    "browser": "로컬"
+  },
+  "imageAspect": {
+    "16:9": "가로 (16:9)",
+    "9:16": "세로 (9:16)",
+    "1:1": "정사각형 (1:1)"
+  },
+  "imageResolution": {
+    "1K": "1K",
+    "2K": "2K",
+    "4K": "4K"
+  },
+  "theme": {
+    "system": "시스템",
+    "light": "라이트",
+    "dark": "다크"
+  },
+  "audioEffect": {
+    "echo": "에코",
+    "reverb": "리버브",
+    "muffle": "먹먹함",
+    "telephone": "전화기",
+    "deep": "딥",
+    "bright": "브라이트",
+    "wobble": "워블",
+    "crush": "크러시"
+  },
+  "look": {
+    "vintage": "빈티지",
+    "vhs": "VHS",
+    "horror": "아날로그 호러",
+    "halation": "헐레이션",
+    "tech": "모던 테크",
+    "noir": "누아르",
+    "grain": "필름 그레인",
+    "pastel": "파스텔",
+    "blockbuster": "블록버스터",
+    "dreamy": "드리미"
+  },
+  "strokeStyle": {
+    "glow": "글로우",
+    "hand": "손그림",
+    "cut": "직선 컷",
+    "solid": "실선",
+    "offset": "오프셋",
+    "dotted": "점선"
+  },
+  "overlayHit": {
+    "press": "누르기",
+    "zap": "찌릿"
+  },
+  "overlayAnim": {
+    "fade": "페이드",
+    "pop": "팝",
+    "zoom": "줌",
+    "slideleft": "왼쪽 슬라이드",
+    "slideright": "오른쪽 슬라이드",
+    "slideup": "위쪽 슬라이드",
+    "slidedown": "아래쪽 슬라이드",
+    "typewriter": "타자기",
+    "wipe": "와이프",
+    "rise": "상승",
+    "drop": "낙하",
+    "grow": "확대",
+    "flip": "플립",
+    "swivel": "스위블",
+    "bounce": "바운스",
+    "wave": "웨이브",
+    "converge": "수렴",
+    "streak": "스트리크",
+    "tumble": "텀블",
+    "scatter": "분산",
+    "slot": "슬롯",
+    "dive": "다이브",
+    "count": "카운트",
+    "disintegrate": "분해",
+    "blur": "블러",
+    "glitch": "글리치",
+    "flicker": "깜빡임"
+  },
+  "overlayLoop": {
+    "pulse": "펄스",
+    "heartbeat": "심장 박동",
+    "float": "플로트",
+    "sway": "스웨이",
+    "spin": "회전",
+    "wiggle": "위글",
+    "shake": "흔들기",
+    "flicker": "깜빡임",
+    "wave": "웨이브",
+    "bounce": "바운스",
+    "flip": "뒤집기",
+    "flutter": "펄럭임"
+  },
+  "ease": {
+    "linear": "선형",
+    "sine_in": "사인 인",
+    "sine_out": "사인 아웃",
+    "sine_inOut": "사인 인아웃",
+    "power2_in": "파워2 인",
+    "power2_out": "파워2 아웃",
+    "power2_inOut": "파워2 인아웃",
+    "power3_in": "파워3 인",
+    "power3_out": "파워3 아웃",
+    "power3_inOut": "파워3 인아웃"
+  },
+  "wheel": {
+    "s": "리프트",
+    "m": "감마",
+    "h": "게인",
+    "o": "오프셋"
+  },
+  "effect": {
+    "echo": "에코",
+    "reverb": "리버브",
+    "muffle": "머플",
+    "telephone": "전화기",
+    "deep": "딥",
+    "bright": "브라이트",
+    "wobble": "워블",
+    "crush": "크러시",
+    "zoom": "줌",
+    "grain": "필름 그레인",
+    "vhs": "VHS",
+    "glitch": "글리치",
+    "blur": "블러",
+    "vignette": "비네트",
+    "lightleak": "라이트 리크",
+    "lightbars": "라이트 바",
+    "flash": "플래시",
+    "shake": "흔들림",
+    "negative": "네거티브",
+    "huecycle": "색상 순환",
+    "vintage": "빈티지",
+    "horror": "아날로그 호러",
+    "halation": "할레이션",
+    "tech": "모던 테크",
+    "noir": "누아르",
+    "pastel": "파스텔",
+    "blockbuster": "블록버스터",
+    "dreamy": "몽환적"
+  },
+  "wordEffect": {
+    "color": "색상",
+    "pop": "팝",
+    "underline": "밑줄",
+    "box": "하이라이트",
+    "spotlight": "스포트라이트",
+    "build": "빌드업",
+    "fill": "채우기",
+    "rise": "떠오르기",
+    "bloom": "블룸",
+    "swing": "스윙 인",
+    "paint": "페인트 온"
+  }
+}

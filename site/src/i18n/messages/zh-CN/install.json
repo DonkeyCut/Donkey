@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "安装 Donkey",
+    "description": "下载适用于 macOS 的 Donkey，并按常规拖拽到“应用程序”文件夹即可完成安装。"
+  },
+  "title": "在 Mac 上<br></br><italic>安装 Donkey。</italic>",
+  "body": "你的项目仅保存在 Mac 本地。文字转语音和导出均在本地运行，未准备好分享之前，文件绝不会离开你的电脑。",
+  "download": "Mac 版下载",
+  "step": "第 {number} 步",
+  "steps": {
+    "open": {
+      "title": "打开",
+      "body": "从下载文件夹中打开 Donkey.dmg 文件。",
+      "imageAlt": "浏览器下载栏中显示的已下载完成的 Donkey 磁盘映像。"
+    },
+    "install": {
+      "title": "安装",
+      "body": "将 Donkey 应用程序拖移到“应用程序”文件夹中。",
+      "imageAlt": "正在将 Donkey 应用程序图标拖入“应用程序”文件夹。"
+    },
+    "launch": {
+      "title": "启动",
+      "body": "从“应用程序”文件夹或“启动台”中打开 Donkey。",
+      "imageAlt": "macOS 程序坞中的 Donkey 应用图标。"
+    }
+  }
+}

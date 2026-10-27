@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EmailAuthForm } from "./_components/landing/EmailAuthForm";
 import { MentionTextarea } from "@/cut/components/AssetRefs";
+import { WithIntl } from "@/i18n/testing";
 import { AiChatSlide } from "@/cut/components/onboarding/slides/AiChat";
 import { TopNav } from "./_components/landing/TopNav";
 import { THEME_HEAD_SCRIPT } from "@/lib/theme";
@@ -14,27 +15,27 @@ const css = postcss.parse(readFileSync(new URL("./globals.css", import.meta.url)
 // Theme declarations must reach a cold page before any client code runs.
 describe("dark theme", () => {
   test("the navigation mark keeps its dark artwork on a white tile", () => {
-    const html = renderToStaticMarkup(createElement(TopNav));
+    const html = renderToStaticMarkup(createElement(WithIntl, null, createElement(TopNav)));
     expect(html.includes("/donkey-logo.svg")).toBe(true);
     expect(html.includes("dark:bg-white")).toBe(true);
   });
 
   test("onboarding copy has a scrim matching the dark surface", () => {
-    const html = renderToStaticMarkup(createElement(AiChatSlide));
+    const html = renderToStaticMarkup(createElement(WithIntl, null, createElement(AiChatSlide)));
     expect(html.includes("dark:from-background")).toBe(true);
     expect(html.includes("dark:via-background/85")).toBe(true);
   });
 
   test("generation prompt hints use the theme's readable text color", () => {
-    const html = renderToStaticMarkup(createElement(MentionTextarea, {
+    const html = renderToStaticMarkup(createElement(WithIntl, null, createElement(MentionTextarea, {
       value: "", candidates: [], onChange: () => {}, placeholder: "Describe a shot",
-    }));
+    })));
     expect(html.match(/<textarea[^>]+class="([^"]+)"/)?.[1]).toContain("placeholder:text-muted-foreground");
   });
 
   test("email auth actions use a paired foreground and surface", () => {
     for (const mode of ["sign-in", "sign-up"] as const) {
-      const html = renderToStaticMarkup(createElement(EmailAuthForm, { mode }));
+      const html = renderToStaticMarkup(createElement(WithIntl, null, createElement(EmailAuthForm, { mode })));
       const button = html.match(/<button[^>]+class="([^"]+)"/)?.[1];
       expect(button).toContain("bg-primary");
       expect(button).toContain("text-primary-foreground");

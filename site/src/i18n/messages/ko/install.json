@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "Donkey 설치",
+    "description": "macOS용 Donkey를 다운로드하고 응용 프로그램 폴더로 드래그하여 간편하게 설치하세요."
+  },
+  "title": "Mac에 Donkey를<br></br><italic>설치하세요.</italic>",
+  "body": "프로젝트는 Mac에 보관돼요. 텍스트 음성 변환 및 내보내기가 로컬에서 실행되므로, 공유할 준비가 되기 전에는 파일이 컴퓨터 밖으로 나가지 않아요.",
+  "download": "Mac용 다운로드",
+  "step": "{number}단계",
+  "steps": {
+    "open": {
+      "title": "열기",
+      "body": "다운로드한 Donkey.dmg 파일을 여세요.",
+      "imageAlt": "브라우저 다운로드 트레이에서 Donkey 디스크 이미지 다운로드가 완료된 모습."
+    },
+    "install": {
+      "title": "설치",
+      "body": "Donkey 앱을 응용 프로그램 폴더로 드래그 앤 드롭하세요.",
+      "imageAlt": "Donkey 앱 아이콘을 응용 프로그램 폴더로 드래그하는 모습."
+    },
+    "launch": {
+      "title": "실행",
+      "body": "응용 프로그램 폴더나 Launchpad에서 Donkey를 실행하세요.",
+      "imageAlt": "macOS Dock에 있는 Donkey 앱 아이콘."
+    }
+  }
+}

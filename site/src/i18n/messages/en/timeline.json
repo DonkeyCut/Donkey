@@ -1,0 +1,207 @@
+{
+  "main": {
+    "resize": "Drag to resize the timeline",
+    "zoom": "Zoom",
+    "fit": "Fit",
+    "fitTitle": "Fit timeline to window",
+    "sticker": "Sticker",
+    "transitionIn": "{name} in",
+    "transitionOut": "{name} out",
+    "transitionTitle": "{name} {seconds}s — drag it anywhere along the row; it plays where it lines up with a cut or a clip edge",
+    "dragToTrim": "Drag to trim",
+    "removeEmptySpace": "Remove empty space",
+    "removeKeyframe": "Remove keyframe",
+    "show": "Show",
+    "hide": "Hide",
+    "captureFrame": "Capture frame",
+    "copyFrame": "Copy frame"
+  },
+  "toolbar": {
+    "text": "Text",
+    "textTooltip": "Text ({key})",
+    "magnet": "Magnet",
+    "magnetOn": "Magnet on: track 0 closes up",
+    "magnetOff": "Magnet: close up track 0",
+    "split": "Split",
+    "splitTooltip": "Split at pointer, or at playhead (⌘B or S)",
+    "delete": "Delete",
+    "deleteCount": "Delete {count}",
+    "deleteTooltip": "Delete ({key})",
+    "tools": "Timeline tools",
+    "zoom": "Zoom",
+    "fit": "Fit",
+    "fitTitle": "Fit timeline to window",
+    "hideTimeline": "Hide timeline",
+    "saved": "Saved",
+    "saveTemplate": "Save template",
+    "backToStart": "Back to start",
+    "playPause": "Play/Pause (Space)"
+  },
+  "clip": {
+    "lut": "LUT",
+    "cutting": "Cutting…",
+    "cuttingShort": "C…",
+    "speedCurve": "Speed curve · {rate}× on average",
+    "speed": "{rate}× speed",
+    "detachAudio": "Detach audio",
+    "brushStroke": "Brush stroke",
+    "options": "Clip options",
+    "addToMedia": "Add to Media",
+    "addToLibrary": "Add to Library",
+    "exportSegment": "Export segment",
+    "download": "Download",
+    "showInFinder": "Show in Finder",
+    "reorderRow": "Drag to reorder the row",
+    "showTrack": "Show track",
+    "hideTrack": "Hide track",
+    "unmuteTrack": "Unmute track",
+    "muteTrack": "Mute track",
+    "enable": "Enable clip",
+    "disable": "Disable clip",
+    "missingMedia": "Missing media",
+    "mute": "Mute clip",
+    "unmute": "Unmute clip",
+    "beat": "Drag to move, double-click to remove",
+    "fadeIn": "Drag to set the fade in",
+    "fadeOut": "Drag to set the fade out",
+    "key": "Drag to retime, Delete to remove",
+    "sticker": "Sticker"
+  },
+  "picker": {
+    "label": "Timeline",
+    "heading": "Timelines",
+    "emptyNote": "{current} is empty. Your edit is on {other}.",
+    "open": "Open {name}"
+  },
+  "group": {
+    "group": "Group",
+    "ungroup": "Ungroup",
+    "groupTooltip": "Group ({key})",
+    "ungroupTooltip": "Ungroup ({key})"
+  },
+  "media": {
+    "play": "Play",
+    "pause": "Pause",
+    "seek": "Seek",
+    "mute": "Mute",
+    "unmute": "Unmute"
+  },
+  "trackRow": {
+    "track": "Track",
+    "follow": "Follow",
+    "tracking": "Tracking {progress}%",
+    "pickTarget": "Pick a target",
+    "failed": "Could not track the footage.",
+    "targets": {
+      "hands_gap": "Between hands",
+      "left_hand": "Left hand",
+      "right_hand": "Right hand",
+      "head": "Head",
+      "person": "Person"
+    }
+  },
+  "flash": {
+    "tone": "Tone",
+    "strobe": "Strobe",
+    "strobeRate": "Strobe rate",
+    "off": "Off",
+    "rhythm": "Rhythm",
+    "fade": "Fade",
+    "curve": "Curve",
+    "tones": {
+      "white": "White",
+      "black": "Black"
+    },
+    "rhythms": {
+      "strobe": "Strobe",
+      "flicker": "Flicker"
+    },
+    "fades": {
+      "none": "Off",
+      "to": "To",
+      "from": "From"
+    }
+  },
+  "curves": {
+    "channels": {
+      "m": "Master",
+      "r": "Red",
+      "g": "Green",
+      "b": "Blue"
+    }
+  },
+  "guides": {
+    "show": "Show guides",
+    "hide": "Hide guides",
+    "showTitle": "Show guides ({key})",
+    "hideTitle": "Hide guides ({key})",
+    "presetsLabel": "Guide presets",
+    "heading": "Guides",
+    "portraitOnly": "Portrait frames",
+    "addVertical": "Add vertical line",
+    "addHorizontal": "Add horizontal line",
+    "presets": {
+      "thirds": "Thirds",
+      "center": "Center",
+      "margins": "Safe margins",
+      "shortform": "Short form",
+      "custom": "Custom"
+    },
+    "sublabels": {
+      "margins": "{inset} inset",
+      "shortform": "TikTok, Instagram, YouTube",
+      "custom": "Drag lines on the preview"
+    },
+    "regions": {
+      "topBar": "Top bar",
+      "cropped": "Cropped",
+      "actions": "Actions",
+      "caption": "Caption · music · nav"
+    }
+  },
+  "speedCurve": {
+    "node": "node {rate} at {time}",
+    "pickPreset": "Pick a preset curve",
+    "custom": "Custom",
+    "smoothSlow": "Smooth Slow-mo",
+    "smoothSlowInfo": "When on, everything under 1× is smoothed on export.",
+    "addNode": "Add a node at the playhead",
+    "removeNode": "Remove the picked node (Delete)",
+    "flatten": "Flatten to 1×",
+    "close": "Close ({key})",
+    "presets": {
+      "flat": {
+        "label": "Flat",
+        "hint": "one rate across the clip"
+      },
+      "rampIn": {
+        "label": "Ramp in",
+        "hint": "opens fast and eases into slow motion"
+      },
+      "rampOut": {
+        "label": "Ramp out",
+        "hint": "opens in slow motion and eases out fast"
+      },
+      "drift": {
+        "label": "Drift",
+        "hint": "a rush that sinks into slow motion, then recovers"
+      },
+      "pulse": {
+        "label": "Pulse",
+        "hint": "two rushes around a slow beat"
+      },
+      "hold": {
+        "label": "Hold",
+        "hint": "races in, slows into a moment in the middle, races out"
+      },
+      "whip": {
+        "label": "Whip",
+        "hint": "slow motion with a burst of speed in the middle"
+      },
+      "stutter": {
+        "label": "Stutter",
+        "hint": "alternating rushes and slow beats"
+      }
+    }
+  }
+}

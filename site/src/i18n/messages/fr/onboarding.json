@@ -1,0 +1,61 @@
+{
+  "sequence": {
+    "dialogLabel": "Bienvenue dans Donkey Cut",
+    "skip": "Passer",
+    "back": "Retour",
+    "next": "Suivant",
+    "done": "Terminé"
+  },
+  "welcome": {
+    "title": "Montez vos vidéos en discutant.",
+    "body": "Coupez des clips, ajoutez des sous-titres, générez des images ou créez de nouvelles scènes — le tout depuis le chat."
+  },
+  "referral": {
+    "title": "Comment nous avez-vous connus ?",
+    "body": "Sélectionnez toutes les options applicables — cela nous indique où être présents.",
+    "otherPlaceholder": "Dites-nous où",
+    "sources": {
+      "discord": "Discord",
+      "tiktok": "TikTok",
+      "instagram": "Instagram",
+      "youtube": "YouTube",
+      "reddit": "Reddit",
+      "search": "Recherche",
+      "friend": "Un ami",
+      "other": "Autre"
+    }
+  },
+  "modes": {
+    "title": "Fonctionne dans le cloud ou sur votre Mac",
+    "subtitle": "Même éditeur. Choisissez ce qui vous convient.",
+    "cloudTitle": "Dans le cloud",
+    "cloudNoInstall": "Sans installation",
+    "cloudAnyBrowser": "Fonctionne sur n'importe quel navigateur",
+    "cloudRendering": "Nous gérons le rendu",
+    "macTitle": "Sur votre Mac",
+    "macLocalFiles": "Vos fichiers restent en local",
+    "macHardware": "Exploite le matériel de votre Mac",
+    "macFaster": "Exports et fonctionnalités IA plus rapides",
+    "switching": "Bascule automatiquement entre cloud et local dès que possible."
+  },
+  "aiChat": {
+    "title": "Discutez avec votre éditeur.",
+    "body": "L'IA a accès à l'ensemble de votre projet. Demandez-lui de couper des clips, de générer des plans manquants, d'écrire des sous-titres, d'ajouter une voix off, de réorganiser votre timeline ou de répondre à vos questions sur vos séquences.",
+    "models": "Fonctionne nativement avec Gemini, ou avec votre propre abonnement Claude ou Codex."
+  },
+  "credits": {
+    "onUs": "offerts",
+    "body": "Déjà sur votre compte — rien à réclamer. Utilisez-les pour générer de la vidéo, de l'audio et des images.",
+    "expires": "Expire le {date}."
+  },
+  "plans": {
+    "title": "Tarifs simples",
+    "subtitle": "L'éditeur est gratuit. Ne payez que pour les médias générés par IA.",
+    "forIndividuals": "Pour les particuliers",
+    "getPro": "Passer à Pro",
+    "getProOff": "Obtenez {percent} % de réduction sur Pro",
+    "continueFree": "Continuer avec la version gratuite",
+    "endsIn": "-{percent} % se termine dans {hours}h {minutes}m {seconds}s",
+    "covers": "{months, plural, one {Pour votre premier mois, puis {price}/mois} other {Par mois pendant vos # premiers mois, puis {price}/mois}}"
+  }
+}

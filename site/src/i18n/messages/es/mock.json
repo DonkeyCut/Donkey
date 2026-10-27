@@ -1,0 +1,89 @@
+{
+  "editorMock": {
+    "caption": "El editor de Donkey Cut con un proyecto terminado abierto: contenido generado en el panel lateral, clips y música en la línea de tiempo, y el chat de IA que los organizó."
+  },
+  "topBar": {
+    "aspect": "{name} · {ratio}",
+    "record": "Grabar",
+    "saved": "Guardado",
+    "chat": "Chat",
+    "export": "Exportar"
+  },
+  "aspectNames": {
+    "vertical": "Vertical",
+    "widescreen": "Pantalla ancha"
+  },
+  "sidePanel": {
+    "tabs": {
+      "media": "Medios",
+      "video": "Video",
+      "image": "Imagen",
+      "audio": "Audio",
+      "subtitles": "Subtítulos",
+      "details": "Detalles"
+    },
+    "projectFiles": "Archivos del proyecto",
+    "library": "Biblioteca",
+    "upload": "Subir",
+    "templateMeta": "{duration} · {count, plural, one {# elemento} other {# elementos}}",
+    "generateImage": "Generar imagen",
+    "generateVideo": "Generar video",
+    "renderNote": "Los renders tardan un minuto o dos. Sigue editando mientras tanto.",
+    "generated": "Generado"
+  },
+  "aiPanel": {
+    "working": "Trabajando… {seconds}s",
+    "placeholder": "Pregunta sobre tu video o dime qué cambiar… @ hace referencia a medios"
+  },
+  "projects": {
+    "posters": {
+      "switcherLabel": "Pósteres de viaje",
+      "name": "Serie de pósteres de ciudades",
+      "prompt": "Póster de viaje pintado a mano, PARÍS: mujer con gabardina cruzando la calle, Torre Eiffel detrás, toldos de café, 'Live the romance' en cursiva roja",
+      "paris": "París",
+      "newYork": "Nueva York",
+      "clipParis": "París — Live the romance",
+      "clipNewYork": "Nueva York — Rise above the city",
+      "captionParis": "Live the romance",
+      "captionNewYork": "Rise above the city",
+      "chat1": "Crea dos pósteres de viaje pintados a mano: París y Nueva York, con la misma mujer cruzando la calle en ambos.",
+      "chat2": "Aquí están los dos pósteres, con la misma paleta y tipografía:",
+      "chat3": "Anímalos: ella camina, paneo lento de cámara, conserva la textura de pintura. Luego únelos con subtítulos y música.",
+      "chat4": "Generé dos clips de 4 s y armé la línea de tiempo con subtítulos y un vals. ¿Quieres otra pista?"
+    },
+    "railway": {
+      "switcherLabel": "Misterio ferroviario",
+      "name": "El misterio ferroviario",
+      "prompt": "Estilo cómic franco-belga, animación de principios del siglo XX con grano de película: un tren a vapor corre por una vía junto a un acantilado en un cañón de montaña; una figura con capa viaja sobre el techo del vagón; un niño en bicicleta lo persigue",
+      "canyonRun": "Carrera en el cañón",
+      "onTheRoof": "En el techo",
+      "bicycleChase": "Persecución en bicicleta",
+      "shot": "Toma {number}",
+      "trainWhistle": "silbato de tren",
+      "wheelsOnGravel": "ruedas sobre grava",
+      "chat1": "Crea el guion gráfico para una persecución estilo cómic de los años 20: una figura misteriosa en un tren a vapor y un niño persiguiéndolo en bicicleta por un cañón.",
+      "chat2": "Tres tomas: 1) el tren cruzando el cañón, 2) la figura con capa manteniendo el equilibrio en el techo, 3) el niño pedaleando fuerte junto a las vías.",
+      "chat3": "Anima las tres en ese estilo de línea clara.",
+      "chat4": "Generé las tres tomas y las edité con una banda sonora de metales y cuerdas:",
+      "chat5": "Agrega un silbato de tren cuando salga del túnel y grava bajo la bicicleta.",
+      "chat6": "Puse ambos en la pista de efectos y los mezclé bajo la música. ¿Quieres ajustar el corte donde el tren entra al túnel?"
+    },
+    "mason": {
+      "switcherLabel": "Mason",
+      "name": "Caricatura",
+      "template": "Plantilla",
+      "voiceover": "Voz de IA — {text}",
+      "scenePrompt": "Animación de caricatura en 2D dibujada a mano con trazos negros gruesos,…",
+      "walkingToSchool": "Caminando a la escuela",
+      "schoolGates": "Portón de la escuela",
+      "fishTank": "Pecera",
+      "strawberries": "Fresas",
+      "soccer": "Fútbol",
+      "taekwondo": "Taekwondo",
+      "swimming": "Natación",
+      "chat1": "@a1 es mi hijo Mason presentándose en coreano. Dibuja una escena para todo lo que mencione y córtala al audio.",
+      "chat2": "¡Eliminé la escena comiendo fresas al final de la línea de tiempo y comencé a generar tres escenas totalmente nuevas que coinciden con los deportes favoritos de Mason: fútbol, taekwondo y natación!\\n\\nSe renderizarán en segundo plano y aparecerán directo en tu línea de tiempo a partir de los 9.5 segundos para coincidir a la perfección con el audio. ¡Avísame si Mason necesita más entrenamiento deportivo!",
+      "chat3": "también le gustan las fresas. tienes que sincronizarlo con el audio"
+    }
+  }
+}

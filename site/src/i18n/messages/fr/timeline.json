@@ -1,0 +1,207 @@
+{
+  "main": {
+    "resize": "Faites glisser pour redimensionner la timeline",
+    "zoom": "Zoom",
+    "fit": "Ajuster",
+    "fitTitle": "Ajuster la timeline à la fenêtre",
+    "sticker": "Autocollant",
+    "transitionIn": "{name} en entrée",
+    "transitionOut": "{name} en sortie",
+    "transitionTitle": "{name} {seconds} s — faites glisser le long de la piste ; s’applique au niveau d’une coupe ou du bord d’un clip",
+    "dragToTrim": "Faites glisser pour rogner",
+    "removeEmptySpace": "Supprimer l'espace vide",
+    "removeKeyframe": "Supprimer l'image clé",
+    "show": "Afficher",
+    "hide": "Masquer",
+    "captureFrame": "Capturer l'image",
+    "copyFrame": "Copier l'image"
+  },
+  "toolbar": {
+    "text": "Texte",
+    "textTooltip": "Texte ({key})",
+    "magnet": "Magnétisme",
+    "magnetOn": "Magnétisme activé : la piste 0 se resserre",
+    "magnetOff": "Magnétisme : resserrer la piste 0",
+    "split": "Scinder",
+    "splitTooltip": "Scinder au pointeur ou à la tête de lecture (⌘B ou S)",
+    "delete": "Supprimer",
+    "deleteCount": "Supprimer {count}",
+    "deleteTooltip": "Supprimer ({key})",
+    "tools": "Outils de la timeline",
+    "zoom": "Zoom",
+    "fit": "Ajuster",
+    "fitTitle": "Ajuster la timeline à la fenêtre",
+    "hideTimeline": "Masquer la timeline",
+    "saved": "Enregistré",
+    "saveTemplate": "Enregistrer le modèle",
+    "backToStart": "Retour au début",
+    "playPause": "Lecture/Pause (Space)"
+  },
+  "clip": {
+    "lut": "LUT",
+    "cutting": "Découpage…",
+    "cuttingShort": "D…",
+    "speedCurve": "Courbe de vitesse · {rate}× en moyenne",
+    "speed": "Vitesse {rate}×",
+    "detachAudio": "Détacher l'audio",
+    "brushStroke": "Coup de pinceau",
+    "options": "Options du clip",
+    "addToMedia": "Ajouter aux médias",
+    "addToLibrary": "Ajouter à la bibliothèque",
+    "exportSegment": "Exporter le segment",
+    "download": "Télécharger",
+    "showInFinder": "Afficher dans le Finder",
+    "reorderRow": "Faites glisser pour réorganiser la ligne",
+    "showTrack": "Afficher la piste",
+    "hideTrack": "Masquer la piste",
+    "unmuteTrack": "Activer le son de la piste",
+    "muteTrack": "Couper le son de la piste",
+    "enable": "Activer le clip",
+    "disable": "Désactiver le clip",
+    "missingMedia": "Média manquant",
+    "mute": "Couper le son du clip",
+    "unmute": "Activer le son du clip",
+    "beat": "Faites glisser pour déplacer, double-cliquez pour supprimer",
+    "fadeIn": "Faites glisser pour régler le fondu en entrée",
+    "fadeOut": "Faites glisser pour régler le fondu en sortie",
+    "key": "Glissez pour modifier la durée, Delete pour supprimer",
+    "sticker": "Sticker"
+  },
+  "picker": {
+    "label": "Chronologie",
+    "heading": "Chronologies",
+    "emptyNote": "{current} est vide. Votre montage se trouve sur {other}.",
+    "open": "Ouvrir {name}"
+  },
+  "group": {
+    "group": "Grouper",
+    "ungroup": "Dégrouper",
+    "groupTooltip": "Grouper ({key})",
+    "ungroupTooltip": "Dégrouper ({key})"
+  },
+  "media": {
+    "play": "Lecture",
+    "pause": "Pause",
+    "seek": "Naviguer",
+    "mute": "Couper le son",
+    "unmute": "Activer le son"
+  },
+  "trackRow": {
+    "track": "Suivi",
+    "follow": "Suivre",
+    "tracking": "Suivi {progress} %",
+    "pickTarget": "Sélectionnez une cible",
+    "failed": "Impossible d'effectuer le suivi de la vidéo.",
+    "targets": {
+      "hands_gap": "Entre les mains",
+      "left_hand": "Main gauche",
+      "right_hand": "Main droite",
+      "head": "Tête",
+      "person": "Personne"
+    }
+  },
+  "flash": {
+    "tone": "Tonalité",
+    "strobe": "Stroboscope",
+    "strobeRate": "Fréquence stroboscopique",
+    "off": "Désactivé",
+    "rhythm": "Rythme",
+    "fade": "Fondu",
+    "curve": "Courbe",
+    "tones": {
+      "white": "Blanc",
+      "black": "Noir"
+    },
+    "rhythms": {
+      "strobe": "Stroboscope",
+      "flicker": "Scintillement"
+    },
+    "fades": {
+      "none": "Désactivé",
+      "to": "Vers",
+      "from": "Depuis"
+    }
+  },
+  "curves": {
+    "channels": {
+      "m": "Maître",
+      "r": "Rouge",
+      "g": "Vert",
+      "b": "Bleu"
+    }
+  },
+  "guides": {
+    "show": "Afficher les repères",
+    "hide": "Masquer les repères",
+    "showTitle": "Afficher les repères ({key})",
+    "hideTitle": "Masquer les repères ({key})",
+    "presetsLabel": "Préréglages de repères",
+    "heading": "Repères",
+    "portraitOnly": "Cadres portrait",
+    "addVertical": "Ajouter une ligne verticale",
+    "addHorizontal": "Ajouter une ligne horizontale",
+    "presets": {
+      "thirds": "Tiers",
+      "center": "Centre",
+      "margins": "Marges de sécurité",
+      "shortform": "Format court",
+      "custom": "Personnalisé"
+    },
+    "sublabels": {
+      "margins": "Marge de {inset}",
+      "shortform": "TikTok, Instagram, YouTube",
+      "custom": "Faites glisser les lignes sur l'aperçu"
+    },
+    "regions": {
+      "topBar": "Barre supérieure",
+      "cropped": "Rogné",
+      "actions": "Actions",
+      "caption": "Sous-titres · musique · nav"
+    }
+  },
+  "speedCurve": {
+    "node": "nœud {rate} à {time}",
+    "pickPreset": "Choisir une courbe prédéfinie",
+    "custom": "Personnalisé",
+    "smoothSlow": "Ralenti fluide",
+    "smoothSlowInfo": "Si activé, tout ce qui est inférieur à 1× est lissé à l'exportation.",
+    "addNode": "Ajouter un nœud à la tête de lecture",
+    "removeNode": "Supprimer le nœud sélectionné (Delete)",
+    "flatten": "Aplatir à 1×",
+    "close": "Fermer ({key})",
+    "presets": {
+      "flat": {
+        "label": "Plat",
+        "hint": "vitesse constante sur tout le clip"
+      },
+      "rampIn": {
+        "label": "Rampe d'entrée",
+        "hint": "démarre vite et passe en douceur au ralenti"
+      },
+      "rampOut": {
+        "label": "Rampe de sortie",
+        "hint": "démarre au ralenti et accélère en douceur"
+      },
+      "drift": {
+        "label": "Dérive",
+        "hint": "une accélération qui plonge au ralenti, puis reprend"
+      },
+      "pulse": {
+        "label": "Pulsation",
+        "hint": "deux accélérations autour d'un temps lent"
+      },
+      "hold": {
+        "label": "Maintien",
+        "hint": "fonce, ralentit un instant au milieu, puis repart vite"
+      },
+      "whip": {
+        "label": "Fouet",
+        "hint": "au ralenti avec une pointe de vitesse au milieu"
+      },
+      "stutter": {
+        "label": "Saccade",
+        "hint": "alternance d'accélérations et de temps lents"
+      }
+    }
+  }
+}

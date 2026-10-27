@@ -2,7 +2,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { AuthScreen } from "@/app/_components/landing/AuthScreen";
-import { CutFooter } from "@/app/cut/_components/landing/CutFooter";
+import { CutFooter } from "@/app/[locale]/cut/_components/landing/CutFooter";
 import { auth } from "@/lib/auth";
 import { resumeAfterAuthError, SIGN_IN_RETURN_COOKIE, signInReturnPath } from "@/lib/signInReturn";
 

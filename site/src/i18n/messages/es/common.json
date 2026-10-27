@@ -1,0 +1,45 @@
+{
+  "language": "Idioma",
+  "footer": {
+    "product": "Producto",
+    "legal": "Legal",
+    "blog": "Blog",
+    "privacy": "Política de privacidad",
+    "terms": "Términos de uso",
+    "cutHome": "Inicio de Donkey Cut",
+    "donkeyHome": "Inicio de Donkey",
+    "helpDiscord": "¿Necesitas ayuda? Únete a <link>Discord</link>",
+    "helpEmail": "¿Necesitas ayuda? Escríbenos a <link>{email}</link>",
+    "copyright": "2026 Donkey, Inc."
+  },
+  "meta": {
+    "title": "Editor de video Donkey Cut",
+    "description": "Un editor de video que hace todo el trabajo en tu Mac."
+  },
+  "pagination": {
+    "label": "paginación",
+    "previous": "Anterior",
+    "previousLabel": "Ir a la página anterior",
+    "next": "Siguiente",
+    "nextLabel": "Ir a la página siguiente",
+    "morePages": "Más páginas"
+  },
+  "dialog": {
+    "close": "Cerrar"
+  },
+  "proPlan": {
+    "body": "Genera contenido multimedia con IA.",
+    "price": "{price}/mes",
+    "storage": "{gb, number} GB de almacenamiento en la nube",
+    "credits": "{credits} créditos de IA cada mes",
+    "generation": "Generación de imagen, video, voz en off y música"
+  },
+  "apiErrors": {
+    "checkout_no_url": "Stripe no devolvió una URL.",
+    "credit_amount_out_of_range": "Elige entre {min} y {max}, en miles enteros.",
+    "auto_reload_invalid": "Proporciona enabled, thresholdDollars y amountDollars.",
+    "no_payment_method": "Compra créditos una vez para guardar una tarjeta y luego activa la recarga automática.",
+    "unsupported_image_type": "Tipo de imagen no compatible.",
+    "image_too_large": "Imagen demasiado grande."
+  }
+}

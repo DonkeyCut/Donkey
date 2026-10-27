@@ -3,6 +3,8 @@
 // so the presets and bounds can never drift between the buttons and the server
 // checks. Keep this file free of prisma / Stripe imports.
 
+import type { Locale } from "@/i18n/locales";
+
 // Presets drive the quick-buy buttons; the custom field accepts any whole-dollar
 // amount in [min, max]. Amounts are whole dollars so they map cleanly to Stripe
 // unit_amount cents and the grant ledger.
@@ -39,6 +41,6 @@ export function creditGrantExpiry(expiresAfterDays: number | null, now = new Dat
 }
 
 /** The expiry as people read it: "September 14, 2026". */
-export function formatCreditExpiry(expiresAt: Date): string {
-  return expiresAt.toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" });
+export function formatCreditExpiry(expiresAt: Date, locale: Locale): string {
+  return expiresAt.toLocaleDateString(locale, { day: "numeric", month: "long", year: "numeric" });
 }

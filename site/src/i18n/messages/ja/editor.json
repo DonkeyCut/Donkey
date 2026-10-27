@@ -1,0 +1,385 @@
+{
+  "embeddedSignIn": {
+    "message": "ここでの編集を続けるには、再接続してください。",
+    "reconnect": "再接続"
+  },
+  "importPoster": {
+    "video": "動画"
+  },
+  "bottomSheet": {
+    "close": "閉じる"
+  },
+  "transformHandles": {
+    "resize": "ドラッグしてサイズ変更",
+    "rotate": "ドラッグして回転"
+  },
+  "viewerTopBar": {
+    "copyFailed": "プロジェクトをコピーできませんでした。",
+    "viewOnly": "閲覧のみ",
+    "chat": "チャット",
+    "chatShortcut": "チャット ({key})",
+    "copying": "コピー中…",
+    "copyProject": "プロジェクトをコピー"
+  },
+  "connectGate": {
+    "bannerBlocked": "このプロジェクトはこのMacに保存されており、ブラウザがDonkeyアプリへのアクセスをブロックしています。",
+    "bannerUnreachable": "このプロジェクトはこのMacに保存されており、Donkey CutからDonkeyアプリにアクセスできません。",
+    "howToFix": "解決方法",
+    "dismiss": "閉じる",
+    "titleBlocked": "接続がブロックされました",
+    "titleAsk": "Donkeyアプリに接続",
+    "titleStored": "このプロジェクトはこのMacに保存されています",
+    "bodyBlocked": "これはローカルプロジェクトです。動画と編集データはこのMac上にあり、ブラウザがそれらを開くDonkeyアプリへのアクセスをブロックしています。アドレスバー横のアイコンからサイトの設定を開き、<em>デバイス上のアプリ</em>をオンにしてから、もう一度お試しください。",
+    "bodyAsk": "これはローカルプロジェクトです。このMac上のDonkeyアプリに保存されています。ブラウザからこのデバイス上のアプリへの接続許可を求められますので、<em>許可</em>を選択してください。",
+    "bodyInstall": "これはローカルプロジェクトです。動画と編集データはこのMac上にあり、Donkeyアプリで開きます。Donkeyをインストールするか、すでにインストールされている場合は開いてください。自動的に接続されます。",
+    "siteSettingsAlt": "アドレスバーの上に開いたChromeのサイト設定（「デバイス上のアプリ」の切り替えスイッチあり）",
+    "download": "Mac版をダウンロード",
+    "connecting": "接続中…",
+    "connect": "接続",
+    "tryAgain": "再試行"
+  },
+  "cameraCard": {
+    "side": {
+      "auto": "自動 ({side})",
+      "bottom": "下",
+      "left": "左",
+      "right": "右"
+    },
+    "matteReady": "人物マットの準備完了",
+    "matteBaking": "人物マットをベイク中 {progress, number, percent}",
+    "matteFailed": "人物マットをベイクできませんでした。",
+    "matteStarting": "人物マットを開始中",
+    "title": "カメラカード",
+    "info": "話者をフレーム端の角丸カード内に表示し、頭部をカードから飛び出させます。「自動」に設定すると、縦向きフレームでは下端に、正方形や横向きフレームでは右側にカードが配置されます。グラフィックは下のトラックに配置してください。カードがフッテージの配置や角丸、シャドウを描画するため、有効時はフレーミングのズーム、パン、枠線、シャドウは無効化されます。長さの単位はデザインpxです。",
+    "sideLabel": "サイド",
+    "top": "上端",
+    "resetTop": "上端をリセット",
+    "width": "幅",
+    "resetWidth": "幅をリセット",
+    "radius": "角丸半径",
+    "cardRadius": "カードの角丸半径",
+    "sideBleed": "サイドブリード",
+    "cardSideBleed": "カードのサイドブリード",
+    "shadow": "シャドウ",
+    "popOut": "ポップアウト",
+    "feather": "フェザー",
+    "popOutFeather": "ポップアウトのフェザー",
+    "retry": "再試行",
+    "footageSize": "フッテージサイズ",
+    "footageOffset": "フッテージオフセット",
+    "footageAxisOffset": "フッテージ {axis}軸オフセット"
+  },
+  "lightbox": {
+    "close": "閉じる",
+    "added": "追加済み",
+    "use": "使用",
+    "prompt": "プロンプト",
+    "copyPrompt": "プロンプトをコピー",
+    "copied": "コピー完了",
+    "copy": "コピー",
+    "preparingPlayback": "再生の準備中…",
+    "readFailed": "ファイルを読み込めませんでした。"
+  },
+  "platformPreview": {
+    "original": "オリジナル",
+    "defaultHandle": "あなた",
+    "originalSound": "オリジナル楽曲 - {handle}",
+    "close": "プレビューを閉じる",
+    "unmute": "ミュート解除",
+    "mute": "ミュート",
+    "following": "フォロー中",
+    "forYou": "おすすめ",
+    "share": "共有",
+    "follow": "フォロー",
+    "more": "… もっと見る",
+    "like": "いいね",
+    "dislike": "低評価",
+    "subscribe": "チャンネル登録"
+  },
+  "mobileShare": {
+    "details": "詳細",
+    "transcript": "文字起こし",
+    "media": "メディア",
+    "chat": "チャット",
+    "cantPlay": "このプロジェクトは現在再生できません。",
+    "preparing": "プロジェクトの再生を準備しています…",
+    "loading": "読み込み中…",
+    "noDetails": "共有された詳細情報はありません。",
+    "caption": "キャプション",
+    "published": "公開日",
+    "notes": "メモ",
+    "links": "リンク",
+    "noTranscript": "共有された文字起こしはありません。",
+    "noMedia": "共有されたメディアはありません。",
+    "noChat": "共有されたチャットはありません。"
+  },
+  "shareDialog": {
+    "features": {
+      "chat": {
+        "label": "チャット",
+        "hint": "AIチャットのスレッドとカード"
+      },
+      "media": {
+        "label": "メディア",
+        "hint": "タイムライン外のアップロード済みファイル"
+      },
+      "genai": {
+        "label": "AI生成",
+        "hint": "生成された動画、画像、音声"
+      },
+      "subtitles": {
+        "label": "字幕",
+        "hint": "文字起こしパネル"
+      },
+      "details": {
+        "label": "詳細",
+        "hint": "キャプション、タグ、メモ"
+      }
+    },
+    "saveFailed": "共有設定を保存できませんでした。",
+    "invalidEmail": "メールアドレスの形式が正しくありません。",
+    "copyFailed": "リンクをコピーできませんでした。もう一度お試しください。",
+    "removeFailed": "共有を解除できませんでした。",
+    "title": "{kind, select, folder {フォルダーを共有} asset {アセットを共有} other {プロジェクトを共有}}",
+    "people": "ユーザー",
+    "invitePlaceholder": "メールアドレスを入力してEnterで招待",
+    "removeEmail": "{email} を削除",
+    "generalAccess": "一般的なアクセス",
+    "public": "リンクを知っている全員",
+    "restricted": "制限付き",
+    "publicHint": "誰でも閲覧可能（サインイン不要）",
+    "restrictedHint": "招待されたユーザーのみ閲覧可能（要サインイン）",
+    "timeline": "タイムライン",
+    "timelineHint": "閲覧者が視聴する内容",
+    "alsoShare": "追加で共有する項目",
+    "alsoShareHint": "閲覧者には常にプレビューとタイムラインが読み取り専用で表示されます。その他に表示させたい項目をオンにしてください。",
+    "folderHint": "閲覧者はサブフォルダーを含むこのフォルダーの内容を閲覧およびダウンロードできます。フォルダーへの変更は共有リンクに反映されます。",
+    "assetHint": "閲覧者はこのアセットをプレビューおよびダウンロードできます。",
+    "tryAgain": "再試行",
+    "copied": "コピーしました",
+    "copyLink": "リンクをコピー",
+    "stopSharing": "共有を停止"
+  },
+  "exportsDock": {
+    "title": "書き出し",
+    "running": "{count}件処理中",
+    "queuedCount": "{count}件待機中",
+    "doneCount": "{count}件完了",
+    "clearAll": "すべてクリア",
+    "collapse": "書き出しを折りたたむ",
+    "expand": "書き出しを展開",
+    "untitled": "名称未設定",
+    "queued": "待機中",
+    "ready": "準備完了",
+    "exportFailed": "書き出し失敗",
+    "cancel": "キャンセル",
+    "dismiss": "閉じる",
+    "hide": "非表示 — 書き出しは継続されます",
+    "showInFinder": "Finderで表示",
+    "downloadAgain": "再ダウンロード",
+    "download": "ダウンロード",
+    "rendering": "レンダリング中… {pct}%",
+    "preparing": "準備中…",
+    "startFailed": "書き出しを開始できませんでした"
+  },
+  "recordDialog": {
+    "deviceFallback": "指定されたデバイスを開始できなかったため、デフォルトに戻しました。",
+    "cameraBlocked": "カメラへのアクセスが拒否されました。Chromeでこのサイトのカメラとマイクを許可してから、もう一度お試しください。",
+    "micBlocked": "マイクへのアクセスが拒否されました。Chromeでこのサイトのマイクを許可してから、もう一度お試しください。",
+    "cameraStartFailed": "このブラウザでカメラの録画を開始できませんでした。他のアプリがカメラを使用していないか確認してから、もう一度お試しください。",
+    "startFailed": "このブラウザで録画を開始できませんでした。もう一度お試しください。",
+    "saveFailed": "録画・録音を保存できませんでした。もう一度お試しください。",
+    "emptyRecording": "録画データが空です。他のアプリがカメラを使用していないか確認してから、もう一度お試しください。",
+    "cameraN": "カメラ {n}",
+    "micN": "マイク {n}",
+    "titleCamera": "カメラ録画",
+    "titleAudio": "音声録音",
+    "close": "閉じる",
+    "waiting": "アクセス権限を待機中…",
+    "start": "録画・録音を開始",
+    "stop": "停止して使用"
+  },
+  "exportDialog": {
+    "title": "書き出し",
+    "presetGroup": "書き出しプリセット",
+    "quickPresets": {
+      "share": {
+        "label": "共有",
+        "detail": "1080p · 幅広い環境で再生可能"
+      },
+      "best": {
+        "label": "最高品質",
+        "detail": "元のファイル設定"
+      },
+      "social4k": {
+        "label": "ソーシャル 4K",
+        "detail": "4Kアップスケール · 各プラットフォームで高ビットレートに変換"
+      },
+      "small": {
+        "label": "軽量",
+        "detail": "720p · 最速"
+      },
+      "master": {
+        "label": "マスター",
+        "detail": "ProRes 4444 · MOV · PCM · 妥協なし"
+      }
+    },
+    "qualities": {
+      "high": {
+        "label": "高",
+        "detail": "最高画質"
+      },
+      "balanced": {
+        "label": "標準",
+        "detail": "容量控えめ"
+      },
+      "small": {
+        "label": "低",
+        "detail": "最速レンダリング"
+      }
+    },
+    "codecs": {
+      "h264": "幅広い環境で再生可能",
+      "hevc": "容量半分 · 新しいデバイス向け",
+      "prores": "編集マスター · MOV",
+      "prores4444": "最高色精度 · MOV"
+    },
+    "audioCodecs": {
+      "aac": "圧縮オーディオ",
+      "pcm": "非圧縮 · MOV"
+    },
+    "colorSpaces": {
+      "sdr": "SDR",
+      "hlg": "HDR (HLG)",
+      "pq": "HDR (PQ)"
+    },
+    "loudness": {
+      "off": "オフ",
+      "social": "SNS",
+      "podcast": "ポッドキャスト",
+      "broadcast": "放送"
+    },
+    "loudnessTarget": "{name} · {lufs} LUFS",
+    "custom": "カスタム",
+    "customHint": "すべての設定を手動で指定",
+    "source": "ソース",
+    "resolution": "解像度",
+    "size": "{width} × {height}",
+    "sizeUpscaled": "{width} × {height} · アップスケール",
+    "sizeUpscaledFromSource": "{width} × {height} · ソースからアップスケール",
+    "quality": "画質",
+    "customRateValue": "{mbps} Mbps · {size}",
+    "fileName": "ファイル名",
+    "range": "範囲",
+    "wholeVideo": "動画全体",
+    "selectionHint": "選択した最初の項目の先頭から最後の項目の末尾まで（全トラック）",
+    "selectionRange": "選択範囲 · {start}–{end}",
+    "frameRate": "フレームレート",
+    "sourceRateHint": "元素材の再生フレームレート",
+    "sourceReading": "ソース · 読み込み中…",
+    "sourceRate": "ソース · {fps} fps",
+    "fps": "{fps} fps",
+    "format": "フォーマット",
+    "eightBit": "8-bit",
+    "color": "カラー",
+    "audio": "オーディオ",
+    "loudnessLabel": "ラウドネス",
+    "loudnessHint": "ミックス全体をターゲット値に設定し、トゥルーピークを{ceiling} dBTP未満に抑えます。",
+    "moreSettings": "詳細設定",
+    "customBitrate": "カスタムビットレート",
+    "customBitrateHint": "ビットレートが高いほど高品質になり、ファイルサイズが大きくなります。特定のビットレートが必要なプラットフォーム向けです。ProResは自動で設定されます。",
+    "auto": "自動",
+    "bitrateLabel": "ビットレート（Mbps）",
+    "mbps": "Mbps",
+    "stems": "ステム",
+    "stemsHint": "別環境でのミキシング用に、ダイアログと各サウンドトラックのレーンごとにWAVを1つずつZIP保存します。",
+    "exportStems": "ステムを書き出す",
+    "captionsFile": "字幕ファイル",
+    "captionsFileHint": "独自字幕に対応したプラットフォーム用に、字幕をSRTファイルとしてダウンロードフォルダーに保存します。",
+    "saveCaptionsFile": "字幕ファイルを保存",
+    "cloudRender": "このブラウザでは{kind, select, prores {ProRes} hdr {HDR} other {これ}}を直接エンコードできないため、クラウドでレンダリングされ、完了後にここに保存されます。",
+    "lufs": "{lufs} LUFS",
+    "stemsTag": "ステム",
+    "reading": "フッテージを読み込み中…",
+    "exportVideo": "動画を書き出す",
+    "scalePresets": "{label}のプリセット"
+  },
+  "topBar": {
+    "aspects": {
+      "16x9": "ワイドスクリーン",
+      "9x16": "縦型",
+      "4x3": "クラシック",
+      "2x1": "シネマティック",
+      "1x1": "スクエア",
+      "3x4": "縦向き"
+    },
+    "aspectPreset": "{name} · {ratio}",
+    "customAspect": "カスタム · {ratio}",
+    "customEllipsis": "カスタム…",
+    "uploading": "{count, plural, other {#件のファイルをアップロード中}}",
+    "copying": "{count, plural, other {#件のファイルをコピー中}}",
+    "finishingUploads": "アップロードを完了中…",
+    "finishingCopies": "コピーを完了中…",
+    "movingMedia": "メディアを移動中 {done}/{total}…",
+    "moveFailed": "プロジェクトを移動できませんでした。",
+    "share": "共有",
+    "moveToShare": "共有するにはクラウドに移動",
+    "moveToCloud": "クラウドに移動",
+    "cloud": "クラウド",
+    "retryImportsFirst": "失敗したインポートを先に再試行してください",
+    "export": "エクスポート",
+    "openInCut": "Donkey Cutで開く",
+    "open": "開く",
+    "fullscreen": "フルスクリーン",
+    "chat": "チャット",
+    "chatShortcut": "チャット ({key})",
+    "backTo": "{tab, select, library {ライブラリに戻る} other {プロジェクトに戻る}}",
+    "rename": "プロジェクト名を変更",
+    "importsFailed": "{count, plural, other {#件のインポートに失敗しました}}",
+    "retry": "再試行",
+    "saving": "保存中",
+    "saveFailed": "保存できませんでした",
+    "saved": "保存済み",
+    "background": "背景",
+    "aspectLimit": "最大8:1の比率まで",
+    "width": "幅",
+    "height": "高さ",
+    "aspectPresets": "アスペクト比プリセット",
+    "record": "録画/録音",
+    "recordCamera": "カメラを録画",
+    "recordAudio": "音声を録音",
+    "moreActions": "その他のアクション",
+    "moveBody": "{from, select, browser {このプロジェクトとメディアをクラウドにコピーし、このブラウザから削除します。ここで書き出されたファイルはそのまま残ります。} other {このプロジェクトとメディアをクラウドにコピーし、このMacから削除します。ここで書き出されたファイルはそのまま残ります。}}",
+    "moving": "移動中…"
+  },
+  "editor": {
+    "backTo": "{tab, select, library {ライブラリに戻る} other {プロジェクトに戻る}}",
+    "needsApp": "これはこのMac上にあるローカルプロジェクトです。Donkeyアプリを開くとここに表示されます。",
+    "shareGone": "この共有は利用できなくなりました。",
+    "conflictReloaded": "別の場所で保存された新しいバージョンを再読み込みしました。",
+    "dismiss": "閉じる",
+    "defaultText": "テキストを入力"
+  },
+  "preview": {
+    "showingOriginal": "オリジナルを表示中 — クリックで切り抜きを表示",
+    "previewingSdr": "SDRをプレビュー中",
+    "copyingFrame": "フレームをコピー中…",
+    "copied": "コピー完了",
+    "copyFrameFailed": "フレームをコピーできませんでした",
+    "copyFrame": "フレームをコピー",
+    "zoomOut": "ズームアウト",
+    "zoomIn": "ズームイン",
+    "reset": "リセット",
+    "zoomLevel": "ズーム {percent}%",
+    "panPicture": "ドラッグして画像を移動",
+    "zoomPicture": "ドラッグして画像をズーム"
+  },
+  "maskGizmo": {
+    "moveCorner": "ドラッグして角を移動、ダブルクリックで削除",
+    "addCorner": "ドラッグしてここに角を追加",
+    "feather": "ドラッグしてエッジをぼかす",
+    "round": "ドラッグして角を丸くします",
+    "rotate": "ドラッグしてマスクを回転させます",
+    "resize": "ドラッグしてマスクのサイズを変更します"
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "title": "Donkey Cut Video Editor — Free, Open Source CapCut Alternative",
+    "description": "A free, open source CapCut alternative. Edit with Chat, generate video, images, voiceovers and music, and keep your projects local."
+  },
+  "nav": {
+    "logIn": "Log in",
+    "signUp": "Sign up",
+    "dashboard": "Dashboard",
+    "goToApp": "Go to App"
+  },
+  "tagline": "Finally, a video editor <italic>that's easy.</italic>",
+  "hero": {
+    "body": "Edit with chat, generate images and video, and keep your files on your own computer. Use your existing Claude or Codex subscription if you already have one.",
+    "cta": "Start a new project"
+  },
+  "worksWith": {
+    "title": "Works <italic>with</italic>",
+    "body": "The assistant uses the Claude and Codex apps already signed in on your Mac. If you have a subscription, you’re done — no setup, no API keys."
+  },
+  "pricing": {
+    "title": "Simple <italic>pricing</italic>",
+    "body": "The editor is free. Pay only for AI generated media.",
+    "footnote": "* Buy credits for AI generated content at any time."
+  },
+  "plans": {
+    "free": {
+      "name": "Free",
+      "detail": "For everyone",
+      "body": "The whole editor, in the cloud or on your own Mac.",
+      "cta": "Start a new project",
+      "editor": "Full access to the video editor",
+      "storage": "{mb, number} MB of cloud storage",
+      "tools": "Import, export, and local transcription",
+      "subscriptions": "Connect your Claude or Codex subscription"
+    },
+    "pro": {
+      "detail": "For individuals",
+      "cta": "Get Pro",
+      "everythingInFree": "Everything in Free"
+    }
+  },
+  "local": {
+    "title": "Run Donkey Cut <italic>on your Mac.</italic>",
+    "body": "Edit videos locally on your Mac. The app uses your own storage and transcribes audio on device.",
+    "cta": "Download for Mac",
+    "imageAlt": "Donkey app icon being dragged into the Applications folder."
+  },
+  "openSource": {
+    "title": "Donkey Cut is <italic>open source.</italic>",
+    "body": "The editor and its render engine are built in the open. Read the source, run it yourself, contribute and make it better.",
+    "runLocally": "Run the editor locally",
+    "running": "Editor running - {url}",
+    "star": "Star on GitHub"
+  },
+  "finalCta": {
+    "body": "Start your next project in minutes.",
+    "cta": "Start Editing"
+  },
+  "blog": {
+    "metaTitle": "Blog | Donkey Cut Video Editor",
+    "metaDescription": "Notes from building Donkey Cut: video editing techniques, how the editor works, and what changed.",
+    "metaPageTitle": "Blog | Donkey Cut Video Editor — Page {page}",
+    "heading": "Blog",
+    "subtitle": "Notes on editing video, and on building the editor.",
+    "latestPosts": "Latest posts",
+    "empty": "Nothing here yet.",
+    "pagination": "Pagination",
+    "previous": "Previous",
+    "next": "Next",
+    "copyLink": "Copy link to section",
+    "onThisPage": "On this page",
+    "overview": "Overview",
+    "draftPreview": "Draft preview. Only you can see this page.",
+    "exitPreview": "Exit preview",
+    "updated": "Updated {date}",
+    "backToBlog": "Back to blog",
+    "backToAll": "Back to all posts"
+  }
+}

@@ -92,9 +92,10 @@ const fromDocumentScript = (item: { stacktrace?: { frames?: { filename?: string 
   return located.length > 0 && located.every((f) => !SCRIPT_FILE.test(f.filename!));
 };
 
-// The language every page is served in, and the classes Chrome's and Edge's
-// translators put on <html> once they rewrite a page.
-const SERVED_LANG = "en";
+// The language this page was served in, read before any translator can
+// rewrite it, and the classes Chrome's and Edge's translators put on <html>
+// once they rewrite a page.
+const SERVED_LANG = typeof document === "undefined" ? "" : document.documentElement.lang;
 const TRANSLATED_CLASSES = ["translated-ltr", "translated-rtl"];
 
 // React's hydration mismatch errors (#418, #423, #425) and the DOM error a
@@ -110,7 +111,8 @@ const RECONCILE_ERROR = /Minified React error #(418|423|425)\b|NotFoundError: Fa
 const translatorArtifact = (item: { value?: string }) => {
   const html = typeof document === "undefined" ? null : document.documentElement;
   const translated =
-    !!html && (html.lang !== SERVED_LANG || TRANSLATED_CLASSES.some((c) => html.classList.contains(c)));
+    !!html &&
+    ((SERVED_LANG !== "" && html.lang !== SERVED_LANG) || TRANSLATED_CLASSES.some((c) => html.classList.contains(c)));
   return translated && typeof item?.value === "string" && RECONCILE_ERROR.test(item.value);
 };
 

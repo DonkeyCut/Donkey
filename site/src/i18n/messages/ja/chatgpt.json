@@ -1,0 +1,112 @@
+{
+  "widget": {
+    "deleted": "このプロジェクトは削除されました。",
+    "createNewProject": "新規プロジェクトを作成",
+    "dismiss": "閉じる",
+    "tryAgain": "再試行",
+    "cloudProjects": "クラウドプロジェクト",
+    "chooseProject": "プレビューするプロジェクトを選択してください。",
+    "connecting": "Donkey Cut に接続中…",
+    "loadProjects": "プロジェクトを読み込む",
+    "yourProjects": "あなたのプロジェクト",
+    "noProjects": "ここでプレビューするには、Donkey Cut でプロジェクトをクラウドに保存してください。",
+    "moreProjects": "その他のプロジェクト",
+    "refreshList": "リストを更新",
+    "previewOf": "{name} のプレビュー",
+    "waitingToRender": "レンダリング待機中…",
+    "rendering": "プレビューをレンダリング中… {percent}%",
+    "renderToWatch": "ここでこのプロジェクトを再生するには、プレビューをレンダリングしてください。",
+    "expired": "このプレビューは有効期限が切れています。再生するには再度レンダリングしてください。",
+    "earlierEdit": "このプレビューは以前の編集内容である可能性があります。",
+    "renderPreview": "プレビューをレンダリング",
+    "openInDonkey": "Donkey Cut で開く ↗",
+    "projects": "プロジェクト",
+    "openingEditor": "エディタを開いています",
+    "editing": "{name} を編集中",
+    "untitled": "無題",
+    "problems": {
+      "requestFailed": "Donkey Cut はこのリクエストを完了できませんでした。もう一度お試しください。",
+      "unreadable": "プレビューの応答を読み込めませんでした。",
+      "editorFailed": "Donkey Cut はエディタを開けませんでした。もう一度お試しください。",
+      "connect": "続行するには、ChatGPT からこのプレビューを接続してください。",
+      "generic": "リクエストに失敗しました。",
+      "videoFailed": "動画を読み込めませんでした。プロジェクトをもう一度開いてみてください。",
+      "openFailed": "Donkey Cutを開けませんでした。",
+      "saveFailed": "{name}を保存できませんでした。"
+    }
+  },
+  "status": {
+    "createProject": {
+      "invoking": "プロジェクトを作成中",
+      "invoked": "プロジェクトを作成しました"
+    },
+    "importMedia": {
+      "invoking": "素材を読み込み中",
+      "invoked": "素材を読み込みました"
+    },
+    "inspectProject": {
+      "invoking": "プロジェクトを読み込み中",
+      "invoked": "プロジェクトを読み込みました"
+    },
+    "listCommands": {
+      "invoking": "コマンド一覧を取得中",
+      "invoked": "コマンド一覧を取得しました"
+    },
+    "describeCommands": {
+      "invoking": "コマンドの説明を取得中",
+      "invoked": "コマンドの説明を取得しました"
+    },
+    "listSkills": {
+      "invoking": "ガイド一覧を取得中",
+      "invoked": "ガイド一覧を取得しました"
+    },
+    "readSkill": {
+      "invoking": "ガイドを読み込み中",
+      "invoked": "ガイドを読み込みました"
+    },
+    "editProject": {
+      "invoking": "プロジェクトを編集中",
+      "invoked": "プロジェクトを編集しました"
+    },
+    "undo": {
+      "invoking": "元に戻し中",
+      "invoked": "元に戻しました"
+    },
+    "redo": {
+      "invoking": "やり直し中",
+      "invoked": "やり直しました"
+    },
+    "exportVideo": {
+      "invoking": "動画を書き出し中",
+      "invoked": "書き出しを開始しました"
+    },
+    "exportStatus": {
+      "invoking": "書き出し状況を確認中",
+      "invoked": "書き出し状況を確認しました"
+    },
+    "jobStatus": {
+      "invoking": "ジョブ状況を確認中",
+      "invoked": "ジョブ状況を確認しました"
+    },
+    "accountStatus": {
+      "invoking": "アカウント情報を読み込み中",
+      "invoked": "アカウント情報を読み込みました"
+    }
+  },
+  "embed": {
+    "failed": "Donkey Cutでエディターを開けませんでした。ChatGPTからプロジェクトを再度開いてください。",
+    "disabled": "ChatGPTとの連携が有効になっていません。",
+    "tooMany": "リクエストが多すぎます。1分後にもう一度お試しください。",
+    "badRequest": "不正なリクエストです。",
+    "expired": "このエディターリンクの有効期限が切れています。ChatGPTからプロジェクトを再度開いてください。"
+  },
+  "consent": {
+    "title": "ChatGPTに接続",
+    "access": "ChatGPTはプロジェクトの{access, select, edit {表示および編集} other {表示}}{identity, select, email {、ならびにメールアドレスを含むアカウント情報の読み取り} account {、ならびにアカウント情報の読み取り} other {}}を行うことができます。",
+    "connect": "接続",
+    "cancel": "キャンセル",
+    "expiredTitle": "再接続",
+    "expiredHeading": "接続をやり直してください",
+    "expiredBody": "この接続ページの有効期限が切れたか、サインイン中のアカウントが変更されました。OpenAIに戻り、接続をもう一度開始してください。"
+  }
+}

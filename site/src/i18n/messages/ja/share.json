@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "restrictedTitle": "共有プロジェクト · Donkey Cut",
+    "restrictedDescription": "このプロジェクトは特定のユーザーに共有されています。",
+    "title": "{name} · Donkey Cut",
+    "description": "ブラウザで{name}を視聴できます。",
+    "libraryTitle": "共有ライブラリ · Donkey Cut"
+  },
+  "view": {
+    "signInPrompt": "このプロジェクトは特定のユーザーに共有されています。アクセス権を確認するにはサインインしてください。",
+    "signIn": "サインイン",
+    "denied": "このプロジェクトへのアクセス権がありません。オーナーに招待を依頼してください。",
+    "deniedAs": "{email} としてはこのプロジェクトへのアクセス権がありません。オーナーに招待を依頼してください。",
+    "inactive": "この共有リンクは現在無効です。",
+    "untitled": "無題"
+  }
+}

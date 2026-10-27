@@ -1,0 +1,79 @@
+{
+  "notNow": "暂不",
+  "ok": "确定",
+  "upgradeToPro": "升级到 Pro",
+  "subscribeToPro": "订阅 Pro",
+  "buyCredits": "购买积分",
+  "billingUnavailable": "结算服务当前不可用。",
+  "offer": {
+    "validThrough": "额外积分有效期至 {date}。",
+    "validFor": "额外积分有效期为 {days, plural, other {# 天}}。",
+    "claimBody": "你有 {credits} 待领取。",
+    "claimBodyBy": "你有 {credits} 待领取。请在 {date} 前领取。",
+    "claimTerms": "领取后有效期为 {days, plural, other {# 天}}。",
+    "subscribeBody": "以 {price} 订阅 Pro，即可获赠额外 {credits}。",
+    "expiresIn": "优惠将在 {hours} 小时 {minutes} 分 {seconds} 秒后到期"
+  },
+  "intro": {
+    "terms": "{months, plural, other {立享 {percent}% 优惠：前 # 个月 {price}/月，之后 {full}/月。}}"
+  },
+  "upgrade": {
+    "outOfCredits": "你的积分已用尽",
+    "proOutBody": "本月的 Pro 积分已用完。购买更多积分以继续生成。",
+    "projectsTitle": "升级以创建更多项目",
+    "creditsBody": "升级到 Pro，每月可获 {credits} 和 100 GB 云存储空间，只需 {price}。",
+    "creditsBodyOffer": "升级到 Pro，每月可获 {credits} 和 100 GB 云存储空间。",
+    "proPrice": "Pro 价格为 {price}。",
+    "projectsBodyStarter": "免费方案仅保留你的初始项目。Pro 则可随心创建任意数量的项目。",
+    "projectsBody": "除初始项目外，免费方案还可保留 {count, plural, other {# 个项目}}。Pro 则可随心创建任意数量的项目。"
+  },
+  "claim": {
+    "expiredTitle": "此优惠已过期",
+    "alreadyProTitle": "你已拥有 Pro",
+    "invalidTitle": "此链接已失效",
+    "wrongAccount": "此优惠属于另一个账户。请使用接收此邮件的邮箱地址登录。",
+    "windowClosed": "此优惠的领取通道已关闭。",
+    "proOnly": "此优惠仅适用于未订阅 Pro 的账户。",
+    "gone": "该链接指向的优惠已不存在。",
+    "addedTitle": "{credits} 已添加到你的账户",
+    "ready": "随时可使用。",
+    "readyExpires": "随时可使用，将于 {date} 过期。",
+    "startEditing": "开始剪辑",
+    "withProTitle": "升级 Pro 获取 {credits}",
+    "waitingTitle": "{credits} 待领取",
+    "claimButton": "领取 {credits}",
+    "failed": "处理失败，请重试。"
+  },
+  "storage": {
+    "title": "云存储空间",
+    "fullTitle": "云存储空间已满",
+    "used": "已使用 {quota} 中的 {used}。",
+    "graceToday": "你的 Pro 方案已结束。除非升级或释放 {bytes} 空间，否则你最早的云端项目将于今天被删除。",
+    "graceDays": "你的 Pro 方案已结束。除非升级或释放 {bytes} 空间，否则你最早的云端项目将在 {days, plural, other {# 天}}后被删除。",
+    "proBody": "删除不再需要的项目或媒体以释放空间。",
+    "body": "Pro 包含 100 GB 云存储空间。",
+    "bodyUsed": "已使用 {quota} 中的 {used}。Pro 包含 100 GB 云存储空间。",
+    "freeUpTerms": "或者删除不再需要的项目和媒体以释放空间。"
+  },
+  "subscribeBonus": {
+    "daysLeft": "还剩 {count} 天",
+    "hoursLeft": "还剩 {count} 小时",
+    "minutesLeft": "还剩 {count} 分钟",
+    "pillLabel": "升级 Pro 获 {credits}，{timeLeft}",
+    "pill": "Pro 专享 {credits} 积分 · {timeLeft}",
+    "starting": "正在启动…"
+  },
+  "creditsPill": {
+    "label": "积分：{credits}",
+    "free": "免费",
+    "upgrade": "升级",
+    "credits": "积分"
+  },
+  "storagePill": {
+    "cancelTooltip": "你的 Pro 方案已设为取消。恢复订阅以保留你的云存储空间。",
+    "ends": "Pro · {days, plural, =0 {今天到期} other {# 天后到期}}",
+    "graceTooltip": "你的 Pro 方案已结束，且已超出免费额度。请在最早的项目被删除前升级或释放空间。",
+    "fullTooltip": "云存储空间已用尽。请升级或释放空间以继续上传。",
+    "usedTooltip": "已使用 {quota} 云存储空间中的 {used}。"
+  }
+}

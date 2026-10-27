@@ -1,0 +1,61 @@
+{
+  "sequence": {
+    "dialogLabel": "欢迎使用 Donkey Cut",
+    "skip": "跳过",
+    "back": "上一步",
+    "next": "下一步",
+    "done": "完成"
+  },
+  "welcome": {
+    "title": "通过对话剪辑视频。",
+    "body": "裁剪片段、添加字幕、生成图像或创建新场景——对话即可搞定。"
+  },
+  "referral": {
+    "title": "你是如何得知我们的？",
+    "body": "可多选——告诉我们下次去哪里能找到你。",
+    "otherPlaceholder": "告诉我们具体渠道",
+    "sources": {
+      "discord": "Discord",
+      "tiktok": "TikTok",
+      "instagram": "Instagram",
+      "youtube": "YouTube",
+      "reddit": "Reddit",
+      "search": "搜索引擎",
+      "friend": "朋友推荐",
+      "other": "其他"
+    }
+  },
+  "modes": {
+    "title": "支持云端或在 Mac 本地运行",
+    "subtitle": "同样的编辑器，随心选择适合你的方式。",
+    "cloudTitle": "云端运行",
+    "cloudNoInstall": "无需安装",
+    "cloudAnyBrowser": "支持任意浏览器",
+    "cloudRendering": "由我们负责渲染",
+    "macTitle": "在 Mac 上",
+    "macLocalFiles": "文件保留在本地",
+    "macHardware": "充分利用 Mac 硬件",
+    "macFaster": "导出与 AI 功能更迅速",
+    "switching": "可用时自动在云端与本地之间切换。"
+  },
+  "aiChat": {
+    "title": "与你的剪辑助手对话。",
+    "body": "AI 可以访问你的整个项目。让它裁剪片段、生成缺失镜头、编写字幕、添加旁白、重新编排时间线，或是解答关于素材的疑问。",
+    "models": "开箱即用支持 Gemini，也可使用你自己的 Claude 或 Codex 订阅。"
+  },
+  "credits": {
+    "onUs": "免费赠送",
+    "body": "已存入你的账户，无需手动领取。可用于生成视频、音频和图像。",
+    "expires": "有效期至 {date}。"
+  },
+  "plans": {
+    "title": "简单明了的定价",
+    "subtitle": "编辑器完全免费，仅为 AI 生成的媒体内容付费。",
+    "forIndividuals": "个人版",
+    "getPro": "获取 Pro",
+    "getProOff": "立享 {percent}% 优惠升级 Pro",
+    "continueFree": "继续使用免费版",
+    "endsIn": "{percent}% 优惠剩余时间：{hours}小时 {minutes}分 {seconds}秒",
+    "covers": "{months, plural, other {前 # 个月每月此价格，之后 {price}/月}}"
+  }
+}

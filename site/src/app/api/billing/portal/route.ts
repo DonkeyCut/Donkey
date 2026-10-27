@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { requestLocale } from "@/i18n/requestLocale";
 import { getStripe, portalConfigurationId } from "@/lib/billing/stripe";
+import { STRIPE_LOCALE } from "@/lib/billing/stripe-locale";
 import {
   donkeySessionUserId,
   notFoundResponse,
@@ -29,6 +31,7 @@ export const POST = withDonkeyAuth(async (request) => {
   const configuration = portalConfigurationId();
   const portal = await stripe.billingPortal.sessions.create({
     customer: customerId,
+    locale: STRIPE_LOCALE[requestLocale(request)],
     return_url: `${request.nextUrl.origin}/app/settings`,
     ...(configuration ? { configuration } : {}),
   });

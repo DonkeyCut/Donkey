@@ -1,0 +1,79 @@
+{
+  "notNow": "Ahora no",
+  "ok": "Aceptar",
+  "upgradeToPro": "Mejora a Pro",
+  "subscribeToPro": "Suscríbete a Pro",
+  "buyCredits": "Comprar créditos",
+  "billingUnavailable": "La facturación no está disponible en este momento.",
+  "offer": {
+    "validThrough": "Los créditos extra son válidos hasta el {date}.",
+    "validFor": "Los créditos extra son válidos por {days, plural, one {# día} other {# días}}.",
+    "claimBody": "Tienes {credits} para reclamar.",
+    "claimBodyBy": "Tienes {credits} para reclamar. Reclámalos antes del {date}.",
+    "claimTerms": "Una vez reclamados, son válidos por {days, plural, one {# día} other {# días}}.",
+    "subscribeBody": "Suscríbete a Pro por {price} y obtén {credits} extra.",
+    "expiresIn": "La oferta expira en {hours}h {minutes}m {seconds}s"
+  },
+  "intro": {
+    "terms": "{months, plural, one {{percent}% de descuento: {price} tu primer mes, luego {full}/mes.} other {{percent}% de descuento: {price}/mes durante tus primeros # meses, luego {full}/mes.}}"
+  },
+  "upgrade": {
+    "outOfCredits": "Te quedaste sin créditos",
+    "proOutBody": "Se agotaron los créditos Pro de este mes. Compra más para seguir generando.",
+    "projectsTitle": "Mejora a Pro para crear más proyectos",
+    "creditsBody": "Mejora a Pro y obtén {credits} cada mes y 100 GB de almacenamiento en la nube por {price}.",
+    "creditsBodyOffer": "Mejora a Pro y obtén {credits} cada mes y 100 GB de almacenamiento en la nube.",
+    "proPrice": "Pro cuesta {price}.",
+    "projectsBodyStarter": "El plan gratuito conserva tu proyecto inicial. Con Pro puedes crear todos los que necesites.",
+    "projectsBody": "El plan gratuito conserva {count, plural, one {# proyecto} other {# proyectos}} además del inicial. Con Pro puedes crear todos los que necesites."
+  },
+  "claim": {
+    "expiredTitle": "Esta oferta ha expirado",
+    "alreadyProTitle": "Ya tienes Pro",
+    "invalidTitle": "Este enlace ya no es válido",
+    "wrongAccount": "Esta oferta pertenece a otra cuenta. Inicia sesión con la dirección a la que se envió el correo.",
+    "windowClosed": "El período para reclamar esta oferta ya cerró.",
+    "proOnly": "Esta oferta es para cuentas sin suscripción a Pro.",
+    "gone": "La oferta a la que apuntaba ya no existe.",
+    "addedTitle": "Se agregaron {credits} a tu cuenta",
+    "ready": "Están listos para usarse.",
+    "readyExpires": "Están listos para usarse. Vencen el {date}.",
+    "startEditing": "Comenzar a editar",
+    "withProTitle": "Obtén {credits} con Pro",
+    "waitingTitle": "{credits} te están esperando",
+    "claimButton": "Reclamar {credits}",
+    "failed": "No se pudo procesar. Intenta de nuevo."
+  },
+  "storage": {
+    "title": "Almacenamiento en la nube",
+    "fullTitle": "El almacenamiento en la nube está lleno",
+    "used": "Has usado {used} de {quota}.",
+    "graceToday": "Tu plan Pro terminó. Tus proyectos más antiguos en la nube se eliminarán hoy a menos que mejores tu plan o liberes {bytes}.",
+    "graceDays": "Tu plan Pro terminó. Tus proyectos más antiguos en la nube se eliminarán en {days, plural, one {# día} other {# días}} a menos que mejores tu plan o liberes {bytes}.",
+    "proBody": "Libera espacio eliminando proyectos o archivos que ya no necesites.",
+    "body": "Pro incluye 100 GB de almacenamiento en la nube.",
+    "bodyUsed": "Has usado {used} de {quota}. Pro incluye 100 GB de almacenamiento en la nube.",
+    "freeUpTerms": "O libera espacio eliminando proyectos y archivos que ya no necesites."
+  },
+  "subscribeBonus": {
+    "daysLeft": "Quedan {count} d",
+    "hoursLeft": "Quedan {count} h",
+    "minutesLeft": "Quedan {count} min",
+    "pillLabel": "{credits} con Pro, {timeLeft}",
+    "pill": "{credits} créditos con Pro · {timeLeft}",
+    "starting": "Iniciando…"
+  },
+  "creditsPill": {
+    "label": "Créditos: {credits}",
+    "free": "Gratis",
+    "upgrade": "Mejorar plan",
+    "credits": "Créditos"
+  },
+  "storagePill": {
+    "cancelTooltip": "Tu plan Pro está programado para cancelarse. Reactívalo para conservar tu almacenamiento en la nube.",
+    "ends": "Pro · {days, plural, =0 {termina hoy} one {termina en # día} other {termina en # días}}",
+    "graceTooltip": "Tu plan Pro terminó y superaste el límite gratuito. Mejora tu plan o libera espacio antes de que se eliminen tus proyectos más antiguos.",
+    "fullTooltip": "Te quedaste sin almacenamiento en la nube. Mejora tu plan o libera espacio para seguir subiendo archivos.",
+    "usedTooltip": "{used} de {quota} de almacenamiento en la nube usado."
+  }
+}

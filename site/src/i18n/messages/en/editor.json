@@ -1,0 +1,385 @@
+{
+  "embeddedSignIn": {
+    "message": "Reconnect to continue editing here.",
+    "reconnect": "Reconnect"
+  },
+  "importPoster": {
+    "video": "Video"
+  },
+  "bottomSheet": {
+    "close": "Close"
+  },
+  "transformHandles": {
+    "resize": "Drag to resize",
+    "rotate": "Drag to rotate"
+  },
+  "viewerTopBar": {
+    "copyFailed": "Could not copy the project.",
+    "viewOnly": "View only",
+    "chat": "Chat",
+    "chatShortcut": "Chat ({key})",
+    "copying": "Copying…",
+    "copyProject": "Copy project"
+  },
+  "connectGate": {
+    "bannerBlocked": "This project is stored on this Mac, and your browser is blocking this page from reaching the Donkey app.",
+    "bannerUnreachable": "This project is stored on this Mac, and Donkey Cut can’t reach the Donkey app.",
+    "howToFix": "How to fix this",
+    "dismiss": "Dismiss",
+    "titleBlocked": "Connection blocked",
+    "titleAsk": "Connect to the Donkey app",
+    "titleStored": "This project is stored on this Mac",
+    "bodyBlocked": "This is a local project — its video and its edits live on this Mac, and your browser is blocking this page from reaching the Donkey app that opens them. Open the site settings from the icon next to the address bar, turn on <em>Apps on device</em>, then try again.",
+    "bodyAsk": "This is a local project — it lives in the Donkey app on this Mac. Your browser will ask for permission to connect to apps on this device — choose <em>Allow</em>.",
+    "bodyInstall": "This is a local project: its video and its edits live on this Mac, and the Donkey app is what opens them. Install Donkey, or open it if it’s already installed — this page connects automatically.",
+    "siteSettingsAlt": "Chrome's site settings open over the address bar, with the Apps on device toggle",
+    "download": "Download for Mac",
+    "connecting": "Connecting…",
+    "connect": "Connect",
+    "tryAgain": "Try again"
+  },
+  "cameraCard": {
+    "side": {
+      "auto": "Auto ({side})",
+      "bottom": "Bottom",
+      "left": "Left",
+      "right": "Right"
+    },
+    "matteReady": "Person matte ready",
+    "matteBaking": "Person matte baking {progress, number, percent}",
+    "matteFailed": "The person matte could not be baked.",
+    "matteStarting": "Person matte starting",
+    "title": "Camera card",
+    "info": "The speaker shows through a rounded card at the edge of the frame, and their head pops out above it. Auto puts the card across the bottom of a portrait frame and up the right side of a square or landscape one. Put the graphic on a lower track. The card places the footage and draws its own corners and shadow, so framing zoom, pan, border and shadow stand aside while it is on. Lengths are design pixels.",
+    "sideLabel": "Side",
+    "top": "Top",
+    "resetTop": "Reset top",
+    "width": "Width",
+    "resetWidth": "Reset width",
+    "radius": "Radius",
+    "cardRadius": "Card radius",
+    "sideBleed": "Side bleed",
+    "cardSideBleed": "Card side bleed",
+    "shadow": "Shadow",
+    "popOut": "Pop out",
+    "feather": "Feather",
+    "popOutFeather": "Pop out feather",
+    "retry": "Retry",
+    "footageSize": "Footage size",
+    "footageOffset": "Footage offset",
+    "footageAxisOffset": "Footage {axis} offset"
+  },
+  "lightbox": {
+    "close": "Close",
+    "added": "Added",
+    "use": "Use",
+    "prompt": "Prompt",
+    "copyPrompt": "Copy prompt",
+    "copied": "Copied",
+    "copy": "Copy",
+    "preparingPlayback": "Preparing playback",
+    "readFailed": "Could not read the file."
+  },
+  "platformPreview": {
+    "original": "Original",
+    "defaultHandle": "you",
+    "originalSound": "original sound - {handle}",
+    "close": "Close preview",
+    "unmute": "Unmute",
+    "mute": "Mute",
+    "following": "Following",
+    "forYou": "For You",
+    "share": "Share",
+    "follow": "Follow",
+    "more": "… more",
+    "like": "Like",
+    "dislike": "Dislike",
+    "subscribe": "Subscribe"
+  },
+  "mobileShare": {
+    "details": "Details",
+    "transcript": "Transcript",
+    "media": "Media",
+    "chat": "Chat",
+    "cantPlay": "This project can't be played right now.",
+    "preparing": "Getting this project ready to play…",
+    "loading": "Loading…",
+    "noDetails": "No details shared.",
+    "caption": "Caption",
+    "published": "Published",
+    "notes": "Notes",
+    "links": "Links",
+    "noTranscript": "No transcript shared.",
+    "noMedia": "No media shared.",
+    "noChat": "No chat shared."
+  },
+  "shareDialog": {
+    "features": {
+      "chat": {
+        "label": "Chat",
+        "hint": "AI chat threads and their cards"
+      },
+      "media": {
+        "label": "Media",
+        "hint": "Uploaded files beyond the timeline"
+      },
+      "genai": {
+        "label": "AI generations",
+        "hint": "Generated video, image, and audio"
+      },
+      "subtitles": {
+        "label": "Subtitles",
+        "hint": "The transcript panel"
+      },
+      "details": {
+        "label": "Details",
+        "hint": "Caption, tags, and notes"
+      }
+    },
+    "saveFailed": "Could not save sharing.",
+    "invalidEmail": "That doesn't look like an email address.",
+    "copyFailed": "Could not copy the link. Try again.",
+    "removeFailed": "Could not remove the share.",
+    "title": "{kind, select, folder {Share folder} asset {Share asset} other {Share project}}",
+    "people": "People",
+    "invitePlaceholder": "Invite by email, press Enter",
+    "removeEmail": "Remove {email}",
+    "generalAccess": "General access",
+    "public": "Anyone with the link",
+    "restricted": "Restricted",
+    "publicHint": "Anyone can view — no sign-in needed",
+    "restrictedHint": "Only people you invite can view, signed in",
+    "timeline": "Timeline",
+    "timelineHint": "What viewers watch",
+    "alsoShare": "Also share",
+    "alsoShareHint": "Viewers always get the preview and timeline, read-only. Switch on anything else they should see.",
+    "folderHint": "Viewers can browse and download this folder’s contents, including subfolders. Changes to the folder appear on the shared link.",
+    "assetHint": "Viewers can preview and download this asset.",
+    "tryAgain": "Try again",
+    "copied": "Copied",
+    "copyLink": "Copy link",
+    "stopSharing": "Stop sharing"
+  },
+  "exportsDock": {
+    "title": "Exports",
+    "running": "{count} running",
+    "queuedCount": "{count} queued",
+    "doneCount": "{count} done",
+    "clearAll": "Clear all",
+    "collapse": "Collapse exports",
+    "expand": "Expand exports",
+    "untitled": "Untitled",
+    "queued": "Queued",
+    "ready": "Ready",
+    "exportFailed": "Export failed",
+    "cancel": "Cancel",
+    "dismiss": "Dismiss",
+    "hide": "Hide — the export keeps running",
+    "showInFinder": "Show in Finder",
+    "downloadAgain": "Download again",
+    "download": "Download",
+    "rendering": "Rendering… {pct}%",
+    "preparing": "Preparing…",
+    "startFailed": "Couldn't start export"
+  },
+  "recordDialog": {
+    "deviceFallback": "That device could not be started — switched back to the default.",
+    "cameraBlocked": "Camera access was blocked. Allow camera and microphone for this site in Chrome, then try again.",
+    "micBlocked": "Microphone access was blocked. Allow the microphone for this site in Chrome, then try again.",
+    "cameraStartFailed": "This browser could not start a camera recording. Check that no other app is using the camera, then try again.",
+    "startFailed": "This browser could not start a recording. Try again.",
+    "saveFailed": "The recording could not be saved. Try again.",
+    "emptyRecording": "The recording came back empty. Check that no other app is using the camera, then try again.",
+    "cameraN": "Camera {n}",
+    "micN": "Microphone {n}",
+    "titleCamera": "Record camera",
+    "titleAudio": "Record audio",
+    "close": "Close",
+    "waiting": "Waiting for permission…",
+    "start": "Start recording",
+    "stop": "Stop and use recording"
+  },
+  "exportDialog": {
+    "title": "Export",
+    "presetGroup": "Export preset",
+    "quickPresets": {
+      "share": {
+        "label": "Share",
+        "detail": "1080p · plays everywhere"
+      },
+      "best": {
+        "label": "Best",
+        "detail": "original file settings"
+      },
+      "social4k": {
+        "label": "Social 4K",
+        "detail": "4K upscale · platforms transcode it at a higher bitrate"
+      },
+      "small": {
+        "label": "Small",
+        "detail": "720p · fastest"
+      },
+      "master": {
+        "label": "Master",
+        "detail": "ProRes 4444 · MOV · PCM · nothing given up"
+      }
+    },
+    "qualities": {
+      "high": {
+        "label": "High",
+        "detail": "best quality"
+      },
+      "balanced": {
+        "label": "Balanced",
+        "detail": "smaller file"
+      },
+      "small": {
+        "label": "Small",
+        "detail": "fastest render"
+      }
+    },
+    "codecs": {
+      "h264": "plays everywhere",
+      "hevc": "half the size · newer devices",
+      "prores": "edit master · MOV",
+      "prores4444": "every pixel's own color · MOV"
+    },
+    "audioCodecs": {
+      "aac": "compressed audio",
+      "pcm": "uncompressed · MOV"
+    },
+    "colorSpaces": {
+      "sdr": "SDR",
+      "hlg": "HDR (HLG)",
+      "pq": "HDR (PQ)"
+    },
+    "loudness": {
+      "off": "Off",
+      "social": "Social",
+      "podcast": "Podcast",
+      "broadcast": "Broadcast"
+    },
+    "loudnessTarget": "{name} · {lufs} LUFS",
+    "custom": "Custom",
+    "customHint": "Set every option yourself",
+    "source": "Source",
+    "resolution": "Resolution",
+    "size": "{width} × {height}",
+    "sizeUpscaled": "{width} × {height} · upscaled",
+    "sizeUpscaledFromSource": "{width} × {height} · upscaled from the source",
+    "quality": "Quality",
+    "customRateValue": "{mbps} Mbps · {size}",
+    "fileName": "File name",
+    "range": "Range",
+    "wholeVideo": "Whole video",
+    "selectionHint": "From the first selected item's start to the last one's end, every row included",
+    "selectionRange": "Selection · {start}–{end}",
+    "frameRate": "Frame rate",
+    "sourceRateHint": "The rate the footage plays at",
+    "sourceReading": "Source · reading…",
+    "sourceRate": "Source · {fps} fps",
+    "fps": "{fps} fps",
+    "format": "Format",
+    "eightBit": "8-bit",
+    "color": "Color",
+    "audio": "Audio",
+    "loudnessLabel": "Loudness",
+    "loudnessHint": "Sets the whole mix to its target and holds true peaks under {ceiling} dBTP.",
+    "moreSettings": "More settings",
+    "customBitrate": "Custom bitrate",
+    "customBitrateHint": "Higher bitrates mean better quality and larger files. Use it when a platform requires a specific bitrate; ProRes sets its own.",
+    "auto": "Auto",
+    "bitrateLabel": "Bitrate in megabits per second",
+    "mbps": "Mbps",
+    "stems": "Stems",
+    "stemsHint": "Saves one WAV per lane, dialogue and each soundtrack lane, zipped beside the video for mixing elsewhere.",
+    "exportStems": "Export stems",
+    "captionsFile": "Captions file",
+    "captionsFileHint": "Saves the captions as an SRT file to your Downloads folder, for platforms that take their own captions.",
+    "saveCaptionsFile": "Save a captions file",
+    "cloudRender": "This browser can't encode {kind, select, prores {ProRes} hdr {HDR} other {this}} itself, so it renders in the cloud and lands here when done.",
+    "lufs": "{lufs} LUFS",
+    "stemsTag": "stems",
+    "reading": "Reading the footage…",
+    "exportVideo": "Export video",
+    "scalePresets": "{label} presets"
+  },
+  "topBar": {
+    "aspects": {
+      "16x9": "Widescreen",
+      "9x16": "Vertical",
+      "4x3": "Classic",
+      "2x1": "Cinematic",
+      "1x1": "Square",
+      "3x4": "Portrait"
+    },
+    "aspectPreset": "{name} · {ratio}",
+    "customAspect": "Custom · {ratio}",
+    "customEllipsis": "Custom…",
+    "uploading": "{count, plural, one {Uploading} other {Uploading # files}}",
+    "copying": "{count, plural, one {Copying} other {Copying # files}}",
+    "finishingUploads": "Finishing uploads…",
+    "finishingCopies": "Finishing copies…",
+    "movingMedia": "Moving media {done}/{total}…",
+    "moveFailed": "Could not move the project.",
+    "share": "Share",
+    "moveToShare": "Move to Cloud to share",
+    "moveToCloud": "Move to Cloud",
+    "cloud": "Cloud",
+    "retryImportsFirst": "Retry the failed imports first",
+    "export": "Export",
+    "openInCut": "Open in Donkey Cut",
+    "open": "Open",
+    "fullscreen": "Fullscreen",
+    "chat": "Chat",
+    "chatShortcut": "Chat ({key})",
+    "backTo": "{tab, select, library {Back to library} other {Back to projects}}",
+    "rename": "Rename project",
+    "importsFailed": "{count, plural, one {# import failed} other {# imports failed}}",
+    "retry": "Retry",
+    "saving": "Saving",
+    "saveFailed": "Couldn’t save",
+    "saved": "Saved",
+    "background": "Background",
+    "aspectLimit": "Up to an 8:1 shape",
+    "width": "Width",
+    "height": "Height",
+    "aspectPresets": "Aspect ratio presets",
+    "record": "Record",
+    "recordCamera": "Record camera",
+    "recordAudio": "Record audio",
+    "moreActions": "More actions",
+    "moveBody": "{from, select, browser {Copies this project and its media to the cloud, then removes it from this browser. Exports rendered here stay behind.} other {Copies this project and its media to the cloud, then removes it from this Mac. Exports rendered here stay behind.}}",
+    "moving": "Moving…"
+  },
+  "editor": {
+    "backTo": "{tab, select, library {Back to library} other {Back to projects}}",
+    "needsApp": "This is a local project — it lives on this Mac. Open the Donkey app and it opens here.",
+    "shareGone": "This share is no longer available.",
+    "conflictReloaded": "Reloaded a newer version saved elsewhere.",
+    "dismiss": "Dismiss",
+    "defaultText": "Your text"
+  },
+  "preview": {
+    "showingOriginal": "Showing the original — click to see the cutout",
+    "previewingSdr": "Previewing SDR",
+    "copyingFrame": "Copying frame…",
+    "copied": "Copied",
+    "copyFrameFailed": "Couldn't copy the frame",
+    "copyFrame": "Copy frame",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "reset": "Reset",
+    "zoomLevel": "Zoom {percent}%",
+    "panPicture": "Drag to pan the picture",
+    "zoomPicture": "Drag to zoom the picture"
+  },
+  "maskGizmo": {
+    "moveCorner": "Drag to move the corner; double-click to remove it",
+    "addCorner": "Drag to add a corner here",
+    "feather": "Drag to feather the edge",
+    "round": "Drag to round the corners",
+    "rotate": "Drag to rotate the mask",
+    "resize": "Drag to resize the mask"
+  }
+}

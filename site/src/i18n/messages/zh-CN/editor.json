@@ -1,0 +1,385 @@
+{
+  "embeddedSignIn": {
+    "message": "重新连接以在此继续编辑。",
+    "reconnect": "重新连接"
+  },
+  "importPoster": {
+    "video": "视频"
+  },
+  "bottomSheet": {
+    "close": "关闭"
+  },
+  "transformHandles": {
+    "resize": "拖动以调整大小",
+    "rotate": "拖动以旋转"
+  },
+  "viewerTopBar": {
+    "copyFailed": "无法复制项目。",
+    "viewOnly": "仅查看",
+    "chat": "聊天",
+    "chatShortcut": "聊天 ({key})",
+    "copying": "正在复制…",
+    "copyProject": "复制项目"
+  },
+  "connectGate": {
+    "bannerBlocked": "此项目存储在此 Mac 上，且你的浏览器正在阻止此页面访问 Donkey 应用。",
+    "bannerUnreachable": "此项目存储在此 Mac 上，且 Donkey Cut 无法连接 Donkey 应用。",
+    "howToFix": "如何解决",
+    "dismiss": "忽略",
+    "titleBlocked": "连接被阻止",
+    "titleAsk": "连接到 Donkey 应用",
+    "titleStored": "此项目存储在此 Mac 上",
+    "bodyBlocked": "这是一个本地项目——其视频和编辑内容保存在此 Mac 上，而你的浏览器阻止了此页面连接用于打开它们的 Donkey 应用。点击地址栏旁的图标打开网站设置，开启<em>设备上的应用</em>，然后重试。",
+    "bodyAsk": "这是一个本地项目——保存在此 Mac 的 Donkey 应用中。你的浏览器将请求连接此设备上应用的权限——请选择<em>允许</em>。",
+    "bodyInstall": "这是一个本地项目：其视频和编辑内容保存在此 Mac 上，需通过 Donkey 应用打开。请安装 Donkey，如果已安装请将其打开——此页面将自动连接。",
+    "siteSettingsAlt": "Chrome 的网站设置在地址栏上方打开，带有“设备上的应用”开关",
+    "download": "下载 Mac 版",
+    "connecting": "正在连接…",
+    "connect": "连接",
+    "tryAgain": "重试"
+  },
+  "cameraCard": {
+    "side": {
+      "auto": "自动 ({side})",
+      "bottom": "底部",
+      "left": "左侧",
+      "right": "右侧"
+    },
+    "matteReady": "人物蒙版已就绪",
+    "matteBaking": "正在烘焙人物蒙版 {progress, number, percent}",
+    "matteFailed": "无法烘焙人物蒙版。",
+    "matteStarting": "正在启动人物蒙版",
+    "title": "摄像头卡片",
+    "info": "出镜人将在画面边缘的圆角卡片中显示，头部则探出卡片上方。“自动”会在竖屏画面底部或方形/横屏画面的右侧放置卡片。请将图形放置在更低的轨道上。卡片会自动定位素材并绘制圆角和阴影，因此启用时，构图缩放、平移、边框和阴影将暂不生效。长度单位为设计像素。",
+    "sideLabel": "侧边",
+    "top": "顶部",
+    "resetTop": "重置顶部",
+    "width": "宽度",
+    "resetWidth": "重置宽度",
+    "radius": "圆角",
+    "cardRadius": "卡片圆角",
+    "sideBleed": "侧边出血",
+    "cardSideBleed": "卡片侧边出血",
+    "shadow": "阴影",
+    "popOut": "探出",
+    "feather": "羽化",
+    "popOutFeather": "探出羽化",
+    "retry": "重试",
+    "footageSize": "素材尺寸",
+    "footageOffset": "素材偏移",
+    "footageAxisOffset": "素材 {axis} 轴偏移"
+  },
+  "lightbox": {
+    "close": "关闭",
+    "added": "已添加",
+    "use": "使用",
+    "prompt": "提示词",
+    "copyPrompt": "复制提示词",
+    "copied": "已复制",
+    "copy": "复制",
+    "preparingPlayback": "正在准备播放",
+    "readFailed": "无法读取文件。"
+  },
+  "platformPreview": {
+    "original": "原始",
+    "defaultHandle": "你",
+    "originalSound": "原声 - {handle}",
+    "close": "关闭预览",
+    "unmute": "取消静音",
+    "mute": "静音",
+    "following": "关注",
+    "forYou": "推荐",
+    "share": "分享",
+    "follow": "关注",
+    "more": "… 更多",
+    "like": "点赞",
+    "dislike": "不喜欢",
+    "subscribe": "订阅"
+  },
+  "mobileShare": {
+    "details": "详情",
+    "transcript": "文稿",
+    "media": "媒体",
+    "chat": "聊天",
+    "cantPlay": "当前无法播放此项目。",
+    "preparing": "正在准备播放此项目…",
+    "loading": "正在加载…",
+    "noDetails": "未分享任何详情。",
+    "caption": "文案",
+    "published": "已发布",
+    "notes": "备注",
+    "links": "链接",
+    "noTranscript": "未分享任何文稿。",
+    "noMedia": "未分享媒体。",
+    "noChat": "未分享对话。"
+  },
+  "shareDialog": {
+    "features": {
+      "chat": {
+        "label": "对话",
+        "hint": "AI 对话记录及其卡片"
+      },
+      "media": {
+        "label": "媒体",
+        "hint": "时间线之外的已上传文件"
+      },
+      "genai": {
+        "label": "AI 生成内容",
+        "hint": "生成的视频、图像和音频"
+      },
+      "subtitles": {
+        "label": "字幕",
+        "hint": "转写文本面板"
+      },
+      "details": {
+        "label": "详细信息",
+        "hint": "文案、标签和备注"
+      }
+    },
+    "saveFailed": "无法保存分享设置。",
+    "invalidEmail": "邮箱地址格式不正确。",
+    "copyFailed": "无法复制链接。请重试。",
+    "removeFailed": "无法移除分享。",
+    "title": "{kind, select, folder {分享文件夹} asset {分享素材} other {分享项目}}",
+    "people": "成员",
+    "invitePlaceholder": "输入邮箱邀请，按 Enter 确认",
+    "removeEmail": "移除 {email}",
+    "generalAccess": "常规访问权限",
+    "public": "任何拥有链接的人",
+    "restricted": "受限制",
+    "publicHint": "任何人均可查看——无需登录",
+    "restrictedHint": "仅受邀用户登录后可查看",
+    "timeline": "时间线",
+    "timelineHint": "查看者观看的内容",
+    "alsoShare": "同时分享",
+    "alsoShareHint": "查看者始终拥有预览和时间线的只读权限。开启需要向其展示的其他内容。",
+    "folderHint": "查看者可以浏览并下载此文件夹的内容（包括子文件夹）。对文件夹所做的更改将同步显示在分享链接中。",
+    "assetHint": "查看者可以预览并下载此素材。",
+    "tryAgain": "重试",
+    "copied": "已复制",
+    "copyLink": "复制链接",
+    "stopSharing": "停止分享"
+  },
+  "exportsDock": {
+    "title": "导出",
+    "running": "{count} 个进行中",
+    "queuedCount": "{count} 个排队中",
+    "doneCount": "{count} 个已完成",
+    "clearAll": "全部清除",
+    "collapse": "收起导出",
+    "expand": "展开导出",
+    "untitled": "未命名",
+    "queued": "排队中",
+    "ready": "已就绪",
+    "exportFailed": "导出失败",
+    "cancel": "取消",
+    "dismiss": "忽略",
+    "hide": "隐藏 — 导出将继续进行",
+    "showInFinder": "在访达中显示",
+    "downloadAgain": "重新下载",
+    "download": "下载",
+    "rendering": "正在渲染… {pct}%",
+    "preparing": "正在准备…",
+    "startFailed": "无法开始导出"
+  },
+  "recordDialog": {
+    "deviceFallback": "无法启动该设备，已切回默认设备。",
+    "cameraBlocked": "摄像头权限被阻止。请在 Chrome 中允许此网站访问摄像头和麦克风，然后重试。",
+    "micBlocked": "麦克风权限被阻止。请在 Chrome 中允许此网站访问麦克风，然后重试。",
+    "cameraStartFailed": "此浏览器无法启动摄像头录制。请检查没有其他应用正在使用摄像头，然后重试。",
+    "startFailed": "此浏览器无法启动录制。请重试。",
+    "saveFailed": "录制内容无法保存。请重试。",
+    "emptyRecording": "录制内容为空。请检查是否有其他应用正在使用摄像头，然后重试。",
+    "cameraN": "摄像头 {n}",
+    "micN": "麦克风 {n}",
+    "titleCamera": "录制摄像头",
+    "titleAudio": "录制音频",
+    "close": "关闭",
+    "waiting": "正在等待权限…",
+    "start": "开始录制",
+    "stop": "停止并使用录制内容"
+  },
+  "exportDialog": {
+    "title": "导出",
+    "presetGroup": "导出预设",
+    "quickPresets": {
+      "share": {
+        "label": "分享",
+        "detail": "1080p · 兼容性最佳"
+      },
+      "best": {
+        "label": "最佳",
+        "detail": "原始文件设置"
+      },
+      "social4k": {
+        "label": "社交 4K",
+        "detail": "4K 升采样 · 平台转码码率更高"
+      },
+      "small": {
+        "label": "小体积",
+        "detail": "720p · 最快"
+      },
+      "master": {
+        "label": "母带",
+        "detail": "ProRes 4444 · MOV · PCM · 毫无妥协"
+      }
+    },
+    "qualities": {
+      "high": {
+        "label": "高",
+        "detail": "最佳画质"
+      },
+      "balanced": {
+        "label": "均衡",
+        "detail": "文件更小"
+      },
+      "small": {
+        "label": "小",
+        "detail": "渲染最快"
+      }
+    },
+    "codecs": {
+      "h264": "兼容性最佳",
+      "hevc": "体积减半 · 适用于较新设备",
+      "prores": "剪辑母带 · MOV",
+      "prores4444": "每个像素独立色彩 · MOV"
+    },
+    "audioCodecs": {
+      "aac": "压缩音频",
+      "pcm": "未压缩 · MOV"
+    },
+    "colorSpaces": {
+      "sdr": "SDR",
+      "hlg": "HDR (HLG)",
+      "pq": "HDR (PQ)"
+    },
+    "loudness": {
+      "off": "关闭",
+      "social": "社交平台",
+      "podcast": "播客",
+      "broadcast": "广播电视"
+    },
+    "loudnessTarget": "{name} · {lufs} LUFS",
+    "custom": "自定义",
+    "customHint": "自行配置所有选项",
+    "source": "源素材",
+    "resolution": "分辨率",
+    "size": "{width} × {height}",
+    "sizeUpscaled": "{width} × {height} · 已放大",
+    "sizeUpscaledFromSource": "{width} × {height} · 较源素材放大",
+    "quality": "质量",
+    "customRateValue": "{mbps} Mbps · {size}",
+    "fileName": "文件名",
+    "range": "范围",
+    "wholeVideo": "完整视频",
+    "selectionHint": "从首个选中项的起点到最后一个选中项的终点，包含所有轨道",
+    "selectionRange": "选区 · {start}–{end}",
+    "frameRate": "帧率",
+    "sourceRateHint": "素材播放所采用的帧率",
+    "sourceReading": "源素材 · 读取中…",
+    "sourceRate": "源素材 · {fps} fps",
+    "fps": "{fps} fps",
+    "format": "格式",
+    "eightBit": "8 位",
+    "color": "色彩",
+    "audio": "音频",
+    "loudnessLabel": "响度",
+    "loudnessHint": "将整体混音调整至目标值，并将真实峰值限制在 {ceiling} dBTP 以下。",
+    "moreSettings": "更多设置",
+    "customBitrate": "自定义码率",
+    "customBitrateHint": "码率越高，画质越好，文件也越大。在平台有特定码率要求时使用；ProRes 会自动设定。",
+    "auto": "自动",
+    "bitrateLabel": "码率（Mbps）",
+    "mbps": "Mbps",
+    "stems": "分轨",
+    "stemsHint": "为每条轨道（对白及各音轨）单独保存一个 WAV 文件，并打包压缩在视频旁，便于在其他软件中混音。",
+    "exportStems": "导出分轨",
+    "captionsFile": "字幕文件",
+    "captionsFileHint": "将字幕以 SRT 文件形式保存到“下载”文件夹，适用于支持独立字幕的平台。",
+    "saveCaptionsFile": "保存字幕文件",
+    "cloudRender": "此浏览器无法自行编码 {kind, select, prores {ProRes} hdr {HDR} other {该格式}}，因此将在云端进行渲染，完成后即可在此获取。",
+    "lufs": "{lufs} LUFS",
+    "stemsTag": "分轨",
+    "reading": "正在读取素材…",
+    "exportVideo": "导出视频",
+    "scalePresets": "{label} 预设"
+  },
+  "topBar": {
+    "aspects": {
+      "16x9": "宽屏",
+      "9x16": "竖屏",
+      "4x3": "经典",
+      "2x1": "电影",
+      "1x1": "正方形",
+      "3x4": "竖屏"
+    },
+    "aspectPreset": "{name} · {ratio}",
+    "customAspect": "自定义 · {ratio}",
+    "customEllipsis": "自定义…",
+    "uploading": "{count, plural, other {正在上传 # 个文件}}",
+    "copying": "{count, plural, other {正在复制 # 个文件}}",
+    "finishingUploads": "正在完成上传…",
+    "finishingCopies": "正在完成复制…",
+    "movingMedia": "正在移动媒体文件 {done}/{total}…",
+    "moveFailed": "无法移动项目。",
+    "share": "分享",
+    "moveToShare": "移至云端以分享",
+    "moveToCloud": "移至云端",
+    "cloud": "云端",
+    "retryImportsFirst": "请先重试失败的导入",
+    "export": "导出",
+    "openInCut": "在 Donkey Cut 中打开",
+    "open": "打开",
+    "fullscreen": "全屏",
+    "chat": "聊天",
+    "chatShortcut": "聊天 ({key})",
+    "backTo": "{tab, select, library {返回素材库} other {返回项目列表}}",
+    "rename": "重命名项目",
+    "importsFailed": "{count, plural, other {# 项导入失败}}",
+    "retry": "重试",
+    "saving": "正在保存",
+    "saveFailed": "保存失败",
+    "saved": "已保存",
+    "background": "背景",
+    "aspectLimit": "比例最高支持 8:1",
+    "width": "宽度",
+    "height": "高度",
+    "aspectPresets": "宽高比预设",
+    "record": "录制",
+    "recordCamera": "录制摄像头",
+    "recordAudio": "录制音频",
+    "moreActions": "更多操作",
+    "moveBody": "{from, select, browser {将此项目及其媒体复制到云端，然后从此浏览器中移除。在此渲染的导出文件仍会保留。} other {将此项目及其媒体复制到云端，然后从此 Mac 中移除。在此渲染的导出文件仍会保留。}}",
+    "moving": "正在移动…"
+  },
+  "editor": {
+    "backTo": "{tab, select, library {返回媒体库} other {返回项目}}",
+    "needsApp": "这是一个本地项目 — 存放在此 Mac 上。打开 Donkey 应用即可在此打开。",
+    "shareGone": "此分享已不再可用。",
+    "conflictReloaded": "已重新加载在其他地方保存的较新版本。",
+    "dismiss": "忽略",
+    "defaultText": "你的文本"
+  },
+  "preview": {
+    "showingOriginal": "正在显示原始画面 — 点击查看抠像",
+    "previewingSdr": "正在预览 SDR",
+    "copyingFrame": "正在复制帧…",
+    "copied": "已复制",
+    "copyFrameFailed": "无法复制帧",
+    "copyFrame": "复制帧",
+    "zoomOut": "缩小",
+    "zoomIn": "放大",
+    "reset": "重置",
+    "zoomLevel": "缩放 {percent}%",
+    "panPicture": "拖动以平移画面",
+    "zoomPicture": "拖动以缩放画面"
+  },
+  "maskGizmo": {
+    "moveCorner": "拖动以移动角点；双击删除",
+    "addCorner": "拖动以在此添加角点",
+    "feather": "拖动以羽化边缘",
+    "round": "拖动调整圆角",
+    "rotate": "拖动旋转蒙版",
+    "resize": "拖动调整蒙版大小"
+  }
+}

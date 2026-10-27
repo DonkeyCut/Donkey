@@ -1,3 +1,4 @@
+import { isLocale } from "@/i18n/locales";
 import { prisma } from "@/lib/prisma";
 
 // The account as the product shows it, shared by every route that hands the
@@ -10,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 export async function accountProfile(userId: string) {
   const [user, avatar] = await Promise.all([
     prisma.user.findUnique({
-      select: { displayName: true, email: true, emailVerified: true, image: true, name: true },
+      select: { displayName: true, email: true, emailVerified: true, image: true, locale: true, name: true },
       where: { id: userId },
     }),
     prisma.userAvatar.findUnique({
@@ -25,6 +26,7 @@ export async function accountProfile(userId: string) {
     email: user.email,
     emailVerified: user.emailVerified,
     image: avatar ? `/api/account/avatar?v=${avatar.updatedAt.getTime()}` : user.image,
+    locale: isLocale(user.locale) ? user.locale : null,
     name: user.name,
   };
 }

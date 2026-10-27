@@ -1,0 +1,112 @@
+{
+  "widget": {
+    "deleted": "Dieses Projekt wurde gelöscht.",
+    "createNewProject": "Neues Projekt erstellen",
+    "dismiss": "Verwerfen",
+    "tryAgain": "Erneut versuchen",
+    "cloudProjects": "Cloud-Projekte",
+    "chooseProject": "Wähle ein Projekt für die Vorschau aus.",
+    "connecting": "Verbindung zu Donkey Cut wird hergestellt…",
+    "loadProjects": "Projekte laden",
+    "yourProjects": "Deine Projekte",
+    "noProjects": "Speichere ein Projekt in Donkey Cut in der Cloud, um es hier anzusehen.",
+    "moreProjects": "Weitere Projekte",
+    "refreshList": "Liste aktualisieren",
+    "previewOf": "Vorschau von {name}",
+    "waitingToRender": "Warten auf Rendering…",
+    "rendering": "Vorschau wird gerendert… {percent}%",
+    "renderToWatch": "Rendere eine Vorschau, um dieses Projekt hier anzusehen.",
+    "expired": "Diese Vorschau ist abgelaufen. Rendere sie erneut zum Ansehen.",
+    "earlierEdit": "Diese Vorschau stammt möglicherweise aus einer früheren Bearbeitung.",
+    "renderPreview": "Vorschau rendern",
+    "openInDonkey": "In Donkey Cut öffnen ↗",
+    "projects": "Projekte",
+    "openingEditor": "Editor wird geöffnet",
+    "editing": "{name} bearbeiten",
+    "untitled": "Ohne Titel",
+    "problems": {
+      "requestFailed": "Donkey Cut konnte diese Anfrage nicht abschließen. Versuche es erneut.",
+      "unreadable": "Die Vorschau-Antwort konnte nicht gelesen werden.",
+      "editorFailed": "Donkey Cut konnte den Editor nicht öffnen. Versuche es erneut.",
+      "connect": "Verbinde diese Vorschau über ChatGPT, um fortzufahren.",
+      "generic": "Anfrage fehlgeschlagen.",
+      "videoFailed": "Video konnte nicht geladen werden. Versuche, das Projekt erneut zu öffnen.",
+      "openFailed": "Donkey Cut konnte nicht geöffnet werden.",
+      "saveFailed": "{name} konnte nicht gespeichert werden."
+    }
+  },
+  "status": {
+    "createProject": {
+      "invoking": "Projekt wird erstellt",
+      "invoked": "Projekt erstellt"
+    },
+    "importMedia": {
+      "invoking": "Footage wird importiert",
+      "invoked": "Footage importiert"
+    },
+    "inspectProject": {
+      "invoking": "Projekt wird gelesen",
+      "invoked": "Projekt gelesen"
+    },
+    "listCommands": {
+      "invoking": "Befehle werden aufgelistet",
+      "invoked": "Befehle aufgelistet"
+    },
+    "describeCommands": {
+      "invoking": "Befehle werden beschrieben",
+      "invoked": "Befehle beschrieben"
+    },
+    "listSkills": {
+      "invoking": "Anleitungen werden aufgelistet",
+      "invoked": "Anleitungen aufgelistet"
+    },
+    "readSkill": {
+      "invoking": "Anleitung wird gelesen",
+      "invoked": "Anleitung gelesen"
+    },
+    "editProject": {
+      "invoking": "Projekt wird bearbeitet",
+      "invoked": "Projekt bearbeitet"
+    },
+    "undo": {
+      "invoking": "Wird rückgängig gemacht",
+      "invoked": "Rückgängig gemacht"
+    },
+    "redo": {
+      "invoking": "Wird wiederholt",
+      "invoked": "Wiederholt"
+    },
+    "exportVideo": {
+      "invoking": "Video wird exportiert",
+      "invoked": "Export gestartet"
+    },
+    "exportStatus": {
+      "invoking": "Export wird geprüft",
+      "invoked": "Export geprüft"
+    },
+    "jobStatus": {
+      "invoking": "Job wird geprüft",
+      "invoked": "Job geprüft"
+    },
+    "accountStatus": {
+      "invoking": "Account wird gelesen",
+      "invoked": "Account gelesen"
+    }
+  },
+  "embed": {
+    "failed": "Donkey Cut konnte den Editor nicht öffnen. Öffne das Projekt erneut aus ChatGPT.",
+    "disabled": "ChatGPT-Verbindung ist nicht aktiviert.",
+    "tooMany": "Zu viele Anfragen. Versuche es in einer Minute erneut.",
+    "badRequest": "Ungültige Anfrage.",
+    "expired": "Dieser Editor-Link ist abgelaufen. Öffne das Projekt erneut aus ChatGPT."
+  },
+  "consent": {
+    "title": "Mit ChatGPT verbinden",
+    "access": "ChatGPT kann deine Projekte {access, select, edit {ansehen und bearbeiten} other {ansehen}}{identity, select, email { und deine Kontoinformationen einschließlich deiner E-Mail-Adresse lesen} account { und deine Kontoinformationen lesen} other {}}.",
+    "connect": "Verbinden",
+    "cancel": "Abbrechen",
+    "expiredTitle": "Verbindung neu starten",
+    "expiredHeading": "Verbindung erneut starten",
+    "expiredBody": "Diese Verbindungsseite ist abgelaufen oder dein angemeldetes Konto hat sich geändert. Kehre zu OpenAI zurück und starte die Verbindung erneut."
+  }
+}

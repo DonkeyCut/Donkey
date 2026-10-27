@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "title": "Editor de Vídeo Donkey Cut — Alternativa Gratuita e Open Source ao CapCut",
+    "description": "Uma alternativa gratuita e open source ao CapCut. Edite com Chat, gere vídeos, imagens, locuções e músicas, mantendo seus projetos locais."
+  },
+  "nav": {
+    "logIn": "Entrar",
+    "signUp": "Cadastre-se",
+    "dashboard": "Painel",
+    "goToApp": "Ir para o App"
+  },
+  "tagline": "Finalmente, um editor de vídeo <italic>que é fácil.</italic>",
+  "hero": {
+    "body": "Edite com chat, gere imagens e vídeos e mantenha seus arquivos no seu próprio computador. Use sua assinatura existente do Claude ou Codex, se já tiver uma.",
+    "cta": "Começar um novo projeto"
+  },
+  "worksWith": {
+    "title": "Funciona <italic>com</italic>",
+    "body": "O assistente usa os apps do Claude e Codex já conectados no seu Mac. Se você tem uma assinatura, já está tudo pronto — sem configuração, sem chaves de API."
+  },
+  "pricing": {
+    "title": "Preços <italic>simples</italic>",
+    "body": "O editor é gratuito. Pague apenas pelas mídias geradas por IA.",
+    "footnote": "* Compre créditos para conteúdo gerado por IA a qualquer momento."
+  },
+  "plans": {
+    "free": {
+      "name": "Gratuito",
+      "detail": "Para todos",
+      "body": "O editor completo, na nuvem ou no seu próprio Mac.",
+      "cta": "Começar um novo projeto",
+      "editor": "Acesso completo ao editor de vídeo",
+      "storage": "{mb, number} MB de armazenamento na nuvem",
+      "tools": "Importação, exportação e transcrição local",
+      "subscriptions": "Conecte sua assinatura do Claude ou Codex"
+    },
+    "pro": {
+      "detail": "Para uso individual",
+      "cta": "Assinar o Pro",
+      "everythingInFree": "Tudo do Gratuito"
+    }
+  },
+  "local": {
+    "title": "Execute o Donkey Cut <italic>no seu Mac.</italic>",
+    "body": "Edite vídeos localmente no seu Mac. O app usa seu próprio armazenamento e transcreve áudio no dispositivo.",
+    "cta": "Baixar para Mac",
+    "imageAlt": "Ícone do app Donkey sendo arrastado para a pasta Aplicativos."
+  },
+  "openSource": {
+    "title": "O Donkey Cut é <italic>open source.</italic>",
+    "body": "O editor e seu motor de renderização são desenvolvidos abertamente. Leia o código-fonte, execute você mesmo, contribua e ajude a torná-lo melhor.",
+    "runLocally": "Execute o editor localmente",
+    "running": "Editor em execução — {url}",
+    "star": "Dar uma estrela no GitHub"
+  },
+  "finalCta": {
+    "body": "Comece seu próximo projeto em minutos.",
+    "cta": "Começar a editar"
+  },
+  "blog": {
+    "metaTitle": "Blog | Editor de Vídeo Donkey Cut",
+    "metaDescription": "Notas sobre o desenvolvimento do Donkey Cut: técnicas de edição de vídeo, funcionamento do editor e novidades.",
+    "metaPageTitle": "Blog | Editor de Vídeo Donkey Cut — Página {page}",
+    "heading": "Blog",
+    "subtitle": "Notas sobre edição de vídeo e o desenvolvimento do editor.",
+    "latestPosts": "Últimas publicações",
+    "empty": "Nada por aqui ainda.",
+    "pagination": "Paginação",
+    "previous": "Anterior",
+    "next": "Próximo",
+    "copyLink": "Copiar link da seção",
+    "onThisPage": "Nesta página",
+    "overview": "Visão geral",
+    "draftPreview": "Pré-visualização de rascunho. Apenas você pode ver esta página.",
+    "exitPreview": "Sair da pré-visualização",
+    "updated": "Atualizado em {date}",
+    "backToBlog": "Voltar ao blog",
+    "backToAll": "Voltar a todos os posts"
+  }
+}

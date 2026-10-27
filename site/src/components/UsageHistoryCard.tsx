@@ -1,5 +1,6 @@
 "use client";
 
+import { useFormatter, useLocale, useTranslations } from "next-intl";
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 
 import { useUsage, type UsageHistory } from "@/queries/billing";
@@ -21,10 +22,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { Locale } from "@/i18n/locales";
 import { formatCreditCharge } from "@/lib/credits/format-credits";
 import { cn } from "@/lib/utils";
 
 type RecentCall = UsageHistory["recent"][number];
+
+// What the helpers below need to word a row: the reader's locale and the
+// "Included" label.
+type Wording = { locale: Locale; included: string };
 
 // Stable identity for a call so expansion state survives a background refetch
 // (which can reorder/prepend rows) instead of being pinned to an array index.
@@ -34,37 +40,35 @@ function callKey(call: RecentCall): string {
 
 // A charge in credits, rounded up so a sub-credit call reads as 1; a zero or
 // unreadable value reads as 0 credits.
-function formatCostValue(value: number): string {
+function formatCostValue(value: number, locale: Locale): string {
   if (!Number.isFinite(value) || value <= 0) {
-    return formatCreditCharge(0);
+    return formatCreditCharge(0, locale);
   }
-  return formatCreditCharge(value);
+  return formatCreditCharge(value, locale);
 }
 
-function formatCallCost(call: RecentCall): string {
+function formatCallCost(call: RecentCall, wording: Wording): string {
   if (call.billingStatus === "included") {
-    return "Included";
+    return wording.included;
   }
-  return formatCostValue(Number.parseFloat(call.costCredits));
+  return formatCostValue(Number.parseFloat(call.costCredits), wording.locale);
 }
 
-function conversationLabel(conversationId: string): string {
-  // Conversation ids are long opaque strings; a short prefix is enough to tell
-  // groups apart without dominating the row.
-  return `Conversation ${conversationId.slice(0, 8)}`;
-}
+// Conversation ids are long opaque strings; a short prefix is enough to tell
+// groups apart without dominating the row.
+const CONVERSATION_ID_CHARS = 8;
 
 // A conversation block's combined cost for its header. An all-included block has
 // no credit cost, so label it "Included".
-function blockCostSummary(calls: RecentCall[]): string {
+function blockCostSummary(calls: RecentCall[], wording: Wording): string {
   if (calls.every((call) => call.billingStatus === "included")) {
-    return "Included";
+    return wording.included;
   }
   const total = calls.reduce((sum, call) => {
     const value = Number.parseFloat(call.costCredits);
     return Number.isFinite(value) ? sum + value : sum;
   }, 0);
-  return formatCostValue(total);
+  return formatCostValue(total, wording.locale);
 }
 
 // Share of the block's input tokens the provider served from cache, across all its calls. This is the
@@ -95,7 +99,7 @@ type RowAnnotation = {
   blockCachedShare: number | null;
 };
 
-function annotateRows(rows: RecentCall[]): RowAnnotation[] {
+function annotateRows(rows: RecentCall[], wording: Wording): RowAnnotation[] {
   const annotations: RowAnnotation[] = rows.map(() => ({
     blockKey: -1,
     blockCount: 0,
@@ -114,7 +118,7 @@ function annotateRows(rows: RecentCall[]): RowAnnotation[] {
       end += 1;
     }
     const block = rows.slice(index, end);
-    const summary = blockCostSummary(block);
+    const summary = blockCostSummary(block, wording);
     const cachedShare = blockCachedShare(block);
     for (let i = index; i < end; i += 1) {
       annotations[i] = {
@@ -129,19 +133,28 @@ function annotateRows(rows: RecentCall[]): RowAnnotation[] {
   return annotations;
 }
 
-function formatTokens(value: number): string {
-  return value.toLocaleString();
-}
-
 function formatDuration(millis: number): string {
   return millis >= 1000 ? `${(millis / 1000).toFixed(1)}s` : `${millis}ms`;
 }
+
+// A call's moment, to the second: "10/27/2026, 3:04:05 PM" in English.
+const CALL_DATE_FORMAT = {
+  year: "numeric",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+} as const;
 
 // Page the table client-side, capped so the control never grows past 5 pages.
 const ROWS_PER_PAGE = 25;
 const MAX_PAGES = 5;
 
 function CallDetail({ call }: { call: RecentCall }) {
+  const t = useTranslations("settings.usage");
+  const format = useFormatter();
+  const formatTokens = (value: number) => format.number(value);
   const { usage } = call;
   const imageBilled = usage.generationCount > 0;
   const tokenBilled =
@@ -150,7 +163,7 @@ function CallDetail({ call }: { call: RecentCall }) {
   const stats: { label: string; value: string }[] = [];
   if (imageBilled) {
     stats.push({
-      label: "Images generated",
+      label: t("imagesGenerated"),
       value: formatTokens(usage.generationCount),
     });
   }
@@ -163,26 +176,26 @@ function CallDetail({ call }: { call: RecentCall }) {
         ? Math.round((usage.cachedInputTokens / usage.inputTokens) * 100)
         : 0;
     stats.push(
-      { label: "Input tokens", value: formatTokens(usage.inputTokens) },
+      { label: t("inputTokens"), value: formatTokens(usage.inputTokens) },
       {
-        label: "Cached input",
-        value: `${formatTokens(usage.cachedInputTokens)} (${cachedShare}%)`,
+        label: t("cachedInput"),
+        value: t("cachedValue", { tokens: formatTokens(usage.cachedInputTokens), share: cachedShare }),
       },
-      { label: "Output tokens", value: formatTokens(usage.outputTokens) },
-      { label: "Total tokens", value: formatTokens(usage.totalTokens) },
+      { label: t("outputTokens"), value: formatTokens(usage.outputTokens) },
+      { label: t("totalTokens"), value: formatTokens(usage.totalTokens) },
     );
   }
   // Only some (audio-priced) calls report a duration; omit it otherwise.
   if (usage.durationMillis > 0) {
-    stats.push({ label: "Duration", value: formatDuration(usage.durationMillis) });
+    stats.push({ label: t("duration"), value: formatDuration(usage.durationMillis) });
   }
 
   // Explain what drove the cost in terms of how the call is priced.
   const explanation = imageBilled
-    ? "Image generation is priced per image, not by tokens."
+    ? t("imageExplanation")
     : tokenBilled
-      ? "Cost is driven by tokens, and input dominates here. Cached input is an unchanged prompt prefix the provider reuses at a fraction of the rate; a low cached share on a repeated call means the cache isn't being hit."
-      : "No billable usage was recorded for this call.";
+      ? t("tokenExplanation")
+      : t("noUsage");
 
   return (
     <div className="space-y-3 px-2 py-1 text-sm">
@@ -198,7 +211,7 @@ function CallDetail({ call }: { call: RecentCall }) {
         </dl>
       ) : null}
       {call.errorCode ? (
-        <p className="text-destructive">Error: {call.errorCode}</p>
+        <p className="text-destructive">{t("error", { code: call.errorCode })}</p>
       ) : null}
     </div>
   );
@@ -207,6 +220,10 @@ function CallDetail({ call }: { call: RecentCall }) {
 // The table renders directly on the page and stretches to the space its
 // parent gives it; the surrounding pane owns scrolling.
 export function UsageHistoryCard() {
+  const t = useTranslations("settings.usage");
+  const locale = useLocale();
+  const format = useFormatter();
+  const wording: Wording = { locale, included: t("included") };
   const usage = useUsage();
   const [page, setPage] = useState(1);
   // Keyed by call identity (not row index) so a refetch can't leave the open
@@ -222,7 +239,7 @@ export function UsageHistoryCard() {
   const rows = usage.data?.recent ?? [];
   // Annotate in the server's chronological order so conversations group in place
   // and individual (no-conversation) calls stay interleaved between them.
-  const annotations = annotateRows(rows);
+  const annotations = annotateRows(rows, wording);
 
   const totalPages = Math.min(
     MAX_PAGES,
@@ -270,16 +287,16 @@ export function UsageHistoryCard() {
             pane. */}
         <div className="[&_[data-slot=table-container]]:overflow-visible">
         {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No calls yet.</p>
+          <p className="text-sm text-muted-foreground">{t("noCalls")}</p>
         ) : (
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
-                <TableHead>Date</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead className="text-right">Cost</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>{t("date")}</TableHead>
+                <TableHead>{t("kind")}</TableHead>
+                <TableHead>{t("model")}</TableHead>
+                <TableHead className="text-right">{t("cost")}</TableHead>
+                <TableHead>{t("status")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -309,14 +326,13 @@ export function UsageHistoryCard() {
                           colSpan={5}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span>{conversationLabel(conversationId)}</span>
+                            <span>{t("conversation", { id: conversationId.slice(0, CONVERSATION_ID_CHARS) })}</span>
                             <span className="tabular-nums">
-                              {annotation.blockCount}{" "}
-                              {annotation.blockCount === 1 ? "call" : "calls"}
+                              {t("calls", { count: annotation.blockCount })}
                               {" · "}
                               {annotation.blockSummary}
                               {annotation.blockCachedShare !== null
-                                ? ` · ${annotation.blockCachedShare}% cached`
+                                ? ` · ${t("cachedShare", { share: annotation.blockCachedShare })}`
                                 : null}
                             </span>
                           </div>
@@ -339,12 +355,12 @@ export function UsageHistoryCard() {
                       {/* Indent a conversation's calls so they read as nested
                           under their header; background calls stay flush. */}
                       <TableCell className={cn(inConversation && "pl-8")}>
-                        {new Date(call.createdAt).toLocaleString()}
+                        {format.dateTime(new Date(call.createdAt), CALL_DATE_FORMAT)}
                       </TableCell>
                       <TableCell>{call.requestKind}</TableCell>
                       <TableCell>{call.model}</TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {formatCallCost(call)}
+                        {formatCallCost(call, wording)}
                       </TableCell>
                       <TableCell>
                         <Badge
@@ -354,7 +370,7 @@ export function UsageHistoryCard() {
                               : "destructive"
                           }
                         >
-                          {call.status}
+                          {t("callStatus", { status: call.status })}
                         </Badge>
                       </TableCell>
                     </TableRow>

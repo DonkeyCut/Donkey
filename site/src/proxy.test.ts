@@ -4,8 +4,10 @@ import nextConfig from "../next.config";
 import { proxy } from "./proxy";
 
 // skipProxyUrlNormalize supplies the original URL to the proxy at runtime.
-function request(url: string, cookie = "") {
-  const req = new NextRequest(url, { headers: { cookie, host: new URL(url).host } });
+function request(url: string, cookie = "", acceptLanguage = "") {
+  const headers: Record<string, string> = { cookie, host: new URL(url).host };
+  if (acceptLanguage) headers["accept-language"] = acceptLanguage;
+  const req = new NextRequest(url, { headers });
   Object.defineProperty(req, "url", { value: url });
   return req;
 }
@@ -20,7 +22,7 @@ for (const host of ["127.0.0.1:3000", "localhost:3000", "[::1]:3000", "donkeycut
     const res = await proxy(request(`${origin}/app/p/example?view=timeline`));
     expect(res.status).toBe(200);
     expect(res.headers.get("location")).toBeNull();
-    expect(res.headers.get("x-middleware-rewrite")).toBe(`${origin}/cut/app/p/example?view=timeline`);
+    expect(res.headers.get("x-middleware-rewrite")).toBe(`${origin}/en/cut/app/p/example?view=timeline`);
   });
 }
 
@@ -33,10 +35,42 @@ test("a direct legacy URL redirects once to the public editor route", async () =
   expect(editor.headers.get("location")).toBeNull();
 });
 
-test("public auth routes pass through", async () => {
+test("public auth routes skip the /cut rewrite", async () => {
   const res = await proxy(request("http://127.0.0.1:3000/sign-in"));
-  expect(res.headers.get("x-middleware-next")).toBe("1");
-  expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+  expect(res.headers.get("x-middleware-rewrite")).toBe("http://127.0.0.1:3000/en/sign-in");
+});
+
+test("a visitor is served in their browser's language at the same address", async () => {
+  const res = await proxy(request("https://donkeycut.com/install", "", "ja-JP,ja;q=0.9,en;q=0.8"));
+  expect(res.headers.get("location")).toBeNull();
+  expect(res.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/ja/install");
+  // A detected language is not saved; only a language the visitor picks is.
+  expect(res.headers.getSetCookie().join("\n")).not.toMatch(/NEXT_LOCALE/);
+});
+
+test("a picked language wins over the browser's", async () => {
+  const res = await proxy(request("https://donkeycut.com/app/p/1", "NEXT_LOCALE=de", "ja"));
+  expect(res.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/de/cut/app/p/1");
+  expect(res.headers.getSetCookie().join("\n")).not.toMatch(/NEXT_LOCALE/);
+});
+
+test("a regional or unsupported language resolves to a shipped one", async () => {
+  const portuguese = await proxy(request("https://donkeycut.com/", "", "pt-PT,pt;q=0.9"));
+  expect(portuguese.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/pt-BR/cut");
+  const chinese = await proxy(request("https://donkeycut.com/", "", "zh"));
+  expect(chinese.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/zh-CN/cut");
+  const dutch = await proxy(request("https://donkeycut.com/", "", "nl-NL"));
+  expect(dutch.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/en/cut");
+});
+
+test("a crawler with no language gets English", async () => {
+  const res = await proxy(request("https://donkeycut.com/blog/some-post"));
+  expect(res.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/en/cut/blog/some-post");
+});
+
+test("a share link opens in the visitor's language at the same address", async () => {
+  const res = await proxy(request("https://donkeycut.com/s/abc", "NEXT_LOCALE=ko"));
+  expect(res.headers.get("x-middleware-rewrite")).toBe("https://donkeycut.com/ko/cut/s/abc");
 });
 
 test("www canonicalizes to the product host", async () => {

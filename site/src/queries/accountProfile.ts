@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
+import type { Locale } from "@/i18n/locales";
 import { apiFetch } from "@/queries/apiClient";
 
 export const accountProfileQueryKey = ["account-profile"] as const;
@@ -14,6 +15,8 @@ export type AccountProfile = {
   email: string;
   emailVerified: boolean;
   image: string | null;
+  // The language the product speaks to this person; null until recorded.
+  locale: Locale | null;
 };
 
 // What the product calls you: your chosen name when you have one, otherwise
@@ -74,3 +77,17 @@ export function useUpdateDisplayName() {
   });
 }
 
+
+export function useUpdateLocale() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (locale: Locale) =>
+      apiFetch<AccountProfile>("/api/account/profile", {
+        body: JSON.stringify({ locale }),
+        method: "PUT",
+      }),
+    onSuccess: (profile) => {
+      queryClient.setQueryData(accountProfileQueryKey, profile);
+    },
+  });
+}

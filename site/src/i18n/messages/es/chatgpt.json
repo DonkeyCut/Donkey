@@ -1,0 +1,112 @@
+{
+  "widget": {
+    "deleted": "Este proyecto fue eliminado.",
+    "createNewProject": "Crear nuevo proyecto",
+    "dismiss": "Descartar",
+    "tryAgain": "Reintentar",
+    "cloudProjects": "Proyectos en la nube",
+    "chooseProject": "Elige un proyecto para previsualizar.",
+    "connecting": "Conectando con Donkey Cut…",
+    "loadProjects": "Cargar proyectos",
+    "yourProjects": "Tus proyectos",
+    "noProjects": "Guarda un proyecto en la nube en Donkey Cut para previsualizarlo aquí.",
+    "moreProjects": "Más proyectos",
+    "refreshList": "Actualizar lista",
+    "previewOf": "Vista previa de {name}",
+    "waitingToRender": "Esperando para renderizar…",
+    "rendering": "Renderizando vista previa… {percent}%",
+    "renderToWatch": "Renderiza una vista previa para ver este proyecto aquí.",
+    "expired": "Esta vista previa expiró. Renderízala de nuevo para verla.",
+    "earlierEdit": "Esta vista previa puede ser de una edición anterior.",
+    "renderPreview": "Renderizar vista previa",
+    "openInDonkey": "Abrir en Donkey Cut ↗",
+    "projects": "Proyectos",
+    "openingEditor": "Abriendo el editor",
+    "editing": "Editando {name}",
+    "untitled": "Sin título",
+    "problems": {
+      "requestFailed": "Donkey Cut no pudo completar esta solicitud. Inténtalo de nuevo.",
+      "unreadable": "No se pudo leer la respuesta de la vista previa.",
+      "editorFailed": "Donkey Cut no pudo abrir el editor. Inténtalo de nuevo.",
+      "connect": "Conecta esta vista previa desde ChatGPT para continuar.",
+      "generic": "La solicitud falló.",
+      "videoFailed": "No se pudo cargar el video. Intenta abrir el proyecto de nuevo.",
+      "openFailed": "No se pudo abrir Donkey Cut.",
+      "saveFailed": "No se pudo guardar {name}."
+    }
+  },
+  "status": {
+    "createProject": {
+      "invoking": "Creando el proyecto",
+      "invoked": "Proyecto creado"
+    },
+    "importMedia": {
+      "invoking": "Importando material",
+      "invoked": "Material importado"
+    },
+    "inspectProject": {
+      "invoking": "Leyendo el proyecto",
+      "invoked": "Proyecto leído"
+    },
+    "listCommands": {
+      "invoking": "Listando comandos",
+      "invoked": "Comandos listados"
+    },
+    "describeCommands": {
+      "invoking": "Describiendo comandos",
+      "invoked": "Comandos descritos"
+    },
+    "listSkills": {
+      "invoking": "Listando guías",
+      "invoked": "Guías listadas"
+    },
+    "readSkill": {
+      "invoking": "Leyendo la guía",
+      "invoked": "Guía leída"
+    },
+    "editProject": {
+      "invoking": "Editando el proyecto",
+      "invoked": "Proyecto editado"
+    },
+    "undo": {
+      "invoking": "Deshaciendo",
+      "invoked": "Deshecho"
+    },
+    "redo": {
+      "invoking": "Rehaciendo",
+      "invoked": "Rehecho"
+    },
+    "exportVideo": {
+      "invoking": "Exportando el video",
+      "invoked": "Exportación iniciada"
+    },
+    "exportStatus": {
+      "invoking": "Revisando la exportación",
+      "invoked": "Exportación revisada"
+    },
+    "jobStatus": {
+      "invoking": "Revisando la tarea",
+      "invoked": "Tarea revisada"
+    },
+    "accountStatus": {
+      "invoking": "Leyendo la cuenta",
+      "invoked": "Cuenta leída"
+    }
+  },
+  "embed": {
+    "failed": "Donkey Cut no pudo abrir el editor. Vuelve a abrir el proyecto desde ChatGPT.",
+    "disabled": "La conexión con ChatGPT no está habilitada.",
+    "tooMany": "Demasiadas solicitudes. Inténtalo de nuevo en un minuto.",
+    "badRequest": "Solicitud incorrecta.",
+    "expired": "Este enlace del editor expiró. Vuelve a abrir el proyecto desde ChatGPT."
+  },
+  "consent": {
+    "title": "Conectar con ChatGPT",
+    "access": "ChatGPT puede {access, select, edit {ver y editar} other {ver}} tus proyectos{identity, select, email { y leer la información de tu cuenta, incluida tu dirección de correo electrónico} account { y leer la información de tu cuenta} other {}}.",
+    "connect": "Conectar",
+    "cancel": "Cancelar",
+    "expiredTitle": "Reiniciar conexión",
+    "expiredHeading": "Inicia la conexión de nuevo",
+    "expiredBody": "Esta página de conexión expiró o cambió la cuenta con la que iniciaste sesión. Regresa a OpenAI e inicia la conexión de nuevo."
+  }
+}

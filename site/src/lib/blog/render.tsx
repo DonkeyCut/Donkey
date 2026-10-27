@@ -5,7 +5,7 @@ import { cacheLife, cacheTag } from "next/cache";
 import { compileMDX } from "next-mdx-remote/rsc";
 import remarkGfm from "remark-gfm";
 
-import { BLOG_ARTICLE_CLASS, blogMdxComponents } from "@/app/cut/blog/_components/mdxComponents";
+import { BLOG_ARTICLE_CLASS, blogMdxComponents } from "@/app/[locale]/cut/blog/_components/mdxComponents";
 import { BLOG_TAG, blogPostTag, getPost } from "@/lib/blog/read";
 
 export async function PostArticle({ slug }: { slug: string }) {

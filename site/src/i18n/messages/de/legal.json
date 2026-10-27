@@ -1,0 +1,20 @@
+{
+  "privacyMeta": {
+    "title": "Datenschutzerklärung | Donkey Cut",
+    "description": "Lies die Datenschutzerklärung von Donkey Cut."
+  },
+  "termsMeta": {
+    "title": "Nutzungsbedingungen | Donkey Cut",
+    "description": "Lies die Nutzungsbedingungen von Donkey Cut."
+  },
+  "englishGoverns": "Diese Richtlinie wird auf Englisch veröffentlicht. Die unten stehende englische Fassung ist die rechtlich bindende Version.",
+  "unsubscribe": {
+    "title": "E-Mail-Einstellungen",
+    "checking": "Link wird überprüft…",
+    "invalid": "Dieser Link ist nicht mehr gültig. Du kannst Produkt-E-Mails in den Einstellungen der App verwalten.",
+    "done": "Du hast Produkt-E-Mails abbestellt. Du kannst sie in den Einstellungen der App jederzeit wieder aktivieren.",
+    "prompt": "Keine Produktneuigkeiten und Ankündigungen von Donkey Cut mehr erhalten? E-Mails zu deinem Konto, wie Abrechnung und Sicherheit, erhältst du weiterhin.",
+    "button": "Abmelden",
+    "failed": "Das hat nicht geklappt – versuche es erneut."
+  }
+}

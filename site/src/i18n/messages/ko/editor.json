@@ -1,0 +1,385 @@
+{
+  "embeddedSignIn": {
+    "message": "여기서 계속 편집하려면 다시 연결하세요.",
+    "reconnect": "다시 연결"
+  },
+  "importPoster": {
+    "video": "비디오"
+  },
+  "bottomSheet": {
+    "close": "닫기"
+  },
+  "transformHandles": {
+    "resize": "드래그하여 크기 조절",
+    "rotate": "드래그하여 회전"
+  },
+  "viewerTopBar": {
+    "copyFailed": "프로젝트를 복사하지 못했어요.",
+    "viewOnly": "보기 전용",
+    "chat": "채팅",
+    "chatShortcut": "채팅 ({key})",
+    "copying": "복사 중…",
+    "copyProject": "프로젝트 복사"
+  },
+  "connectGate": {
+    "bannerBlocked": "이 프로젝트는 이 Mac에 저장되어 있으며, 브라우저가 Donkey 앱 연결을 차단하고 있어요.",
+    "bannerUnreachable": "이 프로젝트는 이 Mac에 저장되어 있으며, Donkey Cut이 Donkey 앱에 연결할 수 없어요.",
+    "howToFix": "해결 방법",
+    "dismiss": "닫기",
+    "titleBlocked": "연결 차단됨",
+    "titleAsk": "Donkey 앱에 연결",
+    "titleStored": "이 프로젝트는 이 Mac에 저장되어 있어요",
+    "bodyBlocked": "로컬 프로젝트예요. 비디오와 편집 내용이 이 Mac에 저장되어 있으며, 브라우저가 이를 여는 Donkey 앱 연결을 차단하고 있어요. 주소 표시줄 옆 아이콘을 눌러 사이트 설정을 열고, <em>기기의 앱</em>을 켠 다음 다시 시도해 보세요.",
+    "bodyAsk": "로컬 프로젝트예요. 이 Mac의 Donkey 앱에 저장되어 있어요. 브라우저에서 이 기기의 앱에 연결하도록 권한을 요청하면 <em>허용</em>을 선택해 주세요.",
+    "bodyInstall": "로컬 프로젝트예요. 비디오와 편집 내용이 이 Mac에 저장되어 있으며 Donkey 앱으로 열 수 있어요. Donkey를 설치하거나 이미 설치되어 있다면 실행해 주세요. 이 페이지에 자동으로 연결돼요.",
+    "siteSettingsAlt": "주소 표시줄 위에 열린 Chrome 사이트 설정과 '기기의 앱' 토글 스위치",
+    "download": "Mac용 다운로드",
+    "connecting": "연결 중…",
+    "connect": "연결",
+    "tryAgain": "다시 시도"
+  },
+  "cameraCard": {
+    "side": {
+      "auto": "자동 ({side})",
+      "bottom": "하단",
+      "left": "왼쪽",
+      "right": "오른쪽"
+    },
+    "matteReady": "인물 매트 준비 완료",
+    "matteBaking": "인물 매트 베이킹 중 {progress, number, percent}",
+    "matteFailed": "인물 매트를 베이킹하지 못했어요.",
+    "matteStarting": "인물 매트 시작 중",
+    "title": "카메라 카드",
+    "info": "화자가 프레임 가장자리의 둥근 모서리 카드 안에 표시되며, 머리가 카드 위로 튀어나옵니다. '자동'을 선택하면 세로 프레임에서는 하단에, 정사각형 또는 가로 프레임에서는 오른쪽 가장자리에 카드를 배치해요. 그래픽은 아래쪽 트랙에 배치하세요. 카드가 영상을 직접 배치하고 자체 모서리와 그림자를 렌더링하므로, 활성화되어 있는 동안에는 프레이밍 줌, 팬, 테두리, 그림자 설정이 비활성화돼요. 길이는 디자인 픽셀 단위예요.",
+    "sideLabel": "위치",
+    "top": "상단",
+    "resetTop": "상단 초기화",
+    "width": "너비",
+    "resetWidth": "너비 초기화",
+    "radius": "곡률 반경",
+    "cardRadius": "카드 곡률 반경",
+    "sideBleed": "측면 블리드",
+    "cardSideBleed": "카드 측면 블리드",
+    "shadow": "그림자",
+    "popOut": "팝아웃",
+    "feather": "페더",
+    "popOutFeather": "팝아웃 페더",
+    "retry": "다시 시도",
+    "footageSize": "영상 크기",
+    "footageOffset": "영상 오프셋",
+    "footageAxisOffset": "영상 {axis} 오프셋"
+  },
+  "lightbox": {
+    "close": "닫기",
+    "added": "추가됨",
+    "use": "사용",
+    "prompt": "프롬프트",
+    "copyPrompt": "프롬프트 복사",
+    "copied": "복사됨",
+    "copy": "복사",
+    "preparingPlayback": "재생 준비 중",
+    "readFailed": "파일을 읽을 수 없어요."
+  },
+  "platformPreview": {
+    "original": "원본",
+    "defaultHandle": "사용자",
+    "originalSound": "오리지널 사운드 - {handle}",
+    "close": "미리보기 닫기",
+    "unmute": "음소거 해제",
+    "mute": "음소거",
+    "following": "팔로잉",
+    "forYou": "추천",
+    "share": "공유",
+    "follow": "팔로우",
+    "more": "… 더보기",
+    "like": "좋아요",
+    "dislike": "싫어요",
+    "subscribe": "구독"
+  },
+  "mobileShare": {
+    "details": "상세 정보",
+    "transcript": "스크립트",
+    "media": "미디어",
+    "chat": "채팅",
+    "cantPlay": "지금은 이 프로젝트를 재생할 수 없어요.",
+    "preparing": "프로젝트 재생 준비 중…",
+    "loading": "불러오는 중…",
+    "noDetails": "공유된 상세 정보가 없어요.",
+    "caption": "캡션",
+    "published": "게시됨",
+    "notes": "메모",
+    "links": "링크",
+    "noTranscript": "공유된 스크립트가 없어요.",
+    "noMedia": "공유된 미디어가 없어요.",
+    "noChat": "공유된 채팅이 없어요."
+  },
+  "shareDialog": {
+    "features": {
+      "chat": {
+        "label": "채팅",
+        "hint": "AI 채팅 스레드 및 카드"
+      },
+      "media": {
+        "label": "미디어",
+        "hint": "타임라인 외 업로드된 파일"
+      },
+      "genai": {
+        "label": "AI 생성물",
+        "hint": "생성된 동영상, 이미지 및 오디오"
+      },
+      "subtitles": {
+        "label": "자막",
+        "hint": "스크립트 패널"
+      },
+      "details": {
+        "label": "세부 정보",
+        "hint": "캡션, 태그 및 메모"
+      }
+    },
+    "saveFailed": "공유 설정을 저장하지 못했어요.",
+    "invalidEmail": "올바른 이메일 주소 형식이 아니에요.",
+    "copyFailed": "링크를 복사하지 못했어요. 다시 시도해 주세요.",
+    "removeFailed": "공유를 삭제하지 못했어요.",
+    "title": "{kind, select, folder {폴더 공유} asset {에셋 공유} other {프로젝트 공유}}",
+    "people": "사용자",
+    "invitePlaceholder": "이메일로 초대, Enter 키 누르기",
+    "removeEmail": "{email} 삭제",
+    "generalAccess": "일반 액세스",
+    "public": "링크가 있는 모든 사용자",
+    "restricted": "제한됨",
+    "publicHint": "누구나 볼 수 있음 — 로그인 불필요",
+    "restrictedHint": "초대받은 사람만 로그인하여 볼 수 있음",
+    "timeline": "타임라인",
+    "timelineHint": "시청자가 보는 화면",
+    "alsoShare": "추가 공유",
+    "alsoShareHint": "시청자에게는 항상 미리보기와 타임라인이 읽기 전용으로 제공돼요. 시청자에게 표시할 항목을 추가로 켜세요.",
+    "folderHint": "시청자는 하위 폴더를 포함하여 이 폴더의 콘텐츠를 탐색하고 다운로드할 수 있어요. 폴더의 변경 사항은 공유 링크에 반영돼요.",
+    "assetHint": "시청자가 이 에셋을 미리 보고 다운로드할 수 있어요.",
+    "tryAgain": "다시 시도",
+    "copied": "복사됨",
+    "copyLink": "링크 복사",
+    "stopSharing": "공유 중지"
+  },
+  "exportsDock": {
+    "title": "내보내기",
+    "running": "{count}개 진행 중",
+    "queuedCount": "{count}개 대기 중",
+    "doneCount": "{count}개 완료",
+    "clearAll": "모두 지우기",
+    "collapse": "내보내기 접기",
+    "expand": "내보내기 펼치기",
+    "untitled": "제목 없음",
+    "queued": "대기 중",
+    "ready": "준비 완료",
+    "exportFailed": "내보내기 실패",
+    "cancel": "취소",
+    "dismiss": "닫기",
+    "hide": "숨기기 — 내보내기는 계속 진행돼요",
+    "showInFinder": "Finder에서 보기",
+    "downloadAgain": "다시 다운로드",
+    "download": "다운로드",
+    "rendering": "렌더링 중… {pct}%",
+    "preparing": "준비 중…",
+    "startFailed": "내보내기를 시작할 수 없어요"
+  },
+  "recordDialog": {
+    "deviceFallback": "해당 장치를 시작할 수 없어 기본 장치로 전환했어요.",
+    "cameraBlocked": "카메라 액세스가 차단되었어요. Chrome에서 이 사이트의 카메라와 마이크 권한을 허용한 뒤 다시 시도해 주세요.",
+    "micBlocked": "마이크 액세스가 차단되었어요. Chrome에서 이 사이트의 마이크 권한을 허용한 뒤 다시 시도해 주세요.",
+    "cameraStartFailed": "이 브라우저에서 카메라 녹화를 시작할 수 없어요. 다른 앱이 카메라를 사용 중인지 확인하고 다시 시도해 주세요.",
+    "startFailed": "이 브라우저에서 녹화를 시작할 수 없어요. 다시 시도해 주세요.",
+    "saveFailed": "녹화를 저장하지 못했어요. 다시 시도해 보세요.",
+    "emptyRecording": "녹화된 내용이 없어요. 다른 앱에서 카메라를 사용 중인지 확인하고 다시 시도해 보세요.",
+    "cameraN": "카메라 {n}",
+    "micN": "마이크 {n}",
+    "titleCamera": "카메라 녹화",
+    "titleAudio": "오디오 녹음",
+    "close": "닫기",
+    "waiting": "권한 대기 중…",
+    "start": "녹화 시작",
+    "stop": "중지하고 녹화본 사용"
+  },
+  "exportDialog": {
+    "title": "내보내기",
+    "presetGroup": "내보내기 프리셋",
+    "quickPresets": {
+      "share": {
+        "label": "공유",
+        "detail": "1080p · 어디서나 재생 가능"
+      },
+      "best": {
+        "label": "최고",
+        "detail": "원본 파일 설정"
+      },
+      "social4k": {
+        "label": "소셜 4K",
+        "detail": "4K 업스케일 · 플랫폼에서 더 높은 비트레이트로 트랜스코딩"
+      },
+      "small": {
+        "label": "소용량",
+        "detail": "720p · 가장 빠름"
+      },
+      "master": {
+        "label": "마스터",
+        "detail": "ProRes 4444 · MOV · PCM · 타협 없는 품질"
+      }
+    },
+    "qualities": {
+      "high": {
+        "label": "높음",
+        "detail": "최고 품질"
+      },
+      "balanced": {
+        "label": "균형",
+        "detail": "더 작은 파일 크기"
+      },
+      "small": {
+        "label": "소용량",
+        "detail": "가장 빠른 렌더링"
+      }
+    },
+    "codecs": {
+      "h264": "어디서나 재생 가능",
+      "hevc": "절반 크기 · 최신 기기",
+      "prores": "편집 마스터 · MOV",
+      "prores4444": "모든 픽셀 고유 색상 · MOV"
+    },
+    "audioCodecs": {
+      "aac": "압축 오디오",
+      "pcm": "비압축 · MOV"
+    },
+    "colorSpaces": {
+      "sdr": "SDR",
+      "hlg": "HDR (HLG)",
+      "pq": "HDR (PQ)"
+    },
+    "loudness": {
+      "off": "끔",
+      "social": "소셜",
+      "podcast": "팟캐스트",
+      "broadcast": "방송"
+    },
+    "loudnessTarget": "{name} · {lufs} LUFS",
+    "custom": "사용자 지정",
+    "customHint": "모든 옵션을 직접 설정해요",
+    "source": "원본",
+    "resolution": "해상도",
+    "size": "{width} × {height}",
+    "sizeUpscaled": "{width} × {height} · 업스케일됨",
+    "sizeUpscaledFromSource": "{width} × {height} · 원본에서 업스케일됨",
+    "quality": "화질",
+    "customRateValue": "{mbps} Mbps · {size}",
+    "fileName": "파일 이름",
+    "range": "범위",
+    "wholeVideo": "전체 영상",
+    "selectionHint": "선택한 첫 항목의 시작부터 마지막 항목의 끝까지, 모든 행을 포함해요",
+    "selectionRange": "선택 영역 · {start}–{end}",
+    "frameRate": "프레임 레이트",
+    "sourceRateHint": "영상이 재생되는 프레임 속도예요",
+    "sourceReading": "원본 · 읽는 중…",
+    "sourceRate": "원본 · {fps} fps",
+    "fps": "{fps} fps",
+    "format": "포맷",
+    "eightBit": "8비트",
+    "color": "색상",
+    "audio": "오디오",
+    "loudnessLabel": "음량(Loudness)",
+    "loudnessHint": "전체 믹스를 목표치로 맞추고 트루 피크를 {ceiling} dBTP 이하로 유지해요.",
+    "moreSettings": "추가 설정",
+    "customBitrate": "사용자 지정 비트레이트",
+    "customBitrateHint": "비트레이트가 높을수록 화질이 좋아지고 파일이 커져요. 플랫폼에서 특정 비트레이트를 요구할 때 사용하세요. ProRes는 자체 설정됩니다.",
+    "auto": "자동",
+    "bitrateLabel": "초당 메가비트(Mbps) 단위 비트레이트",
+    "mbps": "Mbps",
+    "stems": "스팀(Stems)",
+    "stemsHint": "다른 곳에서 믹싱할 수 있도록 대화 및 각 사운드트랙 트랙별 WAV 파일을 압축하여 비디오와 함께 저장해요.",
+    "exportStems": "스팀 내보내기",
+    "captionsFile": "자막 파일",
+    "captionsFileHint": "자체 자막을 지원하는 플랫폼을 위해 자막을 SRT 파일로 다운로드 폴더에 저장해요.",
+    "saveCaptionsFile": "자막 파일 저장",
+    "cloudRender": "이 브라우저에서는 {kind, select, prores {ProRes} hdr {HDR} other {이 형식}}을(를) 직접 인코딩할 수 없어 클라우드에서 렌더링 후 완료되면 여기에 표시돼요.",
+    "lufs": "{lufs} LUFS",
+    "stemsTag": "스팀",
+    "reading": "영상 읽는 중…",
+    "exportVideo": "비디오 내보내기",
+    "scalePresets": "{label} 프리셋"
+  },
+  "topBar": {
+    "aspects": {
+      "16x9": "와이드스크린",
+      "9x16": "세로형",
+      "4x3": "클래식",
+      "2x1": "시네마틱",
+      "1x1": "정사각형",
+      "3x4": "세로"
+    },
+    "aspectPreset": "{name} · {ratio}",
+    "customAspect": "사용자 지정 · {ratio}",
+    "customEllipsis": "사용자 지정…",
+    "uploading": "{count, plural, other {#개 파일 업로드 중}}",
+    "copying": "{count, plural, other {#개 파일 복사 중}}",
+    "finishingUploads": "업로드 마무리 중…",
+    "finishingCopies": "복사 마무리 중…",
+    "movingMedia": "미디어 이동 중 {done}/{total}…",
+    "moveFailed": "프로젝트를 이동하지 못했어요.",
+    "share": "공유",
+    "moveToShare": "공유하려면 Cloud로 이동",
+    "moveToCloud": "Cloud로 이동",
+    "cloud": "Cloud",
+    "retryImportsFirst": "실패한 가져오기를 먼저 다시 시도해 주세요",
+    "export": "내보내기",
+    "openInCut": "Donkey Cut에서 열기",
+    "open": "열기",
+    "fullscreen": "전체 화면",
+    "chat": "채팅",
+    "chatShortcut": "채팅 ({key})",
+    "backTo": "{tab, select, library {라이브러리로 돌아가기} other {프로젝트로 돌아가기}}",
+    "rename": "프로젝트 이름 바꾸기",
+    "importsFailed": "{count, plural, other {#개 가져오기 실패}}",
+    "retry": "다시 시도",
+    "saving": "저장 중",
+    "saveFailed": "저장 실패",
+    "saved": "저장됨",
+    "background": "배경",
+    "aspectLimit": "최대 8:1 비율",
+    "width": "너비",
+    "height": "높이",
+    "aspectPresets": "화면비 프리셋",
+    "record": "녹화/녹음",
+    "recordCamera": "카메라 녹화",
+    "recordAudio": "오디오 녹음",
+    "moreActions": "추가 작업",
+    "moveBody": "{from, select, browser {이 프로젝트와 미디어를 클라우드로 복사한 다음 이 브라우저에서 삭제해요. 여기서 렌더링된 내보내기 파일은 유지돼요.} other {이 프로젝트와 미디어를 클라우드로 복사한 다음 이 Mac에서 삭제해요. 여기서 렌더링된 내보내기 파일은 유지돼요.}}",
+    "moving": "이동 중…"
+  },
+  "editor": {
+    "backTo": "{tab, select, library {라이브러리로 돌아가기} other {프로젝트로 돌아가기}}",
+    "needsApp": "로컬 프로젝트예요 — 이 Mac에 저장되어 있어요. Donkey 앱을 열면 여기서 열려요.",
+    "shareGone": "더 이상 유효하지 않은 공유 링크예요.",
+    "conflictReloaded": "다른 곳에서 저장된 최신 버전을 다시 불러왔어요.",
+    "dismiss": "닫기",
+    "defaultText": "텍스트 입력"
+  },
+  "preview": {
+    "showingOriginal": "원본 표시 중 — 컷아웃을 보려면 클릭해요",
+    "previewingSdr": "SDR 미리보기 중",
+    "copyingFrame": "프레임 복사 중…",
+    "copied": "복사됨",
+    "copyFrameFailed": "프레임을 복사할 수 없어요",
+    "copyFrame": "프레임 복사",
+    "zoomOut": "축소",
+    "zoomIn": "확대",
+    "reset": "재설정",
+    "zoomLevel": "배율 {percent}%",
+    "panPicture": "드래그하여 화면 이동",
+    "zoomPicture": "드래그하여 화면 확대/축소"
+  },
+  "maskGizmo": {
+    "moveCorner": "드래그하여 꼭짓점 이동, 더블클릭하여 삭제",
+    "addCorner": "드래그하여 여기에 꼭짓점 추가",
+    "feather": "드래그하여 가장자리 페더 조절",
+    "round": "드래그하여 모서리 둥글기 조절",
+    "rotate": "드래그하여 마스크 회전",
+    "resize": "드래그하여 마스크 크기 조절"
+  }
+}

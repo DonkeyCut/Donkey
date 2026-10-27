@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useCallback, useState, type ReactNode } from "react";
 
 import { TopNav } from "@/app/_components/landing/TopNav";
@@ -21,55 +22,53 @@ type Props = {
   footer: ReactNode;
 };
 
+// Each mode's link, Google button art and catalog keys. The words live in the
+// `auth.screen` catalog under `copyKey`.
 const copy = {
   "sign-in": {
     alternateHref: "/sign-up",
-    alternateLabel: "Create account",
-    alternateLead: "New to Donkey?",
-    googleAlt: "Sign in with Google",
+    copyKey: "signIn",
     googleSrc: "/google/dark-sign-in-with-google.svg",
     googleWidth: 175,
-    heading: "Send Donkey back to work.",
-    title: "Log in",
   },
   "sign-up": {
     alternateHref: "/sign-in",
-    alternateLabel: "Log in",
-    alternateLead: "Already have an account?",
-    googleAlt: "Sign up with Google",
+    copyKey: "signUp",
     googleSrc: "/google/dark-sign-up-with-google.svg",
     googleWidth: 179,
-    heading: "Put Donkey to Work",
-    title: "Sign up",
   },
-} satisfies Record<
+} as const satisfies Record<
   AuthMode,
   {
     alternateHref: string;
-    alternateLabel: string;
-    alternateLead: string;
-    googleAlt: string;
+    copyKey: "signIn" | "signUp";
     googleSrc: string;
     googleWidth: number;
-    heading: string;
-    title: string;
   }
 >;
 
 const GOOGLE_BUTTON_HEIGHT = 56;
 
 export function AuthScreen({ mode, method = "google", callbackURL, authError, footer }: Props) {
+  const t = useTranslations("auth.screen");
   const [isPending, setIsPending] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(
-    authError ? "Sign-in didn't finish. Please try again." : null,
+    authError ? t("callbackFailed") : null,
   );
   const screenCopy = copy[mode];
+  const words = {
+    alternateLabel: t(`${screenCopy.copyKey}.alternateLabel`),
+    alternateLead: t(`${screenCopy.copyKey}.alternateLead`),
+    googleAlt: t(`${screenCopy.copyKey}.googleAlt`),
+    heading: t(`${screenCopy.copyKey}.heading`),
+  };
   const otherMode: AuthMode = mode === "sign-in" ? "sign-up" : "sign-in";
   const alternateParams = new URLSearchParams();
   if (method === "email") alternateParams.set("method", "email");
   if (callbackURL) alternateParams.set("callbackURL", callbackURL);
   const alternateHref = `${screenCopy.alternateHref}${alternateParams.size ? `?${alternateParams}` : ""}`;
 
+  const googleFailed = t("googleFailed");
   const handleGoogleAuth = useCallback(async () => {
     setIsPending(true);
     setStatusMessage(null);
@@ -84,11 +83,11 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
         provider: "google",
       });
     } catch {
-      setStatusMessage("Google sign-in could not start. Please try again.");
+      setStatusMessage(googleFailed);
     } finally {
       setIsPending(false);
     }
-  }, [callbackURL]);
+  }, [callbackURL, googleFailed]);
 
   const googleButtonWidth = Math.round(
     (screenCopy.googleWidth * GOOGLE_BUTTON_HEIGHT) / 40,
@@ -98,7 +97,7 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
     <>
       {method === "email" ? <EmailAuthForm mode={mode} callbackURL={callbackURL} /> : <button
         type="button"
-        aria-label={screenCopy.googleAlt}
+        aria-label={words.googleAlt}
         disabled={isPending}
         onClick={handleGoogleAuth}
         className={cn(
@@ -108,7 +107,7 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
       >
         <Image
           src={screenCopy.googleSrc}
-          alt={screenCopy.googleAlt}
+          alt={words.googleAlt}
           width={screenCopy.googleWidth}
           height={40}
           priority
@@ -118,24 +117,27 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
         />
       </button>}
       <p className="mt-[18px] text-sm leading-normal text-foreground/70">
-        {screenCopy.alternateLead}{" "}
+        {words.alternateLead}{" "}
         <Link
           href={alternateHref}
           className="font-semibold text-foreground underline underline-offset-[3px]"
         >
-          {screenCopy.alternateLabel}
+          {words.alternateLabel}
         </Link>
       </p>
       <p className="mt-[18px] text-xs leading-normal text-foreground/70">
-        By continuing, you agree to the{" "}
-        <Link href="/terms" className="font-semibold text-foreground">
-          Terms of Use
-        </Link>{" "}
-        and{" "}
-        <Link href="/privacy" className="font-semibold text-foreground">
-          Privacy Policy
-        </Link>
-        .
+        {t.rich("agreement", {
+          terms: (chunks) => (
+            <Link href="/terms" className="font-semibold text-foreground">
+              {chunks}
+            </Link>
+          ),
+          privacy: (chunks) => (
+            <Link href="/privacy" className="font-semibold text-foreground">
+              {chunks}
+            </Link>
+          ),
+        })}
       </p>
       {statusMessage ? (
         <div
@@ -160,13 +162,13 @@ export function AuthScreen({ mode, method = "google", callbackURL, authError, fo
         wordmark="Donkey Cut"
         authToggle={{
           href: alternateHref,
-          label: copy[otherMode].title,
+          label: t(`${copy[otherMode].copyKey}.title`),
         }}
       />
       <section className="mx-auto grid w-full max-w-[1400px] grid-cols-1 justify-items-center gap-16 px-6 pt-[44px] pb-[240px] text-center min-[900px]:gap-24 min-[900px]:px-12 min-[900px]:pt-[72px] min-[900px]:pb-[360px]">
         <div>
           <h1 className="max-w-[920px] text-[33px] leading-[0.9] font-semibold break-words min-[900px]:text-[69px]">
-            {screenCopy.heading}
+            {words.heading}
           </h1>
         </div>
 

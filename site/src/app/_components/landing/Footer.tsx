@@ -1,7 +1,9 @@
 import { Link as LinkIcon, Play, Send, type LucideIcon } from "lucide-react";
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 
 import { GITHUB_REPO_URL } from "@/app/_components/landing/data";
+import { LanguagePicker } from "@/components/LanguagePicker";
 import { hasPublishedPosts } from "@/lib/blog/read";
 
 type SocialLink = {
@@ -14,7 +16,7 @@ type FooterLink = { href: string; label: string };
 type FooterColumn = { title: string; links: FooterLink[] };
 
 export async function Footer() {
-  const showBlog = await hasPublishedPosts();
+  const [showBlog, t] = await Promise.all([hasPublishedPosts(), getTranslations("common.footer")]);
   const socialLinks: SocialLink[] = [
     { href: "https://www.linkedin.com", icon: LinkIcon, label: "LinkedIn" },
     { href: "https://www.youtube.com", icon: Play, label: "YouTube" },
@@ -24,17 +26,17 @@ export async function Footer() {
   // Each entry renders as its own titled column in the footer.
   const linkGroups: FooterColumn[] = [
     {
-      title: "Product",
+      title: t("product"),
       links: [
         { href: GITHUB_REPO_URL, label: "GitHub" },
-        ...(showBlog ? [{ href: "/blog", label: "Blog" }] : []),
+        ...(showBlog ? [{ href: "/blog", label: t("blog") }] : []),
       ],
     },
     {
-      title: "Legal",
+      title: t("legal"),
       links: [
-        { href: "/privacy", label: "Privacy Policy" },
-        { href: "/terms", label: "Terms of Use" },
+        { href: "/privacy", label: t("privacy") },
+        { href: "/terms", label: t("terms") },
       ],
     },
   ];
@@ -46,7 +48,7 @@ export async function Footer() {
           <div className="mb-6 flex flex-wrap items-center gap-4">
             <Link
               href="/"
-              aria-label="Donkey home"
+              aria-label={t("donkeyHome")}
               className="text-[40px] font-semibold text-foreground no-underline md:text-[48px]"
             >
               Donkey
@@ -67,17 +69,21 @@ export async function Footer() {
             })}
           </div>
           <p className="text-[15px] font-semibold text-foreground">
-            Need help? Email us at{" "}
-            <a
-              href="mailto:hello@donkeycut.com"
-              className="underline underline-offset-2"
-            >
-              hello@donkeycut.com
-            </a>
+            {t.rich("helpEmail", {
+              email: "hello@donkeycut.com",
+              link: (chunks) => (
+                <a href="mailto:hello@donkeycut.com" className="underline underline-offset-2">
+                  {chunks}
+                </a>
+              ),
+            })}
           </p>
           <p className="mt-6 text-[13px] text-foreground/70">
-            2026 Donkey, Inc.
+            {t("copyright")}
           </p>
+          <div className="mt-6">
+            <LanguagePicker placement="footer" />
+          </div>
         </div>
         <div className="flex flex-1 flex-col gap-10 sm:flex-row sm:flex-wrap sm:gap-x-16 sm:gap-y-12 md:gap-x-20">
           {linkGroups.map((group) => (

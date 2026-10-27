@@ -1,0 +1,385 @@
+{
+  "embeddedSignIn": {
+    "message": "Verbinde dich erneut, um hier weiterzubearbeiten.",
+    "reconnect": "Erneut verbinden"
+  },
+  "importPoster": {
+    "video": "Video"
+  },
+  "bottomSheet": {
+    "close": "Schließen"
+  },
+  "transformHandles": {
+    "resize": "Ziehen zum Skalieren",
+    "rotate": "Ziehen zum Drehen"
+  },
+  "viewerTopBar": {
+    "copyFailed": "Projekt konnte nicht kopiert werden.",
+    "viewOnly": "Nur anzeigen",
+    "chat": "Chat",
+    "chatShortcut": "Chat ({key})",
+    "copying": "Kopieren…",
+    "copyProject": "Projekt kopieren"
+  },
+  "connectGate": {
+    "bannerBlocked": "Dieses Projekt ist auf diesem Mac gespeichert, und dein Browser blockiert den Zugriff dieser Seite auf die Donkey-App.",
+    "bannerUnreachable": "Dieses Projekt ist auf diesem Mac gespeichert, und Donkey Cut kann die Donkey-App nicht erreichen.",
+    "howToFix": "So behebst du das",
+    "dismiss": "Verwerfen",
+    "titleBlocked": "Verbindung blockiert",
+    "titleAsk": "Mit der Donkey-App verbinden",
+    "titleStored": "Dieses Projekt ist auf diesem Mac gespeichert",
+    "bodyBlocked": "Dies ist ein lokales Projekt – das Video und die Bearbeitungen befinden sich auf diesem Mac, und dein Browser blockiert den Zugriff dieser Seite auf die Donkey-App, die sie öffnet. Öffne die Website-Einstellungen über das Symbol neben der Adressleiste, aktiviere <em>Apps auf dem Gerät</em> und versuche es erneut.",
+    "bodyAsk": "Dies ist ein lokales Projekt – es befindet sich in der Donkey-App auf diesem Mac. Dein Browser wird um Erlaubnis bitten, sich mit Apps auf diesem Gerät zu verbinden – wähle <em>Zulassen</em>.",
+    "bodyInstall": "Dies ist ein lokales Projekt: Das Video und die Bearbeitungen befinden sich auf diesem Mac, und die Donkey-App öffnet sie. Installiere Donkey oder öffne die App, falls sie bereits installiert ist – diese Seite verbindet sich automatisch.",
+    "siteSettingsAlt": "Website-Einstellungen in Chrome über der Adressleiste geöffnet, mit dem Schalter „Apps auf dem Gerät“",
+    "download": "Für Mac herunterladen",
+    "connecting": "Verbinden…",
+    "connect": "Verbinden",
+    "tryAgain": "Erneut versuchen"
+  },
+  "cameraCard": {
+    "side": {
+      "auto": "Automatisch ({side})",
+      "bottom": "Unten",
+      "left": "Links",
+      "right": "Rechts"
+    },
+    "matteReady": "Personen-Matte bereit",
+    "matteBaking": "Personen-Matte rendert {progress, number, percent}",
+    "matteFailed": "Die Personen-Matte konnte nicht gerendert werden.",
+    "matteStarting": "Personen-Matte startet",
+    "title": "Kamera-Card",
+    "info": "Die sprechende Person erscheint in einer abgerundeten Karte am Bildrand, und ihr Kopf ragt darüber hinaus. „Auto“ platziert die Karte unten bei Hochformat und rechts bei Quadrat- oder Querformat. Lege die Grafik auf eine untere Spur. Die Karte platziert das Footage und zeichnet eigene Ecken und Schatten, daher werden Framing-Zoom, Schwenk, Rahmen und Schatten deaktiviert, solange sie aktiv ist. Längenangaben in Design-Pixeln.",
+    "sideLabel": "Seite",
+    "top": "Oben",
+    "resetTop": "Oben zurücksetzen",
+    "width": "Breite",
+    "resetWidth": "Breite zurücksetzen",
+    "radius": "Radius",
+    "cardRadius": "Kartenradius",
+    "sideBleed": "Seitenanschnitt",
+    "cardSideBleed": "Karten-Seitenanschnitt",
+    "shadow": "Schatten",
+    "popOut": "Herausragen",
+    "feather": "Weiche Kante",
+    "popOutFeather": "Herausragen – Weiche Kante",
+    "retry": "Wiederholen",
+    "footageSize": "Footage-Größe",
+    "footageOffset": "Footage-Versatz",
+    "footageAxisOffset": "Footage-{axis}-Versatz"
+  },
+  "lightbox": {
+    "close": "Schließen",
+    "added": "Hinzugefügt",
+    "use": "Verwenden",
+    "prompt": "Prompt",
+    "copyPrompt": "Prompt kopieren",
+    "copied": "Kopiert",
+    "copy": "Kopieren",
+    "preparingPlayback": "Wiedergabe wird vorbereitet",
+    "readFailed": "Datei konnte nicht gelesen werden."
+  },
+  "platformPreview": {
+    "original": "Original",
+    "defaultHandle": "du",
+    "originalSound": "Originalton – {handle}",
+    "close": "Vorschau schließen",
+    "unmute": "Ton an",
+    "mute": "Stummschalten",
+    "following": "Folge ich",
+    "forYou": "Für dich",
+    "share": "Teilen",
+    "follow": "Folgen",
+    "more": "… mehr",
+    "like": "Gefällt mir",
+    "dislike": "Mag ich nicht",
+    "subscribe": "Abonnieren"
+  },
+  "mobileShare": {
+    "details": "Details",
+    "transcript": "Transkript",
+    "media": "Medien",
+    "chat": "Chat",
+    "cantPlay": "Dieses Projekt kann gerade nicht abgespielt werden.",
+    "preparing": "Projekt wird für die Wiedergabe vorbereitet …",
+    "loading": "Wird geladen …",
+    "noDetails": "Keine Details geteilt.",
+    "caption": "Beschreibung",
+    "published": "Veröffentlicht",
+    "notes": "Notizen",
+    "links": "Links",
+    "noTranscript": "Kein Transkript geteilt.",
+    "noMedia": "Keine Medien geteilt.",
+    "noChat": "Kein Chat geteilt."
+  },
+  "shareDialog": {
+    "features": {
+      "chat": {
+        "label": "Chat",
+        "hint": "KI-Chatverläufe und deren Karten"
+      },
+      "media": {
+        "label": "Medien",
+        "hint": "Hochgeladene Dateien außerhalb der Timeline"
+      },
+      "genai": {
+        "label": "KI-Generierungen",
+        "hint": "Generierte Videos, Bilder und Audios"
+      },
+      "subtitles": {
+        "label": "Untertitel",
+        "hint": "Das Transkript-Panel"
+      },
+      "details": {
+        "label": "Details",
+        "hint": "Beschreibung, Tags und Notizen"
+      }
+    },
+    "saveFailed": "Freigabe konnte nicht gespeichert werden.",
+    "invalidEmail": "Das sieht nicht nach einer E-Mail-Adresse aus.",
+    "copyFailed": "Link konnte nicht kopiert werden. Versuch es noch einmal.",
+    "removeFailed": "Freigabe konnte nicht entfernt werden.",
+    "title": "{kind, select, folder {Ordner teilen} asset {Asset teilen} other {Projekt teilen}}",
+    "people": "Personen",
+    "invitePlaceholder": "Per E-Mail einladen, Enter drücken",
+    "removeEmail": "{email} entfernen",
+    "generalAccess": "Allgemeiner Zugriff",
+    "public": "Jeder mit dem Link",
+    "restricted": "Eingeschränkt",
+    "publicHint": "Jeder kann zuschauen – keine Anmeldung nötig",
+    "restrictedHint": "Nur eingeladene Personen können angemeldet zuschauen",
+    "timeline": "Timeline",
+    "timelineHint": "Was Zuschauer sehen",
+    "alsoShare": "Auch teilen",
+    "alsoShareHint": "Zuschauer erhalten immer Vorschau und Timeline (schreibgeschützt). Aktiviere alles Weitere, was sie sehen sollen.",
+    "folderHint": "Zuschauer können Inhalte dieses Ordners inklusive Unterordnern durchsuchen und herunterladen. Änderungen am Ordner sind über den geteilten Link sichtbar.",
+    "assetHint": "Zuschauer können dieses Asset in der Vorschau ansehen und herunterladen.",
+    "tryAgain": "Erneut versuchen",
+    "copied": "Kopiert",
+    "copyLink": "Link kopieren",
+    "stopSharing": "Freigabe beenden"
+  },
+  "exportsDock": {
+    "title": "Exporte",
+    "running": "{count} aktiv",
+    "queuedCount": "{count} in der Warteschlange",
+    "doneCount": "{count} fertig",
+    "clearAll": "Alle löschen",
+    "collapse": "Exporte einklappen",
+    "expand": "Exporte ausklappen",
+    "untitled": "Ohne Titel",
+    "queued": "In der Warteschlange",
+    "ready": "Bereit",
+    "exportFailed": "Export fehlgeschlagen",
+    "cancel": "Abbrechen",
+    "dismiss": "Verwerfen",
+    "hide": "Ausblenden – Export läuft weiter",
+    "showInFinder": "Im Finder anzeigen",
+    "downloadAgain": "Erneut herunterladen",
+    "download": "Herunterladen",
+    "rendering": "Rendern… {pct}%",
+    "preparing": "Vorbereiten…",
+    "startFailed": "Export konnte nicht gestartet werden"
+  },
+  "recordDialog": {
+    "deviceFallback": "Dieses Gerät konnte nicht gestartet werden – zurück zum Standard gewechselt.",
+    "cameraBlocked": "Kamerazugriff wurde blockiert. Erlaube Kamera und Mikrofon für diese Website in Chrome und versuche es erneut.",
+    "micBlocked": "Mikrofonzugriff wurde blockiert. Erlaube das Mikrofon für diese Website in Chrome und versuche es erneut.",
+    "cameraStartFailed": "Dieser Browser konnte die Kameraaufnahme nicht starten. Prüfe, ob eine andere App die Kamera verwendet, und versuche es erneut.",
+    "startFailed": "Dieser Browser konnte die Aufnahme nicht starten. Versuche es erneut.",
+    "saveFailed": "Die Aufnahme konnte nicht gespeichert werden. Versuche es erneut.",
+    "emptyRecording": "Die Aufnahme ist leer. Prüfe, ob eine andere App die Kamera verwendet, und versuche es erneut.",
+    "cameraN": "Kamera {n}",
+    "micN": "Mikrofon {n}",
+    "titleCamera": "Kamera aufnehmen",
+    "titleAudio": "Audio aufnehmen",
+    "close": "Schließen",
+    "waiting": "Warte auf Berechtigung…",
+    "start": "Aufnahme starten",
+    "stop": "Stoppen und Aufnahme verwenden"
+  },
+  "exportDialog": {
+    "title": "Exportieren",
+    "presetGroup": "Export-Voreinstellung",
+    "quickPresets": {
+      "share": {
+        "label": "Teilen",
+        "detail": "1080p · überall abspielbar"
+      },
+      "best": {
+        "label": "Beste",
+        "detail": "Originale Dateieinstellungen"
+      },
+      "social4k": {
+        "label": "Social 4K",
+        "detail": "4K-Upscale · Plattformen transkodieren mit höherer Bitrate"
+      },
+      "small": {
+        "label": "Klein",
+        "detail": "720p · am schnellsten"
+      },
+      "master": {
+        "label": "Master",
+        "detail": "ProRes 4444 · MOV · PCM · keine Kompromisse"
+      }
+    },
+    "qualities": {
+      "high": {
+        "label": "Hoch",
+        "detail": "beste Qualität"
+      },
+      "balanced": {
+        "label": "Ausgewogen",
+        "detail": "kleinere Datei"
+      },
+      "small": {
+        "label": "Klein",
+        "detail": "schnellstes Rendering"
+      }
+    },
+    "codecs": {
+      "h264": "überall abspielbar",
+      "hevc": "halbe Größe · neuere Geräte",
+      "prores": "Schnitt-Master · MOV",
+      "prores4444": "Eigene Farbe pro Pixel · MOV"
+    },
+    "audioCodecs": {
+      "aac": "Komprimiertes Audio",
+      "pcm": "Unkomprimiert · MOV"
+    },
+    "colorSpaces": {
+      "sdr": "SDR",
+      "hlg": "HDR (HLG)",
+      "pq": "HDR (PQ)"
+    },
+    "loudness": {
+      "off": "Aus",
+      "social": "Social",
+      "podcast": "Podcast",
+      "broadcast": "Broadcast"
+    },
+    "loudnessTarget": "{name} · {lufs} LUFS",
+    "custom": "Benutzerdefiniert",
+    "customHint": "Passe alle Optionen selbst an",
+    "source": "Quelle",
+    "resolution": "Auflösung",
+    "size": "{width} × {height}",
+    "sizeUpscaled": "{width} × {height} · hochskaliert",
+    "sizeUpscaledFromSource": "{width} × {height} · von der Quelle hochskaliert",
+    "quality": "Qualität",
+    "customRateValue": "{mbps} Mbps · {size}",
+    "fileName": "Dateiname",
+    "range": "Bereich",
+    "wholeVideo": "Gesamtes Video",
+    "selectionHint": "Vom Anfang des ersten bis zum Ende des letzten ausgewählten Elements, alle Spuren inklusive",
+    "selectionRange": "Auswahl · {start}–{end}",
+    "frameRate": "Bildrate",
+    "sourceRateHint": "Die Rate, mit der das Material abgespielt wird",
+    "sourceReading": "Quelle · wird gelesen…",
+    "sourceRate": "Quelle · {fps} fps",
+    "fps": "{fps} fps",
+    "format": "Format",
+    "eightBit": "8-Bit",
+    "color": "Farbe",
+    "audio": "Audio",
+    "loudnessLabel": "Lautheit",
+    "loudnessHint": "Passt den gesamten Mix an das Ziel an und hält True Peaks unter {ceiling} dBTP.",
+    "moreSettings": "Weitere Einstellungen",
+    "customBitrate": "Eigene Bitrate",
+    "customBitrateHint": "Höhere Bitraten bedeuten bessere Qualität und größere Dateien. Nutze dies, wenn eine Plattform eine bestimmte Bitrate erfordert; ProRes legt sie selbst fest.",
+    "auto": "Auto",
+    "bitrateLabel": "Bitrate in Megabit pro Sekunde",
+    "mbps": "Mbps",
+    "stems": "Stems",
+    "stemsHint": "Speichert eine WAV-Datei pro Spur (Dialoge und jede Tonspur) als ZIP neben dem Video für den Mix an anderer Stelle.",
+    "exportStems": "Stems exportieren",
+    "captionsFile": "Untertiteldatei",
+    "captionsFileHint": "Speichert die Untertitel als SRT-Datei in deinem Download-Ordner – für Plattformen mit eigenen Untertiteln.",
+    "saveCaptionsFile": "Untertiteldatei speichern",
+    "cloudRender": "Dieser Browser kann {kind, select, prores {ProRes} hdr {HDR} other {dies}} nicht selbst codieren. Es wird in der Cloud gerendert und landet hier, wenn es fertig ist.",
+    "lufs": "{lufs} LUFS",
+    "stemsTag": "stems",
+    "reading": "Footage wird eingelesen…",
+    "exportVideo": "Video exportieren",
+    "scalePresets": "{label}-Presets"
+  },
+  "topBar": {
+    "aspects": {
+      "16x9": "Breitbild",
+      "9x16": "Vertikal",
+      "4x3": "Klassisch",
+      "2x1": "Cinematisch",
+      "1x1": "Quadratisch",
+      "3x4": "Hochformat"
+    },
+    "aspectPreset": "{name} · {ratio}",
+    "customAspect": "Benutzerdefiniert · {ratio}",
+    "customEllipsis": "Benutzerdefiniert…",
+    "uploading": "{count, plural, one {Wird hochgeladen} other {# Dateien werden hochgeladen}}",
+    "copying": "{count, plural, one {Wird kopiert} other {# Dateien werden kopiert}}",
+    "finishingUploads": "Uploads werden abgeschlossen…",
+    "finishingCopies": "Kopiervorgänge werden abgeschlossen…",
+    "movingMedia": "Medien werden verschoben {done}/{total}…",
+    "moveFailed": "Projekt konnte nicht verschoben werden.",
+    "share": "Teilen",
+    "moveToShare": "Zum Teilen in die Cloud verschieben",
+    "moveToCloud": "In die Cloud verschieben",
+    "cloud": "Cloud",
+    "retryImportsFirst": "Fehlgeschlagene Importe zuerst wiederholen",
+    "export": "Exportieren",
+    "openInCut": "In Donkey Cut öffnen",
+    "open": "Öffnen",
+    "fullscreen": "Vollbild",
+    "chat": "Chat",
+    "chatShortcut": "Chat ({key})",
+    "backTo": "{tab, select, library {Zurück zur Mediathek} other {Zurück zu Projekten}}",
+    "rename": "Projekt umbenennen",
+    "importsFailed": "{count, plural, one {# Import fehlgeschlagen} other {# Importe fehlgeschlagen}}",
+    "retry": "Wiederholen",
+    "saving": "Wird gespeichert",
+    "saveFailed": "Speichern fehlgeschlagen",
+    "saved": "Gespeichert",
+    "background": "Hintergrund",
+    "aspectLimit": "Bis zu einem 8:1-Format",
+    "width": "Breite",
+    "height": "Höhe",
+    "aspectPresets": "Seitenverhältnis-Vorlagen",
+    "record": "Aufnehmen",
+    "recordCamera": "Kamera aufnehmen",
+    "recordAudio": "Audio aufnehmen",
+    "moreActions": "Weitere Aktionen",
+    "moveBody": "{from, select, browser {Kopiert dieses Projekt und dessen Medien in die Cloud und entfernt es dann aus diesem Browser. Hier gerenderte Exporte bleiben erhalten.} other {Kopiert dieses Projekt und dessen Medien in die Cloud und entfernt es dann von diesem Mac. Hier gerenderte Exporte bleiben erhalten.}}",
+    "moving": "Wird verschoben…"
+  },
+  "editor": {
+    "backTo": "{tab, select, library {Zurück zur Mediathek} other {Zurück zu den Projekten}}",
+    "needsApp": "Das ist ein lokales Projekt – es liegt auf diesem Mac. Öffne die Donkey-App und es öffnet sich hier.",
+    "shareGone": "Diese Freigabe ist nicht mehr verfügbar.",
+    "conflictReloaded": "Eine neuere, andernorts gespeicherte Version wurde neu geladen.",
+    "dismiss": "Schließen",
+    "defaultText": "Dein Text"
+  },
+  "preview": {
+    "showingOriginal": "Original wird angezeigt – klicke, um den Ausschnitt zu sehen",
+    "previewingSdr": "SDR-Vorschau",
+    "copyingFrame": "Frame wird kopiert…",
+    "copied": "Kopiert",
+    "copyFrameFailed": "Frame konnte nicht kopiert werden",
+    "copyFrame": "Frame kopieren",
+    "zoomOut": "Herauszoomen",
+    "zoomIn": "Hereinzoomen",
+    "reset": "Zurücksetzen",
+    "zoomLevel": "Zoom {percent}%",
+    "panPicture": "Ziehe, um das Bild zu verschieben",
+    "zoomPicture": "Ziehe, um das Bild zu zoomen"
+  },
+  "maskGizmo": {
+    "moveCorner": "Ziehe, um die Ecke zu verschieben; doppelklicke, um sie zu entfernen",
+    "addCorner": "Ziehe, um hier eine Ecke hinzuzufügen",
+    "feather": "Ziehe, um die Kante weichzuzeichnen",
+    "round": "Ziehen, um die Ecken abzurunden",
+    "rotate": "Ziehen, um die Maske zu drehen",
+    "resize": "Ziehen, um die Maskengröße zu ändern"
+  }
+}

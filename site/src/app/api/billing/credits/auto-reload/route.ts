@@ -63,7 +63,7 @@ export const PUT = withDonkeyAuth(async (request) => {
   if (!parsed.success) {
     return NextResponse.json(
       {
-        error: "invalid_request",
+        error: "auto_reload_invalid",
         message: "Provide enabled, thresholdDollars, and amountDollars.",
       },
       { status: 400 },

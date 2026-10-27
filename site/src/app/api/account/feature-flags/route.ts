@@ -27,7 +27,7 @@ export const PUT = withDonkeyAuth(async (request: DonkeyAuthenticatedRequest) =>
       ? featureFlagsFor(await isDonkeySuperUser(userId)).some((f) => f.id === body.flag)
       : false;
   if (!known || !body?.flag || typeof body.enabled !== "boolean") {
-    return NextResponse.json({ error: "Unknown flag." }, { status: 400 });
+    return NextResponse.json({ error: "unknown_flag", message: "Unknown flag." }, { status: 400 });
   }
   await prisma.userFeatureFlag.upsert({
     where: { userId_flag: { userId, flag: body.flag } },

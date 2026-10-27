@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "title": "Donkey Cut 動画エディター — 無料・オープンソースのCapCut代替ツール",
+    "description": "無料・オープンソースのCapCut代替ツール。チャットで編集、動画・画像・ナレーション・音楽の生成、プロジェクトのローカル保存に対応。"
+  },
+  "nav": {
+    "logIn": "ログイン",
+    "signUp": "新規登録",
+    "dashboard": "ダッシュボード",
+    "goToApp": "アプリを開く"
+  },
+  "tagline": "ついに登場、<italic>かんたんに使える</italic>動画エディター。",
+  "hero": {
+    "body": "チャットで編集し、画像や動画を生成。ファイルは手元のPCに保存されます。すでにお持ちのClaudeやCodexのサブスクリプションもそのまま利用できます。",
+    "cta": "新規プロジェクトを開始"
+  },
+  "worksWith": {
+    "title": "対応<italic>サービス</italic>",
+    "body": "アシスタント機能は、お使いのMacですでにサインインしているClaudeやCodexのアプリを利用します。サブスクリプションをお持ちなら、初期設定もAPIキーも不要です。"
+  },
+  "pricing": {
+    "title": "シンプルな<italic>料金プラン</italic>",
+    "body": "エディターは無料です。料金が発生するのはAI生成メディアの利用時のみです。",
+    "footnote": "※ AI生成コンテンツ用のクレジットはいつでも購入できます。"
+  },
+  "plans": {
+    "free": {
+      "name": "Free",
+      "detail": "すべてのユーザー向け",
+      "body": "クラウドでも、お使いのMacでも、すべてのエディター機能を利用可能。",
+      "cta": "新規プロジェクトを開始",
+      "editor": "動画エディターへのフルアクセス",
+      "storage": "{mb, number} MBのクラウドストレージ",
+      "tools": "インポート、エクスポート、ローカル文字起こし",
+      "subscriptions": "ClaudeやCodexのサブスクリプションと連携"
+    },
+    "pro": {
+      "detail": "個人向け",
+      "cta": "Proを始める",
+      "everythingInFree": "Freeの全機能"
+    }
+  },
+  "local": {
+    "title": "Donkey Cutを<italic>Macで動かす</italic>",
+    "body": "Mac上でローカルに動画を編集できます。手元のストレージを使用し、音声の文字起こしもデバイス上で完結します。",
+    "cta": "Mac版をダウンロード",
+    "imageAlt": "Donkeyアプリのアイコンがアプリケーションフォルダーにドラッグされている様子。"
+  },
+  "openSource": {
+    "title": "Donkey Cutは<italic>オープンソース</italic>です。",
+    "body": "エディターとレンダリングエンジンはオープンに開発されています。ソースコードを閲覧し、自分で動かし、開発に貢献してプロダクトを向上させましょう。",
+    "runLocally": "エディターをローカルで実行",
+    "running": "エディター実行中 - {url}",
+    "star": "GitHubでStarをつける"
+  },
+  "finalCta": {
+    "body": "数分ですぐに次のプロジェクトを始められます。",
+    "cta": "編集を始める"
+  },
+  "blog": {
+    "metaTitle": "ブログ | Donkey Cut 動画エディター",
+    "metaDescription": "Donkey Cut開発の記録：動画編集のテクニック、エディターの仕組み、変更履歴。",
+    "metaPageTitle": "ブログ | Donkey Cut 動画エディター — {page}ページ",
+    "heading": "ブログ",
+    "subtitle": "動画編集のヒントと、エディター開発の記録。",
+    "latestPosts": "最新の記事",
+    "empty": "まだ記事がありません。",
+    "pagination": "ページネーション",
+    "previous": "前へ",
+    "next": "次へ",
+    "copyLink": "セクションへのリンクをコピー",
+    "onThisPage": "このページの内容",
+    "overview": "概要",
+    "draftPreview": "下書きプレビューです。このページはあなたにのみ表示されています。",
+    "exitPreview": "プレビューを終了",
+    "updated": "更新日: {date}",
+    "backToBlog": "ブログに戻る",
+    "backToAll": "すべての記事に戻る"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "title": "Installer Donkey",
+    "description": "Téléchargez Donkey pour macOS et installez-le en le glissant simplement dans Applications."
+  },
+  "title": "Installez Donkey<br></br><italic>sur votre Mac.</italic>",
+  "body": "Vos projets restent sur votre Mac. La synthèse vocale et les exports s'exécutent localement, vos fichiers ne quittent donc jamais votre ordinateur avant que vous ne décidiez de les partager.",
+  "download": "Télécharger pour Mac",
+  "step": "Étape {number}",
+  "steps": {
+    "open": {
+      "title": "Ouvrir",
+      "body": "Ouvrez le fichier Donkey.dmg depuis vos téléchargements.",
+      "imageAlt": "Téléchargement de l'image disque Donkey terminé dans le volet des téléchargements du navigateur."
+    },
+    "install": {
+      "title": "Installer",
+      "body": "Glissez-déposez l'application Donkey dans votre dossier Applications.",
+      "imageAlt": "Icône de l'application Donkey en cours de glissement vers le dossier Applications."
+    },
+    "launch": {
+      "title": "Lancer",
+      "body": "Ouvrez Donkey depuis votre dossier Applications ou le Launchpad.",
+      "imageAlt": "Icône de l'application Donkey dans le Dock macOS."
+    }
+  }
+}

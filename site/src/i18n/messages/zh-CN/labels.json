@@ -1,0 +1,225 @@
+{
+  "videoAspect": {
+    "16:9": "横屏 (16:9)",
+    "9:16": "竖屏 (9:16)"
+  },
+  "videoResolution": {
+    "360p": "360p 草稿",
+    "720p": "720p",
+    "1080p": "1080p",
+    "4k": "4K"
+  },
+  "stockAspect": {
+    "16:9": "横屏 (16:9)",
+    "9:16": "竖屏 (9:16)",
+    "1:1": "正方形 (1:1)"
+  },
+  "transition": {
+    "crossfade": "交叉淡化",
+    "crosszoom": "交叉缩放",
+    "dipblack": "浸入黑色",
+    "dipwhite": "浸入白色",
+    "blur": "模糊",
+    "pushleft": "向左推入",
+    "pushright": "向右推入",
+    "pushup": "向上推入",
+    "pushdown": "向下推入",
+    "wipeleft": "向左擦除",
+    "wiperight": "向右擦除",
+    "wipeup": "向上擦除",
+    "wipedown": "向下擦除",
+    "circleopen": "圆形展开",
+    "circleclose": "圆形闭合",
+    "splitopen": "分割展开",
+    "splitclose": "分割闭合",
+    "clockwipe": "时钟擦除",
+    "sliceleft": "向左切片",
+    "sliceup": "向上切片",
+    "audiocross": "交叉溶解"
+  },
+  "anim": {
+    "fade": "淡化",
+    "blur": "模糊",
+    "zoom": "缩放",
+    "pop": "弹出",
+    "slideleft": "向左滑动",
+    "slideright": "向右滑动",
+    "slideup": "向上滑动",
+    "slidedown": "向下滑动"
+  },
+  "shape": {
+    "rect": "矩形",
+    "ellipse": "椭圆",
+    "triangle": "三角形",
+    "diamond": "菱形",
+    "star": "星形",
+    "heart": "心形",
+    "hexagon": "六边形",
+    "line": "线条",
+    "arrow": "箭头",
+    "doodle": "涂鸦"
+  },
+  "timeline": {
+    "main": "主",
+    "second": "第二",
+    "third": "第三"
+  },
+  "residency": {
+    "local": "本地",
+    "cloud": "云端",
+    "browser": "本地"
+  },
+  "imageAspect": {
+    "16:9": "横屏 (16:9)",
+    "9:16": "竖屏 (9:16)",
+    "1:1": "正方形 (1:1)"
+  },
+  "imageResolution": {
+    "1K": "1K",
+    "2K": "2K",
+    "4K": "4K"
+  },
+  "theme": {
+    "system": "跟随系统",
+    "light": "浅色",
+    "dark": "深色"
+  },
+  "audioEffect": {
+    "echo": "回声",
+    "reverb": "混响",
+    "muffle": "沉闷",
+    "telephone": "电话",
+    "deep": "低沉",
+    "bright": "明亮",
+    "wobble": "颤音",
+    "crush": "降质"
+  },
+  "look": {
+    "vintage": "复古",
+    "vhs": "VHS",
+    "horror": "模拟恐怖",
+    "halation": "光晕",
+    "tech": "现代科技",
+    "noir": "黑色电影",
+    "grain": "胶片颗粒",
+    "pastel": "粉彩",
+    "blockbuster": "大片",
+    "dreamy": "梦幻"
+  },
+  "strokeStyle": {
+    "glow": "发光",
+    "hand": "手绘",
+    "cut": "直切",
+    "solid": "实线",
+    "offset": "偏移",
+    "dotted": "点线"
+  },
+  "overlayHit": {
+    "press": "按压",
+    "zap": "电击"
+  },
+  "overlayAnim": {
+    "fade": "淡化",
+    "pop": "弹出",
+    "zoom": "缩放",
+    "slideleft": "向左滑动",
+    "slideright": "向右滑动",
+    "slideup": "向上滑动",
+    "slidedown": "向下滑动",
+    "typewriter": "打字机",
+    "wipe": "擦除",
+    "rise": "升起",
+    "drop": "落下",
+    "grow": "放大",
+    "flip": "翻转",
+    "swivel": "旋动",
+    "bounce": "弹跳",
+    "wave": "波动",
+    "converge": "汇聚",
+    "streak": "飞掠",
+    "tumble": "翻滚",
+    "scatter": "分散",
+    "slot": "滚轮",
+    "dive": "俯冲",
+    "count": "计数",
+    "disintegrate": "消散",
+    "blur": "模糊",
+    "glitch": "故障",
+    "flicker": "闪烁"
+  },
+  "overlayLoop": {
+    "pulse": "脉冲",
+    "heartbeat": "心跳",
+    "float": "漂浮",
+    "sway": "摇摆",
+    "spin": "旋转",
+    "wiggle": "扭动",
+    "shake": "抖动",
+    "flicker": "闪烁",
+    "wave": "波动",
+    "bounce": "弹跳",
+    "flip": "翻转",
+    "flutter": "飘动"
+  },
+  "ease": {
+    "linear": "线性",
+    "sine_in": "正弦缓入",
+    "sine_out": "正弦缓出",
+    "sine_inOut": "正弦缓入缓出",
+    "power2_in": "Power2 缓入",
+    "power2_out": "Power2 缓出",
+    "power2_inOut": "Power2 缓入缓出",
+    "power3_in": "Power3 缓入",
+    "power3_out": "Power3 缓出",
+    "power3_inOut": "Power3 缓入缓出"
+  },
+  "wheel": {
+    "s": "提升",
+    "m": "伽玛",
+    "h": "增益",
+    "o": "偏移"
+  },
+  "effect": {
+    "echo": "回声",
+    "reverb": "混响",
+    "muffle": "闷音",
+    "telephone": "电话",
+    "deep": "低沉",
+    "bright": "明亮",
+    "wobble": "颤动",
+    "crush": "粉碎",
+    "zoom": "缩放",
+    "grain": "胶片颗粒",
+    "vhs": "VHS",
+    "glitch": "故障",
+    "blur": "模糊",
+    "vignette": "暗角",
+    "lightleak": "漏光",
+    "lightbars": "光条",
+    "flash": "闪光",
+    "shake": "抖动",
+    "negative": "负片",
+    "huecycle": "色相循环",
+    "vintage": "复古",
+    "horror": "模拟恐怖",
+    "halation": "光晕",
+    "tech": "现代科技",
+    "noir": "黑色电影",
+    "pastel": "粉彩",
+    "blockbuster": "大片",
+    "dreamy": "梦幻"
+  },
+  "wordEffect": {
+    "color": "颜色",
+    "pop": "弹出",
+    "underline": "下划线",
+    "box": "高亮",
+    "spotlight": "聚光灯",
+    "build": "逐字出现",
+    "fill": "填充",
+    "rise": "升起",
+    "bloom": "泛光",
+    "swing": "摆入",
+    "paint": "涂画"
+  }
+}

@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { allowedOrigin, corsHeaders, preflightHeaders } from "@/cut/server/cors";
 import { DONKEYCUT_CANONICAL, isDonkeycutHost } from "@/cut/lib/hosts";
+import { LOCALE_COOKIE, isLocale, type Locale } from "@/i18n/locales";
+import { negotiateLocale } from "@/i18n/negotiate";
 import { BEACON_PATH, META_COOKIE_MAX_AGE_S, metaCookies } from "@/lib/meta/identity";
 
 // Cut (the video editor, publicly "Donkey Cut") lives under /cut in this single
@@ -62,8 +64,6 @@ const PASSTHROUGH = [
   "/sign-up",
   // Email-footer unsubscribe page; the back office's emails link here.
   "/unsubscribe",
-  // The first-party page view beacon (app/p/route.ts).
-  BEACON_PATH,
 ];
 
 // Whole-segment prefix match, so "/cut" covers "/cut/…" but not "/cut-app".
@@ -90,6 +90,23 @@ function withMetaCookies(req: NextRequest, res: NextResponse): NextResponse {
   return res;
 }
 
+// Every page is served in its visitor's language at the same URL. The pages
+// live under a hidden [locale] root segment (app/[locale]), and the last step
+// of the mapping below prefixes the internal path with the visitor's locale:
+// the language they picked (the cookie the pickers write), or else the
+// closest match to their browser's Accept-Language, worked out per request.
+function visitorLocale(req: NextRequest): Locale {
+  const picked = req.cookies.get(LOCALE_COOKIE)?.value;
+  if (isLocale(picked)) return picked;
+  return negotiateLocale(req.headers.get("accept-language"));
+}
+
+function localized(req: NextRequest, internalPath: string): NextResponse {
+  const url = new URL(req.url);
+  url.pathname = `/${visitorLocale(req)}${internalPath === "/" ? "" : internalPath}`;
+  return withMetaCookies(req, NextResponse.rewrite(url));
+}
+
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (isCutApi(pathname)) return cutApi(req);
@@ -114,26 +131,19 @@ export function proxy(req: NextRequest) {
   }
 
   if (underPath(pathname, "/api")) return NextResponse.next();
-  if (passesThrough(pathname)) {
+  if (pathname === BEACON_PATH) {
     return withMetaCookies(req, NextResponse.next());
   }
-
-  const url = new URL(req.url);
-  url.pathname =
-    pathname === "/sitemap.xml"
-      ? "/cut/sitemap.xml"
-      : `/cut${pathname === "/" ? "" : pathname}`;
-  return withMetaCookies(req, NextResponse.rewrite(url));
+  if (passesThrough(pathname)) return localized(req, pathname);
+  return localized(req, `/cut${pathname === "/" ? "" : pathname}`);
 }
 
 export const config = {
   // Page routes (skip Next internals and files with an extension) plus every
   // Cut API path — including media/export files with extensions — so the
-  // hosted 404 and local CORS above cover all of them. "/sitemap.xml" is
-  // matched explicitly so donkeycut.com can serve its own sitemap.
+  // hosted 404 and local CORS above cover all of them.
   matcher: [
     "/((?!_next/|.*\\..*).*)",
     "/api/cut/:path*",
-    "/sitemap.xml",
   ],
 };

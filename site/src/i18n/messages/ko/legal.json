@@ -1,0 +1,20 @@
+{
+  "privacyMeta": {
+    "title": "개인정보 처리방침 | Donkey Cut",
+    "description": "Donkey Cut의 개인정보 처리방침을 확인해 보세요."
+  },
+  "termsMeta": {
+    "title": "이용약관 | Donkey Cut",
+    "description": "Donkey Cut의 이용약관을 확인해 보세요."
+  },
+  "englishGoverns": "본 방침은 영어로 발행되었습니다. 아래의 영어 원문이 구속력을 갖는 공식 버전입니다.",
+  "unsubscribe": {
+    "title": "이메일 환경설정",
+    "checking": "링크 확인 중…",
+    "invalid": "더 이상 유효하지 않은 링크예요. 앱 내 설정에서 제품 관련 이메일을 관리할 수 있어요.",
+    "done": "제품 관련 이메일 구독을 취소했어요. 앱 내 설정에서 언제든 다시 켤 수 있어요.",
+    "prompt": "Donkey Cut의 제품 소식 및 알림 수신을 중단할까요? 결제, 보안 등 계정 관련 필수 이메일은 계속 발송돼요.",
+    "button": "구독 취소",
+    "failed": "처리에 실패했어요. 다시 시도해 주세요."
+  }
+}

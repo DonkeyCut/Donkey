@@ -1,0 +1,269 @@
+{
+  "tabs": {
+    "projects": "Projekte",
+    "library": "Mediathek",
+    "notes": "Notizen",
+    "cameraRoll": "Aufnahmen"
+  },
+  "newProject": {
+    "button": "Neues Projekt",
+    "title": "Neues Projekt",
+    "placeholder": "Projektname",
+    "create": "Projekt erstellen",
+    "whereSaved": "Speicherort für neue Projekte und Medien: {place}",
+    "scopeLocal": "Alle künftigen Projekte und Medien werden<br></br>auf <b>diesem Gerät</b> gespeichert",
+    "scopeCloud": "Alle künftigen Projekte und Medien werden<br></br>in der <b>Cloud</b> gespeichert"
+  },
+  "embeddedNewProject": {
+    "create": "Neues Projekt erstellen",
+    "limit": "Projektlimit für kostenlose Konten erreicht. Hol dir Pro in Donkey Cut, um mehr zu erstellen.",
+    "failed": "Projekt konnte nicht erstellt werden."
+  },
+  "projects": {
+    "badgeLocal": "Lokales Projekt",
+    "badgeCloud": "Cloud-Projekt",
+    "badgeOffline": "Lokales Projekt – öffne die Donkey-App zum Bearbeiten",
+    "grace": "Dein Pro-Abo ist abgelaufen und dein kostenloser Speicher ist voll. Deine ältesten Cloud-Projekte werden {days, plural, =0 {heute} one {in # Tag} other {in # Tagen}} gelöscht, sofern du kein Upgrade machst oder {size} freigibst.",
+    "upgradeToPro": "Auf Pro upgraden",
+    "deleteFolderFailed": "Ordner konnte nicht gelöscht werden.",
+    "deleteProjectFailed": "Projekt konnte nicht gelöscht werden.",
+    "duplicateFailed": "Projekt konnte nicht dupliziert werden.",
+    "moveFailed": "Projekt konnte nicht verschoben werden.",
+    "deleteFailed": "Konnte nicht gelöscht werden.",
+    "cardMeta": "{size} · Bearbeitet: {date}",
+    "columnName": "Name",
+    "columnLength": "Dauer",
+    "columnSize": "Größe",
+    "columnEdited": "Bearbeitet",
+    "importing": "Wird importiert… <elapsed></elapsed>",
+    "newFolder": "Neuer Ordner",
+    "galleryView": "Galerieansicht",
+    "listView": "Listenansicht",
+    "loadFailed": "Diese Projekte konnten nicht geladen werden.",
+    "loadFailedCloud": "Cloud-Projekte konnten nicht geladen werden.",
+    "loadFailedLocal": "Projekte auf diesem Mac konnten nicht geladen werden.",
+    "emptyTitle": "Erstelle ein neues Projekt, um loszulegen",
+    "renameTitle": "Projekt umbenennen",
+    "rename": "Umbenennen",
+    "deleteTitle": "{what} löschen?",
+    "foldersEmpty": "{count, plural, =1 {Der Ordner ist leer.} other {Die Ordner sind leer.}}",
+    "deletesFolders": "{count, plural, =1 {Dadurch wird der gesamte Projektordner samt Mediendateien und Exporten gelöscht.} other {Dadurch wird der gesamte Ordner jedes Projekts samt Mediendateien und Exporten gelöscht.}}",
+    "cannotUndo": "Dies kann nicht rückgängig gemacht werden.",
+    "deleteProjects": "{count, plural, =1 {Projekt löschen} other {Projekte löschen}}",
+    "deleteFolder": "Ordner löschen",
+    "delete": "Löschen",
+    "duplicate": "Duplizieren",
+    "moveToLocal": "Nach Lokal verschieben",
+    "moveToCloud": "In die Cloud verschieben",
+    "actions": "Projektaktionen"
+  },
+  "pick": {
+    "project": "{count, plural, one {# Projekt} other {# Projekte}}",
+    "file": "{count, plural, one {# Datei} other {# Dateien}}",
+    "item": "{count, plural, one {# Element} other {# Elemente}}",
+    "clip": "{count, plural, one {# Clip} other {# Clips}}",
+    "note": "{count, plural, one {# Notiz} other {# Notizen}}",
+    "folder": "{count, plural, one {# Ordner} other {# Ordner}}",
+    "named": "„{name}“",
+    "namedHolding": "„{name}“ und dessen {held}",
+    "foldersHolding": "{folders} ({held})",
+    "both": "{folders} und {items}",
+    "foldersGo": "{count, plural, =1 {Alles im Ordner wird mitgelöscht.} other {Alles in den Ordnern wird mitgelöscht.}}",
+    "phoneOnly": "Wurde von deinem Smartphone synchronisiert und wird auch dort entfernt.",
+    "phoneSome": "{count, plural, =1 {Eines davon wurde von deinem Smartphone synchronisiert und wird auch dort entfernt.} other {# davon wurden von deinem Smartphone synchronisiert und werden auch dort entfernt.}}",
+    "cancel": "Abbrechen",
+    "delete": "Löschen"
+  },
+  "folders": {
+    "renameFolder": "Ordner umbenennen",
+    "renameFailed": "Ordner konnte nicht umbenannt werden.",
+    "createFailed": "Ordner konnte nicht erstellt werden.",
+    "share": "Teilen",
+    "rename": "Umbenennen",
+    "delete": "Löschen",
+    "deleteFolder": "Ordner löschen",
+    "options": "Ordneroptionen",
+    "items": "{count, plural, one {# Element} other {# Elemente}}",
+    "namePlaceholder": "Name"
+  },
+  "rename": {
+    "name": "Name"
+  },
+  "shelfBadge": {
+    "offline": "Lokal – öffne die Donkey-App, um es zu nutzen"
+  },
+  "library": {
+    "share": "Teilen",
+    "newFolder": "Neuer Ordner",
+    "addMedia": "Medien hinzufügen",
+    "emptyTitle": "Deine Mediathek wird in allen Projekten geteilt.",
+    "emptyHint": "Videos, Bilder, Audio- oder Schriftdateien hierher ziehen.",
+    "chooseFiles": "Dateien auswählen",
+    "orPasteLink": "oder Link einfügen",
+    "linkPlaceholder": "TikTok-, YouTube- oder Instagram-Link …",
+    "import": "Importieren",
+    "addNote": "Notiz hinzufügen",
+    "delete": "Löschen",
+    "deleteTitle": "{what} löschen?",
+    "keepCopy": "{count, plural, =1 {Projekte, die es bereits verwenden, behalten ihre eigene Kopie.} other {Projekte, die sie bereits verwenden, behalten ihre eigene Kopie.}}",
+    "remove": "Entfernen"
+  },
+  "libraryShare": {
+    "title": "{kind, select, folder {Ordner teilen} other {Asset teilen}}",
+    "body": "{kind, select, folder {Kopiere diesen Ordner in die Cloud, damit andere ihn öffnen können, wenn dein Gerät offline ist.} other {Kopiere dieses Asset in die Cloud, damit andere es öffnen können, wenn dein Gerät offline ist.}} Freigabeeinstellungen gelten für die Cloud-Kopie. Deine lokalen Dateien bleiben hier.",
+    "copyFailed": "Konnte nicht in die Cloud kopiert werden.",
+    "copying": "In die Cloud kopieren…",
+    "copy": "In die Cloud kopieren"
+  },
+  "sharedLibrary": {
+    "viewOnly": "Geteilte Mediathek · Nur anzeigen",
+    "loading": "Geteilte Mediathek wird geladen",
+    "signInToView": "Melde dich an, um diese Freigabe anzusehen.",
+    "noAccess": "Du hast keinen Zugriff auf diese Freigabe. Bitte den Eigentümer, dich einzuladen.",
+    "gone": "Dieser Freigabelink ist nicht mehr verfügbar.",
+    "loadFailed": "Diese Freigabe konnte nicht geladen werden.",
+    "signIn": "Anmelden",
+    "tryAgain": "Erneut versuchen",
+    "breadcrumb": "Ordnerpfad",
+    "templateMedia": "Vorlagenmedien",
+    "emptyFolder": "Dieser Ordner ist leer.",
+    "pages": "Seiten",
+    "firstPage": "Erste Seite",
+    "nextPage": "Nächste Seite"
+  },
+  "card": {
+    "renameFailed": "Datei konnte nicht umbenannt werden.",
+    "renameFailedBadge": "Umbenennen fehlgeschlagen",
+    "preparing": "Wird vorbereitet",
+    "cantPlay": "Kann nicht abgespielt werden",
+    "makingCopy": "Kopie wird erstellt, die dieser Browser abspielen kann"
+  },
+  "importCard": {
+    "preview": "Vorschau von {name}",
+    "retry": "Wiederholen",
+    "cancel": "Abbrechen",
+    "archive": "Archivieren",
+    "failed": "Fehlgeschlagen",
+    "importing": "Wird importiert…",
+    "importingFor": "Wird importiert seit <time>{elapsed}</time>"
+  },
+  "cardMenu": {
+    "moreActions": "Weitere Aktionen",
+    "addToTimeline": "Zur Timeline hinzufügen",
+    "share": "Teilen",
+    "rename": "Umbenennen",
+    "download": "Herunterladen",
+    "openOriginal": "Original öffnen",
+    "delete": "Löschen"
+  },
+  "generatedMenu": {
+    "moreActions": "Weitere Aktionen",
+    "addToMedia": "Zu Medien hinzufügen",
+    "addToLibrary": "Zur Mediathek hinzufügen",
+    "download": "Herunterladen",
+    "delete": "Löschen",
+    "deleteTitle": "„{name}“ löschen?",
+    "timelineUses": "{count, plural, one {Wird an # Stelle in der Timeline verwendet, die ebenfalls gelöscht wird.} other {Wird an # Stellen in der Timeline verwendet, die ebenfalls gelöscht werden.}}",
+    "fileGoes": "Die Mediendatei wird ebenfalls gelöscht. Dies kann nicht rückgängig gemacht werden.",
+    "cancel": "Abbrechen"
+  },
+  "notes": {
+    "untitled": "Ohne Titel",
+    "untitledNote": "Unbenannte Notiz",
+    "allNotes": "Alle Notizen",
+    "saveFailed": "Notiz konnte nicht gespeichert werden.",
+    "reopen": "Erneut öffnen und wiederholen",
+    "newFolder": "Neuer Ordner",
+    "newNote": "Neue Notiz",
+    "loadFailed": "Notizen konnten nicht geladen werden.",
+    "retry": "Wiederholen",
+    "emptyTitle": "Noch keine Notizen.",
+    "emptyHint": "Notizen synchronisieren mit der Donkey Cut iOS-App – ein hier geschriebenes Skript steht direkt im Teleprompter deines Smartphones bereit.",
+    "delete": "Löschen",
+    "deleteTitle": "{what} löschen?",
+    "deleteFolderTitle": "„{name}“ löschen?",
+    "folderFallback": "Ordner",
+    "removedFromPhone": "{count, plural, =1 {Wird auch von deinem Smartphone entfernt.} other {Werden auch von deinem Smartphone entfernt.}}"
+  },
+  "composer": {
+    "untitledNote": "Unbenannte Notiz",
+    "titlePlaceholder": "Ohne Titel",
+    "noteColor": "Notizfarbe",
+    "deleteNote": "Notiz löschen",
+    "delete": "Löschen",
+    "removeLabel": "Label {name} entfernen",
+    "addLabel": "Label hinzufügen",
+    "label": "Label",
+    "colors": {
+      "butter": "Butter",
+      "blush": "Rosé",
+      "sky": "Himmelblau",
+      "mint": "Minze",
+      "lilac": "Flieder"
+    }
+  },
+  "labelPicker": {
+    "newLabel": "Neues Label…",
+    "findOrCreate": "Suchen oder erstellen…",
+    "renameLabel": "Label {name} umbenennen",
+    "deleteLabel": "Label {name} löschen",
+    "create": "„{name}“ erstellen",
+    "full": "Eine Notiz kann bis zu {max} Labels haben. Entferne eins, um ein neues hinzuzufügen.",
+    "firstLabel": "Gib einen Namen ein, um dein erstes Label zu erstellen."
+  },
+  "noteEditor": {
+    "placeholder": "Schreibe deine Notiz…",
+    "turnInto": {
+      "text": "Text",
+      "h1": "Überschrift 1",
+      "h2": "Überschrift 2",
+      "h3": "Überschrift 3",
+      "bullet": "Aufzählung",
+      "number": "Nummerierte Liste",
+      "todo": "To-do-Liste",
+      "quote": "Zitat"
+    },
+    "bold": "Fett",
+    "italic": "Kursiv",
+    "underline": "Unterstrichen",
+    "strikethrough": "Durchgestrichen",
+    "listStyle": "Listenstil",
+    "textColor": "Textfarbe",
+    "defaultColor": "Standard",
+    "textColors": {
+      "gray": "Grau",
+      "brown": "Braun",
+      "orange": "Orange",
+      "yellow": "Gelb",
+      "green": "Grün",
+      "blue": "Blau",
+      "purple": "Lila",
+      "pink": "Pink",
+      "red": "Rot"
+    }
+  },
+  "docText": {
+    "empty": "Leere Datei.",
+    "moreRows": "+{count} weitere Zeilen"
+  },
+  "cameraRoll": {
+    "emptyTitle": "Noch nichts von deinem Smartphone da.",
+    "emptyHint": "Clips, die du in der Donkey Cut iOS-App aufnimmst, werden hier automatisch synchronisiert.",
+    "delete": "Löschen",
+    "deleteTitle": "{what} löschen?",
+    "deleteBody": "{count, plural, =1 {Der Clip wird aus deinen Cloud-Aufnahmen und von dem Smartphone gelöscht, mit dem er aufgenommen wurde. Projekte, die ihn bereits verwenden, behalten ihre eigene Kopie.} other {Die Clips werden aus deinen Cloud-Aufnahmen und von den Smartphones gelöscht, mit denen sie aufgenommen wurden. Projekte, die sie bereits verwenden, behalten ihre eigene Kopie.}}"
+  },
+  "navUser": {
+    "billing": "Abrechnung",
+    "usage": "Nutzung",
+    "onboarding": "Onboarding ansehen",
+    "runLocally": "Lokal auf Mac ausführen",
+    "logOut": "Abmelden"
+  },
+  "navStorage": {
+    "get100": "100 GB holen",
+    "upgradeTip": "Upgrade für 100 GB + KI-Credits",
+    "grace": "Dein Pro-Abo ist abgelaufen. Mach ein Upgrade oder gib {size} frei, bevor deine ältesten Projekte gelöscht werden."
+  },
+  "justNow": "gerade eben"
+}

@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { requestLocale } from "@/i18n/requestLocale";
+import { translatorFor } from "@/i18n/translator";
 import { auth } from "@/lib/auth";
 import { metaCheckoutMetadata, trackCheckoutStarted } from "@/lib/billing/meta-checkout";
 import { ensureStripeCustomer, getStripe } from "@/lib/billing/stripe";
+import { STRIPE_LOCALE } from "@/lib/billing/stripe-locale";
 import { creditCountLabel, creditsPerDollar } from "@/lib/credits/format-credits";
 import {
   creditTopUpKind,
@@ -31,14 +34,15 @@ export const POST = withDonkeyAuth(async (request) => {
     return unauthorizedResponse();
   }
 
+  const locale = requestLocale(request);
   const parsed = checkoutRequestSchema.safeParse(
     await request.json().catch(() => ({})),
   );
   if (!parsed.success) {
     return NextResponse.json(
       {
-        error: "invalid_request",
-        message: `Choose between ${creditCountLabel(creditTopUpMinDollars * creditsPerDollar)} and ${creditCountLabel(creditTopUpMaxDollars * creditsPerDollar)}, in whole thousands.`,
+        error: "credit_amount_out_of_range",
+        message: `Choose between ${creditCountLabel(creditTopUpMinDollars * creditsPerDollar, locale)} and ${creditCountLabel(creditTopUpMaxDollars * creditsPerDollar, locale)}, in whole thousands.`,
       },
       { status: 400 },
     );
@@ -51,6 +55,7 @@ export const POST = withDonkeyAuth(async (request) => {
     userId: session.user.id,
   });
   const stripe = getStripe();
+  const t = await translatorFor(locale, "settings");
   const origin = request.nextUrl.origin;
   const metadata = {
     amountDollars: String(amountDollars),
@@ -62,13 +67,14 @@ export const POST = withDonkeyAuth(async (request) => {
     cancel_url: `${origin}/app/settings?topup=cancelled`,
     client_reference_id: session.user.id,
     customer: customerId,
+    locale: STRIPE_LOCALE[locale],
     line_items: [
       {
         price_data: {
           currency: "usd",
           product_data: {
-            description: creditCountLabel(amountDollars * creditsPerDollar),
-            name: "Donkey credits",
+            description: creditCountLabel(amountDollars * creditsPerDollar, locale),
+            name: t("checkout.creditsProduct"),
           },
           unit_amount: dollarsToStripeCents(amountDollars),
         },
@@ -83,7 +89,7 @@ export const POST = withDonkeyAuth(async (request) => {
 
   if (!checkout.url) {
     return NextResponse.json(
-      { error: "server-error", message: "Stripe did not return a URL." },
+      { error: "checkout_no_url", message: "Stripe did not return a URL." },
       { status: 502 },
     );
   }

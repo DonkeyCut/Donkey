@@ -1,0 +1,207 @@
+{
+  "main": {
+    "resize": "拖动以调整时间线大小",
+    "zoom": "缩放",
+    "fit": "适合",
+    "fitTitle": "使时间线适应窗口",
+    "sticker": "贴纸",
+    "transitionIn": "{name}入场",
+    "transitionOut": "{name}出场",
+    "transitionTitle": "{name} {seconds} 秒 — 沿轨道任意拖动；当与剪切点或片段边缘对齐时生效",
+    "dragToTrim": "拖动以修剪",
+    "removeEmptySpace": "删除空白间隙",
+    "removeKeyframe": "删除关键帧",
+    "show": "显示",
+    "hide": "隐藏",
+    "captureFrame": "截取帧",
+    "copyFrame": "复制帧"
+  },
+  "toolbar": {
+    "text": "文本",
+    "textTooltip": "文本 ({key})",
+    "magnet": "磁吸",
+    "magnetOn": "磁吸开启：轨道 0 自动靠拢",
+    "magnetOff": "磁吸：轨道 0 自动靠拢",
+    "split": "分割",
+    "splitTooltip": "在指针或播放头处分割（⌘B 或 S）",
+    "delete": "删除",
+    "deleteCount": "删除 {count} 项",
+    "deleteTooltip": "删除 ({key})",
+    "tools": "时间线工具",
+    "zoom": "缩放",
+    "fit": "适合",
+    "fitTitle": "使时间线适应窗口",
+    "hideTimeline": "隐藏时间线",
+    "saved": "已保存",
+    "saveTemplate": "保存模板",
+    "backToStart": "返回开头",
+    "playPause": "播放/暂停 (Space)"
+  },
+  "clip": {
+    "lut": "LUT",
+    "cutting": "剪切中…",
+    "cuttingShort": "剪…",
+    "speedCurve": "速度曲线 · 平均 {rate}×",
+    "speed": "{rate}× 倍速",
+    "detachAudio": "分离音频",
+    "brushStroke": "画笔笔触",
+    "options": "片段选项",
+    "addToMedia": "添加至媒体",
+    "addToLibrary": "添加至资源库",
+    "exportSegment": "导出片段",
+    "download": "下载",
+    "showInFinder": "在访达中显示",
+    "reorderRow": "拖动以调整行顺序",
+    "showTrack": "显示轨道",
+    "hideTrack": "隐藏轨道",
+    "unmuteTrack": "取消静音轨道",
+    "muteTrack": "静音轨道",
+    "enable": "启用片段",
+    "disable": "停用片段",
+    "missingMedia": "媒体丢失",
+    "mute": "静音片段",
+    "unmute": "取消静音片段",
+    "beat": "拖动以移动，双击以移除",
+    "fadeIn": "拖动以设置淡入",
+    "fadeOut": "拖动以设置淡出",
+    "key": "拖动以变速，按 Delete 删除",
+    "sticker": "贴纸"
+  },
+  "picker": {
+    "label": "时间线",
+    "heading": "时间线",
+    "emptyNote": "{current} 为空。你的剪辑位于 {other}。",
+    "open": "打开 {name}"
+  },
+  "group": {
+    "group": "编组",
+    "ungroup": "取消编组",
+    "groupTooltip": "编组 ({key})",
+    "ungroupTooltip": "取消编组 ({key})"
+  },
+  "media": {
+    "play": "播放",
+    "pause": "暂停",
+    "seek": "定位",
+    "mute": "静音",
+    "unmute": "取消静音"
+  },
+  "trackRow": {
+    "track": "跟踪",
+    "follow": "跟随",
+    "tracking": "正在跟踪 {progress}%",
+    "pickTarget": "选择目标",
+    "failed": "无法跟踪素材。",
+    "targets": {
+      "hands_gap": "双手之间",
+      "left_hand": "左手",
+      "right_hand": "右手",
+      "head": "头部",
+      "person": "人物"
+    }
+  },
+  "flash": {
+    "tone": "色调",
+    "strobe": "频闪",
+    "strobeRate": "频闪速率",
+    "off": "关闭",
+    "rhythm": "节奏",
+    "fade": "淡化",
+    "curve": "曲线",
+    "tones": {
+      "white": "白色",
+      "black": "黑色"
+    },
+    "rhythms": {
+      "strobe": "频闪",
+      "flicker": "闪烁"
+    },
+    "fades": {
+      "none": "关",
+      "to": "淡至",
+      "from": "淡自"
+    }
+  },
+  "curves": {
+    "channels": {
+      "m": "主通道",
+      "r": "红色",
+      "g": "绿色",
+      "b": "蓝色"
+    }
+  },
+  "guides": {
+    "show": "显示参考线",
+    "hide": "隐藏参考线",
+    "showTitle": "显示参考线 ({key})",
+    "hideTitle": "隐藏参考线 ({key})",
+    "presetsLabel": "参考线预设",
+    "heading": "参考线",
+    "portraitOnly": "竖屏画幅",
+    "addVertical": "添加垂直参考线",
+    "addHorizontal": "添加水平参考线",
+    "presets": {
+      "thirds": "三分线",
+      "center": "中心线",
+      "margins": "安全边距",
+      "shortform": "短视频",
+      "custom": "自定义"
+    },
+    "sublabels": {
+      "margins": "{inset} 内边距",
+      "shortform": "TikTok, Instagram, YouTube",
+      "custom": "在预览画面上拖动参考线"
+    },
+    "regions": {
+      "topBar": "顶栏",
+      "cropped": "裁切区",
+      "actions": "操作区",
+      "caption": "字幕 · 音乐 · 导航"
+    }
+  },
+  "speedCurve": {
+    "node": "{time} 处节点 {rate}",
+    "pickPreset": "选择预设曲线",
+    "custom": "自定义",
+    "smoothSlow": "平滑慢动作",
+    "smoothSlowInfo": "开启后，导出时低于 1× 的部分将进行平滑处理。",
+    "addNode": "在播放头处添加节点",
+    "removeNode": "移除选中节点 (Delete)",
+    "flatten": "展平为 1×",
+    "close": "关闭 ({key})",
+    "presets": {
+      "flat": {
+        "label": "平直",
+        "hint": "整个片段速度一致"
+      },
+      "rampIn": {
+        "label": "渐入",
+        "hint": "快速开场并渐入慢动作"
+      },
+      "rampOut": {
+        "label": "渐出",
+        "hint": "慢动作开场并渐出加速"
+      },
+      "drift": {
+        "label": "漂移",
+        "hint": "冲刺后沉入慢动作，随后恢复"
+      },
+      "pulse": {
+        "label": "脉冲",
+        "hint": "两次加速围绕一段慢动作"
+      },
+      "hold": {
+        "label": "定格",
+        "hint": "飞速切入，中间放缓片刻，飞速切出"
+      },
+      "whip": {
+        "label": "甩动",
+        "hint": "慢动作中间穿插瞬间加速"
+      },
+      "stutter": {
+        "label": "顿挫",
+        "hint": "加速与慢动作交替"
+      }
+    }
+  }
+}

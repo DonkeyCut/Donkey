@@ -1,0 +1,20 @@
+{
+  "privacyMeta": {
+    "title": "Privacy Policy | Donkey Cut",
+    "description": "Read the Donkey Cut privacy policy."
+  },
+  "termsMeta": {
+    "title": "Terms of Use | Donkey Cut",
+    "description": "Read the Donkey Cut terms of use."
+  },
+  "englishGoverns": "This policy is published in English. The English text below is the binding version.",
+  "unsubscribe": {
+    "title": "Email preferences",
+    "checking": "Checking this link…",
+    "invalid": "This link is no longer valid. You can manage product emails from Settings in the app.",
+    "done": "You're unsubscribed from product emails. You can turn them back on any time from Settings in the app.",
+    "prompt": "Stop receiving product news and announcements from Donkey Cut? Emails about your account, like billing and security, keep arriving either way.",
+    "button": "Unsubscribe",
+    "failed": "That didn't go through — try again."
+  }
+}

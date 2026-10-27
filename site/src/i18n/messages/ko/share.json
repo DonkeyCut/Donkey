@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "restrictedTitle": "공유된 프로젝트 · Donkey Cut",
+    "restrictedDescription": "이 프로젝트는 특정 사용자에게만 공유되어 있어요.",
+    "title": "{name} · Donkey Cut",
+    "description": "브라우저에서 {name}을(를) 시청해 보세요.",
+    "libraryTitle": "공유된 라이브러리 · Donkey Cut"
+  },
+  "view": {
+    "signInPrompt": "이 프로젝트는 특정 사용자에게만 공유되어 있어요. 본인 계정인지 확인하려면 로그인해 주세요.",
+    "signIn": "로그인",
+    "denied": "이 프로젝트에 대한 접근 권한이 없어요. 소유자에게 초대를 요청해 보세요.",
+    "deniedAs": "{email} 계정으로는 이 프로젝트에 접근할 수 없어요. 소유자에게 초대를 요청해 보세요.",
+    "inactive": "이 공유 링크는 더 이상 유효하지 않아요.",
+    "untitled": "제목 없음"
+  }
+}
