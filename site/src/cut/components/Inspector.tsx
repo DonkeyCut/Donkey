@@ -3707,6 +3707,10 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
   const edgeOvershoot = (edge?.overshoot ?? 0) * typeSize;
   const edgeSettle = edge?.settle ?? 0.3;
   const reelItems: Record<ReelDirection, string> = { up: t("reelUp"), down: t("reelDown") };
+  // A dive: the point it zooms about, held where it stands, design px from
+  // the element's center; off flies the deepest ink to the frame's center.
+  const dives = !!edgeMotion(edge)?.animate.dive;
+  const edgeAnchor = edge?.anchor;
   return bar(
     <>
       <Row label={t("duration")}>
@@ -3921,6 +3925,44 @@ function AnimationToolbar({ overlay: o, slot, peers }: { overlay: Overlay; slot:
           />
         </Row>
       )}
+      {dives && (
+        <Row label={t("anchor")}>
+          <Switch
+            checked={!!edgeAnchor}
+            onCheckedChange={(v) => {
+              writeEdge({ anchor: v ? { x: 0, y: 0 } : undefined });
+              ck.end();
+            }}
+          />
+        </Row>
+      )}
+      {dives &&
+        edgeAnchor &&
+        (
+          [
+            ["anchorX", "x"],
+            ["anchorY", "y"],
+          ] as const
+        ).map(([label, axis]) => (
+          <Row key={axis} label={t(label)}>
+            <ValueSlider
+              label={t(label)}
+              sliderClassName="data-horizontal:w-24"
+              valueClassName="w-9 text-muted-foreground"
+              value={edgeAnchor[axis]}
+              min={-EDGE_DISTANCE_MAX}
+              max={EDGE_DISTANCE_MAX}
+              step={1}
+              format={(v) => String(Math.round(v))}
+              parse={(t) => Number(t)}
+              onDraft={(v) => writeEdge({ anchor: { ...edgeAnchor, [axis]: v } })}
+              onCommit={(v) => {
+                writeEdge({ anchor: { ...edgeAnchor, [axis]: v } });
+                ck.end();
+              }}
+            />
+          </Row>
+        ))}
       {edge && (
         <Row label={t("blur")}>
           <ValueSlider

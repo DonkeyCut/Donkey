@@ -30,7 +30,7 @@ import type { MotionPose, MotionPreset } from "./motion/types";
 import type { OverlayWords } from "./words";
 import { splitScale } from "./stretch";
 import { capStreak, ELEMENT_BLUR_MAX } from "./camera";
-import { EASE_BEZIER, type EaseId } from "./ease";
+import { EASE_BEZIER, easeAt, type EaseId } from "./ease";
 import { SLOT_PITCH, type ReelDirection, type ReelShape } from "./dive";
 
 export type OverlayAnimStyle =
@@ -165,6 +165,11 @@ export interface OverlayEdge {
   /** Slot only, with an overshoot: the share of each character's move spent
    * settling back from the far side, 0..0.6. Absent = 0.3. */
   settle?: number;
+  /** Dive only: the point the view zooms about, design px (1080 short side)
+   * from the element's center at rest. It holds where it stands, as a zoom
+   * about a fixed point does, instead of the deepest ink flying to the
+   * frame's center. Absent = the deepest ink of the last letter. */
+  anchor?: { x: number; y: number };
 }
 
 export type EdgeOrder = "reading" | "shuffle";
@@ -630,6 +635,8 @@ export interface OverlayAnimState {
    * Renderers turn it into a view with `diveView`, which needs the drawn
    * geometry this evaluator never sees. */
   dive?: number;
+  /** The diving edge, when it zooms about its own anchor. */
+  diveEdge?: "in" | "out";
   /** Whether the typing bar is lit (typewriter with a caret); absent when the
    * element has none. */
   caret?: boolean;
@@ -800,6 +807,10 @@ function edgeState(
   if (pose.reveal !== undefined) state.reveal = pose.reveal;
   if (pose.erode !== undefined) state.erode = pose.erode;
   if (pose.dive !== undefined) state.dive = pose.dive;
+  // A dive's ease is the flight's own curve on the edge's own clock: an
+  // ease-in on an exit holds back early and rushes into the ink at the end.
+  if (pose.dive !== undefined && slot.ease) state.dive = exiting ? easeAt(slot.ease, 1 - clamped) : 1 - easeAt(slot.ease, clamped);
+  if (pose.dive !== undefined && slot.anchor) state.diveEdge = exiting ? "out" : "in";
   if (pose.blur) state.blur = pose.blur;
   return state;
 }

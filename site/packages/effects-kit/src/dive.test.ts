@@ -70,6 +70,42 @@ describe("dive", () => {
     expect(Y).toBeCloseTo(960, 6);
   });
 
+  test("anchored, the dive zooms about its point where it stands until the ink around it covers the frame", () => {
+    const anchored = { ...focus, at: { out: { x: -60, y: -200, r: 18 } } };
+    const pose = { ...still, diveEdge: "out" as const };
+    // The anchor's place on screen: the element's rest plus its offset.
+    const ax = 540 - 60;
+    const ay = 960 - 200;
+    for (const e of [0.25, 0.5, 1]) {
+      const v = diveView(e, anchored, pose, rest, frame);
+      expect(v.fx).toBeCloseTo(ax, 6);
+      expect(v.fy).toBeCloseTo(ay, 6);
+      expect(v.tx).toBeCloseTo(ax, 6);
+      expect(v.ty).toBeCloseTo(ay, 6);
+    }
+    const landed = diveView(1, anchored, pose, rest, frame);
+    const far = Math.max(...[[0, 0], [1080, 0], [0, 1920], [1080, 1920]].map(([x, y]) => Math.hypot(x - ax, y - ay)));
+    expect(landed.s * 18).toBeGreaterThanOrEqual(far);
+    // The other edge, or none named, flies into the deepest ink as before.
+    expect(diveView(1, anchored, still, rest, frame).tx).toBeCloseTo(540, 6);
+    expect(diveView(1, anchored, { ...still, diveEdge: "in" as const }, rest, frame).tx).toBeCloseTo(540, 6);
+  });
+
+  test("an anchored edge names itself on the pose; an unanchored one doesn't", () => {
+    const anchor = { x: -60, y: -200 };
+    expect(evalOverlayAnim({ out: { style: "dive", seconds: 1, anchor } }, 2.5, 3).diveEdge).toBe("out");
+    expect(evalOverlayAnim({ in: { style: "dive", seconds: 1, anchor } }, 0.5, 3).diveEdge).toBe("in");
+    expect(evalOverlayAnim({ out: { style: "dive", seconds: 1 } }, 2.5, 3).diveEdge).toBeUndefined();
+  });
+
+  test("an ease shapes the flight: an ease-in holds back early and lands on time", () => {
+    const own = { out: { style: "dive" as const, seconds: 1 } };
+    const eased = { out: { style: "dive" as const, seconds: 1, ease: "power2.in" as const } };
+    expect(evalOverlayAnim(eased, 2.3, 3).dive!).toBeLessThan(evalOverlayAnim(own, 2.3, 3).dive! - 0.05);
+    expect(evalOverlayAnim(eased, 2.3, 3).dive).toBeCloseTo(0.09, 1);
+    expect(evalOverlayAnim(eased, 3, 3).dive).toBeCloseTo(1, 6);
+  });
+
   test("an exit dives in across its ramp and an entrance pulls back out", () => {
     const out = { out: { style: "dive" as const, seconds: 1 } };
     expect(evalOverlayAnim(out, 2.001, 3).dive).toBeCloseTo(0, 2);

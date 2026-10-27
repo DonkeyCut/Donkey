@@ -533,7 +533,10 @@
     "reelPitch": "间距",
     "reelBand": "窗口",
     "overshoot": "过冲",
-    "settle": "回稳"
+    "settle": "回稳",
+    "anchor": "固定点",
+    "anchorX": "点 X",
+    "anchorY": "点 Y"
   },
   "fontCycle": {
     "removeFace": "移除字体",

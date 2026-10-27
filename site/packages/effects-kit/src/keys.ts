@@ -335,6 +335,8 @@ export interface OverlayFrameState extends OverlayPose {
   glyphLoop?: GlyphLoopPhase;
   /** How far the view has flown into the element's deepest ink (dive). */
   dive?: number;
+  /** The diving edge, when it zooms about its own anchor. */
+  diveEdge?: "in" | "out";
   /** The motion blur streak: how far the element's center travels on screen
    * while the shutter is open, design px, centered on this moment. Absent
    * when motion blur is off or the element is still. */
@@ -422,6 +424,7 @@ function ownFrame(o: Posable, tLocal: number): OverlayFrameState {
     ...(ev.glyphs ? { glyphs: ev.glyphs } : {}),
     ...(ev.glyphLoop ? { glyphLoop: ev.glyphLoop } : {}),
     ...(ev.dive !== undefined ? { dive: ev.dive } : {}),
+    ...(ev.diveEdge ? { diveEdge: ev.diveEdge } : {}),
     ...(pose.blur || ev.blur ? { blur: (pose.blur ?? 0) + (ev.blur ?? 0) } : {}),
     ...(ev.caret !== undefined ? { caret: ev.caret } : {}),
     ...(ev.brightness !== undefined ? { brightness: ev.brightness } : {}),

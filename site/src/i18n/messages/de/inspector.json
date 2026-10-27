@@ -533,7 +533,10 @@
     "reelPitch": "Abstand",
     "reelBand": "Fenster",
     "overshoot": "Überschwingen",
-    "settle": "Einpendeln"
+    "settle": "Einpendeln",
+    "anchor": "Punkt fixieren",
+    "anchorX": "Punkt X",
+    "anchorY": "Punkt Y"
   },
   "fontCycle": {
     "removeFace": "Schriftschnitt entfernen",

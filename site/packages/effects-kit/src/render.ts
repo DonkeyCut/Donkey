@@ -1277,12 +1277,12 @@ const DIVE_FOCI_MAX = 64;
  * within a couple of design px, small enough to measure in a frame. */
 const DIVE_RASTER = 480;
 
-/** What decides where a dive lands: the look and the layout, never the
- * timing or the motion. */
+/** What decides where a dive lands: the look, the layout and the edges'
+ * anchors, never the timing or the rest of the motion. */
 function diveKey(o: Overlay, aspect: number): string {
   const look: Record<string, unknown> = { ...o };
   for (const k of ["id", "start", "end", "anim", "kf", "lane", "opacity", "rotation", "mask"]) delete look[k];
-  return JSON.stringify([look, Math.round(aspect * 1000)]);
+  return JSON.stringify([look, Math.round(aspect * 1000), o.anim?.in?.anchor ?? null, o.anim?.out?.anchor ?? null]);
 }
 
 /**
@@ -1375,12 +1375,24 @@ async function findDiveFocus(o: Overlay, aspect: number, env: RenderEnv): Promis
   // A last letter with no ink of its own (a mark too thin to measure) falls
   // back to the deepest ink anywhere.
   if (best <= 0) scan(0, rw, 0, rh);
+  // Distances run center to center; the antialiased edge sits up to a pixel
+  // short of the last ink center, so that pixel is not counted.
+  const radius = (d: number) => Math.max(0.5, d - 1) / q;
+  // An anchor keeps its own point; the ink around it sets how far in it goes.
+  const pointAt = (a: { x: number; y: number }) => {
+    const x = Math.min(rw - 1, Math.max(0, Math.floor((a.x + b.cx - left) * q + pad)));
+    const y = Math.min(rh - 1, Math.max(0, Math.floor((a.y + b.cy - top) * q + pad)));
+    return { x: a.x, y: a.y, r: radius(depth[y * rw + x]) };
+  };
+  const anchorIn = o.anim?.in?.anchor;
+  const anchorOut = o.anim?.out?.anchor;
   return {
     x: (bx + 0.5 - pad) / q + left - b.cx,
     y: (by + 0.5 - pad) / q + top - b.cy,
-    // Distances run center to center; the antialiased edge sits up to a
-    // pixel short of the last ink center, so that pixel is not counted.
-    r: Math.max(0.5, best - 1) / q,
+    r: radius(best),
+    ...(anchorIn || anchorOut
+      ? { at: { ...(anchorIn ? { in: pointAt(anchorIn) } : {}), ...(anchorOut ? { out: pointAt(anchorOut) } : {}) } }
+      : {}),
   };
 }
 

@@ -533,7 +533,10 @@
     "reelPitch": "Espaçamento",
     "reelBand": "Janela",
     "overshoot": "Ultrapassagem",
-    "settle": "Estabilização"
+    "settle": "Estabilização",
+    "anchor": "Fixar um ponto",
+    "anchorX": "Ponto X",
+    "anchorY": "Ponto Y"
   },
   "fontCycle": {
     "removeFace": "Remover fonte",

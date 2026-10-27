@@ -533,7 +533,10 @@
     "reelPitch": "간격",
     "reelBand": "윈도우",
     "overshoot": "오버슈트",
-    "settle": "안정화"
+    "settle": "안정화",
+    "anchor": "포인트 고정",
+    "anchorX": "포인트 X",
+    "anchorY": "포인트 Y"
   },
   "fontCycle": {
     "removeFace": "서체 제거",

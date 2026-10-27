@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cameraPath, holdsStill, type Gray } from "./camera";
+import { cameraPath, holdsStill, zoomAnchor, type CameraPose, type Gray } from "./camera";
 
 // A picture that goes on past the frame: a sum of waves, so any zoom, shift or
 // turn of it can be drawn exactly.
@@ -97,5 +97,29 @@ describe("holdsStill", () => {
   test("a steady push never comes back, so it cannot tell", () => {
     const frames = [1, 1.02, 1.04, 1.06].map((scale) => shot({ scale, dx: 0, dy: 0, rotation: 0 }));
     expect(holdsStill(frames, cameraPath(frames))).toBeNull();
+  });
+});
+
+describe("the point a zoom holds still", () => {
+  const pose = (scale: number, dx: number, dy: number): CameraPose => ({ scale, dx, dy, rotation: 0, residual: 1 });
+  /** A zoom about (ax, ay): the picture's centre moves to a + s·(½ − a). */
+  const about = (ax: number, ay: number, scales: number[]) =>
+    scales.map((s) => pose(s, (ax - 0.5) * (1 - s), (ay - 0.5) * (1 - s)));
+
+  test("a punch-in about a point off the centre reads that point", () => {
+    const a = zoomAnchor(about(0.7, 0.48, [1, 1.1, 1.3, 1.7, 2.4, 3.8]))!;
+    expect(a.x).toBeCloseTo(0.7, 3);
+    expect(a.y).toBeCloseTo(0.48, 3);
+    // A pull-back holds its point the same way.
+    const b = zoomAnchor(about(0.25, 0.6, [1, 0.9, 0.75, 0.6]))!;
+    expect(b.x).toBeCloseTo(0.25, 3);
+    expect(b.y).toBeCloseTo(0.6, 3);
+  });
+
+  test("a zoom too small to tell by, or one that slides as it goes, holds no point", () => {
+    expect(zoomAnchor(about(0.7, 0.48, [1, 1.02, 1.05]))).toBeNull();
+    // A push that also pans: the centre runs off sideways while the scale barely moves.
+    const slide = [1, 1.1, 1.2, 1.3, 1.4].map((s, i) => pose(s, i * 0.2 * (i % 2 ? 1 : -1), 0));
+    expect(zoomAnchor(slide)).toBeNull();
   });
 });

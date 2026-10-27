@@ -533,7 +533,10 @@
     "reelPitch": "Spacing",
     "reelBand": "Window",
     "overshoot": "Overshoot",
-    "settle": "Settle"
+    "settle": "Settle",
+    "anchor": "Hold a point",
+    "anchorX": "Point X",
+    "anchorY": "Point Y"
   },
   "fontCycle": {
     "removeFace": "Remove face",

@@ -69,6 +69,7 @@ import {
   EDGE_ORDERS,
   EDGE_REEL_EM_MAX,
   EDGE_SETTLE_MAX,
+  DIVE_ANIM_STYLE_IDS,
   REEL_DIRECTIONS,
   type ReelDirection,
   EASE_IDS,
@@ -259,6 +260,7 @@ import { COMPARE_MODES, MAX_COMPARE, SWEEP_TARGET } from "./frameDiff";
 import { compareMoments, sweepSource } from "./sourceCompare";
 import { findPicture, sampleColors, scanCuts, sourcePictureAt, trackCamera, trackElement, trackLetters, type FrameBox } from "./measure/sourceMeasure";
 import { FULL_FRAME, isFullFrame } from "./measure/picture";
+import { zoomAnchor } from "./measure/camera";
 import { DETECT_CHANGES_MAX, DETECT_CUTS_MAX, DETECT_CUTS_SPAN_MAX, SAMPLE_COLOR_MAX, SAMPLE_COLORS_K_MAX, TRACK_FRAMES_MAX, CAMERA_FRAMES_MAX, TRACK_MATCHES, TRACK_PATH_MAX, TRACK_TOLERANCE_DEFAULT } from "./measure/limits";
 import { renderStageFrame, storeStageStill } from "./stageFrame";
 import { createRasterCanvas, decodeRasterImageUrl, rasterCanvasToDataUrl } from "./raster";
@@ -1252,6 +1254,31 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         delete rest.settle;
         anim[slot] = settle <= 0 ? rest : { ...rest, settle: clamp(settle, 0.05, EDGE_SETTLE_MAX) };
       }
+      // A dive's anchor comes as the frame point the zoom holds still, as
+      // track_camera reads it, and is kept as an offset from the element's
+      // rest so it moves with the element; "none" hands back the deepest ink.
+      const anchor = input[`${slot}_anchor`];
+      if (anchor !== undefined && anim[slot]) {
+        const rest = { ...anim[slot]! };
+        delete rest.anchor;
+        if (anchor === "none" || anchor === null) {
+          anim[slot] = rest;
+        } else {
+          const a = (anchor ?? {}) as Record<string, unknown>;
+          if (!isNum(a.x) || !isNum(a.y))
+            throw new ToolError(`${slot}_anchor is {x, y}, the frame point the zoom holds still as frame fractions, or "none".`);
+          if (!DIVE_ANIM_STYLE_IDS.includes(rest.style))
+            throw new ToolError(`${slot}_anchor sets where a dive zooms; this edge is ${rest.style}.`);
+          const fr = frameOf(s.aspect);
+          anim[slot] = {
+            ...rest,
+            anchor: {
+              x: Math.round((clamp(a.x, -1, 2) - o.x) * fr.w * 10) / 10,
+              y: Math.round((clamp(a.y, -1, 2) - o.y) * fr.h * 10) / 10,
+            },
+          };
+        }
+      }
     };
     edge("in", "in_style", "in_seconds");
     edge("out", "out_style", "out_seconds");
@@ -2119,6 +2146,7 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
       });
       if (run.path.length < 2) throw new ToolError(`Only ${run.path.length} frame between ${from}s and ${to}s — give a longer stretch.`);
       const r3 = (v: number) => Math.round(v * 1000) / 1000;
+      const anchor = zoomAnchor(run.path);
       return {
         ...(run.fps > 0 ? { fps: Math.round(run.fps * 100) / 100 } : {}),
         framesRead: run.path.length,
@@ -2153,6 +2181,13 @@ const toolRuns: Record<BrowserToolName, ToolRun> = {
         })),
         coveredTo: roundT(run.coveredTo),
         truncated: run.truncated,
+        ...(anchor
+          ? {
+              anchor: { x: r3(anchor.x), y: r3(anchor.y) },
+              anchorNote:
+                "The zoom holds this frame point still: everything grows away from it. A zoom into a title's letter until its ink fills the frame is a dive exit with out_anchor this point (set_overlay_animation); a punch-in on footage keys the clip about it.",
+            }
+          : {}),
         ...pictureReport(area),
         source: sourceRef(asset),
       };

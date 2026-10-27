@@ -464,3 +464,37 @@ export function holdsStill(frames: Gray[], path: CameraPose[]): boolean | null {
   diffs.sort((x, y) => x - y);
   return diffs[Math.floor(diffs.length / 2)] < STILL_RESIDUAL;
 }
+
+/** The least a zoom must change the scale by before the point it holds still
+ * is told: a 5% punch-in moves the picture too little to place it. */
+const ANCHOR_ZOOM = 0.2;
+/** How far, frame fractions, the moves may stray from a zoom about one point
+ * on average: past it the camera slides as well and holds no point. */
+const ANCHOR_FIT = 0.02;
+
+/**
+ * The frame point a zoom holds still, in frame fractions, or null when the
+ * path zooms too little or slides too. A zoom about `a` carries the
+ * picture's centre to a + s·(½ − a), so each frame's shift is (a − ½)·(1 − s)
+ * and `a` falls out of a least-squares fit over every frame read.
+ */
+export function zoomAnchor(path: CameraPose[]): { x: number; y: number } | null {
+  const read = path.filter((p) => Number.isFinite(p.residual));
+  const scales = read.map((p) => p.scale);
+  if (read.length < 3 || Math.max(...scales) / Math.min(...scales) < 1 + ANCHOR_ZOOM) return null;
+  let kk = 0;
+  let kx = 0;
+  let ky = 0;
+  for (const p of read) {
+    const k = 1 - p.scale;
+    kk += k * k;
+    kx += k * p.dx;
+    ky += k * p.dy;
+  }
+  const ox = kx / kk;
+  const oy = ky / kk;
+  let miss = 0;
+  for (const p of read) miss += Math.hypot(p.dx - ox * (1 - p.scale), p.dy - oy * (1 - p.scale));
+  if (miss / read.length > ANCHOR_FIT) return null;
+  return { x: 0.5 + ox, y: 0.5 + oy };
+}

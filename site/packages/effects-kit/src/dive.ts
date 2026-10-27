@@ -10,12 +10,19 @@
  * draws under, and `slotReel` says what a rolling character shows.
  */
 
-/** The point a dive flies into, in design px (1080 short side) from the
- * element's center, and the radius of ink around it. */
-export interface DiveFocus {
+/** A point of an element, in design px (1080 short side) from its center,
+ * and the radius of ink around it. */
+export interface DivePoint {
   x: number;
   y: number;
   r: number;
+}
+
+/** The point a dive flies into — its deepest ink — and, for an edge that
+ * names an `anchor`, that point and the ink around it: an anchored dive
+ * zooms about its point where it stands instead. */
+export interface DiveFocus extends DivePoint {
+  at?: { in?: DivePoint; out?: DivePoint };
 }
 
 /** A dive's view in the painter's own coordinates — the element unposed, in
@@ -43,22 +50,27 @@ const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
  *
  * The focus travels from where the pose puts it to the frame's center while
  * the scale grows geometrically, so the flight reads at a constant speed and
- * lands with the ink disk around the focus reaching every corner. The view is
+ * lands with the ink disk around the focus reaching every corner. On an edge
+ * with an anchor (`pose.diveEdge`) the anchor is the focus and holds where
+ * the pose puts it, the way a zoom about a fixed point does, and the disk
+ * reaches the corner farthest from it. The view is
  * expressed in painter coordinates so it composes inside the pose: the posed
  * element draws P(V(p)), and P(V(f)) is the travelling focus.
  */
 export function diveView(
   progress: number,
   focus: DiveFocus,
-  pose: { x: number; y: number; dx: number; dy: number; scale: number; rotation: number },
+  pose: { x: number; y: number; dx: number; dy: number; scale: number; rotation: number; diveEdge?: "in" | "out" },
   rest: { x: number; y: number },
   frame: { width: number; height: number; scale: number }
 ): DiveView {
   const { width: W, height: H, scale: k } = frame;
   const cx = rest.x * W;
   const cy = rest.y * H;
-  const fx = cx + focus.x * k;
-  const fy = cy + focus.y * k;
+  const anchor = pose.diveEdge ? focus.at?.[pose.diveEdge] : undefined;
+  const f = anchor ?? focus;
+  const fx = cx + f.x * k;
+  const fy = cy + f.y * k;
   const e = clamp01(progress);
   const sigma = pose.scale;
   if (e <= 0 || sigma <= 1e-6) return { s: 1, fx, fy, tx: fx, ty: fy };
@@ -70,12 +82,15 @@ export function diveView(
   // Where the pose puts the focus, and how wide its ink is on screen.
   const px = ax + sigma * (cos * (fx - cx) - sin * (fy - cy));
   const py = ay + sigma * (sin * (fx - cx) + cos * (fy - cy));
-  const ink = Math.max(0.5, focus.r * k) * sigma;
-  const reach = (Math.hypot(W, H) / 2) * DIVE_COVER;
+  const ink = Math.max(0.5, f.r * k) * sigma;
+  const reach = anchor
+    ? Math.hypot(Math.max(px, W - px), Math.max(py, H - py)) * DIVE_COVER
+    : (Math.hypot(W, H) / 2) * DIVE_COVER;
   const most = Math.min(DIVE_MAX_SCALE, Math.max(1, reach / ink));
   const s = Math.pow(most, e);
-  const Tx = px + (W / 2 - px) * e;
-  const Ty = py + (H / 2 - py) * e;
+  const travel = anchor ? 0 : e;
+  const Tx = px + (W / 2 - px) * travel;
+  const Ty = py + (H / 2 - py) * travel;
   // Back through the pose: the painter-space point the pose sends to T.
   const ux = (Tx - ax) / sigma;
   const uy = (Ty - ay) / sigma;

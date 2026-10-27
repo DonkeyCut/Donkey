@@ -122,6 +122,8 @@ const PANEL_NAME: Record<string, string> = {
   in_reel_band: "edgeReelBand",
   in_overshoot: "edgeOvershoot",
   in_settle: "edgeSettle",
+  in_anchor: "edgeAnchor",
+  out_anchor: "edgeAnchor",
   in_sequence_at: "edgeSequence",
   out_sequence_at: "edgeSequence",
   out_blur: "edgeBlur",

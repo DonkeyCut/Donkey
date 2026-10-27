@@ -533,7 +533,10 @@
     "reelPitch": "間隔",
     "reelBand": "ウィンドウ",
     "overshoot": "オーバーシュート",
-    "settle": "収束"
+    "settle": "収束",
+    "anchor": "ポイント固定",
+    "anchorX": "ポイントX",
+    "anchorY": "ポイントY"
   },
   "fontCycle": {
     "removeFace": "書体を削除",
