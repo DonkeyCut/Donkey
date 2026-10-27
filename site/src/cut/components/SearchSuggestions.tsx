@@ -6,10 +6,13 @@ import { toolDisplayOf } from "@/cut/lib/toolDisplay";
 // Google's Search Suggestions beside a grounded result, shown as Google sends
 // them: HTML and CSS with links to the searches. The markup renders in a
 // sandboxed frame that runs no script, sized to its content, and every link
-// opens a new tab.
+// opens a new tab. The frame takes the page's theme: a frame document that
+// declares no color scheme gets an opaque canvas when the page is dark, which
+// shows white around the chips' rounded corners.
 
 const FRAME_HEAD =
   '<meta charset="utf-8">' +
+  '<meta name="color-scheme" content="light dark">' +
   "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; font-src https: data:\">" +
   '<base target="_blank">' +
   "<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}</style>";
