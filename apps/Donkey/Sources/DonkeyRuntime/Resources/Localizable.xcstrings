@@ -561,7 +561,7 @@
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "このMacでそのクリップを受け込めませんでした。"
+            "value" : "このMacではそのクリップを処理できませんでした。"
           }
         },
         "ko" : {
