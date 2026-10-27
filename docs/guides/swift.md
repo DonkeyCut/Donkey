@@ -43,14 +43,15 @@ points through Accessibility; app minimum sizes appear in the controls.
 - Define a protocol where a seam needs testing or multiple conformers exist.
   Write `some Protocol` by default; `any Protocol` only for heterogeneous
   values. Models may depend on narrow provider protocols.
-- Name methods so call sites read as phrases: `list.insert(element, at: index)`.
+- Text a person reads comes from the target's String Catalog, through
+  `String(localized:)` or a SwiftUI literal; `site/scripts/i18n-translate.ts`
+  translates the catalogs.
 
 ## Concurrency
 
 - Stay on the main actor and leave it deliberately. Projects set default actor
   isolation to the main actor, so views, models, and helpers agree by
-  construction — models publishing UI state and controllers touching AppKit
-  are covered with zero annotations.
+  construction.
 - Mark CPU-heavy async work `@concurrent` to move it off the main actor:
   parsing, image work, encoding.
 - Use an actor for mutable state hit from many tasks: caches, download
@@ -67,8 +68,8 @@ points through Accessibility; app minimum sizes appear in the controls.
 - State lives in `@Observable` classes. The view that creates a model owns it
   with `@State`; app-wide services inject with `@Environment`; write access to
   someone else's state passes as `@Binding` or `@Bindable`.
-- Models import Foundation only. A SwiftUI or AppKit import in a model means
-  view or controller concerns leaked in, and it costs headless testability.
+- Models import Foundation only; a SwiftUI or AppKit import in a model costs
+  headless testability.
 - Navigation: `NavigationStack` with typed path values for drill-down;
   `NavigationSplitView` for sidebar layouts, which collapse to a stack on
   iPhone.

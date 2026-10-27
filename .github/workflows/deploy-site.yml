@@ -67,6 +67,7 @@ jobs:
         run: |
           node --test scripts/prepare-vercel-build.test.mjs
           npm test
+          npx bun scripts/i18n-translate.ts --check
 
       # The Vercel project sets site/ as its root directory. Run its CLI from
       # the repository root so both the build and upload resolve that directory.

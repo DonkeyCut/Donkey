@@ -20,6 +20,8 @@ Performance comes first. Everything we ship has to be fast on the machines peopl
 
 Every UI addition or change accounts for dark mode. Read the [UI Quality skill](.claude/skills/ui-quality/SKILL.md) and verify text, icons, and control states in light and dark themes.
 
+Every string a person reads comes from the English catalogs in `site/src/i18n/messages/en/`. After adding or changing one, run `npx bun scripts/i18n-translate.ts` in `site/` so every language updates in the same change; CI fails on stale translations. Super-user surfaces stay English. `docs/guides/i18n.md` is the guide.
+
 ## Site Project
 
 Before changing `site/` UI, routes, API handlers, or data access patterns:

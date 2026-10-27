@@ -1,6 +1,6 @@
 # Donkey Cut's AI Assistant
 
-The assistant is the chat panel inside the Donkey Cut editor. It answers questions about the open project and edits it by calling typed tools against the live editor state, while the user watches the changes land. Three providers share one brain — the user's Claude Code login, the user's Codex login, and Gemini through Donkey's hosted inference — and all three get the same system prompt, tool catalog, and skills library; only the transport differs.
+The assistant is the chat panel inside the Donkey Cut editor. It answers questions about the open project and edits it by calling typed tools against the live editor state, while the user watches the changes land. Three providers — Claude Code, Codex, and Gemini through Donkey's hosted inference — get the same system prompt, tool catalog, and skills library; only the transport differs.
 
 **The one rule: the model makes every decision.** No code inspects the user's words. A message goes to a model with the project state attached, and the harness acts only on the typed tool calls that come back. If you're tempted to write `if (text.includes("subtitles"))` anywhere in the chat path, that knowledge belongs in the system prompt, a tool description, or a skill.
 
@@ -59,7 +59,7 @@ Every knowledge surface is defined once — the catalog file ships in the engine
 
 | Surface | Size today | When it enters context |
 | --- | --- | --- |
-| System prompt | ~13K chars (~3K tokens) | Claude: replaces the Agent SDK default. Codex: prepended to the first turn (a resumed session already has it). Gemini: the instructions field, every round. |
+| System prompt | ~13K chars (~3K tokens) | Claude: replaces the Agent SDK default. Codex: prepended to a fresh session's first turn. Gemini: the instructions field, every round. Written for the page's language, which replies follow. |
 | Tool catalog (127 tools in 19 areas) | ~140K chars (~35K tokens) whole | Core plus the routed areas; the whole catalog when unjudged. |
 | Skills library (16 docs) | ~97K chars (~24K tokens) total | The judge's pick rides the turn; list-skills and read-skill cover the rest. |
 | Editor snapshot | Grows with the project; media list and subtitle cues capped at 60 each | Attached to the newest user message as `<editor_state>`, rebuilt fresh every turn. |

@@ -15,9 +15,8 @@ inline, the call belongs in a hook.
 - Shared UI primitives live in `src/components`; route-specific UI stays near
   the route, such as `src/app/_components/landing` for the home page.
 - Server-only helpers live in `src/lib`.
-- Split large route experiences into focused component files.
-- Use absolute imports through the `@/*` alias; avoid barrel `index.ts` files
-  unless a package-level public API truly needs one.
+- Use absolute imports through the `@/*` alias; avoid barrel `index.ts` files.
+- Every string a person reads comes from a catalog; see [Translations](i18n.md).
 
 ## Components
 
