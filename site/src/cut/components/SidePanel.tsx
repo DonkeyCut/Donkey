@@ -1,6 +1,6 @@
 "use client";
 
-import { dismissLibraryImport, importLibraryFiles, useLibraryFileImports } from "@/cut/lib/libraryIntake";
+import { dismissLibraryImport, importLibraryFiles, useLibraryImports } from "@/cut/lib/libraryIntake";
 import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
 
 import { libraryFolderRef, projectFolderRef } from "@/cut/lib/folderReference";
@@ -1688,7 +1688,7 @@ function LibraryPanel({ projectId, onImport }: {
   const [deleting, setDeleting] = useState<LibraryDeleteSet | null>(null);
   // The folder whose name field is open, when the right-click menu opened it.
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
-  const arrivals = useLibraryFileImports((state) => state.items);
+  const arrivals = useLibraryImports((state) => state.items);
   const pending = arrivals.filter((item) => item.folderId === openFolder);
 
   // Where an asset shows: phone recordings gather in the derived Camera Roll

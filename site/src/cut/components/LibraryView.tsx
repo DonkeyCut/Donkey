@@ -1,6 +1,6 @@
 "use client";
 
-import { dismissLibraryImport, importLibraryFiles, useLibraryFileImports, type LibraryArrival as Pending } from "@/cut/lib/libraryIntake";
+import { dismissLibraryImport, importLibraryFiles, importLibraryLink, resumeLibraryLinks, useLibraryImports, type LibraryArrival as Pending } from "@/cut/lib/libraryIntake";
 import { LibraryImportCard } from "@/cut/components/LibraryImportCard";
 import { libraryFolderRef } from "@/cut/lib/folderReference";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -39,9 +39,7 @@ import {
   deleteFromLibrary,
   deleteLibraryFolder,
   deleteTemplate,
-  estimatedShape,
   folderDeleteTakes,
-  importUrlToLibrary,
   libraryMediaUrl,
   carryAssetTo,
   carryTemplateTo,
@@ -59,7 +57,7 @@ import { dialogOnTop, isPasteTarget } from "@/cut/lib/shortcutGate";
 import { lightboxItemFromLibrary, useLightbox } from "@/cut/lib/lightbox";
 import { reportActivity } from "@/cut/lib/tabActivity";
 import { useNewProjectTarget } from "@/cut/lib/newProject";
-import { useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
+import { useEngineUser, useListedResidencies, useLocalCompute } from "@/cut/lib/backend/hooks";
 import { setNeedsApp } from "@/cut/lib/needsApp";
 import type { Residency } from "@/cut/lib/residency";
 import { LibraryShareDialog } from "@/cut/components/LibraryShareDialog";
@@ -108,46 +106,6 @@ const isTemplate = (x: LibraryAsset | LibraryTemplateItem): x is LibraryTemplate
 /** What a delete is about to take: folders and items, picked together. */
 type DeleteSet = { folders: LibraryFolder[]; items: (LibraryAsset | LibraryTemplateItem)[] };
 const NO_PICK: DeleteSet = { folders: [], items: [] };
-
-/** Routing words a path spends on the way to the thing: they say nothing about
- * which post this is, so a label built from one ("youtube.com/watch") reads the
- * same for every import from that site. */
-const ROUTE_SEGMENT = new Set([
-  "watch",
-  "video",
-  "videos",
-  "embed",
-  "v",
-  "e",
-  "p",
-  "post",
-  "posts",
-  "status",
-  "share",
-  "media",
-  "download",
-]);
-
-/** A link's name on its tile: the site it points at and the token that
- * identifies the post — the last telling path segment, or the id a watch URL
- * carries in its query — so two imports from one site read apart. */
-function linkLabel(url: string): string {
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace(/^www\./, "");
-    const id =
-      u.pathname
-        .split("/")
-        .filter(Boolean)
-        .reverse()
-        .find((seg) => !ROUTE_SEGMENT.has(seg.toLowerCase())) ??
-      u.searchParams.get("v");
-    return id ? `${host}/${id}` : host;
-  } catch {
-    return url;
-  }
-}
-
 
 export function LibraryView() {
   const noteView = useRef<NotesViewHandle>(null);
@@ -203,9 +161,12 @@ export function LibraryView() {
   // Media on its way in — an upload or a link — each one a tile in the grid
   // from the moment it starts, so the library shows the work rather than the
   // dialog holding it.
-  const [linkPending, setPending] = useState<Pending[]>([]);
-  const filePending = useLibraryFileImports((state) => state.items);
-  const pending = useMemo(() => [...linkPending, ...filePending], [linkPending, filePending]);
+  const pending = useLibraryImports((state) => state.items);
+  // A reload cuts a link import's page off from its job; its tile comes back.
+  const engineUser = useEngineUser();
+  useEffect(() => {
+    void resumeLibraryLinks(client);
+  }, [client, engineUser]);
   // One drain bounds probe, decode, and transfer work across overlapping drops.
   const [sharing, setSharing] = useState<(LibraryShareTarget & { residency: Residency }) | null>(null);
   useLayoutEffect(() => () => setSharing(null), []);
@@ -262,32 +223,8 @@ export function LibraryView() {
   useEffect(() => {
     reportActivity("import", pending.some((p) => !p.error));
   }, [pending]);
-  const addPending = (p: Pending) => setPending((q) => [...q, p]);
-  const setStage = (id: string, stage: Pending["stage"]) =>
-    setPending((q) => q.map((p) => (p.id === id ? { ...p, stage } : p)));
-  const failPending = (id: string, error: string) =>
-    setPending((q) => q.map((p) => (p.id === id ? { ...p, error } : p)));
-  const dropPending = (id: string) => {
-    setPending((q) => q.filter((p) => p.id !== id));
-    dismissLibraryImport(id);
-  };
-  // Run a failed arrival again on the tile it already has: the reason clears,
-  // the clock restarts, and the same work goes out once more.
-  const retryPending = (item: Pending) => {
-    setPending((q) =>
-      q.map((p) =>
-        p.id === item.id
-          ? {
-              ...p,
-              error: undefined,
-              stage: item.startStage,
-              startedAt: Date.now(),
-            }
-          : p,
-      ),
-    );
-    void item.run();
-  };
+  // Run a failed arrival again on the tile it already has.
+  const retryPending = (item: Pending) => void item.run();
 
   const upload = (files: FileList | File[], into: string | null = openFolder) => {
     const destination = landing(into);
@@ -301,50 +238,11 @@ export function LibraryView() {
   const importLink = async (raw: string) => {
     const value = normalizeLink(raw);
     if (!value) return;
-    const { residency, folderId } = landing(openFolder);
-    if (!live(residency)) return;
+    const destination = landing(openFolder);
+    if (!live(destination.residency)) return;
     setUrl("");
     setAddOpen(false);
-    const id = crypto.randomUUID();
-    const run = async () => {
-      try {
-        // The card's id goes with the link: a retry from this card gets the
-        // job it already queued.
-        const imported = await importUrlToLibrary(
-          value,
-          residency,
-          (stage) => setStage(id, stage),
-          id,
-        );
-        if (folderId) {
-          for (const asset of imported) {
-            await moveLibraryItem(residency, asset.id, folderId).catch(
-              () => {},
-            );
-            asset.folderId = folderId;
-          }
-        }
-        patch((d) => ({ ...d, assets: [...imported, ...d.assets] }));
-        dropPending(id);
-      } catch (e) {
-        failPending(
-          id,
-          e instanceof Error ? e.message : "Could not import that URL.",
-        );
-      }
-    };
-    addPending({
-      id,
-      name: linkLabel(value),
-      folderId,
-      source: value,
-      stage: "queued",
-      startStage: "queued",
-      startedAt: Date.now(),
-      shape: estimatedShape(value),
-      run,
-    });
-    await run();
+    await importLibraryLink(value, destination, client);
   };
 
   // ⌘V takes what a drop takes: files copied from the desktop upload into the
@@ -881,7 +779,7 @@ export function LibraryView() {
                         item={tile.pending}
                         area={tile.pending.mediaType === "video" || tile.pending.mediaType === "image" ? TILE_AREA : audioArea}
                         onRetry={() => retryPending(tile.pending)}
-                        onDismiss={() => dropPending(tile.pending.id)}
+                        onDismiss={() => dismissLibraryImport(tile.pending.id)}
                         opensOn="click"
                       />
                     );

@@ -395,6 +395,8 @@ export async function importUrlToLibrary(
   }
 }
 
+const STAGED_GONE = 404;
+
 /**
  * A link fetched by the cloud worker and landed on a shelf of this machine.
  *
@@ -441,6 +443,9 @@ async function importUrlThroughCloud(
       const bytes = await cloudBackend.fetch(
         `/api/cut/library/media/${encodeURIComponent(staged.fileName)}`,
       );
+      // A page resuming this key after its earlier run landed the media
+      // finds the staged copy already dropped: the shelf holds it.
+      if (bytes.status === STAGED_GONE && landed.length === 0) return [];
       if (!bytes.ok) throw new Error("Could not import that URL.");
       const form = new FormData();
       form.append("file", await bytes.blob(), staged.fileName);

@@ -19,6 +19,7 @@ import {
   saveTemplate,
   copyLibraryAssetToProject,
   copyTemplateToProject,
+  type LibraryAsset,
   type LibrarySource,
   type LinkedMeta,
   type TemplateInput,
@@ -31,6 +32,32 @@ const err = (message: string, status: number) =>
   Response.json({ error: message }, { status });
 const caught = (e: unknown, fallback: string) =>
   err(errorMessage(e, fallback), 500);
+
+/** Link imports by the key the page sent with them. A page that reloads
+ * mid-import asks again under the same key and waits on the download already
+ * running; one that asks after it landed gets the same assets back. A failure
+ * is forgotten so a retry runs again. Landed keys are held as long as the
+ * page resumes an import. */
+const importsByKey = new Map<string, Promise<LibraryAsset[]>>();
+const IMPORT_KEY_HOLD_MS = 30 * 60 * 1000;
+const IMPORT_KEY = /^[A-Za-z0-9_-]{1,128}$/;
+
+function importOnce(key: string | undefined, run: () => Promise<LibraryAsset[]>): Promise<LibraryAsset[]> {
+  if (!key || !IMPORT_KEY.test(key)) {
+    return run();
+  }
+  const running = importsByKey.get(key);
+  if (running) {
+    return running;
+  }
+  const started = run();
+  importsByKey.set(key, started);
+  started.then(
+    () => setTimeout(() => importsByKey.delete(key), IMPORT_KEY_HOLD_MS).unref?.(),
+    () => importsByKey.delete(key),
+  );
+  return started;
+}
 
 /** The shared library: reusable media outside any project. */
 export const libraryApi = {
@@ -139,9 +166,9 @@ export const libraryApi = {
   /** Download a media URL straight into the library. */
   async importUrl(req: Request) {
     try {
-      const { url, audio } = (await req.json()) as { url?: string; audio?: boolean };
+      const { url, audio, key } = (await req.json()) as { url?: string; audio?: boolean; key?: string };
       if (!url) return err("No URL provided.", 400);
-      return Response.json(await importFromUrl(url, { audio: audio === true }));
+      return Response.json(await importOnce(key, () => importFromUrl(url, { audio: audio === true })));
     } catch (e) {
       return caught(e, "Could not import that URL.");
     }
