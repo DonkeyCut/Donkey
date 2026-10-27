@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import {
   Check,
   ChevronDown,
@@ -52,9 +53,16 @@ export function ExportsDock() {
   // Media tab's Exports list, where the cancel lives.
   const dismissed = useExports((s) => s.dismissed);
   const all = useExportRows();
+
+  // Inside a project, that project's exports already show in its Media tab,
+  // so the dock carries only the other projects' work.
+  const openProject = useParams<{ id?: string }>()?.id;
   const items = useMemo(
-    () => all.filter((i) => !dismissed.includes(i.data.id)),
-    [all, dismissed]
+    () =>
+      all.filter(
+        (i) => !dismissed.includes(i.data.id) && i.data.projectId !== openProject
+      ),
+    [all, dismissed, openProject]
   );
 
   // The dock opens while work is in flight and rests on its header once it
