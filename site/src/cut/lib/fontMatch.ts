@@ -44,11 +44,13 @@ export interface InkBox {
 }
 
 /** A crop's ink: 1 where type is, 0 where its ground is, and the box the ink
- * fills. */
+ * fills. `core` marks the strongest of it, the middles of the strokes, which
+ * stay apart where soft edges run lines of small type together. */
 export interface InkMask {
   w: number;
   h: number;
   ink: Uint8Array;
+  core?: Uint8Array;
   box: InkBox | null;
 }
 
@@ -59,6 +61,9 @@ const GRID_ROWS = 40;
 /** A row or column whose ink is under this share of the fullest one is a
  * speck, outside the box. */
 const SPECK = 0.02;
+/** How little core ink a row between two lines may hold, against the
+ * typical row of the lines it parts, to split them. */
+const VALLEY = 0.25;
 /** The upright weights of the system set, which every host draws. */
 const BASE_WEIGHTS: Record<string, TextWeight[]> = { impact: [400] };
 const BASE_DEFAULT_WEIGHTS: TextWeight[] = [400, 700];
@@ -110,8 +115,15 @@ export function inkMaskOf(data: Uint8ClampedArray, w: number, h: number): InkMas
   }
   const cut = Math.max(24, otsu(hist, n));
   const ink = new Uint8Array(n);
-  for (let i = 0; i < n; i++) ink[i] = dist[i] > cut ? 1 : 0;
-  return { w, h, ink, box: inkBoxOf(ink, w, h, { x: 0, y: 0, w, h }) };
+  let peak = 0;
+  for (let i = 0; i < n; i++) {
+    ink[i] = dist[i] > cut ? 1 : 0;
+    peak = Math.max(peak, dist[i]);
+  }
+  const strong = (cut + peak) / 2;
+  const core = new Uint8Array(n);
+  for (let i = 0; i < n; i++) core[i] = dist[i] > strong ? 1 : 0;
+  return { w, h, ink, core, box: inkBoxOf(ink, w, h, { x: 0, y: 0, w, h }) };
 }
 
 /** Rank `faces` by how closely each sets `text` the way the reference's ink
@@ -126,7 +138,7 @@ export async function rankFaces(
   if (!ref.box) throw new Error("No type stands out from its ground in that region.");
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.length === 0) throw new Error("Pass the words the region shows.");
-  const bands = bandsOf(ref, ref.box);
+  const bands = bandsOf(ref, ref.box, lines.length);
   if (bands.length !== lines.length)
     throw new Error(
       `The region holds ${lines_(bands.length)} of ink and the text has ${lines_(lines.length)}. Pass the text with a line break where the type breaks, or a region around one line.`
@@ -351,8 +363,55 @@ function inkBoxOf(ink: Uint8Array, w: number, h: number, within: InkBox): InkBox
   return { x: within.x + xs[0], y: within.y + ys[0], w: xs[1] - xs[0] + 1, h: ys[1] - ys[0] + 1 };
 }
 
-/** The rows of ink inside a box, split where a run of empty rows parts them. */
-function bandsOf(ref: InkMask, box: InkBox): InkBox[] {
+/** The rows of ink inside a box, split where a run of empty rows parts them.
+ * Short of the `lines` the text has, the tallest band is split again where
+ * its stroke cores part: small type set tight, softened by a video, runs its
+ * lines together with no clear row between them. */
+function bandsOf(ref: InkMask, box: InkBox, lines: number): InkBox[] {
+  const bands = rowBands(ref, box);
+  while (bands.length < lines) {
+    const tallest = bands.reduce((a, b) => (b.h > a.h ? b : a));
+    const parts = splitAtCores(ref, tallest, lines - bands.length + 1);
+    if (parts.length < 2) break;
+    bands.splice(bands.indexOf(tallest), 1, ...parts);
+  }
+  return bands;
+}
+
+/** A band cut into `parts` lines at the rows its stroke cores leave nearly
+ * empty, one near each even split; whole when a split finds no such row. */
+function splitAtCores(ref: InkMask, band: InkBox, parts: number): InkBox[] {
+  if (!ref.core) return [band];
+  const rows: number[] = [];
+  for (let y = 0; y < band.h; y++) {
+    let n = 0;
+    const off = (band.y + y) * ref.w + band.x;
+    for (let x = 0; x < band.w; x++) n += ref.core[off + x];
+    rows.push(n);
+  }
+  const typical = [...rows].sort((a, b) => a - b)[Math.floor(rows.length * 0.75)];
+  const reach = band.h / (2 * parts);
+  const cuts: number[] = [];
+  for (let i = 1; i < parts; i++) {
+    const mid = (band.h * i) / parts;
+    let best = -1;
+    for (let y = Math.max(1, Math.ceil(mid - reach)); y < Math.min(band.h - 1, mid + reach); y++) {
+      if (best < 0 || rows[y] < rows[best]) best = y;
+    }
+    if (best < 0 || rows[best] > typical * VALLEY) return [band];
+    cuts.push(best);
+  }
+  const edges = [0, ...cuts, band.h];
+  const out: InkBox[] = [];
+  for (let i = 0; i + 1 < edges.length; i++) {
+    const piece = inkBoxOf(ref.ink, ref.w, ref.h, { x: band.x, y: band.y + edges[i], w: band.w, h: edges[i + 1] - edges[i] });
+    if (piece) out.push(piece);
+  }
+  return out.length === parts ? out : [band];
+}
+
+/** The rows of ink inside a box where a run of empty rows parts them. */
+function rowBands(ref: InkMask, box: InkBox): InkBox[] {
   const rows: number[] = [];
   for (let y = 0; y < box.h; y++) {
     let n = 0;

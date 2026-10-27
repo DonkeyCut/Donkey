@@ -111,6 +111,33 @@ describe("font suggestions", () => {
     expect(ranked[0].score).toBeGreaterThan(good);
   });
 
+  test("two tiny lines set tight and smeared by the video still read as two", async () => {
+    // A side label in a phone recording: two caps lines a couple of pixels
+    // apart, softened by compression so no row between them is ever clear.
+    const small = new Canvas(60, 40);
+    const ctx = small.getContext("2d");
+    ctx.fillStyle = "#f22e30";
+    ctx.fillRect(0, 0, 60, 40);
+    ctx.filter = "blur(0.6px)";
+    ctx.font = '900 12px "Montserrat"';
+    ctx.fillStyle = "#ffffff";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText("AUG", 10, 19);
+    ctx.fillText("UST", 10, 29);
+    const big = new Canvas(480, 320);
+    const b = big.getContext("2d");
+    b.imageSmoothingQuality = "high";
+    b.drawImage(small, 0, 0, 480, 320);
+    const d = b.getImageData(0, 0, 480, 320);
+    const ranked = await rankFaces(inkMaskOf(d.data, 480, 320), "AUG\nUST", CANDIDATES, fontStack);
+    expect(ranked[0].font).toBe("montserrat");
+  });
+
+  test("one line of type asked as two is still one", async () => {
+    const ref = reference("TRAVEL", '700 90px "Oswald"');
+    await expect(rankFaces(ref, "TRA\nVEL", CANDIDATES, fontStack)).rejects.toThrow(/holds 1 line of ink/);
+  });
+
   test("weight tells two cuts of one family apart", async () => {
     const ref = reference("Travel Destination", '900 60px "Montserrat"');
     const ranked = await rankFaces(ref, "Travel Destination", CANDIDATES, fontStack);
