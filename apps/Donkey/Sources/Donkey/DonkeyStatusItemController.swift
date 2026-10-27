@@ -66,7 +66,7 @@ final class DonkeyStatusItemController: NSObject, NSMenuDelegate {
     /// The shared item set — Go to App, the update section, and Quit. The status-item menu is
     /// exactly this; the app main menu appends it after About.
     func populateMenuItems(in menu: NSMenu) {
-        menu.addItem(makeItem(title: "Go to App", action: #selector(goToAppAction), image: Self.donkeyMenuIcon()))
+        menu.addItem(makeItem(title: String(localized: "Go to App", bundle: .donkeyApp), action: #selector(goToAppAction), image: Self.donkeyMenuIcon()))
 
         if let recording = screenRecordingMenuItem() {
             menu.addItem(makeItem(
@@ -80,7 +80,7 @@ final class DonkeyStatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(updateItem())
 
         menu.addItem(.separator())
-        menu.addItem(makeItem(title: "Quit Donkey", action: #selector(quitAction), keyEquivalent: "q"))
+        menu.addItem(makeItem(title: String(localized: "Quit Donkey", bundle: .donkeyApp), action: #selector(quitAction), keyEquivalent: "q"))
     }
 
     private func makeItem(
@@ -132,16 +132,17 @@ final class DonkeyStatusItemController: NSObject, NSMenuDelegate {
     private func updatePresentation() -> (title: String, isClickable: Bool, isBusy: Bool) {
         switch updateState?.status {
         case .available:
-            let title = updateState?.latestVersion.map { "Update App (\($0))" } ?? "Update App"
+            let title = updateState?.latestVersion.map { String(localized: "Update App (\($0))", bundle: .donkeyApp) }
+                ?? String(localized: "Update App", bundle: .donkeyApp)
             return (title, true, false)
         case .checking:
-            return ("Checking for Updates…", false, true)
+            return (String(localized: "Checking for Updates…", bundle: .donkeyApp), false, true)
         case .installing:
-            return ("Updating…", false, true)
+            return (String(localized: "Updating…", bundle: .donkeyApp), false, true)
         case .requiresAdmin:
-            return ("Update Requires an Admin", false, false)
+            return (String(localized: "Update Requires an Admin", bundle: .donkeyApp), false, false)
         default:
-            return ("Check for Updates", true, false)
+            return (String(localized: "Check for Updates", bundle: .donkeyApp), true, false)
         }
     }
 

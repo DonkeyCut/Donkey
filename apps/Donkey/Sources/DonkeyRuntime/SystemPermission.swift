@@ -22,9 +22,9 @@ public enum SystemPermissionCoordinator {
     public static func displayName(_ permission: SystemPermission) -> String {
         switch permission {
         case .screenRecording:
-            return "Screen Recording"
+            return String(localized: "Screen Recording", bundle: .donkeyRuntime)
         case .microphone:
-            return "Microphone"
+            return String(localized: "Microphone", bundle: .donkeyRuntime)
         }
     }
 

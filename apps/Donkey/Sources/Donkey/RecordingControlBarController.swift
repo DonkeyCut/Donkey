@@ -38,7 +38,7 @@ final class RecordingControlBarController {
             backing: .buffered,
             defer: false
         )
-        panel.title = "Screen Recording Controls"
+        panel.title = String(localized: "Screen Recording Controls", bundle: .donkeyApp)
         panel.contentView = hostingView
         panel.backgroundColor = .clear
         panel.isOpaque = false

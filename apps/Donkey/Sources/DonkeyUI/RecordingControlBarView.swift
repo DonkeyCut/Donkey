@@ -17,9 +17,9 @@ public enum RecordingCaptureMode: String, CaseIterable, Sendable {
 
     var tooltip: String {
         switch self {
-        case .fullScreen: return "Record Entire Screen"
-        case .window: return "Record Window"
-        case .region: return "Record Selected Portion"
+        case .fullScreen: return String(localized: "Record Entire Screen", bundle: .donkeyUI)
+        case .window: return String(localized: "Record Window", bundle: .donkeyUI)
+        case .region: return String(localized: "Record Selected Portion", bundle: .donkeyUI)
         }
     }
 }
@@ -85,7 +85,7 @@ public final class RecordingControlBarModel: ObservableObject {
     }
 
     var selectedAudioInputLabel: String {
-        selectedAudioInput?.label ?? "None"
+        selectedAudioInput?.label ?? String(localized: "None", bundle: .donkeyUI)
     }
 
     var audioIconName: String {
@@ -162,7 +162,7 @@ public struct RecordingControlBarView: View {
 
     private var controls: some View {
         HStack(spacing: 10) {
-            iconButton(symbol: "xmark", help: "Close") { model.requestClose() }
+            iconButton(symbol: "xmark", help: String(localized: "Close", bundle: .donkeyUI)) { model.requestClose() }
                 .disabled(model.isBusy)
 
             Divider().frame(height: 22)
@@ -209,7 +209,7 @@ public struct RecordingControlBarView: View {
         .popover(isPresented: $showsWindowSize, arrowEdge: .top) {
             RecordingWindowSizeView(model: model)
         }
-        .hoverHint("Window Dimensions in Points · Click to Resize", into: $hint)
+        .hoverHint(String(localized: "Window Dimensions in Points · Click to Resize", bundle: .donkeyUI), into: $hint)
     }
 
     private var recordingStatus: some View {
@@ -274,7 +274,7 @@ public struct RecordingControlBarView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .hoverHint("Audio Input", into: $hint)
+        .hoverHint(String(localized: "Audio Input", bundle: .donkeyUI), into: $hint)
     }
 
     private var recordButton: some View {
@@ -285,7 +285,9 @@ public struct RecordingControlBarView: View {
                 RoundedRectangle(cornerRadius: model.isRecording ? 3 : 8)
                     .fill(Color.red)
                     .frame(width: 16, height: 16)
-                Text(model.isRecording ? "Stop" : "Record")
+                Text(model.isRecording
+                    ? String(localized: "Stop", bundle: .donkeyUI)
+                    : String(localized: "Record", bundle: .donkeyUI))
                     .font(.system(size: 14, weight: .regular))
             }
             .padding(.horizontal, 14)
@@ -297,7 +299,12 @@ public struct RecordingControlBarView: View {
         .buttonStyle(.plain)
         .disabled(model.isBusy || (!model.isRecording && !model.canRecord))
         .opacity(model.isBusy || (!model.isRecording && !model.canRecord) ? 0.5 : 1)
-        .hoverHint(model.isRecording ? "Stop Recording" : "Start Recording", into: $hint)
+        .hoverHint(
+            model.isRecording
+                ? String(localized: "Stop Recording", bundle: .donkeyUI)
+                : String(localized: "Start Recording", bundle: .donkeyUI),
+            into: $hint
+        )
     }
 
     private func iconButton(symbol: String, help: String, action: @escaping () -> Void) -> some View {

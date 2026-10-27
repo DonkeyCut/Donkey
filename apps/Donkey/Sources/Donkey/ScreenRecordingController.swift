@@ -74,8 +74,8 @@ final class ScreenRecordingController {
     var menuItem: (title: String, symbolName: String)? {
         guard #available(macOS 15.0, *) else { return nil }
         switch phase {
-        case .idle, .armed: return ("Record Screen", "record.circle")
-        case .recording, .finalizing: return ("Stop Recording", "stop.circle.fill")
+        case .idle, .armed: return (String(localized: "Record Screen", bundle: .donkeyApp), "record.circle")
+        case .recording, .finalizing: return (String(localized: "Stop Recording", bundle: .donkeyApp), "stop.circle.fill")
         }
     }
 
@@ -160,12 +160,12 @@ final class ScreenRecordingController {
         if mode != .fullScreen, SystemPermissionCoordinator.status(.screenRecording) != .granted {
             model.isBusy = true
             Task {
-                let granted = await ensurePermission(.screenRecording, hint: "Allow Screen Recording in System Settings, then select a window or region.")
+                let granted = await ensurePermission(.screenRecording, hint: String(localized: "Allow Screen Recording in System Settings, then select a window or region.", bundle: .donkeyApp))
                 model.isBusy = false
                 if granted, SystemPermissionCoordinator.status(.screenRecording) == .granted {
                     selectMode(mode)
                 } else {
-                    if granted { model.statusMessage = "Restart Donkey to finish enabling Screen Recording." }
+                    if granted { model.statusMessage = String(localized: "Restart Donkey to finish enabling Screen Recording.", bundle: .donkeyApp) }
                     openScreenRecordingSettings()
                 }
             }
@@ -253,7 +253,7 @@ final class ScreenRecordingController {
               let selectedWindowID, width > 0, height > 0 else { return }
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         guard AXIsProcessTrustedWithOptions(options) else {
-            model.statusMessage = "Allow Donkey in System Settings → Privacy & Security → Accessibility, then apply the size again."
+            model.statusMessage = String(localized: "Allow Donkey in System Settings → Privacy & Security → Accessibility, then apply the size again.", bundle: .donkeyApp)
             return
         }
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
@@ -273,7 +273,12 @@ final class ScreenRecordingController {
                 )
                 refreshWindowSize()
                 if abs(actual.width - CGFloat(width)) >= 1 || abs(actual.height - CGFloat(height)) >= 1 {
-                    model.statusMessage = "The app adjusted the size to \(Int(actual.width.rounded())) × \(Int(actual.height.rounded())) pt. Try a larger preset or custom size."
+                    let width = Int(actual.width.rounded())
+                    let height = Int(actual.height.rounded())
+                    model.statusMessage = String(
+                        localized: "The app adjusted the size to \(width) × \(height) pt. Try a larger preset or custom size.",
+                        bundle: .donkeyApp
+                    )
                 }
             } catch {
                 refreshWindowSize()
@@ -305,7 +310,7 @@ final class ScreenRecordingController {
     private func startRecording() {
         guard phase == .armed, !model.isBusy else { return }
         guard #available(macOS 15.0, *) else {
-            model.statusMessage = "Screen recording requires macOS 15 or later."
+            model.statusMessage = String(localized: "Screen recording requires macOS 15 or later.", bundle: .donkeyApp)
             return
         }
         guard let target = resolveTarget() else { return }
@@ -319,13 +324,13 @@ final class ScreenRecordingController {
 
     @available(macOS 15.0, *)
     private func beginCapture(target: ScreenCaptureTarget) async {
-        guard await ensurePermission(.screenRecording, hint: "Allow Screen Recording in System Settings, then try again.") else {
+        guard await ensurePermission(.screenRecording, hint: String(localized: "Allow Screen Recording in System Settings, then try again.", bundle: .donkeyApp)) else {
             openScreenRecordingSettings()
             return
         }
         let audio = resolveAudioSelection()
         if audio.capturesMicrophone {
-            guard await ensurePermission(.microphone, hint: "Allow Microphone access to include your voice.") else {
+            guard await ensurePermission(.microphone, hint: String(localized: "Allow Microphone access to include your voice.", bundle: .donkeyApp)) else {
                 return
             }
         }
@@ -371,13 +376,13 @@ final class ScreenRecordingController {
         } catch ScreenRecordingError.screenRecordingPermissionDenied {
             self.recorder = nil
             recordingDim.close()
-            model.statusMessage = "Allow Screen Recording in System Settings, then try again."
+            model.statusMessage = String(localized: "Allow Screen Recording in System Settings, then try again.", bundle: .donkeyApp)
             openScreenRecordingSettings()
             releaseQuit()
         } catch {
             self.recorder = nil
             recordingDim.close()
-            model.statusMessage = "Couldn't start recording."
+            model.statusMessage = String(localized: "Couldn't start recording.", bundle: .donkeyApp)
             releaseQuit()
         }
     }
@@ -394,7 +399,7 @@ final class ScreenRecordingController {
                 let url = try await recorder.stop()
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch {
-                model.statusMessage = "Recording failed to finalize."
+                model.statusMessage = String(localized: "Recording failed to finalize.", bundle: .donkeyApp)
             }
         }
     }
@@ -425,7 +430,7 @@ final class ScreenRecordingController {
         switch model.mode {
         case .fullScreen:
             guard let displayID = (armScreen ?? NSScreen.main)?.donkeyDisplayID else {
-                model.statusMessage = "Couldn't find a display to record."
+                model.statusMessage = String(localized: "Couldn't find a display to record.", bundle: .donkeyApp)
                 return nil
             }
             return .display(displayID: displayID, region: nil)
@@ -444,7 +449,7 @@ final class ScreenRecordingController {
     /// microphone by name, and None.
     private func makeAudioInputs() -> [RecordingAudioInput] {
         var inputs: [RecordingAudioInput] = [
-            RecordingAudioInput(id: "system", kind: .systemAudio, label: "System Audio")
+            RecordingAudioInput(id: "system", kind: .systemAudio, label: String(localized: "System Audio", bundle: .donkeyApp))
         ]
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.microphone, .external],
@@ -458,7 +463,7 @@ final class ScreenRecordingController {
                 label: device.localizedName
             ))
         }
-        inputs.append(RecordingAudioInput(id: "none", kind: .none, label: "None"))
+        inputs.append(RecordingAudioInput(id: "none", kind: .none, label: String(localized: "None", bundle: .donkeyApp)))
         return inputs
     }
 

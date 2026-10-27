@@ -310,6 +310,8 @@ write_info_plist() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
   <key>CFBundleExecutable</key>
   <string>$escaped_executable_name</string>
   <key>CFBundleIdentifier</key>
@@ -359,6 +361,25 @@ write_info_plist() {
 PLIST
 }
 
+# The app takes its language from the .lproj folders in its own Resources, and the SwiftPM
+# resource bundles follow that choice, so every language the string catalogs compiled into gets a
+# folder here, carrying the translated permission prompts (InfoPlist.strings).
+stage_localizations() {
+  local source_dir="$RESOURCES_DIR/Donkey_Donkey.bundle/Contents/Resources" lproj name
+  for lproj in "$source_dir"/*.lproj; do
+    [ -d "$lproj" ] || continue
+    name="$(basename "$lproj")"
+    mkdir -p "$RESOURCES_DIR/$name"
+    if [ -f "$lproj/InfoPlist.strings" ]; then
+      cp "$lproj/InfoPlist.strings" "$RESOURCES_DIR/$name/"
+    fi
+  done
+  if [ ! -d "$RESOURCES_DIR/en.lproj" ]; then
+    echo "No compiled localizations in $source_dir; the app would show English only." >&2
+    exit 1
+  fi
+}
+
 create_debug_app_bundle() {
   local resource_bundle
   local sparkle_framework
@@ -388,6 +409,7 @@ create_debug_app_bundle() {
     echo "Missing SwiftPM resource bundles for Donkey." >&2
     exit 1
   fi
+  stage_localizations
 
   # Stage the bundled CLI tools at Contents/Resources/donkey-tools so bundledToolsDirectory
   # resolves in dev exactly as in release. Symlinked to the repo's vendor dir rather than

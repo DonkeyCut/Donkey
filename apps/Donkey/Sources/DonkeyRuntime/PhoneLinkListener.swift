@@ -257,7 +257,7 @@ final class PhoneLinkConnection: @unchecked Sendable {
                     // delivered — the phone has to keep its copy.
                     body = upload.remaining > 0 ? .discarding(upload.remaining) : .none
                     upload.abort()
-                    send(PhoneLinkReply(ok: false, error: "This Mac could not write that clip."))
+                    send(PhoneLinkReply(ok: false, error: String(localized: "This Mac could not write that clip.", bundle: .donkeyRuntime)))
                     continue
                 }
                 if upload.remaining == 0 {
@@ -307,12 +307,12 @@ final class PhoneLinkConnection: @unchecked Sendable {
             }
         case .clip:
             guard let bytes = header.bytes, bytes > 0, bytes <= Self.maxClipBytes else {
-                send(PhoneLinkReply(ok: false, error: "That clip is not a size this Mac takes."))
+                send(PhoneLinkReply(ok: false, error: String(localized: "That clip is not a size this Mac takes.", bundle: .donkeyRuntime)))
                 connection.cancel()
                 return
             }
             guard header.takeId?.isEmpty == false else {
-                send(PhoneLinkReply(ok: false, error: "That clip did not say which take it is."))
+                send(PhoneLinkReply(ok: false, error: String(localized: "That clip did not say which take it is.", bundle: .donkeyRuntime)))
                 connection.cancel()
                 return
             }
@@ -335,7 +335,7 @@ final class PhoneLinkConnection: @unchecked Sendable {
                         self.body = .discarding(bytes)
                         self.send(PhoneLinkReply(
                             ok: false,
-                            error: "This phone is not paired with this Mac."
+                            error: String(localized: "This phone is not paired with this Mac.", bundle: .donkeyRuntime)
                         ))
                     }
                     self.drain()
@@ -451,7 +451,7 @@ final class PhoneLinkUpload: @unchecked Sendable {
         let landed = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int
         guard landed == declared else {
             abort()
-            reply(PhoneLinkReply(ok: false, error: "That clip did not arrive whole."))
+            reply(PhoneLinkReply(ok: false, error: String(localized: "That clip did not arrive whole.", bundle: .donkeyRuntime)))
             return
         }
 
@@ -486,7 +486,7 @@ struct PhoneLinkEngine: Sendable {
                 let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let token = body["token"] as? String
             else {
-                reply(PhoneLinkReply(ok: false, error: "That code is not open on this Mac."))
+                reply(PhoneLinkReply(ok: false, error: String(localized: "That code is not open on this Mac.", bundle: .donkeyRuntime)))
                 return
             }
             let device = body["device"] as? [String: Any]
@@ -535,8 +535,8 @@ struct PhoneLinkEngine: Sendable {
                 reply(PhoneLinkReply(
                     ok: false,
                     error: status == 401
-                        ? "This phone is no longer paired with this Mac."
-                        : "This Mac could not take that clip."
+                        ? String(localized: "This phone is no longer paired with this Mac.", bundle: .donkeyRuntime)
+                        : String(localized: "This Mac could not take that clip.", bundle: .donkeyRuntime)
                 ))
                 return
             }

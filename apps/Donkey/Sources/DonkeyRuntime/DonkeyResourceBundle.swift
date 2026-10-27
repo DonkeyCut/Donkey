@@ -38,3 +38,8 @@ public enum DonkeyResourceBundle {
     /// The Donkey executable target's resource bundle (the menu bar icon).
     public static let app = named("Donkey_Donkey")
 }
+
+extension Bundle {
+    /// The bundle holding DonkeyRuntime's string catalog, for `String(localized:bundle:)`.
+    static let donkeyRuntime: Bundle = DonkeyResourceBundle.runtime ?? .module
+}

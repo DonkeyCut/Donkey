@@ -4,6 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "Donkey",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14)
     ],
@@ -20,11 +21,15 @@ let package = Package(
         .target(
             name: "DonkeyRuntime",
             resources: [
-                .process("Resources/bundled-tools.json")
+                .process("Resources/bundled-tools.json"),
+                .process("Resources/Localizable.xcstrings")
             ]
         ),
         .target(
-            name: "DonkeyUI"
+            name: "DonkeyUI",
+            resources: [
+                .process("Resources/Localizable.xcstrings")
+            ]
         ),
         .executableTarget(
             name: "Donkey",
@@ -40,7 +45,9 @@ let package = Package(
             ],
             resources: [
                 .copy("Resources/menu-bar-icon.png"),
-                .copy("Resources/menu-bar-icon@2x.png")
+                .copy("Resources/menu-bar-icon@2x.png"),
+                .process("Resources/Localizable.xcstrings"),
+                .process("Resources/InfoPlist.xcstrings")
             ]
         ),
         .testTarget(

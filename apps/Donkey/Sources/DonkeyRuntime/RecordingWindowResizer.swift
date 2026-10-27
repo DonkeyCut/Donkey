@@ -10,11 +10,11 @@ public enum RecordingWindowResizeError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .unavailable: return "The selected window is unavailable. Select it again."
-        case .ambiguous: return "Move the selected window away from overlapping windows, then try again."
-        case .fixedSize: return "This window cannot be resized. Exit full screen or select a resizable window."
-        case .tooLarge: return "Enter a size that fits on the window’s display."
-        case .failed: return "The app could not resize its window. Try again."
+        case .unavailable: return String(localized: "The selected window is unavailable. Select it again.", bundle: .donkeyRuntime)
+        case .ambiguous: return String(localized: "Move the selected window away from overlapping windows, then try again.", bundle: .donkeyRuntime)
+        case .fixedSize: return String(localized: "This window cannot be resized. Exit full screen or select a resizable window.", bundle: .donkeyRuntime)
+        case .tooLarge: return String(localized: "Enter a size that fits on the window’s display.", bundle: .donkeyRuntime)
+        case .failed: return String(localized: "The app could not resize its window. Try again.", bundle: .donkeyRuntime)
         }
     }
 }

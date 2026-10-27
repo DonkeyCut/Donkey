@@ -436,6 +436,25 @@ PLIST
   echo "Bundled the Donkey Cut speech tool from $source_stt."
 }
 
+# The app takes its language from the .lproj folders in its own Resources, and the SwiftPM
+# resource bundles follow that choice, so every language the string catalogs compiled into gets a
+# folder here, carrying the translated permission prompts (InfoPlist.strings).
+stage_localizations() {
+  local source_dir="$RESOURCES_DIR/Donkey_Donkey.bundle/Contents/Resources" lproj name
+  for lproj in "$source_dir"/*.lproj; do
+    [ -d "$lproj" ] || continue
+    name="$(basename "$lproj")"
+    mkdir -p "$RESOURCES_DIR/$name"
+    if [ -f "$lproj/InfoPlist.strings" ]; then
+      cp "$lproj/InfoPlist.strings" "$RESOURCES_DIR/$name/"
+    fi
+  done
+  if [ ! -d "$RESOURCES_DIR/en.lproj" ]; then
+    echo "No compiled localizations in $source_dir; the app would show English only." >&2
+    exit 1
+  fi
+}
+
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$FRAMEWORKS_DIR"
 cp "$EXECUTABLE" "$MACOS_DIR/Donkey"
@@ -471,6 +490,7 @@ if [ "$copied_any_bundle" -eq 0 ]; then
   echo "No SwiftPM resource bundles found to stage; the app will crash at launch." >&2
   exit 1
 fi
+stage_localizations
 prepare_app_icon
 
 SPARKLE_FRAMEWORK="$(find "$BUILD_DIR/.build" -path "*/release/Sparkle.framework" -type d | head -n 1 || true)"
@@ -501,6 +521,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
   <key>CFBundleExecutable</key>
   <string>Donkey</string>
   <key>CFBundleIdentifier</key>
